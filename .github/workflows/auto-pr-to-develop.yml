@@ -116,54 +116,43 @@ jobs:
             echo "has_diff=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Two outcomes: `created=true` only when this run's own `gh pr create`
+      # opened the pull request. Finding one already open is not the same
+      # event, and the workflow must not treat it as one.
+      #
+      # This workflow opens pull requests and never merges them, and it does
+      # not arm auto-merge. It used to, once at creation; but GitHub merges an
+      # armed PR the moment its checks pass, whatever Railway is doing, so two
+      # green PRs merged minutes apart stacked two "Wait for CI" deployments on
+      # staging. Merging is now the operator-run merge train's job
+      # (scripts/merge-train.mjs), which holds while the environment has a
+      # deployment in flight. tests/autoPrAutoMergeArming.test.mjs pins that no
+      # step here can merge or arm.
       - name: Create PR to develop if missing
-        if: steps.target.outputs.create == 'true' && steps.diff-check.outputs.has_diff == 'true'
-        run: |
-          existing=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
-          if [ -z "$existing" ]; then
-            gh pr create \
-              --head "$BRANCH" \
-              --base develop \
-              --title "$BRANCH -> develop" \
-              --body "Auto-created by the Auto PR to Develop workflow. Will merge automatically once required checks pass."
-            echo "Created PR for $BRANCH -> develop"
-          else
-            echo "PR #$existing already open for $BRANCH -> develop"
-          fi
-
-      # A pull request that touches .github/workflows/** cannot have auto-merge
-      # enabled by this token: GitHub refuses the mutation with
-      #
-      #   refusing to allow a Personal Access Token to create or update
-      #   workflow ... without `workflow` scope (enablePullRequestAutoMerge)
-      #
-      # That is a deliberate restriction and the right one -- a change to the
-      # gate should not be able to arrange its own merge. But failing the job
-      # over it puts a red check on every workflow PR for a reason that is not
-      # a defect, and a check that is red for non-defects stops being read.
-      #
-      # So the refusal is reported and tolerated; anything else still fails.
-      # The pull request is unaffected either way -- only auto-merge is, and
-      # such a PR is merged by a human on purpose.
-      - name: Enable auto-merge
+        id: create-pr
         if: steps.target.outputs.create == 'true' && steps.diff-check.outputs.has_diff == 'true'
         run: |
           set -uo pipefail
-          pr_number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
-          if [ -z "$pr_number" ]; then
+          existing=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing already open for $BRANCH -> develop; leaving its merge settings alone."
+            echo "created=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$(gh pr view "$pr_number" --json isDraft --jq '.isDraft')" = "true" ]; then
-            echo "Auto-merge not enabled: PR #$pr_number is still a draft."
-            exit 0
+          if ! gh pr create \
+            --draft \
+            --head "$BRANCH" \
+            --base develop \
+            --title "$BRANCH -> develop" \
+            --body "Auto-created by the Auto PR to Develop workflow, as a draft: pull-request CI runs nothing on a draft. Mark it ready (gh pr ready <number>) when the branch is complete; that starts CI once. Auto-merge is not armed: green, non-draft PRs are merged one Railway deployment at a time by the operator-run merge train (npm run merge-train)."; then
+            echo "::error::gh pr create failed for $BRANCH -> develop."
+            exit 1
           fi
-          if output=$(gh pr merge "$pr_number" --squash --auto 2>&1); then
-            echo "$output"
-            exit 0
+          number=$(gh pr list --head "$BRANCH" --base develop --state open --json number --jq '.[0].number')
+          if [ -z "$number" ]; then
+            echo "::error::gh pr create reported success but no open PR for $BRANCH -> develop can be found."
+            exit 1
           fi
-          echo "$output"
-          if printf '%s' "$output" | grep -q "without \`workflow\` scope"; then
-            echo "Auto-merge not enabled: this PR changes a workflow file, so it must be merged by a human."
-            exit 0
-          fi
-          exit 1
+          echo "created=true" >> "$GITHUB_OUTPUT"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Created PR #$number for $BRANCH -> develop"

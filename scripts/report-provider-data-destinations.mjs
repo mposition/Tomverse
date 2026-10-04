@@ -89,8 +89,8 @@ for (const [label, count, total] of coverage) {
 
 console.log("");
 // Disclosable, not "may serve": serving a residency-constrained request is
-// a separate approval in force, and a row a notice could print is only what
-// such an approval may be made on.
+// decided by an approval in force (lib/deploymentIdentity.ts), and a row a
+// notice could print is only what such an approval may be made on.
 console.log(
     `Disclosable, and so open to a residency approval: ${rows.filter(destinationIsDisclosable).length} of ${rows.length}.`
 );

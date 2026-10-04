@@ -1,0 +1,61 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "router-development-benchmark-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "interactive Claude session in the Claude Code desktop app; not the pinned `claude --print --safe-mode` invocation",
+  "command": null,
+  "sandboxSignature": null,
+  "codexShell": null,
+  "codexAuth": null,
+  "preflight": null,
+  "overrides": [
+    "hand-recorded: the verdict was produced by the reviewer reading review-prompt.md, the task and the package in an interactive session, and running read-only reproductions in the worktree H:/Project/tomverse-router-benchmark-v1-20260910 at HEAD 394387ce (scoped sources identical to the packaged commit 138bd4c6; digest recomputed and identical); no reviewer CLI was invoked, no preflight exists for this reviewer, no usage was captured, and no file in the worktree was written",
+    "startedAt is approximate; receivedAt is when the verdict was finalised"
+  ],
+  "startedAt": "2026-09-10T00:50:00.000Z",
+  "durationMs": null,
+  "usage": null,
+  "receivedAt": "2026-09-10T01:05:00.000Z",
+  "verdict": {
+    "taskId": "router-development-benchmark-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:c5eae232832ac9cea55452bcd0425da493f7c65dd444f26a66fc3e0c21e9a345",
+    "conclusion": "approve",
+    "findings": [],
+    "nextAction": "이 digest(commit 138bd4c6)에 한해 승인하며, 판정 밖 관찰 하나만 별도 작업 후보로 남깁니다: 계획 문서와 답변 파서가 같은 200,000 노드 예산(DEVELOPMENT_LIMITS.nodes)을 쓰므로 카탈로그가 약 108개 모델을 넘으면 buildDevelopmentPlan이 json_complexity_limit으로 계획 digest 계산을 거부해 선언된 models 한도 256에는 닿지 못합니다(126개 복제 카탈로그로 재현, 현재 42개 모델에서는 77,417 노드)."
+  },
+  "importProvenance": {
+    "origin": "user-supplied interactive Claude review",
+    "importedAt": "2026-09-10T01:22:03.982Z",
+    "importedBy": "codex",
+    "headCommitAtImport": "394387ce9ee4e540b7dbdc652015ca06757eb038",
+    "authorization": {
+      "userReply": "네 그렇게 해주세요",
+      "acceptedAction": "Record the supplied interactive Claude approval with provenance and conclude this exchange using the existing aggregator, without an additional CLI review.",
+      "scope": "Review-record import only; no code change, reviewer execution, preflight bypass, provider call, production approval, push or deployment is authorized."
+    },
+    "sourceArtifacts": [
+      {
+        "originalPath": "C:\\Users\\Vyper\\Downloads\\reviewnotesrouterdevelopmentbenchmarkv1round0.md",
+        "preservedPath": "external-review/reviewnotesrouterdevelopmentbenchmarkv1round0.md",
+        "sha256": "ce6f558c37f3eb7251db9fb9f93bbedca4af160cd22eb1004c4a0f60ea4c8371"
+      },
+      {
+        "originalPath": "C:\\Users\\Vyper\\Downloads\\verdictrouterdevelopmentbenchmarkv1round0.json",
+        "preservedPath": "external-review/verdictrouterdevelopmentbenchmarkv1round0.json",
+        "sha256": "b37ed72309e074c51abbc135570a6a66932a326489b6968cd10a4c08d3a9059e"
+      },
+      {
+        "originalPath": "C:\\Users\\Vyper\\Downloads\\verdictround0.candidaterecord.json",
+        "preservedPath": "external-review/verdictround0.candidaterecord.json",
+        "sha256": "5afdb5eb66c78f9601ddfd7667d9330f5b99c0f8de23e49a90657af82e7fb27c"
+      }
+    ],
+    "reviewerExecution": "Not executed or authenticated by this import or by the cross-review control program. command, preflight, usage, duration and sandbox/auth fields remain as supplied, including nulls.",
+    "timestampInterpretation": "startedAt and receivedAt are timestamps reported in the supplied candidate, not importer-observed session events. The candidate marks startedAt approximate and describes receivedAt as verdict finalisation; neither timestamp is independently verified. importedAt is the local import/replay observation time.",
+    "observationBoundary": "The reviewer notes' direct-test, read-only-worktree and interactive-session statements are supplied reviewer claims. This importer directly checked attachment-copy bytes/hashes, verdict consistency, source/package digest identity and pure replay derivation; it did not rerun the claimed reviewer checks or observe their sandbox.",
+    "integrityBoundary": "SHA-256 records byte identity of the supplied artifacts, not reviewer identity, a digital signature, human inspection or authenticated execution.",
+    "approvalBoundary": "The supplied approve verdict applies only to its named source digest. replayExchange derives passed from the supplied verdict and existing package checks; it does not authenticate this external provenance or authorize production use."
+  }
+}

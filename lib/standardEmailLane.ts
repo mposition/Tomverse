@@ -3,9 +3,15 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { deliverEmailOnce } from "@/lib/email";
+import { sendWithAddressLock } from "@/lib/emailSendLock";
+import {
+  SEND_LOCK_RETRY_MS,
+  STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+} from "@/lib/emailSendLockCore";
 import { isLanguage } from "@/lib/language";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
+import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
+import { appUrl } from "@/lib/accountEmails";
 import {
   decryptSnapshot,
   encryptSnapshot,
@@ -13,11 +19,17 @@ import {
 } from "@/lib/emailSnapshotCrypto";
 import {
   emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
   type EmailClassification,
 } from "@/lib/emailTemplateDefinitions";
-import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+  templateContentHash,
+} from "@/lib/emailTemplateRegistry";
 import { templateMetadataMismatches } from "@/lib/emailTemplateMetadataCore";
 import {
+  normalizeSuppressionAddress,
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
@@ -28,13 +40,16 @@ import {
 } from "@/lib/emailUnsubscribeKeyRetention";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
+import { isEmailReleaseNotesLiveForEnqueue } from "@/lib/emailPolicyPublication";
 import {
   ENQUEUE_REFUSAL_MESSAGE,
   marketingFlagApplies,
+  releaseNotesFlagApplies,
   type EnqueueRefusal,
 } from "@/lib/emailFeatureFlags";
 import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIdentity";
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
+import { UNSUBSCRIBE_NOTICE_LANGUAGES } from "@/lib/releaseNotesDisplayRequirements";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { deferralFor } from "@/lib/emailQuietHoursCore";
@@ -57,7 +72,37 @@ import {
   STANDARD_LANE_CLAIM_TTL_MS,
   abandonmentEscalation,
   nextStandardAttempt,
+  type RetryClassification,
 } from "@/lib/standardEmailRetryCore";
+import {
+  VerdictUnavailableError,
+  verdictRead,
+  verdictRetry,
+} from "@/lib/releaseNotesVerdictRetryCore";
+import { releaseNotesSendAuthorization } from "@/lib/releaseNotesSendAuthorization";
+import {
+  recordEnqueueDecision,
+  releaseNotesEnqueueDecision,
+} from "@/lib/releaseNotesEnqueueDecision";
+import {
+  evidenceOf,
+  recordProviderSubmission,
+  recordSendDecision,
+} from "@/lib/releaseNotesSendDecision";
+import { reenqueueIsRight, skipAndReenqueue } from "@/lib/releaseNotesReenqueue";
+import { releaseNotesSkipReason } from "@/lib/releaseNotesSkipReasonCore";
+import {
+  DISPLAY_OBLIGATIONS,
+  SUBJECT_LABEL_OBLIGATIONS,
+  subjectLabelWaived,
+} from "@/lib/releaseNotesDisplayRequirements";
+import { EMAIL_ADDRESS_NORMALIZATION_VERSION } from "@/lib/emailSuppressionCore";
+// The cohort's own digest, not the consent-link digest. The two are different
+// functions -- one hex over the normalised address, the other a prefixed
+// base64url -- and comparing a delivery digest from one with a member digest
+// sealed by the other failed for every member, so the approved override never
+// applied and each refusal was recorded as the person revoking permission.
+import { approvalAddressDigest } from "@/lib/emailSendApprovalCohort";
 
 /**
  * The standard lane: durable, at-least-once, delivered eventually.
@@ -113,7 +158,7 @@ export type StandardEnqueueInput = {
   referenceId?: string;
 };
 
-const resolveLanguage = (value: string | null | undefined) =>
+export const resolveEmailLanguage = (value: string | null | undefined) =>
   isLanguage(value) ? value : "en";
 
 /**
@@ -140,6 +185,9 @@ export async function createStandardDeliveryRows(
   }
 ): Promise<{ eventId: string; deliveryId: string; idempotencyKey: string }> {
   const definition = emailTemplateDefinition(input.templateKey);
+  // The amendment notice is queued only in approved wording, by every writer
+  // that goes through here (a campaign test send, a direct enqueue).
+  assertPolicyChangeNoticeApproved(definition.key, input.language);
 
   const event = await tx.emailEvent.create({
     data: {
@@ -166,8 +214,37 @@ export async function createStandardDeliveryRows(
     : `addr:${input.emailAddress}`;
   const idempotencyKey = `${event.id}:${recipientKey}`;
 
+  // The first of section 7.6's two snapshots, and the pin the second one is
+  // compared against.
+  //
+  // It does not refuse. The send does that, and it does it with the verdict
+  // taken at send time -- a row refused here would leave no record of what was
+  // true when the message was owed, which is the thing the enqueue snapshot
+  // exists to hold. What this decides is the *pin*: the contract this message is
+  // rendered to, so a duty settled or a waiver withdrawn between now and the
+  // send is a difference somebody can see rather than a silent change of
+  // message.
+  //
+  // Read outside `tx` deliberately. These are rules and profiles -- rows an
+  // operator seeds, not rows this transaction is writing -- and widening a
+  // caller's transaction to read them is what `ensureTemplateVersion()` running
+  // before it already refuses to do.
+  const releaseNotes = releaseNotesFlagApplies(definition.purpose)
+    ? await releaseNotesEnqueueDecision({
+        userId: input.userId ?? null,
+        purpose: definition.purpose as string,
+        classification: definition.classification,
+        emailAddress: input.emailAddress,
+        policyVersionId: input.policyVersionId,
+        templateVersionId: input.templateVersionId,
+      })
+    : null;
+
   const delivery = await tx.emailDelivery.create({
     data: {
+      ...(releaseNotes
+        ? { displayContractHash: releaseNotes.displayContractHash }
+        : {}),
       eventId: event.id,
       userId: input.userId ?? null,
       recipientKey,
@@ -178,8 +255,13 @@ export async function createStandardDeliveryRows(
       // change what this row renders. `ZZ` when nothing resolves is the honest
       // answer rather than a guess -- it carries the business identity footer
       // and no advertising rule, which is right for the mail that sends on it.
-      jurisdictionCountry: input.jurisdictionCountry,
-      jurisdictionProfileKey: input.jurisdictionProfileKey,
+      // For a release-notes message, the country and profile its display
+      // contract was composed from -- the hash names that profile, and the send
+      // renders from whatever this row pins, so the two must be the same row.
+      jurisdictionCountry:
+        releaseNotes?.displayProfile?.countryCode ?? input.jurisdictionCountry,
+      jurisdictionProfileKey:
+        releaseNotes?.displayProfile?.profileKey ?? input.jurisdictionProfileKey,
       policyVersionId: input.policyVersionId,
       templateVersionId: input.templateVersionId,
       idempotencyKey,
@@ -191,8 +273,19 @@ export async function createStandardDeliveryRows(
     select: { id: true },
   });
 
+  if (releaseNotes) {
+    await recordEnqueueDecision(tx, {
+      decision: releaseNotes,
+      deliveryId: delivery.id,
+      userId: input.userId ?? null,
+      purpose: definition.purpose as string,
+      classification: definition.classification,
+    });
+  }
+
   return { eventId: event.id, deliveryId: delivery.id, idempotencyKey };
 }
+
 
 /**
  * Enqueues a message, resolving the template and policy versions first.
@@ -246,7 +339,24 @@ export async function enqueueStandardEmail(
     }
   }
 
-  const language = resolveLanguage(input.language);
+  // And the product's own switch, which is not the same question. Marketing
+  // being on says this deployment may send marketing at all; this says the
+  // release-notes product may send, and it is the last step of the activation
+  // order -- document in force, policy version active, readiness confirmed, then
+  // this (draft section 12).
+  //
+  // Checked here *and* at send. A row written while it was on must not go out
+  // after somebody turns it off, and a flag read only at enqueue cannot say so.
+  if (releaseNotesFlagApplies(emailTemplateDefinition(input.templateKey).purpose)) {
+    if (!(await isEmailReleaseNotesLiveForEnqueue())) {
+      return {
+        refused: "release_notes_disabled",
+        message: ENQUEUE_REFUSAL_MESSAGE.release_notes_disabled,
+      };
+    }
+  }
+
+  const language = resolveEmailLanguage(input.language);
   const template = await ensureTemplateVersion({
     templateKey: input.templateKey,
     language,
@@ -326,10 +436,28 @@ type ClaimedDelivery = {
   emailAddress: string;
   language: string;
   attempts: number;
+  /** This worker's claim, as written by `claimDueDelivery()`. */
+  claimedAt: Date | null;
+  /**
+   * This process's wall clock when the claim was taken. `claimedAt` is the
+   * drain's `now`, which a caller may set anywhere; how long the claim has been
+   * held is a question about real time, and it starts here, not at whatever
+   * step later asks.
+   */
+  claimedWallAt: number;
   idempotencyKey: string;
   renderDataSnapshot: unknown;
   policyVersionId: string;
   jurisdictionProfileKey: string;
+  jurisdictionCountry: string;
+  // The generation chain, read because a release-notes send refused for a moved
+  // display contract becomes a replacement rather than an ending (section 7.6).
+  eventId: string;
+  recipientKey: string;
+  lane: string;
+  generation: number;
+  rootDeliveryId: string;
+  displayContractHash: string | null;
   event: { referenceType: string | null; referenceId: string | null };
   templateVersion: {
     id: string;
@@ -372,6 +500,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   `;
   const claimedId = rows[0]?.id;
   if (!claimedId) return null;
+  const claimedWallAt = Date.now();
 
   return prisma.emailDelivery.findUnique({
     where: { id: claimedId },
@@ -381,11 +510,19 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       emailAddress: true,
       language: true,
       attempts: true,
+      claimedAt: true,
       idempotencyKey: true,
       renderDataSnapshot: true,
       // Pinned at enqueue, read here: this is the step the pin exists for.
       policyVersionId: true,
       jurisdictionProfileKey: true,
+      jurisdictionCountry: true,
+      eventId: true,
+      recipientKey: true,
+      lane: true,
+      generation: true,
+      rootDeliveryId: true,
+      displayContractHash: true,
       event: { select: { referenceType: true, referenceId: true } },
       templateVersion: {
         select: {
@@ -397,7 +534,47 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
         },
       },
     },
-  }) as Promise<ClaimedDelivery | null>;
+  }).then((row) => (row ? { ...row, claimedWallAt } : null)) as Promise<ClaimedDelivery | null>;
+};
+
+/**
+ * Writes `providerSubmittedAt` on the send-phase verdict of a message that went.
+ *
+ * After the delivery is marked `sent`, and in its own statement, deliberately.
+ * The delivery row is what stops a second send; the ledger column is the record
+ * of the first. Putting both in one transaction would let a failure of the
+ * record roll back the fact that the message went, and the next drain would send
+ * it again -- trading a gap in a record for a duplicate in somebody's inbox.
+ *
+ * So a failure here is reported and not thrown. What it leaves is a sealed,
+ * allowed verdict with no submission time beside a delivery that says `sent`,
+ * which is readable; the other order is not.
+ */
+const recordReleaseNotesSubmission = async (deliveryId: string) => {
+  try {
+    const recorded = await recordProviderSubmission(prisma, { deliveryId });
+    if (recorded) return;
+    // Sent with no allowed, sealed send-phase verdict to record it on. The gate
+    // runs before every release-notes send, so this is a defect in the gate's
+    // wiring rather than a race, and it is the one thing the ledger exists to
+    // make impossible to miss.
+    await reportOperationalIncident({
+      code: "EMAIL_SEND_WITHOUT_VERDICT",
+      title: "A release-notes message was sent with no send verdict to record it on",
+      severity: "error",
+      error: `Delivery ${deliveryId} was accepted by the provider and has no allowed send-phase decision.`,
+      context: { component: "standard-email-lane", deliveryId },
+    });
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "EMAIL_SUBMISSION_NOT_RECORDED",
+      title: "A sent release-notes message has no submission time in the ledger",
+      severity: "warning",
+      error: `Delivery ${deliveryId}: ${error instanceof Error ? error.message : String(error)}`,
+      cooldownMs: 15 * 60 * 1_000,
+      context: { component: "standard-email-lane", deliveryId },
+    });
+  }
 };
 
 const recordOutcome = async (
@@ -436,6 +613,9 @@ const recordOutcome = async (
         sentDomain: sentDomainOf(context.sentFrom),
       },
     });
+    if (releaseNotesFlagApplies(delivery.templateVersion.purpose)) {
+      await recordReleaseNotesSubmission(delivery.id);
+    }
     return "sent" as const;
   }
 
@@ -576,9 +756,485 @@ const redactSecrets = (
   return { subject: scrub(message.subject), html: scrub(message.html), text: scrub(message.text) };
 };
 
+/**
+ * The release-notes verdict at send time, and what it does to the row.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md section 7.6.
+ *
+ * Returns `null` when the send may go on, and an outcome when the row is
+ * finished here. Not a boolean: the caller has to return the same shape the
+ * other gates return, and a boolean would leave it to invent one.
+ *
+ * ## One transaction
+ *
+ * The snapshot, the skip and any replacement are written together. Section 7.6
+ * asks for the skip and the replacement to be atomic, and the snapshot belongs
+ * with them for the same reason: a decision record that survived a rollback of
+ * the thing it decided would describe a message that never stopped.
+ */
+/**
+ * Another worker finished this row between our claim and our transaction.
+ *
+ * Only reachable through an expired claim -- `claimDueDelivery()` takes rows
+ * with `FOR UPDATE SKIP LOCKED` and a conditional update, so two workers hold
+ * one row only when the first one's claim went stale and the second took it.
+ * That worker has already given the row a terminal state, and this one must not
+ * write over it: the decision that ended the message is theirs.
+ *
+ * Thrown so the transaction rolls back, which is the point -- the verdict
+ * snapshot inside it describes a send that did not happen.
+ */
+/**
+ * How close to going stale a claim may be when a release-notes decision is
+ * committed. The provider call follows the commit, so the claim has to outlive
+ * it: a minute is well past the provider timeout.
+ */
+const CLAIM_MARGIN_MS = 60_000;
+
+/**
+ * The display duties that print in the footer: every display duty but the
+ * subject label. What `releaseNotesSkipReason()` may call an incomplete footer.
+ */
+const FOOTER_DISPLAY_OBLIGATIONS: Readonly<Record<string, readonly string[]>> =
+  Object.fromEntries(
+    Object.entries(DISPLAY_OBLIGATIONS).map(([country, duties]) => [
+      country,
+      duties.filter((duty) => duty !== SUBJECT_LABEL_OBLIGATIONS[country]),
+    ])
+  );
+
+class ReenqueueRaceError extends Error {
+  constructor(readonly reason: "already_superseded" | "not_pending") {
+    super(`the delivery was ${reason} when the replacement was written`);
+    this.name = "ReenqueueRaceError";
+  }
+}
+
+/**
+ * Refuses a notice delivery whose wording, as this build renders it, is not
+ * the approved wording (lib/policyChangeNoticeEmail.ts).
+ */
+const assertPolicyChangeNoticeApproved = (templateKey: string, language: string) => {
+  if (templateKey !== POLICY_CHANGE_NOTICE_TEMPLATE) return;
+  if (!isPolicyChangeNoticeWordingApproved(language, appUrl())) {
+    throw new Error("The amendment notice's wording is not approved; it cannot be queued.");
+  }
+};
+
+const decideReleaseNotesSend = async (
+  delivery: ClaimedDelivery,
+  definition: { purpose: string | null; classification: EmailClassification },
+  now: Date
+): Promise<ReleaseNotesSendOutcome> => {
+  const purpose = definition.purpose;
+  // Unreachable through `releaseNotesFlagApplies()`, which answers false for a
+  // null purpose. Narrowed rather than asserted, so a future caller that asked
+  // without the flag check gets a refusal instead of a thrown lane.
+  if (purpose === null) return { finished: null, suppressSubjectPrefix: false };
+
+  const normalizedAddress = normalizeSuppressionAddress(delivery.emailAddress);
+  // The account's address as it is now, which the cohort comparison needs
+  // alongside the one this row was addressed to. A member whose account address
+  // has moved since the approval was sealed is not the person that approval
+  // named (section 5.6).
+  //
+  // Both this read and the template resolution below go through
+  // `verdictRead()`, like every read inside the authorization. They are inputs
+  // to the verdict -- the address to the cohort comparison, the template id to
+  // the hash -- and a connection reset on either one otherwise reached the
+  // drain's ordinary catch and closed the row as a permanent `failed`, which is
+  // the outcome invariant 11 exists to prevent.
+  const account = delivery.userId
+    ? await verdictRead("the account address", () =>
+        prisma.user.findUnique({
+          where: { id: delivery.userId as string },
+          select: { email: true },
+        })
+      )
+    : null;
+
+  // The template version *now*, which is what a replacement would render with
+  // and therefore what the required contract has to be computed against
+  // (section 7.6 puts the id inside the hash). Resolved before the transaction
+  // because it may insert, and a caller's transaction should not be widened by
+  // our bookkeeping -- the same reason `createStandardDeliveryRows()` has it
+  // resolved before it starts.
+  //
+  // Using the pinned id here instead would have made a new template version
+  // unable to reach a queued message *and* unable to move the hash that would
+  // have re-enqueued it, which is a template correction that silently applies
+  // to nothing already owed.
+  const current = await verdictRead("the current template version", () =>
+    ensureTemplateVersion({
+      templateKey: delivery.templateVersion.template.key,
+      language: delivery.language,
+    })
+  );
+
+  const { verdict, displayProfile } = await releaseNotesSendAuthorization({
+    userId: delivery.userId,
+    purpose,
+    deliveryAddressDigest: approvalAddressDigest(normalizedAddress),
+    currentAddressDigest: account?.email
+      ? approvalAddressDigest(account.email)
+      : null,
+    // The version this row was pinned to, not the active one: the lane composes
+    // a queued message under the version that message carries (EM-04).
+    pinnedPolicyVersionId: delivery.policyVersionId,
+    pinnedDisplayContractHash: delivery.displayContractHash,
+    templateVersionId: current.templateVersionId,
+    // Already asked, a few gates above, and the row would have ended there.
+    suppressed: false,
+    normalizedAddress,
+    phase: "send",
+    now,
+  });
+
+  // A replacement only where the message is still owed. A moved contract is the
+  // only blocker, but the law may refuse this person all the same -- no consent
+  // and no approval that covers them -- and `reenqueueIsRight()` reads the
+  // blocker list alone. A replacement there is a row that is skipped as
+  // `no_consent` on its next drain, and a predecessor whose record says the
+  // contract moved when the actual answer was that we may not send.
+  const replaceable =
+    reenqueueIsRight(verdict.blockers) &&
+    (verdict.legalAllowed || verdict.overrideApplied !== null);
+  // Refused on the law, not the contract, so that is the word recorded.
+  // And the footer word only for duties that print in the footer: a missing
+  // subject label is not something an operator fixes in the footer.
+  const skipReason = releaseNotesSkipReason(
+    reenqueueIsRight(verdict.blockers) && !replaceable ? { ...verdict, blockers: [] } : verdict,
+    FOOTER_DISPLAY_OBLIGATIONS
+  );
+
+  // A replacement is a delivery like any other, so it gets the first of section
+  // 7.6's two snapshots too. Taken before the transaction because the
+  // authorization reads outside it, and only on the path that can use it.
+  //
+  // Its reads are the verdict's reads, so a failure among them is the verdict
+  // being unavailable -- retried -- and not the render failure the drain's
+  // ordinary catch would make of it: a permanent `failed` on the one path that
+  // exists to keep a message alive. Wrapped here rather than inside the function,
+  // whose enqueue-time callers want the raw error to roll their own write back.
+  const replacementEnqueue =
+    replaceable && displayProfile !== null
+      ? await releaseNotesEnqueueDecision({
+          userId: delivery.userId,
+          purpose,
+          classification: definition.classification,
+          emailAddress: delivery.emailAddress,
+          policyVersionId: delivery.policyVersionId,
+          templateVersionId: current.templateVersionId,
+        }).catch((error: unknown) => {
+          throw error instanceof VerdictUnavailableError
+            ? error
+            : new VerdictUnavailableError(
+                "the replacement's enqueue verdict could not be taken",
+                { cause: error }
+              );
+        })
+      : null;
+
+  let outcomeUnknown = false;
+  const finished = await runDecisionTransaction(delivery, async (tx) => {
+    // Still ours, and not about to stop being ours. The authorization reads for
+    // a while outside any lock; a claim that went stale in that time may have
+    // been taken by another worker, which could have skipped this row and
+    // written its replacement. Acting on the verdict from here -- sending the
+    // original under its enqueue key, or skipping it again -- would put a second
+    // message beside that replacement, under a different key. Locked, so the
+    // other worker cannot move it between this read and this commit; and a
+    // claim within a minute of going stale is given up rather than raced,
+    // because the provider call still follows the commit.
+    const [claimRow] = await tx.$queryRaw<
+      Array<{ status: string; claimedAt: Date | null }>
+    >`SELECT "status", "claimedAt" FROM "EmailDelivery" WHERE "id" = ${delivery.id} FOR UPDATE`;
+    const ours =
+      claimRow !== undefined &&
+      claimRow.status === "pending" &&
+      delivery.claimedAt !== null &&
+      claimRow.claimedAt?.getTime() === delivery.claimedAt.getTime() &&
+      // Since the claim, not since this function began: the suppression,
+      // marketing and jurisdiction reads before it spend the same claim.
+      Date.now() - delivery.claimedWallAt < STANDARD_LANE_CLAIM_TTL_MS - CLAIM_MARGIN_MS;
+    if (!ours) throw new ReenqueueRaceError("not_pending");
+
+    const recorded = await recordSendDecision(tx, {
+      deliveryId: delivery.id,
+      userId: delivery.userId,
+      phase: "send",
+      purpose,
+      classification: definition.classification,
+      emailAddress: normalizedAddress,
+      addressNormalizationVersion: EMAIL_ADDRESS_NORMALIZATION_VERSION,
+      verdict,
+      countryCandidates: verdict.countries,
+      // Not before the verdict: submission requires `suppressionCheckedAt >=
+      // evaluatedAt`, and the verdict may be dated to the consent it cites. The
+      // suppression check the send actually rests on is taken again under the
+      // address lock immediately before the provider call, which is later still.
+      suppressionCheckedAt: verdict.evaluatedAt > now ? verdict.evaluatedAt : now,
+      providerSubmittedAt: null,
+      evidence: evidenceOf(verdict),
+    });
+
+    // An earlier attempt sealed an *allowed* send decision, which it does
+    // immediately before the provider call -- so it got that far, and whether the
+    // provider accepted the message is not known. It may have: a process that
+    // dies after the provider's acceptance and before `sent` is written leaves
+    // exactly this row. The ledger holds one send decision per delivery.
+    //
+    // Where the verdict taken now agrees, sending again is safe: the idempotency
+    // key is the same, so a provider that already accepted it drops the second.
+    // Where it disagrees, neither obvious move is:
+    //
+    // - sending on the new basis would be a message under a decision the ledger
+    //   does not hold;
+    // - replacing it (a moved contract, or a moved basis) would send under a new
+    //   idempotency key -- a second message to somebody who may already have the
+    //   first.
+    //
+    // The foundation's rule for an unknown outcome is stop and hand it to a
+    // person, so that is what happens: the row fails as `outcome_unknown` and an
+    // incident names it. A disagreement that refuses on other grounds is the one
+    // exception, because not sending is safe whatever happened before: that row
+    // is skipped below like any other refusal.
+    //
+    // Including a row whose last attempt stopped before the provider (the address
+    // lock was busy, or quiet hours began after the decision). That records what
+    // the last attempt did, not what every attempt since the seal did: one that
+    // reached the provider and died before `sent` leaves nothing behind, and a
+    // later lock failure writes the same word over it. A replacement there would
+    // be a second message under a second key. So this stops too, and the
+    // incident's instruction -- check the provider log for this key -- is what
+    // tells a message that never went from one that did.
+    const earlierAllowed = !recorded.recorded && recorded.existingAllowed;
+    if (
+      earlierAllowed &&
+      recorded.differs &&
+      (verdict.allowed || replaceable)
+    ) {
+      await tx.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "failed",
+          lastErrorKind: "outcome_unknown",
+          attempts: delivery.attempts,
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      outcomeUnknown = true;
+      return true;
+    }
+
+    if (verdict.allowed) return false;
+
+    // The contract moved and nothing else did, on a delivery nothing has tried to
+    // send: the message is still owed, so it is re-rendered under the current
+    // template and the current contract rather than ended. Any second blocker and
+    // this is an ending -- the replacement would be refused for that second
+    // reason, and it would be a second row addressed to somebody who asked for
+    // nothing.
+    if (replaceable) {
+      const required = verdict.displayContract.requiredDisplayContractHash;
+      // `displayProfile` is non-null exactly when `required` is: both come from
+      // one composed contract. Checked together so a replacement can never be
+      // written with one and not the other.
+      if (required !== null && displayProfile !== null) {
+        const replaced = await skipAndReenqueue(tx, {
+          delivery: {
+            id: delivery.id,
+            eventId: delivery.eventId,
+            recipientKey: delivery.recipientKey,
+            userId: delivery.userId,
+            emailAddress: delivery.emailAddress,
+            language: delivery.language,
+            lane: delivery.lane,
+            generation: delivery.generation,
+            rootDeliveryId: delivery.rootDeliveryId,
+            attempts: delivery.attempts,
+            // The message itself. Left out, the replacement cannot render at
+            // all, `decryptSnapshot()` throws, and the drain's ordinary catch
+            // closes it as a permanent `failed` -- so the one path that exists
+            // to keep a message alive would have been the one that lost it.
+            renderDataSnapshot: delivery.renderDataSnapshot as Prisma.InputJsonValue,
+          },
+          current: {
+            templateVersionId: current.templateVersionId,
+            policyVersionId: delivery.policyVersionId,
+            // The profile the new contract was composed from, not the one the
+            // predecessor pinned. The hash names this profile and the next drain
+            // renders from whatever the row pins, so copying the old pin gave a
+            // recipient who moved from Australia to Korea the Korean hash and
+            // the Australian footer -- equal hashes, `satisfied: true`, and no
+            // telephone number.
+            jurisdictionCountry: displayProfile.countryCode,
+            jurisdictionProfileKey: displayProfile.profileKey,
+            displayContractHash: required,
+          },
+        });
+        // A report, not a throw, and therefore something to act on. `not_pending`
+        // means another worker finished this row between the claim and here, and
+        // `already_superseded` means it produced the replacement. Either way this
+        // row is somebody else's now: rolling back leaves it exactly as that
+        // worker left it, whereas committing would write a second verdict over
+        // the decision that actually ended it.
+        if (!replaced.reenqueued) {
+          throw new ReenqueueRaceError(replaced.reason);
+        }
+        // The replacement's own enqueue snapshot. It must describe the contract
+        // the replacement pins; a read that moved between the two verdicts
+        // rolls the whole thing back and the drain retries.
+        if (
+          replacementEnqueue === null ||
+          replacementEnqueue.displayContractHash !== required
+        ) {
+          throw new Error("the replacement's enqueue verdict names a different contract");
+        }
+        await recordEnqueueDecision(tx, {
+          decision: replacementEnqueue,
+          deliveryId: replaced.deliveryId,
+          userId: delivery.userId,
+          purpose,
+          classification: definition.classification,
+        });
+        return true;
+      }
+    }
+
+    await tx.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "skipped",
+        skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+      },
+    });
+    return true;
+  });
+
+  if (outcomeUnknown && finished !== "raced") {
+    await reportOperationalIncident({
+      code: "EMAIL_RELEASE_NOTES_OUTCOME_UNKNOWN",
+      title: "A release note may already have been sent, and its verdict has changed",
+      severity: "error",
+      error:
+        `Delivery ${delivery.id}: an earlier attempt sealed an allowed decision and did not record its outcome; ` +
+        "the verdict taken now disagrees. Check the provider log for this idempotency key before resending.",
+      context: { component: "standard-email-lane", deliveryId: delivery.id },
+    });
+    return {
+      finished: { outcome: "failed" as const, classification: definition.classification },
+    };
+  }
+
+  if (finished === "raced") {
+    // Nothing is written, including no claim release: the row already has the
+    // state the other worker gave it, and clearing `claimedAt` on a terminal row
+    // would only invite a third pass. Reported as `pending` because this pass
+    // did not finish it and will not claim it did -- the next pass finds nothing
+    // due and the count corrects itself.
+    return {
+      finished: { outcome: "pending" as const, classification: definition.classification },
+    };
+  }
+  if (finished) {
+    return {
+      finished: { outcome: "suppressed" as const, classification: definition.classification },
+    };
+  }
+
+  // Allowed, and carrying the one thing the composition cannot work out for
+  // itself. Section 7.7 records an exemption rather than seeding it away, so the
+  // profile still holds the prefix and only the duty state says whether to print
+  // it -- a composition reading the profile alone would put the label on a
+  // message the approval exempted.
+  return {
+    finished: null,
+    suppressSubjectPrefix: subjectLabelWaived(verdict.obligations),
+  };
+};
+
+/**
+ * What the release-notes gate hands back.
+ *
+ * Two shapes rather than a nullable outcome, because an allowed send is not an
+ * absence of a decision: it carries the subject-label exemption the composition
+ * needs, and a `null` would have left the caller to work that out from rows it
+ * has not read.
+ */
+type ReleaseNotesSendOutcome =
+  | {
+      finished: {
+        outcome: "suppressed" | "pending" | "failed";
+        classification: EmailClassification;
+      };
+    }
+  | { finished: null; suppressSubjectPrefix: boolean };
+
+/**
+ * The decision transaction, with the one race it can lose turned into a value.
+ *
+ * Separate from the body so the rollback and the reporting are in one place: a
+ * `catch` inside the transaction callback would swallow the error *and* commit
+ * the snapshot the rollback exists to discard.
+ */
+const runDecisionTransaction = async (
+  delivery: ClaimedDelivery,
+  body: (tx: Prisma.TransactionClient) => Promise<boolean>
+): Promise<boolean | "raced"> => {
+  try {
+    return await prisma.$transaction(body);
+  } catch (error) {
+    // Anything else that fails in here -- the snapshot insert, the seal, the
+    // skip -- rolled the whole transaction back, so nothing about this message
+    // was decided and retrying it is safe. It goes to the drain as the one error
+    // that releases the claim, rather than to the ordinary catch that would
+    // close a message the law allows as a permanent `failed` (invariant 11). A
+    // defect that fails every time still ends: the retry curve runs out and the
+    // row is abandoned with an incident, which is visible in a way a silent
+    // `failed` is not.
+    if (!(error instanceof ReenqueueRaceError)) {
+      throw new VerdictUnavailableError(
+        "the send decision could not be recorded, so nothing was decided",
+        { cause: error }
+      );
+    }
+    await reportOperationalIncident({
+      code: "EMAIL_DELIVERY_CLAIM_RACE",
+      title: "Two workers held one queued email",
+      severity: "warning",
+      error: `Delivery ${delivery.id}: ${error.message}`,
+      cooldownMs: 15 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        reason: error.reason,
+      },
+    });
+    return "raced";
+  }
+};
+
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
+  // For a release note, every database call between the claim and the provider
+  // is retried when it fails, rather than ending the row (section 7.6, invariant
+  // 11): the reads before `decideReleaseNotesSend()` decide the same send, and
+  // the ones after it -- the canary, the pinned profile, the campaign, the
+  // quiet-hours hold -- stand between an allowed, sealed decision and the retry
+  // that would carry it out under the same key. A connection that drops there
+  // is not a message that cannot be rendered. Other mail is unchanged.
+  const gateRead = <T>(label: string, read: () => Promise<T>): Promise<T> =>
+    releaseNotesFlagApplies(delivery.templateVersion.purpose) ? verdictRead(label, read) : read();
   // Filled for marketing only; re-checked immediately before the provider call.
   let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
+  // Set by the release-notes verdict, which is the only thing that reads the
+  // duty state the exemption lives in. False for every other message: a
+  // classification with no subject-label duty has nothing to be exempt from.
+  let suppressSubjectPrefix = false;
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
 
   // The version this row was pinned to must still describe the message the code
@@ -620,15 +1276,16 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     return { outcome: "failed" as const, classification: definition.classification };
   }
 
-  // Checked at send time, not at enqueue: a message queued yesterday may be for
-  // an address that complained this morning, and the decision that matters is
-  // the one true when it goes out.
-  const verdict = await suppressionCheck({
+  // Checked before the work of rendering, so a suppressed address costs a
+  // template read rather than a composed message. It is not the decision the
+  // send is made on: that one is taken again under the address lock,
+  // immediately before the provider call (lib/emailSendLock.ts).
+  const verdict = await gateRead("the suppression check", () => suppressionCheck({
     emailAddress: delivery.emailAddress,
     classification: definition.classification,
     purpose: definition.purpose,
     now,
-  });
+  }));
   if (!verdict.allowed) {
     await prisma.emailDelivery.update({
       where: { id: delivery.id },
@@ -642,21 +1299,6 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     });
     return { outcome: "suppressed" as const, classification: definition.classification };
   }
-  if (verdict.raiseIncident === "transactional_complaint") {
-    await reportOperationalIncident({
-      code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
-      title: "Sending to an address that reported transactional mail as spam",
-      error:
-        "The message is going out anyway -- withholding it would lock the " +
-        "account holder out -- but the complaint needs a person to look at it.",
-      severity: "warning",
-      cooldownMs: 60 * 60 * 1_000,
-      context: {
-        component: "standard-email-lane",
-        classification: definition.classification,
-      },
-    });
-  }
 
   // A preference is a different question from a suppression: suppression is
   // about the mailbox, a preference is about what this person asked for. Both
@@ -669,7 +1311,18 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // lazily on a settings read -- so every account that never opened the
   // preference centre was one marketing template away from being sent
   // advertising it had never agreed to.
-  {
+  //
+  // Not asked for a release-notes purpose, and that exemption is what section
+  // 7.6 means by one verdict: for those, the verdict *is* the consent decision.
+  // It reads the same preference and the same consent record, and it is the only
+  // thing that knows about the sealed `risk_accepted` approval section 5.6 uses
+  // to reach the accounts that existed before any of this did. Those accounts
+  // have no preference row, so this gate refused them as `no_consent` before the
+  // verdict ever ran: the override was loaded, judged, recorded as applied in
+  // the enqueue snapshot, and then never consulted at send. A population the
+  // design names explicitly could not have been sent to at all, and the record
+  // would have said they had refused.
+  if (!releaseNotesFlagApplies(definition.purpose)) {
     const stored =
       definition.purpose && delivery.userId && isEmailPurpose(definition.purpose)
         ? await prisma.emailPreference.findUnique({
@@ -715,7 +1368,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // a promotion that waits for a decision arrives stale, and the row records
   // why it never went.
   if (definition.classification === "marketing") {
-    if (!(await isEmailMarketingEnabled())) {
+    if (!(await gateRead("the marketing switch", () => isEmailMarketingEnabled()))) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
@@ -736,7 +1389,9 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // account-wide (§5.3.1), so a switch that could stop transactional mail would
   // be a second route to login codes not arriving.
   if (definition.classification === "marketing") {
-    const health = await evaluateMarketingSendHealth(now);
+    const health = await gateRead("the marketing send health", () =>
+      evaluateMarketingSendHealth(now)
+    );
     if (health.halted) {
       // Skipped rather than held. A promotion that waits for a person to clear
       // a halt is a promotion that arrives stale, and the reputation event that
@@ -759,14 +1414,32 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // An inferred country is refused as firmly as an absent one: sending
   // advertising under a guessed set of labelling rules is what §6.3 declines
   // to do, and "(광고)" versus "<ADV>" is not a difference anything can split.
+  //
+  // Release-notes purposes reach the same refusal through their own verdict,
+  // so the refusal below is not asked of them twice. That is only true because
+  // `candidateCountries()` applies this gate's own rule -- a high-confidence
+  // country that is not `ZZ`, or none -- and `tests/releaseNotesCandidateCountries
+  // .test.mjs` holds the two to agreement. The first version of the exemption
+  // said the same thing while the verdict accepted a conflict and a
+  // low-confidence guess, which changed what went out rather than which word it
+  // was recorded under. What the exemption changes is the record: the verdict
+  // leaves a send snapshot saying what was known about this person's country,
+  // and this gate leaves a skip reason and nothing else.
   if (definition.classification === "marketing") {
     const resolved = delivery.userId
-      ? await jurisdictionForUser({ userId: delivery.userId })
+      ? await gateRead("the recipient's jurisdiction", () =>
+          jurisdictionForUser({ userId: delivery.userId as string })
+        )
       : null;
     const verdict = resolved
       ? marketingJurisdictionVerdict(resolved)
       : ({ allowed: false, skipReason: "jurisdiction_unconfirmed" } as const);
-    if (!verdict.allowed) {
+    // Only the refusal is exempt, not the block. The quiet-hours hold below is
+    // a timing rule, not a permission, and a release-notes message owes it as
+    // much as any other marketing: the policy makes adding a night-time window a
+    // seed and a policy version, and a purpose that skipped this block would be
+    // the one purpose that seed never reached.
+    if (!verdict.allowed && !releaseNotesFlagApplies(definition.purpose)) {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
         data: {
@@ -790,15 +1463,70 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     const profileKeys = [
       ...new Set([delivery.jurisdictionProfileKey, resolved?.profileKey].filter(Boolean)),
     ] as string[];
-    quietHourWindows = await prisma.jurisdictionProfile.findMany({
+    quietHourWindows = await gateRead("the quiet-hour windows", () => prisma.jurisdictionProfile.findMany({
       where: {
         policyVersionId: delivery.policyVersionId,
         profileKey: { in: profileKeys },
       },
       select: { profileKey: true, quietHours: true },
-    });
-    const held = await holdForQuietHours(delivery, quietHourWindows, now);
+    }));
+    const held = await gateRead("the quiet-hours hold", () =>
+      holdForQuietHours(delivery, quietHourWindows, now)
+    );
     if (held) return { outcome: "pending" as const, classification: definition.classification };
+  }
+
+  // The release-notes verdict, and the second of the two snapshots section 7.6
+  // asks for. Last of the gates and before the render, because it is the one
+  // that can end in a *replacement* rather than an ending: a message whose
+  // display contract moved is re-enqueued under the current template and the
+  // current contract, and rendering the old one first would be work thrown away.
+  //
+  // The reads inside raise `VerdictUnavailableError` and nothing else, which the
+  // drain's catch releases the claim for (invariant 11). A database that cannot
+  // answer is not a refusal, and the drain's default -- permanent `failed` --
+  // would retire a message the law allows over a connection reset.
+  if (releaseNotesFlagApplies(definition.purpose)) {
+    const decided = await decideReleaseNotesSend(delivery, definition, now);
+    if (decided.finished) return decided.finished;
+    suppressSubjectPrefix = decided.suppressSubjectPrefix;
+  }
+
+  // The amendment notice goes out only in approved wording, and only in the
+  // wording the row was queued with. The drain renders from the current source,
+  // not the stored version, so a deploy that changed the notice would otherwise
+  // send new words under the old version's approval -- and the publication gate
+  // counts deliveries by that version's hash.
+  if (definition.key === POLICY_CHANGE_NOTICE_TEMPLATE) {
+    const approved = isPolicyChangeNoticeWordingApproved(delivery.language, appUrl());
+    const pinned = await prisma.templateVersion.findUnique({
+      where: { id: delivery.templateVersion.id },
+      select: { contentHash: true },
+    });
+    const current = definition.render(definition.placeholderPayload, delivery.language);
+    if (!approved || pinned?.contentHash !== templateContentHash(current)) {
+      // Only while the claim is still this worker's: a stale claim may have
+      // been taken by another, and an unconditional write would overwrite that
+      // worker's outcome.
+      const failed = await prisma.emailDelivery.updateMany({
+        where: { id: delivery.id, status: "pending", claimedAt: delivery.claimedAt },
+        data: {
+          status: "failed",
+          attempts: delivery.attempts,
+          lastErrorKind: "notice_wording_unapproved",
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      if (failed.count === 1) await reportOperationalIncident({
+        code: "EMAIL_POLICY_NOTICE_WORDING_UNAPPROVED",
+        title: "An amendment notice was not sent: its wording is not the approved wording it was queued with",
+        severity: "error",
+        error: `Delivery ${delivery.id}: the notice as this build renders it is unapproved or differs from its queued version.`,
+        context: { component: "standard-email-lane", deliveryId: delivery.id },
+      });
+      return { outcome: "failed" as const, classification: definition.classification };
+    }
   }
 
   const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
@@ -868,14 +1596,17 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // before the send: a canary for a version that then failed to send is
   // harmless, a sent message whose version has no canary is not checkable.
   const unsubscribeKeyVersion = link.keyring?.activeVersion ?? null;
-  if (link.keyring) await ensureUnsubscribeKeyCanary(link.keyring);
+  if (link.keyring) {
+    const keyring = link.keyring;
+    await gateRead("the unsubscribe key canary", () => ensureUnsubscribeKeyCanary(keyring));
+  }
 
   // The subject prefix and the jurisdiction footer, from the profile this row
   // was pinned to at enqueue (EM-04). Read from the pinned policy version and
   // not the active one: a message enqueued under one set of labelling rules
   // must not be sent under another, or the delivery row records the first while
   // the recipient receives the second.
-  const profile = await prisma.jurisdictionProfile.findUnique({
+  const profile = await gateRead("the pinned jurisdiction profile", () => prisma.jurisdictionProfile.findUnique({
     where: {
       profileKey_policyVersionId: {
         profileKey: delivery.jurisdictionProfileKey,
@@ -888,7 +1619,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       footerBlocks: true,
       unsubscribeSlaBusinessDays: true,
     },
-  });
+  }));
 
   const composed = composeJurisdictionalMessage({
     classification: definition.classification,
@@ -908,7 +1639,14 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     identity: readBusinessIdentity(process.env),
     language: delivery.language,
     unsubscribeUrl: unsubscribeLink,
+    // The same table the display contract is composed from, keyed by the
+    // pinned profile (one per country), so the footer prints what the contract
+    // the row was pinned to says it prints.
+    unsubscribeNoticeLanguages: profile
+      ? UNSUBSCRIBE_NOTICE_LANGUAGES[profile.profileKey] ?? []
+      : [],
     rendered: templateRendered,
+    suppressSubjectPrefix,
   });
 
   if (composed.ok === false) {
@@ -968,10 +1706,13 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // rendered, is not sent. Cancellation also skips unsent rows itself; this
   // closes the window between a claim and that update.
   if (delivery.event.referenceType === "EmailCampaign" && delivery.event.referenceId) {
-    const campaign = await prisma.emailCampaign.findUnique({
-      where: { id: delivery.event.referenceId },
-      select: { status: true },
-    });
+    const campaignId = delivery.event.referenceId;
+    const campaign = await gateRead("the campaign", () =>
+      prisma.emailCampaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true },
+      })
+    );
     if (campaign?.status === "cancelled") {
       await prisma.emailDelivery.update({
         where: { id: delivery.id },
@@ -992,24 +1733,44 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // check into the past.
   if (
     quietHourWindows.length > 0 &&
-    (await holdForQuietHours(
-      delivery,
-      quietHourWindows,
-      new Date(Math.max(now.getTime(), Date.now()))
+    (await gateRead("the quiet-hours hold", () =>
+      holdForQuietHours(delivery, quietHourWindows, new Date(Math.max(now.getTime(), Date.now())))
     ))
   ) {
     return { outcome: "pending" as const, classification: definition.classification };
   }
 
-  const response = await deliverEmailOnce({
-    to: delivery.emailAddress,
-    ...rendered,
+  // The lock, the last suppression word and the submission, in one scope
+  // (docs/policy/email-product-news-redesign-draft.md section 7.4, C29).
+  // Everything above -- the template read, the render, the footer, the quiet
+  // hour wait -- happened outside it, and anything committed during it is what
+  // this re-check is for.
+  // Wrapped too. A throw from here is a database failure inside the lock --
+  // the suppression re-check, the transaction -- and once the provider has
+  // answered the lock returns that answer rather than throwing. Even the one
+  // case that may have submitted is safe to retry: the same key and, since the
+  // unsubscribe token became deterministic, the same payload.
+  const submitted = await gateRead("the send under the address lock", () => sendWithAddressLock({
+    emailAddress: delivery.emailAddress,
+    classification: definition.classification,
+    purpose: definition.purpose,
+    userId: delivery.userId,
+    now,
+    // The lane cap. What the call gets is this or the transaction’s remaining
+    // life, whichever is less -- the transaction cannot abort an HTTP request,
+    // so a call that outlived it would be submitting with no lock held
+    // (docs/policy/email-notifications.md section 9.8).
+    providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+    message: {
+      ...rendered,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    },
     idempotencyKey: delivery.idempotencyKey,
     // Marketing sends from its own domain or does not send. Derived from the
-    // template's classification rather than passed by the enqueuing caller,
-    // for the same reason the classification itself is: a caller that could
-    // choose would eventually choose wrong, and a promotion sent from the
-    // transactional domain has no symptom until login codes stop arriving
+    // template's classification rather than passed by the enqueuing caller, for
+    // the same reason the classification itself is: a caller that could choose
+    // would eventually choose wrong, and a promotion sent from the transactional
+    // domain has no symptom until login codes stop arriving
     // (docs/policy/email-notifications.md §5.3, §14.1).
     stream: streamForClassification(definition.classification),
     // From the definition too, and for the same reason: the drain looks the
@@ -1017,8 +1778,70 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     // sender the first attempt used rather than one recomputed from what the
     // retry happens to know (docs/policy/email-notifications.md §14.1a).
     senderRole: definition.senderRole,
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-  });
+  }));
+
+  if (submitted.ok === false && submitted.reason === "lock_unavailable") {
+    // Nothing was submitted. The claim is released and the row comes back on
+    // the curve it was already on, with its attempt count untouched: waiting
+    // for a lock is not a failed attempt, and counting it would spend a
+    // message's abandonment budget on somebody else's withdrawal
+    // (docs/policy/email-product-news-redesign-draft.md section 7.4).
+    // The delay this message would have waited had the attempt happened and
+    // failed -- ten seconds for a receipt, a minute for a maintenance notice.
+    // `attempts` on the row stays where it was; only the wait is borrowed.
+    const backoff = nextStandardAttempt({
+      attemptsMade: delivery.attempts + 1,
+      classification: definition.classification,
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "pending",
+        attempts: delivery.attempts,
+        nextAttemptAt: new Date(
+          now.getTime() + (backoff.retry ? backoff.delayMs : SEND_LOCK_RETRY_MS)
+        ),
+        claimedAt: null,
+        deferReason: "send_not_submitted",
+      },
+    });
+    return { outcome: "pending" as const, classification: definition.classification };
+  }
+
+  if (submitted.ok === false) {
+    // A suppression committed while this message was being prepared. The row
+    // records it as the send-time decision it is, not as a provider failure.
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "suppressed",
+        skipReason: submitted.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+        deferReason: null,
+      },
+    });
+    return { outcome: "suppressed" as const, classification: definition.classification };
+  }
+
+  if (submitted.raiseIncident === "transactional_complaint") {
+    await reportOperationalIncident({
+      code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
+      title: "Sending to an address that reported transactional mail as spam",
+      error:
+        "The message is going out anyway -- withholding it would lock the " +
+        "account holder out -- but the complaint needs a person to look at it.",
+      severity: "warning",
+      cooldownMs: 60 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        classification: definition.classification,
+      },
+    });
+  }
+
+  const response = submitted.value;
 
   if (response.ok === false && response.identityRefusal) {
     // Permanent, and reported once per delivery rather than retried: no amount
@@ -1147,6 +1970,68 @@ export async function drainStandardEmailDeliveries(options?: {
         result.abandonedByClassification[classification] += 1;
       } else if (outcome === "suppressed") result.suppressed += 1;
     } catch (error) {
+      if (error instanceof VerdictUnavailableError) {
+        // Neither skipped nor failed. The rules refused nothing -- nobody asked
+        // them -- and nothing about the message is wrong; a database read while
+        // deciding did not answer. Turning that into a permanent `failed`, which
+        // is what the branch below would do, retires a message the law allows
+        // and leaves `lastErrorKind` naming a Prisma class, which nobody reading
+        // the row later can tell from a message that was genuinely unsendable
+        // (draft section 7.6, invariant 11).
+        //
+        // So the claim goes back and the schedule moves, on the classification's
+        // own curve. And it still runs out: a message nobody can decide after
+        // every attempt is one an operator has to see, and holding it `pending`
+        // for ever is how nobody does.
+        const classification = delivery.templateVersion.classification as RetryClassification;
+        const retry = verdictRetry({
+          attemptsMade: delivery.attempts,
+          classification,
+          now,
+        });
+        if (retry.outcome === "retry") {
+          await prisma.emailDelivery.update({
+            where: { id: delivery.id },
+            data: {
+              attempts: retry.attempts,
+              nextAttemptAt: retry.nextAttemptAt,
+              claimedAt: null,
+              lastErrorKind: "verdict_unavailable",
+            },
+          });
+          result.pending += 1;
+        } else {
+          await prisma.emailDelivery.update({
+            where: { id: delivery.id },
+            data: {
+              status: "abandoned",
+              attempts: retry.attempts,
+              nextAttemptAt: null,
+              claimedAt: null,
+              lastErrorKind: "verdict_unavailable",
+            },
+          });
+          result.abandoned += 1;
+          result.abandonedByClassification[classification] += 1;
+        }
+        await reportOperationalIncident({
+          code: "EMAIL_SEND_VERDICT_UNAVAILABLE",
+          title: "A queued email could not be decided",
+          error:
+            `Delivery ${delivery.id}: ${error.message}` +
+            (retry.outcome === "retry"
+              ? ` -- retrying in ${retry.delayMs}ms (attempt ${retry.attempts})`
+              : " -- abandoned, attempts exhausted"),
+          severity: retry.outcome === "retry" ? "warning" : "error",
+          cooldownMs: 15 * 60 * 1_000,
+          context: {
+            component: "standard-email-lane",
+            outcome: retry.outcome,
+            attempts: String(retry.attempts),
+          },
+        });
+        continue;
+      }
       // A render or decrypt failure, not a provider failure. Retrying it will
       // not help -- the snapshot is what it is -- so the row stops here rather
       // than occupying the queue on a curve that cannot succeed.

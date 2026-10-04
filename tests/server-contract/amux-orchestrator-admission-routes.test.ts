@@ -337,6 +337,17 @@ test("after a receipt may have committed, a deadline after the sweep is an unkno
   const plain = await recover(post("/api/internal/amux/execution/recover", identity));
   assert.equal(plain.status, 503);
   assert.equal((await plain.json()).reason, "amux_database_deadline_exceeded");
+
+  // A prior sweep receipt wins over a nested raw-query timeout in the next
+  // recovery step: this route may already have committed a state change.
+  reset({ executionApiEnabled: true, sweepMarksReceipt: true });
+  world.reclaimError = Object.assign(new Error("query canceled"), {
+    code: "P2010",
+    meta: { driverAdapterError: { kind: "postgres", code: "57014" } },
+  });
+  const afterReceipt = await recover(post("/api/internal/amux/execution/recover", identity));
+  assert.equal(afterReceipt.status, 503);
+  assert.equal((await afterReceipt.json()).reason, "amux_outcome_unknown");
 });
 
 test("after a receipt may have committed, none of the three nothing-committed answers is sent by the tick", async () => {

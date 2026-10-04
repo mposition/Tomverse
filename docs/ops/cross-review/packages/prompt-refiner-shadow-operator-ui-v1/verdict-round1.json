@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-operator-ui-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T14:45:59.639Z",
+  "durationMs": 267982,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 44,
+    "cachedInputTokens": 1776026,
+    "outputTokens": 21185,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.474598,
+    "raw": {
+      "input_tokens": 44,
+      "cache_creation_input_tokens": 105674,
+      "cache_read_input_tokens": 1776026,
+      "output_tokens": 21185,
+      "output_tokens_details": {
+        "thinking_tokens": 14355
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 105674,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4068,
+          "cache_read_input_tokens": 109989,
+          "cache_creation_input_tokens": 628,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 628
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T14:50:27.674Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-operator-ui-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:5ebbd1e4f71f1804a8f4d97a57bd79fc9e2fc920ec36cb885c164004797ecc42",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:292-316 (execute)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The post-POST status GET (`await readExecution(run!)`, line 311) sits inside the same `try` as the execution POST, so a transport failure on that follow-up *read* is reported as `m.transportUnknown` (\"The execution request outcome is unknown. Do not resend it...\") even though the POST outcome was received and parsed, and on a `paused` result the lock was already released at line 310 — leaving an enabled \"Resume remaining cases\" button underneath a \"do not resend\" alert.",
+        "reproduction": "Stub `fetch` so the POST to `/api/admin/prompt-refiner/shadow-run/execute` resolves `{ execution: { status: \"paused\", attemptedThisInvocation: 8, dispatchCount: 8, terminalCount: 8, inFlightAttemptId: null, observedAt: \"2026-09-21T01:05:00.000Z\", retryCount: 0, redispatched: 0 }, productAdapterReady: false }`, and the immediately following GET on the same path rejects (network error). Expected: the alert names the failed status read and the button state stays coherent. Actual: the alert renders `transportUnknown` while `executionPostLocked` is false and `canExecute` is true. Fix: hoist `readExecution` out of the POST `try`, or track whether the POST itself completed before choosing the message."
+      },
+      {
+        "location": "lib/promptRefinerShadowOperatorCore.ts:266-315 (promptRefinerExecutionPreviewProblems)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The execution preview is bound to the run only by `runId` and `runContractDigest` — both deployment-independent frozen constants — and `approvalExpiresAt` is accepted as any string, even though the run preview carries `stageApprovalExpiresAt` and the server guarantees `run.approvalExpiresAt === stage.approvalExpiresAt`, so an execution response describing a different authority window is not fail-closed on the client.",
+        "reproduction": "In tests/promptRefinerShadowOperatorCore.test.mjs, take `executionBody()` and set `execution.approvalExpiresAt = \"2030-01-01T00:00:00.000Z\"` while the `runBody()` fixture keeps `stageApprovalExpiresAt: \"2026-09-21T02:00:00.000Z\"`; `parsePromptRefinerExecutionPreview(execution, run)` still returns a preview. Expected under the stated fail-closed contract: `null`."
+      },
+      {
+        "location": "tests/promptRefinerShadowOperatorCore.test.mjs:13-95 (fixtures)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "Every fixture field is derived from `PROMPT_REFINER_SHADOW_OPERATOR_CONTRACT` itself (`timeoutMs: contract.timeoutMs`, `modelId: contract.modelId`, ...), so the suite is self-referential and cannot detect divergence between this duplicated client contract and the server constants it mirrors; a stale client constant would only surface as a fail-closed dead screen in staging.",
+        "reproduction": "Change `timeoutMs: 15_000` to `20_000` in lib/promptRefinerShadowOperatorCore.ts and re-run `node --import tsx --test tests/promptRefinerShadowOperatorCore.test.mjs tests/adminPromptRefinerShadowOperator.test.mjs`: all tests still pass, while the real run preview (`PROMPT_REFINER_TIMEOUT_MS = 15_000`, lib/promptRefinerExecutionContract.ts:75) would be rejected by `parsePromptRefinerRunPreview` in production. Add one assertion comparing the operator contract field-by-field to the server constants in lib/promptRefinerShadowRunContract.ts, lib/promptRefinerExecutionContract.ts and lib/promptRefinerStageAdmissionCore.ts."
+      }
+    ],
+    "nextAction": "All five findings from the previous round are addressed (refresh re-reads the visible step, the run-approval flag no longer gates the GET transition to step 3, `postFailureStop` is now reachable at line 301, the two env flags have separate named messages, and the unlisted-route choice is justified against the role-agnostic `ADMIN_SEARCHABLE_PAGES`); fix the misattributed `transportUnknown` message by moving the follow-up status GET out of the execution POST's try block, and re-submit."
+  }
+}

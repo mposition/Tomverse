@@ -26,6 +26,8 @@
 export const ROUTER_QUALITY_EVAL_VERSION = "router-quality-eval-v1";
 
 /** The paired unit, recorded verbatim so a report cannot leave it implicit. */
+import type { AnswerOutcome } from "./routerAnswerOutcome";
+
 export const PAIRED_EVALUATION_UNIT =
   "one question, answered once by Auto and once by the pre-registered fixed-model baseline";
 
@@ -46,7 +48,32 @@ export type PairExclusionReason =
   | "auto_arm_failed"
   | "baseline_arm_failed"
   | "self_identified"
-  | "judge_failed";
+  | "judge_failed"
+  | "auto_arm_empty"
+  | "baseline_arm_empty"
+  | "both_arms_empty";
+
+/**
+ * The reasons that are an arm failing to serve the person who asked.
+ *
+ * An empty answer and a failed call are the same event from the outside: the
+ * user got nothing. Keeping only `empty` here and treating `failed` as an
+ * ordinary exclusion would favour the arm that errors over the arm that
+ * returns nothing, which is the asymmetry this whole treatment exists to
+ * remove.
+ *
+ * `no_candidate` is not here -- that is the Router declining to route, not an
+ * arm failing. Nor are `self_identified` (a blinding rule) or `judge_failed`
+ * (a measurement failure): neither is visible to the person who asked.
+ */
+export const AUTO_ARM_FAILURE_REASONS: readonly PairExclusionReason[] = [
+  "auto_arm_failed",
+  "auto_arm_empty",
+];
+export const BASELINE_ARM_FAILURE_REASONS: readonly PairExclusionReason[] = [
+  "baseline_arm_failed",
+  "baseline_arm_empty",
+];
 
 export type PairOutcome =
   | { status: "judged"; verdict: JudgeVerdict }
@@ -80,6 +107,143 @@ export const pairScore = (pair: EvaluatedPair): 1 | 0 | -1 | null => {
   if (pair.outcome.verdict === "auto") return 1;
   if (pair.outcome.verdict === "baseline") return -1;
   return 0;
+};
+
+/**
+ * The same pair scored on what the person actually received.
+ *
+ * `pairScore` answers "which answer was better", over the pairs where there
+ * were two answers to compare. This answers "which arm served the person",
+ * which is a different question with a different denominator, and the two are
+ * reported side by side rather than one standing in for the other.
+ *
+ * An arm that produced nothing loses that pair outright. There is no judgement
+ * involved and none is asked for: the comparison is between something and
+ * nothing.
+ *
+ * Both arms empty scores zero and stays in the denominator, the way an
+ * `equivalent` verdict does. Neither arm served the person, so neither is
+ * ahead -- and the count is reported separately, so nothing is hidden inside
+ * that zero.
+ */
+export const outcomeScore = (pair: EvaluatedPair): 1 | 0 | -1 | null => {
+  if (pair.outcome.status === "judged") return pairScore(pair);
+  const reason = pair.outcome.reason;
+  if (AUTO_ARM_FAILURE_REASONS.includes(reason)) return -1;
+  if (BASELINE_ARM_FAILURE_REASONS.includes(reason)) return 1;
+  if (reason === "both_arms_empty") return 0;
+  return null;
+};
+
+/**
+ * What to do with a pair, given what the two arms produced.
+ *
+ * Extracted so that "an empty answer never reaches the judge" is a property a
+ * test can prove rather than a `continue` somebody has to notice. The judge
+ * call in the harness is reachable only through `action: "judge"`, and this
+ * returns that only when both arms produced text.
+ */
+export type PairDecision =
+  | { action: "judge" }
+  | { action: "exclude"; reason: PairExclusionReason; detail: string };
+
+export const decidePairFromAnswers = (
+  auto: AnswerOutcome,
+  baseline: AnswerOutcome
+): PairDecision => {
+  const autoFailed = auto.status === "failed";
+  const baselineFailed = baseline.status === "failed";
+  if (!autoFailed && !baselineFailed) return { action: "judge" };
+
+  const detail = [
+    auto.status === "failed" ? `auto: ${auto.reason} — ${auto.detail}` : null,
+    baseline.status === "failed" ? `baseline: ${baseline.reason} — ${baseline.detail}` : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
+
+  if (auto.status === "failed" && baseline.status === "failed") {
+    return { action: "exclude", reason: "both_arms_empty", detail };
+  }
+  if (auto.status === "failed") {
+    return {
+      action: "exclude",
+      reason: auto.reason === "provider_error" ? "auto_arm_failed" : "auto_arm_empty",
+      detail,
+    };
+  }
+  return {
+    action: "exclude",
+    reason:
+      baseline.status === "failed" && baseline.reason === "provider_error"
+        ? "baseline_arm_failed"
+        : "baseline_arm_empty",
+    detail,
+  };
+};
+
+export type PairAccounting = {
+  total: number;
+  /** Both arms answered and a judge graded them. */
+  judgeable: number;
+  /** One arm produced nothing. A deterministic loss for that arm end to end. */
+  singleArmFailure: number;
+  /** Neither arm produced anything. */
+  doubleArmFailure: number;
+  /** Everything else: no candidate, self-identification, a judge that failed. */
+  otherExclusions: number;
+};
+
+/**
+ * Where every pair went, as counts that have to add up.
+ *
+ * The invariant is the point. A run that reports a delta over 210 pairs while
+ * 31 of them had an empty arm is not reporting on 210 pairs, and the only way
+ * to see that from the outside is to make the four buckets sum to the total
+ * and print all four.
+ */
+export const pairAccounting = (pairs: readonly EvaluatedPair[]): PairAccounting => {
+  let judgeable = 0;
+  let singleArmFailure = 0;
+  let doubleArmFailure = 0;
+  let otherExclusions = 0;
+  for (const pair of pairs) {
+    if (pair.outcome.status === "judged") {
+      judgeable += 1;
+      continue;
+    }
+    const reason = pair.outcome.reason;
+    if (reason === "both_arms_empty") doubleArmFailure += 1;
+    else if (
+      AUTO_ARM_FAILURE_REASONS.includes(reason) ||
+      BASELINE_ARM_FAILURE_REASONS.includes(reason)
+    ) {
+      singleArmFailure += 1;
+    } else otherExclusions += 1;
+  }
+  return {
+    total: pairs.length,
+    judgeable,
+    singleArmFailure,
+    doubleArmFailure,
+    otherExclusions,
+  };
+};
+
+/** Why an accounting does not add up. Empty means it does. */
+export const pairAccountingProblems = (accounting: PairAccounting): readonly string[] => {
+  const summed =
+    accounting.judgeable +
+    accounting.singleArmFailure +
+    accounting.doubleArmFailure +
+    accounting.otherExclusions;
+  return summed === accounting.total
+    ? []
+    : [
+        `the buckets sum to ${summed} against ${accounting.total} pairs: ` +
+          `${accounting.judgeable} judgeable, ${accounting.singleArmFailure} single-arm failure, ` +
+          `${accounting.doubleArmFailure} double-arm failure, ${accounting.otherExclusions} other`,
+      ];
 };
 
 export type CiMethod = "bootstrap_percentile" | "normal_approximation";
@@ -133,6 +297,17 @@ export type DeltaOptions = {
   method?: CiMethod;
   seed?: number;
   resamples?: number;
+  /**
+   * How a pair becomes a number. Defaults to `pairScore`, the quality
+   * comparison over judged pairs. Pass `outcomeScore` for the end-to-end
+   * estimate, where an arm that produced nothing loses.
+   *
+   * Injected rather than computed twice so both estimates come out of the same
+   * bootstrap, on the same seed, with the same tie handling. Two
+   * implementations of this arithmetic would eventually disagree, and the two
+   * numbers are meant to be read side by side.
+   */
+  score?: (pair: EvaluatedPair) => 1 | 0 | -1 | null;
 };
 
 /**
@@ -151,8 +326,9 @@ export const computeWinRateDelta = (
 ): WinRateDelta => {
   const method = options.method ?? "bootstrap_percentile";
   const resamples = options.resamples ?? 10_000;
+  const scoreOf = options.score ?? pairScore;
   const scores = pairs
-    .map(pairScore)
+    .map(scoreOf)
     .filter((score): score is 1 | 0 | -1 => score !== null);
 
   const n = scores.length;
@@ -285,6 +461,9 @@ export const summariseExclusions = (
     baseline_arm_failed: 0,
     self_identified: 0,
     judge_failed: 0,
+    auto_arm_empty: 0,
+    baseline_arm_empty: 0,
+    both_arms_empty: 0,
   };
   let total = 0;
   for (const pair of pairs) {
@@ -549,7 +728,23 @@ const present = (value: unknown) =>
  */
 export const evaluationRecordProblems = (
   record: EvaluationRecord | null | undefined,
-  options: { routableModelIds?: readonly string[] } = {}
+  options: {
+    routableModelIds?: readonly string[];
+    /**
+     * Checks the cited calibration artefact, returning what is wrong with it.
+     *
+     * Injected rather than imported so this module stays arithmetic and shape:
+     * lib/routerJudgeCalibration.ts already depends on it, and the dependency
+     * cannot run both ways. `scripts/check-router-quality-eval.mjs` and the
+     * harness both pass `calibrationArtefactProblems` bound to the run.
+     *
+     * Omitting it is not a way to skip the check. A routable judge with a
+     * calibration nobody validated is reported below, because "there is an
+     * object in the biasMeasurement field" was the whole of the old check and
+     * is satisfied by the artefact of a different judge on a different set.
+     */
+    checkCalibration?: (artefact: unknown) => readonly string[];
+  } = {}
 ): readonly string[] => {
   if (!record || typeof record !== "object") {
     return ["the report is not an object"];
@@ -610,10 +805,24 @@ export const evaluationRecordProblems = (
   const judgesItself =
     record.judge?.isRoutableModel === true ||
     (typeof identity === "string" && routable.includes(identity));
-  if (judgesItself && !present(record.judge?.biasMeasurement)) {
-    problems.push(
-      `the judge (${String(identity)}) is itself routable and carries no bias measurement`
-    );
+  if (judgesItself) {
+    const artefact = record.judge?.biasMeasurement;
+    if (!present(artefact)) {
+      problems.push(
+        `the judge (${String(identity)}) is itself routable and carries no calibration against an ` +
+          "independent judge"
+      );
+    } else if (!options.checkCalibration) {
+      problems.push(
+        `the judge (${String(identity)}) is itself routable and the cited calibration was not ` +
+          "checked, so nothing establishes that it is a calibration of this judge, on these answers, " +
+          "from a run that finished"
+      );
+    } else {
+      for (const problem of options.checkCalibration(artefact)) {
+        problems.push(`the cited calibration: ${problem}`);
+      }
+    }
   }
 
   return problems;

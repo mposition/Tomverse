@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -27,7 +28,33 @@ import { fileURLToPath } from "node:url";
  * -- is there a code path at all.
  */
 
-const SOURCE = fileURLToPath(new URL("../lib/appSettings.ts", import.meta.url));
+const SETTINGS_MODULE = fileURLToPath(
+  new URL("../lib/appSettings.ts", import.meta.url)
+);
+
+/**
+ * Where a write path can be, which is not only `lib/appSettings.ts`.
+ *
+ * Reading one file was fine while every writer was in it. On 2026-09-23 the
+ * marketing switch writer moved to `lib/marketingSwitchWriter.ts` -- it had
+ * come to need the branded marketing transaction, and `lib/appSettings.ts`
+ * sits inside the Prompt Refiner runtime source closure, a sealed file set a
+ * database CHECK is bound to. The sweep then reported four keys as having no
+ * write path, which is exactly the false alarm this file exists not to raise.
+ *
+ * So the scope is behavioural: every `lib/*.ts` that issues an AppSetting
+ * write. A writer that moves again is found without anybody remembering to
+ * add it here.
+ */
+const writerModules = () => {
+  const directory = fileURLToPath(new URL("../lib/", import.meta.url));
+  return readdirSync(directory)
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => join(directory, name))
+    .filter((path) => /appSetting\.(upsert|update|create|delete)/u.test(
+      readFileSync(path, "utf8")
+    ));
+};
 
 /**
  * Keys read but deliberately not writable from the application, and why.
@@ -54,18 +81,6 @@ const READ_ONLY_KEYS = {
       "approval already exist. A toggle would be the procedure's last step " +
       "without its first five.",
   },
-  ASSISTANT_PACKAGE_IMPORT_FLAG_KEY: {
-    reason:
-      "docs/policy/assistant-package-import.md §12.2 lists four things that " +
-      "have to be true before package import may be turned on, in order, and " +
-      "two of them are not: the validating migration for " +
-      "`extractedCharacters` is not deployed, so the figure the quota check " +
-      "reads has not been surveyed, and the staging checklist has no signed " +
-      "run. A toggle would be that procedure's last step without its first " +
-      "ones. The flag exists ahead of the control on purpose -- enabling it " +
-      "later is then a settings change against a reviewed path -- and the " +
-      "control lands with the rollout, not before it.",
-  },
   EMAIL_MARKETING_FLAG_KEY: {
     reason:
       "docs/policy/email-notifications.md §15.2 keeps this off until the legal " +
@@ -75,6 +90,14 @@ const READ_ONLY_KEYS = {
       "click. The flag exists ahead of the control on purpose -- turning it " +
       "on later is then a settings change against a path that has already " +
       "been reviewed and tested.",
+  },
+  EMAIL_RELEASE_NOTES_FLAG_KEY: {
+    reason:
+      "The last step of the release-notes activation order " +
+      "(docs/policy/email-product-news-redesign-draft.md section 12): documents " +
+      "in force, policy version active, readiness confirmed, then this. Each of " +
+      "those is somebody else's decision recorded somewhere else, and a toggle " +
+      "would let one click stand in for all of them. An operator writes the row.",
   },
   EMAIL_CAMPAIGNS_FLAG_KEY: {
     reason:
@@ -98,6 +121,23 @@ const READ_ONLY_KEYS = {
       "operator step in the marketing activation order, recorded by writing " +
       "the row, not a toggle a screen should offer ahead of that order.",
   },
+  EMAIL_SIGNUP_CONSENT_FLAG_KEY: {
+    reason:
+      "docs/policy/email-product-news-redesign-draft.md section 5.2: turning " +
+      "this on starts writing permanent consent evidence about every new " +
+      "account, after the consent copy and the confirmation flag are live. " +
+      "An operator step recorded by writing the row, not a screen toggle.",
+  },
+  MARKETING_EXPERIMENTS_KEY: {
+    reason:
+      "S2 adds the audited experiment activation route after cache and CSP " +
+      "evidence exists; S1 only consumes this default-off value.",
+  },
+  MARKETING_WEBHOOK_APPLY_SCOPE_KEY: {
+    reason:
+      "S2 writes the verified event-type and channel subset with marketing:write, " +
+      "step-up and a human audit row; S1 keeps webhook apply always false.",
+  },
   VOICE_INPUT_FLAG_KEY: {
     reason:
       "docs/policy/voice-input.md §14: enabling voice input starts paying a " +
@@ -110,16 +150,30 @@ const READ_ONLY_KEYS = {
       "VOICE_INPUT_KILL_SWITCH is an environment variable, so it also works " +
       "when the database is the thing that is unwell.",
   },
+  AUTO_EXPLORATION_FLAG_KEY: {
+    reason:
+      "Turning this on changes which model answers a tied Auto turn. Staging " +
+      "has to show that one conversation stays on one model and that a " +
+      "different credit price stays out of the spread before the row is " +
+      "written. There is no admin toggle. Stopping is " +
+      "AUTO_EXPLORATION_KILL_SWITCH, which needs no database write.",
+  },
+  PROMPT_REFINER_FLAG_KEY: {
+    reason:
+      "Prompt Refiner activation requires an approved paid adapter, fixed " +
+      "cost and timeout bounds, PLANNER-03 evidence and rollout disposition. " +
+      "Until those exist, an application toggle would expose the final step " +
+      "without the safety and quality gates that make it usable. Emergency " +
+      "stopping remains available through PROMPT_REFINER_KILL_SWITCH.",
+  },
 };
 
-const source = readFileSync(SOURCE, "utf8");
-
 /**
- * The file's top-level declarations, each with the text that belongs to it.
- * Splitting on column-zero `export`/`const` is enough: this module is a flat
- * list of exported functions and module constants.
+ * A file's top-level declarations, each with the text that belongs to it.
+ * Splitting on column-zero `export`/`const` is enough: these modules are flat
+ * lists of exported functions and module constants.
  */
-const declarations = () => {
+const declarations = (source) => {
   const blocks = [];
   let current = { header: "(module scope)", body: "" };
   for (const line of source.split("\n")) {
@@ -135,22 +189,42 @@ const declarations = () => {
 
 const KEY_IDENTIFIER = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_KEYS?\b/g;
 
-const keysUsedWith = (predicate) => {
+const keysUsedWith = (predicate, paths) => {
   const keys = new Set();
-  for (const block of declarations()) {
-    if (!predicate(block.body)) continue;
-    // The import statement at the top names every key; it is module scope and
-    // touches no Prisma call, so it never matches either predicate.
-    for (const match of block.body.matchAll(KEY_IDENTIFIER)) keys.add(match[0]);
+  for (const path of paths) {
+    for (const block of declarations(readFileSync(path, "utf8"))) {
+      if (!predicate(block.body)) continue;
+      // The import statement at the top names every key; it is module scope
+      // and touches no Prisma call, so it never matches either predicate.
+      for (const match of block.body.matchAll(KEY_IDENTIFIER)) keys.add(match[0]);
+    }
   }
   return keys;
 };
 
+/**
+ * `tx` as well as `prisma`, because a write can be inside a transaction.
+ *
+ * `setAssistantPackageImportEnabled()` is: the flag change and its audit row
+ * share one transaction on purpose, so a failed audit write takes the change
+ * with it. Matching only `prisma.` would have read that as no write path at
+ * all -- the sweep would have reported the very control the policy asked for
+ * as missing, which is the opposite of the mistake this file exists to catch.
+ */
+const CLIENT = String.raw`(?:prisma|tx|client)`;
+// Reads are asked of the settings module, which is the one that reads; writes
+// are asked of every module that writes.
 const readKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(findUnique|findMany|findFirst|count)/.test(body)
+  (body) =>
+    new RegExp(`${CLIENT}\\.appSetting\\.(findUnique|findMany|findFirst|count)`).test(
+      body
+    ),
+  [SETTINGS_MODULE]
 );
 const writtenKeys = keysUsedWith(
-  (body) => /prisma\.appSetting\.(upsert|update|create|delete)/.test(body)
+  (body) =>
+    new RegExp(`${CLIENT}\\.appSetting\\.(upsert|update|create|delete)`).test(body),
+  writerModules()
 );
 
 test("the sweep finds the keys it is meant to, so a silent zero is impossible", () => {
@@ -158,6 +232,12 @@ test("the sweep finds the keys it is meant to, so a silent zero is impossible", 
   // restructured and the regexes stop matching anything.
   assert.ok(readKeys.size >= 5, `only ${readKeys.size} read key(s) found`);
   assert.ok(writtenKeys.size >= 3, `only ${writtenKeys.size} written key(s) found`);
+  // More than the settings module, or the behavioural scope has silently
+  // collapsed back to one file and a moved writer would read as missing again.
+  assert.ok(
+    writerModules().length >= 2,
+    `only ${writerModules().length} module(s) write an AppSetting`
+  );
   for (const key of Object.keys(READ_ONLY_KEYS)) {
     assert.ok(readKeys.has(key), `${key} is registered but nothing reads it`);
   }

@@ -21,6 +21,7 @@ import {
 } from "@/lib/apiSecurity";
 import {
     AssistantProfilesDisabledError,
+    isAssistantPackageImportEnabled,
     isAssistantProfilesEnabled,
 } from "@/lib/appSettings";
 import {
@@ -28,6 +29,7 @@ import {
     createAssistantProfile,
     listAssistantProfiles,
 } from "@/lib/assistantProfileService";
+import { assistantProfileErrorResponse } from "@/lib/assistantProfileErrorResponse";
 // The account-wide profile ceiling is a §14.1 figure and lives with the other
 // approved ones in the knowledge limits module; the per-field limits are the
 // profile's own.
@@ -88,29 +90,6 @@ const createSchema = z
         message: "instructions is required when modelIds is supplied",
     });
 
-export const assistantProfileErrorResponse = (error: unknown) => {
-    if (error instanceof AssistantProfileError) {
-        return NextResponse.json(
-            {
-                error: error.message,
-                code: error.code,
-                ...(error.problems ? { problems: error.problems } : {}),
-            },
-            { status: error.status, headers: { "Cache-Control": "no-store" } }
-        );
-    }
-    if (error instanceof AssistantProfilesDisabledError) {
-        return NextResponse.json(
-            {
-                error: "Assistant profiles are not enabled.",
-                code: "ASSISTANT_PROFILES_DISABLED",
-            },
-            { status: 403, headers: { "Cache-Control": "no-store" } }
-        );
-    }
-    return null;
-};
-
 const requireOwner = async () => {
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
@@ -134,13 +113,29 @@ export async function GET(req: Request) {
             minute: 60,
             day: 1_000,
         });
+        const [profiles, packageImport] = await Promise.all([
+            listAssistantProfiles(userId),
+            // The list is this screen's availability probe already, so the
+            // import entry point asks it the same question rather than the
+            // page reading a second flag server-side and giving the screen two
+            // places that decide what is available.
+            //
+            // Deliberately the import flag alone, which is what
+            // `/settings/assistants/import` answers 404 on. `assertImportEnabled()`
+            // additionally requires knowledge to be on, but a button that
+            // matched *that* would hide while the page it points at still
+            // rendered. The invariant worth keeping is the narrower one: the
+            // entry point is offered exactly when the destination is not a 404.
+            isAssistantPackageImportEnabled(),
+        ]);
         return NextResponse.json(
             {
-                profiles: await listAssistantProfiles(userId),
+                profiles,
                 limits: {
                     maxProfilesPerAccount:
                         ASSISTANT_KNOWLEDGE_LIMITS.maxProfilesPerAccount,
                 },
+                features: { packageImport },
             },
             { headers: { "Cache-Control": "no-store" } }
         );

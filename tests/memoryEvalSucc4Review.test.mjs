@@ -1,0 +1,304 @@
+// The succ-4 review's arithmetic, pinned.
+//
+// `.github/audits/memory-eval-gold-contract-2026-08-27.md` §12. These are the
+// numbers a later reader will cite without recomputing them, and every one of
+// them is a claim about which cases may still measure the rules they were read
+// against.
+
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+import { MEMORY_EVAL_SUCC3_CASES } from "../lib/memoryEvalSucc3Fixtures.ts";
+import { MEMORY_EVAL_REGRESSION_PROVENANCE } from "../lib/memoryEvalRegressionCorpus/provenance.ts";
+import {
+    SUCC4_B_PLUS_MOVES,
+    SUCC4_REVIEWED_AND_KEPT,
+} from "../lib/memoryEvalSucc4Review/bPlusMoves.ts";
+import { SUCC4_BATCHES } from "../lib/memoryEvalSucc4Review/batches.ts";
+import {
+    SUCC4_AFFIRMED,
+    SUCC4_NEGATED,
+    SUCC4_READINGS,
+} from "../lib/memoryEvalSucc4Review/readings.ts";
+
+const succ3ById = new Map(MEMORY_EVAL_SUCC3_CASES.map((c) => [c.id, c]));
+
+test("every case named by the review is a succ-3 case", () => {
+    // A move list naming a case the dataset does not hold moves nothing, and
+    // reads as though it had.
+    for (const move of SUCC4_B_PLUS_MOVES) {
+        assert.ok(succ3ById.has(move.originalId), `unknown case ${move.originalId}`);
+        const testCase = succ3ById.get(move.originalId);
+        assert.equal(
+            `${testCase.category}:${testCase.language}`,
+            move.cell,
+            `${move.originalId} cell`
+        );
+    }
+    for (const id of SUCC4_REVIEWED_AND_KEPT) {
+        assert.ok(succ3ById.has(id), `unknown case ${id}`);
+    }
+});
+
+test("the move set and the kept set are disjoint, and both are unique", () => {
+    const moving = SUCC4_B_PLUS_MOVES.map((move) => move.originalId);
+    assert.equal(new Set(moving).size, moving.length, "a case moves once");
+    assert.equal(
+        new Set(SUCC4_REVIEWED_AND_KEPT).size,
+        SUCC4_REVIEWED_AND_KEPT.length
+    );
+    for (const id of SUCC4_REVIEWED_AND_KEPT) {
+        assert.ok(!moving.includes(id), `${id} is in both lists`);
+    }
+});
+
+test("103 move: 99 from the 121, 2 ruled in the batches, 2 found assembling", () => {
+    assert.equal(SUCC4_B_PLUS_MOVES.length, 103);
+    const fromJudgement = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "judgement-121");
+    const fromBatch = SUCC4_B_PLUS_MOVES.filter((m) => m.from === "batch");
+    assert.equal(fromJudgement.length, 99);
+    assert.deepEqual(
+        fromBatch.map((m) => m.originalId).sort(),
+        ["succ-durable-en-129", "succ-durable-en-316"]
+    );
+    assert.deepEqual(
+        SUCC4_B_PLUS_MOVES.filter((m) => m.from === "assembly")
+            .map((m) => m.originalId)
+            .sort(),
+        ["succ-assistant-en-306", "succ-assistant-en-307"]
+    );
+    // The 121 review's own arithmetic is unchanged by the later ruling: 112
+    // distinct cases carried those golds, 99 moved and 13 stayed.
+    assert.equal(SUCC4_REVIEWED_AND_KEPT.length, 11);
+    const reviewedCases = new Set([
+        ...fromJudgement.map((move) => move.originalId),
+        ...SUCC4_REVIEWED_AND_KEPT,
+    ]);
+    assert.equal(reviewedCases.size, 110);
+});
+
+test("a case ruled during the batches is not also in the kept list", () => {
+    // en-129 and en-316 were read under a written standard, so neither was in
+    // the 13 the 121 review kept. The disjointness test covers the general
+    // case; this one names the two the later ruling touched.
+    for (const id of ["succ-durable-en-129", "succ-durable-en-316"]) {
+        assert.ok(!SUCC4_REVIEWED_AND_KEPT.includes(id));
+    }
+});
+
+test("en-316 moves as a case, both its golds with it", () => {
+    // Only g2 was misread. §12.2 moves the case, so g1 goes too -- and the
+    // replacement should keep the two-gold shape.
+    const testCase = succ3ById.get("succ-durable-en-316");
+    assert.deepEqual(
+        testCase.expected.map((gold) => gold.id),
+        ["g1", "g2"]
+    );
+    // It is itself a replacement: en-57 -> en-316 -> a further one.
+    const row = MEMORY_EVAL_REGRESSION_PROVENANCE.find(
+        (entry) => entry.replacementId === "succ-durable-en-316"
+    );
+    assert.equal(row.originalId, "succ-durable-en-57");
+});
+
+test("the union with the existing corpus is 202, not a sum", () => {
+    // The first 99 left succ-2, so they are not in succ-3 and cannot be in
+    // this set. The union has no overlap -- which is what makes 198 right and
+    // a sum wrong in general.
+    const existing = MEMORY_EVAL_REGRESSION_PROVENANCE.map((p) => p.originalId);
+    assert.equal(existing.length, 99);
+    const moving = SUCC4_B_PLUS_MOVES.map((move) => move.originalId);
+    for (const id of moving) {
+        assert.ok(!existing.includes(id), `${id} is already in the corpus`);
+        assert.ok(
+            !succ3ById.has(id) === false,
+            "a moving case must still be in succ-3 at this point"
+        );
+    }
+    assert.equal(new Set([...existing, ...moving]).size, 202);
+});
+
+test("a seat can be replaced twice, and the record says so", () => {
+    // succ-durable-ko-301 is in batch-162, written to replace one of the first
+    // 99. It now leaves too. That is a fact about this corpus rather than a
+    // miscount, and it is why the union is over ids and not over seats.
+    const replacements = new Set(
+        MEMORY_EVAL_REGRESSION_PROVENANCE.map((p) => p.replacementId).filter(Boolean)
+    );
+    const twiceReplaced = SUCC4_B_PLUS_MOVES.filter((move) =>
+        replacements.has(move.originalId)
+    );
+    assert.ok(
+        twiceReplaced.length > 0,
+        "expected at least one case that was itself a replacement"
+    );
+    assert.ok(twiceReplaced.some((move) => move.originalId === "succ-durable-ko-301"));
+});
+
+test("cell counts match what succ-4 has to replace", () => {
+    const counts = {};
+    for (const move of SUCC4_B_PLUS_MOVES) {
+        counts[move.cell] = (counts[move.cell] ?? 0) + 1;
+    }
+    assert.deepEqual(counts, {
+        "durable_facts:en": 55,
+        "durable_facts:ko": 32,
+        "assistant_only:ko": 7,
+        "assistant_only:en": 7,
+        "injection_directives:en": 2,
+    });
+});
+
+test("every gold the review rewrote belongs to a case that moves", () => {
+    // §12.2: a gold whose match target or anchor changed does not stay in the
+    // decision set, whether or not it formed a rule.
+    const moving = new Set(SUCC4_B_PLUS_MOVES.map((move) => move.originalId));
+    for (const reading of SUCC4_READINGS) {
+        const rewritten =
+            reading.factValueAll ||
+            reading.factValueAny ||
+            reading.evidenceMessageId ||
+            reading.evidenceQuote;
+        if (!rewritten) continue;
+        assert.ok(
+            moving.has(reading.caseId),
+            `${reading.caseId} was rewritten and does not move`
+        );
+    }
+});
+
+test("the readings name real golds", () => {
+    for (const key of [...SUCC4_NEGATED, ...SUCC4_READINGS.map((r) => `${r.caseId}:${r.goldId}`)]) {
+        const [caseId, goldId] = key.split(":");
+        const testCase = succ3ById.get(caseId);
+        assert.ok(testCase, `unknown case ${caseId}`);
+        assert.ok(
+            testCase.expected.some((gold) => gold.id === goldId),
+            `${caseId} has no gold ${goldId}`
+        );
+    }
+});
+
+test("polarity has no default: both lists are written out", () => {
+    // §12 condition 6. A fallback to `affirmed` would make a gold nobody read
+    // indistinguishable from one a person read and called affirmed, and every
+    // gold on the affirmed list got there through the absence of a negation
+    // marker -- a routing signal that decides nothing.
+    assert.equal(SUCC4_AFFIRMED.length, 74);
+    assert.equal(SUCC4_NEGATED.length, 47);
+    assert.equal(SUCC4_AFFIRMED.length + SUCC4_NEGATED.length, 121);
+
+    const both = SUCC4_AFFIRMED.filter((key) => SUCC4_NEGATED.includes(key));
+    assert.deepEqual(both, [], "a gold cannot be both");
+    assert.equal(new Set(SUCC4_AFFIRMED).size, SUCC4_AFFIRMED.length);
+    assert.equal(new Set(SUCC4_NEGATED).size, SUCC4_NEGATED.length);
+});
+
+test("no assignment rests on the marker scan alone", () => {
+    // The scan is a closed list of four Korean and five English markers, and
+    // negation is not. `lack`, `avoid`, `exclude`, `싫다`, `피하다`, `제외하다`
+    // negate without appearing in it. This test cannot check a reading; what
+    // it can check is that the lists are data a person wrote rather than a
+    // predicate a scan computes, which is why both are enumerated.
+    const source = readFileSync(
+        new URL("../lib/memoryEvalSucc4Review/readings.ts", import.meta.url),
+        "utf8"
+    );
+    // Prose may name the scan -- the record explains why it did not decide
+    // anything. What it may not do is import it.
+    const imports = source
+        .split("\n")
+        .filter((line) => line.trimStart().startsWith("import"));
+    for (const derived of ["POLARITY_MARKERS", "polarityGap", "polarityMatches"]) {
+        assert.ok(
+            !imports.some((line) => line.includes(derived)),
+            `${derived} must not decide a polarity in the reading record`
+        );
+    }
+    assert.ok(!source.includes("memoryEvalPolarityCalibration"));
+});
+
+test("every rewritten gold names why, and every reading names a polarity", () => {
+    for (const reading of SUCC4_READINGS) {
+        assert.ok(
+            reading.polarity === "affirmed" || reading.polarity === "negated",
+            `${reading.caseId}:${reading.goldId} has no polarity`
+        );
+        const rewritten =
+            reading.factValueAll || reading.factValueAny || reading.evidenceQuote;
+        if (rewritten) {
+            assert.ok(reading.note, `${reading.caseId} was rewritten with no reason`);
+        }
+    }
+});
+
+test("batch keys are generated, and cover their slice exactly", () => {
+    // An identifier is not a judgement. Two earlier slips were a hand-copied
+    // gold id, so both sides of this comparison are built from the fixtures.
+    const read = new Set([...SUCC4_AFFIRMED, ...SUCC4_NEGATED]);
+    for (const batch of SUCC4_BATCHES) {
+        const [category, language] = batch.cell.split(":");
+        const slice = MEMORY_EVAL_SUCC3_CASES.filter(
+            (testCase) =>
+                testCase.category === category && testCase.language === language
+        )
+            .flatMap((testCase) =>
+                testCase.expected.map((gold) => `${testCase.id}:${gold.id}`)
+            )
+            .filter((key) => !read.has(key))
+            .sort();
+        const expected = slice.slice(batch.from, batch.from + batch.golds.length);
+        const keys = batch.golds.map((gold) => gold.key);
+        assert.deepEqual(keys, expected, `${batch.id} does not cover its slice`);
+        assert.equal(new Set(keys).size, keys.length, `${batch.id} has a duplicate`);
+        for (const gold of batch.golds) {
+            assert.ok(
+                gold.polarity === "affirmed" || gold.polarity === "negated",
+                `${gold.key} has no polarity`
+            );
+        }
+    }
+});
+
+test("batches do not re-label a gold the 121 already settled", () => {
+    const read = new Set([...SUCC4_AFFIRMED, ...SUCC4_NEGATED]);
+    const seen = new Set();
+    for (const batch of SUCC4_BATCHES) {
+        for (const gold of batch.golds) {
+            assert.ok(!read.has(gold.key), `${gold.key} was already settled`);
+            assert.ok(!seen.has(gold.key), `${gold.key} appears in two batches`);
+            seen.add(gold.key);
+        }
+    }
+});
+
+test("every succ-3 gold now has a polarity, and exactly one", () => {
+    // The completion claim, checked rather than counted by hand. A gold in
+    // neither list has no polarity -- that is the state §12 condition 6
+    // requires an unread gold to be in -- so an empty remainder is the only
+    // thing that makes "the reading is finished" true.
+    const assigned = new Map();
+    const claim = (key, where) => {
+        assert.ok(!assigned.has(key), `${key} assigned twice: ${assigned.get(key)} and ${where}`);
+        assigned.set(key, where);
+    };
+    for (const key of SUCC4_AFFIRMED) claim(key, "readings:affirmed");
+    for (const key of SUCC4_NEGATED) claim(key, "readings:negated");
+    for (const batch of SUCC4_BATCHES) {
+        for (const gold of batch.golds) claim(gold.key, batch.id);
+    }
+
+    const unread = [];
+    let total = 0;
+    for (const testCase of MEMORY_EVAL_SUCC3_CASES) {
+        for (const gold of testCase.expected) {
+            total += 1;
+            const key = `${testCase.id}:${gold.id}`;
+            if (!assigned.has(key)) unread.push(key);
+        }
+    }
+    assert.equal(total, 474);
+    assert.deepEqual(unread, [], "these golds have no polarity");
+    assert.equal(assigned.size, 474, "an assignment names a gold that does not exist");
+});

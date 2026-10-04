@@ -1,14 +1,16 @@
 /**
  * Who, other than an administrator, may write to the audit hash chain.
  *
- * docs/policy/development-agent-orchestration.md requires orchestration audit
- * events. System actions use the same chain as human ones and the same
- * transaction as the change. A system entry has no session, so it carries no
- * `actorUserId`, `actorEmail`, IP or user agent; what it carries instead is
- * `metadata.systemActor`, set by `writeSystemAuditLog()` and by nothing else.
+ * docs/policy/marketing-automation.md §6 records system actions in the same
+ * chain as human ones, in the same transaction as the change. A system entry
+ * has no session, so it carries no `actorUserId`, `actorEmail`, IP or user
+ * agent; what it carries instead is `metadata.systemActor`, set by
+ * `writeSystemAuditLog()` and by nothing else.
  *
- * The list is closed on purpose. An entry's actor is evidence, so a new system
- * actor is a reviewed change to this array, not a string a caller makes up.
+ * The list is closed on purpose. An entry's actor is evidence -- a template
+ * approval, a resume into autonomous mode and a webhook verification each
+ * require a *human* row -- so a new system actor is a reviewed change to this
+ * array, not a string a caller makes up.
  *
  * Pure: no server-only import, so static checks and unit tests can read it.
  */
@@ -26,6 +28,34 @@ export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
  */
 export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
 
+/**
+ * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
+ * names the service or app path whose action the entry records; none of them
+ * is a person, so none of them is approval evidence.
+ */
+export const ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS = [
+  "engineering-agent-runner",
+  "engineering-agent-publisher",
+  "engineering-agent-retention",
+  "engineering-agent-observer",
+  "engineering-agent-registrar",
+] as const;
+export type EngineeringAgentSystemAuditActor =
+  (typeof ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 /** AMUX intake policy v12 (approved by mposition, 2026-10-01): this first
  * active v4 actor has one action/target pair, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
@@ -46,14 +76,19 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-v22-auto-admit",
 ] as const;
 
-// The v4 intake actor is limited to a scoped, dark initial source-plan writer.
-// This list entry is not a route, feature flag or permission to call a model.
 export const SYSTEM_AUDIT_ACTORS = [
+  "marketing-publisher",
+  "marketing-retention",
+  "marketing-guard", "marketing-webhook",
+  "prompt-refiner-shadow-runner",
+  "prompt-refiner-vnext-one-shot-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
+  // Scoped to the dark initial source-plan writer below.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
+  ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer",
 ] as const;
-
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
 /**
@@ -84,7 +119,7 @@ export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
   metadata !== null &&
   typeof metadata === "object" &&
   !Array.isArray(metadata) &&
-  Object.prototype.hasOwnProperty.call(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
+  Object.hasOwn(metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY);
 
 type AuditRowActorFields = {
   action?: string;
@@ -107,7 +142,7 @@ type AuditRowActorFields = {
  * chain is the integrity verifier's question.
  */
 export const auditRowActorKind = (
-  row: AuditRowActorFields
+  row: AuditRowActorFields,
 ): "human" | "system" | "unknown" => {
   const claimsSystem = metadataClaimsSystemActor(row.metadata);
   if (!claimsSystem) return row.actorUserId ? "human" : "unknown";
@@ -128,3 +163,26 @@ export const auditRowActorKind = (
   }
   return "system";
 };
+
+/**
+ * The support-triage agent's actors (docs/policy/support-triage.md §7): the
+ * worker pass and the retention run, listed in SYSTEM_AUDIT_ACTORS above.
+ * Neither is a person, so neither is approval evidence. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
+  "support-triage-worker",
+  "support-triage-retention",
+  "support-triage-account-deletion",
+] as const satisfies readonly SystemAuditActor[];
+export type SupportTriageSystemAuditActor =
+  (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;

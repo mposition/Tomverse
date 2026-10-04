@@ -1,6 +1,12 @@
 import "server-only";
 
-import { sendTransactionalEmail } from "@/lib/email";
+import type { LoginMethodProvider } from "@/lib/loginMethodsCore";
+
+import {
+  renderEmailButton,
+  renderEmailParagraph,
+  renderTransactionalEmailLayout,
+} from "@/lib/accountEmails";
 import { EMAIL_FONT_STACK, EMAIL_MONO_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
@@ -120,36 +126,22 @@ export function buildEmailLoginCodeEmail(input: {
       copy.expiry,
       copy.ignore,
     ].join("\n"),
-    html: `
-      <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
-        <p>${escapeHtml(copy.intro)}</p>
-        <p style="font-family:${EMAIL_MONO_FONT_STACK};font-size:32px;font-weight:700;letter-spacing:4px;margin:24px 0">${escapeHtml(input.code)}</p>
-        <p><a href="${input.verifyUrl}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">${escapeHtml(copy.linkLabel)}</a></p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.expiry)}</p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.ignore)}</p>
-      </div>
-    `,
+    // The welcome mail's frame (logo, title band, card, footer). The preview
+    // line is the instruction, never the code: inbox lists show it.
+    html: renderTransactionalEmailLayout({
+      preview: copy.intro,
+      title: copy.subject,
+      bodyHtml: [
+        renderEmailParagraph(escapeHtml(copy.intro)),
+        `<p style="margin:0 0 22px;padding:18px 20px;background:#f1f5f9;border:1px solid #dbe3ef;border-radius:16px;text-align:center;font-family:${EMAIL_MONO_FONT_STACK};font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;">${escapeHtml(input.code)}</p>`,
+        renderEmailButton(input.verifyUrl, escapeHtml(copy.linkLabel)),
+        renderEmailParagraph(escapeHtml(copy.expiry), "muted"),
+        renderEmailParagraph(escapeHtml(copy.ignore), "muted"),
+      ].join(""),
+    }),
   };
 }
 
-export async function sendEmailLoginCodeEmail(input: {
-  to: string;
-  code: string;
-  verifyUrl: string;
-  language?: string | null;
-}) {
-  return sendTransactionalEmail({
-    to: input.to,
-    // Must match the `auth_login_code` definition in
-    // lib/emailTemplateDefinitions.ts, which is what the credential lane
-    // actually sends through; `tests/senderRoles.test.mjs` pins the pair.
-    //
-    // Named rather than imported because that module imports this one for the
-    // renderer, and a cycle for one string is a worse trade than a test.
-    senderRole: "security",
-    ...buildEmailLoginCodeEmail(input),
-  });
-}
 
 type MethodChangedCopy = {
   linkedSubject: string;
@@ -214,23 +206,21 @@ const methodChangedCopy: Record<EmailLanguage, MethodChangedCopy> = {
 const methodLabel = (method: "google" | "azure-ad" | "email") =>
   method === "google" ? "Google" : method === "azure-ad" ? "Microsoft" : "Email";
 
-export async function sendLoginMethodChangedEmail(input: {
-  to: string | null | undefined;
-  action: "linked" | "unlinked";
-  method: "google" | "azure-ad" | "email";
-  language?: string | null;
-}) {
-  if (!input.to) return;
-  const copy = methodChangedCopy[normalizeLanguage(input.language)];
-  const label = methodLabel(input.method);
-  const body = input.action === "linked" ? copy.linked(label) : copy.unlinked(label);
-  const subject = input.action === "linked" ? copy.linkedSubject : copy.unlinkedSubject;
-  return sendTransactionalEmail({
-    to: input.to,
-    // A login method was added or removed and every other device was signed
-    // out. If it was not the account holder, this is the message they act on.
-    senderRole: "security",
-    subject,
+export type LoginMethodNoticePayload = {
+  /** The method that was added or removed, as the account knows it. */
+  method: LoginMethodProvider;
+};
+
+const loginMethodNotice = (
+  action: "linked" | "unlinked",
+  payload: LoginMethodNoticePayload,
+  language: string | null | undefined
+) => {
+  const copy = methodChangedCopy[normalizeLanguage(language)];
+  const label = methodLabel(payload.method);
+  const body = action === "linked" ? copy.linked(label) : copy.unlinked(label);
+  return {
+    subject: action === "linked" ? copy.linkedSubject : copy.unlinkedSubject,
     text: `${body}\n\n${copy.contact}`,
     html: `
       <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
@@ -238,5 +228,27 @@ export async function sendLoginMethodChangedEmail(input: {
         <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.contact)}</p>
       </div>
     `,
-  });
-}
+  };
+};
+
+/**
+ * A login method was added, and every other device stayed signed in.
+ *
+ * Two builders rather than one with a branch: the registry hashes a single
+ * `placeholderPayload` per template, so a template that rendered two different
+ * subjects would have one artifact that matches neither
+ * (docs/policy/email-product-news-redesign-draft.md section 7.4, C36).
+ */
+export const buildLoginMethodLinkedEmail = (
+  payload: LoginMethodNoticePayload,
+  language?: string | null
+) => loginMethodNotice("linked", payload, language);
+
+/**
+ * A login method was removed, and every other device was signed out. If it was
+ * not the account holder, this is the message they act on.
+ */
+export const buildLoginMethodUnlinkedEmail = (
+  payload: LoginMethodNoticePayload,
+  language?: string | null
+) => loginMethodNotice("unlinked", payload, language);

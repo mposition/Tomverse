@@ -36,11 +36,11 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-    MEMORY_EVAL_CASES,
-    MEMORY_EVAL_DATASET_VERSION,
-} from "../lib/memoryExtractionEvalFixtures.ts";
-import { datasetFingerprintInput } from "../lib/memoryExtractionEvalCore.ts";
+// Which dataset the artifact names, resolved rather than imported. A sheet
+// built from the wrong version would print one run's conversation beside
+// another run's answer, so selection is fail-closed and every refusal is
+// named: lib/memoryEvalDatasetRegistry.ts.
+import { resolveArtifactDataset } from "../lib/memoryEvalDatasetRegistry.ts";
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -66,23 +66,14 @@ if (!Number.isInteger(perCell) || perCell < 1) {
 const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
 const manifest = artifact.manifest ?? {};
 
-/**
- * The artifact has to be about the cases in this tree, or the sheet would
- * print one conversation beside another run's answer. The digest is the
- * check that catches it, which is what it is for.
- */
-const localDigest = createHash("sha256")
-    .update(datasetFingerprintInput(MEMORY_EVAL_CASES), "utf8")
-    .digest("hex");
-if (manifest.datasetDigest !== localDigest) {
+const resolved = resolveArtifactDataset(manifest);
+if (!resolved.ok) {
     console.error(
-        `The artifact was computed against a different sample.\n` +
-            `  artifact: ${manifest.datasetVersion} ${manifest.datasetDigest}\n` +
-            `  this tree: ${MEMORY_EVAL_DATASET_VERSION} ${localDigest}\n\n` +
-            "Check out the commit the run was made from, or re-run the eval."
+        `Cannot build a sheet from this artifact (${resolved.reason}).\n\n${resolved.detail}`
     );
     process.exit(1);
 }
+const MEMORY_EVAL_CASES = resolved.composition.cases;
 if (manifest.mode !== "live") {
     console.error(
         "This artifact is a smoke run. Its answers come from a deterministic\n" +
@@ -92,6 +83,10 @@ if (manifest.mode !== "live") {
 }
 
 const caseById = new Map(MEMORY_EVAL_CASES.map((entry) => [entry.id, entry]));
+// Seeded from the resolved dataset digest, which the resolver has just held
+// equal to the artifact's. Same artifact, same sheet: a reviewer cannot draw
+// again for a friendlier sample.
+const localDigest = resolved.manifest.datasetDigest;
 const order = (caseId) =>
     createHash("sha256").update(`${localDigest}:${caseId}`, "utf8").digest("hex");
 
@@ -136,7 +131,7 @@ p("- `적절` — 뽑을 것을 뽑았거나, 뽑지 말아야 할 것을 뽑지
 p("- `부적절` — 뽑지 말아야 할 것을 뽑았거나, 뽑아야 할 것을 놓쳤거나, 문장이 대화가 " +
     "말하지 않은 것을 말합니다. 무엇이 문제인지 한 줄 적습니다.");
 p();
-p("`bulk-safe`가 `true`인 항목은 사용자 확인 없이 저장되는 것들입니다. §12.3의 " +
+p("`bulk-safe`가 `true`인 항목은 사용자가 하나씩 보지 않고 **일괄 승인할 수 있는** 후보입니다(정책 §8.4의 「비민감 모두 승인」). 자동 저장이 아니라 개별 검토를 건너뛸 수 있다는 뜻입니다. §12.3의 " +
     "critical 기준(②③④에서 채택 0건)이 걸리는 자리가 여기입니다.");
 p();
 p("## 이 회차");
@@ -182,10 +177,28 @@ selected.forEach(({ record }, index) => {
         p("- *(없음)*");
     } else {
         for (const candidate of record.candidates) {
+            // polarity and the cited span are the model's own answer, not the
+            // gold, so showing them keeps the sheet blind. A reviewer cannot
+            // judge a schema-3 answer without them: a statement that reads
+            // correctly while claiming the opposite, and one that reads
+            // correctly while citing nothing the user wrote, are both wrong
+            // and neither is visible in the sentence alone.
+            const polarity = candidate.polarity
+                ? ` · ${candidate.polarity}`
+                : "";
             p(
-                `- \`${candidate.kind}\` · bulk-safe **${candidate.bulkSafe}** · ` +
+                `- \`${candidate.kind}\`${polarity} · bulk-safe **${candidate.bulkSafe}** · ` +
                     `${candidate.disposition} — ${candidate.statement}`
             );
+            for (const anchor of candidate.evidence ?? []) {
+                p(
+                    `    - 근거: \`${anchor.evidenceMessageId}\` — ` +
+                        `"${anchor.evidenceQuote}"`
+                );
+            }
+            if ((candidate.evidence ?? []).length === 0 && candidate.polarity) {
+                p("    - 근거: *(없음)*");
+            }
         }
     }
     p();

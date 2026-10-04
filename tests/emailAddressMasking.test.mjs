@@ -102,7 +102,18 @@ test("every kind names its own table in the audit record", () => {
     return target;
   });
   assert.equal(new Set(types).size, types.length, "two kinds share a target type");
-  assert.equal(ADDRESS_REVEAL_TARGET_TYPES.campaign_recipient, "EmailCampaignRecipient");
+  // Named exactly, not merely distinctly. Three wrong strings are still three
+  // distinct strings, and this test stayed green while `suppression` claimed
+  // `SuppressionEntry` -- a table the id it resolves has never had a row in, so
+  // every disclosure filed under it was unlookupable by whoever came back to
+  // the audit log for it. The table each kind names is the table
+  // `resolveRevealedAddresses()` queries for that kind
+  // (`lib/adminEmailAddressReveal.ts`).
+  assert.deepEqual(ADDRESS_REVEAL_TARGET_TYPES, {
+    delivery: "EmailDelivery",
+    suppression: "SuppressionCause",
+    campaign_recipient: "EmailCampaignRecipient",
+  });
 });
 
 test("the campaign ledger reveals through the one shared path", () => {

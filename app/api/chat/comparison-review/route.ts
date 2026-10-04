@@ -124,7 +124,17 @@ export async function POST(request: Request) {
         includeSynthesis: body.includeSynthesis,
         language: body.language || "en",
       },
-      { traceId }
+      {
+        traceId,
+        // Guest runs are the majority of first AI Reviews and produce no
+        // ComparisonReview row at all, so without this they are invisible to
+        // every reliability number the feature has.
+        telemetry: {
+          subjectKind: "guest",
+          conversationId: null,
+          userId: null,
+        },
+      }
     );
     completed = true;
 

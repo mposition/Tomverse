@@ -1,0 +1,17 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-price-readback-v1",
+  "requirement": "Under the approved CHAT-01 one-shot policy v2, add one read-only app-server price read-back slice. Codex authors and Claude Code Max first-party subscription CLI independently reviews. The app transaction must read the exact model registry row and current resolved pricing itself; missing or drifted facts fail closed. This is synthetic, provider-free development only: no holdout, stage/run, spend, dispatch or product activation authority. Do not use Anthropic API.",
+  "completionCriteria": [
+    "Read modelRegistryEntry.findUnique for the pinned model ID through a caller-provided app transaction; do not substitute static catalogue fallback after a DB failure.",
+    "Reject absent, disabled, remapped or price-overridden registry rows; compare routing, tier and cache-write price with the approved pin.",
+    "Return explicit false for provider price observation and dispatch authority even on a matching registry row.",
+    "Synthetic focused tests, typecheck and lint pass; review the exact diff with zero findings."
+  ],
+  "baseCommit": "2519aeda2f87721f7f937207235f1ca925e936c2",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-price-readback-v1.task.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPriceReadback.test.mjs"
+  ],
+  "generatedPaths": []
+}

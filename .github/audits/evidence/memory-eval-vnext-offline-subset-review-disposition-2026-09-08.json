@@ -1,0 +1,3022 @@
+{
+  "schemaVersion": 1,
+  "recordKind": "offline_subset_posthoc_revalidation_and_disposition_draft",
+  "recordStatus": "draft_pending_human_disposition",
+  "preparedDate": "2026-09-08",
+  "preparedBy": "Codex",
+  "authorization": {
+    "preparationAuthorized": true,
+    "evidenceRecalculationAuthorized": true,
+    "humanDispositionDecision": "pending",
+    "approvedBy": null,
+    "approvedAt": null,
+    "acceptedDispositionIds": [],
+    "implementationBytesChangeAuthorized": false,
+    "approvedDocumentChangeAuthorized": false,
+    "gitPublicationAuthorized": false,
+    "mergeAuthorized": false,
+    "activationAuthorized": false,
+    "operationalCallsAuthorized": false
+  },
+  "scope": {
+    "reviewCommit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+    "implementationBasis": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+    "historicalPackageBasis": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+    "newFiles": [
+      ".github/audits/memory-eval-vnext-offline-subset-review-disposition-draft-2026-09-08.md",
+      ".github/audits/evidence/memory-eval-vnext-offline-subset-review-disposition-2026-09-08.json"
+    ],
+    "recordCommitAtPreparation": null,
+    "evidenceType": "posthoc_current_observation",
+    "currentRevalidationCompleted": true,
+    "historicalPreStartTimingProven": false,
+    "oiF1ClosureDeclared": false,
+    "independentConfirmationReview": null,
+    "currentRevalidationScope": {
+      "included": [
+        "26 approved source Git blobs and source/T/I byte bindings",
+        "9 support file Git and working-byte bindings",
+        "6 implementation Git and working-byte bindings",
+        "12 commit objects, parents and ancestry",
+        "M-to-T 30-file and aa-to-T 12-file diff with package/discovery comparisons",
+        "Installed package.json/version inventory and optional/hidden-lock checks",
+        "GET observations of two T CI runs and job/step facts",
+        "T01 component tests: 40 passed",
+        "Local ID/path and two-trap Proxy reproduction at initial preparation",
+        "Seven repository package checks at initial document preparation"
+      ],
+      "excluded": [
+        "Proof of observations before implementation started",
+        "Receipt section 7.4 retrospective completion or waiver",
+        "Human acceptance, OI-F1 closure, approval or publication",
+        "Full P conformance or 54 AC completion",
+        "T or I full-suite rerun, lint, typecheck or independent 88-case harness",
+        "I CI, latest-develop CI, deployment or operational readiness",
+        "Dependency tarball integrity or all installed-file bytes"
+      ],
+      "observationBasis": "Initial preparation observations at I, with timestamps in git/runtime/ci/reproductions/verification. Current means that recorded observation window, not an evergreen revalidation.",
+      "completionMeaning": "The enumerated evidence capture and checks completed; the recorded baseline doc-reference failure remains. Not an all-checks-pass or historic pre-start-completion assertion.",
+      "correctionBoundary": "OD-R1 supplemental observations and checks are separately timestamped under draftRevision and reproductions.getPrototypeOfSupplement."
+    }
+  },
+  "externalReview": {
+    "path": "C:/Users/Vyper/.codex/attachments/c34fdd17-56a9-4933-8ad5-2dcd61f3f73b/pasted-text.txt",
+    "sha256": "74bbc335f5a5c05552d1ad7fa0e3660da8725cbf51996a35d3fa546af26e51c6",
+    "bytes": 14007,
+    "targetCommit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+    "reportedVerdict": "PASS_WITH_WARNINGS",
+    "reportedSeverities": {
+      "P1": 0,
+      "P2": 1,
+      "P3": 3
+    },
+    "reportedIndependentHarnessCases": 88,
+    "reportedFullSuite": {
+      "tests": 7823,
+      "pass": 7804,
+      "fail": 18,
+      "skip": 1
+    },
+    "note": "Report claims are attributed to Claude; not newly executed full-suite/harness evidence from this record."
+  },
+  "git": {
+    "observedAt": "2026-09-08T07:04:30.623Z",
+    "head": "54ad04e29aa3390f4d342d152127e99928b4268e",
+    "branch": "codex/memory-eval-vnext-offline-subset-implementation",
+    "files": [
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
+        "sourceCommit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+        "expectedRawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+        "sourceBlobOid": "4dc1ea945850b283ad9654a4bcaf8967e241e863",
+        "tBlobOid": "4dc1ea945850b283ad9654a4bcaf8967e241e863",
+        "iBlobOid": "4dc1ea945850b283ad9654a4bcaf8967e241e863",
+        "sourceRawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+        "tRawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+        "iRawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+        "workingRawSha256": "20c1501999b9c86ecf079a0385766c60e079bb4ce475dd305edea80423b80a1f",
+        "sourceBytes": 65000,
+        "sourceLfLines": 778,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-purpose-contract-2026-09-06.md",
+        "sourceCommit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+        "expectedRawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+        "sourceBlobOid": "6ab7c0813818a2575cf20915c9f42ba84b5d28e1",
+        "tBlobOid": "6ab7c0813818a2575cf20915c9f42ba84b5d28e1",
+        "iBlobOid": "6ab7c0813818a2575cf20915c9f42ba84b5d28e1",
+        "sourceRawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+        "tRawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+        "iRawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+        "workingRawSha256": "216a7d77e03aaed238b4a32adf8d938b834379885e311811a059faed193c950d",
+        "sourceBytes": 45965,
+        "sourceLfLines": 632,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+        "sourceCommit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+        "expectedRawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+        "sourceBlobOid": "bd45e60dcaa9a0c7193fda87d6022d0e429ff54c",
+        "tBlobOid": "bd45e60dcaa9a0c7193fda87d6022d0e429ff54c",
+        "iBlobOid": "bd45e60dcaa9a0c7193fda87d6022d0e429ff54c",
+        "sourceRawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+        "tRawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+        "iRawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+        "workingRawSha256": "a89599bda0d45dbb7b721c3c279d1dedd6310081c4a98521e89336b3b7c95d28",
+        "sourceBytes": 61926,
+        "sourceLfLines": 726,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+        "sourceCommit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+        "expectedRawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+        "sourceBlobOid": "761c5debe81e48f25870b9ea36a71c1de8165bd1",
+        "tBlobOid": "761c5debe81e48f25870b9ea36a71c1de8165bd1",
+        "iBlobOid": "761c5debe81e48f25870b9ea36a71c1de8165bd1",
+        "sourceRawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+        "tRawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+        "iRawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+        "workingRawSha256": "dbd8eaa5ded61f60e0ab0015da90598270d0b7405fe864781542833a76cd0846",
+        "sourceBytes": 76581,
+        "sourceLfLines": 847,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-contract-decision-2026-09-05.md",
+        "sourceCommit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+        "expectedRawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+        "sourceBlobOid": "19d49c386743265b92851cf6ca158f1c16f14ae2",
+        "tBlobOid": "19d49c386743265b92851cf6ca158f1c16f14ae2",
+        "iBlobOid": "19d49c386743265b92851cf6ca158f1c16f14ae2",
+        "sourceRawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+        "tRawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+        "iRawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+        "workingRawSha256": "f10c6effd8556b7c51781216e9ad450b2b3badc5421c522e82e581f965646b60",
+        "sourceBytes": 23526,
+        "sourceLfLines": 400,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-contract-decision-approval-2026-09-06.md",
+        "sourceCommit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+        "expectedRawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+        "sourceBlobOid": "883166bf495d0bf10bdb512beff56bda3a6dea60",
+        "tBlobOid": "883166bf495d0bf10bdb512beff56bda3a6dea60",
+        "iBlobOid": "883166bf495d0bf10bdb512beff56bda3a6dea60",
+        "sourceRawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+        "tRawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+        "iRawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+        "workingRawSha256": "81da42c3e96365b5f9c7977a1091914495b8a9e8d4b685e5ff6af006c5e74f50",
+        "sourceBytes": 2792,
+        "sourceLfLines": 60,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-2026-09-07.md",
+        "sourceCommit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+        "expectedRawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+        "sourceBlobOid": "9546274f54cab223fc1835330b86af420a7542e7",
+        "tBlobOid": "9546274f54cab223fc1835330b86af420a7542e7",
+        "iBlobOid": "9546274f54cab223fc1835330b86af420a7542e7",
+        "sourceRawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+        "tRawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+        "iRawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+        "workingRawSha256": "bbe1ba6c58b5ae85b21f7d1dc0d0b05fc8b69dfe0b0e786a9f794b38f69bc86f",
+        "sourceBytes": 9406,
+        "sourceLfLines": 142,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-draft-2026-09-07.md",
+        "sourceCommit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+        "expectedRawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+        "sourceBlobOid": "c926a58c1d7ec93ee03ebc7032f4d598c7e66716",
+        "tBlobOid": "c926a58c1d7ec93ee03ebc7032f4d598c7e66716",
+        "iBlobOid": "c926a58c1d7ec93ee03ebc7032f4d598c7e66716",
+        "sourceRawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+        "tRawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+        "iRawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+        "workingRawSha256": "ed5a2a609960b1f81eec85fbb5facb62dd33af8677832c7d0a1566b6d27b8995",
+        "sourceBytes": 14881,
+        "sourceLfLines": 200,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+        "sourceCommit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+        "expectedRawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+        "sourceBlobOid": "fe2a9f6bf1cfc8cdc599a6116e0d10f6189bd4b6",
+        "tBlobOid": "fe2a9f6bf1cfc8cdc599a6116e0d10f6189bd4b6",
+        "iBlobOid": "fe2a9f6bf1cfc8cdc599a6116e0d10f6189bd4b6",
+        "sourceRawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+        "tRawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+        "iRawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+        "workingRawSha256": "b98259b716d2966b6ed6652c9e6f1f8cd8da6148d0008ada2b8a5ea1afc1a8dd",
+        "sourceBytes": 11833,
+        "sourceLfLines": 162,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-draft-2026-09-07.md",
+        "sourceCommit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+        "expectedRawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+        "sourceBlobOid": "d0046c7128a22644fa07b028b166144174f22afb",
+        "tBlobOid": "d0046c7128a22644fa07b028b166144174f22afb",
+        "iBlobOid": "d0046c7128a22644fa07b028b166144174f22afb",
+        "sourceRawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+        "tRawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+        "iRawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+        "workingRawSha256": "1988d0c3837b5144e891e8e4dffe180adf6e2a29490250a083f52d5c09f07690",
+        "sourceBytes": 20644,
+        "sourceLfLines": 244,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-draft-2026-09-07.md",
+        "sourceCommit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+        "expectedRawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+        "sourceBlobOid": "f88ec0794a87414a78686d432de45a78d63965da",
+        "tBlobOid": "f88ec0794a87414a78686d432de45a78d63965da",
+        "iBlobOid": "f88ec0794a87414a78686d432de45a78d63965da",
+        "sourceRawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+        "tRawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+        "iRawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+        "workingRawSha256": "2442160ea990b1fec1751da1fcf9db79677dae170999323009d6596621ea77cb",
+        "sourceBytes": 20392,
+        "sourceLfLines": 281,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-2026-09-07.md",
+        "sourceCommit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+        "expectedRawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+        "sourceBlobOid": "b8638d84a1a8d5ae2a31b2146c2a131719e6e3e7",
+        "tBlobOid": "b8638d84a1a8d5ae2a31b2146c2a131719e6e3e7",
+        "iBlobOid": "b8638d84a1a8d5ae2a31b2146c2a131719e6e3e7",
+        "sourceRawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+        "tRawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+        "iRawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+        "workingRawSha256": "63f9eee06710baebfec5e31de6603c59b990325db8407df5206fcf7e471e1709",
+        "sourceBytes": 13677,
+        "sourceLfLines": 223,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+        "sourceCommit": "159267a80acee97da3a297c637343ea15de725f9",
+        "expectedRawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+        "sourceBlobOid": "69aac932970fc0950cef1fedbf45bb51acab4220",
+        "tBlobOid": "69aac932970fc0950cef1fedbf45bb51acab4220",
+        "iBlobOid": "69aac932970fc0950cef1fedbf45bb51acab4220",
+        "sourceRawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+        "tRawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+        "iRawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+        "workingRawSha256": "31322246dc10af77d3bc1fb7aa3bf727f8f2d8ead764235859a526ff735458c4",
+        "sourceBytes": 56169,
+        "sourceLfLines": 820,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-clarification-approval.json",
+        "sourceCommit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+        "expectedRawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+        "sourceBlobOid": "f761e116ebf3ffefe7ba4beb8e6762526c20cfc9",
+        "tBlobOid": "f761e116ebf3ffefe7ba4beb8e6762526c20cfc9",
+        "iBlobOid": "f761e116ebf3ffefe7ba4beb8e6762526c20cfc9",
+        "sourceRawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+        "tRawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+        "iRawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+        "workingRawSha256": "481999248f5d87a341dc56617e5ecd7da57c8049a5967c24a68c8b8f814e8f09",
+        "sourceBytes": 686,
+        "sourceLfLines": 1,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-2026-09-07.md",
+        "sourceCommit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+        "expectedRawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+        "sourceBlobOid": "01d0bfdf242ca1488522153b0490c53236da3cd0",
+        "tBlobOid": "01d0bfdf242ca1488522153b0490c53236da3cd0",
+        "iBlobOid": "01d0bfdf242ca1488522153b0490c53236da3cd0",
+        "sourceRawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+        "tRawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+        "iRawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+        "workingRawSha256": "e3f15dbf25b3583032ea43905be7928b9049ab86d83bf8f6187f39927a0d1574",
+        "sourceBytes": 13296,
+        "sourceLfLines": 214,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-request-draft-2026-09-07.md",
+        "sourceCommit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+        "expectedRawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+        "sourceBlobOid": "2c6bfe0f61df203da552f86909337b4804805192",
+        "tBlobOid": "2c6bfe0f61df203da552f86909337b4804805192",
+        "iBlobOid": "2c6bfe0f61df203da552f86909337b4804805192",
+        "sourceRawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+        "tRawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+        "iRawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+        "workingRawSha256": "873fceeeb5ac3a858341976618901ca6507a75dbd6433fdcfc8477593b15fdfe",
+        "sourceBytes": 15573,
+        "sourceLfLines": 214,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-recalculated-package-2026-09-07.json",
+        "sourceCommit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+        "expectedRawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+        "sourceBlobOid": "541cc93cbe9d764fe2a1c4aa3ca2adf862c37f09",
+        "tBlobOid": "541cc93cbe9d764fe2a1c4aa3ca2adf862c37f09",
+        "iBlobOid": "541cc93cbe9d764fe2a1c4aa3ca2adf862c37f09",
+        "sourceRawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+        "tRawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+        "iRawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+        "workingRawSha256": "e61e38c1825964df4bfa7b00d0f1ebbf3d441a7fcd0df0d1306f0686c5aa8f48",
+        "sourceBytes": 206389,
+        "sourceLfLines": 4972,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-recalculated-approval-draft-2026-09-07.md",
+        "sourceCommit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+        "expectedRawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+        "sourceBlobOid": "0717ceac2440bac5584368ad41c67ec767f461d9",
+        "tBlobOid": "0717ceac2440bac5584368ad41c67ec767f461d9",
+        "iBlobOid": "0717ceac2440bac5584368ad41c67ec767f461d9",
+        "sourceRawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+        "tRawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+        "iRawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+        "workingRawSha256": "d90af4b2c3b3659026984adf0d893f04148528b6551db634ab76634dd0b11b93",
+        "sourceBytes": 20986,
+        "sourceLfLines": 313,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+        "sourceCommit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+        "expectedRawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+        "sourceBlobOid": "0c86cb83a805f0197a1e6e75b6644823121496c6",
+        "tBlobOid": "0c86cb83a805f0197a1e6e75b6644823121496c6",
+        "iBlobOid": "0c86cb83a805f0197a1e6e75b6644823121496c6",
+        "sourceRawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+        "tRawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+        "iRawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+        "workingRawSha256": "5aa1cebc1064a126627dd8394cc21049c6e23658a9e62858c89ea753ef3ea0bc",
+        "sourceBytes": 36453,
+        "sourceLfLines": 397,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-scope-evidence-2026-09-07.json",
+        "sourceCommit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+        "expectedRawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+        "sourceBlobOid": "9d1fd1b332d6dc26e3d9cb5693fb0e479a85916f",
+        "tBlobOid": "9d1fd1b332d6dc26e3d9cb5693fb0e479a85916f",
+        "iBlobOid": "9d1fd1b332d6dc26e3d9cb5693fb0e479a85916f",
+        "sourceRawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+        "tRawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+        "iRawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+        "workingRawSha256": "9e551cace97982dc3e216085e3e703940d9213cfe52fdd4fe430fcf373d021d5",
+        "sourceBytes": 37723,
+        "sourceLfLines": 633,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-detailed-plan-2026-09-07.md",
+        "sourceCommit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+        "expectedRawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+        "sourceBlobOid": "51151ce4d15717a3fbea2b35639ce3784943b6f5",
+        "tBlobOid": "51151ce4d15717a3fbea2b35639ce3784943b6f5",
+        "iBlobOid": "51151ce4d15717a3fbea2b35639ce3784943b6f5",
+        "sourceRawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+        "tRawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+        "iRawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+        "workingRawSha256": "47923fed9a639cd9cce9b4e3086a33160d81c204a84aaef1bd09f353b24cc065",
+        "sourceBytes": 42190,
+        "sourceLfLines": 477,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-next1-plan-2026-09-07.json",
+        "sourceCommit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+        "expectedRawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+        "sourceBlobOid": "3ace168c233c54d9fe650107f8463dd7a7cb35fa",
+        "tBlobOid": "3ace168c233c54d9fe650107f8463dd7a7cb35fa",
+        "iBlobOid": "3ace168c233c54d9fe650107f8463dd7a7cb35fa",
+        "sourceRawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+        "tRawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+        "iRawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+        "workingRawSha256": "e717b612b3627430e9acb3a8bca3e60432b4ed0d0b2678963611c15b718527d6",
+        "sourceBytes": 75176,
+        "sourceLfLines": 1878,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md",
+        "sourceCommit": "7e5491f5fa24295912d5da7a6cc5e86ddb637f43",
+        "expectedRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+        "sourceBlobOid": "853ea85ce07f69dc2c3f3b3ca08f803bcb5016f0",
+        "tBlobOid": "853ea85ce07f69dc2c3f3b3ca08f803bcb5016f0",
+        "iBlobOid": "853ea85ce07f69dc2c3f3b3ca08f803bcb5016f0",
+        "sourceRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+        "tRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+        "iRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+        "workingRawSha256": "f195a78e4470a8271f7dd8929c88001793c7d3895fd22d77074b61ad6272e224",
+        "sourceBytes": 31978,
+        "sourceLfLines": 418,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-offline-subset-package-2026-09-08.json",
+        "sourceCommit": "7e5491f5fa24295912d5da7a6cc5e86ddb637f43",
+        "expectedRawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+        "sourceBlobOid": "94edbf8c43bf5f652a67831ff3413856678dcd00",
+        "tBlobOid": "94edbf8c43bf5f652a67831ff3413856678dcd00",
+        "iBlobOid": "94edbf8c43bf5f652a67831ff3413856678dcd00",
+        "sourceRawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+        "tRawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+        "iRawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+        "workingRawSha256": "a8dccd780ccb8ae905d211e1cb09460be6d5685e39ae6f411ed9b54b09a55916",
+        "sourceBytes": 94616,
+        "sourceLfLines": 2617,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-approval-request-draft-2026-09-08.md",
+        "sourceCommit": "bd69a817006fb45ee88aa399940acec3d4e36470",
+        "expectedRawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+        "sourceBlobOid": "70614a6b26acb3f026eb25f268756924e741de30",
+        "tBlobOid": "70614a6b26acb3f026eb25f268756924e741de30",
+        "iBlobOid": "70614a6b26acb3f026eb25f268756924e741de30",
+        "sourceRawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+        "tRawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+        "iRawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+        "workingRawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+        "sourceBytes": 21047,
+        "sourceLfLines": 307,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-approval-2026-09-08.md",
+        "sourceCommit": "bd69a817006fb45ee88aa399940acec3d4e36470",
+        "expectedRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+        "sourceBlobOid": "c29313a9dd23e27bf313c694fc24c142f02c7dc4",
+        "tBlobOid": "c29313a9dd23e27bf313c694fc24c142f02c7dc4",
+        "iBlobOid": "c29313a9dd23e27bf313c694fc24c142f02c7dc4",
+        "sourceRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+        "tRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+        "iRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+        "workingRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+        "sourceBytes": 21023,
+        "sourceLfLines": 304,
+        "authorReportedPreviousWorkingMatch": true,
+        "sourceAncestorOfT": true
+      }
+    ],
+    "support9": [
+      {
+        "path": "AGENTS.md",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "68196927b7cdf5b9722c34899823b7e4dd40947f",
+        "tRawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+        "tBytes": 92621,
+        "iBlobOid": "68196927b7cdf5b9722c34899823b7e4dd40947f",
+        "iRawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+        "workingAtI": {
+          "rawSha256": "f4e48afffa926681e07e93634509d75eb4abbc2fda19b6ab7a83ff57d4387dd1",
+          "byteLength": 93876
+        },
+        "mRawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+        "aaBlobOid": "68196927b7cdf5b9722c34899823b7e4dd40947f",
+        "aaRawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad"
+      },
+      {
+        "path": "package.json",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "9b8776a871580d077e1497fcae34283304d55daa",
+        "tRawSha256": "bf1fa24ae46281e9cbf94a6955c62f4d77a2c3c49902f54d2144ae9f9d61dbdf",
+        "tBytes": 20437,
+        "iBlobOid": "9b8776a871580d077e1497fcae34283304d55daa",
+        "iRawSha256": "bf1fa24ae46281e9cbf94a6955c62f4d77a2c3c49902f54d2144ae9f9d61dbdf",
+        "workingAtI": {
+          "rawSha256": "9a37cc648e8ae5eb5ceec6d8e3727477ac13ce5977b088328e26d3bc11f705b3",
+          "byteLength": 20724
+        },
+        "mRawSha256": "226f30f650aaba3e8fe61be37b3e11499991be451902b48abd7c3c2d8e7fb58a",
+        "aaBlobOid": "9b8776a871580d077e1497fcae34283304d55daa",
+        "aaRawSha256": "bf1fa24ae46281e9cbf94a6955c62f4d77a2c3c49902f54d2144ae9f9d61dbdf"
+      },
+      {
+        "path": "package-lock.json",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "eb105b3cca2877a93f3f095430b118339e390b79",
+        "tRawSha256": "d5b9271e5e5a7d0ab068a6c3bd821c99a4014b3915c09f367826bd348d94691c",
+        "tBytes": 567724,
+        "iBlobOid": "eb105b3cca2877a93f3f095430b118339e390b79",
+        "iRawSha256": "d5b9271e5e5a7d0ab068a6c3bd821c99a4014b3915c09f367826bd348d94691c",
+        "workingAtI": {
+          "rawSha256": "fbb286ab621b1333421d4728474867b58956538f80299bfb4a0f4a0585e86266",
+          "byteLength": 583630
+        },
+        "mRawSha256": "5d523a170217f6b6e693a40cb8a3385d138b85d12ca9e0f290046422666e188e",
+        "aaBlobOid": "eb105b3cca2877a93f3f095430b118339e390b79",
+        "aaRawSha256": "d5b9271e5e5a7d0ab068a6c3bd821c99a4014b3915c09f367826bd348d94691c"
+      },
+      {
+        "path": "tsconfig.json",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "a21d63d1f62995aeee3d8885e720f1eb3f23ebc2",
+        "tRawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+        "tBytes": 1446,
+        "iBlobOid": "a21d63d1f62995aeee3d8885e720f1eb3f23ebc2",
+        "iRawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+        "workingAtI": {
+          "rawSha256": "a90dbaf3d7885d0e4d1db827497488e0d905cffc528d65836634b549e4c1a098",
+          "byteLength": 1491
+        },
+        "mRawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+        "aaBlobOid": "a21d63d1f62995aeee3d8885e720f1eb3f23ebc2",
+        "aaRawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959"
+      },
+      {
+        "path": "scripts/run-unit-tests.mjs",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "0a51e254e2df67fbdc8595b9a3b5d7deac1e3291",
+        "tRawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+        "tBytes": 3655,
+        "iBlobOid": "0a51e254e2df67fbdc8595b9a3b5d7deac1e3291",
+        "iRawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+        "workingAtI": {
+          "rawSha256": "e6af763f362e6a31a838d7e5fc9a7c7d5dbbe42d8bceede1da6c9fba24986e76",
+          "byteLength": 3747
+        },
+        "mRawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+        "aaBlobOid": "0a51e254e2df67fbdc8595b9a3b5d7deac1e3291",
+        "aaRawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9"
+      },
+      {
+        "path": "scripts/check-text-encoding.mjs",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "76289e5a0405c8e5f49e12073c68e7daede1f386",
+        "tRawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+        "tBytes": 4481,
+        "iBlobOid": "76289e5a0405c8e5f49e12073c68e7daede1f386",
+        "iRawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+        "workingAtI": {
+          "rawSha256": "6f43f15a2c30afcfe9050897ca9db53b3f5e443d5d7ebf37fa7d4aa94cc8c473",
+          "byteLength": 4620
+        },
+        "mRawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+        "aaBlobOid": "76289e5a0405c8e5f49e12073c68e7daede1f386",
+        "aaRawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e"
+      },
+      {
+        "path": "scripts/check-doc-references.mjs",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "9d0da98af25d9f01bb0da84daa46232a91bfc65b",
+        "tRawSha256": "943eee2e34ca059e911e4f7dcf58992345acdd288d79f56eaf2f269fb40c7f45",
+        "tBytes": 4817,
+        "iBlobOid": "9d0da98af25d9f01bb0da84daa46232a91bfc65b",
+        "iRawSha256": "943eee2e34ca059e911e4f7dcf58992345acdd288d79f56eaf2f269fb40c7f45",
+        "workingAtI": {
+          "rawSha256": "32ac89f0f955054b5ac8710b72cc0c0a9e2fb2c7d585de2e83c44abb0d7c3843",
+          "byteLength": 4968
+        },
+        "mRawSha256": "943eee2e34ca059e911e4f7dcf58992345acdd288d79f56eaf2f269fb40c7f45",
+        "aaBlobOid": "9d0da98af25d9f01bb0da84daa46232a91bfc65b",
+        "aaRawSha256": "943eee2e34ca059e911e4f7dcf58992345acdd288d79f56eaf2f269fb40c7f45"
+      },
+      {
+        "path": "scripts/check-policy-section-references.mjs",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "2d66f9c194bb79d03626db091a9c34d4ffee5a7b",
+        "tRawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+        "tBytes": 12541,
+        "iBlobOid": "2d66f9c194bb79d03626db091a9c34d4ffee5a7b",
+        "iRawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+        "workingAtI": {
+          "rawSha256": "15a73f7cd7f2ed624a129c41be42406243f83e6fa6e19d5a8ca8d6a6cc946d49",
+          "byteLength": 12860
+        },
+        "mRawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+        "aaBlobOid": "2d66f9c194bb79d03626db091a9c34d4ffee5a7b",
+        "aaRawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50"
+      },
+      {
+        "path": "scripts/check-release-records.mjs",
+        "tCommit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "tBlobOid": "3ffb806df1d8a6057ea1db80ef692deea8765087",
+        "tRawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+        "tBytes": 3675,
+        "iBlobOid": "3ffb806df1d8a6057ea1db80ef692deea8765087",
+        "iRawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+        "workingAtI": {
+          "rawSha256": "12466afec65a4f8728ef5972f33459757e365682c065d077fb76b014020d6999",
+          "byteLength": 3772
+        },
+        "mRawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+        "aaBlobOid": "3ffb806df1d8a6057ea1db80ef692deea8765087",
+        "aaRawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080"
+      }
+    ],
+    "sixFiles": [
+      {
+        "path": "lib/memoryEvalVnext/protocol/canonicalJson.ts",
+        "blobOid": "935c3a42e1ba08a3d352338d2d1f53ebe7319de2",
+        "expected": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0",
+        "rawSha256": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0",
+        "workingRawSha256": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0"
+      },
+      {
+        "path": "lib/memoryEvalVnext/protocol/wire.ts",
+        "blobOid": "81e9f7c50db755d4f0bd9e863f800c4d116efeb0",
+        "expected": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31",
+        "rawSha256": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31",
+        "workingRawSha256": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31"
+      },
+      {
+        "path": "lib/memoryEvalVnext/protocol/signatures.ts",
+        "blobOid": "c4973f9ecdef78f8ec3039b5502363bd825974d1",
+        "expected": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9",
+        "rawSha256": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9",
+        "workingRawSha256": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9"
+      },
+      {
+        "path": "lib/memoryEvalVnext/protocol/trust.ts",
+        "blobOid": "71a307442db7529c6843ed943ebee5c9bcb55f3f",
+        "expected": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757",
+        "rawSha256": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757",
+        "workingRawSha256": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757"
+      },
+      {
+        "path": "tests/memoryEvalVnextWire.test.mjs",
+        "blobOid": "642766067bf242c24dd09b123bec861805ae9c63",
+        "expected": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e",
+        "rawSha256": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e",
+        "workingRawSha256": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e"
+      },
+      {
+        "path": "tests/fixtures/memory-eval-vnext/wire-vectors.json",
+        "blobOid": "1eface49a26dd4278e5d62adfe537699bb3d264f",
+        "expected": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8",
+        "rawSha256": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8",
+        "workingRawSha256": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8"
+      }
+    ],
+    "commits": [
+      {
+        "commit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+        "type": "commit",
+        "parents": [
+          "718aaf974e254e32bcb010ff2c1170a06011eed5"
+        ],
+        "committerTime": "2026-09-08T15:42:31+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "type": "commit",
+        "parents": [
+          "9d4d2d6361b634c49c28cfce44c66b68cc9d2357",
+          "aa99828d3030badd7553fa4da2fa7ae12be944d6"
+        ],
+        "committerTime": "2026-09-08T04:49:18Z",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+        "type": "commit",
+        "parents": [
+          "48df8e428061003115aad8d66c27fd1dddd56f7a",
+          "2b652cb9f8a729b40fe325be06503f92a62c524d"
+        ],
+        "committerTime": "2026-09-08T10:18:53+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "7e5491f5fa24295912d5da7a6cc5e86ddb637f43",
+        "type": "commit",
+        "parents": [
+          "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff"
+        ],
+        "committerTime": "2026-09-08T11:32:08+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "bd69a817006fb45ee88aa399940acec3d4e36470",
+        "type": "commit",
+        "parents": [
+          "7e5491f5fa24295912d5da7a6cc5e86ddb637f43"
+        ],
+        "committerTime": "2026-09-08T12:43:12+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "182dad1aaa5c70c4e32696d0c60676ed4a53fc7b",
+        "type": "commit",
+        "parents": [
+          "68421cc32fb3dbfdfa0a6609b7f1ec761ef0ba57",
+          "bd69a817006fb45ee88aa399940acec3d4e36470"
+        ],
+        "committerTime": "2026-09-08T13:35:06+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+        "type": "commit",
+        "parents": [
+          "6263ecdcc1e69585498c19c0a294fef5202f5218"
+        ],
+        "committerTime": "2026-09-06T14:37:05+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+        "type": "commit",
+        "parents": [
+          "6c36a548abf1687d2582566f31fafa51875b77fa"
+        ],
+        "committerTime": "2026-09-07T16:18:49+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "159267a80acee97da3a297c637343ea15de725f9",
+        "type": "commit",
+        "parents": [
+          "75c667054dd6fd1b6adff1e813cf23e3ef43ca00"
+        ],
+        "committerTime": "2026-09-07T19:43:41+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+        "type": "commit",
+        "parents": [
+          "159267a80acee97da3a297c637343ea15de725f9"
+        ],
+        "committerTime": "2026-09-07T20:17:22+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+        "type": "commit",
+        "parents": [
+          "19ff015112e6cf908cd8dc057ca41ace8cef4e87"
+        ],
+        "committerTime": "2026-09-07T21:28:56+10:00",
+        "ancestorOfI": true
+      },
+      {
+        "commit": "aa99828d3030badd7553fa4da2fa7ae12be944d6",
+        "type": "commit",
+        "parents": [
+          "2d05adf70aedc7c360c6e4259e9f82c6fc911e60",
+          "e881545742a967b86fc25650ad7a95c0853bef5f"
+        ],
+        "committerTime": "2026-09-08T04:29:20Z",
+        "ancestorOfI": true
+      }
+    ],
+    "mToT": [
+      "M\t.github/RELEASE_CHECKLIST.md",
+      "M\t.github/audits/2026-09-02-native-mobile-auth-n2-implementation-report.md",
+      "A\t.github/audits/daily-security-audit-gitleaks-npm-audit-2026-09-08.md",
+      "A\t.github/audits/evidence/memory-eval-vnext-offline-subset-package-2026-09-08.json",
+      "A\t.github/audits/memory-eval-vnext-offline-subset-approval-2026-09-08.md",
+      "A\t.github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md",
+      "A\t.github/audits/memory-eval-vnext-offline-subset-approval-request-draft-2026-09-08.md",
+      "M\t.gitleaksignore",
+      "M\tdocs/ops/ai-review-eval-runbook.md",
+      "M\tdocs/ops/ai-review-evaluation-set/decision-v1.spend.jsonl",
+      "M\tdocs/ops/mobile-auth-key-rotation.md",
+      "M\tdocs/policy/voice-input.md",
+      "M\tlib/aiReviewDraftLedger.ts",
+      "M\tlib/mobileAuthContract.ts",
+      "M\tlib/mobileAuthKeyring.ts",
+      "M\tlib/voiceInputPricing.ts",
+      "M\tpackage-lock.json",
+      "M\tpackage.json",
+      "M\tscripts/check-mobile-auth-keyring.mjs",
+      "M\tscripts/check-voice-price-register.mjs",
+      "M\tscripts/draft-ai-review-eval-candidates.mjs",
+      "M\tscripts/ops/Invoke-MobileAuthDeploymentVerify.ps1",
+      "M\tscripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1",
+      "M\tscripts/verify-mobile-auth-deployment.mjs",
+      "M\ttests/aiReviewDraftLedger.test.mjs",
+      "M\ttests/aiReviewDraftLedgerCli.test.mjs",
+      "M\ttests/mobileAuthDeploymentVerify.test.mjs",
+      "M\ttests/mobileAuthKeyring.test.mjs",
+      "M\ttests/mobileAuthKeyringCheck.test.mjs",
+      "M\ttests/voiceProviderBudget.test.mjs"
+    ],
+    "mToTNumstat": "12\t3\t.github/RELEASE_CHECKLIST.md\n66\t0\t.github/audits/2026-09-02-native-mobile-auth-n2-implementation-report.md\n130\t0\t.github/audits/daily-security-audit-gitleaks-npm-audit-2026-09-08.md\n2617\t0\t.github/audits/evidence/memory-eval-vnext-offline-subset-package-2026-09-08.json\n304\t0\t.github/audits/memory-eval-vnext-offline-subset-approval-2026-09-08.md\n418\t0\t.github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md\n307\t0\t.github/audits/memory-eval-vnext-offline-subset-approval-request-draft-2026-09-08.md\n23\t0\t.gitleaksignore\n27\t0\tdocs/ops/ai-review-eval-runbook.md\n1\t0\tdocs/ops/ai-review-evaluation-set/decision-v1.spend.jsonl\n73\t15\tdocs/ops/mobile-auth-key-rotation.md\n131\t13\tdocs/policy/voice-input.md\n133\t6\tlib/aiReviewDraftLedger.ts\n1\t0\tlib/mobileAuthContract.ts\n15\t10\tlib/mobileAuthKeyring.ts\n178\t19\tlib/voiceInputPricing.ts\n52\t119\tpackage-lock.json\n4\t1\tpackage.json\n88\t4\tscripts/check-mobile-auth-keyring.mjs\n34\t5\tscripts/check-voice-price-register.mjs\n43\t0\tscripts/draft-ai-review-eval-candidates.mjs\n8\t5\tscripts/ops/Invoke-MobileAuthDeploymentVerify.ps1\n22\t2\tscripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1\n45\t24\tscripts/verify-mobile-auth-deployment.mjs\n200\t2\ttests/aiReviewDraftLedger.test.mjs\n96\t5\ttests/aiReviewDraftLedgerCli.test.mjs\n36\t2\ttests/mobileAuthDeploymentVerify.test.mjs\n32\t7\ttests/mobileAuthKeyring.test.mjs\n37\t0\ttests/mobileAuthKeyringCheck.test.mjs\n126\t12\ttests/voiceProviderBudget.test.mjs",
+    "aaToT": [
+      "M\t.github/RELEASE_CHECKLIST.md",
+      "M\t.github/audits/2026-09-02-native-mobile-auth-n2-implementation-report.md",
+      "M\tdocs/ops/mobile-auth-key-rotation.md",
+      "M\tlib/mobileAuthContract.ts",
+      "M\tlib/mobileAuthKeyring.ts",
+      "M\tscripts/check-mobile-auth-keyring.mjs",
+      "M\tscripts/ops/Invoke-MobileAuthDeploymentVerify.ps1",
+      "M\tscripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1",
+      "M\tscripts/verify-mobile-auth-deployment.mjs",
+      "M\ttests/mobileAuthDeploymentVerify.test.mjs",
+      "M\ttests/mobileAuthKeyring.test.mjs",
+      "M\ttests/mobileAuthKeyringCheck.test.mjs"
+    ],
+    "tToI": [
+      "A\tlib/memoryEvalVnext/protocol/canonicalJson.ts",
+      "A\tlib/memoryEvalVnext/protocol/signatures.ts",
+      "A\tlib/memoryEvalVnext/protocol/trust.ts",
+      "A\tlib/memoryEvalVnext/protocol/wire.ts",
+      "A\ttests/fixtures/memory-eval-vnext/wire-vectors.json",
+      "A\ttests/memoryEvalVnextWire.test.mjs"
+    ],
+    "packageDiff": "diff --git a/package.json b/package.json\nindex 23127d11..9b8776a8 100644\n--- a/package.json\n+++ b/package.json\n@@ -272,12 +272,15 @@\n     \"eslint-config-next\": {\n       \"brace-expansion\": \"^1.1.17\"\n     },\n-    \"fast-uri\": \"3.1.5\",\n+    \"fast-uri\": \"^3.1.6\",\n     \"pdfjs-dist\": \"^6.2.108\",\n     \"postcss\": {\n       \".\": \"8.5.25\",\n       \"nanoid\": \"^3.3.17\"\n     },\n+    \"prisma\": {\n+      \"mysql2\": \"^3.23.1\"\n+    },\n     \"sharp\": \"$sharp\",\n     \"uuid\": \"11.1.1\"\n   }",
+    "packageScriptsMToTEqual": true,
+    "discovery": {
+      "T": {
+        "root": 624,
+        "client": 4
+      },
+      "I": {
+        "root": 625,
+        "client": 4
+      }
+    },
+    "untracked": [
+      {
+        "path": ".github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+        "sha256": "bcb69780466af1df892f6d82eec186f06836e581b259424e797b5e95274881f2"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.json",
+        "sha256": "316d715a989fa8bb0967794e2d93f9f93ab734fc28741be5cfd9d7bd1f458a88"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.json",
+        "sha256": "ecd5efb933a3f263ace5c2fe7893e70e07e7cc581181d1ed38e6096e9c6e9178"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+        "sha256": "06b104bf7b5ea0d7d207d55db3520d2a968a7d3a6d5bf96e8fb1e182aaa4fcc5"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-independent-review-prompt-2026-09-07.md",
+        "sha256": "93f5477a792f07b0765a209472c7d05c8faf91776d024f00f9d58dfc1d837eee"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-independent-review-prompt-2026-09-08.md",
+        "sha256": "6dc5824aa26e0d2661ff42b9afca5a6de2a5656338bc4b9c2ae7d49baee9abd9"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-implementation-independent-review-prompt-2026-09-08.md",
+        "sha256": "06f66804d3e936dbe80f2a5db0c050c1fe7224b548ec2b2c0d569c79cec3ddfb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-independent-review-prompt-2026-09-08.md",
+        "sha256": "93fd1e540841b1be671c6157e2b231d09c14ea144f830b19c4d53cc4a4b9f3b3"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.md",
+        "sha256": "89653d6e854491e082d393c01ae8cb1acfabfd56eb50d8b1c1f5c73cb8b09404"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.md",
+        "sha256": "b1a0d71cbe49ccb8f7018bb95788640388398a4a111dac2133e198844094c008"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+        "sha256": "74b02f5035ab6766f4e93d9335c7cf7919ba19283173f9cede639c6b66a101be"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+        "sha256": "fea5b992a050d1ba160a0153ea3a7a8da714e57c5193b81bd140e105c7866826"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+        "sha256": "6a06a68271d827667a9d04784ea2eb74642179147bb96b107a946cfecc79a481"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+        "sha256": "bed852fa4fbdb53cd7ddce2b1d453759244fd43bb290b2cd72c2550c7ac3cbdb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+        "sha256": "ccb1af8d606cc27fb30b1654712f9e61065b8a2d2e8123d25dd64c91f0c07f65"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+        "sha256": "7aecf2f7744840cf6161065278103ebcacabef74b808f3e0eadb1748ecaff142"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+        "sha256": "9e64bf111a1cadde38e01386738e4642d42f6a5018dfad52c5c33af5e961d238"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+        "sha256": "7b5e62eb77fdc36a39de1e73fc88cde729090ebc2d4a3d03f26bdbce851ae77c"
+      },
+      {
+        "path": "attachment-audit.json",
+        "sha256": "52b9ea37d7dae4cb09931651cb9955e0447c06b25fd126b485211c7228bb93fa"
+      }
+    ],
+    "ignored": [
+      {
+        "path": "docs/ops/app-managed-web-search-staging-verification-records/2026-08-27__8fc628d63c31d4e2d1a52278263dc08bf0cc1677.md",
+        "sha256": "1a57bfcb5fb33f2f2b19a3dfa7eb80b1d5a05078678b869101fe343f7916a3ee",
+        "observedSha256": "1a57bfcb5fb33f2f2b19a3dfa7eb80b1d5a05078678b869101fe343f7916a3ee"
+      },
+      {
+        "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__5e187218c536af33094154e4174a3af4267a094a.md",
+        "sha256": "7ff9b19e7c8b3fc92248a28b12d22c0a24e6d047e1b3a399021a045dbc4c93f9",
+        "observedSha256": "7ff9b19e7c8b3fc92248a28b12d22c0a24e6d047e1b3a399021a045dbc4c93f9"
+      },
+      {
+        "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__f1d136dc279088fbe08b3c6704284e2f850d050e.md",
+        "sha256": "be151ed569f0cd374edf695febb80452537a09595f54eb4db8ea149d72d1b5ab",
+        "observedSha256": "be151ed569f0cd374edf695febb80452537a09595f54eb4db8ea149d72d1b5ab"
+      }
+    ],
+    "report": {
+      "path": "C:/Users/Vyper/.codex/attachments/c34fdd17-56a9-4933-8ad5-2dcd61f3f73b/pasted-text.txt",
+      "sha256": "74bbc335f5a5c05552d1ad7fa0e3660da8725cbf51996a35d3fa546af26e51c6",
+      "bytes": 14007
+    },
+    "tracked": "",
+    "staged": "",
+    "pass": true,
+    "previousWorkingComparison": {
+      "field": "files[].authorReportedPreviousWorkingMatch",
+      "provenance": "Author tool-log attribution from initial preparation; the earlier comparison hashes/log artifact are not included in this record.",
+      "independentlyVerifiableFromThisRecord": false,
+      "useAsCurrentRevalidationEvidence": false,
+      "distinction": "Current workingRawSha256 and source/T/I blob hashes remain directly recalculable. The attributed prior comparison is neither a historical timing proof nor a current-check baseline."
+    }
+  },
+  "runtime": {
+    "capturedAt": "2026-09-08T07:04:24.188Z",
+    "tip": "54ad04e29aa3390f4d342d152127e99928b4268e",
+    "node": "v22.22.2",
+    "npm": "10.9.7",
+    "platform": "win32",
+    "arch": "x64",
+    "openssl": "3.5.5",
+    "lockWorkingSha256": "fbb286ab621b1333421d4728474867b58956538f80299bfb4a0f4a0585e86266",
+    "packageWorkingSha256": "9a37cc648e8ae5eb5ceec6d8e3727477ac13ce5977b088328e26d3bc11f705b3",
+    "matchedCount": 927,
+    "mismatch": [],
+    "mandatoryMissing": [],
+    "optionalMissingCount": 175,
+    "optionalMissingPlatformIncompatible": 164,
+    "optionalOtherMissing": [
+      {
+        "path": "node_modules/@emnapi/core",
+        "version": "1.10.0",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@emnapi/wasi-threads",
+        "version": "1.2.1",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@napi-rs/wasm-runtime",
+        "version": "1.1.6",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/core",
+        "version": "1.11.1",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/runtime",
+        "version": "1.11.1",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/wasi-threads",
+        "version": "1.2.2",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@napi-rs/wasm-runtime",
+        "version": "1.1.4",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@tybys/wasm-util",
+        "version": "0.10.2",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/tslib",
+        "version": "2.8.1",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@tybys/wasm-util",
+        "version": "0.10.3",
+        "optional": true,
+        "platformCompatible": true
+      },
+      {
+        "path": "node_modules/@unrs/resolver-binding-wasm32-wasi/node_modules/@emnapi/runtime",
+        "version": "1.10.0",
+        "optional": true,
+        "platformCompatible": true
+      }
+    ],
+    "links": [
+      {
+        "path": "node_modules/@tomverse/chat-core",
+        "resolved": "packages/chat-core",
+        "exists": true,
+        "realPath": "H:\\Project\\ai-chat-hub\\packages\\chat-core"
+      },
+      {
+        "path": "node_modules/@tomverse/mobile",
+        "resolved": "apps/mobile",
+        "exists": true,
+        "realPath": "H:\\Project\\ai-chat-hub\\apps\\mobile"
+      },
+      {
+        "path": "node_modules/@tomverse/ui-tokens",
+        "resolved": "packages/ui-tokens",
+        "exists": true,
+        "realPath": "H:\\Project\\ai-chat-hub\\packages\\ui-tokens"
+      }
+    ],
+    "actualPackageJsonInventoryDigest": {
+      "algorithm": "sha256",
+      "format": "JSON.stringify(array sorted lexicographically by path; object insertion order path,version,sha256; UTF-8, no newline)",
+      "sha256": "61b16f3c4f6a97e146dc612b8ce0d77bbe5418a9100cddfd3d2d7e0257be62b1",
+      "count": 927
+    },
+    "hiddenLockSha256": "a18b259089f299ea80b276cb448850b22f2e9be2a5546337ae389b49bd4793bc",
+    "hiddenMismatch": [],
+    "keyPackages": [
+      {
+        "name": "tsx",
+        "version": "4.23.13",
+        "expected": "4.23.13"
+      },
+      {
+        "name": "typescript",
+        "version": "6.0.3",
+        "expected": "6.0.3"
+      },
+      {
+        "name": "esbuild",
+        "version": "0.28.1",
+        "expected": "0.28.1"
+      },
+      {
+        "name": "@esbuild/win32-x64",
+        "version": "0.28.1",
+        "expected": "0.28.1"
+      },
+      {
+        "name": "prisma",
+        "version": "7.10.0",
+        "expected": "7.10.0"
+      },
+      {
+        "name": "@prisma/client",
+        "version": "7.10.0",
+        "expected": "7.10.0"
+      },
+      {
+        "name": "@xmldom/xmldom",
+        "version": "0.9.12",
+        "expected": "0.9.12"
+      },
+      {
+        "name": "mysql2",
+        "version": "3.24.3",
+        "expected": "3.24.3"
+      },
+      {
+        "name": "sql-escaper",
+        "version": "1.5.1",
+        "expected": "1.5.1"
+      },
+      {
+        "name": "browserslist",
+        "version": "4.28.9",
+        "expected": "4.28.9"
+      }
+    ],
+    "npmLs": {
+      "command": "npm ls --all --json",
+      "exitCode": 0,
+      "problems": [
+        "extraneous: @emnapi/runtime@1.11.3 H:\\Project\\ai-chat-hub\\node_modules\\@emnapi\\runtime",
+        "extraneous: @img/sharp-wasm32@0.35.4 H:\\Project\\ai-chat-hub\\node_modules\\@img\\sharp-wasm32"
+      ],
+      "error": null,
+      "stderr": "",
+      "stdoutIdentityStatus": "withdrawn_unreproducible_capture",
+      "stdoutCaptureRuleAtInitialPreparation": null,
+      "withdrawnClaim": {
+        "sha256": "f229dcc3ffedebad3bef986da25175146185d9a421c84ebdbdceb61b149ef62d",
+        "bytes": 355643,
+        "usableAsByteIdentity": false
+      },
+      "identityWithdrawalReason": "OD-F4: the original capture encoding/newline/stream rule was not recorded and an independent replay did not reproduce these bytes. No retroactive capture rule is invented. Retained exit/problems/error/stderr and optional lock bindings are distinct reported observations; no new npm ls run was made for OD-R1."
+    }
+  },
+  "ci": {
+    "startedAt": "2026-09-08T07:05:02.900Z",
+    "endedAt": "2026-09-08T07:05:06.528Z",
+    "runs": [
+      {
+        "id": 34188356181,
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34188356181",
+        "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "event": "push",
+        "branch": "develop",
+        "attempt": 1,
+        "name": "Admin Console E2E",
+        "status": "completed",
+        "conclusion": "success",
+        "createdAt": "2026-09-08T04:49:25Z",
+        "updatedAt": "2026-09-08T04:58:19Z",
+        "runResponseSha256": "d8f0965e195989d8a60d9c5a5ae703818a3e2fe93dfd9d44e3b640abb03e4e32",
+        "jobsResponseSha256": "a099ce2910bde8f81ed8886d1ed42cccffef5207fb98ec21704243a9fbb0b9a2",
+        "jobs": [
+          {
+            "id": 101941142411,
+            "name": "Admin Console E2E (PostgreSQL)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:58:18Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Restore Next.js build cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Production build",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 8,
+                "name": "Restore Playwright Chromium cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 9,
+                "name": "Install Chromium",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 10,
+                "name": "Run the Admin Console E2E suite",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 11,
+                "name": "Upload failed test evidence",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 18,
+                "name": "Post Restore Playwright Chromium cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 19,
+                "name": "Post Restore Next.js build cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 20,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 21,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 22,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 23,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 34188356415,
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34188356415",
+        "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+        "event": "push",
+        "branch": "develop",
+        "attempt": 1,
+        "name": "Credit Finance DB Integration",
+        "status": "completed",
+        "conclusion": "success",
+        "createdAt": "2026-09-08T04:49:26Z",
+        "updatedAt": "2026-09-08T04:58:09Z",
+        "runResponseSha256": "826e53e561b0432f2f51ef361e7209d2fc6fbc76cfeb86f413d0ad8c12d312f2",
+        "jobsResponseSha256": "7edee47c0157800899eaa02940cddefdf2cc7f346c059ac68c15c1ec39990641",
+        "jobs": [
+          {
+            "id": 101941143126,
+            "name": "Credit and finance PostgreSQL scenarios (assistant)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:52:59Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143171,
+            "name": "Credit and finance PostgreSQL scenarios (email)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:57:03Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143185,
+            "name": "Credit and finance PostgreSQL scenarios (finance)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:54:55Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143202,
+            "name": "Credit and finance PostgreSQL scenarios (accounts)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:58:03Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143210,
+            "name": "Credit and finance PostgreSQL scenarios (routing)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:52:49Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143213,
+            "name": "Credit and finance PostgreSQL scenarios (import)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:53:27Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101941143233,
+            "name": "Credit and finance PostgreSQL scenarios (memory)",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:49:28Z",
+            "completedAt": "2026-09-08T04:54:31Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 4,
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 5,
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 6,
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 7,
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "number": 12,
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 13,
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 14,
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 15,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 101942594804,
+            "name": "Credit and finance PostgreSQL scenarios",
+            "status": "completed",
+            "conclusion": "success",
+            "headSha": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+            "startedAt": "2026-09-08T04:58:05Z",
+            "completedAt": "2026-09-08T04:58:08Z",
+            "steps": [
+              {
+                "number": 1,
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 2,
+                "name": "Require every lane to have passed",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "number": 3,
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "developRef": {
+      "sha": "2a74f920745ec6ae8126896e7f2e2cb4bae29c05",
+      "type": "commit",
+      "observedOnlyNotRevalidation": true
+    },
+    "implementationRemote": {
+      "sha": "54ad04e29aa3390f4d342d152127e99928b4268e",
+      "type": "commit"
+    },
+    "implementationRuns": {
+      "total": 0,
+      "runs": []
+    },
+    "mutation": false
+  },
+  "reproductions": {
+    "source": "\nconst fs=require('node:fs'),path=require('node:path');\nconst {checkWire,isAsciiId}=require(\"./lib/memoryEvalVnext/protocol/wire.ts\");\nconst {encodeCanonical,decodeCanonical}=require(\"./lib/memoryEvalVnext/protocol/canonicalJson.ts\");\nconst ref={path:\"a\\nb\",byteLength:1,rawSha256:\"a\".repeat(64)};\nlet calls={ownKeys:0,getOwnPropertyDescriptor:0};\nconst proxied=new Proxy(ref,{ownKeys(t){calls.ownKeys++;return Reflect.ownKeys(t);},getOwnPropertyDescriptor(t,k){calls.getOwnPropertyDescriptor++;return Reflect.getOwnPropertyDescriptor(t,k);}});\nconst enc=encodeCanonical(proxied),encoderCalls={...calls};calls={ownKeys:0,getOwnPropertyDescriptor:0};\nconst checked=checkWire(\"BlobRef\",proxied),wireCalls={...calls};calls={ownKeys:0,getOwnPropertyDescriptor:0};\nconst decoded=enc.ok?decodeCanonical(enc.value):enc;\nconsole.log(JSON.stringify({observedAt:new Date().toISOString(),asciiNewline:isAsciiId(\"imp\\n\"),asciiSpace:isAsciiId(\" \"),asciiDel:isAsciiId(\"\\x7f\"),pathWithNewline:checkWire(\"BlobRef\",ref).ok,encoder:{ok:enc.ok,calls:encoderCalls},checkWire:{ok:checked.ok,calls:wireCalls},decodeBytes:{ok:decoded.ok,calls}}));",
+    "result": {
+      "observedAt": "2026-09-08T07:06:40.233Z",
+      "asciiNewline": true,
+      "asciiSpace": true,
+      "asciiDel": true,
+      "pathWithNewline": true,
+      "encoder": {
+        "ok": true,
+        "calls": {
+          "ownKeys": 1,
+          "getOwnPropertyDescriptor": 3
+        }
+      },
+      "checkWire": {
+        "ok": true,
+        "calls": {
+          "ownKeys": 1,
+          "getOwnPropertyDescriptor": 3
+        }
+      },
+      "decodeBytes": {
+        "ok": true,
+        "calls": {
+          "ownKeys": 0,
+          "getOwnPropertyDescriptor": 0
+        }
+      }
+    },
+    "scope": "Non-operational local object/bytes only; no patch to implementation.",
+    "firstEarlierAttemptNote": "The preceding analysis turn's inline ESM named-import diagnostic failed at module load. The CJS-with-tsx reproduction used here completed; no repository module export was changed.",
+    "originalMeasurementScope": "Initial observation counted ownKeys and getOwnPropertyDescriptor only; getPrototypeOf was unmeasured, not zero. Source/result and original observedAt are preserved.",
+    "getPrototypeOfSupplement": {
+      "purpose": "OD-F3: separately timestamped three-trap reproduction, not a replacement of the original two-trap measurement.",
+      "source": "const {encodeCanonical,decodeCanonical}=require('./lib/memoryEvalVnext/protocol/canonicalJson.ts');\nconst {checkWire}=require('./lib/memoryEvalVnext/protocol/wire.ts');\nconst fresh=()=>({ownKeys:0,getOwnPropertyDescriptor:0,getPrototypeOf:0});let calls=fresh();\nconst ref={path:'a\\nb',byteLength:1,rawSha256:'a'.repeat(64)};\nconst proxied=new Proxy(ref,{ownKeys(t){calls.ownKeys++;return Reflect.ownKeys(t);},getOwnPropertyDescriptor(t,k){calls.getOwnPropertyDescriptor++;return Reflect.getOwnPropertyDescriptor(t,k);},getPrototypeOf(t){calls.getPrototypeOf++;return Reflect.getPrototypeOf(t);}});\nconst enc=encodeCanonical(proxied),encoder={ok:enc.ok,calls:{...calls}};calls=fresh();\nconst chk=checkWire('BlobRef',proxied),checkWireObject={ok:chk.ok,calls:{...calls}};calls=fresh();\nconst dec=enc.ok?decodeCanonical(enc.value):enc,decodeBytes={ok:dec.ok,calls:{...calls}};calls=fresh();\nconst plain=dec.ok?checkWire('BlobRef',dec.value):dec,checkDecodedPlainObject={ok:plain.ok,calls:{...calls}};\nconsole.log(JSON.stringify({observedAt:new Date().toISOString(),targetCommit:'54ad04e29aa3390f4d342d152127e99928b4268e',node:process.version,inputKind:'three-field BlobRef Proxy with local counters only',encoder,checkWireObject,decodeBytes,checkDecodedPlainObject}));",
+      "result": {
+        "observedAt": "2026-09-08T07:43:31.885Z",
+        "targetCommit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+        "node": "v22.22.2",
+        "inputKind": "three-field BlobRef Proxy with local counters only",
+        "encoder": {
+          "ok": true,
+          "calls": {
+            "ownKeys": 1,
+            "getOwnPropertyDescriptor": 3,
+            "getPrototypeOf": 1
+          }
+        },
+        "checkWireObject": {
+          "ok": true,
+          "calls": {
+            "ownKeys": 1,
+            "getOwnPropertyDescriptor": 3,
+            "getPrototypeOf": 1
+          }
+        },
+        "decodeBytes": {
+          "ok": true,
+          "calls": {
+            "ownKeys": 0,
+            "getOwnPropertyDescriptor": 0,
+            "getPrototypeOf": 0
+          }
+        },
+        "checkDecodedPlainObject": {
+          "ok": true,
+          "calls": {
+            "ownKeys": 0,
+            "getOwnPropertyDescriptor": 0,
+            "getPrototypeOf": 0
+          }
+        }
+      },
+      "environment": "Allowlisted OS/PATH/TEMP child; absent DOTENV_CONFIG_PATH checked; node --import tsx -e; no .env/config change.",
+      "scope": "Only local counters and ordinary returned bytes/plain objects. Zero trap counts refer to this original Proxy; not a universal hostile-input or modified-global guarantee. No key/signature/provider/DB/network/write."
+    }
+  },
+  "additionalCurrentFacts": {
+    "observedAt": "2026-09-08T07:16:00.064Z",
+    "rootDependenciesMToTEqual": true,
+    "rootDevDependenciesMToTEqual": true,
+    "packageScriptsMToTEqual": true,
+    "environmentPlaceholderAbsent": true,
+    "extraLabelLockBindings": [
+      {
+        "name": "@emnapi/runtime",
+        "lockVersion": "1.11.3",
+        "optional": true,
+        "physicalVersion": "1.11.3"
+      },
+      {
+        "name": "@img/sharp-wasm32",
+        "lockVersion": "0.35.4",
+        "optional": true,
+        "physicalVersion": "0.35.4"
+      }
+    ]
+  },
+  "runner": {
+    "packageAttempt": {
+      "args": [
+        "run",
+        "test:unit"
+      ],
+      "start": "2026-09-08T07:06:39.367Z",
+      "end": "2026-09-08T07:06:39.599Z",
+      "exit": 1,
+      "signal": null,
+      "outputSha256": "30da9d3e251bc45dce4be788c62aaa860e4b1dd33ff5ce02a6de6df08f323e15",
+      "outputBytes": 66,
+      "summary": "\n> ai-chat-hub@0.1.0 test:unit\n> node scripts/run-unit-tests.mjs\n\n",
+      "counts": [],
+      "failed": []
+    },
+    "directSpawnDiagnostic": {
+      "at": "2026-09-08T07:06:40.711Z",
+      "fileCount": 625,
+      "argvCharacterCount": 37779,
+      "status": null,
+      "error": {
+        "code": "ENAMETOOLONG",
+        "syscall": "spawnSync C:\\nvm4w\\nodejs\\node.exe"
+      },
+      "stdoutBytes": 0,
+      "stderrBytes": 0
+    },
+    "scope": "Existing Windows failure; not a successful full unit run; no runner edit."
+  },
+  "verification": {
+    "environmentBoundary": {
+      "childEnvironmentAllowlistOnly": true,
+      "appCredentialEnvironmentInherited": false,
+      "dotenvPath": "H:/Project/ai-chat-hub/.os-f4-absent-env-file",
+      "dotenvFileCreated": false,
+      "installPerformed": false,
+      "providerOrDatabaseCalled": false,
+      "gitHubGetOnly": true
+    },
+    "beforeDocumentCreation": [
+      {
+        "args": [
+          "run",
+          "check:encoding:strict"
+        ],
+        "start": "2026-09-08T07:05:30.635Z",
+        "end": "2026-09-08T07:05:31.939Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+        "outputBytes": 147,
+        "summary": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:policy-section-references"
+        ],
+        "start": "2026-09-08T07:05:30.447Z",
+        "end": "2026-09-08T07:05:31.554Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "a023c1b4064b51f38930616299cf1b1cd344d1d96ff41f3b32025f9f9398682e",
+        "outputBytes": 364,
+        "summary": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4059 citation(s) against 30 policy document(s). 2424 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1406 and 229 predate this change).\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:release-records"
+        ],
+        "start": "2026-09-08T07:05:30.835Z",
+        "end": "2026-09-08T07:05:31.155Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+        "outputBytes": 745,
+        "summary": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:memory-eval-succ9"
+        ],
+        "start": "2026-09-08T07:05:31.053Z",
+        "end": "2026-09-08T07:05:32.004Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+        "outputBytes": 1276,
+        "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:memory-extraction-eval"
+        ],
+        "start": "2026-09-08T07:05:31.299Z",
+        "end": "2026-09-08T07:05:31.867Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+        "outputBytes": 473,
+        "summary": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:memory-eval-freeze"
+        ],
+        "start": "2026-09-08T07:05:31.586Z",
+        "end": "2026-09-08T07:05:32.312Z",
+        "exit": 0,
+        "signal": null,
+        "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+        "outputBytes": 4024,
+        "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+        "counts": [],
+        "failed": []
+      },
+      {
+        "args": [
+          "run",
+          "check:doc-references"
+        ],
+        "start": "2026-09-08T07:05:31.710Z",
+        "end": "2026-09-08T07:05:32.768Z",
+        "exit": 1,
+        "signal": null,
+        "outputSha256": "a71fe18e693b1d3bd8a77f83701bf950e0d8cef5635c3330ba9e85d466d2ac6a",
+        "outputBytes": 1905,
+        "summary": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\n\n8 broken reference(s) in source comments:\n  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n\nA comment that names a test file is making a claim about coverage, and a\ncomment that names a module is telling the next reader where to look. Both\nare believed without being opened, which is exactly why neither is checked\nby anything else.\n\n",
+        "counts": [],
+        "failed": []
+      }
+    ],
+    "componentTest": {
+      "args": [
+        "--conditions=react-server",
+        "--import",
+        "tsx",
+        "--test",
+        "--test-concurrency=1",
+        "--test-reporter=spec",
+        "--test-reporter-destination=stdout",
+        "tests/memoryEvalVnextWire.test.mjs"
+      ],
+      "start": "2026-09-08T07:06:38.562Z",
+      "end": "2026-09-08T07:06:38.909Z",
+      "exit": 0,
+      "signal": null,
+      "outputSha256": "b7e04dd4221ec3a8daa8cd9810b9ec84101c2ab60d1d2ea2a156a05d6cf573d0",
+      "outputBytes": 3232,
+      "summary": "✔ F01: ASCII object ordering and exact G01/G02 bytes (2.7476ms)\n✔ F02: safe integer boundaries and JavaScript negative zero (0.1906ms)\n✔ F03: sequences keep order and duplicates (0.2486ms)\n✔ F04: NFD and non-ASCII keys are rejected without normalization (0.4848ms)\n✔ F05: duplicate keys are rejected before last-wins parsing (0.2485ms)\n✔ F06: non-integers, non-finite and unsafe numbers are refused (0.3234ms)\n✔ F07: non-JSON values, accessors, custom prototypes and cycles (0.4724ms)\n✔ F08: strict UTF-8 and scalar strings without replacement (0.2547ms)\n✔ F09: non-canonical spellings, ordering and tokens are refused (0.5897ms)\n✔ F10: raw, LF-file and domain hashes match independent goldens (0.6899ms)\n✔ F11: file mode requires exactly one LF and never trims (0.3523ms)\n✔ F12: S3 signs domain-LF plus CJSON, not a digest (1.0931ms)\n✔ F13: five closed shapes return only structure-checked copies (1.3272ms)\n✔ F14: all required fields: omission, null, wrong type, extra and nesting (9.7038ms)\n✔ F15: digest, commit, key ID and byte length leaf constraints (3.144ms)\n✔ F16: UTC fields enforce calendar seconds-Z without reading a clock (7.2322ms)\n✔ F17: both reference paths are relative POSIX paths (0.7702ms)\n✔ F18: Base64 is canonical padded encoding of exact key/signature lengths (1.6177ms)\n✔ F19: roles are a known sorted unique set, never an authority grant (1.76ms)\n✔ F20: RFC 8032 TEST 1/2/3 public vectors and tampering (OS-F2) (2.7164ms)\n✔ F21: volatile synthetic S3 positive signatures for all three purposes (3.2063ms)\n✔ F22: payload/signature/key mutations and deterministic error ordering (5.846ms)\n✔ F23: framing, digest and prehash substitutions never verify as S3 (5.3617ms)\n✔ F24: receipt domain digest is not raw/file SHA or a self-digest (0.4856ms)\n✔ F25: three exact purpose/role pairs remain component-only (0.8022ms)\n✔ F26: importer cannot substitute for the activation approver (1.065ms)\n✔ F27: other upstream purposes are unsupported, not redefined (1.4172ms)\n✔ F28: new D approver handle grammar is exact and role-specific (2.2544ms)\n✔ F29: payload, anchor and explicit expected identity must all match (2.5784ms)\n✔ F30: epoch is opaque and previous-null proves no first-epoch history (1.0397ms)\n✔ F31: explicit time checks only obvious outside/revoked bounds (1.7819ms)\n✔ F32: registration bytes stay opaque and parsing is unsupported (0.6384ms)\n✔ F33: policy/previous digests are syntax and equality only (0.1736ms)\n✔ F34: D/K reference plus raw bytes match only explicit caller facts (0.285ms)\n✔ F35: D/K commit, path, hash and raw bytes cannot be substituted (0.9084ms)\n✔ F36: synthetic Git equality establishes no Git existence or approval (0.1639ms)\n✔ F37: component checks do not read clock, global randomness or network (1.1051ms)\n✔ F38: fixtures contain public data only; synthetic results are not persisted (0.8971ms)\n✔ F39: positive bytes and signatures never issue authority or trusted context (1.0131ms)\n✔ F41: case/AC trace includes external audits and preserves all upstream deferrals (0.615ms)\nℹ tests 40\nℹ suites 0\nℹ pass 40\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 301.8221\n",
+      "counts": [
+        "ℹ tests 40",
+        "ℹ suites 0",
+        "ℹ pass 40",
+        "ℹ fail 0",
+        "ℹ cancelled 0",
+        "ℹ skipped 0",
+        "ℹ todo 0",
+        "ℹ duration_ms 301.8221"
+      ],
+      "failed": []
+    },
+    "fullSuiteRerunThisRecord": false,
+    "typecheckRerunThisRecord": false,
+    "lintRerunThisRecord": false,
+    "previousAuthorFullSuite": {
+      "attribution": "Prior implementation turn; unchanged six blob hashes; not rerun by this record.",
+      "baseline": {
+        "tests": 7783,
+        "pass": 7764,
+        "fail": 18,
+        "skipped": 1,
+        "cancelled": 0,
+        "todo": 0
+      },
+      "after": {
+        "tests": 7823,
+        "pass": 7804,
+        "fail": 18,
+        "skipped": 1,
+        "cancelled": 0,
+        "todo": 0
+      },
+      "newFailures": [],
+      "removedFailures": [],
+      "preservedFailures": [
+        "tests\\adminSoleApprover.test.mjs:286:1 :: the execution has no parameter through which its scope could widen",
+        "tests\\anthropicPromptCachingWiring.test.mjs:332:1 :: promptCachePath is not passed from a file the map does not know",
+        "tests\\automaticFallbackBoundary.test.mjs:160:1 :: only the surfaces that offer a choice import the fallback table",
+        "tests\\bodyScrollLock.test.mjs:121:1 :: only the shared module writes body.style.overflow",
+        "tests\\chatSystemPromptContract.test.mjs:101:1 :: formattedMessages keeps the system turn for the paths that accept one",
+        "tests\\ciPlaywrightInstall.test.mjs:223:1 :: the wrapper is executable",
+        "tests\\continuationEntryState.test.mjs:116:1 :: the prelude flag is the server's answer, never the node or the title",
+        "tests\\externalContinuationContracts.test.mjs:519:1 :: the flag write invalidates the snapshot the chat path reads",
+        "tests\\externalContinuationContracts.test.mjs:680:1 :: the seed loader decides on an uncached flag read, not the snapshot",
+        "tests\\imageGenerationFlagSnapshot.test.mjs:23:1 :: the cached reader interprets the flag with the default-off function",
+        "tests\\memoryEvalReviewSheet.test.mjs:154:1 :: the committed record matches what the generator produces",
+        "tests\\memoryEvalSucc4Dataset.test.mjs:254:1 :: a superseded id in the decision set's graph is only ever a provenance label",
+        "tests\\modelRegistryPricingInheritance.test.ts:2:4750 :: the price-clearing migration is a frozen record of what seeding once wrote",
+        "tests\\providerApiKeyNames.test.mjs:100:1 :: no module resolves a provider key by naming the variable itself",
+        "tests\\providerErrorClassification.test.mjs:219:1 :: every diagnostic code recorded as a provider failure is a known root",
+        "tests\\providerErrorClassification.test.mjs:247:1 :: the scan reaches services, not only route handlers",
+        "tests\\routerScorePolicy.test.mjs:226:1 :: the selection path imports nothing that touches the outside world",
+        "tests\\stagingVerificationRecords.test.mjs:1:1 :: H:\\Project\\ai-chat-hub\\tests\\stagingVerificationRecords.test.mjs"
+      ],
+      "batches": [
+        {
+          "index": 0,
+          "lane": "server",
+          "fileCount": 160,
+          "exit": 1,
+          "error": null,
+          "failed": [
+            "✖ the execution has no parameter through which its scope could widen (1.5299ms)",
+            "✖ promptCachePath is not passed from a file the map does not know (10.8067ms)",
+            "✖ only the surfaces that offer a choice import the fallback table (151.2965ms)",
+            "✖ only the shared module writes body.style.overflow (162.8823ms)",
+            "✖ formattedMessages keeps the system turn for the paths that accept one (1.7376ms)",
+            "✖ the wrapper is executable (0.8677ms)",
+            "✖ the prelude flag is the server's answer, never the node or the title (2.7563ms)",
+            "✖ failing tests:",
+            "✖ the execution has no parameter through which its scope could widen (1.5299ms)",
+            "✖ promptCachePath is not passed from a file the map does not know (10.8067ms)",
+            "✖ only the surfaces that offer a choice import the fallback table (151.2965ms)",
+            "✖ only the shared module writes body.style.overflow (162.8823ms)",
+            "✖ formattedMessages keeps the system turn for the paths that accept one (1.7376ms)",
+            "✖ the wrapper is executable (0.8677ms)",
+            "✖ the prelude flag is the server's answer, never the node or the title (2.7563ms)"
+          ],
+          "counts": [
+            "ℹ tests 1967",
+            "ℹ suites 0",
+            "ℹ pass 1960",
+            "ℹ fail 7",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 87451.3419"
+          ],
+          "failureLocations": [
+            {
+              "location": "tests\\adminSoleApprover.test.mjs:286:1",
+              "name": "the execution has no parameter through which its scope could widen"
+            },
+            {
+              "location": "tests\\anthropicPromptCachingWiring.test.mjs:332:1",
+              "name": "promptCachePath is not passed from a file the map does not know"
+            },
+            {
+              "location": "tests\\automaticFallbackBoundary.test.mjs:160:1",
+              "name": "only the surfaces that offer a choice import the fallback table"
+            },
+            {
+              "location": "tests\\bodyScrollLock.test.mjs:121:1",
+              "name": "only the shared module writes body.style.overflow"
+            },
+            {
+              "location": "tests\\chatSystemPromptContract.test.mjs:101:1",
+              "name": "formattedMessages keeps the system turn for the paths that accept one"
+            },
+            {
+              "location": "tests\\ciPlaywrightInstall.test.mjs:223:1",
+              "name": "the wrapper is executable"
+            },
+            {
+              "location": "tests\\continuationEntryState.test.mjs:116:1",
+              "name": "the prelude flag is the server's answer, never the node or the title"
+            }
+          ],
+          "finishedAt": "2026-09-08T05:19:28.892Z",
+          "outputSha256": "6aebf0c24d9f2b138fef36e86662a59ad9661ec33b1133a683973138370e1c20"
+        },
+        {
+          "index": 1,
+          "lane": "server",
+          "fileCount": 160,
+          "exit": 1,
+          "error": null,
+          "failed": [
+            "✖ the flag write invalidates the snapshot the chat path reads (0.6806ms)",
+            "✖ the seed loader decides on an uncached flag read, not the snapshot (0.3586ms)",
+            "✖ the cached reader interprets the flag with the default-off function (0.8833ms)",
+            "✖ failing tests:",
+            "✖ the flag write invalidates the snapshot the chat path reads (0.6806ms)",
+            "✖ the seed loader decides on an uncached flag read, not the snapshot (0.3586ms)",
+            "✖ the cached reader interprets the flag with the default-off function (0.8833ms)"
+          ],
+          "counts": [
+            "ℹ tests 1922",
+            "ℹ suites 0",
+            "ℹ pass 1919",
+            "ℹ fail 3",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 56971.5254"
+          ],
+          "failureLocations": [
+            {
+              "location": "tests\\externalContinuationContracts.test.mjs:519:1",
+              "name": "the flag write invalidates the snapshot the chat path reads"
+            },
+            {
+              "location": "tests\\externalContinuationContracts.test.mjs:680:1",
+              "name": "the seed loader decides on an uncached flag read, not the snapshot"
+            },
+            {
+              "location": "tests\\imageGenerationFlagSnapshot.test.mjs:23:1",
+              "name": "the cached reader interprets the flag with the default-off function"
+            }
+          ],
+          "finishedAt": "2026-09-08T05:20:25.911Z",
+          "outputSha256": "00d0e36da87733fd032c378cbb3d29d5f66650678015c0f36b58e11aec572134"
+        },
+        {
+          "index": 2,
+          "lane": "server",
+          "fileCount": 160,
+          "exit": 1,
+          "error": null,
+          "failed": [
+            "✖ the committed record matches what the generator produces (363.9252ms)",
+            "✖ a superseded id in the decision set's graph is only ever a provenance label (27.5589ms)",
+            "✖ the price-clearing migration is a frozen record of what seeding once wrote (1.917ms)",
+            "✖ failing tests:",
+            "✖ the committed record matches what the generator produces (363.9252ms)",
+            "✖ a superseded id in the decision set's graph is only ever a provenance label (27.5589ms)",
+            "✖ the price-clearing migration is a frozen record of what seeding once wrote (1.917ms)"
+          ],
+          "counts": [
+            "ℹ tests 1996",
+            "ℹ suites 0",
+            "ℹ pass 1993",
+            "ℹ fail 3",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 133423.8575"
+          ],
+          "failureLocations": [
+            {
+              "location": "tests\\memoryEvalReviewSheet.test.mjs:154:1",
+              "name": "the committed record matches what the generator produces"
+            },
+            {
+              "location": "tests\\memoryEvalSucc4Dataset.test.mjs:254:1",
+              "name": "a superseded id in the decision set's graph is only ever a provenance label"
+            },
+            {
+              "location": "tests\\modelRegistryPricingInheritance.test.ts:2:4750",
+              "name": "the price-clearing migration is a frozen record of what seeding once wrote"
+            }
+          ],
+          "finishedAt": "2026-09-08T05:22:39.387Z",
+          "outputSha256": "1984691adc7475c009037add89b60c770898669e29e9b725d9613ea5b6333ccf"
+        },
+        {
+          "index": 3,
+          "lane": "server",
+          "fileCount": 145,
+          "exit": 1,
+          "error": null,
+          "failed": [
+            "✖ no module resolves a provider key by naming the variable itself (45.491ms)",
+            "✖ every diagnostic code recorded as a provider failure is a known root (0.386ms)",
+            "✖ the scan reaches services, not only route handlers (0.1351ms)",
+            "✖ the selection path imports nothing that touches the outside world (1.2505ms)",
+            "✖ H:\\Project\\ai-chat-hub\\tests\\stagingVerificationRecords.test.mjs (176.1851ms)",
+            "✖ failing tests:",
+            "✖ no module resolves a provider key by naming the variable itself (45.491ms)",
+            "✖ every diagnostic code recorded as a provider failure is a known root (0.386ms)",
+            "✖ the scan reaches services, not only route handlers (0.1351ms)",
+            "✖ the selection path imports nothing that touches the outside world (1.2505ms)",
+            "✖ H:\\Project\\ai-chat-hub\\tests\\stagingVerificationRecords.test.mjs (176.1851ms)"
+          ],
+          "counts": [
+            "ℹ tests 1894",
+            "ℹ suites 0",
+            "ℹ pass 1888",
+            "ℹ fail 5",
+            "ℹ cancelled 0",
+            "ℹ skipped 1",
+            "ℹ todo 0",
+            "ℹ duration_ms 107210.5787"
+          ],
+          "failureLocations": [
+            {
+              "location": "tests\\providerApiKeyNames.test.mjs:100:1",
+              "name": "no module resolves a provider key by naming the variable itself"
+            },
+            {
+              "location": "tests\\providerErrorClassification.test.mjs:219:1",
+              "name": "every diagnostic code recorded as a provider failure is a known root"
+            },
+            {
+              "location": "tests\\providerErrorClassification.test.mjs:247:1",
+              "name": "the scan reaches services, not only route handlers"
+            },
+            {
+              "location": "tests\\routerScorePolicy.test.mjs:226:1",
+              "name": "the selection path imports nothing that touches the outside world"
+            },
+            {
+              "location": "tests\\stagingVerificationRecords.test.mjs:1:1",
+              "name": "H:\\Project\\ai-chat-hub\\tests\\stagingVerificationRecords.test.mjs"
+            }
+          ],
+          "finishedAt": "2026-09-08T05:24:26.647Z",
+          "outputSha256": "fb7bdf8b1c8c36e3246f72b14fd58ac1a7c938b3b5ecc48c1ad007e686c47ae8"
+        },
+        {
+          "index": 4,
+          "lane": "client",
+          "fileCount": 4,
+          "exit": 0,
+          "error": null,
+          "failed": [],
+          "counts": [
+            "ℹ tests 44",
+            "ℹ suites 0",
+            "ℹ pass 44",
+            "ℹ fail 0",
+            "ℹ cancelled 0",
+            "ℹ skipped 0",
+            "ℹ todo 0",
+            "ℹ duration_ms 1093.8302"
+          ],
+          "failureLocations": [],
+          "finishedAt": "2026-09-08T05:24:27.782Z",
+          "outputSha256": "c79a80615fd041712a4a5547ed9b85be86ec791e1dbbc63722e349fe10af154c"
+        }
+      ]
+    },
+    "afterDocumentCreation": {
+      "status": "completed_with_unchanged_baseline_failure",
+      "checks": [
+        {
+          "args": [
+            "run",
+            "check:encoding:strict"
+          ],
+          "start": "2026-09-08T07:13:00.580Z",
+          "end": "2026-09-08T07:13:01.777Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+          "outputBytes": 147,
+          "summary": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:policy-section-references"
+          ],
+          "start": "2026-09-08T07:13:00.581Z",
+          "end": "2026-09-08T07:13:01.578Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "a023c1b4064b51f38930616299cf1b1cd344d1d96ff41f3b32025f9f9398682e",
+          "outputBytes": 364,
+          "summary": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4059 citation(s) against 30 policy document(s). 2424 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1406 and 229 predate this change).\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:release-records"
+          ],
+          "start": "2026-09-08T07:13:00.601Z",
+          "end": "2026-09-08T07:13:00.892Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+          "outputBytes": 745,
+          "summary": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-succ9"
+          ],
+          "start": "2026-09-08T07:13:00.582Z",
+          "end": "2026-09-08T07:13:01.438Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+          "outputBytes": 1276,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-extraction-eval"
+          ],
+          "start": "2026-09-08T07:13:00.581Z",
+          "end": "2026-09-08T07:13:01.096Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+          "outputBytes": 473,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-freeze"
+          ],
+          "start": "2026-09-08T07:13:00.580Z",
+          "end": "2026-09-08T07:13:01.475Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+          "outputBytes": 4024,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:doc-references"
+          ],
+          "start": "2026-09-08T07:13:00.607Z",
+          "end": "2026-09-08T07:13:01.963Z",
+          "exit": 1,
+          "signal": null,
+          "outputSha256": "a71fe18e693b1d3bd8a77f83701bf950e0d8cef5635c3330ba9e85d466d2ac6a",
+          "outputBytes": 1905,
+          "summary": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\n\n8 broken reference(s) in source comments:\n  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n\nA comment that names a test file is making a claim about coverage, and a\ncomment that names a module is telling the next reader where to look. Both\nare believed without being opened, which is exactly why neither is checked\nby anything else.\n\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        }
+      ],
+      "newFailures": 0,
+      "existingDocReferenceFailureCount": 8,
+      "artifactChecks": {
+        "observedAt": "2026-09-08T07:14:52.765Z",
+        "strictUtf8": true,
+        "jsonParse": true,
+        "bomAbsent": true,
+        "crAbsent": true,
+        "trailingWhitespaceAbsent": true,
+        "singleFinalLf": true,
+        "localLinks": [
+          "evidence/memory-eval-vnext-offline-subset-review-disposition-2026-09-08.json",
+          "memory-eval-vnext-offline-subset-approval-2026-09-08.md"
+        ],
+        "missingLinks": [],
+        "newFileWhitespaceDiagnosticCount": 0,
+        "noIndexExitMeaning": "exit 1 means new-file diff exists; zero whitespace diagnostics",
+        "trackedEmpty": true,
+        "stagedEmpty": true,
+        "originalUntrackedAndIgnoredFilesPreserved": 22,
+        "approvedSourcesPreserved": 26,
+        "supportFilesPreserved": 9,
+        "implementationFilesPreserved": 6,
+        "onlyTwoNewPaths": [
+          ".github/audits/evidence/memory-eval-vnext-offline-subset-review-disposition-2026-09-08.json",
+          ".github/audits/memory-eval-vnext-offline-subset-review-disposition-draft-2026-09-08.md"
+        ]
+      },
+      "limits": "Artifact hashes are intentionally not self-embedded. Final byte/hash/link checks are rerun after this validation metadata and Markdown evidence hash are updated.",
+      "auditHelperNote": "The first inline validation command exceeded the Windows process command-line limit before execution; reducing only its in-memory comparison metadata allowed the read-only audit to complete. No helper file or repository code change was needed."
+    },
+    "priorComparisonAttribution": {
+      "claim": "The initial author reported that the seven check-output hashes also matched logs immediately before commit I.",
+      "comparisonLogOrHashesIncluded": false,
+      "independentlyVerifiableFromThisRecord": false,
+      "useAsCurrentRevalidationEvidence": false,
+      "availableBaseline": "Only the explicitly recorded beforeDocumentCreation and afterDocumentCreation outputs, and OD-R1's separately captured before/after results, are the independently comparable baselines."
+    }
+  },
+  "dispositionProposals": [
+    {
+      "id": "OI-F1",
+      "severityReported": "P2",
+      "proposalStatus": "pending_human_acceptance",
+      "observedNow": "T support, source lineage, M-to-T diff, T CI and installed environment recaptured at current I checkout.",
+      "historicalGap": "This posthoc record cannot prove that those observations occurred before implementation.",
+      "proposedNext": "After review and explicit publication instruction, append an audit-only commit preserving I and all approved bytes; retain timing gap as accepted residual only if human explicitly accepts.",
+      "closed": false
+    },
+    {
+      "id": "OI-F2",
+      "severityReported": "P3",
+      "proposalStatus": "deferred_pending_exact_contract_decision",
+      "implementationChanged": false,
+      "points": [
+        "Current ASCII IDs accept C0/space/DEL; current relative path accepts newline.",
+        "A non-space ASCII ID rule is a narrowing, not an automatic bug fix.",
+        "IDs and paths need separate decisions; do not automatically restrict Unicode/space in relative paths."
+      ]
+    },
+    {
+      "id": "OI-F3",
+      "severityReported": "P3",
+      "proposalStatus": "pending_explicit_input_guarantee_disposition",
+      "implementationChanged": false,
+      "points": [
+        "encodeCanonical and checkWire(object) both execute Proxy traps.",
+        "Plain Uint8Array decodeCanonical does not touch the original Proxy.",
+        "Proposed accessor/toJSON-vs-Proxy distinction is not a retroactive edit or waiver of approved F07.",
+        "OD initial reviewer classifies Proxy exclusion as a substantive guarantee reduction relative to Q F07, not merely clarification; this candidate is not accepted."
+      ],
+      "selectedOption": null,
+      "options": [
+        {
+          "id": "A",
+          "status": "unselected_pending_exact_contract_approval",
+          "choice": "Accept an explicitly narrower guarantee",
+          "scope": "Candidate: do not invoke property getter/setter, toJSON or custom iterator hooks while inspecting ordinary object data; do not claim to prevent caller Proxy trap execution.",
+          "effect": "Substantive reduction from Q F07's broad no-user-code requirement. A separate exact amendment/receipt must bind affected Q/S1 requirements, C01/C02 entry points, input assumptions, residual risks and effective implementation identity. Existing approved bytes remain immutable; no retroactive F07 pass.",
+          "implementationChangeAuthorized": false
+        },
+        {
+          "id": "B",
+          "status": "unselected_pending_exact_contract_and_implementation_scope_approval",
+          "choice": "Keep the no-user-code guarantee and prepare Proxy refusal strengthening",
+          "scope": "Separately specify rejection before observable operations for every relevant root/nested object and entry point, including revoked proxies and byte-boundary assumptions; verify feasibility and negative tests before declaring the guarantee met.",
+          "effect": "New import/helper/builtin and test scope require exact authorization even if changes fit the same six paths. Current C01 builtin scope permits node:crypto hash only. No new builtin or implementation is approved by this draft.",
+          "implementationChangeAuthorized": false
+        }
+      ]
+    },
+    {
+      "id": "OI-F4",
+      "severityReported": "P3",
+      "proposalStatus": "deferred_outside_six_file_scope",
+      "implementationChanged": false,
+      "followupCreated": false,
+      "points": [
+        "Windows absolute argv exceeds process launch capacity; package script does not execute tests.",
+        "Future runner change requires separate scope and regression review preserving discovery, flags and lane separation."
+      ]
+    }
+  ],
+  "reproducibility": {
+    "gitBlobHash": "SHA-256 of raw Buffer from git show <40-char commit>:<path>; never hash PowerShell decoded text.",
+    "sourceSet": "Q JSON sourceFiles (22) plus Q Markdown/JSON, approval request and approval receipt (4).",
+    "workingBytes": "Read at I in this task, not a claim of a historic T checkout read.",
+    "gitReads": [
+      "git cat-file -t <commit>",
+      "git show -s --format=%P <commit>",
+      "git merge-base --is-ancestor <sourceCommit> <target>",
+      "git diff --name-status <M> <T>",
+      "git diff --name-status <T> <I>",
+      "git diff --check <T> <I>",
+      "git ls-tree -r --name-only <commit> -- tests"
+    ],
+    "inventoryMethod": {
+      "algorithm": "sha256",
+      "format": "JSON.stringify(array sorted by path using JavaScript default string sort, UTF-16 code-unit order, not localeCompare; object insertion order path,version,sha256; UTF-8, no newline)",
+      "sha256": "61b16f3c4f6a97e146dc612b8ce0d77bbe5418a9100cddfd3d2d7e0257be62b1",
+      "count": 927
+    },
+    "inventoryLimit": "Compares each installed package.json version/hash against lock paths, optional/platform and hidden-lock versions; not tarball integrity or all installed file integrity.",
+    "githubMethod": "gh api GET actions/runs/<id>, actions/runs/<id>/jobs?per_page=100 with total_count guard; git/ref/heads/* and actions/runs?head_sha=I.",
+    "fullSuiteLimit": "This document does not reproduce T full-suite timing or Claude's 88-case independent harness."
+  },
+  "draftRevision": {
+    "id": "OD-R1",
+    "status": "corrected_draft_pending_confirmation_and_human_disposition",
+    "preparedAt": "2026-09-08T07:43:31.885Z",
+    "authorization": "User authorized revising only the two drafts and preparing a focused Claude confirmation prompt. No contract choice, implementation change, approval, commit/push/PR or merge authorization.",
+    "originalDrafts": [
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-review-disposition-draft-2026-09-08.md",
+        "rawSha256": "7041f7f5898ca333ae1d54f3656644d26c736011b32d8e4ad121009406fa233b",
+        "bytes": 30777,
+        "lfLines": 460,
+        "snapshotPath": "C:/Users/Vyper/AppData/Local/Temp/memory-eval-od-revision-61fd971b2fd346e5b5241bae48c227bf/original.md"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-offline-subset-review-disposition-2026-09-08.json",
+        "rawSha256": "0400f4455f620038c990e82872d724ec6a6233ca8c7be6976b772c10d56eee72",
+        "bytes": 131358,
+        "lfLines": 2581,
+        "snapshotPath": "C:/Users/Vyper/AppData/Local/Temp/memory-eval-od-revision-61fd971b2fd346e5b5241bae48c227bf/original.json"
+      }
+    ],
+    "initialDraftReview": {
+      "path": "C:/Users/Vyper/.codex/attachments/8c91b016-4cd6-401a-8e32-0790a509163e/pasted-text.txt",
+      "rawSha256": "63373d6b845a439908661bec3eb356ce6b885c650f59e28fb68da625fc9edb84",
+      "bytes": 10830,
+      "reportedVerdict": "PASS_WITH_WARNINGS",
+      "reportedSeverities": {
+        "P1": 0,
+        "P2": 0,
+        "P3": 4
+      },
+      "target": "Original OD_MD and OD_JSON raw bytes, not implementation commit I.",
+      "attribution": "The reported verdict/executions belong to the initial draft reviewer, not confirmation of OD-R1 or human acceptance."
+    },
+    "findingResponses": [
+      {
+        "id": "OD-F1",
+        "status": "addressed_pending_independent_confirmation",
+        "change": "Define currentRevalidationScope included/excluded/completion meaning alongside the boolean and mirror it in Markdown."
+      },
+      {
+        "id": "OD-F2",
+        "status": "addressed_pending_independent_confirmation",
+        "change": "Label prior working/check-output comparisons as author-tool-log claims unavailable for independent comparison here; preserve explicit present hashes."
+      },
+      {
+        "id": "OD-F3",
+        "status": "addressed_pending_independent_confirmation",
+        "change": "Preserve initial two-trap observation and append separately timed three-trap plus plain recheck reproduction; expose unselected A/B guarantee decisions."
+      },
+      {
+        "id": "OD-F4",
+        "status": "addressed_pending_independent_confirmation",
+        "change": "Withdraw the npm ls raw stdout identifier from usable identity fields; retain the former claim only as an unusable correction trail. No new capture rule is invented."
+      }
+    ],
+    "inventorySortClarification": "JavaScript default string sort, UTF-16 code-unit order; not localeCompare.",
+    "confirmationReview": null,
+    "humanDispositionDecision": "pending",
+    "selectedOiF3Option": null,
+    "gitPublicationAuthorized": false,
+    "implementationChanged": false,
+    "approvedDocumentChanged": false,
+    "checks": {
+      "targetCommit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+      "basis": "Current I checkout, tracked/index clean; pre-correction vs post-correction drafts, not a T clean-checkout suite rerun.",
+      "before": [
+        {
+          "args": [
+            "run",
+            "check:encoding:strict"
+          ],
+          "start": "2026-09-08T07:42:58.852Z",
+          "end": "2026-09-08T07:43:00.047Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+          "outputBytes": 147,
+          "summary": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:policy-section-references"
+          ],
+          "start": "2026-09-08T07:42:59.245Z",
+          "end": "2026-09-08T07:43:00.266Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "a023c1b4064b51f38930616299cf1b1cd344d1d96ff41f3b32025f9f9398682e",
+          "outputBytes": 364,
+          "summary": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4059 citation(s) against 30 policy document(s). 2424 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1406 and 229 predate this change).\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:release-records"
+          ],
+          "start": "2026-09-08T07:42:59.039Z",
+          "end": "2026-09-08T07:42:59.310Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+          "outputBytes": 745,
+          "summary": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-succ9"
+          ],
+          "start": "2026-09-08T07:42:59.442Z",
+          "end": "2026-09-08T07:43:00.294Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+          "outputBytes": 1276,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-extraction-eval"
+          ],
+          "start": "2026-09-08T07:42:59.647Z",
+          "end": "2026-09-08T07:43:00.156Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+          "outputBytes": 473,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-freeze"
+          ],
+          "start": "2026-09-08T07:42:59.864Z",
+          "end": "2026-09-08T07:43:00.647Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+          "outputBytes": 4024,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+          "counts": [],
+          "failed": []
+        },
+        {
+          "args": [
+            "run",
+            "check:doc-references"
+          ],
+          "start": "2026-09-08T07:43:00.076Z",
+          "end": "2026-09-08T07:43:01.156Z",
+          "exit": 1,
+          "signal": null,
+          "outputSha256": "a71fe18e693b1d3bd8a77f83701bf950e0d8cef5635c3330ba9e85d466d2ac6a",
+          "outputBytes": 1905,
+          "summary": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\n\n8 broken reference(s) in source comments:\n  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n\nA comment that names a test file is making a claim about coverage, and a\ncomment that names a module is telling the next reader where to look. Both\nare believed without being opened, which is exactly why neither is checked\nby anything else.\n\n",
+          "counts": [],
+          "failed": []
+        }
+      ],
+      "afterStatus": "completed_with_unchanged_baseline_failure",
+      "after": [
+        {
+          "args": [
+            "run",
+            "check:encoding:strict"
+          ],
+          "start": "2026-09-08T07:48:04.973Z",
+          "end": "2026-09-08T07:48:06.085Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+          "outputBytes": 147,
+          "summary": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:policy-section-references"
+          ],
+          "start": "2026-09-08T07:48:04.973Z",
+          "end": "2026-09-08T07:48:05.950Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "a023c1b4064b51f38930616299cf1b1cd344d1d96ff41f3b32025f9f9398682e",
+          "outputBytes": 364,
+          "summary": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4059 citation(s) against 30 policy document(s). 2424 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1406 and 229 predate this change).\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:release-records"
+          ],
+          "start": "2026-09-08T07:48:04.973Z",
+          "end": "2026-09-08T07:48:05.263Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+          "outputBytes": 745,
+          "summary": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-succ9"
+          ],
+          "start": "2026-09-08T07:48:04.976Z",
+          "end": "2026-09-08T07:48:05.798Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+          "outputBytes": 1276,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-extraction-eval"
+          ],
+          "start": "2026-09-08T07:48:05.006Z",
+          "end": "2026-09-08T07:48:05.497Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+          "outputBytes": 473,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:memory-eval-freeze"
+          ],
+          "start": "2026-09-08T07:48:04.994Z",
+          "end": "2026-09-08T07:48:05.834Z",
+          "exit": 0,
+          "signal": null,
+          "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+          "outputBytes": 4024,
+          "summary": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        },
+        {
+          "args": [
+            "run",
+            "check:doc-references"
+          ],
+          "start": "2026-09-08T07:48:04.993Z",
+          "end": "2026-09-08T07:48:06.227Z",
+          "exit": 1,
+          "signal": null,
+          "outputSha256": "a71fe18e693b1d3bd8a77f83701bf950e0d8cef5635c3330ba9e85d466d2ac6a",
+          "outputBytes": 1905,
+          "summary": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\n\n8 broken reference(s) in source comments:\n  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n\nA comment that names a test file is making a claim about coverage, and a\ncomment that names a module is telling the next reader where to look. Both\nare believed without being opened, which is exactly why neither is checked\nby anything else.\n\n",
+          "counts": [],
+          "failed": [],
+          "sameExitAndOutputAsBefore": true
+        }
+      ],
+      "noRerun": [
+        "T01",
+        "T or I whole suite",
+        "lint",
+        "typecheck",
+        "independent 88-case harness",
+        "runtime inventory",
+        "T/I/latest develop CI",
+        "npm ls"
+      ],
+      "reason": "Document-only correction with unchanged approved/implementation bytes; only the three-trap local reproduction and relevant repository checks are rerun.",
+      "newFailures": 0,
+      "existingDocReferenceFailureCount": 8,
+      "docReferenceComparison": {
+        "method": "Same exit, stdout+stderr UTF-8 output bytes and full output SHA before/after; also eight diagnostic lines compared by source name and type, not count alone.",
+        "expectedOutputSha256": "a71fe18e693b1d3bd8a77f83701bf950e0d8cef5635c3330ba9e85d466d2ac6a",
+        "beforeDiagnostics": [
+          "  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry."
+        ],
+        "afterDiagnostics": [
+          "  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+          "  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+          "  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry."
+        ]
+      },
+      "outputCapture": "Package runner: spawnSync(process.execPath, [npm-cli.js, 'run', script]) with allowlisted child environment and encoding='utf8'; hash UTF-8 bytes of (stdout || '') + (stderr || ''), in that order, without trimming/extra newline. Not npm ls's withdrawn capture.",
+      "artifactChecksStatus": "Final raw-byte/JSON/link/hash/scope audit runs after metadata and Markdown evidence hash transcription; results are returned with handoff, not self-hashed here."
+    },
+    "startedAt": "2026-09-08T07:42:58.284Z"
+  }
+}

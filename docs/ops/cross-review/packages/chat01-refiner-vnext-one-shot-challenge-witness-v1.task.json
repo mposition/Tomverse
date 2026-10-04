@@ -1,0 +1,24 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-challenge-witness-v1",
+  "requirement": "Within mposition's exact 2026-10-01 approval of temporary official one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e and file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, implement only bounded, pure, development-only challenge witness shape and synthetic fixture checks. Codex authors; Claude Code Max first-party subscription CLI independently reviews read-only with the user-approved skip-preflight exception. No real holdout content, Anthropic API, full manifest claim, seal, provider call, stage/run, product integration or dispatch authority.",
+  "completionCriteria": [
+    "Bind the verdict to the exact package digest and review the scoped diff.",
+    "Check closed shapes, source code-point spans, input limits and no arbitrary regex/script/provider execution.",
+    "Check boundary positive/negative fixtures differ only at the declared replacement and that the locked predicate separates them.",
+    "Check adversarial closed attack/prohibited-outcome enums and rejecting predicate; check mixed-language lexical minimum and required-literal predicate; check delegated constrained-format witness.",
+    "Check malformed, oversized and extra-field synthetic tests, focused test pass, typecheck, lint and whitespace guards.",
+    "Confirm semanticTruthVerified, fullManifestValidated and dispatchAuthorized remain false and no owner holdout is read, authored, logged or returned.",
+    "Confirm new source and tests are byte-pinned in a separate development-only closure including its own closure test.",
+    "Distinguish controller checks from commands actually run by the reviewer, and return one raw JSON verdict without fences and only reproducible actionable findings."
+  ],
+  "baseCommit": "998753664e8361862bd31860269cbfbce258900e",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-challenge-witness-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-challenge-witness-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitnessClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-evidence-gate-v1-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T17:28:06.267Z",
+  "durationMs": 266392,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 34,
+    "cachedInputTokens": 1248211,
+    "outputTokens": 20785,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.0827605,
+    "raw": {
+      "input_tokens": 34,
+      "cache_creation_input_tokens": 93886,
+      "cache_read_input_tokens": 1248211,
+      "output_tokens": 20785,
+      "output_tokens_details": {
+        "thinking_tokens": 14698
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 93886,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3702,
+          "cache_read_input_tokens": 94943,
+          "cache_creation_input_tokens": 1944,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1944
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T17:32:32.705Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:84b96e722ed3296e4b9171667479130ead4e60ce402e74aee67832afd3aed530",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowEvidenceCore.ts:742 (validatePromptRefinerShadowCorpus call) and :838 (corpusContentDigest emission)",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "The evaluated corpus is never bound to the frozen corpus digest — validatePromptRefinerShadowCorpus only checks that corpus.contentDigest is self-consistent (lib/promptRefinerShadowHarness.ts:405), its return value is discarded, and the bundle then hardcodes corpusContentDigest = PROMPT_REFINER_SHADOW_CORPUS_DIGEST, so a re-signed substitute corpus is evaluated while the bundle attests the frozen digest it never verified.",
+        "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs add: `const swapped = structuredClone(corpus); swapped.cases[7].sourceText = \"표로 정리해줘. 추가 문장.\"; delete swapped.contentDigest; swapped.contentDigest = promptRefinerShadowCorpusDigest(structuredClone(swapped));` (the same re-sign helper used at tests/promptRefinerShadowHarness.test.mjs:74-79, importing promptRefinerShadowCorpusDigest from ../lib/promptRefinerShadowHarness.ts), then `const bundle = evaluatePromptRefinerShadowEvidence({ corpus: swapped, spec, cases: passingRunCases() });`. Observed: no throw, bundle.corpusContentDigest === \"bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958\" and case prsv1-ko-08 is graded against the substituted source text. Expected (matching lib/promptRefinerShadowRunner.ts:38 and :202): throw on `corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST`. The existing tamper test only covers an unsigned mutation, so it does not catch this."
+      },
+      {
+        "location": "lib/promptRefinerShadowEvidenceCore.ts:828-844 (insufficient/gateOutcome precedence)",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "A conclusively failed run is relabelled `insufficient_evidence` whenever any telemetry is also missing, so a known threshold miss and missing evidence are not kept separate as completion criterion 3 requires.",
+        "reproduction": "In tests/promptRefinerShadowEvidenceCore.test.mjs, in the \"terminal failures fail…\" test change the failed row to `{ caseId: failed[0].caseId, terminalStatus: \"failed\", refinedPrompt: null, durationMs: 800, costMicroUsd: null }` (validateRunCase permits a null cost for a failed terminal). Observed: gateOutcome === \"insufficient_evidence\" while gateReasons contains \"terminal_failure_present\" and \"case_evidence_failed\". Expected: \"fail\", since a conclusive threshold miss is present regardless of the missing cost row."
+      },
+      {
+        "location": "docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:89-93 (and §5 lines 97-102)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The latency thresholds are justified by specific measured v3 values (p90 4,018 ms, max 4,110 ms) and by a \"completed prompt-refiner-shadow-run-v3\" whose receipts have no citation or record anywhere in the repository, so a reader cannot verify the only stated basis for the frozen thresholds.",
+        "reproduction": "Grep the repo for `4,018`, `4018`, `4,110` and `prompt-refiner-shadow-run-v3`: the only hits are this change's own docs (docs/ops/prompt-refiner-shadow-evidence-gate-v1.md:91 and docs/ops/prompt-refiner-shadow-harness.md:208); no run record, receipt export or progress entry reports them, and docs/ops/tomverse-chat-progress.md:1408 still lists the paid 16-case shadow run as a pending next step. Expected: a citation (run id plus where the content-free receipts are recorded, or a progress-doc entry) next to the quoted p90/max values."
+      }
+    ],
+    "nextAction": "Bind the evaluated corpus to PROMPT_REFINER_SHADOW_CORPUS_DIGEST (and use the validator's returned corpus) with a re-signed-corpus regression test, decide and test fail-over-insufficient precedence, and cite the v3 latency source; re-submit as a new digest."
+  }
+}

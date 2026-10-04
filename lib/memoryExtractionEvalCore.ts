@@ -64,9 +64,10 @@ export type MemoryEvalLanguage = (typeof MEMORY_EVAL_LANGUAGES)[number];
  *
  * **The ②③④ figure is conditional.** It holds only while
  * `lib/memoryValidatorProbeCorpus.ts` covers both language arms of all three
- * categories with every `MUST_REFUSE` probe refused and every `MUST_ACCEPT`
- * one still bulk-safe — the deterministic half that §12.3 always required and
- * that had no substance until it was measured. Without that,
+ * categories with every `MUST_REJECT` probe refused, every `MUST_ACCEPT_BULK`
+ * one still bulk-safe, and every `MUST_REQUIRE_SENSITIVE_REVIEW` one extracted
+ * but held — the deterministic half that §12.3 always required and that had no
+ * substance until it was measured. Without that,
  * `tests/memoryValidatorAdversarial.test.mjs` fails and the floor returns to
  * 200.
  */
@@ -94,6 +95,36 @@ export const MEMORY_EVAL_CATEGORY_BY_POLICY_LABEL: Readonly<
 };
 
 /** §12.3 acceptance thresholds. */
+/**
+ * The dataset schema a live run requires.
+ *
+ * Stated here rather than imported from `lib/memoryEvalDatasetSchema.ts` to
+ * keep the run-mode gate free of the schema module's own imports. That module
+ * declares a constant of the same name and they are **no longer equal**: it
+ * says "the schema this module defines", which is 2 and always will be, and
+ * this one says "the schema a live run may score", which is now 3.
+ * `tests/memoryEvalDatasetSchema.test.mjs` pins each to its own meaning.
+ *
+ * ## Moved from 2 to 3 on 2026-08-28
+ *
+ * Approved by @mposition on the evidence of
+ * `npm run report:memory-eval-schema-readiness`: every artifact consumer reads
+ * schema 3, nothing is pending, and each row names the test that would fail if
+ * its conversion were undone.
+ *
+ * **This opens the harness, not a run.** A live run still needs the §12.5
+ * budget approval on the pair, which is a separate record with its own
+ * approver and ceiling. Moving this number stops `legacy_dataset_schema` from
+ * being the refusal and leaves `no_eval_budget` as the one that answers.
+ *
+ * It also does not touch a recorded digest. The scoring contract descriptor
+ * used to read this constant, so moving it re-fingerprinted the frozen
+ * `mem-score-v3.3` contract; `DESCRIPTOR_SCHEMA_VERSION` in
+ * `lib/memoryEvalScoringContractDigest.ts` now pins that field, and
+ * `tests/memoryEvalScoringContractDigest.test.mjs` fails if the digest moves.
+ */
+export const MEMORY_EVAL_DATASET_SCHEMA_VERSION = 3;
+
 export const MEMORY_EVAL_PRECISION_WILSON_LOWER_MIN = 0.95;
 export const MEMORY_EVAL_RECALL_WILSON_LOWER_MIN = 0.85;
 
@@ -466,7 +497,14 @@ export type EvalRunModeDecision =
               | "no_eval_budget"
               | "no_api_key"
               | "dataset_not_frozen"
+              | "legacy_dataset_schema"
+              | "prompt_rule_unimplemented"
+              | "budget_not_bound"
+              | "budget_tuple_mismatch"
+              | "run_sha_not_descendant"
+              | "run_ordinal_not_approved"
               | "unknown_commit"
+              | "pair_not_runnable"
               | "run_cap_above_approved_ceiling";
       };
 
@@ -487,7 +525,40 @@ export type EvalRunModeDecision =
  */
 export function decideEvalRunMode(input: {
     live: boolean;
-    registerEntry: { evalBudget: { maxUsd: number } | null } | null | undefined;
+    registerEntry:
+        | {
+              evalBudget:
+                  | {
+                        /**
+                         * The ceiling for *one* invocation, not for the
+                         * programme. `accruedCostUsd` starts at zero every
+                         * time the harness runs, so this number is what a
+                         * single run may spend; the programme total lives on
+                         * the register as `programmeMaxMicroUsd` and is
+                         * enforced by the run count below plus the operator's
+                         * explicit instruction to run.
+                         */
+                        maxUsd: number;
+                        /**
+                         * How many provider-dispatched runs the approval
+                         * covers, if it says. `runOrdinal` is checked against
+                         * it below.
+                         */
+                        maxProviderDispatchedRuns?: number;
+                    }
+                  | null;
+              /**
+               * Checked as well as the budget, because a revoked entry keeps
+               * its budget: the approval was real and the money was really
+               * spent against it. `mem-extract-v1` is exactly that -- revoked,
+               * never approved, US$20 still recorded -- and a runner reading
+               * only `evalBudget` would happily spend the rest of it on a pair
+               * the register has closed.
+               */
+              status?: "candidate" | "approved" | "revoked";
+          }
+        | null
+        | undefined;
     hasApiKey: boolean;
     datasetFrozen: boolean;
     /**
@@ -502,22 +573,160 @@ export function decideEvalRunMode(input: {
      * a verdict nobody can cite.
      */
     commitKnown: boolean;
+    /**
+     * The schema the dataset is written in.
+     *
+     * `mem-eval-seed-11` is schema 1 and has neither `expectedDisposition`
+     * nor `goldCompleteness`, so the metrics the 2026-08-25 amendment added
+     * cannot be computed against it at all — bulk eligibility recall and the
+     * sensitive-review misclassification count both read fields it does not
+     * have. A run against it would still produce numbers, which is the
+     * danger: they would be the old contract's numbers wearing the new
+     * contract's names.
+     *
+     * Fail-closed on anything that is not schema 2, including a dataset that
+     * declares nothing. Reproducing a past diagnostic goes through
+     * `lib/memoryEvalLegacyDataset.ts` instead, which is not a live run.
+     */
+    datasetSchemaVersion?: number | null;
+    /**
+     * What the dataset is for.
+     *
+     * `decision` is the default and the only value that can produce evidence.
+     * `development` exists for one step: the probe that checks the numbers are
+     * readable before a sample is frozen and 1,150 paid calls rest on it. A
+     * development set is expected to still be moving, so `dataset_not_frozen`
+     * does not apply to it.
+     *
+     * That is the ONLY gate this relaxes. The pair still has to be runnable
+     * and funded, the key still has to exist, the commit still has to be
+     * nameable, the schema still has to be 2, and the run cap still cannot
+     * exceed the approval. And the artifact a development run produces is
+     * `decisionGrade: false`, which
+     * `scripts/check-memory-eval-run-admissibility.mjs` discards as evidence —
+     * so nothing here can turn an unfrozen sample into a verdict.
+     */
+    datasetPurpose?: "decision" | "development";
+    /**
+     * Scoring rules the contract puts on the prompt and the shipped prompt
+     * does not implement, by id.
+     *
+     * A rule this list names is one the run would report on without anything
+     * having applied it. The numbers would be the contract's numbers wearing
+     * a name nothing earned — the same failure `legacy_dataset_schema` above
+     * refuses, one layer up: there the dataset cannot answer the question,
+     * here the prompt was never asked it.
+     *
+     * Passed in rather than computed here, because the contract module is
+     * eval-side and this one is reached from the register, which the runtime
+     * pair resolver imports. Computing it here would pull the scoring
+     * contract into a runtime path that has no use for it. The caller is
+     * `memoryEvalUnimplementedPromptRules()`
+     * (`lib/memoryEvalPromptRuleImplementations.ts`), which owns the mapping.
+     */
+    unimplementedPromptRules?: readonly string[];
+    /**
+     * Why this budget cannot authorise a paid run at all, from
+     * `evalBudgetBindingProblems()`.
+     *
+     * A budget approved before instruments were bound records a ceiling and
+     * nothing else. Those stay on the register as history and cannot fund a
+     * run: the 2026-08-28 re-approval names an immutable tuple precisely so
+     * that "which instrument was this ceiling for" has an answer.
+     */
+    budgetBindingProblems?: readonly string[];
+    /**
+     * Recorded values this run would not reproduce, from
+     * `evalBudgetTupleFailures()`.
+     *
+     * The re-approval says the approval "loses effect immediately" if any of
+     * the dataset, contract or prompt version or digest differs. This is that
+     * sentence as a gate.
+     */
+    budgetTupleFailures?: readonly string[];
+    /**
+     * Whether this run's commit descends from `approvedImplementationSha`.
+     *
+     * `undefined` when the caller could not establish it — no git, a shallow
+     * clone — and that is a refusal too, not a pass: an ancestry nobody could
+     * check is an ancestry nobody has.
+     *
+     * Not an equality with the approved SHA. A registration PR cannot contain
+     * its own merge commit, and a later commit that assembles the same
+     * instrument is running the approved one.
+     */
+    runShaDescendsFromApproval?: boolean;
+    /**
+     * Which of the approved runs this invocation is, counting from 1.
+     *
+     * The approval allows a fixed number of provider-dispatched runs and this
+     * repository keeps no ledger of them, so the operator states it and the
+     * gate checks it against the approval. That makes the explicit instruction
+     * to run the ledger — which is what it already was procedurally — and
+     * makes a third run refuse rather than depend on somebody remembering.
+     *
+     * Required for a live run when the budget names a run count: absent, the
+     * invocation cannot say which run it is, and "some run" is not a run
+     * anybody approved.
+     */
+    runOrdinal?: number;
     /** Per-run ceiling requested on the command line, if any. */
     requestedRunCapUsd?: number | null;
 }): EvalRunModeDecision {
     if (!input.live) return { mode: "smoke" };
     if (!input.registerEntry) return { mode: "refused", reason: "unknown_pair" };
+    if (
+        input.registerEntry.status !== undefined &&
+        input.registerEntry.status !== "candidate" &&
+        input.registerEntry.status !== "approved"
+    ) {
+        return { mode: "refused", reason: "pair_not_runnable" };
+    }
     const budget = input.registerEntry.evalBudget;
     if (!budget) return { mode: "refused", reason: "no_eval_budget" };
     if (!input.hasApiKey) return { mode: "refused", reason: "no_api_key" };
-    if (!input.datasetFrozen) {
+    if (!input.datasetFrozen && input.datasetPurpose !== "development") {
         return { mode: "refused", reason: "dataset_not_frozen" };
+    }
+    if (input.datasetSchemaVersion !== MEMORY_EVAL_DATASET_SCHEMA_VERSION) {
+        return { mode: "refused", reason: "legacy_dataset_schema" };
+    }
+    if ((input.unimplementedPromptRules ?? []).length > 0) {
+        return { mode: "refused", reason: "prompt_rule_unimplemented" };
+    }
+    // The budget's own three conditions, in the order a reader would ask
+    // them: is this budget bound to anything, is this the instrument it was
+    // bound to, and does this commit descend from the one that was approved.
+    if ((input.budgetBindingProblems ?? []).length > 0) {
+        return { mode: "refused", reason: "budget_not_bound" };
+    }
+    if ((input.budgetTupleFailures ?? []).length > 0) {
+        return { mode: "refused", reason: "budget_tuple_mismatch" };
+    }
+    if (input.runShaDescendsFromApproval !== true) {
+        return { mode: "refused", reason: "run_sha_not_descendant" };
     }
     if (!input.commitKnown) {
         return { mode: "refused", reason: "unknown_commit" };
     }
     // A per-run cap may only narrow the approved programme ceiling. Letting a
     // command-line flag widen it would make the approval meaningless.
+    // Which approved run this is. Checked after the binding, because an
+    // invocation of the wrong instrument is wrong whichever run it claims to
+    // be, and before the cap, because a fourth run's cap is not interesting.
+    const approvedRuns = budget.maxProviderDispatchedRuns;
+    if (approvedRuns !== undefined) {
+        const ordinal = input.runOrdinal;
+        if (
+            ordinal === undefined ||
+            !Number.isInteger(ordinal) ||
+            ordinal < 1 ||
+            ordinal > approvedRuns
+        ) {
+            return { mode: "refused", reason: "run_ordinal_not_approved" };
+        }
+    }
+
     const requested = input.requestedRunCapUsd;
     if (requested != null && requested > budget.maxUsd) {
         return { mode: "refused", reason: "run_cap_above_approved_ceiling" };
@@ -526,6 +735,32 @@ export function decideEvalRunMode(input: {
         mode: "live",
         ceilingUsd: requested != null ? requested : budget.maxUsd,
     };
+}
+
+/**
+ * The distinct reasons cases failed, most common first.
+ *
+ * A run that stops on consecutive failures says the pair is "broken, not
+ * unlucky" and then does not say how — which leaves the one question worth
+ * asking answered only inside the artifact. The reasons are almost always a
+ * handful of repeats (one provider error, one parser complaint), so counting
+ * them turns a wall of records into the line somebody can act on.
+ *
+ * Grouped by the message verbatim. Normalising it would merge errors that
+ * differ in the part that matters, and these strings have already been
+ * stripped of anything key-shaped by the caller.
+ */
+export function summarizeFailures(
+    records: readonly { failure: string | null }[]
+): { reason: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const record of records) {
+        if (!record.failure) continue;
+        counts.set(record.failure, (counts.get(record.failure) ?? 0) + 1);
+    }
+    return [...counts]
+        .map(([reason, count]) => ({ reason, count }))
+        .sort((a, b) => b.count - a.count || (a.reason < b.reason ? -1 : 1));
 }
 
 /**

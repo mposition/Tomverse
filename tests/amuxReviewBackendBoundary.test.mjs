@@ -119,5 +119,8 @@ test("review transport budgets keep the browser outside the complete server path
   assert.match(reviewProxy, /AMUX_REVIEW_PROXY_TIMEOUT_MS = 40_000/);
   assert.match(reviewProxy, /AbortSignal\.timeout\(AMUX_REVIEW_PROXY_TIMEOUT_MS\)/);
   assert.match(reviewPanel, /AMUX_REVIEW_CLIENT_TIMEOUT_MS = 45_000/);
-  assert.equal((reviewPanel.match(/timeoutMs: AMUX_REVIEW_CLIENT_TIMEOUT_MS/g) ?? []).length, 4);
+  assert.equal(
+    (reviewPanel.match(/AbortSignal\.timeout\(AMUX_REVIEW_CLIENT_TIMEOUT_MS\)/g) ?? []).length,
+    4,
+  );
 });

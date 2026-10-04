@@ -190,6 +190,16 @@ test.describe("an attachment whose bytes storage no longer holds", () => {
     expect(record.requests[1].acknowledgedUnavailableAttachmentIds).toEqual([
       UNAVAILABLE_ATTACHMENT_ID,
     ]);
+    expect(record.requests[1].sourceUserMessageId).toBe(
+      record.requests[0].sourceUserMessageId
+    );
+    const retriedMessages = record.requests[1].messages as Array<{
+      id?: string;
+      role?: string;
+    }>;
+    expect(retriedMessages.filter((message) => message.role === "user").at(-1)?.id).toBe(
+      record.requests[0].sourceUserMessageId
+    );
   });
 
   test("continuing without the file leaves the card and the message alone", async ({

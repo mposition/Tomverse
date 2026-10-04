@@ -1,0 +1,94 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "prompt-refiner-durable-stage-writer-closure-doc-sync-v1",
+  "round": 2,
+  "baseCommit": "3f050c8789a3bdefa16580aadbae2f3e14761f38",
+  "lineage": [
+    "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "prisma/schema.prisma:5528 (also docs/ops/prompt-refiner-durable-stage-writer-contract.md:20,78,80 and docs/ops/prompt-refiner-durable-stage-writer-task.md:17)",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Prose still describes the closure as 186 files after the enforced contract moved to 187; no test or script binds these strings, so the drift is documentation-only and does not weaken any fail-closed check.",
+      "reproduction": "rg -n '\\b186\\b' prisma/schema.prisma docs/ops/prompt-refiner-durable-stage-writer-contract.md docs/ops/prompt-refiner-durable-stage-writer-task.md -> five stale mentions; rg -n '\\b186\\b' --glob '{lib,tests,scripts,app,packages}/**' returns no contract-bearing hit, and prisma/schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry (lib/marketingAutomationAccess.ts:101-104), so editing it re-rolls MARKETING_WEBHOOK_PIPELINE_FINGERPRINT — carried to a follow-up task as the author disclosed, outside the approved 6-path writableScope."
+    }
+  ],
+  "changeDigest": "sha256:c64fd87a617e7822ad144a600baa90dc42f78c889857394ac1e9b18d13e633ab",
+  "commit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+  "headCommit": "e016fb643e5656dc88b78d09e6cb5fb008842cc6",
+  "worktreeDirty": false,
+  "changeSummary": "Round 1에서 현재 task scope의 모든 finding은 닫혔다. 남은 두 policy 문구는 승인된 writableScope 밖이므로 기존 digest를 변경하지 않고 마지막 round에 그대로 공개한다. controller 종결 후 새 continuation이 해당 두 policy 파일과 이를 검증하는 test를 명시적으로 포함한다.",
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "lib/marketingAutomationAccess.ts",
+    "prisma/schema.prisma",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "lib/marketingAutomationAccess.ts",
+    "prisma/schema.prisma",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerRuntimeSourceClosure.test.mjs tests/marketingAutomationAccess.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2756.1634",
+      "durationMs": 2838
+    }
+  ],
+  "guardCommands": [
+    "npm run typecheck",
+    "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+    "npm run check:encoding:strict",
+    "npm run check:doc-references",
+    "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- ."
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 38767
+    },
+    {
+      "rule": "npx eslint lib/marketingAutomationAccess.ts tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2967
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1348
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 900 referenced path(s) across 116 instruction document(s), and 1013 path(s) named by comments across 3034 source file(s), all present.",
+      "durationMs": 1447
+    },
+    {
+      "rule": "git diff --check 3f050c8789a3bdefa16580aadbae2f3e14761f38 HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 64
+    }
+  ],
+  "producedAt": "2026-09-19T14:43:20.303Z",
+  "diff": "diff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md\nnew file mode 100644\nindex 00000000..b99c91e9\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md\n@@ -0,0 +1,28 @@\n+# Prompt Refiner runtime closure 문서 동기화 Claude 독립 검토 제한 승인\n+\n+Codex가 현재 대화의 사용자 지시를 기록한다. 사용자는 중단된 자동 개발을 이어서\n+마무리하도록 요청했고, 앞선 지시에서 독립 검토가 필요하면 Claude에 요청하며\n+`--skip-preflight` 예외를 허용했다. 이 문서는 전자서명, 제품 실행 승인 또는 검토\n+통과 기록이 아니다.\n+\n+## 적용 범위\n+\n+이 승인은\n+[검토 task](prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json)에 정의된\n+새 continuation exchange의 Claude 읽기 전용 독립 검토에만 적용한다. 이전 exchange는\n+`on_hold (revisions_exhausted)` 상태와 마지막 문서 finding을 그대로 보존한다.\n+\n+## 유지되는 경계\n+\n+- Claude는 저장된 Claude Max `claude.ai` 로그인으로 `claude --print --safe-mode\n+  --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob\n+  --strict-mcp-config`를 사용한다. shell, write, 추가 MCP, 모델 override는 허용하지 않는다.\n+- review child 환경에서 `ANTHROPIC_API_KEY`와 `ANTHROPIC_AUTH_TOKEN`을 제거하고\n+  `claude auth status --json`이 `authMethod=claude.ai`, `subscriptionType=max`임을\n+  확인한다. 실패하면 API key 방식으로 전환하지 않는다.\n+- `--skip-preflight`만 허용하며 `--review-despite-check-failures`와 test/CI 우회는\n+  금지한다.\n+- 최초 검토와 actionable finding 대응 후 최대 두 번의 수정 검토만 허용한다.\n+- product database, provider/model 호출, external 또는 Railway API, credential 조회,\n+  stage mutation, flag/rollout, 유료 실행과 실제 지출은 승인하지 않는다.\n+- 이 기록의 작성·검증·커밋은 push, merge 또는 deploy 승인이 아니다.\ndiff --git a/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json\nnew file mode 100644\nindex 00000000..6f20bab2\n--- /dev/null\n+++ b/docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json\n@@ -0,0 +1,29 @@\n+{\n+  \"taskId\": \"prompt-refiner-durable-stage-writer-closure-doc-sync-v1\",\n+  \"requirement\": \"on_hold로 종결된 prompt-refiner-durable-stage-writer-rebase-fingerprints-v1의 마지막 비차단 finding을 닫는다. Prompt Refiner runtime import closure가 186개에서 187개로 늘어난 사실을 Prisma schema와 운영 계약·작업·진행 문서에 일치시키고, TypeScript/JavaScript source 수는 177개에서 178개로 바로잡는다. schema.prisma의 주석 byte 변경 때문에 marketing webhook pipeline fingerprint를 결정적으로 다시 계산하고 기존 fail-closed 검사를 유지한다. 문서의 closure 수가 다시 drift하지 않도록 기존 runtime source closure test가 상수와 운영 문구를 직접 결속한다. 제품 runtime 동작, database schema 구조, provider/model, Railway, credential, stage mutation, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.\",\n+  \"completionCriteria\": [\n+    \"Prisma schema와 Prompt Refiner durable writer 계약·작업·진행 문서가 runtime closure 187개 및 그중 TypeScript/JavaScript source 178개를 동일하게 기술한다.\",\n+    \"runtime source closure test가 PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT를 기준으로 운영 문서와 schema의 count-bearing 문구를 검사해 186 회귀를 fail-closed한다.\",\n+    \"MARKETING_WEBHOOK_PIPELINE_FINGERPRINT는 주석 byte가 바뀐 schema.prisma를 포함해 computeMarketingWebhookPipelineFingerprint가 재현하는 값과 정확히 일치한다.\",\n+    \"focused fingerprint/source-closure test, typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.\",\n+    \"이 task는 이전 on_hold exchange와 finding을 수정하지 않고 supersedes로 계승하며 product database mutation, provider/model/Railway 호출, credential, stage/flag/rollout 또는 paid execution을 추가하지 않는다.\",\n+    \"Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다.\"\n+  ],\n+  \"baseCommit\": \"3f050c8789a3bdefa16580aadbae2f3e14761f38\",\n+  \"writableScope\": [\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md\",\n+    \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json\",\n+    \"docs/ops/prompt-refiner-durable-stage-writer-contract.md\",\n+    \"docs/ops/prompt-refiner-durable-stage-writer-task.md\",\n+    \"docs/ops/tomverse-chat-progress.md\",\n+    \"lib/marketingAutomationAccess.ts\",\n+    \"prisma/schema.prisma\",\n+    \"tests/marketingAutomationAccess.test.mjs\",\n+    \"tests/promptRefinerRuntimeSourceClosure.test.mjs\"\n+  ],\n+  \"generatedPaths\": [],\n+  \"supersedes\": {\n+    \"taskId\": \"prompt-refiner-durable-stage-writer-rebase-fingerprints-v1\",\n+    \"exchange\": \"docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1/exchange.json\"\n+  }\n+}\ndiff --git a/docs/ops/prompt-refiner-durable-stage-writer-contract.md b/docs/ops/prompt-refiner-durable-stage-writer-contract.md\nindex bc440a94..b51444ad 100644\n--- a/docs/ops/prompt-refiner-durable-stage-writer-contract.md\n+++ b/docs/ops/prompt-refiner-durable-stage-writer-contract.md\n@@ -17,7 +17,7 @@\n `GET /api/admin/prompt-refiner/shadow-stage`\n \n 인증된 owner와 최근 인증을 요구한다. DB mutation, rate-limit 소비, stage/audit 생성은 없다.\n-서버가 과거 evidence를 replay하고 현재 deployment의 186개 고정 source 파일 raw bytes를 읽어\n+서버가 과거 evidence를 replay하고 현재 deployment의 187개 고정 source 파일 raw bytes를 읽어\n proposal/runtime-source/execution digest, commit, deployment, 고정 비용·slot·TTL과\n `executionAdmitted:false`, `productAdapterReady:false`를 반환한다. 또한 environment,\n deployment id, commit SHA, 세 digest, 비용·capacity·TTL 전체의 canonical JSON을 결속한\n@@ -75,9 +75,9 @@ error/body는 담지 않는다.\n - migration은 기존 stage가 있으면 중단하고 seed/backfill하지 않는다.\n - writer가 UTC로 정규화한 한 DB clock snapshot으로 승인·만료 시각을 audit metadata와 stage 양쪽에\n   기록하고, INSERT trigger는 두 값이 정확히 일치하지 않으면 거부한다.\n-- DB CHECK는 186개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical\n+- DB CHECK는 187개 경로의 순서·exact key set·개별/총 크기·lowercase SHA-256 shape와 두 canonical\n   digest를 다시 계산하고 execution manifest의 canonical digest도 다시 계산한다.\n-- 186개 중 177개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는\n+- 187개 중 178개 TypeScript/JavaScript source는 8개 실행 root에서 현재 parser가 지원하는\n   static import/re-export, literal dynamic import, literal `require`, require alias,\n   `module.require`와 `createRequire` 호출로 도달하는 local runtime 폐쇄와 같아야 한다.\n   `node:module`과 `module`은 같은 builtin으로 취급하고 named·default·namespace import의\ndiff --git a/docs/ops/prompt-refiner-durable-stage-writer-task.md b/docs/ops/prompt-refiner-durable-stage-writer-task.md\nindex 93d31e21..8062bc61 100644\n--- a/docs/ops/prompt-refiner-durable-stage-writer-task.md\n+++ b/docs/ops/prompt-refiner-durable-stage-writer-task.md\n@@ -14,7 +14,7 @@ flag·credential·receipt writer를 연결하지 않는다.\n \n - 기존 `PromptRefinerReservationStage`의 additive migration\n - 승인 시점의 DB-owned 시각과 고정 60분 TTL\n-- staging 환경, runtime commit, Railway deployment id, 186-file/16 MiB bounded exact-byte\n+- staging 환경, runtime commit, Railway deployment id, 187-file/16 MiB bounded exact-byte\n   runtime import-closure source manifest\n - 과거 proposal/evidence/corpus/source identity와 현재 execution manifest의 immutable 결속\n - owner 전용 관리자 GET preview와 POST create-only writer\ndiff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md\nindex 07502490..8fca1882 100644\n--- a/docs/ops/tomverse-chat-progress.md\n+++ b/docs/ops/tomverse-chat-progress.md\n@@ -1172,7 +1172,7 @@ events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검\n ## 2026-09-17 Prompt Refiner durable stage writer 회차 (round 0 request_changes, 수정 검증·round 1 대기)\n \n 앞 회차의 다음 순서 ①을 구현했다. 과거 admission proposal/evidence/corpus/source\n-identity와 승인 시점 staging deployment의 full commit, exact 186-file runtime import-closure source manifest,\n+identity와 승인 시점 staging deployment의 full commit, exact 187-file runtime import-closure source manifest,\n 고정 execution manifest를 하나의 immutable stage에 결속한다. 승인 시각과 60분 expiry는\n DB clock이 소유하며, owner 전용 POST는 advisory lock 아래 tamper-evident success audit과\n stage insert를 한 transaction으로 처리한다. 동일 actor·동일 runtime의 exact replay만\ndiff --git a/lib/marketingAutomationAccess.ts b/lib/marketingAutomationAccess.ts\nindex c8b0cb0d..8a1f8b84 100644\n--- a/lib/marketingAutomationAccess.ts\n+++ b/lib/marketingAutomationAccess.ts\n@@ -172,7 +172,7 @@ export const computeMarketingWebhookPipelineFingerprint = (\n \n /** Updated only by the fingerprint test after reviewing a declared file change. */\n export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =\n-  \"9bcf4eb3b861f41bd8508e0e6e772c648c22351e19b58ad8e50bb39705432285\";\n+  \"ac8d4125347e59b7f896d2b70927f45595768e369716d8299db2692414bbc63e\";\n \n const sha256 = (value: string): string =>\n   createHash(\"sha256\").update(value, \"utf8\").digest(\"hex\");\ndiff --git a/prisma/schema.prisma b/prisma/schema.prisma\nindex 16885db0..d9da0a9a 100644\n--- a/prisma/schema.prisma\n+++ b/prisma/schema.prisma\n@@ -5525,7 +5525,7 @@ model PromptRefinerReservationStage {\n   corpusDigest                   String\n   runtimeCommitSha               String\n   runtimeSourceIdentityDigest    String\n-  /// Content-free v2 manifest for the exact 186-file runtime import closure;\n+  /// Content-free v2 manifest for the exact 187-file runtime import closure;\n   /// the database validates ordered paths plus 8 MiB/file and 16 MiB total.\n   runtimeSourceManifest          Json\n   runtimeSourceManifestDigest    String\ndiff --git a/tests/promptRefinerRuntimeSourceClosure.test.mjs b/tests/promptRefinerRuntimeSourceClosure.test.mjs\nindex 03a9e322..1c2245db 100644\n--- a/tests/promptRefinerRuntimeSourceClosure.test.mjs\n+++ b/tests/promptRefinerRuntimeSourceClosure.test.mjs\n@@ -1215,3 +1215,34 @@ test(\"TypeScript and PostgreSQL enforce the identical ordered runtime source pat\n     \"migration executionManifest runtimeSource.fileCount differs from the TypeScript runtime source contract\"\n   );\n });\n+\n+test(\"operator-facing contracts name the enforced runtime source closure size\", () => {\n+  const expectedCount = String(PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT);\n+  const expectedRuntimeSourceCount = String(runtimeImportClosure().length);\n+  for (const [path, pattern] of [\n+    [\"prisma/schema.prisma\", /exact (\\d+)-file runtime import closure/],\n+    [\"docs/ops/prompt-refiner-durable-stage-writer-contract.md\", /deployment의 (\\d+)개 고정 source 파일/],\n+    [\"docs/ops/prompt-refiner-durable-stage-writer-task.md\", /(\\d+)-file\\/16 MiB bounded exact-byte/],\n+    [\"docs/ops/tomverse-chat-progress.md\", /exact (\\d+)-file runtime import-closure source manifest/],\n+  ]) {\n+    const source = readFileSync(join(repositoryRoot, path), \"utf8\");\n+    const found = source.match(pattern);\n+    assert.ok(found, `${path} has no runtime source closure count`);\n+    assert.equal(found[1], expectedCount, `${path} runtime source closure count drifted`);\n+  }\n+\n+  const contract = readFileSync(\n+    join(repositoryRoot, \"docs/ops/prompt-refiner-durable-stage-writer-contract.md\"),\n+    \"utf8\"\n+  );\n+  assert.match(\n+    contract,\n+    new RegExp(`${expectedCount}개 경로의 순서`),\n+    \"database path-count contract drifted\"\n+  );\n+  assert.match(\n+    contract,\n+    new RegExp(`${expectedCount}개 중 ${expectedRuntimeSourceCount}개 TypeScript/JavaScript source`),\n+    \"runtime TypeScript/JavaScript source-count contract drifted\"\n+  );\n+});\n"
+}

@@ -2,12 +2,16 @@ import "server-only";
 
 import { createHmac } from "node:crypto";
 import { getTrustedClientIp } from "@/lib/clientIp";
+import type { MobileAuthEventName } from "@/lib/mobileAuthContract";
 
 type AuthAuditEvent =
     | "auth.create_user"
     | "auth.sign_in"
     | "auth.sign_in_denied_suspended"
     | "auth.sign_in_denied_pending_deletion"
+    // A provider account with no account here signed in from the sign-in
+    // screen, and was sent to sign-up instead of becoming a new account.
+    | "auth.sign_in_redirected_to_signup"
     | "auth.sign_out"
     | "auth.link_account"
     // A presented token was rejected during session resolution because the
@@ -47,7 +51,12 @@ export type SecurityAuditEvent =
     // only successes cannot show that.
     | "account.data_export.request"
     | "account.data_export.download"
-    | "account.data_export.refused";
+    | "account.data_export.refused"
+    // Native mobile bearer authentication (mobile auth design D15). Imported
+    // rather than re-listed: the same eight names are a database CHECK on
+    // MobileAuthEvent.event, and two copies of a closed list are two copies
+    // that drift.
+    | MobileAuthEventName;
 type AuditOutcome = "attempt" | "success" | "denied" | "rate_limited" | "failure";
 
 const auditValue = (

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "prompt-refiner-shadow-journal-v1",
+  "purpose": "development-only",
+  "dataClassification": "synthetic_test_only",
+  "harnessVersion": "prompt-refiner-shadow-harness-v1",
+  "corpusDigest": "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958",
+  "corpusCases": 16,
+  "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
+  "sourceIdentityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
+  "status": "completed",
+  "stopReason": null,
+  "resumable": false,
+  "processedCases": 16,
+  "structuralBoundaryPopulation": 16,
+  "structuralBoundaryViolations": 0,
+  "behavioralOutcomePopulation": 16,
+  "behavioralOutcomeMatches": 16,
+  "remainingCases": 0,
+  "unknownCases": 0,
+  "providerCalls": 0,
+  "costMicroUsd": 0,
+  "source": {
+    "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
+    "identityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
+    "files": {
+      ".gitattributes": "2638c45e7dcb13e22deb22492f0aa9ad3152c82179b89e2e57ed05819aed843e",
+      "docs/ops/prompt-refiner-shadow/corpus-v1.json": "9433a5bb1663220033ac497979557add703148bd29204fca960ce24ea3a06798",
+      "lib/promptInjectionAudit.ts": "4c348c3b0aadc272262cda5d3729c8f92358b5571ea8e1b4021e4dff4f33c19b",
+      "lib/promptRefinerModelPrompt.ts": "f785e797f9f3e104045c98dc60e1f5bf22b9b80a4bab059cd2204bd47bd410bd",
+      "lib/promptRefinerShadowHarness.ts": "612132f6a5a9b7e0553135fa2bfa16802b6a84f8e380b8babea4a07c46c68562",
+      "lib/promptRefinerShadowJournal.ts": "e51e931d51fe631acfca5f973e4e7f807114a75f04b278a9c0734c246a23fc23",
+      "lib/promptRefinerShadowSource.ts": "129c9b20e667a1d0e0ef1e52aec542c78c34f3e469360f53818707050287ba1b",
+      "lib/promptRefinerSuggestion.ts": "342dc278c3ef7f32736f8847ce81effdd87af8eb541400bf567bed88fea9b0f3",
+      "lib/routerDevelopmentBenchmark.ts": "aa7b9784ba7360545ce88856ffcc2a2c0fcc2ff6d8caa8ffc9f331a3f33a54e0",
+      "package-lock.json": "fb9a53fc8db62628d0bdede68667815ec7d35e34f16eb2747cebc4db5b9c4aa2",
+      "package.json": "8d8f79f4f6e7cc07483f49958b3ef41405fb57a150737d3556d590bdb014cdad",
+      "scripts/prompt-refiner-shadow-harness.mjs": "223931f6379aec68d8bc448fa7e25c443bbf6cef9adda96f666e1a15f0cffc29",
+      "tsconfig.json": "b83c909eef875286df44a248dc78e909234750c9ea0646960247fbb4f77ea4ab"
+    }
+  }
+}

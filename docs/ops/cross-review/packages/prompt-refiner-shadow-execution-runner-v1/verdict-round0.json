@@ -1,0 +1,114 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-execution-runner-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.275 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-execution-runner-20260920 shell:default)"
+  ],
+  "startedAt": "2026-09-20T10:44:24.942Z",
+  "durationMs": 399470,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 42,
+    "cachedInputTokens": 2799450,
+    "outputTokens": 32443,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 3.694897250000001,
+    "raw": {
+      "input_tokens": 42,
+      "cache_creation_input_tokens": 192477,
+      "cache_read_input_tokens": 2799450,
+      "output_tokens": 32443,
+      "output_tokens_details": {
+        "thinking_tokens": 24490
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 62904,
+        "ephemeral_5m_input_tokens": 129573
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 5068,
+          "cache_read_input_tokens": 192593,
+          "cache_creation_input_tokens": 2777,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 2777,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T10:51:04.465Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-execution-runner-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:4b382e114bef45d11ddd8c33ce103e31be6ba1d45ac5d35413d3e6f40a29840e",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "package.json:309 (devDependencies) vs lib/promptRefinerShadowTokenizer.ts:3",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "The pinned admission tokenizer `js-tiktoken` is declared only as a devDependency, yet it is now a static runtime import on the shipped paid-dispatch path (execute/route.ts -> promptRefinerShadowRunner.ts:11 -> promptRefinerShadowLiveAdapter.ts:33 -> promptRefinerShadowTokenizer.ts:3), so it is excluded from the repo's production vulnerability audit and from any dev-omitting install.",
+        "reproduction": "grep -n 'js-tiktoken' package.json -> line 309 is inside the devDependencies block (lines 300-314); package-lock.json:10184-10188 shows `\"dev\": true`. Before this change the only importer was scripts/report-token-estimate-accuracy.mjs:32 (a dev script). Consequence 1: .github/workflows/daily-security-audit.yml:113 runs `npm audit --omit=dev`, so any future CVE in a package that now executes inside app/api/admin/prompt-refiner/shadow-run/execute/route.ts is invisible to that audit. Consequence 2: `npm ci --omit=dev && npx next build` fails to resolve `js-tiktoken` from lib/promptRefinerShadowTokenizer.ts. Fix: move `js-tiktoken` into `dependencies` and regenerate package-lock.json (the frozen-version assertion in tests/promptRefinerShadowTokenizer.test.mjs:19 still holds)."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:144-234 and app/api/admin/prompt-refiner/shadow-run/execute/route.ts:2",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "The sequential loop has no wall-clock budget guard against the route's `maxDuration = 300`, so a worst-case invocation can be killed between a durable intent and its terminal write, which permanently latches the one-run authority to `stopped_unknown`.",
+        "reproduction": "Arithmetic against the frozen contract: 16 cases x PROMPT_REFINER_TIMEOUT_MS 15000 = 240s of provider budget alone, plus ~65 DB transactions (16 reserve, 16 intent, 16 terminal, 17 readState) and ~33 full run-source-manifest builds (readRunSourceFiles at lib/promptRefinerShadowRunStore.ts:206-227 re-reads and hashes all 14 paths, including package-lock.json, on every recordPromptRefinerShadowDispatchIntent and readPromptRefinerShadowExecutionState). At 30-80ms RTT that overhead alone is tens of seconds, so total can exceed the 300s cap. If the platform kills the function while an attempt is in `dispatch_intent`, sweepPromptRefinerShadowUnknowns closes it as `unknown_after_dispatch` (lib/promptRefinerShadowRunStore.ts:1000-1006), the run trigger makes `stopped_unknown` immutable (20260920120000 migration.sql:310-312), and `PromptRefinerShadowRun_runContractDigest_key` (same file, line 84) forbids a replacement run without a new contract digest. Suggested fix: record a start timestamp in the runner and return `paused` before reserving a case when remaining budget < timeoutMs + write margin."
+      },
+      {
+        "location": "lib/promptRefinerShadowRunner.ts:29",
+        "severity": "warning",
+        "basis": "judgement",
+        "claim": "The runner validates the bundled corpus only for self-consistency and never binds it to the frozen PROMPT_REFINER_SHADOW_CORPUS_DIGEST, so the exact bytes it sends to the provider are verified only indirectly via a different (on-disk) copy.",
+        "reproduction": "lib/promptRefinerShadowHarness.ts:405 compares the recomputed digest against the file's own embedded `contentDigest` field, never against PROMPT_REFINER_SHADOW_CORPUS_DIGEST (lib/promptRefinerShadowHarness.ts:29). The frozen-digest binding exists only in the stage-admission path, which reads the file from process.cwd() (lib/promptRefinerStageAdmission.ts:202, lib/promptRefinerShadowAdmissionCore.ts:734-741), while the runner dispatches `item.sourceText` from the webpack-bundled import at lib/promptRefinerShadowRunner.ts:5. Edit any `sourceText` in docs/ops/prompt-refiner-shadow/corpus-v1.json and update its `contentDigest` field, then call createPromptRefinerShadowRunner with stubbed store deps: the runner accepts and dispatches the altered text. Fix: `if (corpus.contentDigest !== PROMPT_REFINER_SHADOW_CORPUS_DIGEST) throw ...` next to line 29."
+      },
+      {
+        "location": "tests/server-contract/maintenance-step-isolation.test.ts:172-180",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The new maintenance-step mock returns a sweeper shape the real export never produces, so the added assertions (`examined`, `closedUnknown`) do not exercise the real sweeper's contract.",
+        "reproduction": "Compare the mock's `{ examined, closedUnknown, completedRuns, unresolvedStaleAttemptIds, consumedWithoutAttempt }` with the real return at lib/promptRefinerShadowRunStore.ts:1095-1103, which is `{ observedAt, staleCandidates, closedUnknownAttemptIds, unresolvedStaleAttemptIds, consumedWithoutAttempt, retryCount, redispatched }`. `examined`, `closedUnknown` and `completedRuns` do not exist on the real value, so `result.promptRefinerShadowUnknowns?.examined === 2` (test line ~403) would keep passing after any incompatible change to the sweeper's return shape. Fix: mock the real field names."
+      },
+      {
+        "location": "app/api/admin/prompt-refiner/shadow-run/execute/route.ts:93-113",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "GET enforces no DB rate limit even though it performs a full source-manifest read and takes `FOR UPDATE` row locks plus a share lock on ModelRegistryEntry on every call.",
+        "reproduction": "route.ts GET calls readPromptRefinerShadowExecutionState() with no consumeApiRateLimit; tests/server-contract/admin-prompt-refiner-shadow-execution-route.test.ts asserts `world.rateLimitCalls === 0` for GET. Each call runs readRunSourceFiles (14 files incl. package-lock.json) and lib/promptRefinerShadowRunStore.ts:400-407 (`lockStage` FOR UPDATE, `LOCK TABLE \"ModelRegistryEntry\" IN SHARE MODE`, run FOR UPDATE). The completion criterion lists the DB rate limit for 'execute GET/POST'; add a read-scoped limit or state explicitly that it is POST-only."
+      }
+    ],
+    "nextAction": "Move js-tiktoken to production dependencies and regenerate the lockfile; the three warnings (invocation budget guard, corpus digest binding, maintenance mock shape) are cheap follow-ups that should land in the same revision."
+  }
+}

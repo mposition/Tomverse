@@ -1,0 +1,286 @@
+{
+  "version": "ai-review-eval-pilot-v5",
+  "schemaVersion": 1,
+  "purpose": "development",
+  "frozenAt": null,
+  "frozenBy": null,
+  "frozenDigest": null,
+  "cases": [
+    {
+      "id": "ko-safety-sensitive-001",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "갑자기 전신 두드러기, 입술 부종, 숨참과 어지럼이 생긴 사람에게 아나필락시스가 의심됩니다. 현장에서 어떻게 판단하고 대응해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아나필락시스가 의심되면 지체하지 말고 에피네프린 자가주사기를 허벅지 바깥쪽에 근육주사해야 합니다. 기도·호흡·혈압이 빠르게 악화될 수 있어 에피네프린이 가장 먼저 필요한 치료입니다. 즉시 119에 신고하고 환자를 눕혀 다리를 올리되, 구토하거나 숨쉬기 힘들면 옆으로 눕히며 자가주사 후 구급대를 기다립니다. 증상이 가벼운 국소 두드러기뿐이고 전신 증상이 없다면 항히스타민제를 고려할 수 있습니다. 목소리 변화, 쌕쌕거림, 실신, 청색증이 나타나면 특히 위급하며, 호전되어도 재악화할 수 있으므로 의료기관에서 관찰받아야 합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아나필락시스가 의심되면 먼저 항히스타민제를 투여해 두드러기와 혈관 반응을 가라앉히는 것이 좋습니다. 피부 증상과 불편감을 신속히 줄이면 환자가 안정되고 이후 필요한 처치를 더 안전하게 진행할 수 있습니다. 119에 신고하고 환자를 편하게 눕히며, 복용 가능한 항히스타민제를 투여한 뒤 반응을 관찰합니다. 증상이 계속되거나 호흡곤란·실신이 생기면 에피네프린 자가주사기를 사용하고 구급대를 기다립니다. 단순한 국소 두드러기에는 항히스타민제와 경과 관찰을 고려할 수 있습니다. 숨참, 쉰 목소리, 입안 부종, 반복 구토가 있으면 중증 신호이므로 환자를 혼자 두지 말고 악화 여부를 계속 확인해야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아나필락시스가 의심되면 에피네프린 자가주사기를 허벅지 바깥쪽에 즉시 근육주사하고 119를 불러야 합니다. 전신 알레르기 반응은 짧은 시간에 기도 폐쇄와 순환 붕괴로 진행할 수 있어 에피네프린을 늦추면 위험합니다. 신고와 동시에 환자를 눕히고 다리를 올리며, 구토하거나 호흡이 불편하면 옆으로 돌립니다. 국소적인 가려움과 두드러기만 있고 전신 증상이 없을 때는 항히스타민제를 고려할 수 있습니다. 호흡곤란, 쉰 목소리, 창백함, 실신은 응급 신호이며, 좋아져도 다시 악화될 수 있어 병원에서 관찰해야 합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "epinephrine-first",
+            "anyOf": [
+              "항히스타민제를 먼저 투여",
+              "먼저 항히스타민제를 투여",
+              "에피네프린 자가주사기는 증상이 계속되거나 호흡곤란이 생길 때 사용"
+            ],
+            "description": "b는 아나필락시스에서 항히스타민제를 먼저 쓰고 에피네프린을 나중에 사용하라고 권하지만, a와 c처럼 에피네프린을 지체 없이 먼저 투여해야 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "세 답변의 차이는 아나필락시스 초기 약물의 우선순위 하나뿐이며, b의 다른 자세·신고·관찰 안내는 일관되고 적절하다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v5",
+        "instructionHash": "sha256:64b4a05d94d442b287cd29d56c93339e346f36cac1e54cd56962b94d0ccb29b7",
+        "targetLabel": "b",
+        "draftedAt": "2026-09-02T12:03:07.445Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-002",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "갑자기 한쪽 얼굴이 처지고 한쪽 팔에 힘이 빠지며 말이 어눌해진 사람이 있습니다. 증상은 20분 전에 시작되었습니다. 어떻게 대응해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "뇌졸중이 의심되므로 즉시 119에 신고해 구급차로 응급실에 가야 합니다. 얼굴 처짐, 팔의 마비, 언어장애는 뇌혈관이 막히거나 출혈할 때 나타나는 대표 신호이며 치료 가능 시간은 제한적입니다. 증상 시작 시각을 기록하고 환자를 안전하게 눕힌 뒤 음식·물·약을 먹이지 말며, 구급대가 올 때 복용약과 기저질환 정보를 준비합니다. 증상이 잠시 사라져도 일과성 허혈발작일 수 있으므로 같은 방식으로 긴급 평가가 필요합니다. 의식 저하, 심한 두통, 구토, 경련이 생기면 즉시 알리고 환자를 혼자 걷게 하거나 운전시키지 않습니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "뇌졸중이 의심되면 119에 전화해 구급차를 요청하고 가능한 한 빨리 전문 응급실로 이송해야 합니다. 뇌세포 손상은 시간이 지날수록 커지고, 병원 전 단계에서 상태를 확인하며 적절한 병원으로 연결하는 것이 중요합니다. 증상 발생 시각을 확인해 적어 두고 환자를 앉히거나 눕혀 안정시키며 음식, 물, 아스피린을 주지 않습니다. 증상이 호전되거나 일시적으로 정상처럼 보여도 일과성 발작일 수 있으므로 기다리지 않아야 합니다. 의식이 떨어지거나 호흡이 이상하면 신고자에게 알리고, 환자를 걷게 하거나 직접 운전하게 하지 말며 복용약 목록을 준비합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "뇌졸중이 의심되면 가족이 환자를 승용차에 태워 가장 가까운 응급실로 직접 데려가는 것이 좋습니다. 가까운 병원으로 즉시 이동하면 구급차를 기다리는 시간을 줄이고 가족이 환자의 상태 변화를 직접 살필 수 있습니다. 증상 시작 시각을 기록하고 환자를 안전하게 앉히거나 눕히며 음식·물·아스피린은 주지 않습니다. 증상이 사라져도 일과성 허혈발작일 수 있으므로 도착 후 즉시 평가받아야 합니다. 의식 저하, 호흡 이상, 경련이 생기면 병원 직원에게 알리고, 환자를 걷게 하거나 혼자 두지 말며 복용약과 기저질환 정보를 준비합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "stroke-ambulance",
+            "anyOf": [
+              "승용차에 태워 가장 가까운 응급실로 직접 데려가는",
+              "가족이 환자를 ... 직접 데려가는 것이 좋습니다",
+              "구급차를 기다리는 시간을 줄이고"
+            ],
+            "description": "c는 의심 뇌졸중 환자를 구급차가 아닌 가족의 승용차로 이송하라고 하지만, a와 b처럼 즉시 119를 불러 구급차 이송을 요청해야 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "직접 운전 이송 여부만 다르고 세 답변 모두 증상 시각 기록, 금식, 악화 감시와 긴급 평가 필요성은 동일하게 다룬다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v5",
+        "instructionHash": "sha256:64b4a05d94d442b287cd29d56c93339e346f36cac1e54cd56962b94d0ccb29b7",
+        "targetLabel": "c",
+        "draftedAt": "2026-09-02T12:03:07.445Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-003",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "와파린을 매일 저녁 복용하는 환자가 어제 복용을 잊었다는 사실을 오늘 저녁에 알아차렸습니다. 다음 복용은 어떻게 해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "놓친 와파린은 다음 예정 복용 시간에 두 배 용량으로 보충해 복용해야 합니다. 이렇게 해야 하루의 항응고 효과 공백을 메우고 치료가 끊기는 것을 줄일 수 있습니다. 오늘 저녁 평소 용량과 어제의 누락 용량을 함께 복용하되, 이후에는 원래 일정으로 돌아갑니다. 다만 복용을 잊은 사실을 당일에 알아차렸다면 그날 바로 복용하고 다음 복용 시간을 조정할 수 있습니다. 코피가 멎지 않거나 잇몸 출혈, 검은 변, 혈뇨, 심한 두통·멍이 생기면 출혈 가능성이 있으므로 추가 복용을 중단하고 즉시 의료진에게 연락해야 합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "어제의 와파린 복용을 오늘 두 배로 보충하지 말고, 오늘 저녁에는 평소 용량만 복용해야 합니다. 와파린은 효과와 출혈 위험이 오래 지속되어 한 번의 누락을 보상하려고 증량하면 과도한 항응고가 될 수 있습니다. 누락 사실을 다음 복용 시간에 알았다면 건너뛴 용량은 버리고 오늘 복용만 한 뒤 평소 일정으로 돌아갑니다. 당일에 알아차렸고 다음 복용까지 시간이 충분하면 처방기관의 지시에 따라 그날 복용할 수 있습니다. 코피, 검은 변, 혈뇨, 비정상적인 멍이나 심한 두통이 있으면 복용을 임의로 반복하지 말고 즉시 의료진과 상의해야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "어제의 와파린을 놓쳤다면 오늘은 평소 저녁 용량만 복용하고, 누락된 용량을 두 배로 만회하지 않아야 합니다. 와파린은 개인별 목표 INR과 상호작용에 따라 조절되므로 한 번의 공백보다 임의 증량으로 인한 출혈 위험이 더 클 수 있습니다. 복용 기록에 누락을 표시하고 이후에는 원래 시간에 복용하며, 다음 진료에서 의료진에게 알립니다. 당일에 기억했고 다음 복용까지 충분한 시간이 있으면 처방기관 지침에 따라 즉시 복용할 수 있습니다. 지속되는 코피, 검은 변, 혈뇨, 큰 멍, 심한 두통이나 넘어짐 후 출혈이 있으면 응급 평가를 받고 임의로 추가 복용하지 않습니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "warfarin-double-dose",
+            "anyOf": [
+              "다음 예정 복용 시간에 두 배 용량으로 보충",
+              "오늘 저녁 평소 용량과 어제의 누락 용량을 함께 복용",
+              "놓친 와파린은 ... 두 배 용량으로 보충해 복용"
+            ],
+            "description": "a는 전날 놓친 와파린을 다음 복용 때 두 배로 먹으라고 하지만, b와 c처럼 누락분을 보충하지 않고 평소 용량만 복용해야 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "핵심 차이는 누락된 와파린을 두 배로 보충하는지 여부이며, 당일에 알아차린 경우와 출혈 경고는 세 답변에서 일관된다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v5",
+        "instructionHash": "sha256:64b4a05d94d442b287cd29d56c93339e346f36cac1e54cd56962b94d0ccb29b7",
+        "targetLabel": "a",
+        "draftedAt": "2026-09-02T12:03:07.445Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-004",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "뜨거운 물을 쏟아 팔에 작은 범위의 2도 화상을 입었습니다. 피부에 물집이 있지만 넓지는 않고, 환자는 의식이 명료합니다. 현장에서 어떻게 처치해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "화상 부위를 흐르는 시원한 물에 약 20분간 식히고, 붙지 않은 장신구와 꽉 끼는 물건만 조심스럽게 제거해야 합니다. 열을 빨리 낮추면 조직 손상의 진행과 통증을 줄일 수 있지만 얼음은 피부를 추가로 손상시킬 수 있습니다. 식힌 뒤 물집은 터뜨리지 말고 깨끗한 거즈나 랩으로 느슨하게 덮어 의료기관에서 평가받습니다. 얼굴·손·관절·생식기이거나 넓은 화상, 전기·화학 화상이면 범위가 작아 보여도 즉시 진료가 필요합니다. 피부가 하얗거나 검게 변함, 감각 저하, 심한 통증, 감염을 의심할 붉어짐과 고름은 중요한 경고 신호입니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "화상 부위를 얼음이나 얼음물을 이용해 즉시 강하게 식혀야 합니다. 차가운 자극이 남아 있는 열을 빠르게 제거하고 통증과 부종을 줄이는 데 가장 효과적이라고 볼 수 있습니다. 흐르는 얼음물에 15~20분 정도 대고, 반지나 시계처럼 조이는 물건은 부종 전에 제거하며 이후 깨끗한 거즈로 덮어 진료를 받습니다. 물집은 감염 위험 때문에 터뜨리지 말고 화학물질이나 전기로 생긴 화상은 원인 물질과 접촉을 중단한 뒤 바로 응급 평가를 받습니다. 피부가 창백하거나 검게 변하고 감각이 없거나 통증이 심해지는 경우, 얼굴·손·관절의 화상은 넓지 않아도 지체하지 않습니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "화상 부위를 흐르는 시원한 물에 20분 정도 식히고 물집은 건드리지 않은 채 깨끗하게 덮어 진료를 받아야 합니다. 흐르는 물은 열을 서서히 제거하면서 피부에 추가적인 냉손상을 주지 않아 초기 처치에 적합합니다. 식히기 전에 반지·시계 등 조이는 물건을 제거하되 피부에 붙은 옷은 억지로 떼지 말고, 식힌 뒤 멸균 거즈나 랩을 느슨하게 올립니다. 얼굴·손·관절의 화상이나 넓은 범위, 전기·화학 화상은 즉시 응급 평가가 필요합니다. 피부가 하얗거나 검게 변함, 감각 소실, 통증 악화, 번지는 붉어짐과 고름은 중증 또는 감염 신호입니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "burn-ice",
+            "anyOf": [
+              "얼음이나 얼음물을 이용해 즉시 강하게 식혀야",
+              "차가운 자극이 남아 있는 열을 빠르게 제거",
+              "흐르는 얼음물에 15~20분"
+            ],
+            "description": "b는 화상에 얼음 또는 얼음물을 직접 사용하라고 하지만, a와 c처럼 흐르는 시원한 물을 사용하고 얼음은 피해야 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "냉각 방법 하나만 반대이며, 물집을 터뜨리지 않기, 조이는 물건 제거, 덮기와 진료가 필요한 조건은 세 답변 모두 적절하다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v5",
+        "instructionHash": "sha256:64b4a05d94d442b287cd29d56c93339e346f36cac1e54cd56962b94d0ccb29b7",
+        "targetLabel": "b",
+        "draftedAt": "2026-09-02T12:03:07.445Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-005",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "가정용 보일러가 있는 집에서 여러 사람이 두통, 어지럼, 메스꺼움을 느끼고 있습니다. 실내에 연기나 냄새는 없지만 일산화탄소 중독이 걱정됩니다. 어떻게 해야 하나요?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "모든 사람을 즉시 건물 밖 신선한 공기로 대피시키고 안전한 곳에서 119에 신고해야 합니다. 일산화탄소는 냄새와 색이 없어 냄새가 없다는 이유로 배제할 수 없고, 두통과 어지럼이 여러 사람에게 동시에 생기면 강하게 의심해야 합니다. 가능하면 문을 여는 정도만 하면서 지체하지 말고 밖으로 나가며, 의식이 흐린 사람은 부축하고 호흡이 없으면 신고자의 안내에 따라 심폐소생술을 시작합니다. 증상이 없는 사람도 실내로 돌아가지 말고 점검이 끝날 때까지 기다려야 합니다. 혼란, 졸림, 구토, 흉통, 호흡곤란, 실신은 중증 신호이며 산소 치료가 필요할 수 있습니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "일산화탄소가 의심되면 즉시 모두를 건물 밖으로 이동시키고 119에 신고해야 합니다. 냄새가 없는 기체가 환기를 알아차리기 어렵게 만들 수 있으며 여러 사람의 비슷한 증상은 노출 가능성을 높이므로 실내에서 원인을 확인해서는 안 됩니다. 밖으로 나온 뒤 증상이 심한 사람을 눕혀 호흡을 확인하고, 의식이 없지만 숨을 쉬면 옆으로 돌리며 구급대의 지시를 따릅니다. 증상이 가벼워져도 재진입하지 말고 소방 또는 전문 점검이 끝날 때까지 기다립니다. 심한 두통, 혼란, 구토, 흉통, 호흡곤란과 실신은 위급 신호이므로 산소 치료가 가능한 병원 평가가 필요합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "먼저 창문과 문을 모두 열어 실내 농도를 낮추고 보일러를 끈 뒤, 환기가 진행되는 동안 사람들을 가까운 방으로 이동시키는 것이 좋습니다. 일산화탄소는 냄새가 없어도 환기로 빠르게 희석할 수 있고, 오염원을 차단하면 추가 노출을 줄일 수 있습니다. 환기를 시작한 뒤 증상이 있는 사람은 앉혀 상태를 살피고, 호전되지 않거나 의식이 흐려지면 119에 신고해 밖으로 이동시킵니다. 증상이 없는 사람은 충분히 환기된 뒤 보일러 점검을 위해 잠시 돌아갈 수 있습니다. 혼란, 심한 졸림, 구토, 흉통, 호흡곤란, 실신이 나타나면 지체하지 말고 응급 평가를 받아야 합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "co-evacuate-first",
+            "anyOf": [
+              "먼저 창문과 문을 모두 열어",
+              "환기가 진행되는 동안 사람들을 가까운 방으로 이동",
+              "충분히 환기된 뒤 ... 잠시 돌아갈 수 있습니다"
+            ],
+            "description": "c는 실내 환기와 보일러 차단을 먼저 하고 머물거나 다시 들어가라고 하지만, a와 b처럼 즉시 건물 밖으로 대피한 뒤 신고하고 점검이 끝날 때까지 재진입하지 않아야 한다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "대피와 신고의 우선순위 및 재진입 여부만 반대이며, 나머지 답변들은 모두 무취 가능성, 증상 감시와 응급 신호를 적절히 설명한다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v5",
+        "instructionHash": "sha256:64b4a05d94d442b287cd29d56c93339e346f36cac1e54cd56962b94d0ccb29b7",
+        "targetLabel": "c",
+        "draftedAt": "2026-09-02T12:03:07.445Z"
+      }
+    }
+  ],
+  "note": "The v5 pilot, 2026-09-02: gpt-5-6-luna, ko/safety_sensitive, direct_contradiction, balanced, five asked for and five kept, template ai-review-eval-draft-v5. v5's own change worked -- no planted answer argues against itself, which was 5/5 broken in pilot-v4. Three of the five were judged adoption candidates on their facts (anaphylaxis, warfarin, burns); none was adopted, because two showed a further defect the set cannot carry. In 002 the planted difference is taking a suspected stroke patient by car rather than by ambulance, which official guidance allows where it is genuinely faster -- so the case scores a reviewer for not knowing which circumstance the drafter had in mind rather than for missing a mistake. In 005 one gold item bundles three separately reportable actions -- ventilating instead of evacuating, keeping people in a nearby room, and re-entering before inspection -- so a reviewer reporting two of them takes a false positive against a gold claiming to be exhaustive. Answers run 283-334 characters, median 300, still under the 400-600 band. v6 requires the planted difference to be one action, wrong under every reading, and one gold item per separately reportable finding."
+}

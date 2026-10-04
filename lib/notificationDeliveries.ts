@@ -1,8 +1,9 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sendTransactionalEmail } from "@/lib/email";
 import {
   buildSupportNotificationEmail,
   supportNotificationRecipient,
@@ -12,11 +13,22 @@ import {
   type RefundEmailStage,
 } from "@/lib/billingEmails";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
+import {
+  buildQaReleaseOperatorEmail,
+  qaReleaseAttentionDateFromReference,
+  qaReleaseDigestRecordedDateFromReference,
+  qaReleaseMergeLaneLatchDateFromReference,
+  qaReleaseMonitorFailureDateFromReference,
+  qaReleaseStaleDateFromReference,
+} from "@/lib/qaReleaseOperatorEmail";
 import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import { qualifiesForTraceAutoReview } from "@/lib/feedbackTraceAutoReview";
 import { feedbackStageRecipient } from "@/lib/feedbackLifecycleCore";
-import { suppressionCheck } from "@/lib/emailSuppression";
+import { sendWithAddressLock } from "@/lib/emailSendLock";
+import { sendOperatorNotification } from "@/lib/operatorNotificationSend";
+import { STANDARD_SEND_PROVIDER_TIMEOUT_MS } from "@/lib/emailSendLockCore";
+import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   buildAutoFixOperatorEmail,
   type AutoFixOperatorEmailKind,
@@ -26,6 +38,7 @@ import {
   NOTIFICATION_DELIVERY_STATUS,
   classifyNotificationError,
   nextNotificationDeliveryState,
+  notificationOutcomeForProviderResult,
   type NotificationAttemptOutcome,
 } from "@/lib/notificationRetryCore";
 
@@ -79,6 +92,22 @@ export const NOTIFICATION_KIND = {
   autoFixReviewRequested: "autofix_review_requested",
   autoFixProductionVerified: "autofix_production_verified",
   autoFixPromotionFailed: "autofix_promotion_failed",
+  // The QA-release Monitor's silence alert (docs/policy/qa-release-agent.md
+  // section 7). The referenceId is `stale:<UTC date>`, so the (kind,
+  // referenceId) unique constraint makes it at most one per day.
+  qaReleaseDigestStale: "qa_release_digest_stale",
+  // A Monitor round that could not reach a verdict or record its alert
+  // (policy section 7). `monitor-failure:<UTC date>`, at most one per day.
+  qaReleaseMonitorFailed: "qa_release_monitor_failed",
+  // An operator control mismatch the Monitor found (policy sections 6 and 7).
+  // `attention:<UTC date>`, at most one per day.
+  qaReleaseAttention: "qa_release_attention",
+  // The day's QA-release digest was recorded (policy section 7).
+  // `recorded:<UTC date of the digest>`, at most one per day.
+  qaReleaseDigestRecorded: "qa_release_digest_recorded",
+  // The develop merge lane latched (policy section 7).
+  // `merge-lane-latch:<UTC date>`, at most one per day.
+  qaReleaseMergeLaneLatched: "qa_release_merge_lane_latched",
 } as const;
 
 export type NotificationKind =
@@ -113,7 +142,49 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.autoFixReviewRequested]: "operations",
   [NOTIFICATION_KIND.autoFixProductionVerified]: "operations",
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
+  [NOTIFICATION_KIND.qaReleaseDigestStale]: "operations",
+  [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operations",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operations",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operations",
+  [NOTIFICATION_KIND.qaReleaseMergeLaneLatched]: "operations",
 };
+
+/**
+ * Who each notification is for.
+ *
+ * A customer-facing notice takes the address lock and re-asks suppression
+ * before it sends (docs/policy/email-product-news-redesign-draft.md section
+ * 7.4). An operator alert does not: it is about somebody else's record and
+ * goes to our own mailboxes, so a suppression on a customer address has no
+ * bearing on it and must not silence it.
+ *
+ * A total `Record`, not a list of the customer ones: a kind added to
+ * `NOTIFICATION_KIND` without a decision about who receives it fails the
+ * build rather than inheriting a branch by name. That is the same reason
+ * `NOTIFICATION_SENDER_ROLE` above is total.
+ */
+export const NOTIFICATION_AUDIENCE: Record<NotificationKind, "customer" | "operator"> = {
+  [NOTIFICATION_KIND.supportFeedback]: "operator",
+  [NOTIFICATION_KIND.refundRequestReceived]: "customer",
+  [NOTIFICATION_KIND.refundRequestApproved]: "customer",
+  [NOTIFICATION_KIND.refundRequestRejected]: "customer",
+  [NOTIFICATION_KIND.feedbackUserReceived]: "customer",
+  [NOTIFICATION_KIND.feedbackUserReviewing]: "customer",
+  [NOTIFICATION_KIND.feedbackUserCompleted]: "customer",
+  [NOTIFICATION_KIND.feedbackUserCompletedResend]: "customer",
+  [NOTIFICATION_KIND.autoFixReviewRequested]: "operator",
+  [NOTIFICATION_KIND.autoFixProductionVerified]: "operator",
+  [NOTIFICATION_KIND.autoFixPromotionFailed]: "operator",
+  [NOTIFICATION_KIND.qaReleaseDigestStale]: "operator",
+  [NOTIFICATION_KIND.qaReleaseMonitorFailed]: "operator",
+  [NOTIFICATION_KIND.qaReleaseAttention]: "operator",
+  [NOTIFICATION_KIND.qaReleaseDigestRecorded]: "operator",
+  [NOTIFICATION_KIND.qaReleaseMergeLaneLatched]: "operator",
+};
+
+/** A kind this queue does not know is not a customer's: it is refused earlier. */
+export const isCustomerNotificationKind = (kind: string) =>
+  NOTIFICATION_AUDIENCE[kind as NotificationKind] === "customer";
 
 /** Which submitter-facing kind announces each lifecycle stage. */
 export const FEEDBACK_USER_NOTIFICATION_KIND: Record<
@@ -141,6 +212,41 @@ const DEFAULT_TIME_BUDGET_MS = 120_000;
  * before anyone notices missing mail, rather than only when rows abandon.
  */
 export const NOTIFICATION_QUEUE_DEPTH_ALERT = 100;
+
+/**
+ * Enqueues a notification inside an existing transaction in exactly one SQL
+ * statement, and says whether this call created the row.
+ *
+ * For a caller whose transaction is counted statement by statement (the
+ * QA-release Monitor, docs/policy/qa-release-agent.md section 10): Prisma's
+ * `upsert` with an empty update is not a native upsert and runs as three
+ * statements (read, insert, read back). An existing row is left exactly as
+ * it is, like `enqueueNotificationDelivery`. The timestamps are the database
+ * clock in UTC, the zone Prisma writes these naive columns in.
+ *
+ * Null when the row was inserted by a transaction that committed after this
+ * statement began: the conflict skips the insert and this statement's
+ * snapshot cannot see the row. The caller treats that as an unknown outcome.
+ */
+export async function enqueueNotificationDeliveryOnce(
+  tx: Prisma.TransactionClient,
+  input: { kind: NotificationKind; referenceId: string }
+): Promise<{ id: string; inserted: boolean } | null> {
+  const rows = await tx.$queryRaw<{ id: string; inserted: boolean }[]>`
+    WITH inserted AS (
+      INSERT INTO "NotificationDelivery" ("id", "kind", "referenceId", "nextAttemptAt", "createdAt", "updatedAt")
+      SELECT ${randomUUID()}, ${input.kind}, ${input.referenceId}, now_.t, now_.t, now_.t
+        FROM (SELECT clock_timestamp() AT TIME ZONE 'UTC' AS t) now_
+      ON CONFLICT ("kind", "referenceId") DO NOTHING
+      RETURNING "id"
+    )
+    SELECT "id", true AS inserted FROM inserted
+    UNION ALL
+    SELECT d."id", false AS inserted FROM "NotificationDelivery" d
+     WHERE d."kind" = ${input.kind} AND d."referenceId" = ${input.referenceId}
+       AND NOT EXISTS (SELECT 1 FROM inserted)`;
+  return rows.length === 1 ? rows[0] : null;
+}
 
 /**
  * Enqueues a notification inside an existing transaction.
@@ -334,6 +440,35 @@ async function renderNotification(
     };
   }
 
+  const qaReleaseEmail =
+    kind === NOTIFICATION_KIND.qaReleaseDigestStale
+      ? ({ email: "digest_stale", date: qaReleaseStaleDateFromReference(referenceId) } as const)
+      : kind === NOTIFICATION_KIND.qaReleaseMonitorFailed
+        ? ({ email: "monitor_failed", date: qaReleaseMonitorFailureDateFromReference(referenceId) } as const)
+        : kind === NOTIFICATION_KIND.qaReleaseAttention
+          ? ({ email: "attention", date: qaReleaseAttentionDateFromReference(referenceId) } as const)
+          : kind === NOTIFICATION_KIND.qaReleaseDigestRecorded
+            ? ({ email: "digest_recorded", date: qaReleaseDigestRecordedDateFromReference(referenceId) } as const)
+            : kind === NOTIFICATION_KIND.qaReleaseMergeLaneLatched
+              ? ({ email: "merge_lane_latched", date: qaReleaseMergeLaneLatchDateFromReference(referenceId) } as const)
+              : null;
+  if (qaReleaseEmail) {
+    // Rendered from the reference id alone: the alert carries a date and a
+    // link, nothing the agent read.
+    const { date } = qaReleaseEmail;
+    const recipient = supportNotificationRecipient();
+    if (!date || !recipient) return null;
+    const consoleBase =
+      process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://tomverse.app";
+    return {
+      to: recipient,
+      ...buildQaReleaseOperatorEmail(qaReleaseEmail.email, {
+        date,
+        consoleUrl: `${consoleBase}/admin/agent-digests?tab=qa-release`,
+      }),
+    };
+  }
+
   const feedbackUserStage: Record<string, FeedbackLifecycleStage> = {
     [NOTIFICATION_KIND.feedbackUserReceived]: "received",
     [NOTIFICATION_KIND.feedbackUserReviewing]: "reviewing",
@@ -459,35 +594,90 @@ export async function attemptNotificationDelivery({
       // role axis exists to stop.
       return { kind: "unsendable", reason: "sender_role_unknown" };
     }
-    // The address's own suppression state, through the one table that decides
-    // it (docs/policy/email-notifications.md §13.3): a hard bounce, an
-    // operator's manual stop and a privacy request outrank even a message the
-    // recipient asked for. Until 2026-09-16 this path asked nobody, so a
-    // suppressed address was attempted and the failure looked like the
-    // provider's.
+    // A customer-facing notice goes out through the one helper every
+    // customer-facing send uses: the address lock, the suppression word taken
+    // inside it, and the submission in the same scope
+    // (docs/policy/email-product-news-redesign-draft.md section 7.4, C29).
     //
-    // Scoped to the reporter-facing kinds on purpose. The operator alerts and
-    // the refund notices in this queue go to different people under different
-    // expectations, and deciding their suppression policy is not this
-    // change's to make (independent review 2026-09-16).
-    if (kind.startsWith("feedback_user_")) {
-      const suppression = await suppressionCheck({
+    // The refund notices join the reporter-facing ones here. They asked nobody
+    // before, which meant a hard bounce, an operator's stop or a privacy
+    // request reached the provider as an attempt and came back looking like
+    // the provider's fault. They get the transactional verdict, so a
+    // complaint does not stop them -- docs/policy/email-notifications.md §13.3
+    // decides that, not this file.
+    //
+    // Operator alerts do not pass through here: they go to the team about
+    // somebody else's report, and a queue-level stop on a customer address
+    // must not silence them.
+    if (isCustomerNotificationKind(kind)) {
+      const submitted = await sendWithAddressLock({
         emailAddress: message.to,
         classification: "transactional",
+        // The lane cap; the helper cuts it to what the transaction can
+        // protect. Without a timeout there is no abort signal at all, and the
+        // request could outlive the lock and put a message on the wire after a
+        // withdrawal completed.
+        providerTimeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+        message: {
+          subject: message.subject,
+          html: message.html,
+          text: message.text,
+        },
+        senderRole,
+        idempotencyKey: `notification-delivery:${deliveryId}`,
       });
-      if (!suppression.allowed) {
+      if (submitted.ok === false && submitted.reason === "lock_unavailable") {
+        return { kind: "lock_unavailable" };
+      }
+      if (submitted.ok === false) {
         // manual and privacy_request share one skip reason in the core table;
         // the console shows what it is given rather than inventing a split.
-        return { kind: "unsendable", reason: `suppressed:${suppression.skipReason}` };
+        return { kind: "unsendable", reason: `suppressed:${submitted.skipReason}` };
       }
+      if (submitted.value.ok) {
+        // The former direct sender used to leave this identity evidence for
+        // every accepted queue send. The address-lock helper reports instead
+        // of logging, so preserve the same operator-visible answer here. No
+        // recipient is logged.
+        console.info(
+          JSON.stringify({
+            event: "notification_email_sent",
+            deliveryId,
+            kind,
+            stream: "transactional",
+            senderRole: submitted.value.senderRole,
+            from: submitted.value.from,
+            id: submitted.value.providerMessageId,
+          })
+        );
+      }
+      if (submitted.raiseIncident === "transactional_complaint") {
+        // The verdict taken under the lock. The notice goes out anyway -- it
+        // answers something this person asked for -- but the complaint needs a
+        // person to look at it (§13.3).
+        await reportOperationalIncident({
+          code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
+          title: "Sending to an address that reported transactional mail as spam",
+          error:
+            "A queued notification is going out anyway -- it answers something " +
+            "this person asked for -- but the complaint needs a person to look at it.",
+          severity: "warning",
+          cooldownMs: 60 * 60 * 1_000,
+          context: { component: "notification-deliveries", classification: "transactional" },
+        });
+      }
+      // Read from the provider's answer rather than from a thrown string. A
+      // refused sending identity used to arrive as an unparseable message and
+      // be classified `unknown` and retried, when no amount of waiting sets an
+      // environment variable (lib/notificationRetryCore.ts).
+      return notificationOutcomeForProviderResult(submitted.value);
     }
-    const result = await sendTransactionalEmail({
-      ...message,
-      senderRole,
-      idempotencyKey: `notification-delivery:${deliveryId}`,
-    });
-    if (result.skipped) return { kind: "not_configured" };
-    return { kind: "delivered" };
+
+    // An operator alert, through the one module allowed to submit one. This
+    // file is deliberately not on the send allowlist: it carries both kinds,
+    // and a file-level allowance here would also cover a customer send that
+    // skipped the address lock (section 7.4, C41).
+    return sendOperatorNotification({ message, senderRole, deliveryId });
   } catch (error) {
     const { errorKind, permanent } = classifyNotificationError(error);
     return { kind: "failed", errorKind, permanent };

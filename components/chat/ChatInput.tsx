@@ -64,6 +64,7 @@ import {
 import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
 import { resolveVoiceInputCopy } from "@/components/chat/voiceInputCopy";
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
+import { isVoiceRecorderBusy } from "@/lib/voiceRecorderMachine";
 import { dispatchAppToast } from "@/lib/appToast";
 import {
   attachmentKindForFormat,
@@ -149,6 +150,13 @@ import { useGuestVerification } from "@/components/chat/GuestVerificationProvide
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
+import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
+import {
+  resolvePromptRefinerFixtureDecision,
+  type BoundPromptRefinerSuggestion,
+  type PromptRefinerResolution,
+  type PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 
 /**
  * A stable empty list for the image-intent classifier.
@@ -550,13 +558,28 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  singleModelSelection?: boolean;
   value: string;
   onChange: (value: string) => void;
   personalizedPrompt?: string | null;
   onSubmit: () => void;
   onCancel: () => void;
   disabled?: boolean;
+  /**
+   * Locks only the bytes of the next durable draft while the current Message
+   * transaction is being prepared. Model controls remain usable; text,
+   * attachments, voice, and duplicate submit do not.
+   */
+  draftLocked?: boolean;
+  /** Durable Chat cannot submit before an async voice transcript has landed. */
+  blockSubmitWhileVoiceBusy?: boolean;
   isSending?: boolean;
+  /**
+   * Authenticated durable Chat owns a successor draft independently of the
+   * response already streaming. Other surfaces retain the single-flight
+   * composer contract and stay disabled until that response settles.
+   */
+  allowEditingWhileSending?: boolean;
   focusToken?: number;
   isNewConversation?: boolean;
   currentChatId?: string | null;
@@ -630,6 +653,22 @@ type ChatInputProps = {
   selectionMode?: "manual" | "auto";
   selectionModePending?: boolean;
   onSelectionModeChange?: (next: boolean) => void;
+  /**
+   * Pre-send Prompt Refiner suggestion UI. `offered` is one server-owned
+   * decision; false leaves no disabled teaser. The caller owns the request and
+   * its state so it can bind a response to the exact draft snapshot.
+   */
+  promptRefinerOffered?: boolean;
+  promptRefinerState?: PromptRefinerUiState;
+  onPromptRefinerRequest?: (sourcePrompt: string) => void;
+  /**
+   * Fixture decisions are validated by the state owner. Acceptance shows a
+   * read-only preview and never changes the controlled textarea or durable
+   * draft; the owner discards it when the authored source changes.
+   */
+  onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  /** Return true only when the owner dismissed this exact fixture state. */
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /**
    * The assistant this conversation runs under (§14), or null when it runs
    * under none. Undefined when the control does not apply at all — a guest,
@@ -811,13 +850,17 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 };
 
 export function ChatInput({
+  singleModelSelection = false,
   value,
   onChange,
   personalizedPrompt,
   onSubmit,
   onCancel,
   disabled = false,
+  draftLocked = false,
+  blockSubmitWhileVoiceBusy = false,
   isSending = false,
+  allowEditingWhileSending = false,
   focusToken,
   isNewConversation = true,
   currentChatId = null,
@@ -845,6 +888,11 @@ export function ChatInput({
   selectionMode = "manual",
   selectionModePending = false,
   onSelectionModeChange,
+  promptRefinerOffered = false,
+  promptRefinerState,
+  onPromptRefinerRequest,
+  onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   assistantProfile,
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
@@ -1064,7 +1112,7 @@ export function ChatInput({
           all: extensions.join(", "),
         }));
     }, [isEphemeralAttachment, t]);
-  const maxSelectableModels = isGuestMode
+  const maxSelectableModels = singleModelSelection ? 1 : isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
   const disabledModelIdSet = useMemo(
@@ -1268,7 +1316,45 @@ export function ChatInput({
     ? t("chat.exceedDailyLimit")
     : t("chat.inputPlaceholder");
   
-  const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
+  // Only the authenticated durable Chat surface has transferred the accepted
+  // snapshot into a Message transaction and can therefore own a successor
+  // draft while the provider streams. Review, continuation and guest surfaces
+  // keep the historical single-flight composer contract.
+  const isDisabled =
+    disabled ||
+    isUploading ||
+    isUsageLimitReached ||
+    (isSending && !allowEditingWhileSending);
+  const isDraftMutationDisabled = isDisabled || draftLocked;
+
+  const handlePromptRefinerDecision = useCallback(
+    (
+      suggestion: BoundPromptRefinerSuggestion,
+      decision: "accepted" | "kept_original"
+    ) => {
+      const resolution = resolvePromptRefinerFixtureDecision({
+        suggestion,
+        currentPrompt: value,
+        decision,
+      });
+      // The owner validates the exact source and decision before leaving ready.
+      // A fixture decision is preview-only. The owner may acknowledge a
+      // validated handoff, but these synthetic bytes must never enter the
+      // authored composer draft or its durable draft writer.
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      onPromptRefinerDecision?.(resolution);
+    },
+    [onPromptRefinerDecision, value]
+  );
+
+  const handlePromptRefinerDismiss = useCallback(
+    (requestId: string) => {
+      if (onPromptRefinerDismiss?.(requestId)) {
+        requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      }
+    },
+    [onPromptRefinerDismiss]
+  );
 
   /*
     Voice input (docs/policy/voice-input.md §8.3).
@@ -1322,12 +1408,15 @@ export function ChatInput({
     */
     requestVerificationToken: () => requestGuestVerificationToken("guest_voice"),
   });
+  const isVoiceSubmissionBlocked =
+    blockSubmitWhileVoiceBusy && isVoiceRecorderBusy(voice.state);
 
   // Why Send is unavailable, for the cases a user cannot work out from the
   // button itself. `title` alone does not reach a screen reader or a keyboard
   // user, so this is rendered as text the button points at with
   // aria-describedby (docs/ui-contracts/mobile-chat-composer.md).
-  const sendDisabledReason = isUsageLimitReached
+  const sendDisabledReason = singleModelSelection && selectedModels.length !== 1
+    ? t("chat.singleModelRequired") : isUsageLimitReached
     ? t("chat.exceedDailyLimit")
     : activeSelectedModels.length === 0
       ? t("chat.chooseModel")
@@ -2280,7 +2369,10 @@ export function ChatInput({
     if (action !== "submit") return;
 
     e.preventDefault();
-    if (!isDisabled) {
+    // The successor draft remains editable in durable Chat, but Enter cannot
+    // consume it while either a live response or a read-only recovery poll is
+    // still active. The visible branch below presents Stop instead of Send.
+    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
       dismissGuestQuickStart();
       rememberImageIntentPrompt();
       onSubmit();
@@ -2552,7 +2644,7 @@ export function ChatInput({
   );
 
   const handleFilesSelected = async (files: FileList | File[] | null) => {
-    if (!files?.length) return;
+    if (draftLocked || !files?.length) return;
 
     const availableSlots =
       maxAttachments - attachments.length - scopedPendingAttachments.length;
@@ -2574,6 +2666,7 @@ export function ChatInput({
 
   const handleRetryFailedAttachment = useCallback(
     (failed: FailedAttachment) => {
+      if (draftLocked) return;
       // Retried into the conversation it originally failed in, which is the
       // only one its card is ever shown in.
       void runUploadBatch(
@@ -2581,12 +2674,13 @@ export function ChatInput({
         failed.scopeId
       );
     },
-    [runUploadBatch]
+    [draftLocked, runUploadBatch]
   );
 
   const handleDismissFailedAttachment = useCallback((id: string) => {
+    if (draftLocked) return;
     setFailedAttachments((current) => current.filter((item) => item.id !== id));
-  }, []);
+  }, [draftLocked]);
 
   useEffect(() => {
     const preventFileNavigation = (event: DragEvent) => {
@@ -2615,6 +2709,7 @@ export function ChatInput({
     surface: conversationDropSurface,
     canAttach,
     onFiles: (files) => {
+      if (draftLocked) return;
       void handleFilesSelected(files);
     },
     onRefused: refuseAttachmentDrop,
@@ -2637,7 +2732,7 @@ export function ChatInput({
     if (!hasDraggedFiles(event.dataTransfer)) return;
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = canAttach ? "copy" : "none";
+    event.dataTransfer.dropEffect = canAttach && !draftLocked ? "copy" : "none";
     setIsDragActive(true);
   };
 
@@ -2655,6 +2750,8 @@ export function ChatInput({
     event.stopPropagation();
     setIsDragActive(false);
 
+    if (draftLocked) return;
+
     if (!canAttach) {
       refuseAttachmentDrop();
       return;
@@ -2666,6 +2763,10 @@ export function ChatInput({
     const handlePaste = (
         event: React.ClipboardEvent<HTMLTextAreaElement>
     ) => {
+        if (draftLocked) {
+            event.preventDefault();
+            return;
+        }
         const pastedFiles = Array.from(event.clipboardData.files);
 
         if (pastedFiles.length === 0) {
@@ -2687,7 +2788,7 @@ export function ChatInput({
     };
 
   const handleGoogleDriveSelect = async () => {
-    if (!canConnectGoogleDrive || isUploading) return;
+    if (draftLocked || !canConnectGoogleDrive || isUploading) return;
 
     const availableSlots = maxAttachments - attachments.length;
     if (availableSlots <= 0) {
@@ -2822,6 +2923,7 @@ export function ChatInput({
   };
 
   const handleRemoveAttachment = async (attachment: ChatAttachment) => {
+    if (draftLocked) return;
     onAttachmentsChange(
       attachments.filter((item) => item.id !== attachment.id)
     );
@@ -3345,6 +3447,7 @@ export function ChatInput({
                     <button
                       type="button"
                       data-testid="attachment-retry"
+                      disabled={draftLocked}
                       onClick={() => handleRetryFailedAttachment(failed)}
                       aria-label={`${t("chat.attachmentRetry")}: ${failed.name}`}
                       className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
@@ -3356,6 +3459,7 @@ export function ChatInput({
                     <button
                       type="button"
                       data-testid="attachment-failed-dismiss"
+                      disabled={draftLocked}
                       onClick={() => handleDismissFailedAttachment(failed.id)}
                       aria-label={`${t("chat.removeAttachment")}: ${failed.name}`}
                       className={`relative flex items-center justify-center rounded-full text-red-800 transition hover:bg-red-200 dark:text-red-100 dark:hover:bg-red-900/60 ${
@@ -3432,6 +3536,7 @@ export function ChatInput({
                   <button
                     type="button"
                     data-testid="attachment-remove"
+                    disabled={draftLocked}
                     onClick={() => handleRemoveAttachment(attachment)}
                     // No `relative` here. Both branches below position the
                     // button with `absolute`, and an absolutely positioned
@@ -3494,6 +3599,33 @@ export function ChatInput({
             </button>
           </div>
         )}
+        {promptRefinerOffered &&
+        promptRefinerState &&
+        onPromptRefinerRequest &&
+        onPromptRefinerDecision &&
+        onPromptRefinerDismiss ? (
+          <PromptRefinerSuggestionPanel
+            offered
+            language={lang}
+            currentPrompt={value}
+            state={promptRefinerState}
+            interactionBlockReason={
+              isComposingDraft
+                ? "composition_active"
+                : isDraftMutationDisabled
+                  ? "composer_locked"
+                  : null
+            }
+            onRequest={onPromptRefinerRequest}
+            onUseSuggestion={(suggestion) =>
+              handlePromptRefinerDecision(suggestion, "accepted")
+            }
+            onKeepOriginal={(suggestion) =>
+              handlePromptRefinerDecision(suggestion, "kept_original")
+            }
+            onDismiss={handlePromptRefinerDismiss}
+          />
+        ) : null}
         {/*
           Voice input's status gets a row of its own above the textarea, for
           the same reason the tool chips do: it grows (an elapsed timer, a
@@ -3518,6 +3650,11 @@ export function ChatInput({
           visible line -- the invariant in
           docs/ui-contracts/mobile-chat-composer.md.
         */}
+        {singleModelSelection && selectedModels.length !== 1 && (
+          <p data-testid="chat-single-model-notice" className="text-xs text-amber-700 dark:text-amber-300">
+            {t("chat.singleModelRequired")}
+          </p>
+        )}
         <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
         {/*
           COMPOSER-FOCUS-CLIP-01. The global focus outline is drawn outside the
@@ -3536,6 +3673,7 @@ export function ChatInput({
           wrap={preserveFormatting ? "off" : "soft"}
           onFocus={() => dismissGuestQuickStart("completed")}
           onChange={(e) => {
+            if (draftLocked) return;
             if (e.target.value) dismissGuestQuickStart();
             onChange(e.target.value);
           }}
@@ -3552,6 +3690,7 @@ export function ChatInput({
           aria-label={placeholderText}
           placeholder={placeholderText}
           disabled={isDisabled}
+          readOnly={draftLocked}
           enterKeyHint={isMobileShell ? "enter" : undefined}
           rows={1}
           // The min/max heights are in rem, not px, so a reader at 200% text
@@ -3727,17 +3866,18 @@ export function ChatInput({
               state={voice.state}
               copy={voiceCopy}
               isMobileShell={isMobileShell}
-              // The composer's own disabled state, not the voice machine's:
-              // recording into a locked or sending composer would produce a
-              // transcript with nowhere to go.
-              disabled={isDisabled}
+              // The composer's mutation boundary, not the voice machine's:
+              // a transaction-preparation lock has not yet established a
+              // durable home for a successor transcript.
+              disabled={isDraftMutationDisabled}
               onStart={voice.start}
               onStop={voice.stop}
             />
           )}
-          {isSending ? (
+          {isSending && !allowEditingWhileSending ? (
             <button
               type="button"
+              data-testid="chat-stop-all-button"
               onClick={onCancel}
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
               title={t("chat.stopAllResponses")}
@@ -3745,17 +3885,20 @@ export function ChatInput({
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
-          ) : (
+          ) : !isSending ? (
             <button
               type="button"
               data-testid="chat-send-button"
               onClick={() => {
+                if (isVoiceSubmissionBlocked) return;
                 dismissGuestQuickStart();
                 rememberImageIntentPrompt();
                 onSubmit();
               }}
               disabled={
-                isDisabled ||
+                isDraftMutationDisabled ||
+                isVoiceSubmissionBlocked ||
+                (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
               }
@@ -3768,7 +3911,7 @@ export function ChatInput({
             >
               <ArrowUp className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
           {sendDisabledReason && (
             <p
               id="chat-send-disabled-reason"
@@ -3881,7 +4024,7 @@ export function ChatInput({
                   <button
                     type="button"
                     data-testid="tools-attach-row"
-                    disabled={!canAttach || attachments.length >= maxAttachments}
+                    disabled={draftLocked || !canAttach || attachments.length >= maxAttachments}
                     onClick={() => setMenuView("attachSource")}
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-zinc-800"
                   >
@@ -4216,7 +4359,7 @@ export function ChatInput({
                   <button
                     type="button"
                     data-testid="attach-local-file-row"
-                    disabled={!canAttach || attachments.length >= maxAttachments}
+                    disabled={draftLocked || !canAttach || attachments.length >= maxAttachments}
                     onClick={() => {
                       closeMenu(false);
                       fileInputRef.current?.click();
@@ -4243,8 +4386,8 @@ export function ChatInput({
                     data-testid="attach-google-drive-row"
                     data-locked={canConnectGoogleDrive ? "false" : "true"}
                     disabled={
-                      canConnectGoogleDrive &&
-                      attachments.length >= maxAttachments
+                      draftLocked ||
+                      (canConnectGoogleDrive && attachments.length >= maxAttachments)
                     }
                     onClick={() => {
                       closeMenu(false);
@@ -4651,6 +4794,7 @@ export function ChatInput({
 
                     return (
                       <ModelPickerPanel
+                        singleModelSelection={singleModelSelection}
                         models={PUBLIC_MODELS}
                         selectedModelIds={selectedModels}
                         activeSelectedCount={activeSelectedModels.length}
@@ -4782,6 +4926,7 @@ export function ChatInput({
           type="file"
           multiple
           accept={acceptedFileTypes}
+          disabled={draftLocked}
           onChange={(event) => handleFilesSelected(event.target.files)}
           className="hidden"
         />

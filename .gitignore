@@ -39,6 +39,11 @@ playwright.local-sandbox.config.ts
 # misc
 .DS_Store
 *.pem
+# One exception, and it is a public key: the ROUTE-01 review draw encrypts
+# key.json to it, so a GitHub runner has to be able to read it from the
+# repository. Its private half lives outside any checkout, passphrase-
+# protected, and is what the blanket rule above still exists to stop.
+!docs/ops/router-human-review/key-recipient.pub.pem
 
 # debug
 npm-debug.log*
@@ -75,6 +80,14 @@ docs/*
 !docs/policy/
 !docs/ops/
 !docs/release-gates/
+# docs/marketing/ holds the approved asset registry, which is a gate rather
+# than documentation: lib/marketingAssets.ts reads it, and a marketing post may
+# only use an asset it names. The file is named rather than the directory --
+# marketing strategy lives in the private repository, and an exception for the
+# whole directory is an invitation to put some of it here.
+!docs/marketing/
+docs/marketing/*
+!docs/marketing/asset-registry.json
 .playwright-mcp
 
 # Scratch build directory for scripts/verify-package-build-matrix.mjs.
@@ -92,18 +105,27 @@ promotion-metadata-snapshot-*.json
 # that drifts from the code it was built to exercise.
 .tmp/
 
-# Agent worktrees. `EnterWorktree` puts a full checkout under here -- with its
-# own node_modules and .next once anything has been built or run in it, so the
-# directory is gigabytes of build output that git would otherwise offer to
-# commit. The worktree has its own working tree and its own branch; nothing in
-# it belongs to this one.
-#
-# Scoped to the subdirectory, not to `.claude/`: settings and skills checked in
-# under .claude/ are repository content and must stay versioned.
-/.claude/worktrees/
+# Vite build output for the Capacitor shell spike. `cap sync` copies it into
+# the native projects; it is a build artefact, not source.
+/apps/*/dist/
+
+# Claude Code worktrees. `EnterWorktree` registers a real git worktree here
+# (`git worktree list` knows it); to the parent checkout it is an untracked
+# directory holding a second copy of the whole repository. Committing it would
+# vendor the repo into itself.
+.claude/worktrees/
 
 # An open staging-verification record is a run in progress, not repository
 # content. `check:staging-verification-records` refuses one with no executor
 # and no result, by design -- a blank page in the tree reads as a finished run.
 # The record is committed by whoever ran it, once it has both.
 docs/ops/*-staging-verification-records/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]__*.md
+
+# rust build output
+/target/
+
+# Independent-review briefs written for another agent. They are working notes
+# that name private paths and design documents, and belong in a scratch
+# directory outside the repository, never in a commit (this repository is
+# public). Two were committed by mistake with marketing S2d2 and removed.
+/.*-review-r*.md

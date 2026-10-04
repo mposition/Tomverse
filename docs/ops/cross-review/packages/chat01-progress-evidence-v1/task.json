@@ -1,0 +1,20 @@
+{
+  "taskId": "chat01-progress-evidence-v1",
+  "requirement": "CHAT-01 진행 문서에 #1673 병합·정확한 staging deployment·desktop/mobile focused E2E·로그인된 기존 test conversation reload 관측과 안전한 interactive staging seam 부재를 과장 없이 기록한다. confirmatory v4가 이미 strict case evidence와 token·cost·latency receipt를 저장하고 content-free aggregate를 재구성한다는 완료 사실과, 남은 retention/privacy 및 store가 suggestion/product caller의 제품 request/execution·사용자 disposition receipt에만 적용된다는 경계를 분리한다. 전체 기술 구현, release/activation readiness, Prompt Refiner 제품 연결, confirmatory infrastructure의 백분율은 launch 승인이나 품질 gate가 아닌 추정으로 표시하고, 다음 순서는 제품 receipt 결정과 content-free product receipt store 뒤 Cursor/CI, 별도 승인 paid confirmatory, 사람 disposition, product suggestion, Router/Auto shadow로 유지한다.",
+  "completionCriteria": [
+    "#1673 merge SHA, staging deployment ID·SUCCESS·완료 시각과 focused E2E 38/38이 제공된 증거와 정확히 일치하고 구현·회귀·병합·배포를 서로 대신하지 않는다.",
+    "signed-in staging 관측은 기존 전용 test conversation의 질문 1개·답변 1개와 reload 보존, 중복·recovery 오류 없음, 새 메시지·provider 호출·credit 사용 0으로 한정한다.",
+    "saved-but-undispatched의 interactive staging 재현은 loopback-only deterministic gate와 accidental dispatch 위험 때문에 시도하지 않았음을 밝히고, 이를 pass/fail이 아닌 safe interactive staging seam 부재로 분류한다.",
+    "confirmatory v4의 strict case evidence, token·cost·latency receipt 저장과 content-free aggregate 재구성을 완료된 기반으로 기록하며 product receipt 보존 공백과 혼동하지 않는다.",
+    "남은 retention/privacy 및 writer/store/collection은 suggestion/product caller의 product request/execution receipt와 user disposition receipt에만 적용된다.",
+    "79%·65%·40%·95%는 서로 다른 축의 대략적 추정이고 품질 gate, traffic activation 또는 launch 승인으로 제시되지 않는다.",
+    "권장 순서는 product receipt retention/privacy, content-free product request/execution+disposition store, Cursor/CI, separately approved paid confirmatory, human disposition, product suggestion, Router/Auto shadow다.",
+    "Cursor verdict는 exact package digest에 결속하고 각 finding에 location, severity, evidence와 reproduction을 제공하며 source edit, provider API call, paid call, push, PR, merge 또는 deploy를 하지 않는다."
+  ],
+  "baseCommit": "90380a7bd5b1589531741dd02fb2c88c041cc1df",
+  "writableScope": [
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ops/cross-review/packages/chat01-progress-evidence-v1"
+  ],
+  "generatedPaths": []
+}

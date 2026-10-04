@@ -402,3 +402,31 @@ c65b196ba5d8d66b9916882e46caabd02fe84e95:tests/integration/amux-orchestration.db
 25f329f950b603d7cdddda96447c19dc1dc23374:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1023
 25f329f950b603d7cdddda96447c19dc1dc23374:tests/integration/amux-orchestration.db.test.ts:generic-api-key:1401
 d3569b097b1d264031ea7b98e2f24684e14d03a2:tests/engineeringAgentPublisher.test.mjs:aws-access-token:180
+
+# A sessionStorage key name, not a credential.
+#
+# components/auth/signupConsentClient.ts keeps the sign-up consent choice in
+# tab-scoped storage under a constant named STORAGE_KEY whose value is a dotted
+# storage name with a camelCase segment and a version suffix. The
+# generic-api-key rule reads the _KEY name and that value as a secret; the
+# .gitleaks.toml allowlist covers all-lowercase and camelCase key names, not
+# this shape. The value is deliberately not quoted here: quoting it put the
+# same shape in this file and the scan reported it against this entry's own
+# commit. The two commits below introduced the line and stay in history.
+#
+# Scope: exactly these two findings in those two commits — nothing wider.
+2bdbdffdf26dd95f9b8be51665a428f74a110317:components/auth/signupConsentClient.ts:generic-api-key:16
+66dffd7bc78bac851890835b007df8b8f9299cb3:components/auth/signupConsentClient.ts:generic-api-key:21
+
+# Synthetic agent-digest secret-scan fixtures, not credentials.
+#
+# Commit 110c694 introduced tests/agentDigestStoreCore.test.mjs with two
+# assignment-shaped values (an upper-case token key and a nested client
+# secret key) that exercise the agent-digest store's own refusal of
+# key=value secrets. Both values were invented for the test, are
+# alternating letter-digit runs, and never belonged to any system. Both sit
+# on one line, so gitleaks reports one fingerprint twice. The values are
+# deliberately not quoted.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+110c69474974e48200bcb7fbd556a7e41a7234b6:tests/agentDigestStoreCore.test.mjs:generic-api-key:92

@@ -6,8 +6,12 @@ import { notFound } from "next/navigation";
 import { AssistantPackageImportWizard } from "@/components/assistants/import/AssistantPackageImportWizard";
 import { isAssistantPackageImportEnabled } from "@/lib/appSettings";
 import { listAssistantProfiles } from "@/lib/assistantProfileService";
+import { listStagingImports } from "@/lib/assistantProfileImportService";
 import { authOptions } from "@/lib/auth";
-import type { ImportMergeTarget } from "@/lib/assistantPackageImportWizard";
+import type {
+    ImportMergeTarget,
+    ResumableImport,
+} from "@/lib/assistantPackageImportWizard";
 
 // /settings/assistants/import — the full-screen package import wizard.
 //
@@ -39,18 +43,41 @@ export default async function AssistantPackageImportPage() {
     if (!(await isAssistantPackageImportEnabled())) notFound();
     const session = await getServerSession(authOptions);
     const userId = session?.user?.id;
-    const mergeTargets: ImportMergeTarget[] = userId
-        ? (await listAssistantProfiles(userId)).map((profile) => ({
-              id: profile.id,
-              name: profile.name,
-              icon: profile.icon,
-              currentRevision: profile.currentRevision,
-              knowledgeFileCount: profile.knowledgeFileCount,
-          }))
-        : [];
+    // Read here for the same reason the targets are: step 1 is inside the
+    // stretch whose contract is that no request has gone out yet. It also has
+    // to be the server that answers, because the wizard keeps nothing between
+    // page loads -- which is the whole reason an interrupted import needs
+    // finding at all.
+    const [profiles, resumable] = userId
+        ? await Promise.all([
+              listAssistantProfiles(userId),
+              listStagingImports(userId),
+          ])
+        : [[], []];
+    const mergeTargets: ImportMergeTarget[] = profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        icon: profile.icon,
+        currentRevision: profile.currentRevision,
+        knowledgeFileCount: profile.knowledgeFileCount,
+    }));
+    const waiting: ResumableImport[] = resumable.map((row) => ({
+        id: row.id,
+        mode: row.mode === "merge" ? "merge" : "create",
+        profileId: row.profileId,
+        profileName: row.profileName,
+        published: row.published,
+        fileCount: row.fileCount,
+        // Dates cross to the client as strings, so the boundary carries one
+        // shape rather than one that depends on serialisation.
+        idleExpiresAt: row.idleExpiresAt.toISOString(),
+    }));
     return (
         <main>
-            <AssistantPackageImportWizard mergeTargets={mergeTargets} />
+            <AssistantPackageImportWizard
+                mergeTargets={mergeTargets}
+                resumable={waiting}
+            />
         </main>
     );
 }

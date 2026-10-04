@@ -37,6 +37,7 @@ import {
   type WebSearchTopicSignal,
 } from "@/lib/webSearchRetrySuggestion";
 import { WebSearchSuggestionCard } from "@/components/chat/WebSearchSuggestionCard";
+import { arbitrateWebSearchOffer } from "@/lib/answerSuggestionArbitration";
 import type { WebSearchSuggestionCopy } from "@/components/chat/webSearchSuggestionCopy";
 import {
   chatContentStateKey,
@@ -66,6 +67,11 @@ import type {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import type {
+  PromptRefinerResolution,
+  PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
+import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -78,6 +84,9 @@ type PromptPayload = {
   text: string;
   chatId: string;
   userMessageId: string;
+  messageWasDurablySaved: boolean;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
   /** The models this send was made for; other panels must not consume it. */
   modelIds: string[];
   attachments: ChatAttachment[];
@@ -88,6 +97,8 @@ type PromptPayload = {
 };
 
 type DesktopChatShellProps = {
+  transcriptScope?: "model" | "conversation";
+  onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -106,6 +117,12 @@ type DesktopChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  /** Server-owned final offer, passed unchanged to the composer. */
+  promptRefinerOffered?: boolean;
+  promptRefinerState?: PromptRefinerUiState;
+  onPromptRefinerRequest?: (sourcePrompt: string) => void;
+  onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -128,6 +145,12 @@ type DesktopChatShellProps = {
    * it; it decides nothing about credits, preflight or admission.
    */
   pendingSubmission: { originConversationId: string | null } | null;
+  /** Locks durable Chat draft bytes until its Message transaction accepts. */
+  durableDraftLocked: boolean;
+  /** Refuses submit while a durable Chat voice transcript is unfinished. */
+  blockSubmitWhileVoiceBusy: boolean;
+  /** Authenticated durable Chat may compose its next turn during a response. */
+  allowEditingWhileSending: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -310,6 +333,29 @@ type DesktopChatShellProps = {
   }) => void;
   onSubmit: () => void;
   onBeforeModelSend: (chatId: string) => Promise<boolean>;
+  conversationSelectionTicket: number;
+  identityEpoch: number;
+  onSavedQuestionNotSent: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number,
+    reason: "terminal" | "conversation-left"
+  ) => void;
+  onDurableUndispatchedAccepted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    turnId: string,
+    conversationSelectionTicket: number
+  ) => boolean;
+  onProviderDispatchStarted: (
+    identityKey: string,
+    identityEpoch: number,
+    conversationId: string,
+    promptId: string
+  ) => void;
   onChangePanelModel: (oldModelId: string, newModelId: string) => void;
   onTogglePanelDisable: (modelId: string) => void;
   onRemoveModel: (modelId: string) => void;
@@ -340,6 +386,8 @@ type DesktopChatShellProps = {
 };
 
 export function DesktopChatShell({
+  transcriptScope = "model",
+  onRestorePrompt,
   conversations,
   currentChatId,
   selectedModels,
@@ -355,6 +403,11 @@ export function DesktopChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  promptRefinerOffered = false,
+  promptRefinerState,
+  onPromptRefinerRequest,
+  onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -363,6 +416,9 @@ export function DesktopChatShell({
   isModelSelectionReady,
   isConversationSelectionResolved,
   pendingSubmission,
+  durableDraftLocked,
+  blockSubmitWhileVoiceBusy,
+  allowEditingWhileSending,
   onNewChat,
   onNewImage,
   imageLock,
@@ -424,6 +480,11 @@ export function DesktopChatShell({
   onWebSearchSuggestionDismiss,
   onSubmit,
   onBeforeModelSend,
+  conversationSelectionTicket,
+  identityEpoch,
+  onSavedQuestionNotSent,
+  onDurableUndispatchedAccepted,
+  onProviderDispatchStarted,
   onChangePanelModel,
   onTogglePanelDisable,
   onRemoveModel,
@@ -438,6 +499,9 @@ export function DesktopChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: DesktopChatShellProps) {
+  const singleTranscript = transcriptScope === "conversation";
+  const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
+  const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
   const {
     models: AVAILABLE_MODELS,
     enabledModels: ENABLED_MODELS,
@@ -451,12 +515,12 @@ export function DesktopChatShell({
   >({});
   const handleContentStateChange = useCallback(
     (modelId: string, state: ChatContentState) => {
-      const key = chatContentStateKey(currentChatId, modelId);
+      const key = chatContentStateKey(currentChatId, singleTranscript ? "@conversation" : modelId);
       setModelContentStates((current) =>
         current[key] === state ? current : { ...current, [key]: state }
       );
     },
-    [currentChatId]
+    [currentChatId, singleTranscript]
   );
   // "Is this conversation empty" has three answers, not two, and only one of
   // them may render the welcome screen. See lib/chatContentState.ts: the
@@ -467,7 +531,7 @@ export function DesktopChatShell({
   const conversationContentState = resolveChatContentState({
     isConversationSelectionResolved,
     conversationId: currentChatId,
-    selectedModelIds: selectedModels,
+    selectedModelIds: statusModels,
     reported: modelContentStates,
     // An accepted send has put a user turn in this conversation, so it can
     // never read as empty again -- not even in the window before its panels
@@ -511,25 +575,31 @@ export function DesktopChatShell({
       nextStatus: ModelRuntimeStatus,
       conversationId: string | null
     ) => {
-      const key = chatModelStatusKey(conversationId, modelId);
+      const key = chatModelStatusKey(conversationId, singleTranscript ? "@conversation" : modelId);
       setReportedModelStatuses((current) =>
         current[key] === nextStatus ? current : { ...current, [key]: nextStatus }
       );
     },
-    []
+    [singleTranscript]
   );
   // What every consumer below reads: this conversation's currently selected
   // models and nothing else. A model dropped from the selection stops counting
   // immediately rather than when it next reports, and a model still answering
   // in another conversation is simply not in here.
   const modelStatuses = useMemo(
-    () =>
-      scopeModelStatusesToConversation({
+    () => {
+      const scoped = scopeModelStatusesToConversation({
         statuses: reportedModelStatuses,
         conversationId: currentChatId,
-        selectedModelIds: selectedModels,
-      }),
-    [currentChatId, reportedModelStatuses, selectedModels]
+        selectedModelIds: statusModels,
+      });
+      // Consumers that label a model still use its id; busy ownership stays
+      // on the conversation key even while the next model is being selected.
+      return singleTranscript
+        ? { ...scoped, ...Object.fromEntries(selectedModels.map((id) => [id, scoped["@conversation"]])) }
+        : scoped;
+    },
+    [currentChatId, reportedModelStatuses, selectedModels, singleTranscript, statusModels]
   );
   // Bumped to abort every currently-responding panel at once ("stop all").
   // A counter, not a boolean, so a second click still re-triggers each
@@ -542,8 +612,8 @@ export function DesktopChatShell({
   // shows its own state when they return, and has no say here.
   const isAnyModelResponding = isConversationResponding({
     statuses: modelStatuses,
-    selectedModelIds: selectedModels,
-    disabledModelIds: disabledPanels,
+    selectedModelIds: statusModels,
+    disabledModelIds: singleTranscript ? [] : disabledPanels,
   });
   // A quick-comparison summary needs at least two models that have actually
   // finished responding (not still streaming, not paused/off) -- the
@@ -594,7 +664,7 @@ export function DesktopChatShell({
     The web-search offer, decided from the same status map the rail and the
     expansion offer read.
   */
-  const webSearchSuggestion = deriveWebSearchSuggestion({
+  const webSearchSuggestionForTurn = deriveWebSearchSuggestion({
     conversationId: currentChatId,
     turn: webSearchSuggestionTurn,
     selectedModelIds: selectedModels,
@@ -604,6 +674,21 @@ export function DesktopChatShell({
     retryFailure: webSearchRetryFailure,
     resolvedTopicKeys: webSearchResolvedTopicKeys,
     offeredTopics: webSearchOfferedTopics,
+  });
+  /*
+    A question can satisfy both offers -- recency and a depth signal together --
+    and Deep Research outranks this one when it does
+    (lib/answerSuggestionArbitration.ts).
+
+    Applied here and not at the render site: the impression effect below writes
+    `offeredTopics`, and a card that was never drawn must not be recorded as
+    having been offered, or a later turn refuses the offer for a question nobody
+    was asked about.
+  */
+  const webSearchSuggestion = arbitrateWebSearchOffer({
+    webSearch: webSearchSuggestionForTurn,
+    deepResearch: deepResearchSuggestion,
+    retryFailure: webSearchRetryFailure,
   });
   /*
     The strongest signal, and only that one. The classifier reports every
@@ -714,7 +799,7 @@ export function DesktopChatShell({
     sidebarCollapsePreference === "collapsed" ||
     (sidebarCollapsePreference === "auto" && autoCollapseSuggested);
   const useTabsLayout =
-    selectedModels.length > 1 &&
+    !singleTranscript && selectedModels.length > 1 &&
     perModelWidth(isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH) <
       MIN_PANEL_WIDTH;
 
@@ -861,7 +946,7 @@ export function DesktopChatShell({
             {selectedModels.map((modelId) => {
               const model = AVAILABLE_MODELS.find((item) => item.id === modelId);
               const isActive = modelId === resolvedActiveModelId;
-              const isPanelDisabled = disabledPanels.includes(modelId);
+            const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
               const status = isPanelDisabled
                 ? "paused"
                 : modelStatuses[modelId] || "idle";
@@ -958,12 +1043,12 @@ export function DesktopChatShell({
             </div>
           )}
 
-          {selectedModels.map((modelId, panelIndex) => {
+          {panelModels.map((modelId, panelIndex) => {
             const modelInfo = AVAILABLE_MODELS.find((model) => model.id === modelId);
             const usageProfile = modelInfo
               ? getModelUsageProfile(modelInfo)
               : null;
-            const isPanelDisabled = disabledPanels.includes(modelId);
+            const isPanelDisabled = !singleTranscript && disabledPanels.includes(modelId);
             const isPanelVisible = !useTabsLayout || modelId === resolvedActiveModelId;
 
             return (
@@ -1061,7 +1146,7 @@ export function DesktopChatShell({
                           className="min-w-0 cursor-pointer truncate rounded-md border border-zinc-300 bg-white px-1.5 py-0.5 text-sm font-semibold text-zinc-800 outline-none transition-colors hover:border-zinc-400 hover:text-zinc-950 focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/30 disabled:cursor-not-allowed disabled:opacity-60 aria-busy:opacity-70 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-500 dark:hover:text-white"
                         >
                           {ENABLED_MODELS.map((model) => {
-                            const isAlreadyUsed = selectedModels.includes(model.id) && model.id !== modelId;
+                            const isAlreadyUsed = !singleTranscript && selectedModels.includes(model.id) && model.id !== modelId;
                             return (
                               <option
                                 key={model.id}
@@ -1089,7 +1174,7 @@ export function DesktopChatShell({
                   </div>
 
                   <div className="flex shrink-0 items-center gap-2">
-                    {selectedModels.length > 1 && (
+                    {!singleTranscript && selectedModels.length > 1 && (
                       <>
                         <button
                           type="button"
@@ -1148,7 +1233,9 @@ export function DesktopChatShell({
                 </div>
 
                 <ChatApp
+                  transcriptScope={transcriptScope}
                   otherPanelModelIds={selectedModels}
+                  onRestorePrompt={onRestorePrompt}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
@@ -1159,16 +1246,23 @@ export function DesktopChatShell({
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
+                  conversationSelectionTicket={conversationSelectionTicket}
+                  identityEpoch={identityEpoch}
+                  onSavedQuestionNotSent={onSavedQuestionNotSent}
+                  onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
+                  onProviderDispatchStarted={onProviderDispatchStarted}
                   onResponseComplete={onResponseComplete}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
-                  hideModelOnlyInput={selectedModels.length <= 1}
+                  hideModelOnlyInput={singleTranscript || selectedModels.length <= 1}
                   useCenteredWelcome
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
-                  onRequestCloseModel={() => onToggleModel(modelId)}
-                  hasMultipleActiveModels={selectedModels.length > 1}
+                  onRequestCloseModel={(event) => singleTranscript
+                    ? openChatModelPicker(event.currentTarget)
+                    : onToggleModel(modelId)}
+                  hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />
               </div>
@@ -1201,11 +1295,14 @@ export function DesktopChatShell({
           for the same reason the expansion is: the dock exists once however
           many panels are on screen.
 
-          The two can never be on screen together. This one is made about a
-          question whose only signal is that it needs current information, and
-          `classifyDeepResearchTopic` refuses exactly that case -- recency alone
-          is the one thing it will not offer a report for. A question with both
-          goes to Deep Research, which is the deeper of the two answers.
+          The two are never on screen together, and `arbitrateWebSearchOffer`
+          above is what makes that true. It used to be argued from the rules --
+          this offer needs only recency and `classifyDeepResearchTopic` refuses
+          recency alone -- but needing only recency is not firing only on it: a
+          question carrying recency *and* a depth signal satisfied both, and drew
+          both cards. Deep Research wins that question, as the deeper of the two
+          answers; a failed re-run's own report is the one thing the arbitration
+          does not take away.
         */}
         {webSearchSuggestion.offered &&
           webSearchSuggestion.state &&
@@ -1250,7 +1347,7 @@ export function DesktopChatShell({
             }
           />
         )}
-        <ComparisonActionRail
+        {!singleTranscript && <ComparisonActionRail
           layout="desktop"
           readiness={comparisonReadiness}
           aiReviewAccess={aiReviewAccess}
@@ -1261,7 +1358,7 @@ export function DesktopChatShell({
           onCompareSummary={onCompareSummary}
           onComparisonReview={onComparisonReview}
           onGuestSignInPrompt={onGuestSignInPrompt}
-        />
+        />}
 
         {/*
           The shared fallback: with a single model there is no comparison rail
@@ -1269,7 +1366,7 @@ export function DesktopChatShell({
           somewhere predictable -- a full-width row of its own directly above
           the composer, never inside a model panel.
         */}
-        {!comparisonReadiness.isVisible && (
+        {(singleTranscript || !comparisonReadiness.isVisible) && (
           <GuestVerificationDesktopSlot variant="fallback" />
         )}
 
@@ -1280,12 +1377,16 @@ export function DesktopChatShell({
         {composerPortalHost &&
           createPortal(
             <ChatInput
+              singleModelSelection={singleTranscript}
               value={inputValue}
               onChange={setInputValue}
               personalizedPrompt={personalizedPrompt}
               onSubmit={onSubmit}
               onCancel={() => setStopSignal((current) => current + 1)}
+              draftLocked={durableDraftLocked}
+              blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
               isSending={isAnyModelResponding}
+              allowEditingWhileSending={allowEditingWhileSending}
               focusToken={focusToken}
               currentChatId={currentChatId}
               selectedModels={selectedModels}
@@ -1318,6 +1419,11 @@ export function DesktopChatShell({
               attachmentCapabilities={attachmentCapabilities}
               voiceInputEnabled={voiceInputEnabled}
               onVoiceTranscript={onVoiceTranscript}
+              promptRefinerOffered={promptRefinerOffered}
+              promptRefinerState={promptRefinerState}
+              onPromptRefinerRequest={onPromptRefinerRequest}
+              onPromptRefinerDecision={onPromptRefinerDecision}
+              onPromptRefinerDismiss={onPromptRefinerDismiss}
               identityKey={identityKey}
               onGuestSignInPrompt={onGuestSignInPrompt}
               isGuestMode={isGuestMode}
@@ -1327,7 +1433,7 @@ export function DesktopChatShell({
               // One variant in every state: a new chat and an ongoing one
               // share the dock, so the first send must not restyle it.
               variant="bar"
-              hideTopBorder={comparisonReadiness.isVisible}
+              hideTopBorder={!singleTranscript && comparisonReadiness.isVisible}
               conversationDropSurface={conversationDropSurface}
             />,
             composerPortalHost

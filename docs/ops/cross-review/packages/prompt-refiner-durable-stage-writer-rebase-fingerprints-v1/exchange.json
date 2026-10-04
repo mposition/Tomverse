@@ -1,0 +1,292 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+  "requirement": "PR #1555가 최신 develop commit b118d2e9을 conflict 없이 merge한 뒤 fail-closed 검사 2개가 의도대로 drift를 감지했다. Marketing webhook pipeline은 이 PR의 prisma/schema.prisma 변경 때문에 fingerprint가 c78e7bb3...에서 재현 가능한 9bcf4eb3...로 바뀌었다. Prompt Refiner closure는 develop의 appSettings.ts가 marketingAutomationAccess.ts를 새 runtime import로 갖게 되어 186개가 아니라 187개여야 한다. 새 파일의 computed element access 7개(env/name, fixed descriptor map lookup, typed feature result lookup)를 각각 검토해 inventory 228과 digest 778c2fc6...을 고정한다. TypeScript 매니페스트와 PostgreSQL 제약을 동일한 정렬 목록으로 갱신하되 runtime 동작, 제품/공급자/비용 경계는 바꾸지 않는다. exact base는 dd60bcbe3f119808f5eaea7c833c4e243facebcc이다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "MARKETING_WEBHOOK_PIPELINE_FINGERPRINT는 선언된 두 pipeline file과 descriptor에서 computeMarketingWebhookPipelineFingerprint가 재현한 9bcf4eb3b861f41bd8508e0e6e772c648c22351e19b58ad8e50bb39705432285와 정확히 일치한다.",
+    "Prompt Refiner runtime closure는 appSettings.ts의 실제 local runtime import closure와 동일한 187개이며 TypeScript와 PostgreSQL의 정렬 목록 및 execution manifest fileCount가 일치한다.",
+    "새 marketingAutomationAccess.ts에서 검토한 7개를 포함해 dynamic element access count는 228이고 SHA-256은 전체 187-file path/line/text snapshot에서 재현한 778c2fc68dc5e77dc584478c007e1f5db930dc321a1b2b6a60dcf19b52a0d627와 정확히 일치한다.",
+    "두 focused fingerprint test와 Prompt Refiner runtime source closure 전체 테스트, typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "변경은 marketing fingerprint, Prompt Refiner source closure의 TypeScript/PostgreSQL 동일 계약, computed-access snapshot, 검토 task/authorization으로 한정되며 product database mutation, provider/model, Railway API, credential, stage mutation, flag/rollout 또는 paid execution을 추가하지 않는다.",
+    "Claude verdict는 package digest와 결속하며 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "dd60bcbe3f119808f5eaea7c833c4e243facebcc",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:fa4cc82fddc39165119abdf26604cdf69d3178ba14fbcb2dc330287c7675a9c1",
+      "commit": "26a1427f84feb65036361da4e1fbb4a567c965d2",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.task.json",
+        "lib/marketingAutomationAccess.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "PR #1555의 develop 재베이스 뒤 fail-closed fingerprint drift 두 건을 실제 import closure와 deterministic 계산값으로 갱신했다. focused 40/40, 전체 unit 9,889 pass + 1 skip + 0 fail, fresh PostgreSQL 17에서 124 migrations drift 0 및 Prompt Refiner DB 35/35를 확인했다. 별도 전체 finance lane의 Chat concurrency 실패는 이 6파일 diff 밖이며 기존 원격 finance CI는 통과했다. 제품 DB mutation, provider/model/Railway 호출, credential, stage/flag/rollout 또는 유료 실행은 추가하지 않았다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerReservationCore.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3248.1984",
+          "durationMs": 3336
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39663
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts lib/promptRefinerStageAdmissionCore.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2999
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1373
+        },
+        {
+          "rule": "git diff --check dd60bcbe3f119808f5eaea7c833c4e243facebcc HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 61
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1040-1048",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The new missing/extra diagnostic is attached to an assertion it does not describe: assert.equal compares expected.length to the PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT constant, while missing/extra describe expected vs PROMPT_REFINER_RUNTIME_SOURCE_PATHS, so a stale constant with two consistent 187-entry lists fails with an empty, non-actionable message.",
+          "reproduction": "Set lib/promptRefinerStageAdmissionCore.ts:41 back to `186 as const` and leave both path lists at 187 entries, then run `node --conditions=react-server --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`; the failure reads `runtime source file count changed; missing=[] extra=[]`. Attaching the message to `assert.deepEqual([...PROMPT_REFINER_RUNTIME_SOURCE_PATHS], expected)` at line 1049 (or comparing PROMPT_REFINER_RUNTIME_SOURCE_PATHS.length in the length assert) makes it point at the real drift.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:1040-1048); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:40da843a1a58683b2566e1e0958384344abe1949a44ff55eeb1902d630d7b4fc",
+      "commit": "d231e09c6aa13c87fc1458a3662e080a393ffd25",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.task.json",
+        "lib/marketingAutomationAccess.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 0의 유일한 diagnostic finding을 닫았다. 실제 closure 길이와 선언 count의 불일치는 두 숫자를 직접 표시하고, manifest path list와 실제 closure의 불일치는 missing/extra 경로를 deepEqual 메시지에 표시한다. runtime 동작과 fingerprint 값은 바꾸지 않았고 focused 40/40 및 4개 guard가 다시 통과해야 한다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerReservationCore.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3373.5558",
+          "durationMs": 3468
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 39751
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts lib/promptRefinerStageAdmissionCore.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3023
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1363
+        },
+        {
+          "rule": "git diff --check dd60bcbe3f119808f5eaea7c833c4e243facebcc HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 60
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1049-1053",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Round 0's finding is fixed for the count assertion, but the same empty-message failure mode now lives in the deepEqual: an order-only divergence (same set, wrong position) yields missing=[] extra=[] and, because a custom message suppresses assert's array diff, the reported message states the list changed while naming nothing.",
+          "reproduction": "In lib/promptRefinerStageAdmissionCore.ts move 'lib/marketingAutomationAccess.ts' from after 'lib/managedSlack.ts' to after 'lib/marketingConsentConfirmationEmail.ts' (set unchanged, 187 entries) and run `node --conditions=react-server --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`; the failure reads `runtime source path list changed; missing=[] extra=[]`. Including the first differing index (e.g. `expected[i]` vs `actual[i]`) would close it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql:365",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The embedded executionManifest `runtimeSource.fileCount` literal in the SQL CHECK is hand-synced with PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT but no test binds them, so a missed edit to this one literal passes every focused test, typecheck and lint and only fails at stage-row insert time.",
+          "reproduction": "Revert only migration.sql:365 to `\"fileCount\":186` (leave lines 84 and lib/promptRefinerStageAdmissionCore.ts:41 at 187) and re-run the five focused test files plus `npm run typecheck`: all pass. The existing SQL/TS parity test (tests/promptRefinerRuntimeSourceClosure.test.mjs:1196-1206) only parses `expected_paths`, not the manifest literal. Pre-existing gap, not introduced here; a parallel regex assertion on `\"runtimeSource\":{\"fileCount\":(\\d+)` would cover it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "prisma/schema.prisma:5528",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The doc comment `Content-free v2 manifest for the exact 186-file runtime import closure` (and docs/ops/prompt-refiner-durable-stage-writer-task.md:17, docs/ops/tomverse-chat-progress.md:1175) still says 186 after the closure moved to 187.",
+          "reproduction": "`rg -n '186-file'` returns those three non-package paths. Note schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry and is outside this task's writableScope, so correcting the comment requires re-pinning MARKETING_WEBHOOK_PIPELINE_FINGERPRINT again; leaving it to a follow-up with a widened scope is the reasonable call.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerRuntimeSourceClosure.test.mjs:1049-1053; open finding: prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql:365; open finding: prisma/schema.prisma:5528); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:d7a58be43e2f2cdb5a98ccd60ed30c9591980c7d5b62faf6127f8343dc1fd306",
+      "commit": "cb585a309b53540eeeea309fe3b023429f2d4253",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.authorization.md",
+        "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.task.json",
+        "lib/marketingAutomationAccess.ts",
+        "lib/promptRefinerStageAdmissionCore.ts",
+        "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+        "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+      ],
+      "changeSummary": "Round 1의 현재 범위 내 두 finding을 닫았다. 순서-only drift는 firstDifferentIndex와 actual/expected 경로를 표시하고, SQL executionManifest runtimeSource.fileCount를 TypeScript 상수에 직접 결속한다. stale 186-file 설명 3곳은 승인된 exact 6-file scope 밖이고 schema 수정이 marketing fingerprint를 다시 바꾸므로 숨기거나 scope를 소급 변경하지 않고 별도 후속 task로 처리한다. 제품 runtime 동작은 바꾸지 않았다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerReservationCore.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3305.9906",
+          "durationMs": 3390
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 40011
+        },
+        {
+          "rule": "npx eslint lib/marketingAutomationAccess.ts lib/promptRefinerStageAdmissionCore.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2991
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1391
+        },
+        {
+          "rule": "git diff --check dd60bcbe3f119808f5eaea7c833c4e243facebcc HEAD -- .",
+          "passed": true,
+          "detail": "",
+          "durationMs": 62
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "prisma/schema.prisma:5528 (also docs/ops/prompt-refiner-durable-stage-writer-contract.md:20,78,80 and docs/ops/prompt-refiner-durable-stage-writer-task.md:17)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "Prose still describes the closure as 186 files after the enforced contract moved to 187; no test or script binds these strings, so the drift is documentation-only and does not weaken any fail-closed check.",
+          "reproduction": "rg -n '\\b186\\b' prisma/schema.prisma docs/ops/prompt-refiner-durable-stage-writer-contract.md docs/ops/prompt-refiner-durable-stage-writer-task.md -> five stale mentions; rg -n '\\b186\\b' --glob '{lib,tests,scripts,app,packages}/**' returns no contract-bearing hit, and prisma/schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry (lib/marketingAutomationAccess.ts:101-104), so editing it re-rolls MARKETING_WEBHOOK_PIPELINE_FINGERPRINT — carried to a follow-up task as the author disclosed, outside the approved 6-path writableScope.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: prisma/schema.prisma:5528 (also docs/ops/prompt-refiner-durable-stage-writer-contract.md:20,78,80 and docs/ops/prompt-refiner-durable-stage-writer-task.md:17)) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:d7a58be43e2f2cdb5a98ccd60ed30c9591980c7d5b62faf6127f8343dc1fd306",
+  "commit": "cb585a309b53540eeeea309fe3b023429f2d4253",
+  "changeSummary": "Round 1의 현재 범위 내 두 finding을 닫았다. 순서-only drift는 firstDifferentIndex와 actual/expected 경로를 표시하고, SQL executionManifest runtimeSource.fileCount를 TypeScript 상수에 직접 결속한다. stale 186-file 설명 3곳은 승인된 exact 6-file scope 밖이고 schema 수정이 marketing fingerprint를 다시 바꾸므로 숨기거나 scope를 소급 변경하지 않고 별도 후속 task로 처리한다. 제품 runtime 동작은 바꾸지 않았다.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/marketingAutomationAccess.test.mjs tests/promptRefinerRuntimeSourceClosure.test.mjs tests/promptRefinerStageAdmissionCore.test.mjs tests/promptRefinerStageAdmissionReader.test.mjs tests/promptRefinerReservationCore.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3305.9906",
+      "durationMs": 3390
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 40011
+    },
+    {
+      "rule": "npx eslint lib/marketingAutomationAccess.ts lib/promptRefinerStageAdmissionCore.ts tests/promptRefinerRuntimeSourceClosure.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2991
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1391
+    },
+    {
+      "rule": "git diff --check dd60bcbe3f119808f5eaea7c833c4e243facebcc HEAD -- .",
+      "passed": true,
+      "detail": "",
+      "durationMs": 62
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "prisma/schema.prisma:5528 (also docs/ops/prompt-refiner-durable-stage-writer-contract.md:20,78,80 and docs/ops/prompt-refiner-durable-stage-writer-task.md:17)",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "Prose still describes the closure as 186 files after the enforced contract moved to 187; no test or script binds these strings, so the drift is documentation-only and does not weaken any fail-closed check.",
+      "reproduction": "rg -n '\\b186\\b' prisma/schema.prisma docs/ops/prompt-refiner-durable-stage-writer-contract.md docs/ops/prompt-refiner-durable-stage-writer-task.md -> five stale mentions; rg -n '\\b186\\b' --glob '{lib,tests,scripts,app,packages}/**' returns no contract-bearing hit, and prisma/schema.prisma is a declared MARKETING_WEBHOOK_PIPELINE_FILES entry (lib/marketingAutomationAccess.ts:101-104), so editing it re-rolls MARKETING_WEBHOOK_PIPELINE_FINGERPRINT — carried to a follow-up task as the author disclosed, outside the approved 6-path writableScope.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 1 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-19T14:31:23.658Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "cb585a309b53540eeeea309fe3b023429f2d4253",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1.task.json",
+    "lib/marketingAutomationAccess.ts",
+    "lib/promptRefinerStageAdmissionCore.ts",
+    "prisma/migrations/20260918130000_prompt_refiner_stage_admission/migration.sql",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ]
+}

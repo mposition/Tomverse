@@ -1,0 +1,2603 @@
+{
+  "evalVersion": "router-quality-eval-v1",
+  "mode": "pilot",
+  "evaluationSetVersion": "router-eval-development-v0",
+  "evaluationSetPurpose": "development",
+  "decisionSetUseIndex": null,
+  "commitSha": "5a9ab87424c3bc28c1daf55ce54dabce2da1606c",
+  "startedAt": "2026-08-27T02:41:16.553Z",
+  "cellCounts": {
+    "general_question_answering/ko": 14,
+    "general_question_answering/en": 14,
+    "writing_and_rewriting/ko": 14,
+    "coding/en": 14,
+    "analysis_and_reasoning/ko": 14,
+    "current_information/en": 14,
+    "document_and_attachment/ko": 14,
+    "long_context_conversation/en": 14,
+    "translation_cross_language/ko-en": 14,
+    "writing_and_rewriting/en": 14,
+    "analysis_and_reasoning/en": 14,
+    "document_and_attachment/en": 14,
+    "current_information/ko": 14,
+    "coding/ko": 14,
+    "long_context_conversation/ko": 14
+  },
+  "baseline": {
+    "modelId": "gpt-5-6-luna",
+    "catalogueVersion": "1e5d6058762d9d43cfb14297d2d85da5799907d9",
+    "preRegisteredAt": "2026-08-26",
+    "preRegisteredBy": "mposition"
+  },
+  "versions": {
+    "router": "router-decision-v1",
+    "estimator": "generic_multilingual_v1",
+    "planner": "none",
+    "template": "judge-rubric-v1"
+  },
+  "routerVersions": {
+    "decision": "router-decision-v1",
+    "taskProfile": "task-profile-v2",
+    "candidates": "router-candidates-v1",
+    "selection": "router-selection-v2",
+    "scorePolicy": "router-score-policy-v2"
+  },
+  "pairedUnit": "one question, answered once by Auto and once by the pre-registered fixed-model baseline",
+  "ciMethod": "bootstrap_percentile",
+  "seed": 20260826,
+  "sampleSize": 210,
+  "discordantPairs": 164,
+  "pointEstimatePp": -43.80952380952381,
+  "ci95LowerPp": -53.80952380952381,
+  "ci95UpperPp": -33.33333333333333,
+  "outcome": "measured",
+  "outcomeReasons": [],
+  "meetsMargin": false,
+  "positionBias": {
+    "decided": 164,
+    "preferredFirst": 86,
+    "firstRate": 0.524390243902439,
+    "autoFirstRate": 0.5190476190476191
+  },
+  "routedAwayRate": 0.7857142857142857,
+  "seedPreRegistration": {
+    "preRegisteredAt": "2026-08-26",
+    "preRegisteredBy": "mposition"
+  },
+  "judge": {
+    "identity": "gpt-5-6-luna",
+    "isRoutableModel": true,
+    "preRegisteredAt": "2026-08-26",
+    "preRegisteredBy": "mposition",
+    "biasMeasurement": null
+  },
+  "exclusions": [],
+  "truncatedByCost": false,
+  "plannedItems": 210,
+  "completedItems": 210,
+  "stoppedReason": "completed",
+  "rebuiltFromJournal": null,
+  "providerCostUsd": 0.386845,
+  "pairs": [
+    {
+      "itemId": "general-ko-001",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-002",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-003",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-004",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "general-ko-005",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-006",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-007",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-008",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-009",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-010",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-011",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-012",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-ko-013",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "general-ko-014",
+      "stratum": "general_question_answering",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-001",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "general-en-002",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-003",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-004",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-005",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-006",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "general-en-007",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-008",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-009",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-010",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-011",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "general-en-012",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-013",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "general-en-014",
+      "stratum": "general_question_answering",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-ko-001",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-ko-002",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-003",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-ko-004",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-005",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-ko-006",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-007",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-008",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-009",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-010",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-011",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-ko-012",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-ko-013",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-ko-014",
+      "stratum": "writing_and_rewriting",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "coding-en-001",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-002",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-003",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "coding-en-004",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-005",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "coding-en-006",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "coding-en-007",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "coding-en-008",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-009",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-010",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "coding-en-011",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-012",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-013",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-en-014",
+      "stratum": "coding",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-001",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-002",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-003",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-004",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-005",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-006",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-007",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-008",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-009",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-010",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-011",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-012",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-013",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-ko-014",
+      "stratum": "analysis_and_reasoning",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-002",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-en-003",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "current-en-004",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-005",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-006",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-007",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-008",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-009",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-en-010",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-en-011",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-012",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-013",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-en-014",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-en-015",
+      "stratum": "current_information",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-ko-001",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-ko-002",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "document-ko-003",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-004",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-005",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "document-ko-006",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-ko-007",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-008",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-009",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-ko-010",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-011",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-012",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-ko-013",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "document-ko-014",
+      "stratum": "document_and_attachment",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-en-016",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-017",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-018",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-019",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-020",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-021",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-022",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-023",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "long-en-024",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-025",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-026",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-027",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-028",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-en-029",
+      "stratum": "long_context_conversation",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-001",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-002",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-003",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-004",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-005",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-006",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-007",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-008",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-009",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-010",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-011",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-012",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-013",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "translation-ko-en-014",
+      "stratum": "translation_cross_language",
+      "cell": "ko-en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-001",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-002",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-003",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-en-004",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-en-005",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-006",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-en-007",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-008",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-009",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-en-010",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "writing-en-011",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-en-012",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "writing-en-013",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "writing-en-014",
+      "stratum": "writing_and_rewriting",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "analysis-en-001",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-002",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-003",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-004",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-005",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-006",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "analysis-en-007",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-008",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-009",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-010",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-011",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-012",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-013",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "analysis-en-014",
+      "stratum": "analysis_and_reasoning",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-en-001",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-002",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-003",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-004",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "document-en-005",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-006",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-007",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-008",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-009",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-010",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "document-en-011",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-012",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-013",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "document-en-014",
+      "stratum": "document_and_attachment",
+      "cell": "en",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "current-ko-002",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-003",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-004",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-ko-005",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-006",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-007",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-008",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-ko-009",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-010",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-ko-011",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "current-ko-012",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-ko-013",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "current-ko-014",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "current-ko-015",
+      "stratum": "current_information",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "coding-ko-001",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-002",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-003",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-004",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-005",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-006",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-007",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-008",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-009",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-010",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "coding-ko-011",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "coding-ko-012",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "coding-ko-013",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "coding-ko-014",
+      "stratum": "coding",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-ko-002",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-003",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-ko-004",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-005",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-006",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-ko-007",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "long-ko-008",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-009",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "auto"
+      }
+    },
+    {
+      "itemId": "long-ko-010",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-ko-011",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "gpt-5-6-luna",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "equivalent"
+      }
+    },
+    {
+      "itemId": "long-ko-012",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-013",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "second",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-014",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    },
+    {
+      "itemId": "long-ko-015",
+      "stratum": "long_context_conversation",
+      "cell": "ko",
+      "baselineModelId": "gpt-5-6-luna",
+      "autoModelId": "deepseek-v4-flash",
+      "autoPosition": "first",
+      "outcome": {
+        "status": "judged",
+        "verdict": "baseline"
+      }
+    }
+  ]
+}

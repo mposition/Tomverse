@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ARTIFACT_LIMITS } from "../lib/generatedArtifactCore.ts";
+import { ArtifactToolRejectionLog } from "../lib/generatedArtifactRejectionLog.ts";
 import {
   ALL_ARTIFACT_TOOL_NAMES,
   CREATE_DOCUMENT_BATCH_TOOL_NAME,
@@ -60,6 +61,39 @@ const batchInput = (overrides = {}) => ({
   ...overrides,
 });
 
+const runRejectedBatchWithDiagnostic = async (input, overrides = {}) => {
+  const lines = [];
+  const calls = [];
+  const log = new ArtifactToolRejectionLog(
+    [CREATE_DOCUMENT_BATCH_TOOL_NAME],
+    (line) => lines.push(line)
+  );
+  const artifacts = collector({
+    ...overrides,
+    noteRejection: (...args) => {
+      calls.push(args);
+      log.record(...args);
+    },
+  });
+  const report = await artifacts.runDocumentBatch(input, "SECRET_TOOL_CALL_ID");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].slice(0, 2), [
+    "SECRET_TOOL_CALL_ID", CREATE_DOCUMENT_BATCH_TOOL_NAME,
+  ]);
+  assert.strictEqual(calls[0][2], input);
+  assert.equal(calls[0][3], "spec_rejected");
+  assert.deepEqual(lines.map(JSON.parse), [{
+    event: "generated_artifact_tool_rejected",
+    toolName: CREATE_DOCUMENT_BATCH_TOOL_NAME,
+    requestedFormat: null,
+    rejectionCode: "spec_rejected",
+  }]);
+  assert.doesNotMatch(lines[0], /SECRET_|contracts|att_[0-9]|계약서양식|명단|메모/);
+  assert.equal(artifacts.failed.length, 1);
+  assert.equal(artifacts.failed[0].failureCode, "spec_rejected");
+  return report;
+};
+
 /* -------------------------------------------------------------------------- */
 /* Registration                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -99,7 +133,7 @@ test("the tool name list covers every tool that can be registered", () => {
 /* -------------------------------------------------------------------------- */
 
 test("a handle that names nothing on this turn is refused, and the real ones are listed", async () => {
-  const report = await collector().runDocumentBatch(
+  const report = await runRejectedBatchWithDiagnostic(
     batchInput({ templateAttachment: "att_9" })
   );
   assert.equal(report.status, "failed");
@@ -108,8 +142,84 @@ test("a handle that names nothing on this turn is refused, and the real ones are
   assert.match(report.note, /do not invent a file/);
 });
 
+test("a throwing rejection diagnostic preserves the ordinary failure report and one card", async () => {
+  let calls = 0;
+  const artifacts = collector({
+    noteRejection: () => {
+      calls += 1;
+      throw new Error("diagnostic sink failed");
+    },
+  });
+  const report = await artifacts.run(
+    "text",
+    { filename: "x", format: "nope" },
+    "call_1"
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(report.status, "failed");
+  assert.match(report.reason, /format/);
+  assert.match(report.note, /The file was not created/);
+  assert.equal(artifacts.failed.length, 1);
+  assert.equal(artifacts.failed[0].failureCode, "spec_rejected");
+  assert.deepEqual(artifacts.toStreamArtifacts().map(({ ordinal, status, failureCode }) => ({
+    ordinal, status, failureCode,
+  })), [{ ordinal: 0, status: "failed", failureCode: "spec_rejected" }]);
+});
+
+test("an async rejecting diagnostic preserves the ordinary failure report and one card", async () => {
+  let calls = 0;
+  const artifacts = collector({
+    noteRejection: async () => {
+      calls += 1;
+      await Promise.resolve();
+      throw new Error("async diagnostic sink failed");
+    },
+  });
+  const report = await artifacts.run(
+    "text",
+    { filename: "x", format: "nope" },
+    "call_1"
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(report.status, "failed");
+  assert.match(report.reason, /format/);
+  assert.match(report.note, /The file was not created/);
+  assert.equal(artifacts.failed.length, 1);
+  assert.equal(artifacts.failed[0].failureCode, "spec_rejected");
+  assert.deepEqual(artifacts.toStreamArtifacts().map(({ ordinal, status, failureCode }) => ({
+    ordinal, status, failureCode,
+  })), [{ ordinal: 0, status: "failed", failureCode: "spec_rejected" }]);
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+test("a throwing rejection diagnostic preserves the batch failure report and one card", async () => {
+  let calls = 0;
+  const artifacts = collector({
+    noteRejection: () => {
+      calls += 1;
+      throw new Error("diagnostic sink failed");
+    },
+  });
+  const report = await artifacts.runDocumentBatch(
+    batchInput({ templateAttachment: "att_9" }),
+    "call_1"
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(report.status, "failed");
+  assert.equal(report.reason, "attachment_not_on_turn:att_9");
+  assert.match(report.note, /att_1, att_2/);
+  assert.equal(artifacts.failed.length, 1);
+  assert.equal(artifacts.failed[0].failureCode, "spec_rejected");
+  assert.deepEqual(artifacts.toStreamArtifacts().map(({ ordinal, status, failureCode }) => ({
+    ordinal, status, failureCode,
+  })), [{ ordinal: 0, status: "failed", failureCode: "spec_rejected" }]);
+});
+
 test("a template that is not a Word document is refused by name", async () => {
-  const report = await collector().runDocumentBatch(
+  const report = await runRejectedBatchWithDiagnostic(
     batchInput({ templateAttachment: "att_2", dataAttachment: "att_1" })
   );
   assert.equal(report.status, "failed");
@@ -124,8 +234,9 @@ test("a data file that is not tabular is refused by name", async () => {
     mediaType: "text/plain",
     bytes: new TextEncoder().encode("hello"),
   });
-  const report = await collector({ turnAttachments: attachments }).runDocumentBatch(
-    batchInput({ dataAttachment: "att_3" })
+  const report = await runRejectedBatchWithDiagnostic(
+    batchInput({ dataAttachment: "att_3" }),
+    { turnAttachments: attachments }
   );
   assert.equal(report.status, "failed");
   assert.equal(report.reason, "data_not_tabular");

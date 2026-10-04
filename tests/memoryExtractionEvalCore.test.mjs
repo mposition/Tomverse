@@ -344,9 +344,18 @@ test("a reduced critical-negative floor is conditional on the probe corpus", asy
     // docs/policy/external-conversation-import-and-memory.md §12.2 [개정 · 2026-08-23]: ②③④ may sit below 200 per arm only
     // while the deterministic half §12.3 always required actually holds. The
     // policy says "conditional"; without this test that word costs nothing.
-    const { MUST_REFUSE, MUST_ACCEPT, NEEDS_JUDGEMENT } = await import(
-        "../lib/memoryValidatorProbeCorpus.ts"
-    );
+    //
+    // The 2026-08-25 scoring amendment split the accept side in two, so the
+    // conditions are five now rather than four. The new one is not decoration:
+    // a validator that started refusing health information outright would
+    // still satisfy every old condition while losing the memories the feature
+    // exists to keep.
+    const {
+        MUST_REJECT,
+        MUST_ACCEPT_BULK,
+        MUST_REQUIRE_SENSITIVE_REVIEW,
+        NEEDS_JUDGEMENT,
+    } = await import("../lib/memoryValidatorProbeCorpus.ts");
     const { validateMemoryCandidate } = await import(
         "../lib/memoryValidatorCore.ts"
     );
@@ -358,31 +367,55 @@ test("a reduced critical-negative floor is conditional on the probe corpus", asy
     );
     if (reduced.length === 0) return;
 
-    const bulkSafe = (probe) =>
+    const validate = (probe) =>
         validateMemoryCandidate({
             kind: "identity",
             statement: probe.statement,
             confidence: 0.9,
             evidence: [{ role: probe.role ?? "user", sourceType: "conversation" }],
-        }).bulkSafe;
+        });
+    const bulkSafe = (probe) => validate(probe).bulkSafe;
 
-    // Condition 1: nothing the corpus calls refusable is bulk-safe.
-    assert.deepEqual(MUST_REFUSE.filter(bulkSafe).map((p) => p.statement), []);
-    // Condition 2: the accept side is non-empty and intact, so a tightening
+    // Condition 1: nothing the corpus calls rejectable is bulk-safe.
+    assert.deepEqual(MUST_REJECT.filter(bulkSafe).map((p) => p.statement), []);
+    // Condition 2: the bulk-safe side is non-empty and intact, so a tightening
     // that silently stopped the feature remembering anything cannot buy the
     // reduced floor.
-    assert.ok(MUST_ACCEPT.length > 0);
+    assert.ok(MUST_ACCEPT_BULK.length > 0);
     assert.deepEqual(
-        MUST_ACCEPT.filter((probe) => !bulkSafe(probe)).map((p) => p.statement),
+        MUST_ACCEPT_BULK.filter((probe) => !bulkSafe(probe)).map((p) => p.statement),
         []
     );
-    // Condition 3: what a rule cannot decide stays undecided. An empty list
+    // Condition 3 [신규 · 2026-08-25]: health information is extracted AND held.
+    // Both directions in the same run, because either one alone is satisfiable
+    // by a validator doing the wrong thing.
+    assert.ok(MUST_REQUIRE_SENSITIVE_REVIEW.length > 0);
+    assert.deepEqual(
+        MUST_REQUIRE_SENSITIVE_REVIEW.filter(bulkSafe).map((p) => p.statement),
+        [],
+        "health information reached bulk approval"
+    );
+    assert.deepEqual(
+        MUST_REQUIRE_SENSITIVE_REVIEW.filter(
+            (probe) => validate(probe).disposition === "rejected"
+        ).map((p) => p.statement),
+        [],
+        "health information was refused rather than held"
+    );
+    // Condition 4: what a rule cannot decide stays undecided. An empty list
     // would claim the rules cover the judgement cases, which is not true.
     assert.ok(NEEDS_JUDGEMENT.length > 0);
-    // Condition 4: both language arms, since the reduction applies per arm.
+    // Condition 5: both language arms, since the reduction applies per arm —
+    // now on all three asserted lists rather than only the rejections.
     const hangul = /[ㄱ-힝]/;
-    const ko = MUST_REFUSE.filter((probe) => hangul.test(probe.statement)).length;
-    assert.ok(ko > 0 && MUST_REFUSE.length - ko > 0);
+    for (const [name, list] of [
+        ["MUST_REJECT", MUST_REJECT],
+        ["MUST_ACCEPT_BULK", MUST_ACCEPT_BULK],
+        ["MUST_REQUIRE_SENSITIVE_REVIEW", MUST_REQUIRE_SENSITIVE_REVIEW],
+    ]) {
+        const ko = list.filter((probe) => hangul.test(probe.statement)).length;
+        assert.ok(ko > 0 && list.length - ko > 0, `${name} covers one arm only`);
+    }
 });
 
 test("the durable_facts floor is derived from §12.3, not chosen", () => {

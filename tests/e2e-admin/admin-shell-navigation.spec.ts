@@ -40,6 +40,13 @@ const NAVIGATION = [
     label: "Email campaigns",
     href: "/admin/email-campaigns",
   },
+  { group: "Operations", label: "Marketing", href: "/admin/marketing" },
+  {
+    group: "Operations",
+    label: "Engineering agent",
+    href: "/admin/engineering-agent",
+  },
+  { group: "Operations", label: "Agent digests", href: "/admin/agent-digests" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
   // Listed to the owner, who is who this describe block signs in as. Every
   // other role sees Execution alone (the "AMUX group by role" block below).

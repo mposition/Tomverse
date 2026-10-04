@@ -1,0 +1,66 @@
+{
+  "$comment": "S0 example plan. Copy it outside the repo. testProfileId is the Zernio profile that holds ONLY test accounts; allowlist.accounts lists every test account and is checked against GET /v1/accounts before any write. targets must be a subset of the allowlist. Media URLs are the publicUrl values printed by `upload` for the files `samples` generated. Set confirmTestAccountsOnly to true only after checking that no production brand account appears anywhere in this file.",
+  "label": "Tomverse S0 verification post - please ignore",
+  "testProfileId": "REPLACE_WITH_TEST_PROFILE_ID",
+  "confirmTestAccountsOnly": false,
+  "allowlist": {
+    "accounts": [
+      { "platform": "linkedin", "accountId": "REPLACE_WITH_TEST_LINKEDIN_ACCOUNT_ID" },
+      { "platform": "twitter", "accountId": "REPLACE_WITH_TEST_X_ACCOUNT_ID" },
+      { "platform": "facebook", "accountId": "REPLACE_WITH_TEST_FACEBOOK_ACCOUNT_ID" },
+      { "platform": "threads", "accountId": "REPLACE_WITH_TEST_THREADS_ACCOUNT_ID" },
+      { "platform": "instagram", "accountId": "REPLACE_WITH_TEST_INSTAGRAM_ACCOUNT_ID" },
+      { "platform": "youtube", "accountId": "REPLACE_WITH_TEST_YOUTUBE_ACCOUNT_ID" },
+      { "platform": "tiktok", "accountId": "REPLACE_WITH_TEST_TIKTOK_ACCOUNT_ID" }
+    ]
+  },
+  "mode": "publishNow",
+  "probeContentDedup": true,
+  "targets": [
+    {
+      "platform": "linkedin",
+      "accountId": "REPLACE_WITH_TEST_LINKEDIN_ACCOUNT_ID",
+      "platformSpecificData": { "organizationUrn": "urn:li:organization:REPLACE_WITH_TEST_PAGE_ID" }
+    },
+    { "platform": "twitter", "accountId": "REPLACE_WITH_TEST_X_ACCOUNT_ID" },
+    {
+      "platform": "facebook",
+      "accountId": "REPLACE_WITH_TEST_FACEBOOK_ACCOUNT_ID",
+      "platformSpecificData": { "pageId": "REPLACE_WITH_TEST_PAGE_ID" }
+    },
+    { "platform": "threads", "accountId": "REPLACE_WITH_TEST_THREADS_ACCOUNT_ID" },
+    {
+      "platform": "instagram",
+      "accountId": "REPLACE_WITH_TEST_INSTAGRAM_ACCOUNT_ID",
+      "mediaItems": [
+        { "type": "image", "url": "REPLACE_WITH_publicUrl_OF_s0-square-1.jpg" },
+        { "type": "image", "url": "REPLACE_WITH_publicUrl_OF_s0-square-2.jpg" }
+      ]
+    },
+    {
+      "platform": "instagram",
+      "accountId": "REPLACE_WITH_TEST_INSTAGRAM_ACCOUNT_ID",
+      "mediaItems": [{ "type": "video", "url": "REPLACE_WITH_publicUrl_OF_s0-vertical-15s.mp4" }],
+      "platformSpecificData": { "shareToFeed": false }
+    },
+    {
+      "platform": "youtube",
+      "accountId": "REPLACE_WITH_TEST_YOUTUBE_ACCOUNT_ID",
+      "mediaItems": [{ "type": "video", "url": "REPLACE_WITH_publicUrl_OF_s0-vertical-15s.mp4" }],
+      "platformSpecificData": { "title": "Tomverse S0 verification - please ignore", "visibility": "public", "madeForKids": false, "containsSyntheticMedia": false }
+    },
+    {
+      "platform": "tiktok",
+      "accountId": "REPLACE_WITH_TEST_TIKTOK_ACCOUNT_ID",
+      "mediaItems": [{ "type": "video", "url": "REPLACE_WITH_publicUrl_OF_s0-vertical-15s.mp4" }],
+      "platformSpecificData": {
+        "privacyLevel": "PUBLIC_TO_EVERYONE",
+        "allowComment": true,
+        "allowDuet": false,
+        "allowStitch": false,
+        "contentPreviewConfirmed": true,
+        "expressConsentGiven": true
+      }
+    }
+  ]
+}

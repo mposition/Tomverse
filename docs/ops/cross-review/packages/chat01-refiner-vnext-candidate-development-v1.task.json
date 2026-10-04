@@ -1,0 +1,26 @@
+{
+  "taskId": "chat01-refiner-vnext-candidate-development-v1",
+  "requirement": "Codex authors only the operator-approved no-cost CHAT-01 vNext development candidate and synthetic-fixture evaluation; Claude Code Max first-party subscription CLI independently reviews it read-only. Diagnose the existing v6 three failures from staging read-only evidence without changing the frozen v1 corpus/spec or v3-v6 run/gate. Pin a direct Luna candidate identity, pure message adapter, system prompt, strict parser/direction and narrow literal proxy, then freeze an exact source closure. Do not claim semantic quality, new holdout independence, run admission or release readiness. No new holdout creation, provider/API call, stage/run approval, flag, product traffic, PR merge or deployment is authorized; Anthropic API is not used.",
+  "completionCriteria": [
+    "Read requirement and the entire scoped diff before test records and author explanation. Inspect the actual changed bytes and dependency closure, not just the prose, and bind the verdict to the package digest.",
+    "Confirm the staging v6 evidence records precisely three failed cases and states the limits of the read-only evidence; the old 13/16 FAIL and all frozen historical artifacts stay unchanged. Development fixtures are not a new independent holdout or a retroactive pass.",
+    "Confirm the proposed model identity and pure adapter have no provider client, dispatch or product authority; untrusted source remains a user-message data field, and the response uses the strict vNext JSON parser with no-change and unsupported reasons rejected.",
+    "Confirm the development evaluator distinguishes structural/direction and exact-literal proxies from semantic preservation and always returns not_admissible; the source-closure manifest hashes all declared files and its test fails if a pinned byte changes.",
+    "Require passing focused tests, TypeScript, lint, whitespace, encoding and documentation-reference guards. Distinguish the control-program results from any independently executed reviewer checks.",
+    "Return one raw JSON verdict without Markdown fences, with precise reproduced findings if any. An approve with an actionable finding is not a controller pass. Keep nextAction at most 120 characters."
+  ],
+  "baseCommit": "2be76ff325e00f2d7999d2393112c27b153f5c47",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-candidate-development-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-candidate-development.md",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-candidate-source-closure.json",
+    "docs/policy/prompt-refiner-quality-evaluation-vnext-draft.md",
+    "lib/promptRefinerQualityEvaluationVnextCandidate.ts",
+    "lib/promptRefinerQualityEvaluationVnextCore.ts",
+    "lib/promptRefinerQualityEvaluationVnextDevelopment.ts",
+    "tests/promptRefinerQualityEvaluationVnextCandidate.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextClosure.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextDevelopment.test.mjs"
+  ],
+  "generatedPaths": []
+}

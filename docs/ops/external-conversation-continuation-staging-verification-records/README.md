@@ -65,7 +65,11 @@ npm run staging:continuation-fixtures
 파일이 이미 있으면 다시 만들 필요가 없습니다 — 저장소에 commit 돼 있습니다.
 
 로컬 PC의 PowerShell, 같은 폴더. 배포 SHA 40자리가 필요하고,
-**Admin Console 헤더에 앞 12자리가 보입니다**(`RAILWAY_GIT_COMMIT_SHA`).
+**Admin Console 화면 맨 아래 상태 표시줄의 `Version`에 앞 12자리가 보입니다**
+(`RAILWAY_GIT_COMMIT_SHA`, `Job health`·`API/DB`와 같은 줄). 전체 40자리는
+`git rev-parse <12자리>`로 폅니다. **Railway의 deployment id(UUID)는 배포를
+가리키지 코드를 가리키지 않으므로 이 자리에 넣지 않습니다** — 스크립트가
+거절합니다.
 
 ```
 npm run staging:continuation-record -- --deploy-sha <40자리 SHA>

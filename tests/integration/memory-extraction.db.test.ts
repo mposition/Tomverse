@@ -686,16 +686,32 @@ test("the offline pipeline composes with the processor under a fake adapter", as
                         candidates: [
                             {
                                 kind: "preference",
+                                polarity: "affirmed",
                                 statement: "사용자는 간결한 답변을 선호한다",
                                 confidence: 0.9,
-                                evidence: ["m1"],
+                                // A span of the seeded body, because a
+                                // `mem-extract-v6` citation carries a quote and
+                                // the parser checks it against the stored
+                                // message.
+                                evidence: [
+                                    {
+                                        messageLabel: "m1",
+                                        quote: "conversation body",
+                                    },
+                                ],
                             },
                             {
                                 kind: "constraint",
+                                polarity: "affirmed",
                                 statement:
                                     "사용자의 API 키는 sk-live-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 이다",
                                 confidence: 0.9,
-                                evidence: ["m1"],
+                                evidence: [
+                                    {
+                                        messageLabel: "m1",
+                                        quote: "conversation body",
+                                    },
+                                ],
                             },
                         ],
                     },

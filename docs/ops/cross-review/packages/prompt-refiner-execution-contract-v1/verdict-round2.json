@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-execution-contract-v1",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-15T22:36:38.809Z",
+  "durationMs": 171068,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 36,
+    "cachedInputTokens": 1370947,
+    "outputTokens": 12314,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.9558745,
+    "raw": {
+      "input_tokens": 36,
+      "cache_creation_input_tokens": 93892,
+      "cache_read_input_tokens": 1370947,
+      "output_tokens": 12314,
+      "output_tokens_details": {
+        "thinking_tokens": 7753
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 93892,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1442,
+          "cache_read_input_tokens": 97001,
+          "cache_creation_input_tokens": 1633,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1633
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T22:39:29.928Z",
+  "verdict": {
+    "taskId": "prompt-refiner-execution-contract-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:5472b12ce5eb652338dfe0810b5d6581014d0cd39629d9806228a118129ad6b3",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerExecutionContract.ts:145-257 (promptRefinerExecutionContractProblems)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The drift check reads only the static checked-in profile via getModelPricingProfile, so a per-model env price override (the same override that lib/modelPricing.ts resolveModelPricing honours at cost-resolution time) can raise the effective input/output rate far above the pinned 0.2/1.2 while the preregistration still reports no drift and keeps the frozen 24,916 microUSD per-request ceiling.",
+        "reproduction": "node --import tsx -e \"process.env.CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION='99'; const c=await import('./lib/promptRefinerExecutionContract.ts'); const p=await import('./lib/modelPricing.ts'); const m=await import('./lib/models.ts'); console.log(c.promptRefinerExecutionContractProblems(), p.resolveModelPricing(m.getModel('gpt-5-6-luna')).inputUsdPerMillionTokens, c.PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD)\" -- expected today: [] alongside an effective rate of 99 and an unchanged 24916 ceiling; a contract that refuses this drift would list a problem instead (or the boundary that only checked-in facts are frozen would be stated in lib/promptRefinerExecutionContract.ts and docs/policy/prompt-refiner-observability.md, so the future reservation authority must re-verify the resolved rate before dispatch)."
+      }
+    ],
+    "nextAction": "Merge as-is: both round-1 nits are closed (the byte-level-BPE lemma and offline-only framing allowance are documented at lib/promptRefinerExecutionContract.ts:56-67 with the dimensional comment in tests/promptRefinerExecutionContract.test.mjs, and the unreachable retryCount disjunct is gone from lib/promptRefinerReceiptCore.ts:215), the pin matches the checked-in catalogue/pricing, 100000*0.2 + ceil(4096*1.2) = 24916 and x100 = 2491600 derive from calculateProviderUsageCost, admission has no admitted:true branch by type, and the terminal-reason mapping is injective and schema-valid; the recorded nit about runtime price overrides can be handled when the reservation authority lands."
+  }
+}

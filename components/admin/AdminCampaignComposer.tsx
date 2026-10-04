@@ -5,21 +5,21 @@ import { useRouter } from "next/navigation";
 import { Eye, Loader2, Send } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import {
   useAdminLocale,
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
-import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import {
-  readAdminApiFailure,
+  describeAdminApiFailure,
   type AdminApiFailure,
 } from "@/lib/adminApiOutcome";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 import {
   type AssistantKnowledgeCampaignLanguage,
-  type ProductAnnouncementPayload,
+  type ProductAnnouncementContent,
 } from "@/lib/productAnnouncementEmail";
+import { adminFetch } from "@/lib/adminFetch";
 
 const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
 
@@ -42,11 +42,12 @@ export function AdminCampaignComposer({
 }: {
   mayWrite: boolean;
   campaignsEnabled: boolean;
-  starterContent: Record<ComposerLocale, ProductAnnouncementPayload>;
+  starterContent: Record<ComposerLocale, ProductAnnouncementContent>;
 }) {
   const router = useRouter();
   const m = useAdminMessages(adminEmailCampaignsMessages).composer;
   const { locale: apiLocale } = useAdminLocale();
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [content, setContent] = useState(() =>
     structuredClone(starterContent)
   );
@@ -54,15 +55,14 @@ export function AdminCampaignComposer({
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [copyDigest, setCopyDigest] = useState<string | null>(null);
   const [busy, setBusy] = useState<"preview" | "create" | null>(null);
-  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const editRevision = useRef(0);
   const locales = useMemo(() => Object.keys(content) as ComposerLocale[], [content]);
   const current = content[locale];
   const currentPreview = previews.find((preview) => preview.language === locale);
 
-  const update = <K extends keyof ProductAnnouncementPayload>(
+  const update = <K extends keyof ProductAnnouncementContent>(
     key: K,
-    value: ProductAnnouncementPayload[K]
+    value: ProductAnnouncementContent[K]
   ) => {
     editRevision.current += 1;
     setContent((previous) => ({
@@ -97,6 +97,7 @@ export function AdminCampaignComposer({
   };
 
   const request = async (path: string) => {
+    setApiFailure(null);
     const response = await adminFetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -119,24 +120,24 @@ export function AdminCampaignComposer({
             }),
       }),
     });
-    if (!response.ok) {
-      const outcome = await readAdminApiFailure(response, {
-        fallback: path.endsWith("/preview") ? m.previewFailed : m.createFailed,
-        locale: apiLocale,
-      });
-      setApiFailure(outcome);
-      dispatchAppToast(outcome.message, outcome.tone);
-      return null;
-    }
-    setApiFailure(null);
     const payload = (await response.json().catch(() => null)) as Record<
       string,
       unknown
     > | null;
-    if (!payload) {
-      throw new Error(
-        path.endsWith("/preview") ? m.previewFailed : m.createFailed
-      );
+    if (!response.ok) {
+      // 409 and 428 are answers, not faults: the shared notice names them and,
+      // for a stale sign-in, links back into step-up for this screen.
+      const outcome = describeAdminApiFailure({
+        status: response.status,
+        error: typeof payload?.error === "string" ? payload.error : null,
+        code: typeof payload?.code === "string" ? payload.code : null,
+        approvalId:
+          typeof payload?.approvalId === "string" ? payload.approvalId : null,
+        fallback: path.endsWith("/preview") ? m.previewFailed : m.createFailed,
+        locale: apiLocale,
+      });
+      setApiFailure(outcome);
+      throw new Error(outcome.message);
     }
     return payload;
   };
@@ -147,7 +148,6 @@ export function AdminCampaignComposer({
     setBusy("preview");
     try {
       const payload = await request("/api/admin/email-campaigns/preview");
-      if (!payload) return;
       if (editRevision.current !== requestedRevision) return;
       setPreviews((payload?.previews as Preview[]) ?? []);
       setCopyDigest(
@@ -168,7 +168,6 @@ export function AdminCampaignComposer({
     setBusy("create");
     try {
       const payload = await request("/api/admin/email-campaigns");
-      if (!payload) return;
       const campaign = payload?.campaign as { id?: unknown } | undefined;
       if (typeof campaign?.id !== "string") throw new Error(m.createFailed);
       dispatchAppToast(m.created, "success");
@@ -186,7 +185,6 @@ export function AdminCampaignComposer({
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
@@ -210,6 +208,7 @@ export function AdminCampaignComposer({
           {m.disabled}
         </p>
       ) : null}
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.8fr)]">
         <div className="min-w-0">

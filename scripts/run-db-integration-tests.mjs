@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { readAmuxCommitDeadlineInstallSql } from "./amux-commit-deadline-install.mjs";
 import {
   DB_INTEGRATION_GROUPS,
+  POSTGRES16_COMPAT_GROUP,
+  POSTGRES16_COMPAT_SUITES,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
 import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
@@ -90,9 +92,9 @@ const testEnvironment = {
  * wants one answer rather than seven.
  */
 const group = (process.env.DB_INTEGRATION_GROUP || "").trim();
-if (group && !DB_INTEGRATION_GROUPS.includes(group)) {
+if (group && group !== POSTGRES16_COMPAT_GROUP && !DB_INTEGRATION_GROUPS.includes(group)) {
   fail(
-    `DB_INTEGRATION_GROUP must be one of ${DB_INTEGRATION_GROUPS.join(", ")}; received "${group}".`
+    `DB_INTEGRATION_GROUP must be one of ${[...DB_INTEGRATION_GROUPS, POSTGRES16_COMPAT_GROUP].join(", ")}; received "${group}".`
   );
 }
 if (group) {
@@ -109,18 +111,22 @@ if (group) {
  * A step whose arguments name no suite at all -- the Prisma schema build -- is
  * never filtered. Each lane gets its own database and has to build it.
  */
-const run = (args, label) => {
+const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
-    const mine = suites.filter((suite) => dbIntegrationGroupOf(suite) === group);
+    const mine = suites.filter((suite) =>
+      group === POSTGRES16_COMPAT_GROUP
+        ? POSTGRES16_COMPAT_SUITES.includes(suite)
+        : dbIntegrationGroupOf(suite) === group
+    );
     if (mine.length === 0) return;
     selected = args.filter((arg) => !arg.startsWith("tests/") || mine.includes(arg));
   }
   console.log(`\n[db-integration] ${label}`);
   const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
-    env: testEnvironment,
+    env: { ...testEnvironment, ...environmentOverrides },
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -232,6 +238,44 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The shared AgentDigestItem table: closed agent and kind lists, the
+    // idempotency prefix, rows born with their body, and the expiry and purge
+    // that are the only update and delete.
+    "tests/integration/agent-digest-item.db.test.ts",
+    // Its single writer: one row and one system audit entry in one transaction,
+    // a replay or a conflict writes neither, and a refusal never opens one.
+    "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
+    // The digest intake: secret, control revision and switch, closed schema,
+    // then the single writer; one digest per UTC day.
+    "tests/integration/qa-release-digest-intake.db.test.ts",
+    // The Monitor silence check: its own secret, the control revision, then
+    // the freshness verdict over the database clock.
+    "tests/integration/qa-release-monitor.db.test.ts",
+    // The merge lane's attempts: one open per lane, the core's lifecycle and
+    // nothing else, every write audited by the right actor, no removal.
+    "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
+    // The merge lane service's three app calls: its own secret, the revision
+    // it carries, a strict body, then the single writer.
+    "tests/integration/qa-release-merge-lane-routes.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
@@ -251,6 +295,56 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // Engineering adapter: the run is written in the AMUX writer's own
+    // transaction after every AMUX lock, one fact or neither, and its
+    // settlement meets delivery ack and expired recovery without a deadlock.
+    "tests/integration/engineering-agent-amux-adapter.db.test.ts",
+    // Engineering agent store: every change commits with its audit entry
+    // under the right actor, and results go where the core says. It closes
+    // what it opens, so it passes whichever engineering file runs first.
+    "tests/integration/engineering-agent-store.db.test.ts",
+    // Support-triage run record: the database owns the deadline, caps runs
+    // at 52 per kind per UTC day under concurrency, downgrades a late success
+    // and refuses deleting a row younger than 30 days.
+    "tests/integration/support-triage-run.db.test.ts",
+    // Support-triage timeouts: one call arms the lane timeouts, they survive
+    // the call, a slow statement is cancelled, and on 17 a short inherited
+    // transaction_timeout refuses the transaction before any write.
+    "tests/integration/support-triage-timeouts.db.test.ts",
+    // Support-triage run writer: a run row and its system audit entry commit
+    // or roll back together, and a late finish is recorded as such.
+    "tests/integration/support-triage-run-store.db.test.ts",
+    // Support-triage retention: rows past their boundary go in audited
+    // batches, a cancelling row is skipped and counted, and no progress is
+    // reported as such.
+    "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
+    // Engineering agent state: the triggers refuse a late success, a claim
+    // without the next fencing token, a draft closed without its decision, a
+    // second capability consumption and a rewritten snapshot, whoever writes.
+    "tests/integration/engineering-agent-schema.db.test.ts",
+    // sre-ops transaction bounds: the arming function refuses a short budget,
+    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
+    // inherited transaction_timeout so the session ends at ours.
+    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
+    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
+    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
+    "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
@@ -266,7 +360,27 @@ run(
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
+    // sre-ops trust check T3a: the migrations' catalogue is exactly the
+    // expected one, and a dropped or re-deferred rule is seen.
+    "tests/integration/ops-observer-catalog.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
+    // Prompt Refiner authority: stage-first locking, runtime price drift,
+    // one-time consume and the permanent 100-slot/cost ceiling.
+    "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // vNext one-shot storage remains dark but must commit exactly 80 fixed-
+    // price slots and refuse consumption before run approval or any reuse.
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    // The staging-only create-once writer: exact historical/current provenance,
+    // audit atomicity, immutable approval and DB-clock expiry.
+    "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
+    // One-run approval, atomic dispatch-intent/reservation consume, immutable
+    // terminal receipts and stop-without-retry unknown recovery.
+    "tests/integration/prompt-refiner-shadow-run.db.test.ts",
+    "tests/integration/prompt-refiner-successor-migration.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     // The hash chain is walked in batches now, and a cursor that skips or
     // repeats a row is silent: a skipped row is reported as verified, and a
@@ -278,6 +392,10 @@ run(
     "tests/integration/account-deletion.db.test.ts",
     "tests/integration/conversation-title.db.test.ts",
     "tests/integration/conversation-lock-migration.db.test.ts",
+    // Durable Chat recovery is a database coordination contract: duplicate
+    // claims, draft/checkpoint CAS, DB-clock leases and deletion cascades can
+    // all look correct in one process while failing under PostgreSQL races.
+    "tests/integration/chat-durable-recovery.db.test.ts",
     "tests/integration/provider-recovery.db.test.ts",
     "tests/integration/provider-failure-scope.db.test.ts",
     "tests/integration/provider-probe.db.test.ts",
@@ -298,6 +416,18 @@ run(
     // or a bucket outage cannot record an account as having lost its files.
     "tests/integration/message-attachment-availability.db.test.ts",
     "tests/integration/email-notification-schema.db.test.ts",
+    // The permission ledger's constraints and triggers. Append-only, sealing and
+    // verdict immutability are enforced in Postgres because a ledger the
+    // application alone protects is one a migration or an admin script can
+    // rewrite -- and the row it rewrites is the proof that a send was allowed.
+    "tests/integration/email-permission-ledger.db.test.ts",
+    // The ledger's first writers: the sealed cohort a risk_accepted approval
+    // covers, and the one-time in-product notice. Here rather than in a unit
+    // test because what is under test is whether the rows those writers build
+    // survive the triggers -- a sealed approval refusing to change, and an
+    // append-only table accepting a repeated render as one row rather than
+    // raising on the second.
+    "tests/integration/email-send-approval-cohort.db.test.ts",
     // The three ADR flags against the rows that hold them: the acceptance
     // criterion is about a delivery row *not* being created, which only the
     // table can confirm, and the fan-out gate needs a real event to expand.
@@ -313,6 +443,10 @@ run(
     "tests/integration/email-webhook-processing-lease.db.test.ts",
     // Recording the permanent bounces that were handled as soft ones.
     "tests/integration/email-permanent-bounce-recovery.db.test.ts",
+    // The lock every customer-facing send takes: the suppression word read
+    // inside it, the provider call made while it is held, and the row that
+    // waits without counting an attempt when somebody else has the address.
+    "tests/integration/email-send-address-lock.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     // A deletion request and a spam complaint: the suppression and the preference
     // withdrawal commit in one transaction, keyed so a retry records nothing new.
@@ -321,6 +455,40 @@ run(
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
+    // The recipient-authority rules: a version that is no longer a draft
+    // cannot have its rules changed, and one (ruleKey, ruleVersion) names one
+    // content -- both enforced by trigger, because a waiver is scoped to it.
+    "tests/integration/release-notes-country-rule.db.test.ts",
+    // The duty states: each one carries its own evidence and only its own, and a
+    // waiver has to name a sealed approval of the waiver kind. All three are
+    // constraints and a trigger, so only the database can answer for them.
+    "tests/integration/release-notes-rule-obligation.db.test.ts",
+    // The send verdict written down: the evidence it cited is rows the database
+    // will not lose, the seal closes the set in the same transaction, and one
+    // phase of one delivery is recorded once however many times it is evaluated.
+    "tests/integration/release-notes-send-decision.db.test.ts",
+    // The amendment notice's reach (S10): which owed accounts have no attempt at
+    // all, counted as a set in one statement. The first version counted only
+    // `sent` and compared sizes, and both mistakes are about rows.
+    "tests/integration/email-policy-publication.db.test.ts",
+    // The sign-up screen's consent choice (S4): only the database shows that an
+    // existing account never consumes one, that consumption and its evidence
+    // commit together, and that an estimate never replaces a declaration.
+    "tests/integration/signup-consent.db.test.ts",
+    // Sign-in and sign-up split (v25): a proven address with no account is
+    // held for one sign-up, and only the database shows the hold is single use.
+    "tests/integration/email-login-signup-hold.db.test.ts",
+    // DOI section 14: a proven session consents at once; the database shows
+    // the seal, the lock-time address check and the retired link.
+    "tests/integration/email-verified-session-consent.db.test.ts",
+    "tests/integration/au-relationship.db.test.ts",
+    "tests/integration/in-product-consent-notice.db.test.ts",
+    "tests/integration/processing-result-notice.db.test.ts",
+    // The two statutory display checks, whose question is which (policy version,
+    // profile) a message could still be composed under. Both earlier readings of
+    // that were wrong in ways only rows show: the active version alone, and a
+    // profile key assumed equal to a country code.
+    "tests/integration/email-statutory-display-readiness.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.
     "tests/integration/email-snapshot-retention.db.test.ts",
@@ -381,15 +549,41 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
-    // Deploy B: the read authority setting, the cutover under the exclusive
-    // fence, and lifting causes by the release matrix. The fence, the setting
-    // row and the audit row sharing a transaction are all database facts.
+    // Lifting causes by the release matrix, the address lock a concurrent
+    // writer contends for, and a retired setting row proving inert. The lock,
+    // the leftover row and the audit row sharing a transaction with the
+    // release are all database facts.
     "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
     "tests/integration/marketing-lane.db.test.ts",
     "tests/integration/admin-email-delivery.db.test.ts",
+    // Opening one audit row by id. The property is the relationship between two
+    // reads of the same table -- the newest-N window and the single-row read --
+    // so a single process with no database proves neither.
+    "tests/integration/admin-audit-row-by-id.db.test.ts",
+    // The audit chain writer on real rows: the database clock, the previous
+    // hash read and the verifier agree, inside and outside a caller's
+    // transaction, and a rolled-back caller leaves no entry behind.
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
+    // The marketing tables' triggers and CHECK constraints, exercised with
+    // direct writes rather than through the store module: what they refuse is
+    // exactly the write that did not go through it.
+    "tests/integration/marketing-automation-schema.db.test.ts",
+    // The staging webhook shadow: the partial unique index on an event's
+    // digest refusing a second report inside the transaction that would have
+    // audited it, and one winner among deliveries racing for an armed fault.
+    "tests/integration/marketing-webhook-shadow.db.test.ts",
+    // Proving a template: two human audit entries that still verify against
+    // the chain, which is the only route to a post published without a person
+    // looking at it. Needs real rows, because a fixture that inserted them
+    // would prove the loader agrees with the fixture.
+    "tests/integration/marketing-templates.db.test.ts",
+    // Where a plan number came from, which decides whether a price claim may
+    // rest on it. Needs rows, because the whole question is stored versus
+    // compiled.
+    "tests/integration/marketing-fact-sources.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
@@ -430,6 +624,18 @@ run(
     "tests/integration/memory-metrics.db.test.ts",
     "tests/integration/conversation-memory-mode.db.test.ts",
     "tests/integration/conversation-selection-mode.db.test.ts",
+    // AI Review's operational record: that a run round-trips content-free,
+    // that a guest run lands at all (it produces no ComparisonReview row), and
+    // that the 90-day purge reaches only what it should.
+    "tests/integration/comparison-review-run-telemetry.db.test.ts",
+    // The per-item feedback contract: the unique index really is the
+    // idempotency key, a verdict is scoped to one person, and both cascades
+    // are the deletion path the data-domain registry claims.
+    "tests/integration/comparison-review-item-feedback.db.test.ts",
+    // A pin is not activity: the sidebar groups its date headers by
+    // `updatedAt`, so pinning may not touch it, and another account's pin
+    // statement must match no row.
+    "tests/integration/conversation-pin.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",
@@ -457,6 +663,15 @@ run(
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
+    // N2: what the database refuses about mobile bearer authentication -- the
+    // two-step cascade to a rotation row that has no user column of its own,
+    // and the constraint stopping an audit row from naming somebody's device
+    // without naming the account that cascade reaches.
+    "tests/integration/mobile-auth-schema.db.test.ts",
+    // The lifecycle on top of those tables: the conditional UPDATE that makes
+    // strict single use true under a real race, and D8's contract that a
+    // replay's revocation commits even though the caller is refused.
+    "tests/integration/mobile-auth-service.db.test.ts",
     // Release C1: what the database refuses about a profile version snapshot.
     "tests/integration/assistant-profile-schema.db.test.ts",
     "tests/integration/assistant-profile-service.db.test.ts",
@@ -465,6 +680,7 @@ run(
     "tests/integration/assistant-knowledge-schema.db.test.ts",
     "tests/integration/assistant-knowledge-pipeline.db.test.ts",
     "tests/integration/assistant-package-import.db.test.ts",
+    "tests/integration/assistant-package-import-flag.db.test.ts",
     "tests/integration/assistant-package-export.db.test.ts",
     // Release C3c: which row the runtime reads for a profile-backed turn --
     // Policy: docs/policy/external-conversation-import-and-memory.md.
@@ -489,6 +705,24 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// This suite creates and drops only its own synthetic schema. Give its Prisma
+// client that exact schema rather than letting it see the lane's public tables.
+const oneShotAuditSuite =
+  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
+    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
+  fail("the isolated one-shot audit suite requires a dedicated test database name");
+}
+const oneShotTestUrl = new URL(rawTestDatabaseUrl);
+oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+run(
+  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
+    oneShotAuditSuite],
+  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
+    DATABASE_URL: oneShotTestUrl.toString(),
+    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
@@ -535,6 +769,23 @@ run(
     "tests/integration/refund-decision-route.db.test.ts",
   ],
   "Running the administrator refund decision transaction and its outbox"
+);
+// Also its own process, and for the same reason: it replaces next-auth. What
+// it pins is which requests reach the lift at all -- a stale cause set, a dead
+// handle and an unknown handle are three different refusals, and every one of
+// them used to answer "not found".
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/admin-suppression-lift-route.db.test.ts",
+  ],
+  "Running the administrator suppression lift route and its refusals"
 );
 // Also its own process: it replaces next-auth and the AI SDK's streamText to
 // drive a real searching turn end to end. What it asserts is the wiring
@@ -704,4 +955,19 @@ run(
     "tests/integration/conversation-auto-selection-route.db.test.ts",
   ],
   "Running the Auto selection-mode route scenarios"
+);
+// Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
+// in its own process rather than changing another integration suite's client.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/message-attachment-resend.db.test.ts",
+  ],
+  "Running restored question attachment persistence scenarios"
 );

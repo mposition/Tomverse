@@ -9,10 +9,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ESLint } from "eslint";
+
+import {
+  COMPILER_SPECIFIER,
+  missingCompilerProblem,
+  resolveCompiler,
+} from "../scripts/check-shared-packages-core.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const packagesDir = join(root, "packages");
@@ -38,7 +45,6 @@ test("there is at least one shared package to enforce the boundary on", () => {
     "PACKAGE-01 measures a boundary; packages/ must not be empty."
   );
 });
-
 const forbidden = [
   ["a framework import", 'import Link from "next/link";'],
   ["the framework root", 'import { after } from "next";'],
@@ -251,6 +257,66 @@ for (const name of packageNames) {
   });
 }
 
+test("an unresolvable compiler is reported as the check not running", () => {
+    // The branch the runner cannot be made to take: relocating it to a tree
+    // without `typescript` also loses `eslint`, which it imports at load. So
+    // the decision lives in the core and the stub is the only way in.
+    const asking = [];
+    const resolved = resolveCompiler((specifier) => {
+        asking.push(specifier);
+        throw Object.assign(new Error("not found"), { code: "MODULE_NOT_FOUND" });
+    });
+
+    assert.equal(resolved, null, "a resolver that throws is an answer, not a crash");
+    assert.deepEqual(asking, [COMPILER_SPECIFIER], "it asks by specifier, never by path");
+
+    const problem = missingCompilerProblem(2);
+    assert.match(problem, /npm ci/, "it names the remedy");
+    assert.match(problem, /\b2 package\(s\)/, "it says how many went unchecked");
+    assert.match(
+        problem,
+        /not a boundary failure/,
+        "the whole point: a missing compiler is not the packages failing to type-check"
+    );
+    assert.doesNotMatch(
+        problem,
+        /does not type-check/,
+        "that phrase is the conclusion this message exists to avoid"
+    );
+});
+
+test("a resolvable compiler is passed through unchanged", () => {
+    assert.equal(
+        resolveCompiler(() => "/somewhere/typescript/bin/tsc"),
+        "/somewhere/typescript/bin/tsc"
+    );
+});
+
+test("the checker finds the compiler the way Node finds anything else", () => {
+    // The standalone type-check is only evidence if the compiler was actually
+    // run. The checker used to spawn a literal
+    // `<root>/node_modules/typescript/bin/tsc`, which does not exist in a git
+    // worktree -- the worktree installs nothing and Node resolves up to the
+    // parent checkout. The spawn failed, its loader stack trace landed in the
+    // problem text, and a missing compiler was reported as a package that does
+    // not type-check.
+    const script = join(root, "scripts", "check-shared-packages.mjs");
+    const source = readFileSync(script, "utf8");
+
+    assert.doesNotMatch(
+        source,
+        /node_modules["'\s,)]/,
+        "a hard-coded node_modules path assumes this checkout installed its own " +
+            "dependencies; resolve the compiler by specifier instead."
+    );
+
+    assert.equal(
+        existsSync(createRequire(pathToFileURL(script).href).resolve("typescript/bin/tsc")),
+        true,
+        "typescript/bin/tsc resolves from the checker's own location"
+    );
+});
+
 test("the workspace resolves the package by its published specifier", async () => {
   // Not a formality: the app imports `@tomverse/chat-core`, and that only
   // resolves because the root manifest declares the workspace. Importing the
@@ -266,5 +332,38 @@ test("the root manifest declares the workspace", () => {
   assert.ok(
     (manifest.workspaces ?? []).includes("packages/*"),
     "packages/* must be a workspace or the specifier above resolves to nothing."
+  );
+});
+
+test("the AMUX Rust crate stays in the Cargo workspace outside PACKAGE-01 packages", () => {
+  const crateManifest = join(root, "crates", "amux-core", "Cargo.toml");
+  const formerPackageManifest = join(
+    root,
+    "packages",
+    "amux-core",
+    "Cargo.toml"
+  );
+
+  assert.equal(
+    existsSync(crateManifest),
+    true,
+    "crates/amux-core must remain the authoritative Rust crate location"
+  );
+  assert.equal(
+    existsSync(formerPackageManifest),
+    false,
+    "a Rust crate under packages/* would silently enter PACKAGE-01's JavaScript package population"
+  );
+
+  const cargoWorkspace = readFileSync(join(root, "Cargo.toml"), "utf8");
+  const orchestratorManifest = readFileSync(
+    join(root, "apps", "tomverse-orchestrator", "Cargo.toml"),
+    "utf8"
+  );
+
+  assert.match(cargoWorkspace, /"crates\/amux-core"/);
+  assert.match(
+    orchestratorManifest,
+    /amux-core\s*=\s*\{\s*path\s*=\s*"\.\.\/\.\.\/crates\/amux-core"\s*\}/
   );
 });

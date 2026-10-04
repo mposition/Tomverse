@@ -124,6 +124,34 @@ export const sourceCommentReferences = (source) =>
  * what the reader has already been told.
  */
 export const PLANNED_REFERENCES = {
+    // The product-news redesign names three modules it proposes. The draft says
+    // in its own first paragraph that none of them exists and that nothing is
+    // built until section 12 is approved, so building empty modules to satisfy
+    // this check would put files in the tree that no decision has authorised.
+    "lib/emailReleaseNotes.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed gate for the release_notes purpose. Section 9 lists it as new; section 12 lists the approvals that would authorise it.",
+    },
+    "lib/releaseNotesContentRules.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed content rules for release notes (D5). Not built: the classification it enforces is itself awaiting approval B.",
+    },
+    "lib/emailPermission.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed permission verdict and the sign-up attempt row behind it (D3, D4). Not built: section 11 approval A decides whether the bases exist at all.",
+    },
+    "tests/releaseNotesContentRules.test.mjs": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "The test that would enforce D5 across seven locales, named so the design can say what proves the rule rather than leaving it to review.",
+    },
+    // The marketing automation policy fixes the SEO agent's allowlist to four
+    // exact files. Three exist; the fourth is the llms.txt route the policy
+    // names as a planned file. The policy was approved on 2026-09-17; the route
+    // is built in stage S5, and this entry leaves when it exists.
+    "app/llms.txt/route.ts": {
+        document: "docs/policy/marketing-automation.md",
+        reason: "Fourth file of the SEO agent's exact allowlist (section 9.2). Planned, not built: the policy is approved and the route lands in stage S5.",
+    },
     // An entry here is a document telling the reader about something that does
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in

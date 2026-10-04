@@ -148,9 +148,157 @@ test("deployments baseline a pre-existing database before applying migrations", 
   // Order matters: a database that predates the baseline has to be marked
   // before deploy tries to apply it, or deploy fails on `relation "User"
   // already exists` and blocks every later deployment.
-  assert.ok(
-    migrate.indexOf("baseline-existing-database.mjs") <
-      migrate.indexOf("migrate deploy"),
-    "the baseline guard must run before prisma migrate deploy"
+  //
+  // The deploy step is `scripts/run-prisma-migrate-deploy.mjs`, which retries a
+  // database it could not reach; matching either spelling keeps this about the
+  // order rather than about how the step is spelled.
+  const deployStep = migrate.search(
+    /run-prisma-migrate-deploy\.mjs|prisma\s+migrate\s+deploy/
   );
+  assert.ok(deployStep >= 0, "db:migrate must run the deploy step");
+  assert.ok(
+    migrate.indexOf("baseline-existing-database.mjs") < deployStep,
+    "the baseline guard must run before the deploy step"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Migrations `migrate diff` cannot see (2026-10-02)
+// ---------------------------------------------------------------------------
+//
+// The first migration to ship on its own with nothing schema.prisma describes
+// -- a partial expression index -- was refused by the guard on staging: the
+// database "matched" schema.prisma before it was applied, which is what the
+// guard reads as a restore that already holds it. Such a migration now declares
+// a presence probe, and the guard proceeds only when every probe proves absence.
+
+test("a migration names one relation in its header, or declares nothing", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  assert.deepEqual(
+    presenceDeclarationIn(`-- intro
+--
+-- baseline-check: present-if-relation "X_key"
+
+CREATE INDEX x;`),
+    { kind: "relation", relation: "X_key" },
+  );
+  assert.deepEqual(presenceDeclarationIn("CREATE INDEX x;"), { kind: "none" });
+  // A function is not a relation; it has its own declaration and question.
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: present-if-function "f_x"
+CREATE FUNCTION f_x();`),
+    { kind: "function", function: "f_x" },
+  );
+  for (const [label, sql] of [
+    // SQL instead of a name: the guard asks its own fixed question, so a
+    // declaration that tries to supply one is not a declaration at all.
+    ["sql", `-- baseline-check: present-if SELECT dblink_exec('x', 'DELETE FROM "User"')
+CREATE INDEX x;`],
+    ["two", `-- baseline-check: present-if-relation "A"
+-- baseline-check: present-if-relation "B"
+CREATE INDEX x;`],
+    ["quoted inside", `-- baseline-check: present-if-relation "a\"b"
+CREATE INDEX x;`],
+    ["schema-qualified", `-- baseline-check: present-if-relation "other.X"
+CREATE INDEX x;`],
+    ["unknown kind", `-- baseline-check: present-if-trigger "T"
+CREATE INDEX x;`],
+    ["function schema-qualified", `-- baseline-check: present-if-function "other.f"
+CREATE INDEX x;`],
+    ["too long", `-- baseline-check: present-if-relation "${"a".repeat(64)}"
+CREATE INDEX x;`],
+  ]) {
+    assert.deepEqual(presenceDeclarationIn(sql), { kind: "invalid" }, label);
+  }
+  // Only the header counts: a declaration after the first statement -- in a
+  // function body, say -- is not one.
+  assert.deepEqual(
+    presenceDeclarationIn(`CREATE FUNCTION f() AS $$
+-- baseline-check: present-if-relation "X"
+$$;`),
+    { kind: "none" },
+  );
+});
+
+test("the guard asks one fixed question with the name bound, and accepts one boolean", async () => {
+  const { presenceQuery, presenceAnswer } = await import("../scripts/baseline-presence-core.mjs");
+  assert.deepEqual(presenceQuery("X_key"), {
+    text: 'SELECT to_regclass($1) IS NOT NULL AS "present"',
+    values: ['public."X_key"'],
+    rowMode: "array",
+  });
+  const { functionPresenceQuery, presenceQueryFor } = await import("../scripts/baseline-presence-core.mjs");
+  const fn = functionPresenceQuery("f_x");
+  assert.deepEqual(fn, {
+    text: "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1) AS \"present\"",
+    values: ["f_x"],
+    rowMode: "array",
+  });
+  assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x" }), fn);
+  assert.deepEqual(presenceQueryFor({ name: "m", relation: "X_key" }), presenceQuery("X_key"));
+  assert.equal(presenceAnswer([[false]]), false);
+  assert.equal(presenceAnswer([[true]]), true);
+  for (const rows of [[], [[false], [false]], [[false, true]], [["f"]], [[null]], undefined]) {
+    assert.equal(presenceAnswer(rows), undefined, JSON.stringify(rows));
+  }
+});
+
+test("the guard proceeds only when every pending migration proves absence", async () => {
+  const { pendingProbes, presenceVerdict } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = {
+    a: `-- baseline-check: present-if-relation "A"\nCREATE INDEX a;`,
+    b: `-- baseline-check: present-if-relation "B"\nCREATE INDEX b;`,
+    c: "CREATE INDEX c;",
+    f: `-- baseline-check: present-if-function "F"
+CREATE FUNCTION f();`,
+  };
+  assert.deepEqual(pendingProbes(["a", "f"], (name) => sql[name]), {
+    probes: [{ name: "a", relation: "A" }, { name: "f", function: "F" }],
+    undeclared: [],
+  });
+  assert.deepEqual(pendingProbes(["a", "c"], (name) => sql[name]).undeclared, ["c"]);
+  assert.deepEqual(pendingProbes(["a", "b"], (name) => sql[name]).probes, [
+    { name: "a", relation: "A" },
+    { name: "b", relation: "B" },
+  ]);
+  assert.equal(presenceVerdict(["a", "b"], new Map([["a", false], ["b", false]])).proceed, true);
+  for (const answer of [true, null, undefined, "f", 0]) {
+    const verdict = presenceVerdict(["a", "b"], new Map([["a", false], ["b", answer]]));
+    assert.equal(verdict.proceed, false, String(answer));
+    assert.deepEqual(verdict.notProvenAbsent, ["b"]);
+  }
+});
+
+test("the guard reads probes only on the refusal path, read-only and rolled back", () => {
+  const guard = readFileSync(join(ROOT, "scripts", "baseline-existing-database.mjs"), "utf8");
+  const match = guard.indexOf("schemaMatchesPrisma()) {");
+  const probe = guard.indexOf("pendingProbes(", match);
+  // The query the guard runs is the core's fixed one, never a migration's text.
+  assert.ok(guard.includes("client.query(presenceQueryFor(probe))"));
+  const readOnly = guard.indexOf('"BEGIN READ ONLY"', probe);
+  const rollback = guard.indexOf('"ROLLBACK"', readOnly);
+  assert.ok(match > 0 && probe > match && readOnly > probe && rollback > readOnly);
+  // An undeclared migration still meets the original refusal.
+  assert.ok(guard.includes("undeclared,"));
+});
+
+test("the webhook shadow index migration names its own index", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261002120000_marketing_webhook_shadow_event_unique", "migration.sql"),
+    "utf8",
+  );
+  const declaration = presenceDeclarationIn(sql);
+  const index = /CREATE UNIQUE INDEX "([^"]+)"/.exec(sql)?.[1];
+  assert.deepEqual(declaration, { kind: "relation", relation: index });
+});
+
+test("a migration that creates only a function names that function", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261003130000_support_triage_arm_timeouts", "migration.sql"),
+    "utf8",
+  );
+  const created = /CREATE (?:OR REPLACE )?FUNCTION (?:public\.)?"?([a-z_]+)"?\(/i.exec(sql)?.[1];
+  assert.deepEqual(presenceDeclarationIn(sql), { kind: "function", function: created });
 });

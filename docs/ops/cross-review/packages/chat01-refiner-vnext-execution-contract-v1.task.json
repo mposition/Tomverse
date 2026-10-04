@@ -1,0 +1,21 @@
+{
+  "taskId": "chat01-refiner-vnext-execution-contract-v1",
+  "requirement": "Codex authors the owner-approved, no-cost CHAT-01 Prompt Refiner vNext 80-slot successor execution-contract proposal and cache-write usage guard; Claude Code Max first-party subscription CLI independently reviews it. The approved numeric design is commit cdc947a4eb33f33bd27d099e1d041bc478e702e2, document SHA-256 a1ebccdbbe10c02725d73686235f379f51abd38f5cf8a6acd9e3ba294edbbfea. This scope does not authorize holdout creation, provider calls, stage/run approval, durable reservation consume or release, flags, product traffic, PR merge or deployment. Do not treat this review as runtime admission. Keep the historical v6 13/16 FAIL and earlier stage/run rows unchanged. The reviewer must read requirement and complete diff before test records and author explanation, inspect source bytes rather than trust the summary, and use only read-only tools, not Anthropic API.",
+  "completionCriteria": [
+    "The new isolated proposal fixes stage capacity and run size at 80, request worst case at 29918 microUSD, stage/run each at 2393440 microUSD, max input 100000, max billed output 4096, timeout 15000ms and retry 0; stage and run are nested boundaries rather than additive spending.",
+    "The effective price pin requires direct OpenAI Standard gpt-5.6-luna and exact uncached input 0.20, cached input multiplier 0.1, cache write 0.25 and output 1.20 USD per million tokens. The 1/1/99998 input bucket split plus 4096 output reproduces the approved 29918 microUSD worst case with each bucket independently rounded up.",
+    "A missing, null, noninteger or contradictory cache-write count, missing or drifted price pin, incomplete input/output, out-of-range count, impossible bucket split or reasoning count above billed output yields no non-null cost. An explicitly reported integer zero may be accepted. No result itself authorizes reservation release.",
+    "The approval record accurately distinguishes implementation-only authority from operational stage/run cost approval. Existing policy still blocks all other runtime and paid scopes. No provider, route, DB writer, product or traffic path imports the new module.",
+    "Focused tests pass with missing and adversarial usage and price cases; TypeScript, focused lint and whitespace checks pass. Distinguish the new offline cost guard from actual provider telemetry evidence or invoice reconciliation.",
+    "Claude Code Max subscription CLI returns a digest-bound JSON verdict with precise reproducible findings if any. The control-program fixed revision limits and earlier concluded exchanges are not bypassed."
+  ],
+  "baseCommit": "750ec991ae1f5fa62dc5df6cb7b4eac565db2df9",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-execution-contract-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-execution-contract-approval.md",
+    "docs/policy/prompt-refiner-quality-evaluation-vnext-draft.md",
+    "lib/promptRefinerQualityEvaluationVnextExecutionContract.ts",
+    "tests/promptRefinerQualityEvaluationVnextExecutionContract.test.mjs"
+  ],
+  "generatedPaths": []
+}

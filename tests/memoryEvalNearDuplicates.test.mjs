@@ -87,6 +87,36 @@ test("the shape signal is not constant across the real cases", () => {
     );
 });
 
+test("a declared rework is exempt, and only against the case it names", () => {
+    // The successor set relabels the frozen conversations, so every reworked
+    // case is byte-identical to its source. That is the one duplicate this
+    // detector must not report -- and the exemption has to be narrow enough
+    // that it cannot be used to smuggle in a template.
+    const turns = [
+        ["user", "저는 간호사로 일한 지 12년 됐습니다."],
+        ["assistant", "오래 하셨네요. 어떤 부분을 도와드릴까요?"],
+    ];
+    const source = testCase("src-1", turns);
+    const rework = { ...testCase("succ-1", turns), sourceCaseId: "src-1" };
+    const misdeclared = {
+        ...testCase("succ-2", turns),
+        sourceCaseId: "some-other-case",
+    };
+
+    assert.deepEqual(
+        nearDuplicatePairs([source, rework]).filter((pair) => pair.shape > 0.9),
+        [],
+        "a case duplicating the source it declares must not be reported"
+    );
+
+    // Same bytes, wrong declaration: still reported. An exemption that keyed
+    // off "has a sourceCaseId" rather than off the pair would let this pass.
+    assert.ok(
+        nearDuplicatePairs([source, misdeclared]).some((pair) => pair.shape > 0.9),
+        "a duplicate of a case it does not declare must still be reported"
+    );
+});
+
 test("pairs are ranked, and never cross a cell boundary", () => {
     const cases = [
         ...MEMORY_EVAL_CASES,

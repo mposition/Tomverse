@@ -1,5 +1,8 @@
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { isLanguage } from "@/lib/language";
+import { headers } from "next/headers";
+import { getTrustedIpCountry } from "@/lib/trustedIpCountry";
+import { signupConsentAvailable } from "@/lib/signupConsent";
 import { SignInPageContent } from "./SignInPageContent";
 
 /**
@@ -27,14 +30,27 @@ export default async function SignInPage({
 }) {
   const requested = (await searchParams).lang;
   const locale = Array.isArray(requested) ? requested[0] : requested;
+  // NEXT_PUBLIC_* direct references are normally inlined into client bundles.
+  // Read through the server environment object so this dynamic page can pass
+  // the public site key supplied by the running deployment even when the same
+  // build artifact was produced without it.
+  const runtimeEnvironment = process.env;
+  const turnstileSiteKey = runtimeEnvironment.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  // The sign-up consent devices (S4), decided on the server. This screen shows
+  // them only in the sign-up step of a sign-in that proved an address with no
+  // account (section 5.2a); the sign-up screen shows them up front.
+  const signupConsentEnabled = await signupConsentAvailable(
+    getTrustedIpCountry(await headers())
+  ).catch(() => false);
+  const consent = { signupConsentEnabled, mode: "signin" as const };
 
   if (!isLanguage(locale)) {
-    return <SignInPageContent />;
+    return <SignInPageContent turnstileSiteKey={turnstileSiteKey} {...consent} />;
   }
 
   return (
     <LanguageProvider initialLang={locale} forceInitialLang>
-      <SignInPageContent />
+      <SignInPageContent turnstileSiteKey={turnstileSiteKey} {...consent} />
     </LanguageProvider>
   );
 }

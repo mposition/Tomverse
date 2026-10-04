@@ -1,0 +1,31 @@
+{
+  "taskId": "prompt-refiner-execution-pricing-drift-v1",
+  "requirement": "종결된 prompt-refiner-execution-contract-v1 exchange의 round 2가 남긴 단일 unresolved_on_hold finding을 새 continuation에서 검토한다. 실제 비용 경로와 같은 resolveModelPricing()으로 gpt-5-6-luna의 effective input/output rate를 exact 0.2/1.2 pin과 다시 비교하여 per-model 환경 override나 전달된 runtime model row의 가격 drift를 dispatch 전에 execution_contract_mismatch로 거절해야 한다. 원래 exchange의 on_hold/revisions_exhausted 기록과 verdict bytes는 바꾸지 않는다. provider/API/model 호출, runtime writer·예약 authority·adapter, billing, Router 결합, AppSetting writer, flag 활성화, 유료 benchmark와 rollout 승인은 포함하지 않는다. reviewer는 상속된 가격 drift finding이 이 좁은 6-file 후속 diff로 닫혔는지 명시적으로 판정한다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.",
+  "completionCriteria": [
+    "promptRefinerExecutionContractProblems()는 checked-in profile 검사와 별도로 resolveModelPricing(model, estimatedPromptTokens=100000)의 effective input/output rate를 정확한 pin과 비교한다.",
+    "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION 또는 CHAT_MODEL_GPT_5_6_LUNA_OUTPUT_USD_PER_MILLION override가 어느 한쪽 rate를 바꾸면 해당 effective_*_price_mismatch를 내고 admission은 execution_contract_mismatch로 dispatch 전에 거절한다.",
+    "정상 catalog model과 pricing은 기존 24916 microUSD 요청 상한, 2491600 microUSD 단계 상한, retry 0, authority unavailable fail-closed 경계를 유지한다.",
+    "runtime model row를 검사 함수에 전달할 수 있고 미래 예약 authority는 예약·dispatch와 같은 critical path에서 이 gate를 통과해야 한다는 경계가 코드와 한국어 정책·UI 계약·진척 기록에 일치하게 남는다.",
+    "환경 변수 격리 테스트는 input/output drift를 각각 재현하고 실행 뒤 원래 process.env 존재 여부와 값을 정확히 복원하며 환경값을 출력하거나 receipt에 저장하지 않는다.",
+    "기존 종결 exchange의 round 2 package·verdict·events·exchange bytes와 on_hold/revisions_exhausted 상태는 변경하지 않고 새 continuation만 그 finding의 해소 여부를 판단한다.",
+    "focused unit, 전체 typecheck, lint, model-pricing, 문서·정책 참조, strict encoding과 실제 6-file diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다."
+  ],
+  "baseCommit": "96e20b351335a802f53a33e9f2af96572c989705",
+  "writableScope": [
+    "AGENTS.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerExecutionContract.ts",
+    "tests/promptRefinerExecutionContract.test.mjs",
+    "docs/ops/cross-review/packages/"
+  ],
+  "generatedPaths": [
+    "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1"
+  ],
+  "supersedes": {
+    "taskId": "prompt-refiner-execution-contract-v1",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/exchange.json"
+  }
+}

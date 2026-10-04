@@ -1,0 +1,242 @@
+[
+  {
+    "pairId": "analysis-en-001",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-en-004",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-en-007",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-en-013",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-ko-001",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-ko-007",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-ko-008",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "analysis-ko-012",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "coding-en-004",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "coding-en-005",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "coding-en-006",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "coding-en-007",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "coding-ko-001",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "coding-ko-007",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "coding-ko-010",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "coding-ko-014",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "current-en-002",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "current-en-004",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "current-en-007",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "current-en-011",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "current-ko-004",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "current-ko-006",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "current-ko-010",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "current-ko-013",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "document-en-001",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "document-en-004",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "document-en-006",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "document-en-007",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "document-ko-006",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "document-ko-008",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "document-ko-009",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "document-ko-014",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-en-001",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-en-003",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-en-010",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-en-012",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-ko-003",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-ko-009",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-ko-010",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "general-ko-011",
+    "verdict": "auto"
+  },
+  {
+    "pairId": "long-en-017",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-en-020",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-en-025",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-en-027",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-ko-005",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-ko-006",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "long-ko-007",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "long-ko-011",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "translation-ko-en-004",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "translation-ko-en-006",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "translation-ko-en-008",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "translation-ko-en-013",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "writing-en-002",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "writing-en-003",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "writing-en-005",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "writing-en-008",
+    "verdict": "equivalent"
+  },
+  {
+    "pairId": "writing-ko-004",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "writing-ko-009",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "writing-ko-010",
+    "verdict": "baseline"
+  },
+  {
+    "pairId": "writing-ko-011",
+    "verdict": "auto"
+  }
+]

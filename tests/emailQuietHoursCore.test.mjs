@@ -119,13 +119,18 @@ test("malformed windows are refused rather than guessed", () => {
   assert.deepEqual(parseQuietHours(KR), KR);
 });
 
-test("the seeded KR window is the one this module reads", () => {
-  const profiles = JURISDICTION_PROFILE_SEED.filter((profile) => profile.quietHours);
+test("no seeded profile carries a window, and this module still reads one", () => {
+  // Q4, resolved 2026-09-16: 시행령 제61조제2항 excludes electronic mail from
+  // the Network Act's night-time restriction, so Korea's window left the seed.
+  // This module stays, because a window is policy-version data: the day a
+  // profile needs one, it is a seed edit and an activation rather than code.
   assert.deepEqual(
-    profiles.map((profile) => profile.profileKey),
-    ["KR"]
+    JURISDICTION_PROFILE_SEED.filter((profile) => profile.quietHours).map(
+      (profile) => profile.profileKey
+    ),
+    []
   );
-  assert.deepEqual(parseQuietHours(profiles[0].quietHours), KR);
+  assert.deepEqual(parseQuietHours(KR), KR);
   assert.deepEqual(jurisdictionSeedProblems(), []);
 });
 

@@ -1,0 +1,53 @@
+{
+  "version": "router-judge-comparator-v1",
+  "pairs": 60,
+  "humanBaselineMarginPp": 53.333333333333336,
+  "luna": {
+    "judgeId": "luna",
+    "marginShiftPp": -3.3333333333333357,
+    "marginErrorPp": 3.3333333333333357,
+    "exactAgreement": 0.7833333333333333,
+    "oppositeVerdictRate": 0.15
+  },
+  "fable": {
+    "judgeId": "fable",
+    "marginShiftPp": -43.333333333333336,
+    "marginErrorPp": 43.333333333333336,
+    "exactAgreement": 0.5333333333333333,
+    "oppositeVerdictRate": 0.2
+  },
+  "marginErrorDifferencePp": -40,
+  "marginErrorDifferenceCi": {
+    "lowerPp": -56.66666666666667,
+    "upperPp": -5.0000000000000036
+  },
+  "seed": 20260826,
+  "resamples": 10000,
+  "thresholds": {
+    "tolerancePp": 10,
+    "oppositeVerdictCeiling": 0.1
+  },
+  "selection": {
+    "outcome": "undecided",
+    "judgeId": null,
+    "reasons": [
+      "luna is closer to the humans on baseline margin (+3.33pp against +43.33pp), and the 95% interval on the difference [-56.67pp, -5.00pp] excludes zero",
+      "but luna reverses 15.0% of pairs against the humans, over the 10% rail. Reversals cancel in an aggregate margin and will not cancel on another sample"
+    ],
+    "activatesSampleSize": false,
+    "resolutionCaveat": "60 human-labelled pairs resolve to roughly +-10pp. That is enough to say which judge is closer to people, and not enough to certify that the chosen judge's residual bias is smaller than ROUTE-01's -2pp decision boundary. Any report turning on a margin near -2pp must say so."
+  },
+  "judges": {
+    "luna": {
+      "modelId": "gpt-5-6-luna",
+      "provider": "openai",
+      "apiModel": "gpt-5.6-luna"
+    },
+    "fable": {
+      "modelId": "claude-fable-5",
+      "provider": "anthropic",
+      "apiModel": "claude-fable-5"
+    }
+  },
+  "bundleDigest": "sha256:9e0ea8dd6587f51bfa8f7d545fc405361e6a4830d2af792c85ed49f773d74fe3"
+}

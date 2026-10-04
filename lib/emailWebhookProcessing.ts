@@ -291,11 +291,12 @@ export async function processResendWebhook(input: {
       ${JSON.stringify(input.payload)}::jsonb,
       ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
     )
-    -- No conflict target while the old (provider, providerEventId) unique still
-    -- exists beside the per-account one: a target names one arbiter, and a
-    -- conflict on the other would raise instead of doing nothing -- as when
-    -- two workers insert the same new event at once. Which row conflicted is
-    -- established by the lookup below.
+    -- No conflict target. The contraction (20260920100100) left one arbiter,
+    -- so naming it would behave identically -- and not naming it stays right if
+    -- a second one is ever added, which is what went wrong while the old
+    -- (provider, providerEventId) unique sat beside the per-account one: a
+    -- target names one arbiter and a conflict on the other raises instead of
+    -- doing nothing. Which row conflicted is established by the lookup below.
     ON CONFLICT DO NOTHING
     RETURNING "id", "receivedAt",
               ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
@@ -336,20 +337,31 @@ export async function processResendWebhook(input: {
     },
   });
   if (!existing) {
-    // Not this account's event: the same id is on file for the other account,
-    // and the old unique refuses a second row for it. Not a duplicate to
-    // acknowledge -- the event has not been recorded -- so it fails, the
-    // provider retries, and somebody is told. Provider event ids are unique
-    // across accounts in practice; this is the case that says otherwise.
+    // The insert stored nothing and the lookup finds nothing, which after the
+    // contraction (20260920100100) has no ordinary explanation: the unique an
+    // event id conflicts on is `(provider, providerAccount, providerEventId)`,
+    // so a conflict there means this account's own event is on file and the
+    // lookup above finds it. Not *impossible* -- the primary key is an arbiter
+    // too, a future unique would be another, and a row can be deleted between
+    // the insert and the read -- which is the reason to fail loudly rather than
+    // to claim the state cannot occur.
+    //
+    // Until that migration the old `(provider, providerEventId)` unique made
+    // this the ordinary way a marketing event carrying a transactional event's
+    // id was refused -- which is the behaviour the contraction exists to end.
+    // The answer is the same as it was: not a duplicate to acknowledge, because
+    // nothing was recorded. It fails, the provider retries, and somebody is
+    // told.
     await reportOperationalIncident({
       code: "EMAIL_WEBHOOK_EVENT_ID_COLLISION",
-      title: "A provider event id arrived on both accounts",
-      error: "An event id already recorded for one provider account arrived for the other and could not be stored",
+      title: "A provider event was neither stored nor found",
+      error:
+        "A provider event conflicted on insert and was absent on the read that followed; the account-aware unique leaves no ordinary explanation for that",
       severity: "error",
       cooldownMs: 30 * 60 * 1_000,
       context: { component: "email-webhook", account: providerAccount },
     });
-    throw new Error("Provider event id is already recorded for the other account");
+    throw new Error("Provider event was neither stored nor found");
   }
   if (existing.processedAt || existing.abandonedAt) return { handled: false, reason: "duplicate" };
   const claim = await claimStoredEvent(existing.id);

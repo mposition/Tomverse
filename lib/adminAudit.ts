@@ -66,33 +66,70 @@ type AuditChainEntry = {
 /**
  * Appends one entry to the audit hash chain on `client`.
  *
- * The only place a row joins the chain. Every writer -- the administrator
+ * The application's shared append path. Every writer -- the administrator
  * writer below and any system-actor writer -- goes through here, so the lock,
  * the database clock, the previous-hash read and the HMAC input cannot drift
- * apart between them. The AMUX contract is recorded in
- * docs/policy/development-agent-orchestration.md, and the sequence is pinned
- * by tests/server-contract/admin-audit-chain-writer.test.ts.
+ * apart between them (docs/policy/marketing-automation.md §6). The sequence is
+ * pinned by tests/server-contract/admin-audit-chain-writer.test.ts. It is the
+ * intended way in, not a boundary: what stops other writes is the static check
+ * and the database's own triggers, within the limits both state.
  *
  * `integritySecret` is resolved by the caller before any transaction opens,
  * as it always was, so reading the environment is not part of the locked span.
  */
+/**
+ * Takes the audit chain's transaction-scoped advisory lock.
+ *
+ * `appendAuditChainEntry()` below takes it as its first statement, which is
+ * enough when the append is the first thing a transaction does. It is not
+ * enough when the append is the last: a transaction that locks rows and then
+ * appends takes the two locks in the opposite order from one that appends and
+ * then locks rows, and two of those running at once deadlock.
+ *
+ * So a caller whose audit entry must come last -- because it names a row it is
+ * creating -- calls this first instead. The lock is re-entrant within a
+ * transaction and released at commit, so the append's own request costs
+ * nothing; what it buys is that every writer takes this lock before any row
+ * lock, which is the only ordering there is.
+ */
+export async function takeAuditChainLock(
+  client: Prisma.TransactionClient,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+}
+
+/** What an append wrote: the row id, and its hash (null only with no integrity key). */
+export type AppendedAuditEntry = { id: string; entryHash: string | null };
+
 async function appendAuditChainEntry(
   client: Prisma.TransactionClient,
   entry: AuditChainEntry,
   integritySecret: string | undefined
-): Promise<string> {
+): Promise<AppendedAuditEntry> {
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
   const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
-    SELECT clock_timestamp() AS "createdAt"
+    -- AdminAuditLog.createdAt is a naive timestamp. Always materialize the
+    -- UTC wall clock explicitly so a non-UTC database session cannot shift
+    -- the stored instant or the HMAC payload derived from it.
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "createdAt"
   `;
-  const createdAt = timestampRows[0]?.createdAt || new Date();
+  const databaseNow = timestampRows[0]?.createdAt || new Date();
   const previous = integritySecret
     ? await client.adminAuditLog.findFirst({
         where: { entryHash: { not: null } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { entryHash: true },
+        select: { entryHash: true, createdAt: true },
       })
     : null;
+  // The chain is ordered by (createdAt, id) and ids are random, so an entry
+  // stamped in the same millisecond as the head could sort before it and fork
+  // the chain for the next writer. A hashed entry therefore always lands at
+  // least one millisecond after the head; the database refuses anything else
+  // (20260918090000_admin_audit_log_append_only).
+  const createdAt =
+    previous && databaseNow.getTime() <= previous.createdAt.getTime()
+      ? new Date(previous.createdAt.getTime() + 1)
+      : databaseNow;
   const previousHash = previous?.entryHash || null;
   const entryHash = integritySecret
     ? computeAdminAuditEntryHash(
@@ -129,7 +166,7 @@ async function appendAuditChainEntry(
       createdAt,
     },
   });
-  return created.id;
+  return { id: created.id, entryHash };
 }
 
 /**
@@ -180,7 +217,7 @@ export async function writeAdminAuditLog({
   // a retired key would put fresh rows in a span that is on its way out.
   const integritySecret = adminAuditIntegrityKeys(process.env)[0];
   const write = (client: Prisma.TransactionClient) =>
-    appendAuditChainEntry(client, entry, integritySecret);
+    appendAuditChainEntry(client, entry, integritySecret).then((appended) => appended.id);
 
   // The id is returned so a caller can name this entry as evidence in the same
   // transaction (docs/policy/email-product-news-redesign-draft.md, section 7.4).
@@ -192,7 +229,7 @@ type SystemAuditInput = {
   /**
    * Required, unlike the administrator writer's. A system action has no
    * request to fail and no person to ask, so its record has to commit or roll
-   * back with the change it describes.
+   * back with the change it describes (docs/policy/marketing-automation.md §6).
    */
   tx: Prisma.TransactionClient;
   systemActor: SystemAuditActor;
@@ -214,8 +251,12 @@ type SystemAuditInput = {
  *
  * Everything is checked at runtime as well as by the types, because callers
  * reach this from jobs whose inputs are assembled at runtime.
+ *
+ * Returns the entry's hash with its id, so a caller can copy the hash into its
+ * own row in the same transaction (the sre-ops transition ledger,
+ * docs/policy/sre-ops.md §3-10) without reading the entry back.
  */
-export async function writeSystemAuditLog({
+export async function writeSystemAuditLogEntry({
   tx,
   systemActor,
   action,
@@ -223,7 +264,7 @@ export async function writeSystemAuditLog({
   targetId,
   summary,
   metadata,
-}: SystemAuditInput): Promise<string> {
+}: SystemAuditInput): Promise<AppendedAuditEntry> {
   if (!tx) {
     throw new AuditWriteRefusedError(
       "writeSystemAuditLog needs the caller's transaction."
@@ -267,4 +308,12 @@ export async function writeSystemAuditLog({
   };
   const integritySecret = adminAuditIntegrityKeys(process.env)[0];
   return appendAuditChainEntry(tx, entry, integritySecret);
+}
+
+/**
+ * `writeSystemAuditLogEntry` for a caller that needs only the id -- the one
+ * every system writer had before the entry's hash was returned too.
+ */
+export async function writeSystemAuditLog({ tx, ...entry }: SystemAuditInput): Promise<string> {
+  return (await writeSystemAuditLogEntry({ tx, ...entry })).id;
 }

@@ -38,6 +38,15 @@ export type RenderedMessage = { subject: string; html: string; text: string };
 export type CompositionInput = {
   classification: string;
   /**
+   * Whether an approval exempts this message from its country subject label.
+   *
+   * Passed rather than derived: the exemption lives in a duty state that only
+   * the release-notes verdict reads, and nothing in this module could tell an
+   * exempt message from one whose country never asked for a label. Absent means
+   * false, so every caller that does not deal in exemptions is unchanged.
+   */
+  suppressSubjectPrefix?: boolean;
+  /**
    * The template's own flag, not the classification.
    *
    * The same value drives the `List-Unsubscribe` headers, so the footer link
@@ -51,6 +60,8 @@ export type CompositionInput = {
   language: string;
   unsubscribeUrl?: string | null;
   reasonLine?: string | null;
+  /** The languages the unsubscribe notice must also be in (Korea: ko and en). */
+  unsubscribeNoticeLanguages?: readonly string[];
   rendered: RenderedMessage;
 };
 
@@ -133,6 +144,7 @@ export const composeJurisdictionalMessage = (
         language: input.language,
         unsubscribeUrl: input.unsubscribeUrl,
         reasonLine: input.reasonLine,
+        unsubscribeNoticeLanguages: input.unsubscribeNoticeLanguages,
       })
     : ({ ok: false, missing: [] as string[] } as const);
 
@@ -153,7 +165,17 @@ export const composeJurisdictionalMessage = (
     );
   }
 
-  const prefix = marketing ? input.profile.subjectPrefix?.trim() : null;
+  // The exemption, not the absence of a rule. Section 7.7 of the release-notes
+  // design records an exemption rather than clearing the profile, so the profile
+  // still holds "(ad)" and only the duty state says whether to print it --
+  // clearing the seed instead would leave nothing able to tell an exemption from
+  // a country whose rule never asked, and reinstating the label would mean
+  // editing a seed rather than withdrawing an approval. Only the caller that
+  // read the duty state can answer, so it is passed rather than looked up.
+  const prefix =
+    marketing && !input.suppressSubjectPrefix
+      ? input.profile.subjectPrefix?.trim()
+      : null;
   // Compared against the trimmed prefix so `<ADV> `, whose trailing space is
   // part of the seeded value, does not double when a subject already carries
   // it. Re-rendering from the stored snapshot means this should never happen;

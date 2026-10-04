@@ -2,9 +2,26 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 
-import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
+import { appUrl } from "@/lib/accountEmails";
+import {
+  emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
-import { marketingFlagApplies } from "@/lib/emailFeatureFlags";
+import {
+  CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
+  isEmailReleaseNotesLiveForEnqueue,
+} from "@/lib/emailPolicyPublication";
+import {
+  CHANGE_NOTICE_WINDOW_DAYS,
+  TOLD_STATUSES,
+} from "@/lib/emailPolicyPublicationCore";
+import {
+  marketingFlagApplies,
+  releaseNotesFlagApplies,
+} from "@/lib/emailFeatureFlags";
 import { encryptSnapshot, readSnapshotKeyring } from "@/lib/emailSnapshotCrypto";
 import {
   ensureBootstrapPolicyVersion,
@@ -18,6 +35,8 @@ import {
   EXPANSION_BATCH_SIZE,
   expansionRefusal,
   nextBatchPlan,
+  NOTICE_SENT_IN_FLIGHT_DAYS,
+  policyChangeNoticePairingProblem,
   readExpansionSpec,
   type AudienceCohortSpec,
   type ExpansionRefusalReason,
@@ -35,6 +54,11 @@ import {
   type CampaignExcludedReason,
 } from "@/lib/emailCampaignRecipientCore";
 import { audienceExclusion } from "@/lib/modelRetirementAudienceCore";
+import {
+  recordEnqueueDecision,
+  releaseNotesEnqueueDecision,
+} from "@/lib/releaseNotesEnqueueDecision";
+import { releaseNotesAudienceWhere } from "@/lib/releaseNotesAudience";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
 import { deliveryContentForLanguage } from "@/lib/emailCampaignContentCore";
 
@@ -110,6 +134,54 @@ const waveForEvent = (eventId: string) =>
   });
 
 /**
+ * The accounts an amendment notice wave writes to.
+ *
+ * The publication gate's own owed set and evidence window
+ * (lib/emailPolicyPublication.ts `noticeFactsFor`): an account created before
+ * the effective day, or with no creation time, that holds no approved notice
+ * that arrived (a told state with a recorded arrival, as the gate reads it) or
+ * is still on its way (`NOTICE_SENT_IN_FLIGHT_DAYS`). Every wave asks afresh, so a second wave
+ * reaches accounts created since the first and the ones whose notice did not
+ * arrive, and nobody is written to twice. The audience estimate counts the same
+ * condition, so the number an approver reads is the one the wave expands.
+ */
+export const policyChangeNoticeAudienceWhere = (
+  effectiveDate: string,
+  now: Date
+): Prisma.UserWhereInput => {
+  const effective = new Date(`${effectiveDate}T00:00:00.000Z`);
+  const windowStart = new Date(
+    effective.getTime() - CHANGE_NOTICE_WINDOW_DAYS * 86_400_000
+  );
+  return {
+    AND: [
+      { OR: [{ createdAt: null }, { createdAt: { lt: effective } }] },
+      {
+        emailDeliveries: {
+          none: {
+            createdAt: { gte: windowStart },
+            OR: [
+              { status: "pending" },
+              {
+                status: "sent",
+                sentAt: {
+                  gte: new Date(now.getTime() - NOTICE_SENT_IN_FLIGHT_DAYS * 86_400_000),
+                },
+              },
+              { status: { in: [...TOLD_STATUSES] }, deliveredAt: { not: null } },
+            ],
+            templateVersion: {
+              contentHash: { in: [...CHANGE_NOTICE_APPROVED_CONTENT_HASHES] },
+              template: { key: POLICY_CHANGE_NOTICE_TEMPLATE },
+            },
+          },
+        },
+      },
+    ],
+  };
+};
+
+/**
  * Who a cohort wave looks at next.
  *
  * A first notice asks the audience query. A reminder asks the people the
@@ -131,23 +203,21 @@ const cohortCandidates = async (input: {
    */
   classification: SendClassification;
   purpose: string | null;
+  /** The version the expansion pins, which scopes the approvals that count. */
+  policyVersionId: string;
 }): Promise<ExpansionCandidate[]> => {
   if (input.cohort.kind === "marketing_consent") {
+    // The candidate condition the estimate reads too
+    // (lib/releaseNotesAudience.ts): confirmed consent, or a sealed
+    // `risk_accepted` approval. The second half is the population section 5.6
+    // exists for, and a query on consent alone could never reach it.
+    const audience = await releaseNotesAudienceWhere({
+      purpose: input.cohort.purpose,
+      policyVersionId: input.policyVersionId,
+    });
     const rows = await prisma.user.findMany({
       where: {
-        accountStatus: "active",
-        emailPreferences: {
-          some: {
-            purpose: input.cohort.purpose,
-            enabled: true,
-            grantedAt: { not: null },
-            // Confirmed consent only (docs/policy/email-double-opt-in.md §6).
-            // The lane refuses the rest anyway; filing them here would put
-            // people in the ledger as recipients who can never receive.
-            confirmedAt: { not: null },
-          },
-        },
-        ...(input.after ? { id: { gt: input.after } } : {}),
+        AND: [audience, ...(input.after ? [{ id: { gt: input.after } }] : [])],
       },
       orderBy: { id: "asc" },
       take: input.take,
@@ -166,6 +236,35 @@ const cohortCandidates = async (input: {
         excludedReason: candidate.email ? null : "no_email",
         malformed: false,
       },
+      inAudience: true,
+    }));
+  }
+
+  if (input.cohort.kind === "policy_change_notice") {
+    const rows = await prisma.user.findMany({
+      where: {
+        AND: [
+          policyChangeNoticeAudienceWhere(input.cohort.effectiveDate, new Date()),
+          ...(input.after ? [{ id: { gt: input.after } }] : []),
+        ],
+      },
+      orderBy: { id: "asc" },
+      take: input.take,
+      select: {
+        id: true,
+        email: true,
+        settings: { select: { language: true } },
+      },
+    });
+    // No ledger. The recipient ledger's cohort names are a closed CHECK, and
+    // this cohort's record is the delivery row itself, which outlives the
+    // account and is what the gate counts. An account with no address gets no
+    // row, and the gate already counts it as unreachable.
+    return rows.map((candidate) => ({
+      id: candidate.id,
+      email: candidate.email,
+      language: candidate.settings?.language ?? null,
+      ledger: null,
       inAudience: true,
     }));
   }
@@ -362,6 +461,34 @@ export async function expandEmailEvent(input: {
   });
   if (refusal) return { refused: refusal };
 
+  // The notice and its cohort, both ways, before anything is written. The
+  // cohort reaches people who turned every email off, and the notice to any
+  // other audience would leave out accounts the gate then waits on; a draft
+  // checks this, and an event stored before that check or written another way
+  // must stop here instead.
+  const noticePairing = policyChangeNoticePairingProblem({
+    templateKey: event.template.key,
+    noticeTemplateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+    noticeEffectiveDate: POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
+    spec,
+  });
+  if (noticePairing) {
+    await reportOperationalIncident({
+      code: "EMAIL_NOTICE_AUDIENCE_MISMATCH",
+      title: "An amendment notice fan-out was refused before writing anything",
+      error: noticePairing,
+      severity: "error",
+      context: {
+        component: "email-audience-expansion",
+        eventId: event.id,
+        templateKey: event.template.key,
+      },
+    });
+    return { refused: "notice_audience_mismatch" };
+  }
+  const noticeEffectiveDate =
+    spec.cohort?.kind === "policy_change_notice" ? spec.cohort.effectiveDate : null;
+
   // Before the event is moved to `expanding` and before a single row is
   // written. A fan-out that started and then found the feature off would leave
   // an event mid-expansion and a partial audience already queued.
@@ -371,6 +498,15 @@ export async function expandEmailEvent(input: {
     !(await isEmailMarketingEnabled())
   ) {
     return { refused: "marketing_disabled" };
+  }
+  // The product own switch, for the same reason and in the same place: a
+  // fan-out that started and then found release notes off would leave an event
+  // mid-expansion and a partial audience already queued.
+  if (
+    releaseNotesFlagApplies(definitionForFlag.purpose) &&
+    !(await isEmailReleaseNotesLiveForEnqueue())
+  ) {
+    return { refused: "release_notes_disabled" };
   }
 
   const cap = input.recipientCap ?? spec.recipientCap;
@@ -431,6 +567,7 @@ export async function expandEmailEvent(input: {
             take: plan.take,
             classification: definition.classification,
             purpose: definition.purpose ?? null,
+            policyVersionId,
           })
         : (
             await nextCandidates({
@@ -498,6 +635,15 @@ export async function expandEmailEvent(input: {
         const language = isLanguage(deliveryContent.language)
           ? deliveryContent.language
           : "en";
+        // The amendment notice fans out only in approved wording
+        // (lib/policyChangeNoticeEmail.ts). Thrown, so the wave stops rather than
+        // queueing some recipients under wording nobody approved.
+        if (
+          event.template.key === POLICY_CHANGE_NOTICE_TEMPLATE &&
+          !isPolicyChangeNoticeWordingApproved(language, appUrl())
+        ) {
+          throw new Error("The amendment notice's wording is not approved; the wave cannot expand.");
+        }
         const template = await ensureTemplateVersion({
           templateKey: event.template.key,
           language,
@@ -507,37 +653,106 @@ export async function expandEmailEvent(input: {
         // what a row already written renders under.
         const resolved = await jurisdictionForUser({ userId: candidate.id });
 
-        const written = await prisma.emailDelivery.createManyAndReturn({
-          select: { id: true },
-          data: [
-            {
-              eventId: event.id,
+        // The section 7.6 pin, per recipient, exactly as the single-message
+        // enqueue path does it. A fanned-out row without one is not a row with a
+        // missing column: at send, a pin that cannot be confirmed is the same
+        // refusal as one that no longer matches, so every message in the
+        // campaign would be skipped as `display_contract_changed` on its first
+        // drain. The audience would receive nothing and the record would say
+        // their duties had moved.
+        const releaseNotes = releaseNotesFlagApplies(definition.purpose)
+          ? await releaseNotesEnqueueDecision({
               userId: candidate.id,
-              recipientKey: recipientKeyFor(candidate.id),
-              lane: "standard",
+              purpose: definition.purpose as string,
+              classification: definition.classification,
               emailAddress: candidate.email,
-              language,
-              jurisdictionCountry: resolved?.countryCode ?? "ZZ",
-              jurisdictionProfileKey: resolved?.profileKey ?? "ZZ",
               policyVersionId,
               templateVersionId: template.templateVersionId,
-              idempotencyKey: `${event.id}:${recipientKeyFor(candidate.id)}`,
-              // A dry run writes the same rows and marks them, so it answers
-              // the question a dry run is asked. `dry_run` is already in the
-              // skipReason CHECK and nothing has ever written it.
-              ...(spec.dryRun
-                ? { status: "skipped", skipReason: "dry_run", nextAttemptAt: null }
-                : { status: "pending", nextAttemptAt: new Date() }),
-              attempts: 0,
-              renderDataSnapshot: encryptSnapshot(
-                deliveryContent.payload,
-                snapshotKeyring()
-              ) as Prisma.InputJsonValue,
-            },
-          ],
-          // The unique index decides duplicates. A resumed pass re-covering
-          // ground is the ordinary case, not an error.
-          skipDuplicates: true,
+            })
+          : null;
+
+        // The row and its enqueue snapshot in one transaction, as the
+        // single-message path has them. Two transactions lost the snapshot for
+        // good whenever the second failed: the row was already committed and
+        // `pending`, the drain took it, and a resumed pass found the insert
+        // swallowed by `skipDuplicates` and had no row id to record against --
+        // so the first of section 7.6's two snapshots was simply never written
+        // for that recipient.
+        // Captured here, where the null check above has narrowed it; a closure
+        // does not keep that narrowing.
+        const emailAddress = candidate.email;
+        const written = await prisma.$transaction(async (tx) => {
+          if (noticeEffectiveDate) {
+            // One notice per account across every wave and campaign. The page
+            // query ran outside this transaction, so a second wave expanding
+            // at the same moment could have read the same account; the lock
+            // makes the two take turns, and the re-read after it sees whatever
+            // the other one committed. Keyed by account, not by event, because
+            // the event's own unique index cannot see another event's row.
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`policy-change-notice:${candidate.id}`}))`;
+            const stillOwed = await tx.user.count({
+              where: {
+                AND: [
+                  { id: candidate.id },
+                  policyChangeNoticeAudienceWhere(noticeEffectiveDate, new Date()),
+                ],
+              },
+            });
+            if (stillOwed === 0) return [];
+          }
+          const rows = await tx.emailDelivery.createManyAndReturn({
+            select: { id: true },
+            data: [
+              {
+                eventId: event.id,
+                userId: candidate.id,
+                recipientKey: recipientKeyFor(candidate.id),
+                lane: "standard",
+                emailAddress,
+                language,
+                // The contract's own profile for a release-notes row, for the same
+                // reason as the single-message path: the hash names it and the send
+                // renders from the pin.
+                jurisdictionCountry:
+                  releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
+                jurisdictionProfileKey:
+                  releaseNotes?.displayProfile?.profileKey ?? resolved?.profileKey ?? "ZZ",
+                policyVersionId,
+                templateVersionId: template.templateVersionId,
+                ...(releaseNotes
+                  ? { displayContractHash: releaseNotes.displayContractHash }
+                  : {}),
+                idempotencyKey: `${event.id}:${recipientKeyFor(candidate.id)}`,
+                // A dry run writes the same rows and marks them, so it answers
+                // the question a dry run is asked. `dry_run` is already in the
+                // skipReason CHECK and nothing has ever written it.
+                ...(spec.dryRun
+                  ? { status: "skipped", skipReason: "dry_run", nextAttemptAt: null }
+                  : { status: "pending", nextAttemptAt: new Date() }),
+                attempts: 0,
+                renderDataSnapshot: encryptSnapshot(
+                  deliveryContent.payload,
+                  snapshotKeyring()
+                ) as Prisma.InputJsonValue,
+              },
+            ],
+            // The unique index decides duplicates. A resumed pass re-covering
+            // ground is the ordinary case, not an error.
+            skipDuplicates: true,
+          });
+          // Only for a row this pass wrote. A resumed pass that finds the insert
+          // swallowed finds the snapshot too, because both committed together.
+          const [row] = rows;
+          if (row && releaseNotes) {
+            await recordEnqueueDecision(tx, {
+              decision: releaseNotes,
+              deliveryId: row.id,
+              userId: candidate.id,
+              purpose: definition.purpose as string,
+              classification: definition.classification,
+            });
+          }
+          return rows;
         });
 
         if (written.length === 1) {
@@ -553,7 +768,10 @@ export async function expandEmailEvent(input: {
             userId: candidate.id,
             email: candidate.email,
             language,
-            jurisdictionCountry: resolved?.countryCode ?? "ZZ",
+            // The country the row pinned, so the wave ledger and the delivery
+            // cannot name different countries for one recipient.
+            jurisdictionCountry:
+              releaseNotes?.displayProfile?.countryCode ?? resolved?.countryCode ?? "ZZ",
             ledger: candidate.ledger,
             // Looked up only when this pass did not write the row, which is
             // the resumed case. The ordinary path already has the id.
@@ -562,9 +780,14 @@ export async function expandEmailEvent(input: {
               (
                 await prisma.emailDelivery.findUnique({
                   where: {
-                    eventId_recipientKey: {
+                    // Generation 0: the fan-out writes roots. A replacement
+                    // is written by the re-enqueue path with its own
+                    // generation, and looking one up here would find a message
+                    // this pass did not write.
+                    eventId_recipientKey_generation: {
                       eventId: event.id,
                       recipientKey: recipientKeyFor(candidate.id),
+                      generation: 0,
                     },
                   },
                   select: { id: true },

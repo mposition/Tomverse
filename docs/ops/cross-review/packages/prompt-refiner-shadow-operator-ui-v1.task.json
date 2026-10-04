@@ -1,0 +1,28 @@
+{
+  "taskId": "prompt-refiner-shadow-operator-ui-v1",
+  "requirement": "CHAT-01 Prompt Refiner의 동결된 staging shadow 실행을 owner가 제품의 기존 관리자 인증 세션 안에서 안전하게 조작할 최소 운영 화면을 추가한다. 화면은 stage preview/승인, 정확히 16건·retry 0·US$0.398656 run preview/승인, execution preview/명시적 실행을 순서대로 제공한다. 서버가 준 deployment·commit·digest·confirmation과 고정 model/cost/runtime 사실을 client에서도 fail-closed 검증하고 승인 body는 검증된 서버 값만 재사용한다. mount와 refresh는 GET-only이며 POST는 각각 명시적 버튼 동작에서만 발생한다. 실행 POST는 전송 전에 잠그고, transport unknown·서버 거부·malformed response에서는 자동 재시도나 같은 화면의 재전송을 금지한다. 오직 명시적 paused 응답만 남은 case의 수동 continuation을 다시 연다. page와 기존 API는 owner 및 recent-auth 경계를 유지하고 재인증 복귀 링크를 제공한다. prompt·refined prompt·모델 출력·provider error·credential은 화면에 표시하지 않으며 제품 Chat 트래픽과 연결하지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "관리자 detail route는 owner가 아니면 notFound하고 최근 인증이 만료된 API 응답에는 기존 admin 재인증 복귀 경로를 렌더링한다.",
+    "stage/run/execution preview parser가 정확한 환경·배포·commit·digest·model·tokenizer·timeout·retry·case 수·비용 상한·confirmation을 검증하고 drift나 malformed 응답을 fail-closed한다.",
+    "mount와 status refresh는 GET-only이며 세 POST는 각각 사용자의 버튼 동작에서만 시작되고 검증된 preview의 exact binding body만 전송한다.",
+    "execution POST는 전송 전에 잠기며 unknown/refusal/malformed 결과는 재시도를 열지 않고, retryCount=0·redispatched=0인 valid paused 응답만 수동 continuation을 다시 허용한다.",
+    "운영 화면과 응답 처리는 prompt·refined prompt·모델 출력·원시 provider 오류를 노출하지 않고 content-free status·count·고정 비용 사실만 표시한다.",
+    "focused UI/core/navigation tests, 기존 shadow live-adapter tests, owner-only API server-contract tests, TypeScript, ESLint, encoding, production build와 diff whitespace 검사가 통과한다.",
+    "Claude verdict는 package digest와 결속하고 finding마다 location, severity, basis와 reproduction을 제공한다. 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "51c1648f0d721d975617260342c2b7fe1ae77aa7",
+  "writableScope": [
+    "app/(site)/(application)/admin/prompt-refiner-shadow/page.tsx",
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1.task.json",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "lib/adminNavigation.ts",
+    "lib/adminNavigationLocale.ts",
+    "lib/promptRefinerShadowOperatorCore.ts",
+    "tests/adminNavigation.test.mjs",
+    "tests/adminPromptRefinerShadowOperator.test.mjs",
+    "tests/promptRefinerShadowOperatorCore.test.mjs"
+  ],
+  "generatedPaths": []
+}

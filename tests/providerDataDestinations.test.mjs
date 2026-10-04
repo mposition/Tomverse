@@ -519,21 +519,9 @@ test("deepseek names the Hangzhou company and does not store API content in a na
         new URL("../lib/modelRegistryShared.ts", import.meta.url),
         "utf8"
     );
-    const hosts = [...registry.matchAll(/https?:\/\/[^"'\\\s]+/g)].map(
-        (match) => new URL(match[0]).hostname
-    );
-    assert.equal(
-        hosts.some((host) => host === "api.deepseek.com"),
-        true
-    );
-    assert.equal(
-        hosts.some((host) => host === "api.deepseek.cn"),
-        false
-    );
-    assert.equal(
-        hosts.some((host) => host === "api.sg.deepseek.com"),
-        false
-    );
+    assert.match(registry, /deepseek:\s*\{[\s\S]*?baseUrl: "https:\/\/api\.deepseek\.com"/);
+    assert.equal(registry.includes("api.deepseek.cn"), false);
+    assert.equal(registry.includes("api.sg.deepseek.com"), false);
 });
 
 test("mistral API training is off and the row is ready", () => {
@@ -543,6 +531,17 @@ test("mistral API training is off and the row is ready", () => {
     assert.equal(row.independentCommercialUseProhibited.value, true);
     assert.equal(row.customerContentStorage.mode, "COMMITTED_LOCATIONS");
     assert.deepEqual([...row.customerContentStorage.macroRegions], ["EU"]);
+    assert.equal(row.status, "proven");
+    assert.equal(destinationIsDisclosable(row), true);
+});
+
+test("together privacy answers are no, so training is off and the row is ready", () => {
+    const row = providerDataDestination("together");
+    assert.ok(row);
+    assert.equal(row.trainsOnCustomerContent.value, false);
+    assert.equal(row.independentCommercialUseProhibited.value, true);
+    assert.equal(row.zeroDataRetention.mode, "ZDR");
+    assert.equal(row.retention.content.behavior, "CUSTOMER_CONTROLLED");
     assert.equal(row.status, "proven");
     assert.equal(destinationIsDisclosable(row), true);
 });
@@ -571,6 +570,10 @@ test("every enrolled provider is ready", () => {
         "qwen",
         "zhipu",
         "perplexity",
+        "deepinfra",
+        "together",
+        "openrouter",
+        "sail",
     ];
     const open = [];
     assert.deepEqual(

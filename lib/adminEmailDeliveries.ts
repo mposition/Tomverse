@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { maskEmailAddress } from "@/lib/emailAddressMaskingCore";
+import { causeSetDigest } from "@/lib/emailSuppression";
 import {
   DELIVERY_STATUSES,
   type DeliveryFilters,
@@ -165,7 +166,7 @@ export async function abandonedLegalEmailCount(): Promise<number> {
   });
 }
 
-const SUPPRESSION_SELECT = {
+const SUPPRESSION_CAUSE_SELECT = {
   id: true,
   emailAddress: true,
   scope: true,
@@ -177,30 +178,171 @@ const SUPPRESSION_SELECT = {
   occurredAt: true,
   expiresAt: true,
   createdAt: true,
-} satisfies Prisma.SuppressionEntrySelect;
+} satisfies Prisma.SuppressionCauseSelect;
 
-type AdminSuppressionRecord = Prisma.SuppressionEntryGetPayload<{
-  select: typeof SUPPRESSION_SELECT;
+type AdminSuppressionCauseRecord = Prisma.SuppressionCauseGetPayload<{
+  select: typeof SUPPRESSION_CAUSE_SELECT;
 }>;
 
-/** Masked for the same reason, and by the same rule, as a delivery row. */
-export type AdminSuppressionRow = Omit<
-  AdminSuppressionRecord,
-  "emailAddress"
-> & { emailAddressMasked: string | null };
+/** One active cause, as the console shows it. */
+export type AdminSuppressionCause = Omit<
+  AdminSuppressionCauseRecord,
+  "emailAddress" | "scope" | "purposeKey"
+>;
+
+/**
+ * One suppressed selector -- an address, a scope and a purpose -- and every
+ * active cause on it.
+ *
+ * Masked for the same reason, and by the same rule, as a delivery row.
+ */
+export type AdminSuppressionRow = {
+  /**
+   * The newest active cause on this selector, and the handle the lift uses.
+   *
+   * A cause id rather than an entry id: `SuppressionEntry` is the mirror the
+   * contraction stops writing, and a console keyed on it would go blind to
+   * every new hard bounce the moment that happened
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4). Which
+   * cause it is does not matter to the lift, which resolves the selector and
+   * acts on all of them; it matters to the reveal, which reads an address by
+   * this id.
+   */
+  id: string;
+  emailAddressMasked: string | null;
+  scope: string;
+  purposeKey: string;
+  /** Newest first, and never empty -- a selector with none is not listed. */
+  causes: AdminSuppressionCause[];
+  /**
+   * Names this row's set of active causes, and is what a lift request carries
+   * back so the server can tell that the row has not changed since.
+   *
+   * Fixed size on purpose: the ids themselves are unbounded and a request body
+   * is not, so carrying them would put a ceiling on how many causes a selector
+   * may hold and still be liftable (`causeSetDigest`).
+   */
+  causeSetDigest: string;
+};
+
+/**
+ * What we will not mail, and why, read from the causes that decide it.
+ *
+ * `SuppressionCause` is append-only and one selector can carry several at once
+ * -- a soft bounce that hardened, an unsubscribe on top of a complaint -- and
+ * the block is their sum. So this groups rather than lists: one row per
+ * selector, every active cause on it, newest first. Listing a row per cause
+ * would show one address three times and invite an operator to lift a third of
+ * a block.
+ *
+ * Expiry is applied here rather than left to the reader. A soft bounce whose
+ * `expiresAt` has passed stops mail nowhere, and a screen that still lists it
+ * is a screen that asks somebody to lift something that is not there.
+ *
+ * ## Why the limit is applied to selectors, in the database
+ *
+ * The obvious shape -- read `limit * something` causes and group them in memory
+ * -- truncates the wrong thing. A selector whose causes straddle the end of
+ * that window gets a row with *some* of its causes, and the missing one is
+ * exactly what an operator needed to see: a `complaint` that does not appear
+ * beside the `unsubscribe` -- and so a row that will need a second
+ * administrator does not say so -- or a `privacy_request` that will still be
+ * there afterwards. A lift releases the causes its action may and leaves the
+ * rest, so what a missing cause costs is not a refusal the operator did not
+ * expect but an outcome they did not: they act believing the address will be
+ * clear, and the lift -- which reads the causes again for itself -- acts on a
+ * set the screen never displayed.
+ *
+ * So the selectors are chosen first, with the limit applied to them, and their
+ * causes are read afterwards with no limit at all. Two reads rather than one: a
+ * cause released between them can leave a selector with nothing active, and
+ * that selector is dropped rather than drawn as an empty row.
+ */
+/**
+ * What joins a selector's three parts into one map key.
+ *
+ * A NUL, because Postgres text cannot contain one, so no address, scope or
+ * purpose can spell a different selector's key. Written with
+ * `String.fromCharCode` rather than as an escape: the escape is the thing that
+ * arrives as a literal control character when it passes through one editing
+ * tool too many, and the repository's control-character check refuses the file
+ * when it does.
+ */
+const SELECTOR_KEY_SEPARATOR = String.fromCharCode(0);
 
 export async function listSuppressions(input: {
   emailAddress: string | null;
   limit: number;
+  now?: Date;
 }): Promise<AdminSuppressionRow[]> {
-  const rows = await prisma.suppressionEntry.findMany({
-    where: input.emailAddress ? { emailAddress: input.emailAddress } : {},
-    select: SUPPRESSION_SELECT,
+  const now = input.now ?? new Date();
+  const address = input.emailAddress;
+
+  // Which selectors, newest first. `max("id")` breaks a tie on `occurredAt`, so
+  // a page boundary lands in the same place twice rather than wherever the plan
+  // happens to put it.
+  const selectors = await prisma.$queryRaw<
+    Array<{ emailAddress: string; scope: string; purposeKey: string }>
+  >`
+    SELECT "emailAddress", "scope", "purposeKey"
+      FROM "SuppressionCause"
+     WHERE "releasedAt" IS NULL
+       AND ("expiresAt" IS NULL OR "expiresAt" > ${now})
+       AND (${address}::text IS NULL OR "emailAddress" = ${address})
+     GROUP BY "emailAddress", "scope", "purposeKey"
+     ORDER BY max("occurredAt") DESC, max("id") DESC
+     LIMIT ${input.limit}
+  `;
+  if (selectors.length === 0) return [];
+
+  const causes = await prisma.suppressionCause.findMany({
+    where: {
+      releasedAt: null,
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      AND: [
+        {
+          OR: selectors.map(({ emailAddress, scope, purposeKey }) => ({
+            emailAddress,
+            scope,
+            purposeKey,
+          })),
+        },
+      ],
+    },
+    select: SUPPRESSION_CAUSE_SELECT,
     orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
-    take: input.limit,
   });
-  return rows.map(({ emailAddress, ...rest }) => ({
-    ...rest,
-    emailAddressMasked: maskEmailAddress(emailAddress),
-  }));
+
+  const rows = new Map<string, AdminSuppressionRow>();
+  for (const { emailAddress, scope, purposeKey, ...cause } of causes) {
+    const key = [emailAddress, scope, purposeKey].join(SELECTOR_KEY_SEPARATOR);
+    const existing = rows.get(key);
+    if (existing) {
+      existing.causes.push(cause);
+      continue;
+    }
+    rows.set(key, {
+      // The first cause of a selector in this order is its newest, which is
+      // also the one an operator is most likely to have come here about.
+      id: cause.id,
+      emailAddressMasked: maskEmailAddress(emailAddress),
+      scope,
+      purposeKey,
+      causes: [cause],
+      // Filled below, once the row has all of its causes.
+      causeSetDigest: "",
+    });
+  }
+
+  // Back into the order the selectors were chosen in. A selector that lost its
+  // last cause between the two reads is simply absent from the map.
+  return selectors
+    .map(({ emailAddress, scope, purposeKey }) =>
+      rows.get([emailAddress, scope, purposeKey].join(SELECTOR_KEY_SEPARATOR))
+    )
+    .filter((row): row is AdminSuppressionRow => row !== undefined)
+    .map((row) => ({
+      ...row,
+      causeSetDigest: causeSetDigest(row.causes.map((cause) => cause.id)),
+    }));
 }

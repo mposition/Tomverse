@@ -715,13 +715,24 @@ cause · 권고 · Acceptance criteria · 검증 방법 · 파일:line 순입니
     DNS를 바꾼 시점이 아니라 **첫 실발송 시점부터** 돌고
     (`docs/ops/email-sending-domains.md` §8.1), 리포트가 2주간 모이지 않으면
     더 늦어집니다.
-  - `dmarc@tomverse.app` 실제 수신 여부 **미확인**
+  - `dmarc@tomverse.app` 실제 수신 여부 **미확인** — 사서함이 저장소 밖입니다.
+    DNS 레코드 자체도 이 컨테이너에서는 확인할 수 없습니다(`dig` 없음,
+    DNS-over-HTTPS는 프록시가 403으로 차단)
   - **A18 suppression 경계 결정** — 별도 Resend team/region, 별도 provider,
     또는 동일 계정 유지 + 비이메일 계정 복구 수단 의무화 중 하나 확정
     (ADR §5.3.1)
-  - 결정된 발송 구조에 따른 `news.tomverse.app` 구성과 SPF/DKIM/DMARC 검증
+  - 결정된 발송 구조에 따른 `news.tomverse.app` 구성과 SPF/DKIM/DMARC 검증 —
+    **2026-08-26 확인: 이 도메인은 Resend에 등록돼 있지 않습니다.** 미착수가
+    추정이 아니라 조회 결과입니다
   - **동의한 수신자 cohort로 4~6주 warm-up**, complaint·bounce 기준 충족
   - 법률 **Q1·Q2 회신**과 **Q8의 실제 사업자 정보** 확정
+- **2026-08-26 갱신**: 선행 항목 중 둘이 움직였습니다.
+  `docs/ops/email-sending-domains.md` §8.2(감사 리포트 경로의 `From:`)가
+  **해결**됐고 — 실측 `alerts@mail.tomverse.app`, 그 과정에서 문서가 기대하던
+  값 `hello@`가 틀렸다는 것도 드러났습니다 — 2주 관측의 **가장 빠른 검토
+  가능일이 2026-09-04로 계산**됐습니다(Resend에서 `mail.tomverse.app` 생성
+  2026-08-21 07:56 UTC 확인). A18은 여전히 사람의 결정이지만 **전제가
+  실측**됐습니다: 두 도메인이 한 계정·한 region입니다.
 - **저장소 안에 남아 있던 조건**: EM-05 feature flag(**§46에서 해결**)와
   Admin API·UI·승인 연결. 즉 **EM-16만 풀려도 즉시 발송 가능한 상태가 아니며**,
   반대로 EM-16이 저장소 작업을 멈추게 하지도 않습니다.

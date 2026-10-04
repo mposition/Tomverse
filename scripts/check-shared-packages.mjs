@@ -35,10 +35,16 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ESLint } from "eslint";
+
+import {
+  missingCompilerProblem,
+  resolveCompiler,
+} from "./check-shared-packages-core.mjs";
 
 const RULE = "no-restricted-imports";
 const METRIC = "forbidden_nextjs_imports_in_shared_packages";
@@ -140,7 +146,16 @@ for (const { name, configured } of configuredFor) {
 
 // --- 2. Each package with TypeScript type-checks standalone -----------------
 
-for (const entry of scriptPackages) {
+// Where the compiler is, and what a missing one means, are both decided in
+// check-shared-packages-core.mjs -- see that file for why they are not inline.
+const require_ = createRequire(import.meta.url);
+const tscBin = resolveCompiler((specifier) => require_.resolve(specifier));
+
+if (tscBin === null && scriptPackages.length > 0) {
+  problems.push(missingCompilerProblem(scriptPackages.length));
+}
+
+for (const entry of tscBin === null ? [] : scriptPackages) {
   const tsconfig = join("packages", entry.name, "tsconfig.json");
   if (!existsSync(join(root, tsconfig))) {
     problems.push(
@@ -152,7 +167,7 @@ for (const entry of scriptPackages) {
   }
   const compiled = spawnSync(
     process.execPath,
-    [join(root, "node_modules", "typescript", "bin", "tsc"), "--project", tsconfig],
+    [tscBin, "--project", tsconfig],
     { cwd: root, encoding: "utf8" }
   );
   if (compiled.status !== 0) {

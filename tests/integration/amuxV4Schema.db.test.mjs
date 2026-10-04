@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
+import { insertSyntheticAmuxAudit } from "./amux-v4-audit-fixture.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -193,15 +194,14 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     const decisionPreviewId = randomUUID();
     const decisionId = randomUUID();
     const decisionAudit = async (action, actorUserId, metadata = null) => {
-      const auditId = randomUUID();
-      const entryHash = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
-      await client.query(
-        `INSERT INTO public."AdminAuditLog"
-         ("id", "actorUserId", "action", "targetType", "targetId", "summary", "metadata", "entryHash")
-         VALUES ($1, $2, $3, 'AmuxIdeaUnitDecision', $4, 'synthetic decision probe', $5::jsonb, $6)`,
-        [auditId, actorUserId, action, decisionId, metadata && JSON.stringify(metadata), entryHash],
-      );
-      return auditId;
+      return insertSyntheticAmuxAudit(client, {
+        actorUserId,
+        action,
+        targetType: "AmuxIdeaUnitDecision",
+        targetId: decisionId,
+        summary: "synthetic decision probe",
+        metadata,
+      });
     };
     await client.query(
       `INSERT INTO public."AmuxIdeaTransferPreview"

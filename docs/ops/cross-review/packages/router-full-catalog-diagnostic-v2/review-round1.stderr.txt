@@ -1,0 +1,208 @@
+2026-09-09T11:22:06.162206Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:23:55.392952Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:24:11.330417Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:24:55.031051Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:29:00.636583Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:29:46.120538Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+sh : The term 'sh' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the 
+spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:2 char:1
++ sh -c "set -o pipefail; node --import tsx --test tests/routerFullCata ...
++ ~~
+    + CategoryInfo          : ObjectNotFound: (sh:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+
+2026-09-09T11:29:46.142559Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:29:56.697712Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+TAP version 13
+# Subtest: tests\\autoFallbackGate.test.mjs
+not ok 1 - tests\\autoFallbackGate.test.mjs
+  ---
+  duration_ms: 8.445
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\autoFallbackGate.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\automaticFallbackBoundary.test.mjs
+not ok 2 - tests\\automaticFallbackBoundary.test.mjs
+  ---
+  duration_ms: 6.9503
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\automaticFallbackBoundary.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\crossReview.test.mjs
+not ok 3 - tests\\crossReview.test.mjs
+  ---
+  duration_ms: 6.3528
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\crossReview.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerCandidates.test.mjs
+not ok 4 - tests\\routerCandidates.test.mjs
+  ---
+  duration_ms: 5.4091
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerCandidates.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerDecision.test.mjs
+not ok 5 - tests\\routerDecision.test.mjs
+  ---
+  duration_ms: 4.7274
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerDecision.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerFullCatalogDiagnostic.test.mjs
+not ok 6 - tests\\routerFullCatalogDiagnostic.test.mjs
+  ---
+  duration_ms: 4.0946
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerFullCatalogDiagnostic.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerScorePolicy.test.mjs
+not ok 7 - tests\\routerScorePolicy.test.mjs
+  ---
+  duration_ms: 3.0117
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerScorePolicy.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerSelection.test.mjs
+not ok 8 - tests\\routerSelection.test.mjs
+  ---
+  duration_ms: 2.1997
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerSelection.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 0
+# fail 8
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 19.5362
+
+2026-09-09T11:29:56.722498Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:30:03.794062Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+C:\nvm4w\nodejs\node.exe: bad option: --test-isolation=none
+
+2026-09-09T11:30:03.816270Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T11:30:12.921391Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5

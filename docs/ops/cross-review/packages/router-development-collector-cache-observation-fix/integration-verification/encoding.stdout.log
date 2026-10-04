@@ -1,0 +1,5 @@
+
+> ai-chat-hub@0.1.0 check:encoding
+> node scripts/check-text-encoding.mjs
+
+Text encoding check passed. No mojibake markers found.

@@ -133,10 +133,21 @@ test("a rewritten row is still caught when it sits mid-chain", async () => {
     select: { id: true },
   });
   assert.ok(target);
-  await prisma.adminAuditLog.update({
-    where: { id: target.id },
-    data: { summary: "Rewritten after signing." },
-  });
+  // The table is append-only, so the rewrite goes through the one door an
+  // attacker would need: the trigger off for the length of the edit.
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "AdminAuditLog" DISABLE TRIGGER "admin_audit_log_is_append_only"`,
+  );
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AdminAuditLog" SET "summary" = 'Rewritten after signing.' WHERE "id" = $1`,
+      target.id,
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "AdminAuditLog" ENABLE TRIGGER "admin_audit_log_is_append_only"`,
+    );
+  }
 
   const integrity = await verifyAdminAuditIntegrity();
   assert.equal(integrity.valid, false);

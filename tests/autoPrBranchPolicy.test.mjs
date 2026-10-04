@@ -100,7 +100,14 @@ test("the workflow filter and the module agree on the marker", () => {
     // here, so what is pinned is that it names the same marker and that the
     // job actually consults the module -- a filter widened without the module
     // would otherwise reach the PR-creating step unchecked.
-    const workflow = readFileSync(".github/workflows/auto-pr-to-develop.yml", "utf8");
+    // Newlines normalised on read. Git checks this file out with CRLF on
+    // Windows and the assertions below spell `\n`, so without this the
+    // first one fails on a line ending and every assertion after it goes
+    // unread -- which is how the step rename below reached CI unnoticed.
+    const workflow = readFileSync(
+        ".github/workflows/auto-pr-to-develop.yml",
+        "utf8"
+    ).replace(/\r\n/g, "\n");
 
     assert.match(workflow, /branches:\n\s+- "to-develop\/\*\*"\n\s+- "\*\*\/to-develop\/\*\*"/);
     // The key, not the word: the comment above the filter explains what
@@ -112,15 +119,19 @@ test("the workflow filter and the module agree on the marker", () => {
     );
     assert.match(workflow, /node scripts\/auto-pr-branch-policy\.mjs "\$BRANCH"/);
 
-    // Every step that can create or merge a pull request is gated on the
-    // module's answer, not only on the glob.
-    const gated = [...workflow.matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1]);
-    for (const step of ["Create PR to develop if missing", "Enable auto-merge"]) {
-        assert.ok(gated.includes(step), `${step} still exists`);
-    }
+    // Every step that can create a pull request is gated on the module's
+    // answer, not only on the glob: the diff check and the create step read
+    // it directly. Nothing in the workflow merges or arms auto-merge any more
+    // (tests/autoPrAutoMergeArming.test.mjs pins that).
+    const names = [...workflow.matchAll(/^\s+- name: (.+)$/gm)].map((m) => m[1]);
+    assert.ok(names.includes("Create PR to develop if missing"));
+    assert.ok(
+        !names.some((name) => /auto-merge/i.test(name)),
+        "no auto-merge step"
+    );
     assert.equal(
         (workflow.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length,
-        3,
-        "the diff check and both PR-writing steps are gated on the module"
+        2,
+        "the diff check and the PR-creating step are gated on the module"
     );
 });

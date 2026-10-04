@@ -4,6 +4,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { prisma } from "@/lib/prisma";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
   campaignAttestationStates,
@@ -18,6 +19,7 @@ import {
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
 } from "@/lib/emailFeatureFlags";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
@@ -52,6 +54,11 @@ beforeEach(async () => {
   // fan-out needs that flag on too (EM-05). Off is the default everywhere
   // else, which is what makes turning it on here a statement.
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  // product_updates is the release-notes product now, behind its own switch
+  // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
 });
 
 after(async () => {

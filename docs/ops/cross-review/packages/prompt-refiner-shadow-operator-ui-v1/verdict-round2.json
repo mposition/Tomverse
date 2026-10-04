@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-operator-ui-v1",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-operator-ui-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T14:55:55.308Z",
+  "durationMs": 234258,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 30,
+    "cachedInputTokens": 1317813,
+    "outputTokens": 18390,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.3826265,
+    "raw": {
+      "input_tokens": 30,
+      "cache_creation_input_tokens": 126382,
+      "cache_read_input_tokens": 1317813,
+      "output_tokens": 18390,
+      "output_tokens_details": {
+        "thinking_tokens": 14680
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 126382,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 7764,
+          "cache_read_input_tokens": 128996,
+          "cache_creation_input_tokens": 2329,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2329
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-20T14:59:49.622Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-operator-ui-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:21ed48d0da73a51014390e3c86d8722e9b39189665078cd95ce08a13fdfa8eca",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "components/admin/AdminPromptRefinerShadowPanel.tsx:414 (stage card `m.expires` field)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The same label `m.expires` (\"Expires\" / \"만료\") carries two different meanings on one screen: on the stage card it renders the frozen TTL constant `${stage.approvalTtlMinutes} min` (always \"60 min\", even for an `already_exists` stage approved 55 minutes ago), while on the execution card (:503) it renders the real absolute `approvalExpiresAt` timestamp, so the stage row can read as \"60 minutes of authority remaining\" when almost none is left.",
+        "reproduction": "With a durable stage approved 55 minutes earlier, mount /admin/prompt-refiner-shadow: the stage GET returns `approvalTtlMinutes: 60` (lib/promptRefinerStageAdmission.ts:485, a constant, not a remaining-time value) and `status: \"already_exists\"`, so the stage card shows Expires = \"60 min\"; after approving the run, the execution card shows Expires = the real ISO timestamp ~5 minutes in the future. Expected: the stage field is labelled as a TTL (e.g. m.approvalTtl \"Approval window\") or shows the stage's actual expiry, so one label does not mean two things."
+      }
+    ],
+    "nextAction": "Merge as is; the single nit is cosmetic labelling and, per the review rules, is recorded without blocking — address it only if the author wants the stage card to state remaining authority rather than the frozen TTL."
+  }
+}

@@ -5,6 +5,7 @@ import {
   getMemoryExtractionRevokedPairs,
   getPublicAppSettings,
   isAssistantKnowledgeEnabled,
+  isAssistantPackageImportEnabled,
   isAssistantProfilesEnabled,
   isChatStarterEnabled,
   isExternalContinuationEnabled,
@@ -25,6 +26,7 @@ export default async function AdminPlatformSettingsPage() {
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
     chatStarterEnabled,
+    assistantPackageImportEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,
     revokedPairs,
@@ -37,6 +39,11 @@ export default async function AdminPlatformSettingsPage() {
     isAssistantProfilesEnabled(),
     isAssistantKnowledgeEnabled(),
     isChatStarterEnabled(),
+    // Reported here, changed through its own control and its own request: a
+    // save that carried it with everything else could not leave an audit row
+    // saying this flag moved
+    // (`docs/policy/assistant-package-import.md` §12.2.1).
+    isAssistantPackageImportEnabled(),
     // Read, never written from this screen: the two Release B flags are the
     // policy §12.4 human procedure and the panel reports them without offering
     // to change them. See the PATCH schema in /api/admin/app-settings.
@@ -57,6 +64,7 @@ export default async function AdminPlatformSettingsPage() {
       assistantProfilesEnabled={assistantProfilesEnabled}
       assistantKnowledgeEnabled={assistantKnowledgeEnabled}
       chatStarterEnabled={chatStarterEnabled}
+      assistantPackageImportEnabled={assistantPackageImportEnabled}
       memoryExtractionEnabled={memoryExtractionEnabled}
       memoryInjectionEnabled={memoryInjectionEnabled}
       memoryApprovedPairCount={injectableExtractionPairs(revokedPairs).length}

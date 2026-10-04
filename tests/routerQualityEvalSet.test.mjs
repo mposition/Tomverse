@@ -9,6 +9,7 @@ import {
   EVAL_CELLS,
   EVAL_STRATA,
   adoptedItems,
+  evalSampleDigest,
   evalSetProblems,
   uniformCellTargets,
 } from "../lib/routerQualityEvalSet.ts";
@@ -20,10 +21,29 @@ const item = (overrides = {}) => ({
   id: "gen-ko-001",
   stratum: "general_question_answering",
   cell: "ko",
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8 records language beside
+  // stratum and cell, as a pair: the cross-language cell is a direction rather
+  // than one language, and collapsing it would lose the ability to ask about
+  // Korean prompts separately from Korean answers.
+  language: { prompt: "ko", expectedResponse: "ko" },
   source: "drafted",
   status: "candidate",
   adoptedBy: null,
   adoptedAt: null,
+  // A drafted item records its drafter, because that drafter is the confound
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8 makes a person weigh before adopting.
+  draftProvenance: {
+    batchId: "test-batch",
+    provider: "openai",
+    modelId: "gpt-5-5",
+    requestedApiModel: "gpt-5.5",
+    generationParameters: { max_completion_tokens: 8000 },
+    modelVersion: null,
+    promptTemplateVersion: "router-eval-draft-v1",
+    promptTemplateHash: "0000000000000000",
+    generatorCommit: null,
+    draftedAt: "2026-08-24T00:00:00.000Z",
+  },
   prompt: "전세와 월세의 차이를 설명해 주세요.",
   ...overrides,
 });
@@ -39,7 +59,15 @@ const developmentSet = (overrides = {}) => ({
   ...overrides,
 });
 
-const decisionSet = (overrides = {}) => ({
+// frozenDigest is derived rather than written in, so a test that changes the
+// items keeps testing what it changed instead of tripping the freeze check.
+// The drift tests set it by hand.
+const decisionSet = (overrides = {}) => {
+  const base = decisionSetFields(overrides);
+  return { frozenDigest: evalSampleDigest(base), ...base };
+};
+
+const decisionSetFields = (overrides = {}) => ({
   version: "router-eval-decision-v1",
   purpose: "decision",
   frozenAt: "2026-08-10T00:00:00.000Z",
@@ -50,6 +78,18 @@ const decisionSet = (overrides = {}) => ({
     preRegisteredAt: "2026-08-01T00:00:00.000Z",
     preRegisteredBy: "backend-ai-lead",
     rationale: "the shipping default, so non-inferiority is measured against what users get today",
+  },
+  judge: {
+    modelId: "gpt-5-6-luna",
+    preRegisteredAt: "2026-08-01T00:00:00.000Z",
+    preRegisteredBy: "backend-ai-lead",
+    rationale: "reads both cell languages, and its self-preference is measured separately",
+  },
+  seed: {
+    value: 20260812,
+    preRegisteredAt: "2026-08-01T00:00:00.000Z",
+    preRegisteredBy: "backend-ai-lead",
+    rationale: "fixed before the run so this is one run rather than the best of several",
   },
   cellTargets: [{ stratum: "general_question_answering", cell: "ko", target: 120 }],
   items: [
@@ -231,10 +271,29 @@ test("the committed candidate pool is well formed and covers every cell", () => 
       assert.ok(covered.has(`${stratum}/${cell}`), `the pool has no item for ${stratum}/${cell}`);
     }
   }
-  // §8: a model-drafted pool is a candidate pool. Nothing here is adopted, and
-  // adoption is not something this repository can perform.
-  assert.equal(adoptedItems(set).length, 0);
-  assert.ok(set.items.every((entry) => entry.status === "candidate"));
+  // docs/ops/tomverse-chat-router-evaluation-set.md §8: a model-drafted pool is
+  // a candidate pool, and adoption is a human act. This used to assert that
+  // nothing was adopted, which held only until a person adopted something --
+  // it fixed a state rather than the rule. The rule is that an adopted item
+  // names who adopted it and when; an agent writing `adopted` has no adopter
+  // to name, so the assertion still catches exactly what it was for.
+  for (const entry of set.items) {
+    assert.ok(
+      entry.status === "candidate" || entry.status === "adopted",
+      `${entry.id} has status ${entry.status}`
+    );
+    if (entry.status === "adopted") {
+      assert.ok(entry.adoptedBy, `${entry.id} is adopted but names no adopter`);
+      assert.ok(entry.adoptedAt, `${entry.id} is adopted but records no date`);
+    } else {
+      assert.equal(entry.adoptedBy, null, `${entry.id} is a candidate but names an adopter`);
+      assert.equal(entry.adoptedAt, null, `${entry.id} is a candidate but records a date`);
+    }
+  }
+  assert.equal(
+    adoptedItems(set).length,
+    set.items.filter((entry) => entry.status === "adopted").length
+  );
 });
 
 // The gate check is the thing an operator runs before citing a report, so its
@@ -293,4 +352,29 @@ test("the gate check refuses a pilot report as ROUTE-01 evidence", { timeout: 12
   assert.equal(code, 1, "a pilot report was accepted as ROUTE-01 evidence");
   assert.match(output, /only --mode=decision produces ROUTE-01 evidence/);
   assert.match(output, /§7 keeps separate/);
+});
+
+test("a decision set must pre-register a complete judge and seed", () => {
+  assert.match(evalSetProblems(decisionSet({ judge: null })).join(" "), /pre-register its judge/);
+  assert.match(evalSetProblems(decisionSet({ seed: null })).join(" "), /pre-register its seed/);
+  for (const field of ["modelId", "preRegisteredAt", "preRegisteredBy", "rationale"]) {
+    const judge = { ...decisionSet().judge, [field]: "" };
+    assert.ok(
+      evalSetProblems(decisionSet({ judge })).length > 0,
+      `an empty judge ${field} should be reported`
+    );
+  }
+});
+
+// seededRandom(0) is the runner's fallback when --seed is absent, so a stored
+// 0 would read as a choice and act as an omission.
+test("a seed of zero, or a non-integer, is not a pre-registered seed", () => {
+  for (const value of [0, -1, 1.5, "20260812", null]) {
+    const seed = { ...decisionSet().seed, value };
+    assert.match(
+      evalSetProblems(decisionSet({ seed })).join(" "),
+      /seed is not a positive integer/,
+      `${JSON.stringify(value)} should be rejected`
+    );
+  }
 });

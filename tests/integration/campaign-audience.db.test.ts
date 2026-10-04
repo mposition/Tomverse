@@ -4,13 +4,21 @@ import { after, beforeEach, test } from "node:test";
 
 import {
   MODEL_LAUNCH_TEMPLATE,
+  POLICY_CHANGE_NOTICE_TEMPLATE,
   PRODUCT_ANNOUNCEMENT_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { prisma } from "@/lib/prisma";
+import { POLICY_NOTICE_CAMPAIGN_WAVES } from "@/lib/emailAudienceExpansionCore";
+import { waveAudienceBreakdown } from "@/lib/adminEmailCampaigns";
+import { expandEmailEvent } from "@/lib/emailAudienceExpansion";
+import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import { setEmailPolicyPublishedForTests } from "@/lib/emailPolicyPublication";
 import {
   approveCampaign,
+  campaignScheduleProblems,
   createCampaignDraft,
+  estimateCampaignAudience,
   runCampaignWave,
 } from "@/lib/emailCampaignService";
 import {
@@ -21,6 +29,7 @@ import {
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
+  EMAIL_RELEASE_NOTES_FLAG_KEY,
 } from "@/lib/emailFeatureFlags";
 import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 
@@ -57,6 +66,11 @@ beforeEach(async () => {
   // fan-out needs that flag on too (EM-05). Off is the default everywhere
   // else, which is what makes turning it on here a statement.
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  // product_updates is the release-notes product now, behind its own switch
+  // (lib/emailFeatureFlags.ts); these suites exercise campaigns of that purpose.
+  await setEmailFeatureFlag(EMAIL_RELEASE_NOTES_FLAG_KEY, true);
+  // And published: the amendment S10 waits for is not in the repository yet.
+  setEmailPolicyPublishedForTests(true);
 });
 
 after(async () => {
@@ -558,4 +572,239 @@ test("a campaign whose audience names nobody sends to nobody", async () => {
   assert.ok("refused" in run.expansion);
   assert.equal(run.expansion.refused, "no_audience");
   assert.equal(await prisma.emailDelivery.count(), 0);
+});
+
+// The amendment notice cohort (S10): every owed account, once.
+
+const NOTICE_COHORT = {
+  cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-16" },
+};
+
+const noticeDraft = () =>
+  createCampaignDraft({
+    category: "other",
+    templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+    locales: ["ko", "en"],
+    contentByLocale: { ko: {}, en: {} },
+    audienceSpec: NOTICE_COHORT,
+    createdByEmail: "ops@example.test",
+  });
+
+const createdAt = (userId: string, value: Date | null) =>
+  prisma.user.update({ where: { id: userId }, data: { createdAt: value } });
+
+const noticeRecipients = async () =>
+  (
+    await prisma.emailDelivery.findMany({
+      where: { templateVersion: { template: { key: POLICY_CHANGE_NOTICE_TEMPLATE } } },
+      select: { userId: true },
+    })
+  )
+    .map((row) => row.userId)
+    .sort();
+
+test("the amendment notice reaches every owed account once, and a later wave only the rest", async () => {
+  // The approved hashes are for the production origin.
+  process.env.PUBLIC_APP_URL = "https://tomverse.app";
+  try {
+    const owed = await account({});
+    const suspended = await account({ accountStatus: "suspended" });
+    const undated = await account({});
+    const noAddress = await account({ email: null });
+    const joinedAfter = await account({});
+    await createdAt(owed, new Date("2026-01-01T00:00:00Z"));
+    await createdAt(suspended, new Date("2026-03-01T00:00:00Z"));
+    await createdAt(undated, null);
+    await createdAt(noAddress, new Date("2026-02-01T00:00:00Z"));
+    // On the effective day itself: the gate does not count it as owed.
+    await createdAt(joinedAfter, new Date("2026-11-16T00:00:00Z"));
+
+    // The waves the console drafts pass the approval schedule check.
+    const consoleShaped = await createCampaignDraft({
+      category: "other",
+      templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+      locales: ["ko", "en"],
+      contentByLocale: { ko: {}, en: {} },
+      audienceSpec: NOTICE_COHORT,
+      createdByEmail: "ops@example.test",
+      initialWaves: POLICY_NOTICE_CAMPAIGN_WAVES,
+    });
+    assert.ok(POLICY_NOTICE_CAMPAIGN_WAVES.length >= 2);
+    assert.equal(
+      await prisma.emailCampaignWave.count({ where: { campaignId: consoleShaped.id } }),
+      POLICY_NOTICE_CAMPAIGN_WAVES.length
+    );
+    assert.deepEqual(await campaignScheduleProblems({ campaignId: consoleShaped.id }), []);
+    await prisma.emailCampaign.delete({ where: { id: consoleShaped.id } });
+
+    const first = await noticeDraft();
+    const estimate = await estimateCampaignAudience({
+      campaignId: first.id,
+      byEmail: "ops@example.test",
+    });
+    assert.ok(!("refused" in estimate), JSON.stringify(estimate));
+    assert.equal(estimate.estimatedRecipients, 3);
+    const summary = estimate.summary as {
+      kind?: string;
+      owed?: number;
+      alreadyReached?: number;
+      noAddress?: number;
+    };
+    assert.deepEqual(
+      {
+        kind: summary.kind,
+        owed: summary.owed,
+        alreadyReached: summary.alreadyReached,
+        noAddress: summary.noAddress,
+      },
+      { kind: "policy_change_notice", owed: 4, alreadyReached: 0, noAddress: 1 }
+    );
+
+    await approveCampaign({ campaignId: first.id, approvalId: `appr-${randomUUID()}` });
+    const launch = await runCampaignWave({ campaignId: first.id, kind: "launch" });
+    assert.ok(!("refused" in launch), JSON.stringify(launch));
+    // A legal message: the suspended account is owed it too. No ledger rows,
+    // because the delivery row is this cohort's record.
+    assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
+    assert.equal((await ledger(first.id)).length, 0);
+    // The console reads the delivery rows for this audience, not an empty ledger.
+    const [launchWave] = await waveAudienceBreakdown(first.id);
+    assert.deepEqual(
+      { keepsLedger: launchWave.keepsLedger, deliveries: launchWave.deliveries },
+      { keepsLedger: false, deliveries: 3 }
+    );
+
+    // Asked again, the cohort holds nobody: each of them has a notice on its way.
+    const again = await runCampaignWave({ campaignId: first.id, kind: "reminder" });
+    assert.ok(!("refused" in again), JSON.stringify(again));
+    assert.deepEqual(await noticeRecipients(), [owed, suspended, undated].sort());
+
+    // One notice bounced. One was reported delivered with its arrival time,
+    // which is what the gate counts as told. One was reported as a complaint
+    // with no arrival time, which the gate does not count, so it is sent again.
+    // And an account joined before the effective day.
+    await prisma.emailDelivery.updateMany({
+      where: { userId: owed },
+      data: { status: "bounced" },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: undated },
+      data: { status: "delivered", sentAt: new Date(), deliveredAt: new Date() },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: suspended },
+      data: { status: "complained", sentAt: new Date(), deliveredAt: null },
+    });
+    const late = await account({});
+    await createdAt(late, new Date("2026-10-20T00:00:00Z"));
+    const followUp = await runCampaignWave({
+      campaignId: first.id,
+      kind: "final_reminder",
+    });
+    assert.ok(!("refused" in followUp), JSON.stringify(followUp));
+    assert.deepEqual(
+      await noticeRecipients(),
+      [owed, owed, suspended, suspended, undated, late].sort()
+    );
+
+    // A notice sent with no delivery report is on its way for a few days, then
+    // asked about again.
+    const quiet = await account({});
+    await createdAt(quiet, new Date("2026-04-01T00:00:00Z"));
+    const sinceSent = await noticeDraft();
+    await approveCampaign({ campaignId: sinceSent.id, approvalId: `appr-${randomUUID()}` });
+    assert.ok(!("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "launch" }))));
+    const quietRows = () =>
+      prisma.emailDelivery.count({
+        where: { userId: quiet, templateVersion: { template: { key: POLICY_CHANGE_NOTICE_TEMPLATE } } },
+      });
+    assert.equal(await quietRows(), 1);
+    await prisma.emailDelivery.updateMany({
+      where: { userId: { not: quiet } },
+      data: { status: "delivered", sentAt: new Date(), deliveredAt: new Date() },
+    });
+    await prisma.emailDelivery.updateMany({
+      where: { userId: quiet },
+      data: { status: "sent", sentAt: new Date() },
+    });
+    assert.ok(!("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "reminder" }))));
+    assert.equal(await quietRows(), 1);
+    await prisma.emailDelivery.updateMany({
+      where: { userId: quiet },
+      data: { sentAt: new Date(Date.now() - 4 * 86_400_000) },
+    });
+    assert.ok(
+      !("refused" in (await runCampaignWave({ campaignId: sinceSent.id, kind: "final_reminder" })))
+    );
+    assert.equal(await quietRows(), 2);
+  } finally {
+    delete process.env.PUBLIC_APP_URL;
+  }
+});
+
+test("the notice cohort carries only the notice, and the notice only its cohort", async () => {
+  process.env.PUBLIC_APP_URL = "https://tomverse.app";
+  try {
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+        audienceSpec: NOTICE_COHORT,
+        createdByEmail: "ops@example.test",
+      }),
+      /carries only policy_change_notice/
+    );
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: { ko: {}, en: {} },
+        audienceSpec: { cohort: { kind: "marketing_consent", purpose: "product_updates" } },
+        createdByEmail: "ops@example.test",
+      }),
+      /its own cohort/
+    );
+    await assert.rejects(
+      createCampaignDraft({
+        category: "other",
+        templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+        locales: ["ko", "en"],
+        contentByLocale: { ko: {}, en: {} },
+        audienceSpec: { cohort: { kind: "policy_change_notice", effectiveDate: "2026-11-15" } },
+        createdByEmail: "ops@example.test",
+      }),
+      /announces 2026-11-16/
+    );
+    assert.equal(await prisma.emailCampaign.count(), 0);
+
+    // An event stored before the draft check, or written another way, stops at
+    // expansion before a single row.
+    await account({});
+    const template = await ensureTemplateVersion({
+      templateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+      language: "en",
+    });
+    const event = await prisma.emailEvent.create({
+      data: {
+        kind: `email.${POLICY_CHANGE_NOTICE_TEMPLATE}`,
+        templateId: template.templateId,
+        referenceType: "test",
+        referenceId: randomUUID(),
+        payload: {},
+        audienceKind: "user_segment",
+        audienceSpec: { cohort: { kind: "marketing_consent", purpose: "product_updates" } },
+        status: "pending",
+      },
+      select: { id: true },
+    });
+    assert.deepEqual(await expandEmailEvent({ eventId: event.id }), {
+      refused: "notice_audience_mismatch",
+    });
+    assert.equal(await prisma.emailDelivery.count(), 0);
+  } finally {
+    delete process.env.PUBLIC_APP_URL;
+  }
 });

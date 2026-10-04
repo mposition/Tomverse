@@ -54,6 +54,7 @@ async function delayConversationHistory(page: Page, delayMs: number) {
           disabledPanels: [],
           messages: [],
           nextCursor: null,
+          messagePage: { hasMore: false, nextCursor: null },
         }),
       });
     }

@@ -6,15 +6,31 @@
   "sourceRunId": "33312326437",
   "sourceArtifact": "route01-calibration-20260830a",
   "bundleFile": "route01-pilot-20260830a.answers.jsonl",
-  "bundleDigest": null,
+  "bundleDigest": "sha256:9e0ea8dd6587f51bfa8f7d545fc405361e6a4830d2af792c85ed49f773d74fe3",
   "expectedCells": 15,
   "expectedPrimaryPairs": 60,
-  "adjudicatorId": null,
-  "keyRecovery": null,
+  "adjudicatorId": "A-02",
+  "amendments": [
+    {
+      "at": "2026-09-09",
+      "by": "OP-01",
+      "field": "adjudicatorId",
+      "from": "A-01",
+      "to": "A-02",
+      "reason": "The adjudication sheet A-01 returned carried both reviewers' verdicts on every one of the 15 disputed items, and A-01's verdicts matched R-01 on all 15. A third opinion given in sight of the split is not blind, so A-01's 15 verdicts were set aside unused and A-02 was named. A-02 graded a sheet built by scripts/router-human-review-collect.mjs, which holds the disputed pairs and nothing about how the reviewers split. A-02 is a pseudonym for a person other than R-01, R-02 and A-01; the mapping is kept outside this repository. keyRecovery.verifiedBy stays A-01 because that is who opened the probe."
+    }
+  ],
+  "keyRecovery": {
+    "verifiedBy": "A-01",
+    "verifiedAt": "2026-08-31T07:57Z",
+    "recipientKeyFingerprint": "sha256:6271ac1afca28509b96a6fc8424b1973a19ad0413eefafa719ac19ce133ac4ab",
+    "probeSha256": "sha256:f7bb647b5ce710f218c133a38e6d6a8e2000bef935725c00b62b7a52d2dd99a4",
+    "probeRunId": "33369782907"
+  },
   "notes": [
-    "bundleDigest is null until one free dispatch reads it off the pinned artifact and refuses. Commit the value it prints, then dispatch again. It is read, never chosen.",
+    "bundleDigest was read off the pinned artifact by run 33346660064, which refused and printed it. It is read, never chosen: the same run reported 210 pair(s) across 15 cell(s), and the download action verified the artifact's own sha256 8c2a96e3527370bd9ecb6d39ed8cb65c3f59a06931933ef86dfcaebf58f4b288 before the content digest was taken.",
     "The seed is derived from bundleDigest by lib/routerHumanReviewSource.ts and is not an input to anything.",
-    "adjudicatorId must be filled before the first dispatch: the third reviewer is named before the first two verdicts exist, so a tie-breaker is not chosen once it is known which way they would break the tie.",
+    "adjudicatorId is A-01, named 2026-08-31 before any pair was drawn and before either reviewer graded anything, so the tie-breaker was not chosen once it was known which way they would break the tie. A-01 is a pseudonym and must be a different person from the two reviewers: lib/routerHumanReviewAdjudication.ts refuses an adjudicator who already graded the sample, because a second look is not a third opinion. The mapping from these labels to people is kept outside this repository.",
     "keyRecovery is null until the recovery-probe workflow has run and a person has opened its probe with the private half of the committed public key. The draw refuses without it, and refuses again if the public key has been replaced since: an artifact is only downloadable once its job has finished, so a probe sealed in the draw's own job could only be opened after the key it stands in for was already sealed.",
     "The judges have already graded these answers and disagree by +40.48pp, which is why neither the bundle nor the seed is a dispatch input."
   ]

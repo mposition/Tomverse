@@ -1,0 +1,43 @@
+# 1Password secret references for the mobile auth key rings.
+#
+# Used directly, not copied:
+#
+#   op run --env-file docs/ops/mobile-auth-op-env.template -- \
+#     pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 ... -UsePreinjectedRings
+#
+# `op run` resolves each reference and puts the value on the environment of the
+# child process only. Nothing here is a secret: a reference is a pointer, which
+# is why this file is committed and a resolved copy of it never is. Keeping the
+# file in the repository rather than copying it to a local `.env` also removes
+# the copy that could later be filled in by hand.
+#
+# ONLY the two rings belong here. The other six variables are ordinary
+# parameters of the wrapper -- they are already visible in the Railway
+# dashboard, and reading them off the command line is how an operator checks
+# they typed them right. Adding them here would move that check out of sight.
+#
+# Which entry to point at is the operator's decision at the time:
+#
+#   ...Active     what is deployed now  -- section 3 step 4, the preflight check
+#   ...Pending    the next candidate    -- section 3 steps 3 and 6
+#
+# Both lines below name Active. Point them at Pending for the steps that check
+# the candidate. Contract and entry names: docs/ops/mobile-auth-key-rotation.md
+# section 2.2.
+#
+# The vault name contains spaces, which quoting handles. The item name contains
+# an em dash, which is NOT in the documented set of characters a reference
+# supports -- so an item whose name carries one is referenced BY ITS ID
+# instead, and the name stays as it is. That is the documented route, not a
+# workaround, and it means nothing has to be renamed:
+#
+#   op://Tomverse Production Secrets/<item id>/signing-ring
+#
+# The two lines below are written with the name because the id is only knowable
+# from the vault, and reading it there is part of the real-vault step. Replace
+# <item name> with the id at that point and leave section 2.2's names alone.
+#
+# Reference syntax: https://www.1password.dev/cli/secret-reference-syntax
+
+MOBILE_AUTH_SIGNING_KEYS="op://Tomverse Production Secrets/Mobile Auth Keyrings — Active/signing-ring"
+MOBILE_AUTH_REFRESH_PEPPERS="op://Tomverse Production Secrets/Mobile Auth Keyrings — Active/refresh-pepper-ring"

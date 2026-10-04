@@ -35,15 +35,15 @@
 
 ## The navigation
 
-Seven groups, twenty-four entries. One page, one job. The owner sees all
-twenty-four; every other role sees twenty-two, because two AMUX entries are
+Seven groups, twenty-seven entries. One page, one job. The owner sees all
+twenty-seven; every other role sees twenty-five, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
 | Command Center | Overview | `/admin/overview` | `summary`, `health` |
 | Command Center | Work queue | `/admin/work-queue` | — |
-| Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports` |
+| Command Center | Analytics | `/admin/analytics` | `usage`, `product`, `imports`, `ai-review` |
 | Customers | Users | `/admin/users` | — |
 | Customers | Support | `/admin/support` | `feedback`, `fixes`, `privacy` |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |
@@ -57,6 +57,9 @@ owner-only (rule 14).
 | Operations | Alerts | `/admin/alerts` | `policy`, `templates`, `deliveries` |
 | Operations | Email campaigns | `/admin/email-campaigns` | `campaigns`, `schedule` |
 | Operations | Email delivery | `/admin/email-delivery` | `deliveries`, `suppressions` |
+| Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
+| Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
+| Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
@@ -65,6 +68,36 @@ owner-only (rule 14).
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
 | Governance | Admin access | `/admin/admin-access` | `administrators`, `readiness`, `integrity` |
+
+**Marketing** is the marketing automation's record: what the Guard sent to a
+person, what went out, which brand accounts exist and what the automation
+reported (`docs/policy/marketing-automation.md` §6.1, §8). Its badge counts
+drafts in `pending_approval`, because the Guard's second verdict is "a person
+decides" and without the count the queue is a page nobody opens. Its
+`experiments` and `comments` sections are labelled as belonging to later
+stages rather than drawn as queues that happen to be empty: "nothing is
+waiting" and "nothing writes this yet" are different answers, and only one of
+them is true. Reading any of it takes ordinary admin authentication; the
+`writeRoles` on this entry drive the sidebar marker and the mutations a later
+slice adds, not these screens.
+
+**Engineering agent** is the engineering agent's record and the controls a
+person owns (`docs/policy/engineering-agent.md §11` and `docs/policy/engineering-agent.md §12`): T2 drafts decided,
+decision items acknowledged, the mode and freeze, a halt acknowledged and the
+record that both dead-man monitors alert. It carries no badge in
+this slice. Reading takes ordinary admin authentication; every control takes
+`engineering-agent:write` and a recent sign-in, checked by its own route, and
+`t1` is not a mode this screen can set.
+
+**Agent digests** is the common area where agent teams' daily digests are
+read (`docs/policy/qa-release-agent.md` section 4), one section per agent
+that stores them; QA and release is the first. It shows the newest operator
+control revision and the recent digests as counts and codes, says how many
+it lists, and shows an expired or unreadable body as such rather than
+drawing a digest that is not there. It carries no badge. Its one control
+records the next operator control revision, offered to owner and ops only;
+its route checks that role and a recent sign-in again and answers a stale
+sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

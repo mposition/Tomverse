@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-confirmatory-shadow-v4",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.278 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-confirmatory-shadow-v4-20260921 shell:default)"
+  ],
+  "startedAt": "2026-09-20T23:54:05.657Z",
+  "durationMs": 560081,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 70,
+    "cachedInputTokens": 5389142,
+    "outputTokens": 35081,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 5.603986,
+    "raw": {
+      "input_tokens": 70,
+      "cache_creation_input_tokens": 203204,
+      "cache_read_input_tokens": 5389142,
+      "output_tokens": 35081,
+      "output_tokens_details": {
+        "thinking_tokens": 27233
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 203204,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3657,
+          "cache_read_input_tokens": 206489,
+          "cache_creation_input_tokens": 1658,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1658
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-21T00:03:25.803Z",
+  "verdict": {
+    "taskId": "prompt-refiner-confirmatory-shadow-v4",
+    "round": 2,
+    "reviewedDigest": "sha256:17594820acd4eab4bb66071506f235e27be6e3c5dc0054862a2a6288dfd6ec6a",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "prisma/migrations/20260921100000_prompt_refiner_confirmatory_shadow_v4/migration.sql:11-20 (CREATE FUNCTION \"prompt_refiner_runtime_manifest_valid\")",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The replacement wrapper keeps IMMUTABLE but drops the PARALLEL SAFE marker the renamed v2 validator carries, so a CHECK constraint on PromptRefinerReservationStage now calls a parallel-unsafe function; correctness is unaffected (the STRICT loss is inert because a STRICT function also yields NULL on NULL input, and every argument column is NOT NULL), only planning is.",
+        "reproduction": "Apply the migration to an empty database, then run: SELECT proname, proparallel, proisstrict FROM pg_proc WHERE proname IN ('prompt_refiner_runtime_manifest_valid','prompt_refiner_runtime_manifest_v2_valid'); the v2 validator reports proparallel='s', proisstrict=true, while the new wrapper reports proparallel='u', proisstrict=false. Adding PARALLEL SAFE (and optionally STRICT) to the wrapper restores parity."
+      }
+    ],
+    "nextAction": "Approve and land; optionally add PARALLEL SAFE to the new runtime-manifest wrapper for parity with the validator it fronts."
+  }
+}

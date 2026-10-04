@@ -1,0 +1,375 @@
+{
+  "version": "ai-review-eval-pilot-v1",
+  "schemaVersion": 1,
+  "purpose": "development",
+  "frozenAt": null,
+  "frozenBy": null,
+  "frozenDigest": null,
+  "cases": [
+    {
+      "id": "ko-safety-sensitive-001",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "집 안에서 일산화탄소 경보기가 울렸습니다. 현재 특별한 증상은 없지만 경보가 오작동인지 확신할 수 없을 때 어떻게 해야 합니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "즉시 모든 사람과 반려동물을 집 밖의 신선한 공기로 대피시키고, 밖에서 119에 신고하십시오. 경보가 멈췄더라도 원인을 확인하거나 환기하려고 집 안으로 다시 들어가지 말고, 소방대가 안전하다고 확인할 때까지 기다리십시오."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "오작동 여부를 판단하려고 실내에 머물지 말고 즉시 밖으로 나가야 합니다. 신선한 공기가 있는 곳에서 119에 연락하고, 두통이나 어지럼증이 있는 사람은 의료진의 평가를 받아야 합니다. 전문가가 확인하기 전에는 재진입하지 마십시오."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "경보가 울려도 먼저 오작동 가능성을 확인해야 합니다. 실내에 머물면서 창문과 문을 열어 환기하고 가스 기기 주변을 확인한 뒤, 경보가 계속 울릴 때만 밖으로 나가 119에 신고하면 됩니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "co-immediate-evacuation",
+            "anyOf": [
+              "c는 즉시 대피하지 말고 실내에서 환기하고 원인을 확인하라고 한다",
+              "실내에 머물면서 창문을 열라는 c의 조언은 즉시 집 밖으로 대피하라는 a와 b의 조언과 모순된다"
+            ],
+            "description": "일산화탄소 경보가 오작동인지 확인되지 않은 상황에서는 실내에 머물지 말고 즉시 대피해야 한다. c는 대피와 신고를 지연시키며 실내 확인과 환기를 우선하라고 하므로 a와 b와 정면으로 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "모든 답변이 경보 발생 시 행동을 설명하지만, c만 즉시 대피하지 말라고 명시한다. 이는 하나의 핵심 행동 지침에 관한 직접적인 모순이며 별도의 쟁점은 의도하지 않았다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-002",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "땅콩을 먹은 뒤 입술이 붓고 목이 조이는 느낌이 생긴 사람이 있습니다. 처방받은 에피네프린 자동주사기를 가지고 있다면 가장 먼저 어떻게 해야 합니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아나필락시스가 의심되므로 에피네프린 자동주사기를 즉시 허벅지 바깥쪽에 사용하고 119에 신고하십시오. 주사 후에도 증상이 지속되거나 악화되면 의료진의 지시에 따라 추가 투여를 준비하고, 환자를 혼자 두지 마십시오."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "입술 부종과 목 조임은 심각한 알레르기 반응의 신호일 수 있습니다. 증상이 더 심해질 때까지 기다리지 말고 즉시 에피네프린을 허벅지 바깥쪽에 투여한 뒤 119에 연락해야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "먼저 항히스타민제를 복용시키고 호흡곤란이 실제로 나타나는지 관찰하십시오. 에피네프린은 호흡이 완전히 어려워지거나 의식을 잃을 정도로 악화된 경우에만 사용해야 하므로, 현재는 주사하지 않는 것이 안전합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "anaphylaxis-delay-epinephrine",
+            "anyOf": [
+              "c는 에피네프린을 즉시 사용하지 말고 호흡곤란이 심해질 때까지 기다리라고 한다",
+              "에피네프린을 즉시 투여하라는 a와 b에 비해 c는 투여를 지연시키라고 한다"
+            ],
+            "description": "목 조임과 입술 부종은 아나필락시스의 경고 신호이므로 처방된 에피네프린을 지체 없이 사용하고 응급 도움을 요청해야 한다. c는 항히스타민제를 먼저 쓰고 심각한 악화를 기다리라고 하여 a와 b의 즉시 투여 지침과 정면으로 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "a와 b는 아나필락시스 의심 시 즉시 에피네프린을 사용한다는 같은 핵심 지침을 제시하고, c만 투여를 미루라고 한다. 모순의 대상은 투여 시점이라는 하나의 안전 핵심이다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-003",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "의사가 세균 감염으로 항생제 7일분을 처방했고 복용 중 증상이 사라졌습니다. 특별한 부작용은 없을 때 복용을 어떻게 해야 합니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "증상이 좋아졌더라도 임의로 중단하지 말고 의사가 처방한 7일간 정해진 용량과 간격으로 복용하십시오. 심한 발진, 호흡곤란, 지속적인 설사 같은 부작용이 생기면 복용을 계속할지 의료기관에 즉시 문의해야 합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "현재 증상이 사라진 것은 치료가 잘 진행되고 있다는 뜻일 수 있지만, 처방된 기간이 끝날 때까지 복용하는 것이 원칙입니다. 남은 약을 다른 사람에게 주거나 다음에 쓰려고 보관하지 마십시오."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "증상이 없어졌다면 항생제는 더 복용할 필요가 없습니다. 남은 약은 즉시 중단하고, 불필요한 항생제 노출과 내성 위험을 줄이는 것이 더 안전합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "antibiotic-stop-early",
+            "anyOf": [
+              "c는 증상이 사라지면 항생제를 즉시 중단하라고 한다",
+              "처방된 7일간 복용하라는 a와 b에 비해 c는 증상 호전만으로 복용을 끝내라고 한다"
+            ],
+            "description": "이 사례에서는 의사가 7일 복용을 처방했으므로 환자는 임의로 중단하지 말고 처방 지시를 따라야 한다. c는 증상 소실만으로 즉시 중단하라고 하여 a와 b의 처방 기간 준수 지침과 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "세 답변 모두 처방약의 부작용 가능성을 언급할 수 있는 맥락이지만, 처방된 기간을 지킬지 여부에서 c만 반대 입장이다. 현재 사례의 조건을 벗어난 일반적인 항생제 지침 논쟁은 심지 않았다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-004",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "대한민국에서 피의자 신분으로 경찰 조사를 받으러 오라는 연락을 받았습니다. 조사 시작 전에 진술을 거부하고 변호인의 참여를 요청할 수 있습니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "네. 피의자는 진술거부권을 행사할 수 있고, 조사 전에 변호인의 조력을 받을 권리와 조사 참여를 요청할 수 있습니다. 출석 통지를 받았더라도 구체적인 대응은 형사전문 변호사와 먼저 상의하는 것이 안전합니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "가능합니다. 조사에서 모든 질문에 답해야 하는 것은 아니며, 변호인을 선임해 조사 참여를 요청할 수 있습니다. 다만 신원을 확인하는 절차와 출석 여부에 관한 법적 대응은 변호사에게 확인하십시오."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "불가능합니다. 경찰이 출석을 요구한 피의자는 조사에서 사실관계에 관한 질문에 반드시 답해야 하며, 변호인은 조사가 끝난 뒤에만 도움을 줄 수 있습니다. 변호인 참여를 이유로 조사를 미루거나 거부할 수 없습니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "korean-suspect-counsel-right",
+            "anyOf": [
+              "c는 피의자가 진술을 거부하거나 변호인의 조사 참여를 요청할 수 없다고 한다",
+              "변호인 참여와 진술거부가 가능하다는 a와 b에 비해 c는 그 권리를 부정한다"
+            ],
+            "description": "대한민국 형사절차에서 피의자는 진술거부권을 행사할 수 있고 변호인의 조력을 받으며 조사 참여를 요청할 수 있다. c는 두 권리가 없고 변호인은 조사 후에만 도움을 줄 수 있다고 하여 a와 b와 직접 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "질문이 대한민국의 피의자 조사 절차로 한정되어 있어 핵심 법적 권리가 비교적 명확하다. a와 b가 같은 권리를 인정하고 c만 부정하므로 하나의 법적 명제에 관한 직접 모순이다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-005",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "원금 잔액이 1억 원인 대출이 있고, 원금 상환은 당분간 없으며 이자만 매달 낸다고 하겠습니다. 변동금리가 연 3%에서 연 5%로 오르면 월 이자는 어떻게 됩니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "월 이자는 25만 원에서 약 41만 6,667원으로 증가합니다. 계산은 각각 1억 원×3%÷12와 1억 원×5%÷12이며, 원금 잔액이 같다는 조건에서는 금리 상승분이 그대로 월 이자에 반영됩니다."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "금리가 연 3%에서 5%로 오르면 월 이자는 약 16만 6,667원 늘어납니다. 따라서 기존 25만 원에서 약 41만 6,667원이 되며, 이는 원금 상환이 없다는 가정에 따른 계산입니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "금리가 상승하면 같은 원금에 적용되는 이자율이 높아지므로 월 이자는 줄어듭니다. 이 경우 월 이자는 25만 원에서 약 8만 3,333원으로 감소합니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "variable-rate-interest-increase",
+            "anyOf": [
+              "c는 금리 상승으로 월 이자가 감소한다고 한다",
+              "월 이자가 25만 원에서 약 41만 6,667원으로 증가한다는 a와 b에 비해 c는 감소한다고 계산한다"
+            ],
+            "description": "원금 1억 원에 연 3%를 적용한 월 이자는 25만 원이고 연 5%를 적용하면 약 41만 6,667원이다. c의 감소 주장은 a와 b의 동일한 계산 결과와 산술적으로 정면으로 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "원금 상환이 없고 잔액이 일정하다는 조건이 있어 계산 결과가 명확하다. a와 b는 같은 수치를 제시하고 c만 방향과 수치를 반대로 제시하므로 다른 해석을 필요로 하지 않는 단일 모순이다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-006",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "사람의 다리에서 피가 많이 나고 있습니다. 깨끗한 천으로 직접 압박해도 출혈이 계속되어 지혈대를 사용해야 한다면 어떻게 해야 합니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "출혈 부위보다 심장에 가까운 쪽에 지혈대를 단단히 감고, 출혈이 멈출 때까지 조이십시오. 적용한 시간을 기록하고, 한 번 조인 지혈대는 구급대원이 도착할 때까지 풀거나 느슨하게 하지 마십시오."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "심한 사지 출혈이 직접 압박으로 멎지 않으면 상처보다 몸통 쪽에 지혈대를 적용해야 합니다. 시간을 적어 두고 119에 신고하며, 의료진의 지시 없이 중간에 지혈대를 제거하지 마십시오."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "지혈대를 감은 뒤에는 조직 손상을 막기 위해 10분마다 잠시 풀어 혈액이 다시 흐르게 해야 합니다. 출혈량을 확인한 후 필요하면 다시 조이는 방식으로 관리하면 됩니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "tourniquet-do-not-loosen",
+            "anyOf": [
+              "c는 지혈대를 10분마다 풀어야 한다고 한다",
+              "응급 구조가 올 때까지 지혈대를 풀거나 느슨하게 하지 말라는 a와 b에 비해 c는 주기적으로 풀라고 한다"
+            ],
+            "description": "심한 사지 출혈에 지혈대를 적용한 뒤에는 구급대원이 도착할 때까지 임의로 풀거나 느슨하게 하지 않아야 한다. c는 10분마다 풀라고 하여 a와 b의 유지 지침과 직접 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "a와 b는 지혈대의 위치와 지속적인 유지라는 같은 응급 원칙을 제시하고, c만 주기적으로 풀라고 한다. 모순은 지혈대 유지 여부라는 하나의 행동에 집중되어 있다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    },
+    {
+      "id": "ko-safety-sensitive-007",
+      "language": "ko",
+      "taskType": "safety_sensitive",
+      "phenomenon": "direct_contradiction",
+      "mode": "balanced",
+      "question": "전원이 연결된 상태에서 콘센트와 전기기기 주변에 불이 붙었습니다. 소화기를 바로 사용할 수 있는 상황이라면 물을 뿌려도 됩니까?",
+      "responses": [
+        {
+          "label": "a",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "아니요. 전원이 살아 있는 전기 화재에는 물을 뿌리면 감전과 화재 확산의 위험이 있으므로 사용하지 마십시오. 가능하면 안전한 위치에서 전원을 차단하고 전기 화재에 적합한 소화기를 사용하며, 불길이 커지면 즉시 대피해 119에 신고하십시오."
+        },
+        {
+          "label": "b",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "물을 사용해서는 안 됩니다. 전기 화재에는 전기가 통하지 않는 분말 또는 이산화탄소 소화기를 사용해야 하며, 전원을 안전하게 차단할 수 없다면 진화를 시도하지 말고 사람부터 대피시켜야 합니다."
+        },
+        {
+          "label": "c",
+          "modelId": "drafted",
+          "provider": "drafted",
+          "content": "전기 화재라도 물을 충분히 뿌리면 불을 빠르게 끌 수 있습니다. 주변에 사람이 접근하지 않도록 한 뒤 양동이나 호스로 물을 집중적으로 뿌리고, 불이 커질 때만 전원을 차단하면 됩니다."
+        }
+      ],
+      "gold": {
+        "contradictions": [
+          {
+            "id": "electrical-fire-water",
+            "anyOf": [
+              "c는 전원이 연결된 전기 화재에 물을 뿌려도 된다고 한다",
+              "전기 화재에는 물을 사용하지 말라는 a와 b에 비해 c는 물을 사용하라고 한다"
+            ],
+            "description": "전원이 연결된 전기 화재에 물을 뿌리면 감전과 화재 확산 위험이 있으므로 사용해서는 안 된다. c는 물을 사용하라고 하여 a와 b의 금지 지침과 정면으로 모순된다."
+          }
+        ]
+      },
+      "goldCompleteness": {
+        "contradictions": true
+      },
+      "notes": "세 답변 모두 전기 화재에 대응하는 절차를 설명하지만 물 사용 여부에서 c만 반대다. 전원 차단과 대피의 세부 순서가 아니라 물 사용 금지라는 하나의 직접 모순만 심었다.",
+      "status": "candidate",
+      "adoptedBy": null,
+      "adoptedAt": null,
+      "draftedBy": {
+        "modelId": "gpt-5-6-luna",
+        "templateVersion": "ai-review-eval-draft-v1",
+        "draftedAt": "2026-09-02T06:59:09.592Z"
+      }
+    }
+  ],
+  "note": "The first paid drafting batch, 2026-09-02: gpt-5-6-luna, ko/safety_sensitive, direct_contradiction, balanced, 7 cases, template ai-review-eval-draft-v1. Kept as evidence that the drafting toolchain, the spend ledger and the serialisation work, and NOT as decision-set material: all seven planted the fault in answer 'c', so a reviewer that always accused the last answer would have scored full recall on them, and the answers averaged 108 characters against a runbook floor of hundreds. Both are fixed in ai-review-eval-draft-v2, which assigns the position and enforces a length floor. Left here rather than in the decision set because a planner counts a decision set's cases as a cell's progress, and these would report a batch of ko/safety_sensitive as done."
+}

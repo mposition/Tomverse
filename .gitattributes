@@ -1,3 +1,41 @@
+# Staging verification fixtures are checked out byte-for-byte on every platform.
+#
+# `manifest.json` records each fixture's size and SHA-256 so an operator can
+# confirm the file they are about to upload is the one the answer key describes.
+# That only works if the bytes on disk are the same everywhere. Without this,
+# Git's autocrlf on Windows rewrites every LF to CRLF at checkout and the file
+# gains one byte per line -- 150 for `plain-conversation.json` -- so the digest
+# check fails on a clone that is in fact correct.
+#
+# Deliberately scoped to these files rather than the repository. A repo-wide
+# `text=auto` would rewrite every contributor's working tree, which is a much
+# larger decision than this one and is not needed to make a digest meaningful.
+docs/ops/external-conversation-continuation-staging-verification-records/fixtures/*.json text eol=lf
+
+# AI Review evaluation records are bound to their approvals by digest.
+#
+# The blind sheet, the record a person signs, the answer key and the run
+# journal are all fingerprinted, and the sheet is additionally rebuilt and
+# compared byte for byte. Git's autocrlf on Windows rewrites LF to CRLF at
+# checkout, so evidence that verifies on the machine that made it -- and in
+# CI, which is Linux -- would fail on a fresh Windows clone of the same commit.
+#
+# That asymmetry is the worst shape this could take: the operator whose
+# approval it is sees a digest mismatch that nobody else can reproduce, and
+# the honest reading of a digest mismatch is that the evidence was tampered
+# with. Pinning the whole directory rather than four globs, because anything
+# written beside these files is evidence too.
+docs/ops/ai-review-evaluation-records/** text eol=lf
+docs/ops/ai-review-evaluation-set/*.json text eol=lf
+
+# The drafting spend ledger sits beside the set it paid for.
+#
+# Not digest-bound, but it is append-only and read line by line to decide
+# whether more money may be spent, and a line the reader rejects stops the
+# loop. Pinned for the same reason as the files above: an operator's own clone
+# must read what CI reads.
+docs/ops/ai-review-evaluation-set/*.jsonl text eol=lf
+
 # Provider documentation, saved exactly as the provider served it.
 #
 # The parsers in lib/providerModelDocsCore.ts read these as the markdown the
@@ -7,3 +45,70 @@
 # trailing whitespace in some rows is the provider's, kept so the fixtures stay
 # byte-for-byte what was read.
 tests/fixtures/providerModelDocs/*.md text eol=lf
+
+# Prompt Refiner provider-free shadow source is compared to exact Git bytes.
+#
+# This narrow list is the executable/source allowlist in
+# lib/promptRefinerShadowSource.ts. Pinning each path keeps a normal Windows
+# checkout with core.autocrlf=true byte-identical to the source commit without
+# changing line-ending policy for the rest of the repository. The attribute
+# file is itself part of the identity so this contract cannot drift silently.
+/.gitattributes text eol=lf
+/package.json text eol=lf
+/package-lock.json text eol=lf
+/tsconfig.json text eol=lf
+docs/ops/prompt-refiner-shadow/corpus-v1.json text eol=lf
+lib/promptRefinerShadowHarness.ts text eol=lf
+lib/promptRefinerShadowJournal.ts text eol=lf
+lib/promptRefinerShadowSource.ts text eol=lf
+lib/promptRefinerModelPrompt.ts text eol=lf
+lib/promptInjectionAudit.ts text eol=lf
+lib/promptRefinerSuggestion.ts text eol=lf
+lib/routerDevelopmentBenchmark.ts text eol=lf
+scripts/prompt-refiner-shadow-harness.mjs text eol=lf
+
+# Prompt Refiner admission-readiness evidence is verified as exact bytes.
+#
+# These four paths, and only these four paths in the evidence directory, are
+# digest-bound. The README is explanatory rather than evidence, so pinning a
+# directory-wide glob would silently expand the immutable set.
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl text eol=lf
+/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl text eol=lf
+
+# Admission proposal implementation paths are pinned narrowly for reproducible
+# review bytes without changing the rest of lib/, tests/, or nested docs.
+/lib/promptRefinerShadowAdmissionCore.ts text eol=lf
+/tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only challenge witness closure reads exact bytes.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-challenge-witness-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitnessClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only 80-slot witness pass closure.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-witnesses-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnessesClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only rubric structure closure.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotRubric.ts text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotRubric.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestRubricsClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only manifest envelope closure reads exact bytes.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs text eol=lf
+
+# The approved consent copy and the test that holds it to the record must be
+# byte-identical on every platform: the test reads the document, and a CRLF
+# checkout used to fail three of its comparisons on Windows.
+docs/policy/email-consent-copy-draft.md text eol=lf
+tests/emailConsentCopy.test.mjs text eol=lf

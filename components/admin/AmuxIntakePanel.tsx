@@ -3,9 +3,9 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
-import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=intake");
 

@@ -16,6 +16,7 @@ const branch = (overrides = {}) => ({
   readFile: () => null,
   pricedModelIds: new Set(),
   pendingPriceModelIds: new Set(),
+  pricingVerificationRecords: new Set(),
   ...overrides,
 });
 
@@ -111,13 +112,64 @@ test("a comment naming the register does not move the split", () => {
   assert.equal(parsed.pendingPriceModelIds.size, 0);
 });
 
-test("a priced model that has left the pending register is resolved", () => {
+test("a verified model, with the record that proves it, is resolved", () => {
   const result = classifyIssue(
     { number: 244, title: "Verify production pricing: claude-fable-5" },
-    facts({ pricedModelIds: new Set(["claude-fable-5"]) })
+    facts({
+      pricedModelIds: new Set(["claude-fable-5"]),
+      pricingVerificationRecords: new Set(["claude-fable-5"]),
+    })
   );
   assert.equal(result.verdict, VERDICTS.RESOLVED_IN_CODE);
   assert.deepEqual(result.resolvedOn, ["develop", "main"]);
+});
+
+test("a profile alone never resolves a verification issue", () => {
+  // The failure this replaced: `check:model-pricing` is fail-closed on every
+  // enabled premium model having an explicit profile, and the pending register
+  // is empty, so "has a profile and is not pending" was true from the moment a
+  // model shipped -- before anybody checked a number. #246, #247 and #248 were
+  // reported as done on that basis while #244's own comment said in writing
+  // that they were not.
+  const result = classifyIssue(
+    { number: 246, title: "Verify production pricing: mistral-large-3" },
+    facts({ pricedModelIds: new Set(["mistral-large-3"]) })
+  );
+  assert.equal(result.verdict, VERDICTS.OPEN_WORK);
+  const detail = result.signals.map((signal) => signal.detail).join(" ");
+  assert.match(detail, /no pricing verification record/i);
+});
+
+test("a record with no profile is not resolved either", () => {
+  // Backwards, but worth pinning: a record naming a model the tree does not
+  // price describes something that is not there.
+  const result = classifyIssue(
+    { number: 246, title: "Verify production pricing: mistral-large-3" },
+    facts({ pricingVerificationRecords: new Set(["mistral-large-3"]) })
+  );
+  assert.equal(result.verdict, VERDICTS.OPEN_WORK);
+});
+
+test("moving a price into MODEL_PRICING still asks only for the profile", () => {
+  // The two title shapes ask different things. #256 is about where the numbers
+  // live, not about whether anyone checked them, so requiring a verification
+  // record here would report a finished migration as unfinished forever.
+  const result = classifyIssue(
+    {
+      number: 256,
+      title: "Move GLM-5.2 pricing from environment variables into MODEL_PRICING",
+    },
+    facts({
+      pricedModelIds: new Set(["glm-5.2"]),
+      readFile: () => null,
+    })
+  );
+  const pricing = result.signals.filter((signal) => signal.kind === "pricing");
+  assert.ok(pricing.length > 0);
+  assert.ok(
+    pricing.every((signal) => signal.resolved),
+    "the profile alone must satisfy a move issue"
+  );
 });
 
 test("a priced model still in the pending register is not resolved", () => {
@@ -137,7 +189,10 @@ test("the provider prefix is optional on either side", () => {
       number: 248,
       title: "Verify production pricing: perplexity/sonar-deep-research",
     },
-    facts({ pricedModelIds: new Set(["sonar-deep-research"]) })
+    facts({
+      pricedModelIds: new Set(["sonar-deep-research"]),
+      pricingVerificationRecords: new Set(["perplexity/sonar-deep-research"]),
+    })
   );
   assert.equal(result.verdict, VERDICTS.RESOLVED_IN_CODE);
 });
@@ -289,11 +344,16 @@ test("only genuinely open work is offered as a candidate", () => {
           readFile: () => 'import path from "node:path";\n',
           pricedModelIds: new Set(["claude-fable-5", "glm-5.2"]),
           pendingPriceModelIds: new Set(),
+          // #244 is here as a *finished* verification, so it carries the record
+          // that finishing one produces. Without it this fixture would be
+          // asserting the very shortcut this report stopped taking.
+          pricingVerificationRecords: new Set(["claude-fable-5"]),
         },
         main: {
           readFile: () => 'import ts from "typescript";\n',
           pricedModelIds: new Set(["claude-fable-5", "glm-5.2"]),
           pendingPriceModelIds: new Set(),
+          pricingVerificationRecords: new Set(["claude-fable-5"]),
         },
       },
       new Map([

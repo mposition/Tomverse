@@ -1,0 +1,24 @@
+{
+  "taskId": "prompt-refiner-shadow-evidence-gate-followup-v2",
+  "requirement": "종결된 prompt-refiner-shadow-evidence-gate-v1 exchange의 round 2에 남은 재현 가능한 두 finding을 수정한다. unknown-only case shortfall은 case_evidence_incomplete로, 실제 case failure는 case_evidence_failed로 분리하고 혼합 상태를 회귀 테스트한다. evidence spec duplicate-key 검사는 실제 duplicate parser branch를 실행함을 직접 증명한다. 기존 provider-independent content-free 경계, frozen corpus 결속, authority false 값과 비용·UI·Router 비승인 상태는 유지한다. author는 Codex, reviewer는 Claude Code Max이며 사용자 승인 --skip-preflight 예외 아래 Read/Grep/Glob only로 검토한다.",
+  "completionCriteria": [
+    "unknown-only case shortfall은 case_evidence_incomplete만 기록하고 case_evidence_failed를 기록하지 않는다.",
+    "실제 failed 또는 suggested evidence failure는 case_evidence_failed를 기록하며 incomplete와 구분한다.",
+    "spec duplicate-key fixture가 syntactically valid한 중복 key를 포함하고 parseBenchmarkJson의 json_duplicate_key branch를 직접 확인한다.",
+    "기존 evidence core 집중 테스트, 전체 unit, TypeScript, 수정 파일 ESLint, 문서·정책 절 참조, diff whitespace 검사가 통과한다.",
+    "Claude verdict는 새 package digest에 결속하고 actionable finding마다 location, severity, evidence와 reproduction을 기록한다.",
+    "provider 호출, Railway 변경, stage/run 승인, 유료 실행, 제품 UI, Router 결합 또는 rollout 권한을 추가하지 않는다."
+  ],
+  "baseCommit": "a08cdaff64ac00004d29b7b8d9ffa4f16bd0c54f",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-followup-v2.task.json",
+    "lib/promptRefinerShadowEvidenceCore.ts",
+    "tests/promptRefinerShadowEvidenceCore.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-shadow-evidence-gate-v1",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-shadow-evidence-gate-v1/exchange.json"
+  }
+}

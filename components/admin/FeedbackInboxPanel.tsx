@@ -31,12 +31,12 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
-import { adminFetch } from "@/lib/adminFetch";
 import { autoFixReplyDraft } from "@/lib/feedbackAutoFixReplyDraft";
 import {
   useServerSyncedRows,
   useSupportInboxRefresh,
 } from "@/components/admin/useSupportInboxRefresh";
+import { adminFetch } from "@/lib/adminFetch";
 
 type FeedbackInboxMessages = AdminMessageShape<
   (typeof adminFeedbackInboxMessages)["en"]

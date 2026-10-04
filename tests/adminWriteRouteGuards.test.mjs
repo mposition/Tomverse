@@ -86,7 +86,7 @@ const performs = (source, name) => {
 
 /** The `@/lib` modules a route imports, as text. One level, not transitive. */
 const importedSources = (routeSource) =>
-  [...routeSource.matchAll(/from "@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+  [...routeSource.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
     .map((match) => `${LIB_DIR}${match[1]}.ts`)
     .filter((path) => existsSync(path))
     .map((path) => withoutComments(readFileSync(path, "utf8")));
@@ -155,6 +155,19 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
+const oneShotStageWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
+const oneShotStageAuditWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
+const reachesCanonicalOneShotStageAudit = (route) =>
+  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
+  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
+  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
+
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
     routes.length >= 60,
@@ -169,12 +182,13 @@ test("the sweep sees the admin API, so a silent pass is impossible", () => {
 test("every admin route decides whether the caller is an administrator", () => {
   // The guard itself, not the role: `isAdminSession` answers the first
   // question and `hasAdminPermission` the second, but a route that asks
-  // neither is open to any signed-in account.
+  // neither is open to any signed-in account. Shared mutation services count
+  // only through the same one-level call boundary used for the write guards.
   const unguarded = routes
     .filter(
       (route) =>
-        !route.source.includes("isAdminSession") &&
-        !route.source.includes("hasAdminPermission")
+        !route.reaches("isAdminSession") &&
+        !route.reaches("hasAdminPermission")
     )
     .map((route) => route.name);
 
@@ -207,7 +221,9 @@ test("every admin write route writes an audit entry", () => {
   // and a write that leaves no row is invisible to `verifyAdminAuditIntegrity`
   // as well -- the chain stays valid because the entry was never in it.
   const unaudited = writeRoutes
-    .filter((route) => !route.reaches("writeAdminAuditLog") && !reachesCanonicalAmuxReviewAudit(route))
+    .filter((route) => !route.reaches("writeAdminAuditLog") &&
+      !reachesCanonicalAmuxReviewAudit(route) &&
+      !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 
   assert.deepEqual(

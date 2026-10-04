@@ -1,0 +1,456 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "router-development-collector-v1-1",
+  "requirement": "Build and independently review a standalone, operator-funded DEVELOPMENT-only collector for the existing Router development benchmark v1. This is a new feature task, not a continuation of a passed exchange or reuse of an earlier Claude verdict. Preserve the existing synthetic 24-case corpus, exact-JSON grader, offline benchmark CLI, original 11 task/review records, and all production Router, pricing, runtime registry, credit, product-client and cross-review-controller behavior. Retain the full catalogue-by-case population with refusals and not-run rows; only prompt text is model input. Default preview is a credential-free proposal/census and never an approval. Only explicit execute plus --live may call a provider after a separate human approval binds the exact manifest digest, selected rows, every numeric budget/call/time limit, expiry and assumption. This implementation/review task performs no paid benchmark calls. Freeze source, context, model/API identity, pricing and product generation settings; reject dirty or drifting execution and recheck before each dispatch and after durable intent with a fresh deadline. Use conditional catalogue-context/output-cap and maximum-current-tier integer-microUSD reservations, never presented as verified provider context, actual invoice cost or a guaranteed billed ceiling. Retain every dispatched reservation permanently, nullable observations/cost, and durable intent-to-terminal lineage. Stop on known raw-token bound violations even when cost is unknown, known unsupported served tier/billing including HTTP errors, and observed frozen-rate cost above reservation. The canonical Git-common-dir registration/witness/ledger and exclusive lock must fail closed on crash-unknown, missing/truncated/rolled-back state and stale locks, with no retry or fallback. Reuse existing product model/settings helpers with maxRetries=0 and no tools or outbound tier selector; retain only allowlisted provider-origin observations, never SDK-invented usage/identity, raw reasoning, bodies, headers or error secrets. Preserve the explicit distinction between 1 MiB post-reception answer storage, 64 KiB v1 answer export and 16 MiB v1 document limits, without claiming a hard network-ingress or memory cap. Preserve blank/wrong/failure/missing denominators. Durable timeout stops run/resume but exports as v1 timeout; crash-unknown, unsupported and bound-violating records block the whole export. Measure the eventual clean reviewed snapshot against develop commit 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910, after the authorized normal integration and successful verification. That integration, packaging and independent review are not completed by this task declaration. Set author=codex and reviewer=claude through the existing control-program flags. The limited user permission in router-development-collector-v1-1.authorization.md permits --skip-preflight only for the announced v1.1 independent review after a separate orchestrator go; no failed-check override, model override, API-billing fallback, benchmark execution, main merge, production deployment, model-winner claim or adoption is authorized.",
+  "completionCriteria": [
+    "The clean integration snapshot includes exact base 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910 through a normal merge preserving the reviewed v1 history. Record actual integration commits, parents and verification outcomes separately; this declaration does not certify their completion. A freshly computed digest covers exactly the 13 listed source/specification/receipt paths. This task and its authorization receipt are review instructions/provenance, not implementation evidence.",
+    "The original docs/ops/cross-review/packages/router-development-benchmark-v1.task.json and all 10 original files under docs/ops/cross-review/packages/router-development-benchmark-v1/ remain byte-identical to 0e853fd9ecebb0808dacefc6816a0d1f25148783. The existing 24-case corpus, v1 README/grader/planner/offline CLI/tests, production Router/client/pricing/registry/credits, package-lock.json, and cross-review controller/executors remain unchanged. Review scope does not grant authority over these protected files or reuse their passed approvals.",
+    "package.json preserves every non-script field and existing script while adding only benchmark:router:collect and test:router-development-collector. Integration uses the exact union of the two parents' scripts with no conflicting shared value. scripts/check-processing-tier-core.mjs adds only the exact collector response-observation pin with sendsATier:false; its guard regex/functions and every existing allowlist entry are preserved. This is not permission to send an outbound processing tier or relax a guard.",
+    "Preview/help and export do not invoke provider clients; no-budget preview retains the full v1 plan and null collectionManifest/approval. Full manifest selection retains the original 42-by-24 snapshot population (1,008 rows, including its 360 static-eligible and 648 refused rows) without relabeling 15 static-eligible models as account-access or health verified. Selected, refused, unattempted, attempted and acquired/exportable rows remain distinguishable. Only row.input.prompt is sent, without gold, case/grading metadata or other model answers.",
+    "Execute requires --mode=execute, --live, a separately supplied approved record and an exact manifest/digest match. Bind all selected rows, numeric total/per-request microUSD limits, maximum calls, request/run timeouts, expiry, acknowledgements, clean source files/commit, model/API identity, context assumption, price revision/tiers and generation settings. No defaults or automatic approvals authorize spend; no execution-time overrides reprice or retarget a saved manifest. Current source/pricing/settings and fresh time are checked before each request and again after durable intent. Runtime credentials, account access, provider health, shared product budgets and invoice settlement remain unverified.",
+    "Reservation arithmetic uses positive safe-integer limits, nonnegative validated tier rates, maximum current input/cache-write/output tier rates, upward integer-microUSD rounding including input-partition rounding allowance, and overflow rejection. The catalogue context input bound and output-cap assumption are explicitly conditional, not verified tokenization, provider-enforced billing ceilings or invoices. Reservations are never released after dispatch, including failure, timeout or unknown outcomes; unknown observations and cost stay null instead of zero.",
+    "Known input totals or known disjoint input-partition lower bounds above the frozen context assumption, and known output or reasoning tokens above the frozen output cap, independently stop with observed_token_bound_exceeded even when other usage or cost is null. Preserve the existing answer, raw allowlisted observations and committed reservation before any overflowing cost calculation; do not fill missing observed totals. Known unsupported billing/served tier, including an HTTP-error response or a mislabeled terminal status, and estimated token-cost-over-reservation also stop later dispatch/resume and block the entire export. These are assumption/measurement failures, not authenticated invoice overrun claims or authority to increase caps.",
+    "Use the canonical Git common directory shared by this clone's worktrees, a fixed approval-ID registration, append-only hash-chained journal, separate per-event sequence/digest witness, and an exclusive wx lock. Complete partial writes and file fsync for intent and witness before dispatch. Detect duplicate/orphan events, missing registration/ledger, truncation, witness rollback mismatch, and crash-unknown without resetting history or budget. Never automatically delete stale locks, retry attempted rows, fallback to another model, or claim exactly-once provider execution, central-clone protection or power-loss guarantees.",
+    "A durable SDK deadline timeout is retained as a known local terminal and stops the run and resume with request_timeout, without returning reservation or asserting provider cancellation/zero billing. Export alone may accept this stop reason and an expired historically valid approval, emitting a v1 timeout row. Crash-unknown, incomplete returned answers, unsupported billing/steps, token-bound breaches and storage/export oversize block the whole export rather than dropping attempted rows or scoring them as wrong answers.",
+    "The provider adapter reuses getActiveAiModel/getModelGenerationSettings and the frozen model-specific output cap, with maxRetries:0, one prompt, a deadline abort signal, no tools/search/coding executor, no fallback and no outbound tier selector. SDK responseBody opt-in is transient in memory for an exact provider-field allowlist; no raw body, reasoning, headers, error text or secrets persist. Missing normalized/synthetic SDK usage and identity are not promoted to provider observations. servedProcessingTier stays nullable; auto/missing is not invented standard processing, and known non-standard/default tiers are unsupported.",
+    "Post-reception answer storage is limited to 1,048,576 UTF-8 bytes with full-byte-count/digest preservation on omission; the existing v1 answer/document limits remain 65,536 and 16,777,216 bytes. State clearly that these limits do not bound network ingress or SDK memory. Export maintains journal-bound self-reported provenance, null providerCostUsd, existing prompt/call digests and the full v1 plan denominator. Blank, invalid/wrong JSON, complete provider failure and durable timeout remain visible to the frozen scorer; missing or unsupported data cannot inflate correctness.",
+    "Actual offline runs pass at least 72 collector tests and 95 original benchmark tests using npm run test:router-development-collector and npm run test:router-development-benchmark, the targeted 181-test Router regression set, and all 9 tests in tests/processingTierGuard.test.mjs, with zero failures and skips. Record exact commands and actual counts, not an inferred total or prior result. The Router set comprises routerFullCatalogDiagnostic, routerCandidates, routerDecision, routerSelection, routerCallLimits, chatContextWindow, taskProfileCore, routerScorePolicy, routerCostProjection, routerSignalCore, routerQualityEvalSet and routerQualityDecisionGate test files. Use the existing react-server/tsx/serial test invocation. No test invokes a paid provider.",
+    "Official npm run typecheck, lint for every changed source/test/guard script, check:encoding, check:doc-references, check:policy-section-references, check:model-pricing, check:router-quality-eval, check:router-context-window and check:context-window-register pass. Explicit byte/semantic checks verify original records and v1 files, package non-script fields/lock, exact parent-script union and preservation of old processing-tier allowlist data and guard behavior. Record each genuine execution separately from the author's claims and the later control-program checks; do not reinterpret failures or skip mandatory checks.",
+    "Package only after verification, the authorized normal integration and a separate orchestrator go, using a new clean named commit and the existing control program with --author=codex --reviewer=claude. generatedPaths is empty. Only the exact new output directory docs/ops/cross-review/packages/router-development-collector-v1-1 may be excluded; no source, prior record, parent directory or nested file exclusion is allowed. No package/reviewer verdict is created by authoring this task. The eventual exchange remains awaiting_review until an actual verdict bound to its full newly computed digest exists.",
+    "Before actual independent review, announce its necessity and obtain the orchestrator's explicit go. Keep the existing Claude Read,Grep,Glob-only safe-mode/strict-MCP invocation, no shell/write tools or model override. Remove ANTHROPIC_API_KEY case-insensitively only from the review child environment while preserving stored claude.ai login; do not mutate parent/persistent environment, switch to bare mode or fall back to API billing. Preserve the exact limited user permission in the separate receipt; --skip-preflight is a recorded skip, never a passed preflight, and --review-despite-check-failures is prohibited. At most two fix rounds are allowed, with no supersedes or reopening of an earlier passed exchange.",
+    "Documentation distinguishes operator-funded development collection from production dispatch, synthetic agent-authored fixtures from human-adopted decision evidence, static catalogue admission from runtime readiness, conditional reservation from actual invoices, and internal mock tests from independent Claude/provider observations. There are zero actual provider calls to collect benchmark answers in this task; the separately authorized read-only Claude code review is not a benchmark collection run. No main merge, production deployment, pricing/registry/credit policy change, model winner, quality-band promotion or adoption is authorized. Future commit/package/review/push/merge steps each remain subject to their applicable separate go."
+  ],
+  "baseCommit": "88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:55cb20818f04feabb2ea0af86cb641da5caed13d329ea34d424558ac2b5b3420",
+      "commit": "40ce5fc2179f040d3d8bf4a3e4c147f33af93133",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.task.json",
+        "docs/ops/router-development-benchmark/collector-v1.1.md",
+        "lib/routerDevelopmentCollector.ts",
+        "lib/routerDevelopmentCollectorJournal.ts",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "package.json",
+        "scripts/check-processing-tier-core.mjs",
+        "scripts/router-development-collect.mjs",
+        "tests/routerDevelopmentCollector.test.mjs",
+        "tests/routerDevelopmentCollectorAdversarial.test.mjs",
+        "tests/routerDevelopmentCollectorCli.test.mjs",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "Standalone DEVELOPMENT-only router answer collector; separate digest-bound human budget approval and explicit live execution are required. This package contains no paid collection, production policy change or reviewer verdict. Integrates exact develop snapshot 88dc1d6 and preserves original v1 evidence.",
+      "testResults": [
+        {
+          "command": "node -e 'const cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-collector\",\"expected\":72},{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"expected\":9}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\",\"todo\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+          "passed": true,
+          "output": "ℹ duration_ms 239.2848\nObserved offline test result: {\"command\":\"npm run test:router-development-collector\",\"tests\":72,\"pass\":72,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"tests\":9,\"pass\":9,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+          "durationMs": 31195
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35408
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "0 lint\n> eslint lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2786
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1153
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 765 referenced path(s) across 92 instruction document(s), and 887 path(s) named by comments across 2628 source file(s), all present.",
+          "durationMs": 1249
+        },
+        {
+          "rule": "npm run check:policy-section-references -- --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
+          "passed": true,
+          "detail": "ub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\n\nPolicy section reference check passed: 4130 citation(s) against 30 policy document(s). 2480 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+          "durationMs": 971
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 712
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 653
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 623
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 692
+        },
+        {
+          "rule": "node -e '\nconst fs=require(\"node:fs\"),cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");\nconst base=\"88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\",historical=\"f8d80a6797104da281c116eee12b01d5c7b25c2d\",record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",source=\"89d1e563c121d92dd833434bc6e270bfdada10b5\";\nconst git=(...args)=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const paths=(...args)=>git(...args).toString().trim().split(/\\r?\\n/).filter(Boolean);\nconst check=(ref,path)=>{const original=git(\"show\",ref+\":\"+path);assert.ok(fs.readFileSync(path).equals(original),\"working bytes: \"+path);assert.ok(git(\"show\",\":\"+path).equals(original),\"index bytes: \"+path);};\nconst records=paths(\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\");assert.equal(records.length,11);assert.deepEqual(paths(\"ls-files\",\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\"),records);for(const p of records)check(record,p);\nconst v1=[\"docs/ops/router-development-benchmark/README.md\",\"docs/ops/router-development-benchmark/development-v1.json\",\"lib/routerDevelopmentBenchmark.ts\",\"lib/routerDevelopmentBenchmarkPlan.ts\",\"scripts/router-development-benchmark.mjs\",\"tests/routerDevelopmentBenchmark.test.mjs\",\"tests/routerDevelopmentBenchmarkCli.test.mjs\",\"tests/routerDevelopmentBenchmarkCorpus.test.mjs\"];for(const p of v1)check(historical,p);\nconst pattern=/^(lib\\/(?:router|model|activeAiModel|anthropicPromptCaching|deepseek|perplexity)|scripts\\/(?:cross-review|eval-router-quality|check-model-pricing|check-context-window-register|check-router-context-window)|docs\\/policy\\/.*(?:register|router|pricing)|package-lock\\.json|\\.github\\/workflows\\/)/;\nconst protectedFiles=paths(\"ls-tree\",\"-r\",\"--name-only\",base).filter(p=>pattern.test(p));assert.equal(protectedFiles.length,107);for(const p of protectedFiles)check(base,p);assert.equal(new Set([...records,...v1,...protectedFiles]).size,124);\nconst authored=paths(\"diff-tree\",\"--no-commit-id\",\"--name-only\",\"-r\",source);assert.equal(authored.length,11);for(const p of authored.filter(p=>p!==\"package.json\"))check(source,p);\nconst read=ref=>JSON.parse(git(\"show\",ref+\":package.json\"));const left=read(source),right=read(base),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts))if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"shared script conflict: \"+key);const withoutScripts=({scripts,...rest})=>rest;assert.deepEqual(withoutScripts(left),withoutScripts(right));assert.deepEqual(actual,{...right,scripts:{...right.scripts,...left.scripts}});assert.deepEqual(JSON.parse(git(\"show\",\":package.json\")),actual);assert.equal(Object.keys(actual.scripts).length,212);assert.deepEqual(Object.keys(actual.scripts).filter(k=>!Object.hasOwn(right.scripts,k)).sort(),[\"benchmark:router:collect\",\"test:router-development-collector\"]);check(base,\"package-lock.json\");\nconst guardPath=\"scripts/check-processing-tier-core.mjs\",old=git(\"show\",base+\":\"+guardPath).toString(),current=fs.readFileSync(guardPath,\"utf8\");const pin=\"observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);\";\nconst addition=['\"'\"'  {'\"'\"','\"'\"'    file: \"lib/routerDevelopmentCollectorProvider.ts\",'\"'\"','\"'\"'    sendsATier: false,'\"'\"','\"'\"'    reason:'\"'\"','\"'\"'      \"Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.\",'\"'\"','\"'\"'    mentions: ['\"'\"','\"'\"'      '\"'\"'+JSON.stringify(pin)+'\"'\"','\"'\"','\"'\"'    ],'\"'\"','\"'\"'  },'\"'\"','\"'\"''\"'\"'].join(\"\\n\");assert.equal(current.split(addition).length,2);assert.equal(current.replace(addition,\"\"),old,\"guard changed beyond exact 9-line addition\");\nconst task=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\"));assert.equal(task.baseCommit,base);assert.equal(task.writableScope.length,13);assert.deepEqual(task.generatedPaths,[]);assert.equal(Object.hasOwn(task,\"supersedes\"),false);assert.deepEqual(paths(\"diff\",\"--name-only\",base).sort(),[...task.writableScope].sort());assert.deepEqual(paths(\"diff\",\"--name-only\"),[]);assert.deepEqual(paths(\"diff\",\"--cached\",\"--name-only\"),[]);git(\"diff\",\"--check\",base);\n(async()=>{const core=await import(require(\"node:url\").pathToFileURL(require(\"node:path\").resolve(guardPath)).href);assert.equal(core.PROCESSING_TIER_REQUEST_ALLOWLIST.length,5);assert.equal((old.match(/sendsATier: false,/g)||[]).length,4);const entry=core.PROCESSING_TIER_REQUEST_ALLOWLIST[0];assert.equal(entry.sendsATier,false);assert.deepEqual(entry.mentions,[pin]);const all=core.PROCESSING_TIER_REQUEST_ALLOWLIST.flatMap(e=>e.mentions.map(text=>({file:e.file,text})));assert.deepEqual(core.auditProcessingTierMentions({matchedLines:all,allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors,[]);assert.ok(core.auditProcessingTierMentions({matchedLines:[...all,{file:entry.file,text:'\"'\"'request.service_tier = \"priority\";'\"'\"'}],allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors.length>0);console.log(\"Preserved 124 protected paths, original records11/source8, author10, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.\");})().catch(error=>{console.error(error);process.exitCode=1;});\n'",
+          "passed": true,
+          "detail": "Preserved 124 protected paths, original records11/source8, author10, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.",
+          "durationMs": 4521
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "scripts/router-development-collect.mjs:67",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The output-path guard reconstructs the filename with outputPath.slice(dirname(outputPath).length + 1), which drops the first character of the basename whenever the parent is a filesystem/drive root, so the existence check and the git-common-dir containment check are applied to a different path than the one actually written.",
+          "reproduction": "node -e \"const {resolve,dirname}=require('path');const o=resolve('C:/run.json');console.log(o, dirname(o), o.slice(dirname(o).length+1))\" prints 'C:\\\\run.json C:\\\\ un.json' (POSIX: resolve('/run.json') yields '/run.json' and 'un.json'). Running the CLI with --output=C:/run.json therefore validates C:\\\\un.json and writes C:\\\\run.json. Impact is limited: a git common dir is never a filesystem root, so containment cannot be bypassed, and the 'wx' open flag still refuses to overwrite an existing file; the fix is basename(outputPath).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/routerDevelopmentCollectorProvider.ts:85",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "observeCollectionBody only parses openai, deepseek/xai/mistral/moonshot, anthropic/minimax and google bodies and returns early for every other provider, so a reported non-standard served tier or any usage counter on a groq/qwen/zhipu/perplexity model would never be read and unsupportedBilling would stay false, leaving the row exportable as succeeded.",
+          "reproduction": "node --conditions=react-server --import tsx -e \"import('./lib/routerDevelopmentCollectorProvider.ts').then(m=>console.log(m.observeCollectionBody('qwen',{service_tier:'priority',usage:{prompt_tokens:1,completion_tokens:1}}), m.observeCollectionBody('openai',{service_tier:'priority',usage:{input_tokens:1,output_tokens:1}})))\" — the first returns source 'unavailable' with unsupportedBilling false, the second returns servedProcessingTier 'priority' with unsupportedBilling true. Currently unreachable for selection because every model on those providers lacks contextWindowTokens and is refused with benchmark:context_window_undeclared (check:router-context-window reports 16 enabled models without a declared window, leaving exactly the 15 eligible ones), but adding a context window to such a model would silently disable tier/billing detection for it; documenting the covered provider families or refusing selection of an unparsed provider would close it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/router-development-benchmark/collector-v1.1.md:299",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "\"Relative input/output paths resolve from the current shell directory\" is inaccurate for the documented `npm run benchmark:router:collect --` invocation, because npm runs package scripts from the package root regardless of the caller's working directory.",
+          "reproduction": "From any subdirectory of the checkout, run `npm run benchmark:router:collect -- --output=x.json`; the file is created at the repository root, not in the subdirectory (npm run-script documentation, already cited in this document's reference list, states scripts run from the root of the package folder). All worked examples in the document use absolute paths, so only the sentence needs correcting.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: scripts/router-development-collect.mjs:67; open finding: lib/routerDevelopmentCollectorProvider.ts:85; open finding: docs/ops/router-development-benchmark/collector-v1.1.md:299); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:b968bf159f191459ed02e5f4df376829ea5706d580eb91c4f20a7c223e66150b",
+      "commit": "bf433682da1cf82c26e9c82aefd6c0dfcb4883c8",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.task.json",
+        "docs/ops/router-development-benchmark/collector-v1.1.md",
+        "lib/routerDevelopmentCollector.ts",
+        "lib/routerDevelopmentCollectorJournal.ts",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "package.json",
+        "scripts/check-processing-tier-core.mjs",
+        "scripts/router-development-collect.mjs",
+        "tests/routerDevelopmentCollector.test.mjs",
+        "tests/routerDevelopmentCollectorAdversarial.test.mjs",
+        "tests/routerDevelopmentCollectorCli.test.mjs",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "Address round 0 evidence findings: canonical output basename/check/write target, explicit unsupported-provider admission and adapter refusal, and accurate npm path documentation. Also close the separately reproduced internal dot-dot-prefixed common-dir child boundary. Preserve all round 0 verdict and preparation evidence in the same exchange, with unchanged task/base/scope and no exclusions or review-limit reset. No paid benchmark or production changes.",
+      "testResults": [
+        {
+          "command": "node -e 'const cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-collector\",\"expected\":79},{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"expected\":9}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\",\"todo\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+          "passed": true,
+          "output": "ℹ duration_ms 259.437\nObserved offline test result: {\"command\":\"npm run test:router-development-collector\",\"tests\":79,\"pass\":79,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"tests\":9,\"pass\":9,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+          "durationMs": 33922
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35478
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "0 lint\n> eslint lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2785
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1185
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 765 referenced path(s) across 92 instruction document(s), and 887 path(s) named by comments across 2628 source file(s), all present.",
+          "durationMs": 1287
+        },
+        {
+          "rule": "npm run check:policy-section-references -- --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
+          "passed": true,
+          "detail": "ub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\n\nPolicy section reference check passed: 4130 citation(s) against 30 policy document(s). 2480 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+          "durationMs": 945
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 688
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 657
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 637
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 702
+        },
+        {
+          "rule": "node -e '\nconst fs=require(\"node:fs\"),cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");\nconst base=\"88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\",historical=\"f8d80a6797104da281c116eee12b01d5c7b25c2d\",record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",source=\"89d1e563c121d92dd833434bc6e270bfdada10b5\";\nconst git=(...args)=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const paths=(...args)=>git(...args).toString().trim().split(/\\r?\\n/).filter(Boolean);\nconst check=(ref,path)=>{const original=git(\"show\",ref+\":\"+path);assert.ok(fs.readFileSync(path).equals(original),\"working bytes: \"+path);assert.ok(git(\"show\",\":\"+path).equals(original),\"index bytes: \"+path);};\nconst records=paths(\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\");assert.equal(records.length,11);assert.deepEqual(paths(\"ls-files\",\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\"),records);for(const p of records)check(record,p);\nconst v1=[\"docs/ops/router-development-benchmark/README.md\",\"docs/ops/router-development-benchmark/development-v1.json\",\"lib/routerDevelopmentBenchmark.ts\",\"lib/routerDevelopmentBenchmarkPlan.ts\",\"scripts/router-development-benchmark.mjs\",\"tests/routerDevelopmentBenchmark.test.mjs\",\"tests/routerDevelopmentBenchmarkCli.test.mjs\",\"tests/routerDevelopmentBenchmarkCorpus.test.mjs\"];for(const p of v1)check(historical,p);\nconst pattern=/^(lib\\/(?:router|model|activeAiModel|anthropicPromptCaching|deepseek|perplexity)|scripts\\/(?:cross-review|eval-router-quality|check-model-pricing|check-context-window-register|check-router-context-window)|docs\\/policy\\/.*(?:register|router|pricing)|package-lock\\.json|\\.github\\/workflows\\/)/;\nconst protectedFiles=paths(\"ls-tree\",\"-r\",\"--name-only\",base).filter(p=>pattern.test(p));assert.equal(protectedFiles.length,107);for(const p of protectedFiles)check(base,p);assert.equal(new Set([...records,...v1,...protectedFiles]).size,124);\nconst fixedSource=\"bf433682da1cf82c26e9c82aefd6c0dfcb4883c8\";const frozenScope=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\")).writableScope;assert.equal(frozenScope.length,13);for(const p of frozenScope)check(fixedSource,p);\nconst read=ref=>JSON.parse(git(\"show\",ref+\":package.json\"));const left=read(source),right=read(base),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts))if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"shared script conflict: \"+key);const withoutScripts=({scripts,...rest})=>rest;assert.deepEqual(withoutScripts(left),withoutScripts(right));assert.deepEqual(actual,{...right,scripts:{...right.scripts,...left.scripts}});assert.deepEqual(JSON.parse(git(\"show\",\":package.json\")),actual);assert.equal(Object.keys(actual.scripts).length,212);assert.deepEqual(Object.keys(actual.scripts).filter(k=>!Object.hasOwn(right.scripts,k)).sort(),[\"benchmark:router:collect\",\"test:router-development-collector\"]);check(base,\"package-lock.json\");\nconst guardPath=\"scripts/check-processing-tier-core.mjs\",old=git(\"show\",base+\":\"+guardPath).toString(),current=fs.readFileSync(guardPath,\"utf8\");const pin=\"observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);\";\nconst addition=['\"'\"'  {'\"'\"','\"'\"'    file: \"lib/routerDevelopmentCollectorProvider.ts\",'\"'\"','\"'\"'    sendsATier: false,'\"'\"','\"'\"'    reason:'\"'\"','\"'\"'      \"Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.\",'\"'\"','\"'\"'    mentions: ['\"'\"','\"'\"'      '\"'\"'+JSON.stringify(pin)+'\"'\"','\"'\"','\"'\"'    ],'\"'\"','\"'\"'  },'\"'\"','\"'\"''\"'\"'].join(\"\\n\");assert.equal(current.split(addition).length,2);assert.equal(current.replace(addition,\"\"),old,\"guard changed beyond exact 9-line addition\");\nconst task=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\"));assert.equal(task.baseCommit,base);assert.equal(task.writableScope.length,13);assert.deepEqual(task.generatedPaths,[]);assert.equal(Object.hasOwn(task,\"supersedes\"),false);assert.deepEqual(paths(\"diff\",\"--name-only\",base).sort(),[...task.writableScope].sort());assert.deepEqual(paths(\"diff\",\"--name-only\"),[]);assert.deepEqual(paths(\"diff\",\"--cached\",\"--name-only\"),[]);git(\"diff\",\"--check\",base);\n(async()=>{const core=await import(require(\"node:url\").pathToFileURL(require(\"node:path\").resolve(guardPath)).href);assert.equal(core.PROCESSING_TIER_REQUEST_ALLOWLIST.length,5);assert.equal((old.match(/sendsATier: false,/g)||[]).length,4);const entry=core.PROCESSING_TIER_REQUEST_ALLOWLIST[0];assert.equal(entry.sendsATier,false);assert.deepEqual(entry.mentions,[pin]);const all=core.PROCESSING_TIER_REQUEST_ALLOWLIST.flatMap(e=>e.mentions.map(text=>({file:e.file,text})));assert.deepEqual(core.auditProcessingTierMentions({matchedLines:all,allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors,[]);assert.ok(core.auditProcessingTierMentions({matchedLines:[...all,{file:entry.file,text:'\"'\"'request.service_tier = \"priority\";'\"'\"'}],allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors.length>0);console.log(\"Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.\");})().catch(error=>{console.error(error);process.exitCode=1;});\n'",
+          "passed": true,
+          "detail": "Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.",
+          "durationMs": 4589
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/routerDevelopmentCollectorJournal.ts:184 (collectionReport rows[].outcome)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The run report labels a selected-but-unattempted row and a never-selected eligible row identically as \"not_run\", so the report artifact alone does not distinguish a budget/deadline-skipped selected row from a row that was never in the selection; the distinction survives only in the separate manifest.selectedRowIds.",
+          "reproduction": "Run `npm run test:router-development-collector` and read tests/routerDevelopmentCollector.test.mjs, test \"permanent reservations stop a selected population explicitly and completed rows never rerun\": the manifest selects 2 rows with maxCalls=1, one row is dispatched, the run stops with `budget_stopped`, and the assertion `report.rows.filter((row) => row.outcome === \"not_run\").length === 359` holds — that 359 is the one skipped selected row plus the 358 never-selected eligible rows under a single label. Adding `selectedRowIds` (or a per-row `selected` flag) to collectionReport would separate them without changing any journal or manifest binding.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/routerDevelopmentCollectorJournal.ts:184 (collectionReport rows[].outcome)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:68a70f500dd8579a40224c0c6f7f297715d447e8ba5557d55163fffad2491acc",
+      "commit": "d087876da40a574e8d4e5baa0c2412525620f92c",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-v1-1.task.json",
+        "docs/ops/router-development-benchmark/collector-v1.1.md",
+        "lib/routerDevelopmentCollector.ts",
+        "lib/routerDevelopmentCollectorJournal.ts",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "package.json",
+        "scripts/check-processing-tier-core.mjs",
+        "scripts/router-development-collect.mjs",
+        "tests/routerDevelopmentCollector.test.mjs",
+        "tests/routerDevelopmentCollectorAdversarial.test.mjs",
+        "tests/routerDevelopmentCollectorCli.test.mjs",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "Address the round 1 evidence nit by deriving each run-report row's selected boolean from the frozen manifest. Preserve all existing outcome, journal, reservation, export and scoring semantics; extend the existing budget/resume assertions and document the report distinction. This is the final allowed fix round of the same exchange, preserving rounds 0 and 1, preparation evidence, fixed task/base/scope and zero exclusions. No benchmark provider calls or production changes.",
+      "testResults": [
+        {
+          "command": "node -e 'const cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-collector\",\"expected\":79},{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"expected\":9}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\",\"todo\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+          "passed": true,
+          "output": "ℹ duration_ms 248.6273\nObserved offline test result: {\"command\":\"npm run test:router-development-collector\",\"tests\":79,\"pass\":79,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"tests\":9,\"pass\":9,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+          "durationMs": 34284
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35173
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "0 lint\n> eslint lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2790
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1183
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 765 referenced path(s) across 92 instruction document(s), and 887 path(s) named by comments across 2628 source file(s), all present.",
+          "durationMs": 1258
+        },
+        {
+          "rule": "npm run check:policy-section-references -- --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
+          "passed": true,
+          "detail": "ub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\n\nPolicy section reference check passed: 4130 citation(s) against 30 policy document(s). 2480 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+          "durationMs": 961
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 706
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 653
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 629
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 699
+        },
+        {
+          "rule": "node -e '\nconst fs=require(\"node:fs\"),cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");\nconst base=\"88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\",historical=\"f8d80a6797104da281c116eee12b01d5c7b25c2d\",record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",source=\"89d1e563c121d92dd833434bc6e270bfdada10b5\";\nconst git=(...args)=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const paths=(...args)=>git(...args).toString().trim().split(/\\r?\\n/).filter(Boolean);\nconst check=(ref,path)=>{const original=git(\"show\",ref+\":\"+path);assert.ok(fs.readFileSync(path).equals(original),\"working bytes: \"+path);assert.ok(git(\"show\",\":\"+path).equals(original),\"index bytes: \"+path);};\nconst records=paths(\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\");assert.equal(records.length,11);assert.deepEqual(paths(\"ls-files\",\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\"),records);for(const p of records)check(record,p);\nconst v1=[\"docs/ops/router-development-benchmark/README.md\",\"docs/ops/router-development-benchmark/development-v1.json\",\"lib/routerDevelopmentBenchmark.ts\",\"lib/routerDevelopmentBenchmarkPlan.ts\",\"scripts/router-development-benchmark.mjs\",\"tests/routerDevelopmentBenchmark.test.mjs\",\"tests/routerDevelopmentBenchmarkCli.test.mjs\",\"tests/routerDevelopmentBenchmarkCorpus.test.mjs\"];for(const p of v1)check(historical,p);\nconst pattern=/^(lib\\/(?:router|model|activeAiModel|anthropicPromptCaching|deepseek|perplexity)|scripts\\/(?:cross-review|eval-router-quality|check-model-pricing|check-context-window-register|check-router-context-window)|docs\\/policy\\/.*(?:register|router|pricing)|package-lock\\.json|\\.github\\/workflows\\/)/;\nconst protectedFiles=paths(\"ls-tree\",\"-r\",\"--name-only\",base).filter(p=>pattern.test(p));assert.equal(protectedFiles.length,107);for(const p of protectedFiles)check(base,p);assert.equal(new Set([...records,...v1,...protectedFiles]).size,124);\nconst fixedSource=\"d087876da40a574e8d4e5baa0c2412525620f92c\";const frozenScope=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\")).writableScope;assert.equal(frozenScope.length,13);for(const p of frozenScope)check(fixedSource,p);\nconst read=ref=>JSON.parse(git(\"show\",ref+\":package.json\"));const left=read(source),right=read(base),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts))if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"shared script conflict: \"+key);const withoutScripts=({scripts,...rest})=>rest;assert.deepEqual(withoutScripts(left),withoutScripts(right));assert.deepEqual(actual,{...right,scripts:{...right.scripts,...left.scripts}});assert.deepEqual(JSON.parse(git(\"show\",\":package.json\")),actual);assert.equal(Object.keys(actual.scripts).length,212);assert.deepEqual(Object.keys(actual.scripts).filter(k=>!Object.hasOwn(right.scripts,k)).sort(),[\"benchmark:router:collect\",\"test:router-development-collector\"]);check(base,\"package-lock.json\");\nconst guardPath=\"scripts/check-processing-tier-core.mjs\",old=git(\"show\",base+\":\"+guardPath).toString(),current=fs.readFileSync(guardPath,\"utf8\");const pin=\"observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);\";\nconst addition=['\"'\"'  {'\"'\"','\"'\"'    file: \"lib/routerDevelopmentCollectorProvider.ts\",'\"'\"','\"'\"'    sendsATier: false,'\"'\"','\"'\"'    reason:'\"'\"','\"'\"'      \"Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.\",'\"'\"','\"'\"'    mentions: ['\"'\"','\"'\"'      '\"'\"'+JSON.stringify(pin)+'\"'\"','\"'\"','\"'\"'    ],'\"'\"','\"'\"'  },'\"'\"','\"'\"''\"'\"'].join(\"\\n\");assert.equal(current.split(addition).length,2);assert.equal(current.replace(addition,\"\"),old,\"guard changed beyond exact 9-line addition\");\nconst task=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\"));assert.equal(task.baseCommit,base);assert.equal(task.writableScope.length,13);assert.deepEqual(task.generatedPaths,[]);assert.equal(Object.hasOwn(task,\"supersedes\"),false);assert.deepEqual(paths(\"diff\",\"--name-only\",base).sort(),[...task.writableScope].sort());assert.deepEqual(paths(\"diff\",\"--name-only\"),[]);assert.deepEqual(paths(\"diff\",\"--cached\",\"--name-only\"),[]);git(\"diff\",\"--check\",base);\n(async()=>{const core=await import(require(\"node:url\").pathToFileURL(require(\"node:path\").resolve(guardPath)).href);assert.equal(core.PROCESSING_TIER_REQUEST_ALLOWLIST.length,5);assert.equal((old.match(/sendsATier: false,/g)||[]).length,4);const entry=core.PROCESSING_TIER_REQUEST_ALLOWLIST[0];assert.equal(entry.sendsATier,false);assert.deepEqual(entry.mentions,[pin]);const all=core.PROCESSING_TIER_REQUEST_ALLOWLIST.flatMap(e=>e.mentions.map(text=>({file:e.file,text})));assert.deepEqual(core.auditProcessingTierMentions({matchedLines:all,allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors,[]);assert.ok(core.auditProcessingTierMentions({matchedLines:[...all,{file:entry.file,text:'\"'\"'request.service_tier = \"priority\";'\"'\"'}],allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors.length>0);console.log(\"Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.\");})().catch(error=>{console.error(error);process.exitCode=1;});\n'",
+          "passed": true,
+          "detail": "Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.",
+          "durationMs": 4441
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Round 1's evidence nit is resolved: lib/routerDevelopmentCollectorJournal.ts:185-191 derives each run-report row's `selected` from the digest-bound manifest.selectedRowIds, so selected-but-unattempted, never-selected-eligible, attempted, unknown and refused rows are now distinguishable in the report artifact alone, with the reading rule documented at docs/ops/router-development-benchmark/collector-v1.1.md:64-70 and asserted in tests/routerDevelopmentCollector.test.mjs:86-92; outcome labels, denominators, journal/reservation/export semantics, protected v1 records and the processing-tier guard are unchanged, so this snapshot may proceed to its separately authorized packaging/integration steps with no benchmark provider call, merge or adoption implied."
+    }
+  ],
+  "changeDigest": "sha256:68a70f500dd8579a40224c0c6f7f297715d447e8ba5557d55163fffad2491acc",
+  "commit": "d087876da40a574e8d4e5baa0c2412525620f92c",
+  "changeSummary": "Address the round 1 evidence nit by deriving each run-report row's selected boolean from the frozen manifest. Preserve all existing outcome, journal, reservation, export and scoring semantics; extend the existing budget/resume assertions and document the report distinction. This is the final allowed fix round of the same exchange, preserving rounds 0 and 1, preparation evidence, fixed task/base/scope and zero exclusions. No benchmark provider calls or production changes.",
+  "testResults": [
+    {
+      "command": "node -e 'const cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-collector\",\"expected\":79},{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"expected\":9}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\",\"todo\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+      "passed": true,
+      "output": "ℹ duration_ms 248.6273\nObserved offline test result: {\"command\":\"npm run test:router-development-collector\",\"tests\":79,\"pass\":79,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs\",\"tests\":9,\"pass\":9,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+      "durationMs": 34284
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 35173
+    },
+    {
+      "rule": "npm run lint -- lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+      "passed": true,
+      "detail": "0 lint\n> eslint lib/routerDevelopmentCollector.ts lib/routerDevelopmentCollectorJournal.ts lib/routerDevelopmentCollectorProvider.ts scripts/router-development-collect.mjs scripts/check-processing-tier-core.mjs tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs",
+      "durationMs": 2790
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1183
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 765 referenced path(s) across 92 instruction document(s), and 887 path(s) named by comments across 2628 source file(s), all present.",
+      "durationMs": 1258
+    },
+    {
+      "rule": "npm run check:policy-section-references -- --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
+      "passed": true,
+      "detail": "ub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs --since 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\n\nPolicy section reference check passed: 4130 citation(s) against 30 policy document(s). 2480 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+      "durationMs": 961
+    },
+    {
+      "rule": "npm run check:model-pricing",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+      "durationMs": 706
+    },
+    {
+      "rule": "npm run check:router-quality-eval",
+      "passed": true,
+      "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+      "durationMs": 653
+    },
+    {
+      "rule": "npm run check:router-context-window",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+      "durationMs": 629
+    },
+    {
+      "rule": "npm run check:context-window-register",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+      "durationMs": 699
+    },
+    {
+      "rule": "node -e '\nconst fs=require(\"node:fs\"),cp=require(\"node:child_process\"),assert=require(\"node:assert/strict\");\nconst base=\"88dc1d6bfd6cbac983d6d0c2609b7eb37df08910\",historical=\"f8d80a6797104da281c116eee12b01d5c7b25c2d\",record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",source=\"89d1e563c121d92dd833434bc6e270bfdada10b5\";\nconst git=(...args)=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const paths=(...args)=>git(...args).toString().trim().split(/\\r?\\n/).filter(Boolean);\nconst check=(ref,path)=>{const original=git(\"show\",ref+\":\"+path);assert.ok(fs.readFileSync(path).equals(original),\"working bytes: \"+path);assert.ok(git(\"show\",\":\"+path).equals(original),\"index bytes: \"+path);};\nconst records=paths(\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\");assert.equal(records.length,11);assert.deepEqual(paths(\"ls-files\",\"--\",\"docs/ops/cross-review/packages/router-development-benchmark-v1\",\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\"),records);for(const p of records)check(record,p);\nconst v1=[\"docs/ops/router-development-benchmark/README.md\",\"docs/ops/router-development-benchmark/development-v1.json\",\"lib/routerDevelopmentBenchmark.ts\",\"lib/routerDevelopmentBenchmarkPlan.ts\",\"scripts/router-development-benchmark.mjs\",\"tests/routerDevelopmentBenchmark.test.mjs\",\"tests/routerDevelopmentBenchmarkCli.test.mjs\",\"tests/routerDevelopmentBenchmarkCorpus.test.mjs\"];for(const p of v1)check(historical,p);\nconst pattern=/^(lib\\/(?:router|model|activeAiModel|anthropicPromptCaching|deepseek|perplexity)|scripts\\/(?:cross-review|eval-router-quality|check-model-pricing|check-context-window-register|check-router-context-window)|docs\\/policy\\/.*(?:register|router|pricing)|package-lock\\.json|\\.github\\/workflows\\/)/;\nconst protectedFiles=paths(\"ls-tree\",\"-r\",\"--name-only\",base).filter(p=>pattern.test(p));assert.equal(protectedFiles.length,107);for(const p of protectedFiles)check(base,p);assert.equal(new Set([...records,...v1,...protectedFiles]).size,124);\nconst fixedSource=\"d087876da40a574e8d4e5baa0c2412525620f92c\";const frozenScope=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\")).writableScope;assert.equal(frozenScope.length,13);for(const p of frozenScope)check(fixedSource,p);\nconst read=ref=>JSON.parse(git(\"show\",ref+\":package.json\"));const left=read(source),right=read(base),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts))if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"shared script conflict: \"+key);const withoutScripts=({scripts,...rest})=>rest;assert.deepEqual(withoutScripts(left),withoutScripts(right));assert.deepEqual(actual,{...right,scripts:{...right.scripts,...left.scripts}});assert.deepEqual(JSON.parse(git(\"show\",\":package.json\")),actual);assert.equal(Object.keys(actual.scripts).length,212);assert.deepEqual(Object.keys(actual.scripts).filter(k=>!Object.hasOwn(right.scripts,k)).sort(),[\"benchmark:router:collect\",\"test:router-development-collector\"]);check(base,\"package-lock.json\");\nconst guardPath=\"scripts/check-processing-tier-core.mjs\",old=git(\"show\",base+\":\"+guardPath).toString(),current=fs.readFileSync(guardPath,\"utf8\");const pin=\"observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);\";\nconst addition=['\"'\"'  {'\"'\"','\"'\"'    file: \"lib/routerDevelopmentCollectorProvider.ts\",'\"'\"','\"'\"'    sendsATier: false,'\"'\"','\"'\"'    reason:'\"'\"','\"'\"'      \"Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.\",'\"'\"','\"'\"'    mentions: ['\"'\"','\"'\"'      '\"'\"'+JSON.stringify(pin)+'\"'\"','\"'\"','\"'\"'    ],'\"'\"','\"'\"'  },'\"'\"','\"'\"''\"'\"'].join(\"\\n\");assert.equal(current.split(addition).length,2);assert.equal(current.replace(addition,\"\"),old,\"guard changed beyond exact 9-line addition\");\nconst task=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/router-development-collector-v1-1.task.json\",\"utf8\"));assert.equal(task.baseCommit,base);assert.equal(task.writableScope.length,13);assert.deepEqual(task.generatedPaths,[]);assert.equal(Object.hasOwn(task,\"supersedes\"),false);assert.deepEqual(paths(\"diff\",\"--name-only\",base).sort(),[...task.writableScope].sort());assert.deepEqual(paths(\"diff\",\"--name-only\"),[]);assert.deepEqual(paths(\"diff\",\"--cached\",\"--name-only\"),[]);git(\"diff\",\"--check\",base);\n(async()=>{const core=await import(require(\"node:url\").pathToFileURL(require(\"node:path\").resolve(guardPath)).href);assert.equal(core.PROCESSING_TIER_REQUEST_ALLOWLIST.length,5);assert.equal((old.match(/sendsATier: false,/g)||[]).length,4);const entry=core.PROCESSING_TIER_REQUEST_ALLOWLIST[0];assert.equal(entry.sendsATier,false);assert.deepEqual(entry.mentions,[pin]);const all=core.PROCESSING_TIER_REQUEST_ALLOWLIST.flatMap(e=>e.mentions.map(text=>({file:e.file,text})));assert.deepEqual(core.auditProcessingTierMentions({matchedLines:all,allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors,[]);assert.ok(core.auditProcessingTierMentions({matchedLines:[...all,{file:entry.file,text:'\"'\"'request.service_tier = \"priority\";'\"'\"'}],allowlist:core.PROCESSING_TIER_REQUEST_ALLOWLIST}).errors.length>0);console.log(\"Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.\");})().catch(error=>{console.error(error);process.exitCode=1;});\n'",
+      "passed": true,
+      "detail": "Preserved 124 protected paths, original records11/source8, fixed-source13, exact212-script union, package non-scripts/lock, guard old4+exact1 pin; scope13, no unstaged/staged source edits; outbound mutation still rejected.",
+      "durationMs": 4441
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Round 1's evidence nit is resolved: lib/routerDevelopmentCollectorJournal.ts:185-191 derives each run-report row's `selected` from the digest-bound manifest.selectedRowIds, so selected-but-unattempted, never-selected-eligible, attempted, unknown and refused rows are now distinguishable in the report artifact alone, with the reading rule documented at docs/ops/router-development-benchmark/collector-v1.1.md:64-70 and asserted in tests/routerDevelopmentCollector.test.mjs:86-92; outcome labels, denominators, journal/reservation/export semantics, protected v1 records and the processing-tier guard are unchanged, so this snapshot may proceed to its separately authorized packaging/integration steps with no benchmark provider call, merge or adoption implied.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-10T04:23:23.064Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "d087876da40a574e8d4e5baa0c2412525620f92c",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md",
+    "docs/ops/cross-review/packages/router-development-collector-v1-1.task.json",
+    "docs/ops/router-development-benchmark/collector-v1.1.md",
+    "lib/routerDevelopmentCollector.ts",
+    "lib/routerDevelopmentCollectorJournal.ts",
+    "lib/routerDevelopmentCollectorProvider.ts",
+    "package.json",
+    "scripts/check-processing-tier-core.mjs",
+    "scripts/router-development-collect.mjs",
+    "tests/routerDevelopmentCollector.test.mjs",
+    "tests/routerDevelopmentCollectorAdversarial.test.mjs",
+    "tests/routerDevelopmentCollectorCli.test.mjs",
+    "tests/routerDevelopmentCollectorProvider.test.mjs"
+  ]
+}

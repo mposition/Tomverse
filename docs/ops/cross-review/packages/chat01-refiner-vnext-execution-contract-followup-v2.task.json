@@ -1,0 +1,24 @@
+{
+  "taskId": "chat01-refiner-vnext-execution-contract-followup-v2",
+  "requirement": "Continue the concluded chat01-refiner-vnext-execution-contract-v1 exchange, which remains on_hold (revisions_exhausted) with two documented low-severity findings. This successor is not a reset or retroactive pass: preserve its three round packages, verdicts and final status, and review the complete scoped change against the same base. Codex is author; Claude Code Max first-party subscription CLI is read-only independent reviewer. The user authorized repeated independent review until approval, within the controller's fixed supersession limit. This remains only the owner-approved no-cost 80-slot vNext execution-contract proposal and cache-write usage guard. No holdout, provider/API request, operational stage/run approval, durable reservation consume/release, flag, product traffic, PR merge or deployment is authorized; Anthropic API is not used.",
+  "completionCriteria": [
+    "Inspect the v1 on_hold final verdict and resolve both inherited observations without modifying historical verdicts: explain that the approved price pin is a design snapshot whose future runtime admission must recheck current catalogue and official rates; explain why null optional reasoning breakdown can still yield a conservative cost when billed output total includes it, unlike the historical v1 adapter.",
+    "Verify the complete five-file implementation and new follow-up task diff against base commit 750ec991ae1f5fa62dc5df6cb7b4eac565db2df9, including scope approval, 80-slot/29918/2393440 price ceiling, explicit cache-write telemetry fail-closed behavior, non-admission, tests and the prior rounds' document corrections.",
+    "Require a passing focused test command and passing TypeScript, lint and whitespace guards on the final package. Distinguish package-recorded results from independently run reviewer checks.",
+    "Claude reads requirement and diff before test records and author explanation, returns one raw digest-bound JSON document without Markdown fences, with precise reproduced findings if any, and neither ignores an open finding nor treats a reviewer approve with an actionable finding as control-program pass. The nextAction value is one short sentence of at most 120 characters; evidence belongs in findings, not nextAction."
+  ],
+  "baseCommit": "750ec991ae1f5fa62dc5df6cb7b4eac565db2df9",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-execution-contract-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-execution-contract-followup-v2.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-execution-contract-approval.md",
+    "docs/policy/prompt-refiner-quality-evaluation-vnext-draft.md",
+    "lib/promptRefinerQualityEvaluationVnextExecutionContract.ts",
+    "tests/promptRefinerQualityEvaluationVnextExecutionContract.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-execution-contract-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-execution-contract-v1/exchange.json"
+  }
+}

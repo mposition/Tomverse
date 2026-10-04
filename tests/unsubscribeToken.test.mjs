@@ -227,3 +227,26 @@ test("re-agreeing is a different event from agreeing", () => {
   assert.equal(consentActionFor({ wasEnabled: true, nowEnabled: true }), "reconfirmed");
   assert.equal(consentActionFor({ wasEnabled: true, nowEnabled: false }), "withdrawn");
 });
+
+test("the same payload always makes the same token, and another payload another IV", () => {
+  // A retried message must render what the first attempt rendered, or the
+  // provider's idempotency key does not suppress the second send.
+  const ring = { activeVersion: "v1", secrets: { v1: "a-secret" } };
+  const one = { userId: "user_1", purpose: "product_updates", deliveryId: "d1" };
+  const first = createUnsubscribeToken(one, ring);
+  assert.equal(createUnsubscribeToken(one, ring), first);
+  assert.deepEqual(readUnsubscribeToken(first, ring), { valid: true, payload: one });
+  const iv = (token) => token.split(".")[2];
+  for (const other of [
+    { ...one, deliveryId: "d2" },
+    { ...one, purpose: "newsletter" },
+    { ...one, userId: "user_2" },
+  ]) {
+    assert.notEqual(iv(createUnsubscribeToken(other, ring)), iv(first));
+  }
+  // And a key rotation changes it.
+  assert.notEqual(
+    createUnsubscribeToken(one, { activeVersion: "v2", secrets: { v2: "another-secret" } }),
+    first
+  );
+});

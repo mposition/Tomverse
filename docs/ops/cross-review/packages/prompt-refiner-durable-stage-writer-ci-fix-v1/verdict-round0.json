@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-durable-stage-writer-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-18T15:43:19.177Z",
+  "durationMs": 299880,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 44,
+    "cachedInputTokens": 1338937,
+    "outputTokens": 21980,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.1237725000000003,
+    "raw": {
+      "input_tokens": 44,
+      "cache_creation_input_tokens": 89708,
+      "cache_read_input_tokens": 1338937,
+      "output_tokens": 21980,
+      "output_tokens_details": {
+        "thinking_tokens": 13904
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 89708,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2686,
+          "cache_read_input_tokens": 90398,
+          "cache_creation_input_tokens": 2110,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2110
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-18T15:48:19.135Z",
+  "verdict": {
+    "taskId": "prompt-refiner-durable-stage-writer-ci-fix-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:be274d65f2843093db0c834d83e70ebcbb62c52adcf4704a2cb77a5dcecd6939",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:1150-1154",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The new boundary test exercises only the `isInstalledDependencyResolution` predicate on string inputs, not `resolveLocalRuntimeImport`'s new early return, so the integration point the CI failure lived in is covered only indirectly by the pinned 186-path closure assertion.",
+        "reproduction": "Read tests/promptRefinerRuntimeSourceClosure.test.mjs:1150-1154: the three assertions call the predicate directly and never call resolveLocalRuntimeImport. Delete line 224 (`if (isInstalledDependencyResolution(path)) return null;`) and run `node --import tsx --test tests/promptRefinerRuntimeSourceClosure.test.mjs`: the test at line 1150 still passes; only the closure test at line 1022 reports the change. An added `assert.equal(resolveLocalRuntimeImport(\"lib/promptRefinerStageAdmission.ts\", \"typescript\"), null)` would pin the early return itself (note it is only discriminating on a checkout whose node_modules is inside the repository, i.e. the Linux layout)."
+      },
+      {
+        "location": "tests/promptRefinerRuntimeSourceClosure.test.mjs:224",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The early return is placed before the `local workspace import resolved outside repository` assertion at line 234, so a `@tomverse/*` import that ever resolved to a real (non-symlinked) copy under node_modules would be silently classified external instead of failing on that guard.",
+        "reproduction": "Read lines 217-240: the `isInstalledDependencyResolution` return at 224 precedes both the `.d.ts` assertion (227) and the workspace assertion (234). The behaviour is still fail-closed — the closure would then omit packages/chat-core/src/index.ts and `assert.deepEqual([...PROMPT_REFINER_RUNTIME_SOURCE_PATHS], expected)` at line 1036 fails — but the message names a path list rather than the workspace rule. Gating the early return on `workspace === null` would keep the precise message; today's workspace layout (npm symlink, realpath into packages/*) is unaffected either way, which line 1158 confirms."
+      },
+      {
+        "location": "tests/integration/prompt-refiner-reservation-admission.db.test.ts:56-57",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "A third PostgreSQL suite truncates the same three tables but still with `CASCADE`, so the no-CASCADE cleanup rule this change establishes is not uniform across the FK's dependents (pre-existing from PR #1555 and outside this task's writable scope, so not actionable here).",
+        "reproduction": "`rg -U 'TRUNCATE TABLE[^;]*\"AdminAuditLog\"[^;]*RESTART IDENTITY( CASCADE)?' tests/integration` shows prompt-refiner-reservation-admission.db.test.ts:56-57 ending in `RESTART IDENTITY CASCADE`, while the two suites changed here end in `RESTART IDENTITY`. That suite runs in the `finance` lane (scripts/db-integration-groups.mjs:73 matches `prompt-refiner-reservation`), so it is not covered by the accounts lane the author ran."
+      }
+    ],
+    "nextAction": "Merge as CI consistency: the two accounts-lane cleanups name all three FK-linked tables in one statement without CASCADE and every other AdminAuditLog truncation in the repository already uses CASCADE; the 20260918130000 migration and lib/promptRefinerStageAdmission.ts allowlist entries match the file contents (2 AdminAuditLog mentions, FK plus read-only trigger SELECT, one constant `LOCK TABLE \"ModelRegistryEntry\"` via $executeRawUnsafe) and permit no protected-table write; lib/promptRefinerStageAdmissionCore.ts names providerFallbackCandidates only as a path literal in PROMPT_REFINER_RUNTIME_SOURCE_PATHS, importing no export and dispatching nothing — the three nits above are recorded and need no revision round, and note that the PostgreSQL accounts lane result is the author's claim, not something this read-only review re-ran."
+  }
+}

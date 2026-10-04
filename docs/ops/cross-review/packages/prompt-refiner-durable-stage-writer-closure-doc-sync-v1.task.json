@@ -1,0 +1,29 @@
+{
+  "taskId": "prompt-refiner-durable-stage-writer-closure-doc-sync-v1",
+  "requirement": "on_hold로 종결된 prompt-refiner-durable-stage-writer-rebase-fingerprints-v1의 마지막 비차단 finding을 닫는다. Prompt Refiner runtime import closure가 186개에서 187개로 늘어난 사실을 Prisma schema와 운영 계약·작업·진행 문서에 일치시키고, TypeScript/JavaScript source 수는 177개에서 178개로 바로잡는다. schema.prisma의 주석 byte 변경 때문에 marketing webhook pipeline fingerprint를 결정적으로 다시 계산하고 기존 fail-closed 검사를 유지한다. 문서의 closure 수가 다시 drift하지 않도록 기존 runtime source closure test가 상수와 운영 문구를 직접 결속한다. 제품 runtime 동작, database schema 구조, provider/model, Railway, credential, stage mutation, flag/rollout 및 유료 실행은 변경하지 않는다. author는 Codex, reviewer는 Claude Code Max이며 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only와 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "Prisma schema와 Prompt Refiner durable writer 계약·작업·진행 문서가 runtime closure 187개 및 그중 TypeScript/JavaScript source 178개를 동일하게 기술한다.",
+    "runtime source closure test가 PROMPT_REFINER_RUNTIME_SOURCE_FILE_COUNT를 기준으로 운영 문서와 schema의 count-bearing 문구를 검사해 186 회귀를 fail-closed한다.",
+    "MARKETING_WEBHOOK_PIPELINE_FINGERPRINT는 주석 byte가 바뀐 schema.prisma를 포함해 computeMarketingWebhookPipelineFingerprint가 재현하는 값과 정확히 일치한다.",
+    "focused fingerprint/source-closure test, typecheck, 수정 파일 lint, strict encoding 및 diff whitespace 검사가 통과한다.",
+    "이 task는 이전 on_hold exchange와 finding을 수정하지 않고 supersedes로 계승하며 product database mutation, provider/model/Railway 호출, credential, stage/flag/rollout 또는 paid execution을 추가하지 않는다.",
+    "Claude verdict는 새 package digest와 결속하며 최초 검토와 최대 두 번의 수정 검토 후 actionable finding이 남으면 on_hold다."
+  ],
+  "baseCommit": "3f050c8789a3bdefa16580aadbae2f3e14761f38",
+  "writableScope": [
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-closure-doc-sync-v1.task.json",
+    "docs/ops/prompt-refiner-durable-stage-writer-contract.md",
+    "docs/ops/prompt-refiner-durable-stage-writer-task.md",
+    "docs/ops/tomverse-chat-progress.md",
+    "lib/marketingAutomationAccess.ts",
+    "prisma/schema.prisma",
+    "tests/marketingAutomationAccess.test.mjs",
+    "tests/promptRefinerRuntimeSourceClosure.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-durable-stage-writer-rebase-fingerprints-v1",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-durable-stage-writer-rebase-fingerprints-v1/exchange.json"
+  }
+}

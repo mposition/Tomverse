@@ -1,0 +1,23 @@
+{
+  "taskId": "prompt-refiner-shadow-operator-ui-final-v2",
+  "requirement": "Claude가 approve한 prompt-refiner-shadow-operator-ui-v1의 마지막 비차단 nit를 닫는다. stage card의 approvalTtlMinutes는 남은 시간이 아니라 동결된 60분 승인 window이므로 execution card의 실제 approvalExpiresAt과 같은 'Expires/만료' 라벨을 재사용하지 않고 'Approval window/승인 유효기간'으로 명확히 구분한다. 그 밖의 owner/recent-auth, exact preview binding, 비용·모델 상수, GET-only refresh, explicit POST, unknown stop, no retry·redispatch, content-free UI 계약은 바꾸지 않는다. author는 Codex, reviewer는 Claude Code Max이고 승인된 --skip-preflight 예외 아래 Read/Grep/Glob only 및 strict MCP로 검토한다.",
+  "completionCriteria": [
+    "stage 카드의 60 min 값은 Approval window/승인 유효기간 라벨을 쓰고 execution 카드의 절대시각만 Expires/만료 라벨을 쓴다.",
+    "focused operator/navigation test, TypeScript, 수정 파일 ESLint, encoding과 diff whitespace 검사가 통과한다.",
+    "제품 runtime 동작, provider/model/Railway/database/stage/run/flag/비용 경계는 변경하지 않는다.",
+    "Claude verdict는 새 package digest와 결속하고 재현 가능한 finding을 기록한다."
+  ],
+  "baseCommit": "59c425c3e9a76c87eede685874dddb753005daa2",
+  "writableScope": [
+    "components/admin/AdminPromptRefinerShadowPanel.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.authorization.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-final-v2.task.json",
+    "lib/adminMessages/promptRefinerShadow.ts",
+    "tests/adminPromptRefinerShadowOperator.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-shadow-operator-ui-v1",
+    "exchange": "docs/ops/cross-review/packages/prompt-refiner-shadow-operator-ui-v1/exchange.json"
+  }
+}

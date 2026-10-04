@@ -78,6 +78,7 @@ import {
   type StoredArtifact,
 } from "@/lib/generatedArtifactStorage";
 import type { ArtifactToolMode } from "@/lib/generatedArtifactToolPolicy";
+import type { ArtifactToolRejectionCode } from "@/lib/generatedArtifactRejectionLog";
 
 /**
  * The tool name for each kind.
@@ -343,6 +344,13 @@ export type GeneratedArtifactCollectorOptions = {
   >;
   /** Injectable so a test can assert the date folder in a batch path. */
   now?: Date;
+  /** Receives raw input; its diagnostic output must contain metadata only. */
+  noteRejection?: (
+    toolCallId: string | undefined,
+    toolName: string,
+    input: unknown,
+    rejectionCode: ArtifactToolRejectionCode
+  ) => void;
 };
 
 /**
@@ -562,6 +570,21 @@ export class GeneratedArtifactCollector {
     return entry;
   }
 
+  private noteRejection(
+    toolCallId: string | undefined,
+    toolName: string,
+    input: unknown,
+    rejectionCode: ArtifactToolRejectionCode
+  ): void {
+    try {
+      void Promise.resolve(
+        this.options.noteRejection?.(toolCallId, toolName, input, rejectionCode)
+      ).catch(() => undefined);
+    } catch {
+      // Diagnostics are best-effort; preserve the rejection report and card.
+    }
+  }
+
   /**
    * The format a *rejected* call should be labelled with.
    *
@@ -592,7 +615,11 @@ export class GeneratedArtifactCollector {
    * "edit produces a new version" rule (policy section 9), and it is why the
    * key is the content and not the name.
    */
-  async run(kind: ArtifactKind, rawInput: unknown): Promise<ArtifactToolReport> {
+  async run(
+    kind: ArtifactKind,
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
     this.invocations += 1;
     const handler = HANDLERS[kind];
 
@@ -643,14 +670,22 @@ export class GeneratedArtifactCollector {
     const admission = handler.admit(rawInput);
     if (!admission.ok) {
       const format = this.failureFormat(kind, rawInput);
+      const rejectionCode =
+        admission.code === "TOO_MANY_CELLS" ||
+        admission.code === "ARCHIVE_TOO_LARGE" ||
+        admission.code === "OUTPUT_TOO_LARGE"
+          ? "limit_exceeded"
+          : "spec_rejected";
+      this.noteRejection(
+        toolCallId,
+        ARTIFACT_TOOL_NAMES[kind],
+        rawInput,
+        rejectionCode
+      );
       this.recordFailure(
         sanitizeArtifactFilename("generated", format),
         format,
-        admission.code === "TOO_MANY_CELLS" ||
-          admission.code === "ARCHIVE_TOO_LARGE" ||
-          admission.code === "OUTPUT_TOO_LARGE"
-          ? "limit_exceeded"
-          : "spec_rejected",
+        rejectionCode,
         null
       );
       return {
@@ -703,7 +738,10 @@ export class GeneratedArtifactCollector {
    * naming rule; the files themselves are the user's own, resolved before this
    * collector was constructed.
    */
-  async runDocumentBatch(rawInput: unknown): Promise<ArtifactToolReport> {
+  async runDocumentBatch(
+    rawInput: unknown,
+    toolCallId?: string
+  ): Promise<ArtifactToolReport> {
     this.invocations += 1;
 
     if (this.options.mode === "sign_in_required") {
@@ -740,6 +778,12 @@ export class GeneratedArtifactCollector {
 
     const admission = admitDocumentBatchSpec(rawInput);
     if (!admission.ok) {
+      this.noteRejection(
+        toolCallId,
+        CREATE_DOCUMENT_BATCH_TOOL_NAME,
+        rawInput,
+        "spec_rejected"
+      );
       this.recordFailure(
         sanitizeArtifactFilename("documents", "zip"),
         "zip",
@@ -766,6 +810,12 @@ export class GeneratedArtifactCollector {
         : null;
     if (missing || !template || !data) {
       const available = attachments ? Array.from(attachments.keys()) : [];
+      this.noteRejection(
+        toolCallId,
+        CREATE_DOCUMENT_BATCH_TOOL_NAME,
+        rawInput,
+        "spec_rejected"
+      );
       this.recordFailure(
         sanitizeArtifactFilename(spec.filename, "zip"),
         "zip",
@@ -784,6 +834,12 @@ export class GeneratedArtifactCollector {
       };
     }
     if (template.mediaType !== DOCX_MEDIA_TYPE) {
+      this.noteRejection(
+        toolCallId,
+        CREATE_DOCUMENT_BATCH_TOOL_NAME,
+        rawInput,
+        "spec_rejected"
+      );
       this.recordFailure(
         sanitizeArtifactFilename(spec.filename, "zip"),
         "zip",
@@ -799,6 +855,12 @@ export class GeneratedArtifactCollector {
       };
     }
     if (!BATCH_DATA_MEDIA_TYPES.has(data.mediaType)) {
+      this.noteRejection(
+        toolCallId,
+        CREATE_DOCUMENT_BATCH_TOOL_NAME,
+        rawInput,
+        "spec_rejected"
+      );
       this.recordFailure(
         sanitizeArtifactFilename(spec.filename, "zip"),
         "zip",
@@ -1028,7 +1090,7 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: workbookSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
-        return collector.run("spreadsheet", input);
+        return collector.run("spreadsheet", input, toolCallId);
       },
     }),
     [ARTIFACT_TOOL_NAMES.document]: tool({
@@ -1036,7 +1098,7 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: documentSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
-        return collector.run("document", input);
+        return collector.run("document", input, toolCallId);
       },
     }),
     [ARTIFACT_TOOL_NAMES.presentation]: tool({
@@ -1044,7 +1106,7 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: presentationSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
-        return collector.run("presentation", input);
+        return collector.run("presentation", input, toolCallId);
       },
     }),
     [ARTIFACT_TOOL_NAMES.text]: tool({
@@ -1052,7 +1114,7 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: textFileSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
-        return collector.run("text", input);
+        return collector.run("text", input, toolCallId);
       },
     }),
     [ARTIFACT_TOOL_NAMES.archive]: tool({
@@ -1060,7 +1122,7 @@ export const buildGeneratedArtifactToolConfig = (
       inputSchema: archiveSpecSchema,
       execute: async (input, { toolCallId }) => {
         noteExecutionStarted?.(toolCallId);
-        return collector.run("archive", input);
+        return collector.run("archive", input, toolCallId);
       },
     }),
     ...(registerDocumentBatch
@@ -1070,7 +1132,7 @@ export const buildGeneratedArtifactToolConfig = (
             inputSchema: documentBatchSpecSchema,
             execute: async (input, { toolCallId }) => {
               noteExecutionStarted?.(toolCallId);
-              return collector.runDocumentBatch(input);
+              return collector.runDocumentBatch(input, toolCallId);
             },
           }),
         }

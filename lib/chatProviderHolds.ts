@@ -290,6 +290,24 @@ export type AttemptCostIntent = {
         maxQueries: number;
     };
     /**
+     * The prompt-cache write premium this attempt was authorized to spend, if
+     * any (docs/policy/anthropic-prompt-caching.md section 5).
+     *
+     * A third component of `reservedCostMicroUsd`, beside tokens and search,
+     * and it has to be recorded here for the same reason the search
+     * authorization is: the consistency check below reconstructs the total
+     * from its parts, and a component it cannot see makes every cached turn's
+     * authorization look corrupt. That is not hypothetical -- it is what
+     * happened when the premium was added to the reservation and not to this
+     * type, and the check refused to settle any cached turn at all.
+     *
+     * Optional, and absent means zero: every reservation written before prompt
+     * caching authorized no premium, and a required field would make them
+     * unreadable -- a reservation that cannot be deserialized is one that
+     * cannot be refunded.
+     */
+    promptCacheWriteReservedPremiumMicroUsd?: number;
+    /**
      * The application-managed search this attempt was authorized to run, if any.
      *
      * A second field rather than a variant of the one above, because the two
@@ -309,24 +327,6 @@ export type AttemptCostIntent = {
         maxQueries: number;
         pricingVersion: string;
     };
-    /**
-     * The prompt-cache write premium this attempt was authorized to spend, if
-     * any (docs/policy/anthropic-prompt-caching.md section 5).
-     *
-     * A third component of `reservedCostMicroUsd`, beside tokens and search,
-     * and it has to be recorded here for the same reason the search
-     * authorization is: the consistency check below reconstructs the total
-     * from its parts, and a component it cannot see makes every cached turn's
-     * authorization look corrupt. That is not hypothetical -- it is what
-     * happened when the premium was added to the reservation and not to this
-     * type, and the check refused to settle any cached turn at all.
-     *
-     * Optional, and absent means zero: every reservation written before prompt
-     * caching authorized no premium, and a required field would make them
-     * unreadable -- a reservation that cannot be deserialized is one that
-     * cannot be refunded.
-     */
-    promptCacheWriteReservedPremiumMicroUsd?: number;
 };
 
 /**

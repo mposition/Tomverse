@@ -46,6 +46,7 @@ import {
   recordFallbackTransition,
   type PlannerMode,
   type RoutingAttemptOutcome,
+  type RoutingAttemptErrorClass,
   type RoutingFailureLayer,
 } from "@/lib/routingAttemptStore";
 import type {
@@ -303,6 +304,11 @@ export const beginInstrumentedDispatch = async (
         reservationId: input.reservationId ?? null,
         conversationId: input.conversationId ?? null,
         productKey: input.productKey ?? null,
+        // Null on a manual turn: the allocator did not run, and writing
+        // `deterministic` would claim it took the top candidate. An Auto
+        // turn records `deterministic` or `explore_bounded` plus `session`.
+        allocationMode: record?.allocationMode ?? null,
+        allocationSeedGrain: record?.allocationSeedGrain ?? null,
       },
       select: { id: true },
     });
@@ -592,7 +598,7 @@ export const completeInstrumentedDispatch = async (
     firstVisibleTokenAt?: Date | null;
     actualInputTokens?: number | null;
     actualOutputTokens?: number | null;
-    errorClass?: string | null;
+    errorClass?: RoutingAttemptErrorClass | null;
     assistantMessageId?: string | null;
     settlementOutcome?: string | null;
     firstTokenMs?: number | null;

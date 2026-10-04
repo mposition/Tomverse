@@ -1,0 +1,68 @@
+name: Engineering Agent Image
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
+# Builds the engineering agent's runtime image (docs/policy/engineering-agent.md
+# §8): main only, no repository secret, no cache. The job's own token pushes
+# the image to GHCR and nothing else; the publisher App key never exists here.
+#
+# The run prints the pushed digest. Railway runs the services by that digest
+# only after a person records it in .railway/scheduled-jobs.ts in a pull
+# request they merge, and an operator applies it -- this workflow changes no
+# deployment.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/engineering-agent.Dockerfile
+      - lib/engineeringAgentCore.ts
+      - lib/engineeringAgentModelCall.ts
+      - lib/engineeringAgentSecretPatterns.ts
+      - scripts/engineering-agent-runner.mjs
+      - scripts/engineering-agent-runner-core.mjs
+      - scripts/engineering-agent-publisher.mjs
+      - scripts/engineering-agent-publisher-core.mjs
+      - scripts/engineering-agent-supervisor.mjs
+      - .github/workflows/engineering-agent-image.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: engineering-agent-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build and push the engineering agent image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build without cache
+        run: |
+          docker build --pull --no-cache \
+            -f docker/engineering-agent.Dockerfile \
+            -t "ghcr.io/mposition/tomverse-engineering-agent:${GITHUB_SHA}" .
+
+      - name: Push and report the digest
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "ghcr.io/mposition/tomverse-engineering-agent:${GITHUB_SHA}"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "ghcr.io/mposition/tomverse-engineering-agent:${GITHUB_SHA}")"
+          docker logout ghcr.io
+          echo "Pushed ${digest} from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          echo "$digest"

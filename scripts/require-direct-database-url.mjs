@@ -1,8 +1,7 @@
 import pg from "pg";
 import {
     CONNECT_RETRY_COUNT,
-    isRetryablePostgresConnectionError,
-    nextConnectRetryDelayMs,
+    connectWithRetry,
 } from "./direct-database-connect-core.mjs";
 
 const { Client } = pg;
@@ -96,49 +95,18 @@ const newClient = () =>
         application_name: "tomverse-prisma-migrate-check",
     });
 
-/**
- * Opens the connection, retrying a failure that could clear on its own.
- *
- * A fresh `Client` per attempt because `pg` does not allow reconnecting one
- * that failed to connect -- reusing it would turn the second attempt into a
- * different, misleading error. A client that got partway is closed before the
- * next try so a retry cannot leak a socket.
- *
- * Throws the last error when every attempt is spent, so the reporting below
- * stays the single place that redacts and formats a connection failure.
- */
-const connectWithRetry = async () => {
-    let lastError;
-    for (let attempt = 1; attempt <= CONNECT_RETRY_COUNT; attempt += 1) {
-        const candidate = newClient();
-        try {
-            await candidate.connect();
-            await candidate.query("SELECT 1");
-            return candidate;
-        } catch (error) {
-            lastError = error;
-            await candidate.end().catch(() => undefined);
-
-            const delayMs = isRetryablePostgresConnectionError(error)
-                ? nextConnectRetryDelayMs(attempt)
-                : null;
-            if (delayMs === null) break;
-
-            console.warn(
-                `Direct PostgreSQL connection failed; retrying in ${
-                    delayMs / 1_000
-                }s (${attempt}/${CONNECT_RETRY_COUNT}).`
-            );
-            await sleep(delayMs);
-        }
-    }
-    throw lastError;
+const warnConnectRetry = (attempt, delayMs) => {
+    console.warn(
+        `Direct PostgreSQL connection failed; retrying in ${
+            delayMs / 1_000
+        }s (${attempt}/${CONNECT_RETRY_COUNT}).`
+    );
 };
 
 let client;
 
 try {
-    client = await connectWithRetry();
+    client = await connectWithRetry(newClient, { onRetry: warnConnectRetry });
 
     console.log("[migration-check 3/3] Testing PostgreSQL advisory locks");
     let lockAvailable = false;

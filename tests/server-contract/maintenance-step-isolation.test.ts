@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 
 // What one failing retention step costs the rest of the run.
 //
@@ -73,6 +74,11 @@ const prismaStub = {
   imageAssetCleanup: { deleteMany: async () => ({ count: 28 }) },
   assistantKnowledgeCleanup: { deleteMany: async () => ({ count: 29 }) },
   tokenEstimateShadowSample: { deleteMany: async () => ({ count: 30 }) },
+  // Added with the `comparison_review_runs` step (the AI Review M5 slice).
+  // Without it the step reaches `deleteMany` on `undefined`, which is a
+  // failed step rather than a crash — so the run still finishes and the two
+  // tests that read `failedSteps` are the ones that notice.
+  comparisonReviewRun: { deleteMany: async () => ({ count: 31 }) },
   providerErrorEvent: { deleteMany: async () => ({ count: 6 }) },
   productAnalyticsEvent: { deleteMany: async () => ({ count: 7 }) },
   notificationDelivery: { deleteMany: async () => ({ count: 8 }) },
@@ -81,6 +87,22 @@ const prismaStub = {
   providerProbeResult: { deleteMany: async () => ({ count: 23 }) },
   scheduledJobRun: { deleteMany: async () => ({ count: 24 }) },
   providerModelCatalogRun: { deleteMany: async () => ({ count: 25 }) },
+  // Added with the three mobile bearer-authentication steps. Same reason as
+  // `comparisonReviewRun` above, and the same symptom: without them the steps
+  // reach `deleteMany` on `undefined`, which the runner records as three extra
+  // failed steps rather than a crash. So the suite stayed green everywhere
+  // except the two tests that read `failedSteps` -- which is exactly where it
+  // went red on develop.
+  //
+  // Two PRs fixed this independently on 2026-08-31 (#1219 and #1220) and both
+  // merged, leaving develop with duplicate keys: legal JavaScript, so the
+  // suite stayed green, and TS1117 under `tsc`. The second copy is removed
+  // here. Worth noticing that the stub falling behind `lib/maintenance.ts` is
+  // now a recurring failure with no check of its own -- the delegate has to
+  // arrive with the step, and nothing enforces it.
+  mobileAuthEvent: { deleteMany: async () => ({ count: 32 }) },
+  mobileLoginGrant: { deleteMany: async () => ({ count: 33 }) },
+  mobileRefreshRotation: { deleteMany: async () => ({ count: 34 }) },
   $executeRaw: async () => 9,
   $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(prismaStub),
 };
@@ -145,6 +167,58 @@ mock.module(mod("lib/operationalMonitoring.ts"), {
     reportOperationalIncident: async (incident: { code: string }) => {
       reportedIncidents.push(incident.code);
     },
+  },
+});
+mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
+  namedExports: {
+    sweepPromptRefinerShadowUnknowns: async () => ({
+      observedAt: "2026-09-20T09:00:00.000Z",
+      staleCandidates: 2,
+      closedUnknownAttemptIds: ["attempt-1"],
+      unresolvedStaleAttemptIds: [],
+      consumedWithoutAttempt: [],
+      retryCount: 0,
+      redispatched: 0,
+    }),
+  },
+});
+
+// The product-research agent's two app-side duties. Its store is mocked rather
+// than its Prisma model stubbed, because the model name appears only inside the
+// store and so the stub guard below cannot see it -- which is how this file
+// broke a third time.
+mock.module(mod("lib/productResearchObservationStore.ts"), {
+  namedExports: {
+    sweepProductResearchObservations: async () => ({ removed: 31 }),
+    // Keep the unrelated silence check inside its 26-hour window on every run.
+    latestProductResearchSuccess: async () => new Date(Date.now() - 60 * 60 * 1000),
+    readProductResearchEnabledSince: async () => new Date("2026-09-01T00:00:00.000Z"),
+  },
+});
+// The billing-finance-ops silence check (docs/policy/billing-finance-ops.md
+// §1.3 signal 2). Mocked as a module: it reads AppSetting and AgentDigestItem
+// through the database clock, which this stub does not model.
+mock.module(mod("lib/billingFinanceOpsSilence.ts"), {
+  namedExports: {
+    checkBillingFinanceOpsSilence: async () => "recorded",
+  },
+});
+// The shared AgentDigestItem retention (docs/policy/billing-finance-ops.md
+// §1.4). Mocked as a store for the same reason: the model name appears only
+// inside lib/agentDigestStore.ts, so the stub guard below cannot see it. One
+// short batch each, so each step stops after its first call.
+mock.module(mod("lib/agentDigestStore.ts"), {
+  namedExports: {
+    AGENT_DIGEST_RETENTION_BATCH: 200,
+    expireAgentDigestBodies: async () => ({ expired: 37 }),
+    purgeAgentDigestMeta: async () => ({ purged: 41 }),
+  },
+});
+mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
+  namedExports: {
+    // On, so the silence step does its reads: off would make it report
+    // `disabled` and prove nothing about the step being wired in.
+    isProductResearchRouteEnabled: () => true,
   },
 });
 
@@ -267,6 +341,15 @@ type CleanupResult = Record<string, unknown> & {
     oldestEligibleMs: number | null;
   } | null;
   costAdjustments: { applied: number; pending: number } | null;
+  promptRefinerShadowUnknowns: {
+    observedAt: string;
+    staleCandidates: number;
+    closedUnknownAttemptIds: string[];
+    unresolvedStaleAttemptIds: string[];
+    consumedWithoutAttempt: string[];
+    retryCount: 0;
+    redispatched: 0;
+  } | null;
 };
 const emptyNoCost = () => ({
   no_reservation: 0,
@@ -321,6 +404,9 @@ test("a step that throws does not skip the steps behind it", async () => {
   // is the assertion the change exists for.
   assert.deepEqual(deletedAccountIds, ["user-past-its-grace-period"]);
   assert.equal(result.scheduledAccountsDeleted, 1);
+  assert.equal(result.billingFinanceOpsSilence, "recorded");
+  assert.equal(result.agentDigestBodiesExpired, 37);
+  assert.equal(result.agentDigestMetaPurged, 41);
 
   // So did everything after it, all the way to the last step.
   assert.equal(result.sessions, 2);
@@ -361,6 +447,13 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.assistantImportsExpired, 33);
   assert.equal(result.assistantImportsExpiryRefused, 1);
   assert.equal(result.assistantImportUploadClaimsReclaimed, 35);
+  assert.equal(result.promptRefinerShadowUnknowns?.staleCandidates, 2);
+  assert.deepEqual(
+    result.promptRefinerShadowUnknowns?.closedUnknownAttemptIds,
+    ["attempt-1"]
+  );
+  assert.equal(result.promptRefinerShadowUnknowns?.retryCount, 0);
+  assert.equal(result.promptRefinerShadowUnknowns?.redispatched, 0);
 });
 
 test("a clean run reports no failed steps and every count", async () => {
@@ -412,6 +505,10 @@ test("the maintenance run drives the cost ledger's recovery passes", async () =>
   // sweep reports its own: a pass that applied everything it found and left
   // work behind is only visible if the step says so.
   assert.equal(result.costAdjustments?.pending, 0);
+  assert.deepEqual(
+    result.promptRefinerShadowUnknowns?.closedUnknownAttemptIds,
+    ["attempt-1"]
+  );
   assert.deepEqual(reportedIncidents, []);
 });
 
@@ -536,4 +633,42 @@ test("an intent naming a model the attempt did not run is an incident", async ()
   sweepNoCostReasons.cost_intent_identity_mismatch = 1;
   await (await load()).cleanupExpiredData();
   assert.deepEqual(reportedIncidents, ["CHAT_COST_INTENT_UNAVAILABLE"]);
+});
+
+test("every model the cleanup touches exists on the stub", () => {
+  /*
+    A guard against the way this file has now broken twice.
+
+    When a new cleanup step is added and its Prisma model is not added to
+    `prismaStub`, the step reaches `deleteMany` on `undefined`. `step()` catches
+    that, so nothing crashes: the run finishes, 505 of 507 assertions still
+    pass, and the only symptom is two tests failing with names that say nothing
+    about the cause -- "a step that throws does not skip the steps behind it"
+    and "a clean run reports no failed steps and every count". Whoever added the
+    step then has to work backwards from a diff of step names to a missing stub
+    key, in a file they were not editing.
+
+    `comparisonReviewRun` was the first time; the three mobile bearer-auth
+    models were the second, and they went red on develop for every open pull
+    request until someone traced it. This says so directly instead.
+
+    Reading the source rather than importing it is deliberate: `lib/maintenance`
+    is already mocked in this process, so its module graph cannot answer which
+    models the real file names.
+  */
+  const source = readFileSync(resolve(process.cwd(), "lib/maintenance.ts"), "utf8");
+  const used = [...new Set([...source.matchAll(/\bprisma\.([a-zA-Z][A-Za-z0-9]*)\./g)].map((m) => m[1]))];
+  // The pattern has to find the models this file is known to clean up; if it
+  // ever finds almost nothing, the regex has stopped matching rather than the
+  // cleanup having shrunk, and a guard that silently matches nothing is worse
+  // than none.
+  assert.ok(used.length >= 15, `only ${used.length} models matched -- check the pattern`);
+
+  const missing = used.filter((model) => !(model in prismaStub));
+  assert.deepEqual(
+    missing,
+    [],
+    `lib/maintenance.ts calls prisma.${missing[0] ?? "?"} but prismaStub has no such key; ` +
+      "add it beside the others so the step succeeds instead of joining failedSteps"
+  );
 });
