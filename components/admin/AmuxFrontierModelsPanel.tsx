@@ -16,18 +16,28 @@ import {
   readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
   type PreparedIdeaTransferPreview,
 } from "@/lib/amux/ideaTransferPreviewUiCore";
+import {
+  clearRefusedConfirmationAttempt, readConfirmedIdeaTransfer, readConfirmationAttempt,
+  readConfirmationAttemptForPreview, reserveConfirmationAttempt,
+  type ConfirmedIdeaTransfer,
+} from "@/lib/amux/ideaTransferConfirmationUiCore";
 
 type PreviewState =
-  | { kind: "idle" | "pending" | "unknown" | "expired" | "recovery_unavailable" }
+  | { kind: "idle" | "pending" | "unknown" | "expired" | "confirmed" | "recovery_unavailable" }
   | { kind: "prepared"; value: PreparedIdeaTransferPreview };
+type ConfirmState =
+  | { kind: "idle" | "pending" | "unknown" | "expired" | "refused" }
+  | { kind: "confirmed"; value: ConfirmedIdeaTransfer };
 
 const receiptStore = (): Storage | null => {
   try { return window.sessionStorage; } catch { return null; }
 };
 
-export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, planReady,
+export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
+  ideaId, planReady,
   declaredExternalSources, operatorId }: {
-  available: boolean; previewAvailable: boolean; ideaId: string | null;
+  available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
+  ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
@@ -40,7 +50,30 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
+  const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
+
+  const readConfirmation = useCallback(async (pendingId: string,
+    expectedIdeaId: string, expectedDigest: string, expectedDigestKeyId: string) => {
+    const report = (next: ConfirmState) => setConfirmation((current) =>
+      current.kind === "confirmed" ? current : next);
+    try {
+      const query = new URLSearchParams({ previewId: pendingId });
+      const response = await adminFetch(`/api/admin/amux/ideas/transfer-confirmation?${query}`,
+        { cache: "no-store" });
+      if (!response.ok) { report({ kind: "unknown" }); return; }
+      const body: unknown = await response.json();
+      const parsed = readConfirmedIdeaTransfer(response.status, body, pendingId,
+        expectedIdeaId, expectedDigest, expectedDigestKeyId);
+      if (parsed) {
+        report({ kind: "confirmed", value: parsed });
+        setPreview((current) => current.kind === "prepared" ? current : { kind: "confirmed" });
+      } else if (body && typeof body === "object" &&
+                 (body as Record<string, unknown>).state === "expired") {
+        report({ kind: "expired" });
+      } else { report({ kind: "unknown" }); }
+    } catch { report({ kind: "unknown" }); }
+  }, []);
 
   const readBack = useCallback(async (pendingId: string, model: AvailableFrontierModel,
     effort: string) => {
@@ -63,9 +96,39 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
       }
       const parsed = readPreparedIdeaTransferPreview(response.status, body, pendingId, ideaId ?? "",
         model, effort);
-      setPreview(parsed ? { kind: "prepared", value: parsed } : { kind: "unknown" });
+      if (parsed) {
+        setPreview({ kind: "prepared", value: parsed });
+        if (confirmAvailable) {
+          const attempt = readConfirmationAttempt(receiptStore(), operatorId, pendingId,
+            ideaId ?? "", parsed.payloadDigest, parsed.payloadDigestKeyId);
+          if (attempt === "present") {
+            setConfirmation({ kind: "pending" });
+            await readConfirmation(pendingId, ideaId ?? "", parsed.payloadDigest,
+              parsed.payloadDigestKeyId);
+          } else if (attempt === "unavailable") {
+            setConfirmation({ kind: "unknown" });
+          }
+        }
+        return;
+      }
+      if (confirmAvailable && body && typeof body === "object" &&
+          (body as Record<string, unknown>).state === "unavailable") {
+        const attempt = readConfirmationAttemptForPreview(receiptStore(), operatorId,
+          pendingId, ideaId ?? "");
+        if (attempt.kind === "present") {
+          setPreview({ kind: "unknown" });
+          setConfirmation({ kind: "pending" });
+          await readConfirmation(pendingId, ideaId ?? "", attempt.payloadDigest,
+            attempt.payloadDigestKeyId);
+        } else {
+          setPreview({ kind: attempt.kind === "unavailable" ?
+            "recovery_unavailable" : "unknown" });
+        }
+        return;
+      }
+      setPreview({ kind: "unknown" });
     } catch { setPreview({ kind: "unknown" }); }
-  }, [ideaId, locale, m.transferPreviewUnknown]);
+  }, [confirmAvailable, ideaId, locale, m.transferPreviewUnknown, operatorId, readConfirmation]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!available) return;
@@ -198,6 +261,53 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
     void readBack(receipt.previewId, receipt.model, receipt.effort);
   };
 
+  const confirmPreview = async () => {
+    if (!confirmAvailable || !ideaId || preview.kind !== "prepared" ||
+        confirmation.kind !== "idle") return;
+    const value = preview.value;
+    if (!reserveConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+      ideaId, value.payloadDigest, value.payloadDigestKeyId)) {
+      setConfirmation({ kind: "unknown" });
+      await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+        value.payloadDigestKeyId);
+      return;
+    }
+    setConfirmation({ kind: "pending" });
+    setFailure(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/transfer-confirmation", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, previewId: value.previewId, ideaId,
+          payloadDigest: value.payloadDigest,
+          payloadDigestKeyId: value.payloadDigestKeyId }),
+      });
+      if (response.status === 409) {
+        await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+          value.payloadDigestKeyId);
+        return;
+      }
+      if ([400, 401, 403, 404, 410, 413, 415, 428].includes(response.status)) {
+        const refusal = await readAdminApiFailure(response, {
+          fallback: m.transferConfirmRefused, locale,
+        });
+        setFailure(refusal);
+        if (response.status !== 410) {
+          clearRefusedConfirmationAttempt(receiptStore(), operatorId, value.previewId,
+            ideaId, value.payloadDigest, value.payloadDigestKeyId);
+        }
+        setConfirmation((current) => current.kind === "confirmed" ? current :
+          { kind: response.status === 410 ? "expired" : "refused" });
+        return;
+      }
+      const body: unknown = await response.json();
+      const parsed = readConfirmedIdeaTransfer(response.status, body, value.previewId,
+        ideaId, value.payloadDigest, value.payloadDigestKeyId);
+      if (parsed) { setConfirmation({ kind: "confirmed", value: parsed }); return; }
+    } catch { /* A lost response must be read back by ID, not re-posted. */ }
+    await readConfirmation(value.previewId, ideaId, value.payloadDigest,
+      value.payloadDigestKeyId);
+  };
+
   return (
     <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
@@ -257,7 +367,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
       {preview.kind === "pending" ? <p role="status">{m.transferPreviewPreparing}</p> : null}
       {preview.kind === "recovery_unavailable" ? <p role="alert">{m.recoveryUnavailable}</p> : null}
       {preview.kind === "expired" ? <p role="status">{m.transferPreviewExpired}</p> : null}
-      {preview.kind === "unknown" ? <div className="space-y-2">
+      {preview.kind === "unknown" && confirmation.kind === "idle" ? <div className="space-y-2">
         <p role="alert">{m.transferPreviewUnknown}</p>
         <button type="button" onClick={recoverPreview} className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
           {m.transferPreviewReadBack}
@@ -269,12 +379,39 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, ideaId, p
           <p className="break-all text-xs">{preview.value.provider} / {preview.value.modelId}
             {` · ${preview.value.reasoningEffort} · ${preview.value.previewId}`}</p>
           <p className="text-xs">{m.transferPreviewExpires}: {preview.value.expiresAt}</p>
+          <p className="break-all text-xs">{m.transferPreviewDigest}: {preview.value.payloadDigest}</p>
           <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-100 p-3 text-xs dark:bg-zinc-900">
             {preview.value.prompt}
           </pre>
-          <p>{m.transferPreviewBoundary}</p>
+          <p>{confirmation.kind === "confirmed" ? m.transferConfirmRecordedBoundary :
+            m.transferPreviewBoundary}</p>
+          {confirmAvailable && confirmation.kind === "idle" ? <button type="button"
+            onClick={() => void confirmPreview()}
+            className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 dark:border-blue-400 dark:text-blue-200">
+            {m.transferConfirmAction}
+          </button> : null}
         </div>
       ) : null}
+      {confirmation.kind === "pending" ? <p role="status">{m.transferConfirmPending}</p> : null}
+      {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
+      {confirmation.kind === "expired" ? <p role="status">{m.transferConfirmExpired}</p> : null}
+      {confirmation.kind === "refused" && !failure ?
+        <p role="alert">{m.transferConfirmRefused}</p> : null}
+      {confirmation.kind === "unknown" ? <div className="space-y-2">
+        <p role="alert">{m.transferConfirmUnknown}</p>
+        <button type="button" onClick={() => {
+          const receipt = ideaId ? readPreviewReceipt(receiptStore(), operatorId, ideaId) : null;
+          const attempt = receipt?.kind === "present" && ideaId ?
+            readConfirmationAttemptForPreview(receiptStore(), operatorId,
+              receipt.previewId, ideaId) : null;
+          if (receipt?.kind === "present" && attempt?.kind === "present" && ideaId) {
+            void readConfirmation(receipt.previewId, ideaId,
+              attempt.payloadDigest, attempt.payloadDigestKeyId);
+          } else { setPreview({ kind: "recovery_unavailable" }); }
+        }} className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+          {m.transferConfirmReadBack}
+        </button>
+      </div> : null}
     </section>
   );
 }
