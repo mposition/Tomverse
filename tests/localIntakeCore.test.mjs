@@ -6,6 +6,7 @@ import { adminMessagesFor } from "../lib/adminLocale.ts";
 import { adminAmuxLocalIntakeMessages } from "../lib/adminMessages/amuxLocalIntake.ts";
 import {
   LOCAL_INTAKE_APPLY_CODE_LATCH,
+  scanAmuxV4Input,
   buildLocalIntakeSnapshot,
   inspectLocalIntakePackage,
   localIntakeApplyPermitted,
@@ -164,6 +165,21 @@ test("secret and private path refuse before any adapter call", async () => {
   assert.equal(pathResult.code, "absolute_path");
   assert.equal(calls, 0);
   assert.equal(scanLocalIntakeInput("mail me at owner@example.com").code, "personal_data");
+});
+
+test("v4 secret scanning is separate from the already enabled v3 scanner", () => {
+  assert.equal(parseLocalIntakePackage(body(pkg())).ok, true);
+  for (const value of [
+    ["API key: sk", "_test_", "1234567890abcdefghijklmnop"].join(""),
+    ["sk", "_live_", "1234567890abcdefghijklmnop"].join(""),
+    "API key: abcdefgh12",
+    ["xsk", "_live_", "1234567890abcdefghijklmnop_x"].join(""),
+    ["rk", "_live_", "1234567890abcdefghijklmnop"].join(""),
+    "whsec_1234567890abcdefghijklmnop",
+  ]) assert.equal(scanAmuxV4Input(value).code, "secret");
+  for (const value of ["task-1", "task-management-system", "risk-assessment-plan"]) {
+    assert.equal(scanAmuxV4Input(value).ok, true);
+  }
 });
 
 test("operator text is data and never becomes the process argv", async () => {

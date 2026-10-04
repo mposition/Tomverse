@@ -28,13 +28,13 @@ const runner = readFileSync(
 );
 
 const onDisk = readdirSync(resolve(ROOT, "tests", "integration"))
-    .filter((name) => name.endsWith(".db.test.ts"))
+    .filter((name) => /\.db\.test\.(?:ts|mjs)$/.test(name))
     .map((name) => `tests/integration/${name}`)
     .sort();
 
 const listed = [
     ...new Set(
-        [...runner.matchAll(/"(tests\/integration\/[^"]+\.db\.test\.ts)"/g)].map(
+        [...runner.matchAll(/"(tests\/integration\/[^"]+\.db\.test\.(?:ts|mjs))"/g)].map(
             (match) => match[1]
         )
     ),

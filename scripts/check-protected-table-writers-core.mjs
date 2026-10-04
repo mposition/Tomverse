@@ -802,6 +802,30 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
+  {
+    path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 36,
+    reason:
+      "The v4 decision migration references four immutable audit IDs through restrictive foreign keys and reads one linked row with SELECT FOR SHARE in its decision guard. Its DDL and trigger write verbs affect AmuxIdeaUnitDecision and related v4 tables only; it neither inserts nor updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261001111800_amux_v4_frontier_model_catalog/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 12,
+    reason:
+      "The Frontier catalog migration adds two restrictive audit foreign keys, declares an audit row type, and reads the approval and revocation audit rows with two SELECT statements in its guard. The write verbs create and constrain AmuxIdeaFrontierModelApproval only; no statement writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261002100000_amux_v4_source_plan_revision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 32,
+    reason:
+      "The initial source-plan migration adds one restrictive foreign key from creationAuditLogId to the existing audit row. Its write verbs create and constrain AmuxIdeaSourcePlanRevision and AmuxIdeaAnalysisChunk only; it never writes AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
