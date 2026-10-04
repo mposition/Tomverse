@@ -111,8 +111,8 @@ export const CACHE_ISOLATION_RECORD: CacheIsolationRecord = {
   ],
   // The owner's act. Filling both fields is what lifts §5's cache rule; see the
   // header. Leave them empty to change nothing.
-  approvedBy: "",
-  approvedAt: "",
+  approvedBy: "mposition",
+  approvedAt: "2026-10-04T03:32:28Z",
 };
 
 export type CacheIsolationSignature = {
