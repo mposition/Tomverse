@@ -418,15 +418,15 @@ const compilerOptions = parsedConfig.options;
 // element access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
 //
-// 2026-10-04, merge current main: marketing, account email and AMUX edits
-// coexist in the fixed closure. Count and position-free inventory remain
-// unchanged; the digest below is repinned for source positions only.
+// 2026-10-04, merged main and sre-ops: account, AMUX, audit actor and
+// marketing fingerprint edits coexist in the fixed closure. The count and
+// position-free inventory stay unchanged; repin source positions below.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "e9536414735320d75e1a7ad47e8d8ee",
-  "ef9e9691496a41c03be35b505d4a193d0",
+  "85a2067f7f6273a1a79d405e8815d89f",
+  "aadfd76db7b487ca264dfad74b9ebf60",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
