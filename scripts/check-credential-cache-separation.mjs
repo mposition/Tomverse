@@ -2,13 +2,24 @@
 /**
  * Fails when a job holding a credential restores a cache nothing verifies.
  *
- * The separation this enforces exists today by accident. Every job the
- * reachability analysis judges to hold a writable credential restores only a
- * package manager's own cache, which `npm ci` checks against the lockfile, so a
- * tampered entry fails or is refetched rather than installing different code.
- * None of them restores `.next/cache` or the Playwright browser cache, which
- * have no such check -- a build reads the first into the server bundle it then
- * runs, and a cache hit launches the second without downloading or hashing it.
+ * As of 2026-10-04 no job the reachability analysis judges to hold a writable
+ * credential restores any cache at all, so this check has nothing to classify
+ * and says so. It was not always that: the separation existed by accident, with
+ * every such job restoring only a package manager's own cache, which `npm ci`
+ * checks against the lockfile, so a tampered entry fails or is refetched rather
+ * than installing different code. None restored `.next/cache` or the Playwright
+ * browser cache, which have no such check -- a build reads the first into the
+ * server bundle it then runs, and a cache hit launches the second without
+ * downloading or hashing it.
+ *
+ * The remaining declarations went in two steps, both recorded in the audit's
+ * 4.3: P7 took the npm cache off the one job an agent-raised event reaches, and
+ * the owner's §16 decision took it off the other ten -- not for speed, but to
+ * make a list this audit published in its own first two revisions describe a
+ * state that no longer exists. What this check still refuses is unchanged: a
+ * credentialed job restoring a cache nothing verifies. The verified kind stays
+ * allowed, because that is the scope docs/policy/engineering-agent.md §5.1
+ * gives it.
  *
  * Nothing was holding that apart. One `actions/cache` step added to any of
  * those jobs would put unverified bytes next to a repository write token and

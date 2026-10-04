@@ -405,8 +405,9 @@ v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은
 lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 — 그리고 둘 다
 이미 명시적 sha512 핀을 갖고 있습니다.
 
-- `cron-auto-fix.yml:218-225` — `CLAUDE_CODE_INTEGRITY` 대조 후 `npm install -g`
-- `feedback-autofix.yml:146-154` — 같은 패턴
+- `cron-auto-fix.yml:232-243`(step `Install Claude Code CLI`) — `CLAUDE_CODE_INTEGRITY`
+  대조 후 `npm install -g`
+- `feedback-autofix.yml:157-169`(step `Install Claude Code CLI (pinned)`) — 같은 패턴
 
 `package.json`의 `postinstall`은 `prisma generate` 하나입니다.
 
@@ -548,7 +549,8 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 `actions/setup-node@v6`, `actions/checkout@v6`, `gitleaks/gitleaks-action@v3`.
 태그는 움직일 수 있으므로 "제3자 코드가 `main` scope job에서 실행된다"는 F3의
 전제를 캐시 없이도 성립시킵니다. 가장 위험한 두 job은 **이미 SHA로 핀했습니다**
-(`cron-auto-fix.yml:179`·`:207`, `feedback-autofix.yml:108`·`:116`). 이 감사의
+(`cron-auto-fix.yml:189`·`:217`, `feedback-autofix.yml:115`·`:123` — 각 파일의
+`actions/checkout`·`actions/setup-node`). 이 감사의
 세 축이 아니므로 권고하지 않고, 별도 판단 대상으로만 적습니다.
 
 ## 6. 이미 맞게 되어 있는 것 — 완화 PR이 되돌리면 안 되는 결정
@@ -556,14 +558,14 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 | 결정 | 위치 |
 |---|---|
 | 자격증명 job이 Playwright 캐시를 복원하지 않고 매번 새로 내려받음 | `cron-auto-fix.yml:320`, `visual-baseline-record.yml:74` |
-| lockfile 밖 설치에 명시적 sha512 핀 | `cron-auto-fix.yml:218-225`, `feedback-autofix.yml:146-154` |
-| 가장 위험한 두 job의 action SHA 핀 | `cron-auto-fix.yml:179`·`:207`, `feedback-autofix.yml:108`·`:116` |
+| lockfile 밖 설치에 명시적 sha512 핀 | `cron-auto-fix.yml:232-243`, `feedback-autofix.yml:157-169` (step `Install Claude Code CLI`) |
+| 가장 위험한 두 job의 action SHA 핀 | `cron-auto-fix.yml:189`·`:217`, `feedback-autofix.yml:115`·`:123` (`checkout`·`setup-node`) |
 | `--ignore-scripts` | `pr-fast-gate.yml:684` |
 | `Linux-next-` fallback 제거 | `pr-fast-gate.yml:809-810`, `:1014-1015` |
 | 이미지 빌드에 secret·캐시 없음 | `engineering-agent-image.yml:4`, `:46-48` |
 | `npm ci`를 일부러 하지 않음 | `deployed-commit-drift.yml:114-116` |
 | 캐시 표면 0 | `secret-history-scan.yml`, `back-merge-main-to-develop.yml`, `codeql.yml` |
-| secret을 한 step으로 좁힘 | `feedback-autofix.yml:157` ("LLM key only in this step") |
+| secret을 한 step으로 좁힘 | `feedback-autofix.yml:171` (step `Attempt the fix (LLM key only in this step)`) |
 | Rust 캐시에 restore-keys 없음 | `orchestrator-rust.yml:54` |
 
 ## 7. 권고 — 우선순위 순
