@@ -58,9 +58,9 @@ export async function readInitialIdeaSourcePlan(session: Session, ideaId: string
     where: { id: plan.creationAuditLogId, action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
       targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET, targetId: plan.id,
       actorUserId: null },
-    select: { metadata: true, entryHash: true },
+    select: { action: true, targetType: true, actorUserId: true, actorEmail: true,
+      ipAddress: true, userAgent: true, metadata: true, entryHash: true },
   });
-  const metadata = audit?.metadata;
   const ownerAudit = await prisma.adminAuditLog.findFirst({
     where: { action: "amux.v4.initial_source_plan.requested",
       targetType: "AmuxIdeaSubmission", targetId: ideaId, actorUserId },
@@ -68,7 +68,7 @@ export async function readInitialIdeaSourcePlan(session: Session, ideaId: string
   });
   const ownerMetadata = ownerAudit?.metadata;
   const valid = plan.state === "active" && !!audit?.entryHash && !!ownerAudit?.entryHash &&
-    matchesInitialPlanSystemAudit(metadata, plan.manifestDigest) &&
+    matchesInitialPlanSystemAudit(audit, plan.manifestDigest) &&
     !!ownerMetadata && typeof ownerMetadata === "object" && !Array.isArray(ownerMetadata) &&
     (ownerMetadata as Record<string, unknown>).revisionId === plan.id &&
     (ownerMetadata as Record<string, unknown>).systemAuditId === plan.creationAuditLogId;
@@ -115,7 +115,11 @@ export async function prepareInitialIdeaSourcePlan(session: Session, request: Re
   } catch (error) {
     if (!callbackReturned && error instanceof InitialSourcePlanError) throw error;
     let readBack: InitialPlanAccessError["readBack"] = "unavailable";
-    try { readBack = (await readInitialIdeaSourcePlan(session, ideaId)).status; } catch { /* uncertain */ }
+    try {
+      const observed = (await readInitialIdeaSourcePlan(session, ideaId)).status;
+      // A read of absent cannot rule out a still-running or unobserved COMMIT.
+      readBack = observed === "absent" ? "unavailable" : observed;
+    } catch { /* uncertain */ }
     throw new InitialPlanAccessError("outcome_unknown", 503, readBack);
   }
 }
