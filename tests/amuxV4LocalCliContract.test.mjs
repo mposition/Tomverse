@@ -140,6 +140,28 @@ test("Claude result needs exact served model and complete usage", () => {
     "verified_success");
 });
 
+test("Claude ignores only bounded pre-init UI invalidation notices", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const startup = { type: "system", subtype: "ui_invalidate",
+    uuid: "notice-1", session_id: "session-1" };
+  const stream = (prefix) => Buffer.from([...prefix,
+    { type: "system", subtype: "init", tools: [] },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "S0_OK" }] } },
+    claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+    stream([startup]), 0).kind, "verified_success");
+  for (const prefix of [
+    [{ ...startup, tools: ["Bash"] }],
+    [{ ...startup, content: "unexpected" }],
+    Array.from({ length: 9 }, () => startup),
+  ]) {
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
+      stream(prefix), 0), { kind: "outcome_unknown" });
+  }
+});
+
 test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const maxTokens = Buffer.from([
@@ -221,8 +243,8 @@ test("Claude S0 pre-init system diagnostic exposes no free-form event data", () 
       rejectionPoint: "unexpected_event", unexpectedEventType: "system",
       unexpectedEventPhase: "before_init",
       unexpectedSystemSubtype: subtype,
-      unexpectedSystemSubtypeDigest: createHash("sha256")
-        .update(event.subtype).digest("hex"),
+      ...(subtype === "other" ? { unexpectedSystemSubtypeDigest:
+        createHash("sha256").update(event.subtype).digest("hex") } : {}),
       unexpectedSystemHasCapabilities: capabilities,
       unexpectedSystemHasFreeText: freeText,
     });
