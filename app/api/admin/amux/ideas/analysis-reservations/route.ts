@@ -100,7 +100,7 @@ export async function POST(request: Request): Promise<Response> {
     const keys = loadCurrentAmuxContentKeys(process.env);
     const receipt = await prisma.$transaction((tx) =>
       commitAmuxIdeaAnalysisBudgetReservation(tx, {
-        ...body, keys,
+        ...body, keys, session, request,
         // The exact, S0-reviewed one-turn Claude profile is the only admitted
         // profile. A new model or changed limits must not inherit these facts.
         runner: { tokenCapsEnforceable: true, billableToolsDisabled: true },
