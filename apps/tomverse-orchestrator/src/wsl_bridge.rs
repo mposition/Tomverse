@@ -373,15 +373,16 @@ fn plan_bridge_heartbeat(
     at_boundary: bool,
     has_pending: bool,
 ) -> WorkerHeartbeatPlan {
-    if halted {
+    if !roster_ok {
+        // An unreadable roster cannot prove the worker stopped.
+        plan_worker_heartbeat(true, false, true)
+    } else if halted {
         // An ambiguous attempt may have been dropped from local pending while
         // the server still owns it. Never advertise dispatch readiness until
         // operator read-back and a fresh process registration.
         plan_worker_heartbeat(running, false, true)
-    } else if roster_ok {
-        plan_worker_heartbeat(running, at_boundary, has_pending)
     } else {
-        plan_worker_heartbeat(true, false, true)
+        plan_worker_heartbeat(running, at_boundary, has_pending)
     }
 }
 
@@ -2089,6 +2090,13 @@ mod tests {
             plan_bridge_heartbeat(true, true, false, true, false),
             WorkerHeartbeatPlan {
                 status: "stopped",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, false, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
                 dispatch_ready: false,
             }
         );

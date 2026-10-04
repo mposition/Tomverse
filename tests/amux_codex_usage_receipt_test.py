@@ -191,10 +191,11 @@ class UsageReceiptTest(unittest.TestCase):
     def test_non_text_rollout_timestamp_is_refused_with_value_error(self):
         lines = sample_lines()
         started = json.loads(lines[1])
-        started["timestamp"] = None
-        lines[1] = json.dumps(started) + "\n"
-        with self.assertRaisesRegex(ValueError, "ISO string"):
-            self.extract(lines)
+        for non_text_timestamp in (None, 1791081852):
+            started["timestamp"] = non_text_timestamp
+            lines[1] = json.dumps(started) + "\n"
+            with self.assertRaisesRegex(ValueError, "ISO string"):
+                self.extract(lines)
 
     def test_cumulative_gap_is_refused(self):
         lines = sample_lines()
