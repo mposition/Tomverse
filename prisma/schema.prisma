@@ -1973,8 +1973,10 @@ model Feedback {
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 
-  lifecycleEvents FeedbackLifecycleEvent[]
-  autoFixCase     FeedbackAutoFixCase?
+  lifecycleEvents          FeedbackLifecycleEvent[]
+  autoFixCase              FeedbackAutoFixCase?
+  supportTriageSuggestions SupportTriageSuggestion[]
+  supportTriageMemberships SupportTriageGroupMember[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -8205,6 +8207,57 @@ model QaReleaseOperatorControl {
   auditLogId               String    @unique
   /// Overwritten by the insert trigger from the database clock.
   createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+
+  mergeAttempts QaReleaseMergeAttempt[]
+}
+
+/// The QA-release merge lane's attempts (docs/policy/qa-release-agent.md
+/// version 4, section 8 item 5). The lifecycle is lib/qaReleaseMergeAttemptCore.ts;
+/// migration 20261004010000_qa_release_merge_attempt enforces it, keeps one
+/// open attempt per lane with a partial unique index Prisma does not model,
+/// binds every write to an audit row of the same transaction and refuses
+/// removal.
+model QaReleaseMergeAttempt {
+  id                String                   @id
+  pullRequestNumber Int
+  headSha           String
+  base              String
+  controlRevision   Int
+  control           QaReleaseOperatorControl @relation(fields: [controlRevision], references: [revision], onDelete: Restrict, onUpdate: Restrict)
+  state             String
+  outcome           String?
+  mergeCommitSha    String?
+  lastAuditLogId    String
+  /// The next five are set by the triggers from the database clock.
+  issuedAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  expiresAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  consumedAt        DateTime?                @db.Timestamptz(3)
+  closedAt          DateTime?                @db.Timestamptz(3)
+  updatedAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  /// The staging deployments the lane last observed for this merge, and when.
+  deployObservation Json?
+  deployObservedAt  DateTime?                @db.Timestamptz(3)
+
+  latchEvents QaReleaseMergeLaneLatch[]
+
+  @@index([issuedAt])
+}
+
+/// The QA-release merge lane's latch (docs/policy/qa-release-agent.md version
+/// 4, section 8 item 5): append-only events, latched when the newest sets it.
+/// Reasons are lib/qaReleaseMergeLaneLatchCore.ts; migration
+/// 20261004020000_qa_release_merge_lane_latch keeps the numbering consecutive,
+/// binds each event to an audit row of its own transaction (set by the merge
+/// lane, released by a person) and refuses any change.
+model QaReleaseMergeLaneLatch {
+  sequence   Int                    @id
+  latched    Boolean
+  reason     String?
+  attemptId  String?
+  attempt    QaReleaseMergeAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLogId String                 @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime               @default(now()) @db.Timestamptz(3)
 }
 
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
@@ -8469,6 +8522,7 @@ model OpsObserverGenesis {
   runDeadlineAt       DateTime              @db.Timestamptz(3)
   state               OpsObserverState?
   deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
 }
 
 /// The key state of one genesis. Every update is exactly the next generation
@@ -8569,4 +8623,116 @@ model SupportTriageRun {
   blocked                 Int?
 
   @@index([kind, createdAt])
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
+  auditLogId     String             @unique
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
+}
+
+/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). One
+/// row per (report, input digest): a proposed lane and keyword-flag codes,
+/// never the text of the report. Migration
+/// 20261004010000_support_triage_suggestion holds the state machine, the
+/// lease and the display stamp.
+model SupportTriageSuggestion {
+  id              String    @id
+  feedbackId      String
+  inputDigest     String
+  state           String    @default("pending")
+  failureCode     String?
+  claimToken      String?
+  leaseExpiresAt  DateTime?
+  attemptCount    Int       @default(0)
+  lane            String?
+  keywordFlags    String[]  @default([])
+  ownerQueueState String    @default("not_queued")
+  displayedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([feedbackId, inputDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([leaseExpiresAt])
+}
+
+/// Support-triage group (docs/policy/support-triage.md §5, §6): one
+/// equivalence class of one kind over server facts, for display only. Its
+/// members carry its primary digest through a composite key, so a terminal
+/// group (digest NULL) can hold none. Migration
+/// 20261004020000_support_triage_group holds the state machine and the
+/// tombstone rules.
+model SupportTriageGroup {
+  id                            String    @id
+  state                         String    @default("candidate")
+  primaryKind                   String
+  primarySnapshotDigest         String?
+  groupCandidateKey             String?   @unique
+  groupInputDigest              String?
+  keyRetiredAt                  DateTime?
+  retiredMemberIds              String[]  @default([])
+  decision                      String?
+  decidedAt                     DateTime?
+  ownerQueueState               String    @default("not_queued")
+  displayedAt                   DateTime?
+  keyRecheckDeferredCount       Int       @default(0)
+  keyRecheckDeferredRunId       String?
+  keyRecheckLastEvaluatedRunSeq BigInt?
+  keyRecheckDeferredRunSeq      BigInt?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @default(now())
+
+  members SupportTriageGroupMember[]
+  signals SupportTriageGroupSignal[]
+
+  @@unique([id, primarySnapshotDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([keyRetiredAt])
+  @@index([retiredMemberIds], type: Gin)
+}
+
+/// A report in an open support-triage group. Inserted and deleted, never updated.
+model SupportTriageGroupMember {
+  groupId               String
+  feedbackId            String   @unique
+  primarySnapshotDigest String
+  createdAt             DateTime @default(now())
+
+  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
+  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, feedbackId])
+}
+
+/// One signal per (group, kind): the SHA-256 of a server value its members
+/// share, never the value. Inserted and deleted, never updated.
+model SupportTriageGroupSignal {
+  groupId           String
+  kind              String
+  snapshotDigest    String
+  provenanceClass   String
+  snapshotExpiresAt DateTime
+  observedAt        DateTime @default(now())
+
+  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, kind])
+  @@index([snapshotExpiresAt])
 }

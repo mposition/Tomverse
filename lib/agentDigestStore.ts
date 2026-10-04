@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
-import type { AgentDigestAgentKey } from "@/lib/agentDigestContract";
+import { AGENT_DIGEST_META_RETENTION_DAYS, type AgentDigestAgentKey } from "@/lib/agentDigestContract";
 import {
   AGENT_DIGEST_STORE_TIMEOUTS as LIMITS,
   classifyAgentDigestRepeat,
@@ -20,7 +20,8 @@ import { prisma } from "@/lib/prisma";
  * names this file). Shared contract items 1-9: a row is born with its body, in
  * the same transaction as its system audit entry, and is never edited by the
  * application -- body expiry and the meta purge are the database's two allowed
- * changes and get their own functions here when a job needs them.
+ * changes, and expireAgentDigestBodies and purgeAgentDigestMeta below are their
+ * only callers.
  *
  * Idempotency: the insert is ON CONFLICT DO NOTHING on (agentKey,
  * idempotencyKey), so two concurrent submissions cannot both write; the loser
@@ -172,4 +173,106 @@ export async function recordAgentDigestItem(
     if (error instanceof AgentDigestNotAdmitted) return { status: "not_admitted", reason: error.reason };
     throw error;
   }
+}
+
+/** Rows one retention batch touches. Each batch is its own transaction and audit entry. */
+export const AGENT_DIGEST_RETENTION_BATCH = 200;
+
+type RetentionRow = { id: string; agentKey: string };
+
+const countByAgent = (rows: readonly RetentionRow[]) =>
+  rows.reduce<Record<string, number>>((counts, row) => {
+    counts[row.agentKey] = (counts[row.agentKey] ?? 0) + 1;
+    return counts;
+  }, {});
+
+/**
+ * Body expiry, the first of the table's two allowed changes (shared contract
+ * items 4-5; docs/policy/billing-finance-ops.md §1.4). One batch of rows past
+ * their `retentionUntil`, for every agent: the payload becomes NULL and the
+ * update trigger stamps `bodyDeletedAt` from the database clock. The trigger
+ * refuses the update for any row still inside its retention, so this function
+ * cannot remove a body early even if its WHERE were wrong.
+ *
+ * Irreversible by design: the payload is gone. What remains is the row's
+ * identity, size and hash, and the `agent_digest.recorded` audit entry that
+ * already carries the same hash.
+ */
+export async function expireAgentDigestBodies(db: Db = prisma): Promise<{ expired: number }> {
+  return db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<RetentionRow[]>`
+        UPDATE "AgentDigestItem" SET "payload" = NULL
+        WHERE "id" IN (
+          SELECT "id" FROM "AgentDigestItem"
+          WHERE "payload" IS NOT NULL AND "retentionUntil" < clock_timestamp()
+          ORDER BY "retentionUntil"
+          LIMIT ${AGENT_DIGEST_RETENTION_BATCH}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"::text AS "id", "agentKey"`;
+      if (rows.length === 0) return { expired: 0 };
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "agent-digest-retention",
+        action: "agent_digest.bodies_expired",
+        targetType: "AgentDigestItem",
+        targetId: null,
+        summary: `Expired the bodies of ${rows.length} agent digest items past their retention.`,
+        // Counts only: the rows keep their identity and hash, and the bodies are gone.
+        metadata: { expired: rows.length, byAgent: countByAgent(rows) },
+      });
+      return { expired: rows.length };
+    },
+    { maxWait: 5_000, timeout: LIMITS.prismaMs },
+  );
+}
+
+/**
+ * The meta purge, the second allowed change: one batch of rows whose body is
+ * already gone and whose `createdAt` is past the shared 365-day meta retention.
+ * The delete trigger refuses any other row.
+ */
+export async function purgeAgentDigestMeta(db: Db = prisma): Promise<{ purged: number }> {
+  return db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<RetentionRow[]>`
+        DELETE FROM "AgentDigestItem"
+        WHERE "id" IN (
+          SELECT "id" FROM "AgentDigestItem"
+          WHERE "bodyDeletedAt" IS NOT NULL
+            AND "createdAt" < clock_timestamp() - make_interval(days => ${AGENT_DIGEST_META_RETENTION_DAYS}::int)
+          ORDER BY "createdAt"
+          LIMIT ${AGENT_DIGEST_RETENTION_BATCH}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"::text AS "id", "agentKey"`;
+      if (rows.length === 0) return { purged: 0 };
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "agent-digest-retention",
+        action: "agent_digest.meta_purged",
+        targetType: "AgentDigestItem",
+        targetId: null,
+        summary: `Purged ${rows.length} agent digest items past the meta retention.`,
+        metadata: { purged: rows.length, byAgent: countByAgent(rows) },
+      });
+      return { purged: rows.length };
+    },
+    { maxWait: 5_000, timeout: LIMITS.prismaMs },
+  );
 }
