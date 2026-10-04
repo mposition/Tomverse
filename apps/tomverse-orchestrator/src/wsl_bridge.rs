@@ -366,6 +366,25 @@ pub fn plan_worker_heartbeat(
     }
 }
 
+fn plan_bridge_heartbeat(
+    halted: bool,
+    roster_ok: bool,
+    running: bool,
+    at_boundary: bool,
+    has_pending: bool,
+) -> WorkerHeartbeatPlan {
+    if halted {
+        // An ambiguous attempt may have been dropped from local pending while
+        // the server still owns it. Never advertise dispatch readiness until
+        // operator read-back and a fresh process registration.
+        plan_worker_heartbeat(running, false, true)
+    } else if roster_ok {
+        plan_worker_heartbeat(running, at_boundary, has_pending)
+    } else {
+        plan_worker_heartbeat(true, false, true)
+    }
+}
+
 impl WorkerAdapter for ExistingSessionAdapter {
     async fn is_running(&self, worker: &str) -> Result<bool> {
         Ok(self
@@ -1445,11 +1464,13 @@ pub async fn run_from_env() -> i32 {
                 continue;
             };
             let has_pending = pending_workers.contains(&name);
-            let plan = if roster_ok {
-                plan_worker_heartbeat(session.running, session.at_boundary, has_pending)
-            } else {
-                plan_worker_heartbeat(true, false, true)
-            };
+            let plan = plan_bridge_heartbeat(
+                halted,
+                roster_ok,
+                session.running,
+                session.at_boundary,
+                has_pending,
+            );
             let published = api
                 .worker_heartbeat(
                     &name,
@@ -2051,6 +2072,31 @@ mod tests {
             WorkerHeartbeatPlan {
                 status: "stopped",
                 dispatch_ready: false,
+            }
+        );
+    }
+
+    #[test]
+    fn halted_bridge_never_advertises_a_worker_as_dispatch_ready() {
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "stopped",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(false, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "idle",
+                dispatch_ready: true,
             }
         );
     }
