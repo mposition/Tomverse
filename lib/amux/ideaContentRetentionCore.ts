@@ -1,9 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
-/** This capability stays dark until legal-hold and external-key deletion
- * evidence have both passed staging. An environment value alone cannot open it. */
-export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = false;
+/** The route can be staged, but each environment remains dark until its own
+ * operator-controlled switch and distinct trigger secret are provisioned. */
+export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = true;
 export const AMUX_V4_CONTENT_RETENTION_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION";
 export const AMUX_V4_CONTENT_RETENTION_SECRET_ENV =

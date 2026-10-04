@@ -15,19 +15,20 @@ const request = (token = secret, agentId = AMUX_V4_CONTENT_RETENTION_AGENT_ID) =
     body: JSON.stringify({ schemaVersion: 1 }),
   });
 
-test("retention route has a separate secret and cannot be opened by an environment value", async () => {
+test("retention route has a separate secret and stays dark without its switch", async () => {
   assert.equal(isAmuxV4ContentRetentionAuthorized(request(), secret,
     ["another-distinct-secret-0123456789"]), true);
   assert.equal(isAmuxV4ContentRetentionAuthorized(request(), secret,
     [secret]), false);
   assert.equal(isAmuxV4ContentRetentionAuthorized(request(secret, "amux-v4-analysis"),
     secret, []), false);
-  assert.equal(amuxV4ContentRetentionEnabled("enabled"), false);
+  assert.equal(amuxV4ContentRetentionEnabled(undefined), false);
+  assert.equal(amuxV4ContentRetentionEnabled("enabled"), true);
   const previousSecret = process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET;
   const previousSwitch = process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
   try {
     process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET = secret;
-    process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = "enabled";
+    delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
     const response = await POST(request());
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), {
