@@ -39,6 +39,17 @@ test("the deadline must be an instant ahead of now and at most 180 s out", () =>
   }
 });
 
+test("an impossible date that would roll into the window is refused", () => {
+  // 2026-02-30T01:01Z rolls to 2026-03-02T01:01Z, which is inside the window here.
+  const now = Date.parse("2026-03-02T01:00:00.000Z");
+  assert.deepEqual(parseOpsObserverRequest("state", JSON.stringify({ runDeadline: "2026-02-30T01:01:00Z" }), now), {
+    ok: false,
+    error: "deadline_invalid",
+  });
+  assert.equal(parseOpsObserverRequest("state", JSON.stringify({ runDeadline: "2026-03-02T01:01:00Z" }), now).ok, true);
+  assert.equal(parseOpsObserverRequest("state", JSON.stringify({ runDeadline: "2026-03-02T01:00:61Z" }), now).ok, false);
+});
+
 test("keys are closed and confirm's ids keep the database's shapes", () => {
   for (const body of [
     {},

@@ -32,6 +32,10 @@ function deadline(value, nowMs) {
   if (typeof value !== "string" || !ISO_INSTANT.test(value)) return null;
   const ms = Date.parse(value);
   if (!Number.isFinite(ms) || ms <= nowMs || ms > nowMs + RUN_DEADLINE_MS) return null;
+  // Date.parse rolls an impossible date over (02-30 becomes 03-02), so the
+  // instant must print back as the same calendar date and time.
+  const printed = new Date(ms).toISOString();
+  if (printed.slice(0, 19) !== value.slice(0, 19)) return null;
   return new Date(ms);
 }
 
