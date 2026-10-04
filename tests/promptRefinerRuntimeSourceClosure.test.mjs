@@ -425,12 +425,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-05, AMUX v4 analysis budget: an existing admin-audit helper now
 // selects an action-specific actor scope. The count (228) and position-free
 // inventory are unchanged; only positions in this fixed closure moved.
+// 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
+// same audit helper. The 228-entry count and position-free inventory still
+// match origin/develop; only source positions moved.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c145aeb7588742162b5f8c9276daf9c7",
-  "085d5792233040a176e15b14ecb8306b",
+  "0e4d7b2c8a668df39f8eda5948cc087c",
+  "a0424ffea654a5b028091cd64d226ff1",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

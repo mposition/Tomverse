@@ -56,8 +56,8 @@ export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
 ] as const;
 export type ProductResearchSystemAuditActor =
   (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
-/** AMUX intake policy v12 (approved by mposition, 2026-10-01): this first
- * active v4 actor has one action/target pair, not general audit authority. */
+/** AMUX intake policy v12 (approved by mposition, 2026-10-01): the v4 actor
+ * has an explicit action/target scope per writer, not general audit authority. */
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_TARGET = "AmuxIdeaSourcePlanRevision" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as const;
@@ -66,6 +66,22 @@ export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as con
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_RESERVED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE = "analysis-budget-reserve-v1" as const;
+/** Expiry may release only a never-dispatched AMUX analysis hold. */
+export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION = "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE = "analysis-budget-expire-v1" as const;
+/** A known, capped CLI result settles agent cost; unknown usage stays held. */
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_SETTLED" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" as const;
+/** An uncertain CLI outcome blocks further analysis until read-back and owner resolution. */
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
+/** Policy v6: an unfinished idea stops at its immutable seven-day deadline. */
+export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
+export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
+export const AMUX_V4_IDEA_AUTO_CANCEL_SCOPE = "idea-analysis-auto-cancel-v1" as const;
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -89,7 +105,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-vnext-one-shot-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
-  // Scoped to the dark initial source-plan writer below.
+  // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
   ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer",
@@ -119,6 +135,22 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET) {
+    return AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET) {
+    return AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
+    return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
+  }
+  if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
+      targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
+    return AMUX_V4_IDEA_AUTO_CANCEL_SCOPE;
   }
   return null;
 };
