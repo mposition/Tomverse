@@ -7125,7 +7125,7 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 
 /// Should the existing card be refreshed? Split out so both gates are testable
 /// without a store or a clock — the whole defect was a decision nobody could see.
-/// The count already carded, parsed back out of the rendered evidence block.
+/// The latest count already carded, parsed back out of the rendered evidence block.
 ///
 /// autofix writes that block itself from `Finding::evidence` as `key: value`
 /// lines, so this reads its own output rather than anything a caller controls.
@@ -7134,11 +7134,12 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 /// cooldown in charge.
 pub(crate) fn carded_count(desc: &str) -> Option<u64> {
     desc.lines()
-        .find_map(|l| {
+        .filter_map(|l| {
             let line = l.trim();
             line.strip_prefix("count:")
                 .or_else(|| line.strip_prefix("consecutive_failures:"))
         })
+        .last()
         .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
@@ -8691,6 +8692,8 @@ mod tests {
         let desc = "verdict: whatever\ncount: 4\ndistinct_clients: 1 (ip:100.108.219.90)\n";
         assert_eq!(super::carded_count(desc), Some(4));
         assert_eq!(super::carded_count("consecutive_failures: 31\n"), Some(31));
+        assert_eq!(super::carded_count("consecutive_failures: 31\nrefreshed\nconsecutive_failures: 64\n"), Some(64),
+            "the newest measurement sets the next doubling threshold");
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
         assert_eq!(super::carded_count("count: not-a-number\n"), None);
@@ -14194,6 +14197,15 @@ mod tests {
             "count belongs in the computed title: {}",
             c[0].1
         );
+        runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_064, "failure", 800.0));
+        let not_doubled = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(not_doubled.count, 65);
+        assert!(file_finding(&st, &not_doubled).await.unwrap().is_none());
+        let title_after_small_increase: String = st.store.read().unwrap().query_row(
+            "SELECT title FROM issues WHERE id=?1", rusqlite::params![card], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(title_after_small_increase, escalated.title,
+            "65 failures must not bypass the cooldown after the card recorded 64");
     }
 
     /// Dedupe, durably. A nightly failure files ONCE. This is the property that
