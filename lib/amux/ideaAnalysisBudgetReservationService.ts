@@ -1,18 +1,18 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
-import { auditRowActorKind,
-  AMUX_V4_IDEA_SYSTEM_ACTOR,
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
-  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET } from "@/lib/adminAuditSystemActors";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
   AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
   AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
+import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
 
 /** This transaction body is not a claim or a dispatch permission. It reads
  * owner-approved price evidence from the app DB; no route, CLI runner or
@@ -36,6 +36,8 @@ function refuse(code: AmuxIdeaAnalysisReservationError["code"], reason?: string)
 }
 
 export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
+  session: Session;
+  request: Request;
   holdId: string;
   previewId: string;
   priceVersionId: string;
@@ -91,6 +93,10 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
   });
   if (!idea || !chunk || !preview || idea.state !== "submitted" ||
+      !input.session.user?.id || !isAdminSession(input.session) ||
+      getAdminRole(input.session) !== "owner" ||
+      input.session.user.id !== idea.actorUserId ||
+      input.session.user.id !== preview.confirmedByUserId ||
       now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId ||
       chunk.state !== "awaiting_preview" ||
@@ -205,6 +211,15 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { previewId: preview.id }, select: { id: true },
   })) refuse("already_reserved");
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  // First reservation in a UTC month creates its own capped ledger row. The
+  // audit-chain lock serializes this with other reservation writers, while
+  // the unique month key remains the database backstop.
+  await tx.amuxIdeaAnalysisBudgetWindow.createMany({
+    data: [{ namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
+      limitMicroUsd: BigInt(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD),
+      spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) }],
+    skipDuplicates: true,
+  });
   const lockedWindow = await tx.$queryRaw<Array<{
     spentMicroUsd: bigint; reservedMicroUsd: bigint; limitMicroUsd: bigint;
   }>>`
@@ -234,18 +249,13 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   });
   if (decision.decision !== "reservation_candidate") refuse("budget_hold", decision.reason);
   const reserve = BigInt(decision.worstCaseMicroUsd);
-  const auditId = await writeSystemAuditLog({
-    tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
-    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
-    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
-    targetId: input.holdId,
-    summary: "Reserved one AMUX v4 analysis Agent cost ceiling; no model was called.",
-    metadata: { previewId: preview.id, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
-      monthStart: monthStart.toISOString(), provider: decision.provider,
-      modelId: decision.modelId, pricingVersion: decision.pricingVersion,
-      priceVersionId: input.priceVersionId,
-      reservedMicroUsd: decision.worstCaseMicroUsd,
-      amountMeaning: decision.amountMeaning, modelCallStarted: false },
+  const auditId = await writeAmuxAnalysisBudgetSystemAudit({
+    tx, holdId: input.holdId, previewId: preview.id,
+    monthStartIso: monthStart.toISOString(), provider: decision.provider,
+    modelId: decision.modelId, pricingVersion: decision.pricingVersion,
+    priceVersionId: input.priceVersionId,
+    reservedMicroUsd: decision.worstCaseMicroUsd,
+    amountMeaning: decision.amountMeaning,
   });
   const updated = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
     where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
@@ -266,6 +276,15 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     outputMicroUsdPerMillion: pricing.outputMicroUsdPerMillion,
     reservedMicroUsd: reserve, status: "reserved",
   } });
+  await writeAdminAuditLog({
+    tx, session: input.session, request: input.request,
+    action: "amux.v4.analysis_budget.reserved",
+    targetType: "AmuxIdeaAnalysisBudgetHold", targetId: input.holdId,
+    summary: "Owner reserved one bounded AMUX v4 Agent analysis cost ceiling.",
+    metadata: { previewId: preview.id, priceVersionId: input.priceVersionId,
+      systemAuditId: auditId, reservedMicroUsd: decision.worstCaseMicroUsd,
+      namespace: AMUX_V4_ANALYSIS_NAMESPACE, modelCallStarted: false },
+  });
   return { holdId: input.holdId, previewId: preview.id,
     reservedMicroUsd: decision.worstCaseMicroUsd, auditId };
 }
