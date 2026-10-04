@@ -245,6 +245,13 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",
@@ -322,6 +329,9 @@ run(
     // sre-ops genesis chain and state: chain shape, compare-and-set generation,
     // checkpoint order, trigger stamps, immutability, and no late COMMIT.
     "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
     // sre-ops reservations: reserved then closed once by mode, one open at a
     // time, items only in their reservation's transaction and once per
     // incident kind, retention-only deletion, no late COMMIT.

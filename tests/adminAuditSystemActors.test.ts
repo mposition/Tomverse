@@ -51,6 +51,8 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-intake",
     "support-triage-worker",
     "support-triage-retention",
+    // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
+    "billing-finance-ops-intake",
     // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
     "qa-release-merge-lane",
   ]);

@@ -193,13 +193,13 @@ export const PROTECTED_TABLES = [
   {
     table: "QaReleaseMergeAttempt",
     delegate: "qaReleaseMergeAttempt",
-    writers: ["lib/qaReleaseMergeLaneStore.ts"],
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
     contract: "docs/policy/qa-release-agent.md §8",
   },
   {
     table: "QaReleaseMergeLaneLatch",
     delegate: "qaReleaseMergeLaneLatch",
-    writers: ["lib/qaReleaseMergeLaneStore.ts"],
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
     contract: "docs/policy/qa-release-agent.md §8",
   },
   {
@@ -530,25 +530,39 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
   },
   {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseOperatorControl",
     tableMentions: 3,
-    writeVerbs: 18,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and a person's latch release, which reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeAttempt",
-    tableMentions: 11,
-    writeVerbs: 18,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and a person's latch release, which reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event. No table name is interpolated; every value is a bound parameter.",
+    tableMentions: 9,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
   },
   {
     path: "lib/qaReleaseMergeLaneStore.ts",
     table: "QaReleaseMergeLaneLatch",
-    tableMentions: 8,
-    writeVerbs: 18,
-    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and a person's latch release, which reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
+    tableMentions: 4,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
   },
   {
     path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
@@ -597,6 +611,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 13,
     reason:
       "Creates the merge-lane attempt table, whose foreign key names the operator control revision it was issued under. It names write verbs to refuse or constrain them on the attempt table and writes no control row.",
+  },
+  {
+    path: "prisma/migrations/20261004000000_agent_digest_billing_finance_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 8,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
   },
   {
     path: "scripts/check-enum-constraints.mjs",
@@ -975,6 +997,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "scripts/ops-observer/statement-ceiling-core.mjs",
+    count: 2,
+    reason:
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
+  },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
     count: 1,
