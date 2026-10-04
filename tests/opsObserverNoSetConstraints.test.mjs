@@ -40,7 +40,7 @@ const REVIEWED_MENTIONS = {
   // Points back to the genesis and state migration's statement of that limit.
   "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql": 1,
   // Points back to the same statement of that limit.
-  "prisma/migrations/20261004010000_ops_observer_transition/migration.sql": 1,
+  "prisma/migrations/20261004030000_ops_observer_transition/migration.sql": 1,
 };
 
 function* walk(dir) {

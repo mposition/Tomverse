@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-import { recordAgentDigestItem } from "@/lib/agentDigestStore";
+import { expireAgentDigestBodies, purgeAgentDigestMeta, recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { prisma } from "@/lib/prisma";
 
 // lib/agentDigestStore.ts against PostgreSQL through the migration history:
@@ -179,4 +179,146 @@ test("an admission returning null lets the row and its audit entry commit", asyn
   if (result.status !== "created") return;
   createdIds.push(result.id);
   assert.equal(await auditCount(result.id), 1);
+});
+
+// docs/policy/billing-finance-ops.md §7 W1a: the registration migration widens
+// the CHECKs and the retention CASE. A billing-finance-ops row is accepted with
+// its own 90-day body retention and its own intake actor; a kind that belongs
+// to another agent is still refused by the database, not only by the store.
+test("billing-finance-ops is registered with its kind, retention and intake actor", async () => {
+  const result = await recordAgentDigestItem({
+    agentKey: "billing-finance-ops",
+    kind: "price_deadline_digest",
+    schemaVersion: 1,
+    idempotencyKey: `billing-finance-ops:test:${randomUUID()}`,
+    payload: { verdict: "quiet", items: [], rejectedFields: [] },
+  });
+  assert.equal(result.status, "created");
+  if (result.status !== "created") return;
+  createdIds.push(result.id);
+
+  const row = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: result.id } });
+  assert.equal(row.retentionUntil.getTime() - row.createdAt.getTime(), 90 * 86_400_000);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditLogId } });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "billing-finance-ops-intake");
+
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
+       VALUES ($1::uuid, 'billing-finance-ops', 'daily_digest', 1, $2, '{}'::jsonb, $3, 2)`,
+      randomUUID(),
+      `billing-finance-ops:test:${randomUUID()}`,
+      "0".repeat(64),
+    ),
+    /AgentDigestItem_kind_check/,
+  );
+});
+
+// The switch row the registration migration seeds is pinned on the migration's
+// SQL in tests/agentDigestContract.test.mjs, not here: other suites in this
+// lane clear AppSetting, so whether the row is still present when this file
+// runs depends on test order, not on the migration.
+
+// The function returns void, so it is called with $executeRawUnsafe (as the
+// support_triage_assert_deadline tests do) rather than selected as a value.
+// The boundary itself -- a run is refused only when the clock is strictly past
+// the deadline -- cannot be hit with a live clock, so it is pinned on the
+// function's text in tests/agentDigestContract.test.mjs; here the two sides of
+// it are shown with a margin.
+test("billing_finance_ops_assert_deadline passes before the deadline and raises after it or on NULL", async () => {
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline(clock_timestamp() + interval '1 minute')`,
+  );
+  // A deadline passed from the application goes as an ISO instant with its Z.
+  // Prisma sends a JS Date as a timestamp without a zone, which `::timestamptz`
+  // then reads in the session's time zone -- on a +10:00 server that moved
+  // this one-minute deadline ten hours into the past.
+  await prisma.$executeRawUnsafe(
+    `SELECT billing_finance_ops_assert_deadline($1::timestamptz)`,
+    new Date(Date.now() + 60_000).toISOString(),
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(clock_timestamp() - interval '1 second')`),
+    /billing_finance_ops_deadline_passed/,
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`SELECT billing_finance_ops_assert_deadline(NULL)`),
+    /billing_finance_ops_deadline_passed/,
+  );
+});
+
+// docs/policy/billing-finance-ops.md §1.4: the two retention batches. A row's
+// clock columns are immutable through the application, so the test backdates
+// them with the update trigger disabled -- the only way to make a row old
+// without waiting a year.
+const backdate = async (id: string, days: number) => {
+  await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" DISABLE TRIGGER "AgentDigestItem_before_update"`);
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AgentDigestItem"
+         SET "createdAt" = "createdAt" - make_interval(days => $2::int),
+             "retentionUntil" = "retentionUntil" - make_interval(days => $2::int)
+       WHERE "id" = $1::uuid`,
+      id,
+      days,
+    );
+  } finally {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "AgentDigestItem" ENABLE TRIGGER "AgentDigestItem_before_update"`);
+  }
+};
+
+test("body expiry clears only bodies past their retention, stamps the deletion, and audits the batch", async () => {
+  const expired = await recordAgentDigestItem(submission({ n: 1 }));
+  const fresh = await recordAgentDigestItem(submission({ n: 2 }));
+  assert.equal(expired.status, "created");
+  assert.equal(fresh.status, "created");
+  if (expired.status !== "created" || fresh.status !== "created") return;
+  createdIds.push(expired.id, fresh.id);
+  await backdate(expired.id, 91);
+
+  const result = await expireAgentDigestBodies();
+  assert.ok(result.expired >= 1);
+
+  const gone = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: expired.id } });
+  assert.equal(gone.payload, null);
+  assert.ok(gone.bodyDeletedAt);
+  assert.equal(gone.payloadSha256, expired.payloadSha256);
+  const kept = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: fresh.id } });
+  assert.notEqual(kept.payload, null);
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "agent_digest.bodies_expired" },
+    orderBy: { createdAt: "desc" },
+  });
+  const metadata = audit.metadata as Record<string, unknown>;
+  assert.equal(metadata.systemActor, "agent-digest-retention");
+  assert.equal(metadata.expired, result.expired);
+});
+
+test("the meta purge deletes only rows whose body is gone and whose 365 days are up", async () => {
+  const old = await recordAgentDigestItem(submission({ n: 3 }));
+  const bodied = await recordAgentDigestItem(submission({ n: 4 }));
+  const young = await recordAgentDigestItem(submission({ n: 5 }));
+  if (old.status !== "created" || bodied.status !== "created" || young.status !== "created") throw new Error("setup");
+  createdIds.push(old.id, bodied.id, young.id);
+  await backdate(old.id, 400);
+  await backdate(bodied.id, 400);
+  await backdate(young.id, 100);
+  // The first and the third lose their bodies. The second keeps its body and
+  // the third is only 100 days old, so both must survive the purge.
+  await prisma.$executeRawUnsafe(`UPDATE "AgentDigestItem" SET "payload" = NULL WHERE "id" = $1::uuid`, old.id);
+  await prisma.$executeRawUnsafe(`UPDATE "AgentDigestItem" SET "payload" = NULL WHERE "id" = $1::uuid`, young.id);
+
+  const result = await purgeAgentDigestMeta();
+  assert.ok(result.purged >= 1);
+  assert.equal(await prisma.agentDigestItem.count({ where: { id: old.id } }), 0);
+  assert.equal(await prisma.agentDigestItem.count({ where: { id: bodied.id } }), 1);
+  const youngRow = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: young.id } });
+  assert.ok(youngRow.bodyDeletedAt, "the young row's body is gone");
+
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "agent_digest.meta_purged" },
+    orderBy: { createdAt: "desc" },
+  });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "agent-digest-retention");
 });

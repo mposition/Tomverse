@@ -200,6 +200,10 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push 금지**다. 이 가정을
   푸는 방법은 job별 제외가 아니라, cache의 ref 간 공유 범위에 대한 날짜 있는 확인
   기록 하나를 분석기 설정에 고정하는 것뿐이다.
+  **그 설정은 `lib/agentCacheIsolationRecord.ts`이고, 기록은 초안 상태로 거기 있다**
+  — 세 방향과 각 근거는 채워져 있고 `approvedBy`·`approvedAt`가 비어 있다. 두 칸을
+  채우는 것이 이 규칙을 푸는 행위이며 **소유자만 한다**(§7). 비어 있는 동안 기록은
+  아무것도 풀지 않는다.
   분석기는 복원하는 cache의 **종류**도 함께 보고하지만(§5.1), 그것이 이 규칙을
   좁히지는 않는다 — 어떤 종류든 복원하면 금지다.
 - **그 기록이 담아야 하는 것**(§5.1): 기록은 **방향을 구분해서** 써야 하고, 아래
@@ -297,6 +301,15 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   기록을 참으로 유지하는 장치가 꺼진다. `tests/agentPrCacheIsolation.test.mjs`가
   이것을 고정한다.
 - 이 검사도 **이름을 출력하지 않는다**(§16). 수치만 남긴다.
+- **기록을 적용하는 쪽은 먼저 기록을 무시한 분석으로 판정한다.** 기록을 적용한
+  분석은 cache 이유를 아예 보고하지 않으므로, 그 분석으로 이 조건을 물으면 조건이
+  참이어서가 아니라 **증거가 가려져서** 충족으로 보인다. 그래서 소비자
+  (`scripts/report-engineering-agent-tiers.mjs`)는 `cacheIsolationRecorded: false`로
+  한 번 판정하고, 서명과 그 판정이 **둘 다** 성립할 때만 기록을 적용한다.
+  `tests/agentCacheIsolationRecord.test.mjs`가 이 순서를 고정한다.
+- **서명이 조건보다 오래 살지 않는다.** 같은 테스트가 "기록이 서명됐는데 이 조건이
+  깨진" 상태를 실패로 만든다. 서명은 한 파일의 두 칸이지만, 그 칸이 참이 아닌 상태를
+  만들 수는 없다.
 
 ## 6. 신뢰 경계와 외부 텍스트
 
