@@ -266,7 +266,7 @@ export const PROTECTED_TABLES = [
     table: "AmuxCliUsageInvocation",
     delegate: "amuxCliUsageInvocation",
     writers: [],
-    contract: "docs/policy/development-agent-orchestration.md v22 §5, v25",
+    contract: "docs/policy/development-agent-orchestration.md v22 and v25",
   },
   {
     table: "AmuxCliUsageAggregateFinalization",

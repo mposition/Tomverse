@@ -3,7 +3,7 @@ import { AMUX_V4_IDEA_AGENT_ID } from "./ideaIdentityCore.ts";
 
 /** An independent v4 intake bridge. The existing AMUX sync credential cannot
  * discover operator ideas, and this read latch remains dark until activation. */
-export const AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH = false;
+export const AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH = true;
 export const AMUX_V4_ANALYSIS_QUEUE_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ";
 export const AMUX_V4_ANALYSIS_AGENT_SECRET_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET";
 export const AMUX_V4_ANALYSIS_AGENT_ID = AMUX_V4_IDEA_AGENT_ID;

@@ -39,6 +39,6 @@ test("the v4 initial source-plan writer has only its closed Admin access caller"
   assert.match(route, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
   assert.match(route, /!initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);
   assert.match(access, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
-  assert.match(core, /AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED = false/);
-  assert.match(core, /AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED = false/);
+  assert.match(core, /AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED = true/);
+  assert.match(core, /AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED = true/);
 });

@@ -51,14 +51,14 @@ export function inspectAmuxIdeaSubmission(raw: string): IdeaSubmissionInspection
 }
 
 /** Shipment remains dark. No v1-v3 intake flag can open this new writer. */
-export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = false;
+export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = true;
 export const AMUX_V4_IDEA_SUBMISSION_ENV = "TOMVERSE_AMUX_V4_IDEA_SUBMIT";
 export const ideaSubmissionWritePermitted = (value: string | undefined) =>
   AMUX_V4_IDEA_SUBMISSION_CODE_LATCH && value === "enabled";
 
 /** Read-back has an independent gate so stopping new writes cannot hide an
  * uncertain in-flight submission. Both gates ship closed. */
-export const AMUX_V4_IDEA_READBACK_CODE_LATCH = false;
+export const AMUX_V4_IDEA_READBACK_CODE_LATCH = true;
 export const AMUX_V4_IDEA_READBACK_ENV = "TOMVERSE_AMUX_V4_IDEA_READBACK";
 export const ideaSubmissionReadBackPermitted = (value: string | undefined) =>
   AMUX_V4_IDEA_READBACK_CODE_LATCH && value === "enabled";

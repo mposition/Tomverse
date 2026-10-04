@@ -27,8 +27,10 @@ test("an exact owner choice is admitted without enabling a live transfer", () =>
       approvalId: input.approvalId, approvalVersion: input.approvalVersion,
     },
   });
-  assert.equal(transferPreviewWritePermitted("enabled"), false);
-  assert.equal(transferPreviewReadPermitted("enabled"), false);
+  assert.equal(transferPreviewWritePermitted(undefined), false);
+  assert.equal(transferPreviewReadPermitted(undefined), false);
+  assert.equal(transferPreviewWritePermitted("enabled"), true);
+  assert.equal(transferPreviewReadPermitted("enabled"), true);
 });
 
 test("model substitutions and malformed request metadata fail closed", () => {

@@ -2,7 +2,7 @@ import type { AmuxAnalysisChunk } from "./ideaAnalysisChunkCore.ts";
 import { AMUX_TASK_ROLE_PROPOSALS, AMUX_EXECUTION_GRADE_PROPOSALS } from "./ideaAnalysisVocabulary.ts";
 
 export const AMUX_V4_ANALYSIS_RESULT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ";
-export const AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED = false;
+export const AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED = true;
 
 export const amuxV4AnalysisResultReadEnabled = (value: string | undefined): boolean =>
   AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED && value === "enabled";

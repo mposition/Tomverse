@@ -14,7 +14,7 @@ import { commitAmuxIdeaOnlyAnalysisClaim,
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
 import { prisma } from "@/lib/prisma";
 
-const CLAIM_CODE_LATCH = false;
+const CLAIM_CODE_LATCH = true;
 const CLAIM_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE";
 // Read-back is independently gated so turning off writes cannot prevent an
 // operator from reconciling a lost claim response. It never returns a prompt.

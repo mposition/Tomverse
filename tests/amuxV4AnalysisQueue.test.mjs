@@ -58,7 +58,7 @@ test("only the guarded claim route calls the production claim service", async ()
   const route = await readFile(join(root,
     "app/api/internal/amux/v4/analysis-claim/route.ts"), "utf8");
   assert.match(route, /await takeAuditChainLock\(tx\);[\s\S]*?await enforceAmuxV4DailyClaimLimit\(tx\);[\s\S]*?commitAmuxIdeaOnlyAnalysisClaim\(tx,/);
-  assert.match(route, /const CLAIM_CODE_LATCH = false/);
+  assert.match(route, /const CLAIM_CODE_LATCH = true/);
 });
 const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
   "https://tomverse.example/api/internal/amux/v4/analysis-queue", {
@@ -66,10 +66,11 @@ const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
       "x-amux-agent-id": agentId },
   });
 
-test("AMUX v4 analysis queue uses a dedicated identity and stays dark", () => {
+test("AMUX v4 analysis queue uses a dedicated identity and switch", () => {
   assert.equal(AMUX_V4_ANALYSIS_AGENT_ID, AMUX_V4_IDEA_AGENT_ID);
-  assert.equal(AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH, false);
-  assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), false);
+  assert.equal(AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH, true);
+  assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), true);
+  assert.equal(amuxV4AnalysisQueueReadEnabled(undefined), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), secret), true);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), secret, secret), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret, "amux-orchestrator"), secret), false);
@@ -86,7 +87,7 @@ test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before
   const originalSyncSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   try {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
-    process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV] = "enabled";
+    delete process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV];
     delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     const denied = await POST(new Request("https://tomverse.example/api/internal/amux/v4/analysis-queue",
       { method: "POST" }));
