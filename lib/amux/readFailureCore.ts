@@ -86,8 +86,8 @@ const TRANSIENT_SOCKET_CODES = new Set([
 /** Enough for every wrapper Prisma and the pg adapter put around one error. */
 const MAX_ERROR_NODES = 16;
 
-/** A PostgreSQL code nested by Prisma/adapter-pg, without reading error text. */
-export const amuxDatabaseSqlState = (error: unknown): string | null => {
+/** A short nested database/driver code, without reading error text. */
+export const amuxDatabaseDiagnosticCode = (error: unknown): string | null => {
   const seen = new Set<unknown>();
   const queue: unknown[] = [error];
   while (queue.length > 0 && seen.size < MAX_ERROR_NODES) {

@@ -16,7 +16,6 @@ import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
-  amuxDatabaseSqlState,
   amuxTransactionNotStartedCode,
   amuxTransientDatabaseCode,
   isAmuxDbBusyCode,
@@ -126,6 +125,26 @@ const amuxOutcomeUnknownResponse = (
  * policy version 20, section 1): busy, deadline exceeded, call ceiling
  * exceeded. Mirrors the branch order below.
  */
+const isKnownDeadlineFailure = (
+  error: unknown,
+  databaseCode: string | null,
+  databaseError: string,
+): boolean => {
+  if (error instanceof AmuxDbBoundaryError) {
+    return error.code === "AMUX_DB_DEADLINE_EXCEEDED";
+  }
+  // A running transaction's P2028 is still outcome-unknown, even if its
+  // nested adapter cause mentions a statement timeout.
+  if (error && typeof error === "object" && "code" in error && error.code === "P2028") {
+    return false;
+  }
+  return (
+    databaseCode === "57014" ||
+    databaseError.includes("57014") ||
+    amuxTransientDatabaseCode(error) === "57014"
+  );
+};
+
 const answersNothingCommitted = (error: unknown): boolean => {
   if (error instanceof AmuxDbBoundaryError && isAmuxDbBusyCode(error.code)) {
     return true;
@@ -144,13 +163,7 @@ const answersNothingCommitted = (error: unknown): boolean => {
     typeof candidate?.meta?.database_error === "string"
       ? candidate.meta.database_error
       : "";
-  if (
-    (error instanceof AmuxDbBoundaryError &&
-      error.code === "AMUX_DB_DEADLINE_EXCEEDED") ||
-    databaseCode === "57014" ||
-    databaseError.includes("57014") ||
-    (!(error instanceof AmuxDbBoundaryError) && amuxDatabaseSqlState(error) === "57014")
-  ) {
+  if (isKnownDeadlineFailure(error, databaseCode, databaseError)) {
     return true;
   }
   return (
@@ -247,13 +260,7 @@ export const amuxInternalErrorResponse = (
       ? candidate.meta.database_error
       : "";
 
-  if (
-    (error instanceof AmuxDbBoundaryError &&
-      error.code === "AMUX_DB_DEADLINE_EXCEEDED") ||
-    databaseCode === "57014" ||
-    databaseError.includes("57014") ||
-    (!(error instanceof AmuxDbBoundaryError) && amuxDatabaseSqlState(error) === "57014")
-  ) {
+  if (isKnownDeadlineFailure(error, databaseCode, databaseError)) {
     return amuxJsonNoStore(
       {
         error: "AMUX database deadline exceeded.",
