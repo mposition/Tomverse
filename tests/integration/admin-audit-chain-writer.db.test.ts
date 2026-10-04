@@ -30,17 +30,15 @@ const reset = () =>
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
-      "EngineeringAgentApproval",
-      -- These dark v4 tables are empty in this lane; list the complete FK
-      -- closure instead of cascading into unrelated data.
-      "AmuxIdeaUnitDecision",
-      "AmuxIdeaDraftUnit",
-      "AmuxIdeaTransferPreview",
       "AmuxIdeaAnalysisChunk",
-      "AmuxIdeaSourceScopeApproval",
-      "AmuxIdeaSourcePlanRevision",
-      "AmuxIdeaSubmission",
+      "AmuxIdeaDraftUnit",
       "AmuxIdeaFrontierModelApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaUnitDecision",
+      "EngineeringAgentApproval",
       "AdminAuditLog"
     RESTART IDENTITY
   `);
