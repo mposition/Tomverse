@@ -55,9 +55,12 @@ function connection(env: NodeJS.ProcessEnv) {
   const endpoint = env.AMUX_V4_KEY_STORE_ENDPOINT;
   const accessKeyId = env.AMUX_V4_KEY_STORE_ACCESS_KEY_ID;
   const secretAccessKey = env.AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY;
+  const secureEndpoint = !!endpoint && /^https:\/\/[^/?#]+\/?$/.test(endpoint);
+  const testLoopback = env.NODE_ENV === "test" && !!endpoint &&
+    /^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/?$/.test(endpoint);
   if (!bucket || !BUCKET.test(bucket) || !region || !REGION.test(region) ||
       !endpoint || !accessKeyId || !secretAccessKey ||
-      !/^https:\/\/[^/?#]+\/?$/.test(endpoint)) {
+      (!secureEndpoint && !testLoopback)) {
     throw new AmuxIdeaKeyStoreError("unavailable");
   }
   return { bucket, client: new S3Client({ region, endpoint,
