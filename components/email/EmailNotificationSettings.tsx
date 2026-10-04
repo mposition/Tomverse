@@ -519,14 +519,18 @@ export function EmailNotificationSettings() {
                                             togglePreference(preference)
                                         }
                                         data-testid={`email-preference-${preference.purpose}-toggle`}
+                                        // On is green and off is grey in both
+                                        // themes, with a white knob on either:
+                                        // the state reads from colour as well
+                                        // as from the knob's side.
                                         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
                                             preference.enabled
-                                                ? "bg-zinc-900 dark:bg-white"
-                                                : "bg-zinc-300 dark:bg-zinc-700"
+                                                ? "bg-status-switch-on-500"
+                                                : "bg-zinc-300 dark:bg-zinc-600"
                                         }`}
                                     >
                                         <span
-                                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform dark:bg-zinc-950 ${
+                                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
                                                 preference.enabled
                                                     ? "translate-x-[22px]"
                                                     : "translate-x-0.5"

@@ -2040,12 +2040,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   test("an undispatched saved Chat Message is reported only on its originating conversation", async ({ page }, testInfo) => {
-    const viewport = testInfo.project.name.includes("mobile")
+    const isMobileProject = testInfo.project.name.includes("mobile");
+    const viewport = isMobileProject
       ? MOBILE_VIEWPORT
       : DESKTOP_VIEWPORT;
-    const remountViewport = testInfo.project.name.includes("mobile")
+    const remountViewport = isMobileProject
       ? DESKTOP_VIEWPORT
       : MOBILE_VIEWPORT;
+    const activeShell = page.getByTestId(isMobileProject ? "mobile-chat-shell" : "desktop-chat-shell");
+    const remountShell = page.getByTestId(isMobileProject ? "desktop-chat-shell" : "mobile-chat-shell");
     const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
       { id: `abandoned-user-${index}`, role: "user", content: `Abandoned question ${index + 1}.` },
       { id: `abandoned-answer-${index}`, role: "assistant", modelId: MODEL_A,
@@ -2063,8 +2066,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await submitComposer(page, prompt, viewport.width);
     await expect.poll(state.messageSaveStarted).toBe(true);
     await page.setViewportSize(remountViewport);
-    await page.setViewportSize(viewport);
+    await expect(remountShell).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await page.setViewportSize(viewport);
+    await expect(activeShell).toBeVisible();
 
     state.releaseMessageSave();
     await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
@@ -2096,12 +2101,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   test("a full Chat unmount preserves one saved-undispatched notice for the same conversation", async ({ page }, testInfo) => {
     const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
-    const viewport = testInfo.project.name.includes("mobile")
+    const isMobileProject = testInfo.project.name.includes("mobile");
+    const viewport = isMobileProject
       ? MOBILE_VIEWPORT
       : DESKTOP_VIEWPORT;
-    const remountViewport = testInfo.project.name.includes("mobile")
+    const remountViewport = isMobileProject
       ? DESKTOP_VIEWPORT
       : MOBILE_VIEWPORT;
+    const activeShell = page.getByTestId(isMobileProject ? "mobile-chat-shell" : "desktop-chat-shell");
+    const remountShell = page.getByTestId(isMobileProject ? "desktop-chat-shell" : "mobile-chat-shell");
     const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
       { id: `unmount-user-${index}`, role: "user", content: `Unmount question ${index + 1}.` },
       { id: `unmount-answer-${index}`, role: "assistant", modelId: MODEL_A,
@@ -2119,8 +2127,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await submitComposer(page, prompt, viewport.width);
     await expect.poll(state.messageSaveStarted).toBe(true);
     await page.setViewportSize(remountViewport);
-    await page.setViewportSize(viewport);
+    await expect(remountShell).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await page.setViewportSize(viewport);
+    await expect(activeShell).toBeVisible();
     state.releaseMessageSave();
     await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
     expect(await persistentChatPostCount(page)).toBe(0);
@@ -2144,12 +2154,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   test("re-clicking the active Chat row preserves and consumes its saved-undispatched notice once", async ({ page }, testInfo) => {
     const savedNoticeCopy = /Your question was saved, but no answer request was sent\.|질문은 저장되었지만 답변 요청은 전송되지 않았습니다\./;
-    const viewport = testInfo.project.name.includes("mobile")
+    const isMobileProject = testInfo.project.name.includes("mobile");
+    const viewport = isMobileProject
       ? MOBILE_VIEWPORT
       : DESKTOP_VIEWPORT;
-    const remountViewport = testInfo.project.name.includes("mobile")
+    const remountViewport = isMobileProject
       ? DESKTOP_VIEWPORT
       : MOBILE_VIEWPORT;
+    const activeShell = page.getByTestId(isMobileProject ? "mobile-chat-shell" : "desktop-chat-shell");
+    const remountShell = page.getByTestId(isMobileProject ? "desktop-chat-shell" : "mobile-chat-shell");
     const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
       { id: `reclick-user-${index}`, role: "user", content: `Re-click question ${index + 1}.` },
       { id: `reclick-answer-${index}`, role: "assistant", modelId: MODEL_A,
@@ -2175,8 +2188,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await submitComposer(page, prompt, viewport.width);
     await expect.poll(state.messageSaveStarted).toBe(true);
     await page.setViewportSize(remountViewport);
-    await page.setViewportSize(viewport);
+    await expect(remountShell).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await page.setViewportSize(viewport);
+    await expect(activeShell).toBeVisible();
     state.releaseMessageSave();
     await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
 
@@ -2488,12 +2503,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   test("cancelling a locked conversation selection does not abandon the current saved turn", async ({ page }, testInfo) => {
-    const viewport = testInfo.project.name.includes("mobile")
+    const isMobileProject = testInfo.project.name.includes("mobile");
+    const viewport = isMobileProject
       ? MOBILE_VIEWPORT
       : DESKTOP_VIEWPORT;
-    const remountViewport = testInfo.project.name.includes("mobile")
+    const remountViewport = isMobileProject
       ? DESKTOP_VIEWPORT
       : MOBILE_VIEWPORT;
+    const activeShell = page.getByTestId(isMobileProject ? "mobile-chat-shell" : "desktop-chat-shell");
+    const remountShell = page.getByTestId(isMobileProject ? "desktop-chat-shell" : "mobile-chat-shell");
     const savedMessages: QaConversationMessage[] = Array.from({ length: 26 }, (_, index) => ([
       { id: `locked-user-${index}`, role: "user", content: `Locked question ${index + 1}.` },
       { id: `locked-answer-${index}`, role: "assistant", modelId: MODEL_A,
@@ -2510,8 +2528,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await submitComposer(page, "A saved turn remains owned by A.", viewport.width);
     await expect.poll(state.messageSaveStarted).toBe(true);
     await page.setViewportSize(remountViewport);
-    await page.setViewportSize(viewport);
+    await expect(remountShell).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
+    await page.setViewportSize(viewport);
+    await expect(activeShell).toBeVisible();
     state.releaseMessageSave();
     await expect.poll(state.messageSaveResponseSettledCount).toBe(1);
 
@@ -2527,7 +2547,9 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     // selection. A responsive cleanup/remount must therefore keep A's
     // selection ticket and must not manufacture an abandonment notice.
     await page.setViewportSize(remountViewport);
+    await expect(remountShell).toBeVisible();
     await page.setViewportSize(viewport);
+    await expect(activeShell).toBeVisible();
     await expect(page.getByTestId("app-toast").filter({
       hasText: "Your question was saved, but no answer request was sent.",
     })).toHaveCount(0);

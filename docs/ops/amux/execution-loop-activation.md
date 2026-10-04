@@ -2,6 +2,8 @@
 
 정책: `docs/policy/development-agent-orchestration.md` 버전 15. 이 문서는 환경 변수를 설정하지 않는다. 각 단계는 운영자가 하고, 단계마다 결과를 읽은 뒤 다음으로 간다.
 
+이 절차의 WSL 명령은 기존 호스트 기록이다. 전용 Ubuntu 서버로 옮긴 bridge는 승인된 정책 v23과 `docs/ops/amux/wsl-execution-bridge.md`의 Ubuntu 이전 절에 적힌 운영 게이트를 통과한 뒤에만 활성화한다. 현재 새 서버의 제품 bridge는 비활성이다.
+
 ## 무엇이 이어지는가
 
 | 단계 | 주체 | 결과 |

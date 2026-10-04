@@ -60,29 +60,42 @@ import {
  * before the gate counts it, because the gate cannot tell an edit that keeps the
  * amendment from one that removes it.
  */
-export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]>> = {};
+export const APPROVED_AMENDED_DIGESTS: Readonly<Record<string, readonly string[]>> = {
+  // docs/policy/email-policy-amendment-draft.md §2, §3 and §5, approved by
+  // mposition on 2026-10-03: the email clause in seven languages, the terms
+  // clause in en, ko and zh, both effective 2026-11-16.
+  "/privacy": ["5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7"],
+  "/terms": ["5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709"],
+};
 
 /**
- * The current state of each amended document that is not a sitemap page.
+ * The current state of each amended document whose date the sitemap may not
+ * publish.
  *
  * `SITEMAP_CONTENT_EVIDENCE` only holds pages whose shown date the sitemap may
- * publish, and `/terms` is not one: its "Last updated" line did not move with
- * every edit (lib/sitemapContentDates.ts). So its state is recorded here, beside
- * a verifier that recomputes it. Checked first; a sitemap entry answers for
- * `/privacy`.
+ * publish. `/terms` is not one: its "Last updated" line did not move with every
+ * edit (lib/sitemapContentDates.ts). `/privacy` is not one while its shown date
+ * is a future effective date. So their state is recorded here, beside a
+ * verifier that recomputes it. This table is read first; a sitemap entry would
+ * answer only for a document not listed here.
  *
- * `/terms` today: the July 15 page, before the section 5 clause (docs/policy/
- * email-consent-copy-draft.md) is added. The gate still reports it as
- * `document_state_unrecorded` while no amended version is approved; the record
- * is what an approved digest will be compared against, and what the verifier
- * holds to the page now.
+ * Both documents today: the S10 amendment as approved on 2026-10-03, effective
+ * 2026-11-16. `/privacy` is here too, not in the sitemap table, while that
+ * date is in the future: a sitemap lastmod may not be a day that has not come
+ * (lib/sitemapContentDates.ts).
  */
 export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
   Record<string, { date: string; contentSha256: string }>
 > = {
+  // Here rather than in the sitemap's table while its effective date is in the
+  // future (lib/sitemapContentDates.ts).
+  "/privacy": {
+    date: "2026-11-16",
+    contentSha256: "5052379184eb3c41f3c50986db4b4587a22d0b3814247852150a5539cd1307b7",
+  },
   "/terms": {
-    date: "2026-07-15",
-    contentSha256: "6bd214059b552e38abd9c89d41eecd6fdfa98cad3a8705f7dec54f0f84929932",
+    date: "2026-11-16",
+    contentSha256: "5a2e6339c29b7b8892add806418f5d24b2681a58a426808531ff639e617a4709",
   },
 };
 
@@ -101,7 +114,7 @@ export const AMENDED_DOCUMENT_EVIDENCE: Readonly<
  * previous version called the document verified whichever one it read.
  */
 export const DIGEST_VERIFIED_BY: Readonly<Record<string, { record: "sitemap" | "amended" }>> = {
-  "/privacy": { record: "sitemap" },
+  "/privacy": { record: "amended" },
   "/terms": { record: "amended" },
 };
 

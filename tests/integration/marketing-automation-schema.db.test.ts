@@ -339,6 +339,16 @@ beforeEach(async () => {
       "AmuxIdeaTransferPreview",
       "AmuxIdeaUnitDecision",
       "EngineeringAgentApproval",
+      -- These dark v4 tables are empty in this lane; list the complete FK
+      -- closure instead of cascading into unrelated data.
+      "AmuxIdeaUnitDecision",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaFrontierModelApproval",
       "AdminAuditLog"
     RESTART IDENTITY
   `);
