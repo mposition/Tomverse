@@ -53,6 +53,10 @@ test("the system actor list is closed and changes only by review", () => {
     "support-triage-retention",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
+    "support-triage-account-deletion",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
     // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
     "ops-observer",
   ]);
