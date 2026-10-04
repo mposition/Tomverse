@@ -24,11 +24,14 @@ const SHAPES = Object.freeze({
   confirm: Object.freeze({ runDeadline: "deadline", deliveryId: "uuid", runId: "runId" }),
 });
 
+export { UUID as UUID_PATTERN, RUN_ID as RUN_ID_PATTERN };
+
 export const REQUEST_ROUTES = Object.freeze(Object.keys(SHAPES));
 
 const refuse = (error) => ({ ok: false, error });
 
-function deadline(value, nowMs) {
+/** The run deadline of any request, or null: an ISO instant in (now, now + 180 s]. */
+export function parseRunDeadline(value, nowMs) {
   if (typeof value !== "string" || !ISO_INSTANT.test(value)) return null;
   const ms = Date.parse(value);
   if (!Number.isFinite(ms) || ms <= nowMs || ms > nowMs + RUN_DEADLINE_MS) return null;
@@ -68,7 +71,7 @@ export function parseOpsObserverRequest(route, bodyText, nowMs) {
   for (const [key, kind] of Object.entries(shape)) {
     const raw = body[key];
     if (kind === "deadline") {
-      const parsed = deadline(raw, nowMs);
+      const parsed = parseRunDeadline(raw, nowMs);
       if (!parsed) return refuse("deadline_invalid");
       value[key] = parsed;
     } else if (kind === "uuid") {
