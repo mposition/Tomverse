@@ -8,6 +8,7 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import {
   readAvailableFrontierModels,
   readCheckedFrontierSelection,
@@ -41,16 +42,18 @@ const receiptStore = (): Storage | null => {
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  analysisBudgetAvailable, ideaId, planReady, continuationSelection,
+  analysisBudgetAvailable, catalogWriteAvailable, ideaId, planReady, continuationSelection,
   declaredExternalSources, operatorId, onCheckedCollectionModel }: {
   available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
+  catalogWriteAvailable: boolean;
   ideaId: string | null;
   continuationSelection?: { chunkIndex: number; pinnedTargetRefs: string[] } | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
   onCheckedCollectionModel?: (model: CheckedCollectionModel | null) => void;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
+  const cost = useAdminMessages(adminAmuxAnalysisBudgetMessages);
   const { locale } = useAdminLocale();
   const [models, setModels] = useState<AvailableFrontierModel[] | null>(null);
   const [loading, setLoading] = useState(available);
@@ -58,11 +61,17 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const [selectedApprovalId, setSelectedApprovalId] = useState("");
   const [selectedEffort, setSelectedEffort] = useState("");
   const [checking, setChecking] = useState(false);
+  const [catalogConfirm, setCatalogConfirm] = useState(false);
+  const [catalogPending, setCatalogPending] = useState(false);
+  const [catalogUnknownId, setCatalogUnknownId] = useState<string | null>(null);
+  const [catalogApproved, setCatalogApproved] = useState(false);
   const [checked, setChecked] = useState(false);
   const selectionVersion = useRef(0);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
+  const opusApproved = models?.some((model) => model.provider === "anthropic" &&
+    model.modelId === "claude-opus-5-5" && model.allowedEfforts.includes("high"));
   const receiptScopeId = ideaId && continuationSelection ?
     `${ideaId}:c${continuationSelection.chunkIndex}` : ideaId;
 
@@ -401,6 +410,48 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       value.payloadDigestKeyId);
   };
 
+  const approveOpus = async () => {
+    if (!catalogWriteAvailable || !available || opusApproved || !catalogConfirm ||
+        catalogPending || catalogUnknownId) return;
+    const approvalId = crypto.randomUUID();
+    setCatalogUnknownId(approvalId);
+    setCatalogPending(true);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/frontier-models", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, action: "approve", approvalId,
+          provider: "anthropic", modelId: "claude-opus-5-5",
+          allowedEfforts: ["high"], expectedPreviousVersion: 0,
+          ownerConfirmedFrontierEligibility: true }),
+      });
+      const body: unknown = response.ok ? await response.json() : null;
+      if (!body || typeof body !== "object" ||
+          (body as Record<string, unknown>).approvalId !== approvalId ||
+          (body as Record<string, unknown>).status !== "approved") return;
+      await load(); setCatalogApproved(true); setCatalogUnknownId(null);
+    } catch { /* Lost response: only read back this ID. */ }
+    finally { setCatalogPending(false); }
+  };
+
+  const readCatalogApproval = async () => {
+    if (!catalogUnknownId || catalogPending) return;
+    setCatalogPending(true);
+    try {
+      const query = new URLSearchParams({ approvalId: catalogUnknownId });
+      const response = await adminFetch(`/api/admin/amux/ideas/frontier-models?${query}`,
+        { cache: "no-store" });
+      const body: unknown = response.ok ? await response.json() : null;
+      if (!body || typeof body !== "object" ||
+          (body as Record<string, unknown>).state !== "found") return;
+      const approval = (body as Record<string, unknown>).approval;
+      if (!approval || typeof approval !== "object" ||
+          (approval as Record<string, unknown>).id !== catalogUnknownId ||
+          (approval as Record<string, unknown>).status !== "approved") return;
+      await load(); setCatalogApproved(true); setCatalogUnknownId(null);
+    } catch { /* Preserve the unknown state and require another read. */ }
+    finally { setCatalogPending(false); }
+  };
+
   return (
     <section className="space-y-2 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
       aria-labelledby="amux-v4-frontier-models-heading">
@@ -419,6 +470,23 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {loading ? <p role="status">{m.frontierModelsLoading}</p> : null}
       {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       {models?.length === 0 ? <p role="status">{m.frontierModelsEmpty}</p> : null}
+      {available && catalogWriteAvailable && models && !opusApproved && !catalogUnknownId ?
+        <div className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+          <label className="flex items-center gap-2"><input type="checkbox"
+            checked={catalogConfirm} onChange={(event) => setCatalogConfirm(event.target.checked)} />
+            {cost.modelConfirm}</label>
+          <button type="button" onClick={() => void approveOpus()}
+            disabled={!catalogConfirm || catalogPending}
+            className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">
+            {cost.modelApprove}
+          </button>
+        </div> : null}
+      {catalogUnknownId ? <div className="space-y-2"><p role="alert">{cost.unknown}</p>
+        <button type="button" onClick={() => void readCatalogApproval()}
+          disabled={catalogPending} className="min-h-11 rounded-lg border border-zinc-500 px-4">
+          {cost.check}
+        </button></div> : null}
+      {catalogApproved ? <p role="status">{cost.modelApproved}</p> : null}
       {models && models.length > 0 ? (
         <div className="space-y-3">
           <label className="flex flex-col gap-1">

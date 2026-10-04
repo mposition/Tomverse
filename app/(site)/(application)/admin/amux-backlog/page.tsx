@@ -35,7 +35,9 @@ import {
 } from "@/lib/amux/ideaInitialSourcePlanCore";
 import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
+  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
   frontierCatalogReadPermitted,
+  frontierCatalogWritePermitted,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import {
   AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
@@ -136,6 +138,8 @@ export default async function AdminAmuxBacklogPage({
           sourceScopeApprovalAvailable={sourceScopeApprovalAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
+          catalogWriteAvailable={frontierModelsAvailable &&
+            frontierCatalogWritePermitted(process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV])}
           collectionRequestAvailable={sourceScopeApprovalAvailable && frontierModelsAvailable &&
             collectionRequestReadPermitted(process.env[AMUX_V4_COLLECTION_REQUEST_READ_ENV]) &&
             collectionRequestWritePermitted(process.env[AMUX_V4_COLLECTION_REQUEST_WRITE_ENV])}

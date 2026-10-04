@@ -80,13 +80,15 @@ function parsePullRequests(value: string): Array<{ repository: string; number: n
 
 export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvailable,
   sourceScopeApprovalAvailable,
-  initialPlanAvailable, frontierModelsAvailable, collectionRequestAvailable,
+  initialPlanAvailable, frontierModelsAvailable, catalogWriteAvailable,
+  collectionRequestAvailable,
   collectionPreviewReadAvailable, transferPreviewAvailable,
   transferConfirmAvailable, analysisBudgetAvailable,
   analysisResultAvailable, recentAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   sourceScopeApprovalAvailable: boolean;
-  initialPlanAvailable: boolean; frontierModelsAvailable: boolean; collectionRequestAvailable: boolean;
+  initialPlanAvailable: boolean; frontierModelsAvailable: boolean;
+  catalogWriteAvailable: boolean; collectionRequestAvailable: boolean;
   collectionPreviewReadAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
@@ -633,6 +635,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       <AmuxFrontierModelsPanel
         key={submission.kind === "submitted" ? submission.ideaId : "none"}
         available={frontierModelsAvailable}
+        catalogWriteAvailable={catalogWriteAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
         analysisBudgetAvailable={analysisBudgetAvailable}

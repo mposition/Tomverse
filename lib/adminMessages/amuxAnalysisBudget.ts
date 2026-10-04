@@ -2,6 +2,9 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
   en: {
+    modelConfirm: "I verified this exact Frontier model and reasoning level",
+    modelApprove: "Approve Claude Opus 5.5 for analysis",
+    modelApproved: "The model is approved in the catalog. No analysis has started.",
     title: "Analysis cost approval",
     unavailable: "Analysis cost approval is disabled. No model will be called.",
     loading: "Checking the approved price and reservation…",
@@ -20,6 +23,9 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     expired: "The approved price has expired; a new verified price decision is required.",
   },
   ko: {
+    modelConfirm: "이 Frontier 모델과 추론 수준을 확인했습니다",
+    modelApprove: "Claude Opus 5.5 분석 모델 승인",
+    modelApproved: "모델 목록에 승인이 기록되었습니다. 분석은 시작되지 않았습니다.",
     title: "분석 비용 승인",
     unavailable: "분석 비용 승인이 비활성화되어 있습니다. 모델은 호출되지 않습니다.",
     loading: "승인 가격과 예약 상태를 확인하는 중…",

@@ -64,6 +64,8 @@ test("Admin budget step is shown only after transfer confirmation", async () => 
   const budget = await readFile(new URL(
     "../components/admin/AmuxAnalysisBudgetPanel.tsx", import.meta.url), "utf8");
   assert.match(panel, /confirmation\.kind === "confirmed" \? <AmuxAnalysisBudgetPanel/);
+  assert.match(panel, /ownerConfirmedFrontierEligibility: true/);
+  assert.match(panel, /catalogUnknownId \? <div/);
   assert.match(budget, /analysis-reservations\?\$\{query\}/);
   assert.match(budget, /setUnknown\("hold"\)/);
   assert.match(budget, /ownerConfirmedWorstTier: true/);
