@@ -417,3 +417,61 @@ export async function reportQaReleaseMergeResult(input: {
     throw error;
   }
 }
+
+/** The lane as the service sees it at the start of a round: one statement, no write, on the database clock. */
+export async function readQaReleaseMergeLaneState(): Promise<{
+  dbNowMs: number;
+  latched: boolean;
+  openAttempt: {
+    id: string;
+    state: "issued" | "consumed" | "awaiting_deploy";
+    pullRequestNumber: number;
+    headSha: string;
+    mergeCommitSha: string | null;
+    issuedAtMs: number;
+    mergeNotBeforeMs: number;
+  } | null;
+}> {
+  const [row] = await prisma.$queryRaw<
+    {
+      dbNowMs: bigint;
+      latched: boolean | null;
+      id: string | null;
+      state: string | null;
+      pullRequestNumber: number | null;
+      headSha: string | null;
+      mergeCommitSha: string | null;
+      issuedAtMs: bigint | null;
+      consumedAtMs: bigint | null;
+    }[]
+  >`SELECT
+      floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
+      (SELECT l."latched" FROM "QaReleaseMergeLaneLatch" l ORDER BY l."sequence" DESC LIMIT 1) AS "latched",
+      a."id", a."state", a."pullRequestNumber", a."headSha", a."mergeCommitSha",
+      floor(extract(epoch FROM a."issuedAt") * 1000)::bigint AS "issuedAtMs",
+      floor(extract(epoch FROM a."consumedAt") * 1000)::bigint AS "consumedAtMs"
+    FROM (SELECT 1) one
+    LEFT JOIN LATERAL (
+      SELECT * FROM "QaReleaseMergeAttempt" WHERE "state" IN ('issued', 'consumed', 'awaiting_deploy') LIMIT 1
+    ) a ON true`;
+  const issuedAtMs = row.issuedAtMs === null ? null : Number(row.issuedAtMs);
+  return {
+    dbNowMs: Number(row.dbNowMs),
+    latched: row.latched === true,
+    openAttempt:
+      row.id === null || issuedAtMs === null
+        ? null
+        : {
+            id: row.id,
+            state: row.state as "issued" | "consumed" | "awaiting_deploy",
+            pullRequestNumber: row.pullRequestNumber ?? 0,
+            headSha: row.headSha ?? "",
+            mergeCommitSha: row.mergeCommitSha,
+            issuedAtMs,
+            // The earliest the merge can have happened: its consume, or its
+            // issue when it was never consumed (an unreported merge placed by a
+            // re-read). Earlier is the safe side: waits run out sooner.
+            mergeNotBeforeMs: row.consumedAtMs === null ? issuedAtMs : Number(row.consumedAtMs),
+          },
+  };
+}
