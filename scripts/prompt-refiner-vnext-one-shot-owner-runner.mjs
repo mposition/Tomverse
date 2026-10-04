@@ -1,6 +1,8 @@
 // Owner-environment preflight only. Restricted input never leaves this process.
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { closeSync, constants, fsyncSync, openSync, unlinkSync,
+  writeFileSync } from "node:fs";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createPromptRefinerVnextOneShotAdapter } from
@@ -9,7 +11,10 @@ import { readVerifiedPromptRefinerVnextOneShotOwnerCase } from
   "./prompt-refiner-vnext-one-shot-owner-case.mjs";
 
 const SLOT_COUNT = 80;
+const CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER_KEY = /^(?:[0-9a-f]{2}){32,64}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const FORBIDDEN_DB_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(?:_|$)|^POSTGRES(?:_|$)|^PG(?:HOST|USER|PASSWORD|DATABASE|PORT|PASSFILE|SERVICEFILE)$|^DB_(?:HOST|USER|PASSWORD|DATABASE|PORT)$/i;
 // Catch common accidental credentials; the owner still runs in a clean environment.
 const FORBIDDEN_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(?:_|$)|^POSTGRES(?:_|$)|^PG(?:HOST|USER|PASSWORD|DATABASE|PORT|PASSFILE|SERVICEFILE)$|^DB_(?:HOST|USER|PASSWORD|DATABASE|PORT)$|(?:^|_)API_KEY$|^PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN$/i;
 const refuse = () => { throw new Error("owner_runner_preflight_unavailable"); };
@@ -91,7 +96,220 @@ export async function runPromptRefinerVnextOneShotOwnerPreflight(input) {
   }
 }
 
+const appOrigin = (value) => {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.origin !== value ||
+        url.username || url.password || url.search || url.hash) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+};
+
+const readSmallJson = async (response) => {
+  const body = await response.text();
+  if (Buffer.byteLength(body, "utf8") > 2048) return null;
+  try { return JSON.parse(body); } catch { return null; }
+};
+const admissionUnknown = (requestId, slotIndex) => Object.freeze({
+  status: "admission_outcome_unknown", requestId, slotIndex,
+  humanReviewRequired: true, retryAuthorized: false, dispatchAuthorized: false,
+});
+
+async function recordUnknownStop({ origin, headers, requestId, slotIndex,
+  runApprovalAuditLogId, slotConsumptionAuditLogId, reason }) {
+  try {
+    const stopped = await globalThis.fetch(
+      `${origin}/api/internal/prompt-refiner/vnext-one-shot-stop`, {
+        method: "POST", headers, redirect: "error", cache: "no-store",
+        body: JSON.stringify({ requestId, slotIndex, runApprovalAuditLogId,
+          slotConsumptionAuditLogId, reason }),
+      });
+    const receipt = stopped.status === 201 ? await readSmallJson(stopped) : null;
+    return Boolean(receipt &&
+      Object.keys(receipt).sort().join(",") ===
+        "dispatchAuthorized,humanReviewRequired,reservationHeld,retryAuthorized,stopAuditLogId" &&
+      typeof receipt.stopAuditLogId === "string" &&
+      receipt.stopAuditLogId.length > 0 && receipt.stopAuditLogId.length <= 128 &&
+      receipt.reservationHeld === true &&
+      receipt.humanReviewRequired === true && receipt.retryAuthorized === false &&
+      receipt.dispatchAuthorized === false);
+  } catch {
+    // The stop may have committed. The owner must read back the stage and audit.
+    return false;
+  }
+}
+
+/**
+ * One slot's owner-only send path. The app, not an input boolean, confirms the
+ * separately approved stage/run and consumes this slot before any generator is
+ * resolved. The switches are absent by default. Tests inject only transports.
+ */
+export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies = {}) {
+  const { manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex,
+    runApprovalAuditLogId, now, env = process.env } = input ?? {};
+  const origin = appOrigin(env?.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN);
+  const token = env?.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
+  const providerKey = env?.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY;
+  const runnerDigest = env?.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+  if (env?.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
+      !origin || typeof token !== "string" || token.length < 32 ||
+      token.length > 256 || typeof providerKey !== "string" ||
+      providerKey.length < 32 || !SHA256.test(runnerDigest ?? "") ||
+      !OWNER_KEY.test(ownerKeyHex ?? "") || !Number.isInteger(slotIndex) ||
+      slotIndex < 0 || slotIndex >= SLOT_COUNT ||
+      typeof runApprovalAuditLogId !== "string" ||
+      runApprovalAuditLogId.length < 1 || runApprovalAuditLogId.length > 128 ||
+      Object.entries(env).some(([key, value]) =>
+        FORBIDDEN_DB_ENV.test(key) && typeof value === "string" && value.length > 0)) {
+    return refuse();
+  }
+
+  const selected = readVerifiedPromptRefinerVnextOneShotOwnerCase({
+    manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex, now: now ?? new Date(),
+  });
+  if (selected.dispatchAuthorized !== false || !SHA256.test(selected.manifestRoot)) {
+    return refuse();
+  }
+  const requestId = randomUUID();
+  const fetchImpl = globalThis.fetch;
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  let grant;
+  let refused = false;
+  try {
+    const response = await fetchImpl(`${origin}/api/internal/prompt-refiner/vnext-one-shot-slot`, {
+      method: "POST", headers, redirect: "error", cache: "no-store",
+      body: JSON.stringify({ requestId, slotIndex, runApprovalAuditLogId,
+        manifestRoot: selected.manifestRoot, runnerDigest }),
+    });
+    if (response.status === 409 || response.status === 400 ||
+        response.status === 401 || response.status === 403 ||
+        response.status === 404) refused = true;
+    else if (response.status !== 201) return admissionUnknown(requestId, slotIndex);
+    else grant = await readSmallJson(response);
+  } catch {
+    // A lost response may follow a committed consumption. Never ask again.
+    return admissionUnknown(requestId, slotIndex);
+  }
+  if (refused) return refuse();
+  if (!grant || Object.keys(grant).sort().join(",") !==
+      "dispatchAuthorized,requestId,reservationConsumed,slotConsumptionAuditLogId,slotIndex" ||
+      grant.requestId !== requestId || grant.slotIndex !== slotIndex ||
+      grant.reservationConsumed !== true || grant.dispatchAuthorized !== true ||
+      typeof grant.slotConsumptionAuditLogId !== "string" ||
+      grant.slotConsumptionAuditLogId.length < 1 ||
+      grant.slotConsumptionAuditLogId.length > 128) {
+    return admissionUnknown(requestId, slotIndex);
+  }
+
+  // The app call can take time; rehash the sealed source once more immediately
+  // before the provider boundary. A consumed slot is never reused on drift.
+  let generate = dependencies.generate;
+  let languageModel = { provider: "openai.responses", modelId: "gpt-5.6-luna" };
+  let outcome;
+  try {
+    if (!generate) {
+      const [{ generateText }, { createOpenAI }] = await Promise.all([
+        import("ai"), import("@ai-sdk/openai"),
+      ]);
+      generate = generateText;
+      languageModel = createOpenAI({ apiKey: providerKey }).responses("gpt-5.6-luna");
+    }
+    const current = readVerifiedPromptRefinerVnextOneShotOwnerCase({
+      manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex, now: now ?? new Date(),
+    });
+    if (current.caseId !== selected.caseId ||
+        current.sourceText !== selected.sourceText ||
+        current.manifestRoot !== selected.manifestRoot) return refuse();
+    const adapter = createPromptRefinerVnextOneShotAdapter({ generate, languageModel });
+    outcome = await adapter({ requestId, sourceText: current.sourceText });
+  } catch {
+    outcome = { status: "outcome_unknown", reason: "response_unverified" };
+  }
+  if (outcome.status === "bounded_response") {
+    return Object.freeze({ status: "bounded_response", requestId, slotIndex,
+      slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
+      output: outcome.output,
+      costUpperBoundMicroUsd: outcome.costUpperBoundMicroUsd,
+      dispatchAuthorized: false });
+  }
+  const stopRecorded = await recordUnknownStop({ origin, headers,
+    requestId, slotIndex, runApprovalAuditLogId,
+    slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
+    reason: outcome.reason });
+  return Object.freeze({ status: "outcome_unknown", reason: outcome.reason,
+    requestId, slotIndex, slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
+    stopRecorded, humanReviewRequired: true, retryAuthorized: false,
+    dispatchAuthorized: false });
+}
+
 async function main(args) {
+  if (args[0] === "--dispatch-slot") {
+    if (args.length !== 13 || args[1] !== "--manifest" ||
+        args[3] !== "--binding" || args[5] !== "--seal" ||
+        args[7] !== "--slot" || args[9] !== "--run-audit" ||
+        args[11] !== "--result" || !args[12]) {
+      process.stderr.write("usage_invalid\n");
+      return 2;
+    }
+    try {
+      const resultPath = resolve(args[12]);
+      if (resultPath === CODE_ROOT || resultPath.startsWith(`${CODE_ROOT}${sep}`) ||
+          [args[2], args[4], args[6]].some((path) => resolve(path) === resultPath)) {
+        return refuse();
+      }
+      const descriptor = openSync(resultPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL |
+        (constants.O_NOFOLLOW ?? 0), 0o600);
+      let keepResult = false;
+      try {
+        const result = await runPromptRefinerVnextOneShotOwnerSlot({
+          manifestPath: args[2], bindingPath: args[4], sealPath: args[6],
+          slotIndex: Number(args[8]), runApprovalAuditLogId: args[10],
+          ownerKeyHex: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_OWNER_SEAL_KEY_HEX,
+        });
+        if (result.status !== "bounded_response") {
+          process.stdout.write(JSON.stringify(result) + "\n");
+          return 1;
+        }
+        try {
+          writeFileSync(descriptor, JSON.stringify({ slotIndex: result.slotIndex,
+            output: result.output }) + "\n", { encoding: "utf8" });
+          fsyncSync(descriptor);
+        } catch {
+          const stopRecorded = await recordUnknownStop({
+            origin: appOrigin(process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN),
+            headers: { authorization:
+              `Bearer ${process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN}`,
+              "content-type": "application/json" },
+            requestId: result.requestId, slotIndex: result.slotIndex,
+            runApprovalAuditLogId: args[10],
+            slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+            reason: "response_unverified",
+          });
+          process.stdout.write(JSON.stringify({ status: "outcome_unknown",
+            requestId: result.requestId, slotIndex: result.slotIndex,
+            stopRecorded, humanReviewRequired: true, retryAuthorized: false,
+            dispatchAuthorized: false }) + "\n");
+          return 1;
+        }
+        keepResult = true;
+        process.stdout.write(JSON.stringify({ status: result.status,
+          requestId: result.requestId, slotIndex: result.slotIndex,
+          slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+          costUpperBoundMicroUsd: result.costUpperBoundMicroUsd,
+          dispatchAuthorized: false }) + "\n");
+        return 0;
+      } finally {
+        closeSync(descriptor);
+        if (!keepResult) unlinkSync(resultPath);
+      }
+    } catch {
+      process.stderr.write("owner_runner_dispatch_unavailable\n");
+      return 1;
+    }
+  }
   if (args.length !== 6 || args[0] !== "--manifest" ||
       args[2] !== "--binding" || args[4] !== "--seal" ||
       !args[1] || !args[3] || !args[5]) {
