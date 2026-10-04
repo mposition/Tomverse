@@ -482,9 +482,10 @@ pub fn completion_from_card(detail: &serde_json::Value) -> LocalCompletion {
     }
 }
 
-/// A settle whose response was lost may be sent again: the server fences a
-/// replay on the ended attempt and task revision, so a committed first send
-/// answers the second with not-settled. Only an explicit not-settled drops it.
+/// An unknown settle outcome must stop the bridge for human read-back.
+/// A replay is fenced by the server, but it is still a write request and can
+/// hide whether the first request committed. Only a definite busy response
+/// proves no write happened and permits a later attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettleResult {
     Settled,
@@ -510,6 +511,31 @@ pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
         Ok(settled) => plan_settle_result(Some(*settled)),
         Err(error) if is_database_busy(error) => SettleResult::RetryNextTick,
         Err(_) => plan_settle_result(None),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SettleFollowup {
+    halt: bool,
+    keep_pending: bool,
+}
+
+/// Only an explicit database-busy answer proves that settlement wrote nothing.
+/// An unknown result stops the bridge for human read-back, not another write.
+fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
+    match result {
+        SettleResult::Settled => SettleFollowup {
+            halt: false,
+            keep_pending: false,
+        },
+        SettleResult::DropAndHalt | SettleResult::KeepAndHalt => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+        },
+        SettleResult::RetryNextTick => SettleFollowup {
+            halt: false,
+            keep_pending: true,
+        },
     }
 }
 
@@ -1596,20 +1622,22 @@ pub async fn run_from_env() -> i32 {
                             )
                             .await
                             .map(|response| response.settled);
-                        match plan_settle_answer(&settled) {
-                            SettleResult::Settled => {}
-                            SettleResult::DropAndHalt => halted = true,
-                            SettleResult::KeepAndHalt => {
-                                halted = true;
-                                still_running.push(entry);
-                            }
-                            SettleResult::RetryNextTick => {
-                                eprintln!(
-                                    "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
-                                    entry.delivery.attempt_id
-                                );
-                                still_running.push(entry);
-                            }
+                        let result = plan_settle_answer(&settled);
+                        if result == SettleResult::KeepAndHalt {
+                            eprintln!(
+                                "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
+                                entry.delivery.attempt_id
+                            );
+                        } else if result == SettleResult::RetryNextTick {
+                            eprintln!(
+                                "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
+                                entry.delivery.attempt_id
+                            );
+                        }
+                        let followup = plan_settle_followup(result);
+                        halted |= followup.halt;
+                        if followup.keep_pending {
+                            still_running.push(entry);
                         }
                     }
                 }
@@ -2457,10 +2485,26 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_settle_response_keeps_the_attempt_and_only_a_refusal_drops_it() {
+    fn a_lost_settle_response_halts_for_read_back_without_replaying_the_write() {
         assert_eq!(plan_settle_result(Some(true)), SettleResult::Settled);
         assert_eq!(plan_settle_result(Some(false)), SettleResult::DropAndHalt);
         assert_eq!(plan_settle_result(None), SettleResult::KeepAndHalt);
+        assert_eq!(
+            plan_settle_followup(SettleResult::Settled),
+            SettleFollowup { halt: false, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::DropAndHalt),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::KeepAndHalt),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::RetryNextTick),
+            SettleFollowup { halt: false, keep_pending: true }
+        );
     }
 
     #[test]
