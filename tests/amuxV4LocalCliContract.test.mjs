@@ -38,8 +38,10 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.ok(claude.command.includes("--no-session-persistence"));
   assert.ok(claude.command.includes("stream-json"));
   assert.ok(claude.command.includes("--verbose"));
-  assert.ok(claude.command.includes("--permission-mode"));
-  assert.ok(claude.command.includes("--permission-prompts"));
+  assert.deepEqual(claude.command.slice(
+    claude.command.indexOf("--permission-mode"),
+    claude.command.indexOf("--permission-mode") + 4),
+  ["--permission-mode", "manual", "--permission-prompts", "none"]);
   assert.equal(claude.command.includes("--max-turns"), false);
   assert.deepEqual(claude.command.slice(-4), ["--model", anthropic.modelId,
     "--effort", anthropic.reasoningEffort]);
@@ -118,18 +120,6 @@ test("Claude result needs exact served model and complete usage", () => {
       Buffer.from(events.map((event) => JSON.stringify(event)).join("\n")), 0),
     { kind: "outcome_unknown" });
   }
-  const metadataOnly = [
-    { type: "system", subtype: "init", tools: [],
-      skills: ["built-in-skill"], agents: ["built-in-agent"],
-      plugins: [{ name: "built-in-plugin", path: "/run/amux-cli/plugin" }],
-      permissionMode: "manual" },
-    { type: "assistant", message: { role: "assistant",
-      content: [{ type: "text", text: "answer" }] } },
-    claudeEnvelope(),
-  ];
-  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
-    Buffer.from(metadataOnly.map((event) => JSON.stringify(event)).join("\n")),
-    0).kind, "verified_success");
   const unsafeStop = [
     { type: "system", subtype: "init", tools: [] },
     { type: "assistant", message: { role: "assistant",
@@ -239,10 +229,44 @@ test("Claude S0 security trace counts capabilities without tool names", () => {
   assert.deepEqual(diagnostic.syntheticTrace.events[0], {
     type: "system", phase: "before_init", subtype: "init",
     capabilityCounts: { tools: 1, mcp_servers: 0, skills: 0,
-      plugins: 0, agents: 0 }, permissionMode: "restricted",
+      plugins: 0, agents: 0 },
+    discoveryDigests: {
+      skills: createHash("sha256").update("[]").digest("hex"),
+      plugins: createHash("sha256").update("[]").digest("hex"),
+      agents: createHash("sha256").update("[]").digest("hex"),
+    }, pluginPathClasses: [], permissionMode: "restricted",
   });
   assert.equal(JSON.stringify(diagnostic).includes("Bash"), false);
   assert.equal(JSON.stringify(diagnostic).includes("never expose"), false);
+});
+
+test("Claude S0 traces discovery provenance without exposing names or paths", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const secret = "private-plugin-name";
+  const stdout = Buffer.from([
+    { type: "system", subtype: "init", tools: [], mcp_servers: [],
+      skills: [secret], agents: [secret],
+      plugins: [{ name: secret, path: "/tmp/.claude/plugin" },
+        { name: "built-in", path: "builtin:review" }],
+      permissionMode: "manual" },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: secret }] } },
+    claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
+  const result = inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+    { diagnostic: true, syntheticEventType: true });
+  assert.equal(result.kind, "outcome_unknown");
+  assert.equal(result.failureReason, "security_no_tools_violation");
+  assert.deepEqual(result.syntheticTrace.events[0].pluginPathClasses,
+    ["sandbox_config", "embedded"]);
+  assert.equal(result.syntheticTrace.events[0].permissionMode, "manual");
+  assert.equal(result.syntheticTrace.events[0].discoveryDigests.plugins,
+    createHash("sha256").update(JSON.stringify([
+      { name: secret, path: "/tmp/.claude/plugin" },
+      { name: "built-in", path: "builtin:review" },
+    ])).digest("hex"));
+  assert.equal(JSON.stringify(result).includes(secret), false);
+  assert.equal(JSON.stringify(result).includes("/tmp/.claude/plugin"), false);
 });
 
 test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
