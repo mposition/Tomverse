@@ -72,6 +72,20 @@ def sample_lines(*, marker=True, duplicate=False, total=13, interloper=False):
     ]
     if duplicate:
         lines.insert(4, lines[3])
+    cumulative = {key: 0 for key in module.TOKEN_KEYS}
+    for index, raw in enumerate(lines):
+        row = json.loads(raw)
+        payload = row.get("payload") or {}
+        if row.get("type") == "event_msg" and payload.get("type") == "token_count":
+            info = payload["info"]
+            last = info["last_token_usage"]
+            for key in module.TOKEN_KEYS:
+                cumulative[key] += last[key]
+            info["total_token_usage"] = {
+                **cumulative,
+                "total_tokens": cumulative["input_tokens"] + cumulative["output_tokens"],
+            }
+            lines[index] = json.dumps(row) + "\n"
     return lines
 
 
@@ -100,6 +114,65 @@ class UsageReceiptTest(unittest.TestCase):
             self.extract(sample_lines(interloper=True))
         with self.assertRaises(ValueError):
             self.extract(sample_lines(total=12))
+
+    def test_repeated_token_snapshot_and_null_info_do_not_overcount(self):
+        lines = sample_lines()
+        repeated = json.loads(lines[4])
+        repeated["timestamp"] = "2026-10-04T02:44:04.500Z"
+        lines.insert(5, json.dumps(repeated) + "\n")
+        null = json.loads(lines[5])
+        null["payload"]["info"] = None
+        lines.insert(6, json.dumps(null) + "\n")
+        receipt = self.extract(lines)
+        self.assertEqual(receipt["usage"]["inputTokens"], 30)
+        self.assertEqual(receipt["usageSamples"], 2)
+
+    def test_prior_session_usage_is_baseline_not_this_attempt(self):
+        lines = sample_lines()
+        prior = json.loads(token_event(100, 2, "t00"))
+        prior["payload"]["info"]["total_token_usage"] = dict(prior["payload"]["info"]["last_token_usage"])
+        lines.insert(1, json.dumps(prior) + "\n")
+        for index, raw in enumerate(lines[2:], start=2):
+            row = json.loads(raw)
+            info = (row.get("payload") or {}).get("info")
+            if isinstance(info, dict):
+                total = info["total_token_usage"]
+                for key in module.TOKEN_KEYS:
+                    total[key] += prior["payload"]["info"]["last_token_usage"][key]
+                total["total_tokens"] = total["input_tokens"] + total["output_tokens"]
+                lines[index] = json.dumps(row) + "\n"
+        receipt = self.extract(lines)
+        self.assertEqual(receipt["usage"]["inputTokens"], 30)
+        self.assertEqual(receipt["usage"]["outputTokens"], 7)
+        self.assertEqual(len(receipt["baselineUsageSha256"]), 64)
+
+    def test_missing_cache_write_is_unknown_not_zero(self):
+        lines = sample_lines()
+        for index, raw in enumerate(lines):
+            row = json.loads(raw)
+            info = (row.get("payload") or {}).get("info")
+            if isinstance(info, dict):
+                info["last_token_usage"].pop("cache_write_input_tokens")
+                info["total_token_usage"].pop("cache_write_input_tokens")
+                lines[index] = json.dumps(row) + "\n"
+        self.assertIsNone(self.extract(lines)["usage"]["cacheWriteInputTokens"])
+
+    def test_task_id_prefix_and_naive_closure_are_refused(self):
+        lines = sample_lines()
+        lines[3] = user_event(TURNS[0], f"Task: {TASK}suffix\nExecution attempt: {ATTEMPT}", "t03")
+        with self.assertRaisesRegex(ValueError, "different task"):
+            self.extract(lines)
+        with self.assertRaisesRegex(ValueError, "timezone"):
+            module.extract_usage(sample_lines(), ATTEMPT, TASK, TURNS, "codex-impl", "CI-6", "2026-10-04T02:44:12")
+
+    def test_cumulative_gap_is_refused(self):
+        lines = sample_lines()
+        row = json.loads(lines[4])
+        row["payload"]["info"]["total_token_usage"]["input_tokens"] += 1
+        row["payload"]["info"]["total_token_usage"]["total_tokens"] += 1
+        lines[4] = json.dumps(row) + "\n"
+        with self.assertRaisesRegex(ValueError, "delta disagrees"):
+            self.extract(lines)
 
     def test_turn_after_card_closure_refused(self):
         with self.assertRaises(ValueError):
