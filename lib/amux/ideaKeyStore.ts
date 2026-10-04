@@ -49,6 +49,9 @@ function identity(input: AmuxContentKeyIdentity) {
     keyId: `amux2-${digest}` };
 }
 
+export const amuxContentUnitKeyId = (input: AmuxContentKeyIdentity): string =>
+  identity(input).keyId;
+
 function connection(env: NodeJS.ProcessEnv) {
   const bucket = env.AMUX_V4_KEY_STORE_BUCKET;
   const region = env.AMUX_V4_KEY_STORE_REGION;

@@ -740,6 +740,16 @@ const REGISTRY = {
     reason:
       "DraftUnitRetentionState in lib/amux/ideaRetentionCore.ts has proposed, approved, rejected, and expired. The read-only cleanup planner knows these four states, but no runtime writer list or live transition route exists yet.",
   },
+  AmuxIdeaContentKeyRetirement_purpose_check: {
+    owner: "database",
+    reason:
+      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+  },
+  AmuxIdeaRetentionHold_reason_check: {
+    owner: "database",
+    reason:
+      "AMUX idea-wide retention holds record a constrained reason category rather than free-text personal data in the seven-year approval audit.",
+  },
   AmuxIdeaUnitDecision_action_check: {
     owner: "database",
     reason:

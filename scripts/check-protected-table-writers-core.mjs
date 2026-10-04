@@ -1092,6 +1092,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The dark collection-request migration adds two restrictive foreign keys to existing creation and transition audit rows. Its guard also reads the new purge audit row FOR SHARE to bind it to the request and chain hash. Its DDL and guard write verbs affect only AmuxIdeaCollectionRequest and a Frontier composite index; it never writes or seeds AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261004190000_amux_v4_content_key_retirement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 10,
+    reason:
+      "The AMUX content-key retirement migration adds only two restrictive foreign keys to already-written purge and key-deletion audit rows. Its DDL and guard write verbs affect AmuxIdeaContentKeyRetirement alone; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261004190100_amux_v4_retention_hold/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 13,
+    reason:
+      "The AMUX retention-hold migration has three restrictive foreign keys to separately written owner approval/release and system notice audit rows. Its DDL and trigger constrain only AmuxIdeaRetentionHold; it does not write AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
     table: "QaReleaseOperatorControl",
     tableMentions: 11,
