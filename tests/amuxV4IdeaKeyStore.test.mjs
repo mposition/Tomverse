@@ -35,6 +35,14 @@ test("key envelope refuses invalid coordinates and key sizes", () => {
     { code: "integrity_unavailable" });
 });
 
+test("external keys stay closed for bodies without a retirement worker", () => {
+  for (const purpose of ["source_scope", "collection_result", "analysis_result",
+    "node_content", "card_title", "card_brief"]) {
+    assert.throws(() => sealAmuxContentUnitKey({ ...raw, purpose },
+      randomBytes(32), randomBytes(32)), { code: "integrity_unavailable" });
+  }
+});
+
 test("preloaded keyring never falls back to the global master", () => {
   const global = { masterKeyId: "global", masterKeyVersion: 1,
     masterKey: randomBytes(32), digestKeyId: "digest", digestKey: randomBytes(32) };

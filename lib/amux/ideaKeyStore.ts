@@ -11,8 +11,9 @@ import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 const IDEA_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SUBJECT_ID = /^[A-Za-z0-9:_-]{1,160}$/;
 const PURPOSES: ReadonlySet<string> = new Set<AmuxContentPurpose>([
-  "idea_raw", "source_scope", "collection_result", "transfer_payload", "analysis_result",
-  "analysis_draft", "analysis_freeform", "node_content", "card_title", "card_brief",
+  // Only body kinds with a due purge and external-key retirement path may
+  // receive a key. The remaining v4 purposes stay dark until that path exists.
+  "idea_raw", "transfer_payload", "analysis_draft", "analysis_freeform",
 ]);
 const BUCKET = /^[a-z0-9][a-z0-9.-]{2,126}$/;
 const REGION = /^[a-z0-9-]{2,32}$/;
