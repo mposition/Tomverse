@@ -1,7 +1,7 @@
 // Owner-environment preflight only. Restricted input never leaves this process.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, constants, fsyncSync, openSync, unlinkSync,
-  writeFileSync } from "node:fs";
+  readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +18,16 @@ const FORBIDDEN_DB_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(
 // Catch common accidental credentials; the owner still runs in a clean environment.
 const FORBIDDEN_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(?:_|$)|^POSTGRES(?:_|$)|^PG(?:HOST|USER|PASSWORD|DATABASE|PORT|PASSFILE|SERVICEFILE)$|^DB_(?:HOST|USER|PASSWORD|DATABASE|PORT)$|(?:^|_)API_KEY$|^PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN$/i;
 const refuse = () => { throw new Error("owner_runner_preflight_unavailable"); };
+
+export function verifyPromptRefinerVnextOneShotRunnerBytes(path, expectedDigest) {
+  if (typeof path !== "string" || !SHA256.test(expectedDigest ?? "")) return false;
+  try {
+    const actual = createHash("sha256").update(readFileSync(path)).digest();
+    return timingSafeEqual(actual, Buffer.from(expectedDigest, "hex"));
+  } catch {
+    return false;
+  }
+}
 
 export const isForbiddenOwnerRunnerEnvironmentKey = (key) =>
   FORBIDDEN_ENV.test(key);
@@ -252,6 +262,12 @@ async function main(args) {
         args[11] !== "--result" || !args[12]) {
       process.stderr.write("usage_invalid\n");
       return 2;
+    }
+    if (!verifyPromptRefinerVnextOneShotRunnerBytes(
+      fileURLToPath(import.meta.url),
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST)) {
+      process.stderr.write("owner_runner_dispatch_unavailable\n");
+      return 1;
     }
     try {
       const resultPath = resolve(args[12]);
