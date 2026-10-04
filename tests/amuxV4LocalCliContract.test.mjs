@@ -214,7 +214,23 @@ test("Claude S0 diagnostic reports only bounded unexpected event type and phase"
       failureReason: "output_contract_mismatch",
       rejectionPoint: "unexpected_event",
       unexpectedEventType: expectedType,
-      unexpectedEventPhase: expectedPhase };
+      unexpectedEventPhase: expectedPhase,
+      syntheticTrace: {
+        total: events.length, truncated: false,
+        events: events.map((event, index) => ({
+          type: ["system", "assistant", "result", "user", "stream_event",
+            "rate_limit_event"].includes(event.type) ? event.type : "other",
+          phase: index === 0 ? "before_init" :
+            events.slice(0, index).some((item) => item.type === "result")
+              ? "after_result" :
+            events.slice(0, index).some((item) => item.type === "assistant")
+              ? "after_assistant" : "after_init",
+          ...(event.type === "system" ? { subtype: event.subtype } : {}),
+          ...(event.type === "assistant" ? { hasToolUse: false } : {}),
+          ...(event.type === "result" ? { subtype: "success",
+            isError: false, modelCount: 1 } : {}),
+        })),
+      } };
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true, syntheticEventType: true }), expected);
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
@@ -247,6 +263,9 @@ test("Claude S0 pre-init system diagnostic exposes no free-form event data", () 
         createHash("sha256").update(event.subtype).digest("hex") } : {}),
       unexpectedSystemHasCapabilities: capabilities,
       unexpectedSystemHasFreeText: freeText,
+      syntheticTrace: { total: 1, truncated: false,
+        events: [{ type: "system", phase: "before_init",
+          subtype }] },
     });
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true }), { kind: "outcome_unknown",

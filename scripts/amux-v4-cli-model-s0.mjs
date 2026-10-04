@@ -41,6 +41,8 @@ if (process.platform !== "linux" ||
         result.unexpectedSystemHasCapabilities ?? null : null,
       unexpectedSystemHasFreeText: result.kind === "outcome_unknown" ?
         result.unexpectedSystemHasFreeText ?? null : null,
+      syntheticTrace: result.kind === "outcome_unknown" ?
+        result.syntheticTrace ?? null : null,
       childExitCode: result.kind === "outcome_unknown" ? result.childExitCode ?? null : null,
       approvedConnects: result.kind === "outcome_unknown" ?
         result.approvedConnects ?? null : null,
