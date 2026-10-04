@@ -11,23 +11,30 @@
 --      transaction (its xmin is ours), and keysSha256 is the stamp the state
 --      trigger computed. A superseded genesis cannot append.
 --   2. No generation is skipped: generation 1 starts a genesis's ledger and
---      every later row follows the previous one. The newest row of a genesis
---      can never be deleted (rule 4), so "the previous row exists" is the whole
---      rule; there is no purged gap to allow for.
---   3. The row names an existing, signed audit entry of the state advance of
---      the same genesis, and copies its hash. The id is a plain column, not a
---      foreign key: AdminAuditLog already refuses UPDATE and DELETE of every
---      row (20260918090000_admin_audit_log_append_only), so a restricting key
+--      every later row follows the previous one. Deletion keeps the row at the
+--      verified checkpoint and everything after it (rule 4), so "the previous
+--      row exists" is the whole rule; there is no purged gap to allow for.
+--   3. The row names the audit entry of this same advance: written by this
+--      transaction (its xmin is ours), by the system actor ops-observer, as
+--      ops_observer.state_advanced of this genesis, with this generation and
+--      key stamp in its metadata, and signed; the row copies its hash. An entry
+--      committed by an earlier advance therefore cannot be bound to a later
+--      one. The id is a plain column, not a foreign key: AdminAuditLog already
+--      refuses UPDATE and DELETE of every row
+--      (20260918090000_admin_audit_log_append_only), so a restricting key
 --      would repeat that rule, and it would add a relation to the audit
 --      table's schema block that other features fingerprint.
 --   4. Rows never change and the table is never truncated. A row is deleted
---      only seven years after it was
---      written and only behind its genesis's verified checkpoint, so the
---      ledger never loses a generation the trust check has not yet verified.
---      Deleting the ledger of a superseded genesis needs the retirement record
---      of a later slice; until it exists that delete is refused, which is the
---      conservative direction (a row kept, never a row lost). The ledger never
---      holds an audit row back: it has no key into the audit table (rule 3).
+--      only seven years after it was written (the guard sets createdAt, so a
+--      caller cannot backdate it), only below its genesis's verified
+--      checkpoint, and only while the ledger row at that checkpoint exists. A
+--      state advance that appended no row is a trust-check failure (T3c), and
+--      this last condition keeps such a lag from letting the checkpoint vouch
+--      for generations the ledger never held. Deleting the ledger of a
+--      superseded genesis needs the retirement record of a later slice; until
+--      it exists that delete is refused, which is the conservative direction
+--      (a row kept, never a row lost). The ledger never holds an audit row
+--      back: it has no key into the audit table (rule 3).
 --   5. A claimed run deadline is required and at most 180 s ahead, and the
 --      deferred constraint trigger of the genesis and state migration aborts
 --      the COMMIT of a row written past it. The limit stated there about
@@ -72,18 +79,35 @@ DECLARE
   audit_action   text;
   audit_type     text;
   audit_target   text;
+  audit_no_user  boolean;
+  audit_actor    text;
+  audit_generation text;
+  audit_keys     text;
+  audit_ours     boolean;
+  checkpoint_found boolean;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     RAISE EXCEPTION 'ops_observer_transition_immutable' USING ERRCODE = 'OB070';
   END IF;
 
   IF TG_OP = 'DELETE' THEN
-    EXECUTE format('SELECT "verifiedThroughGeneration" FROM %I."OpsObserverState" WHERE "genesisId" = $1',
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I."OpsObserverGenesis" WHERE "supersedesGenesisId" = $1)',
                    TG_TABLE_SCHEMA)
-      INTO verified_gen USING OLD."genesisId";
+      INTO superseded USING OLD."genesisId";
+    EXECUTE format('SELECT s."verifiedThroughGeneration",
+                           EXISTS (SELECT 1 FROM %1$I.%2$I t
+                                    WHERE t."genesisId" = s."genesisId" AND t.generation = s."verifiedThroughGeneration")
+                      FROM %1$I."OpsObserverState" s WHERE s."genesisId" = $1', TG_TABLE_SCHEMA, TG_TABLE_NAME)
+      INTO verified_gen, checkpoint_found USING OLD."genesisId";
+    IF superseded THEN
+      RAISE EXCEPTION 'ops_observer_transition_superseded' USING ERRCODE = 'OB072';
+    END IF;
     IF OLD."createdAt" >= clock_timestamp() - interval '7 years'
        OR verified_gen IS NULL OR verified_gen <= OLD."generation" THEN
       RAISE EXCEPTION 'ops_observer_transition_retained' USING ERRCODE = 'OB071';
+    END IF;
+    IF NOT checkpoint_found THEN
+      RAISE EXCEPTION 'ops_observer_transition_checkpoint_missing' USING ERRCODE = 'OB076';
     END IF;
     RETURN OLD;
   END IF;
@@ -122,13 +146,23 @@ BEGIN
     END IF;
   END IF;
 
-  EXECUTE format('SELECT "entryHash", action, "targetType", "targetId"
+  -- The audit entry of this advance: written by this transaction, by the
+  -- ops-observer system actor, naming this genesis, generation and key stamp.
+  EXECUTE format('SELECT "entryHash", action, "targetType", "targetId", "actorUserId" IS NULL,
+                         metadata ->> ''systemActor'', metadata ->> ''generation'', metadata ->> ''keysSha256'',
+                         xmin = pg_current_xact_id()::xid
                     FROM %I."AdminAuditLog" WHERE id = $1 FOR KEY SHARE', TG_TABLE_SCHEMA)
-    INTO audit_hash, audit_action, audit_type, audit_target USING NEW."auditLogId";
+    INTO audit_hash, audit_action, audit_type, audit_target, audit_no_user,
+         audit_actor, audit_generation, audit_keys, audit_ours
+    USING NEW."auditLogId";
   IF audit_hash IS NULL OR NEW."auditEntryHash" IS DISTINCT FROM audit_hash
+     OR audit_ours IS NOT TRUE OR audit_no_user IS NOT TRUE
+     OR audit_actor IS DISTINCT FROM 'ops-observer'
      OR audit_action IS DISTINCT FROM 'ops_observer.state_advanced'
      OR audit_type IS DISTINCT FROM 'OpsObserverState'
-     OR audit_target IS DISTINCT FROM NEW."genesisId"::text THEN
+     OR audit_target IS DISTINCT FROM NEW."genesisId"::text
+     OR audit_generation IS DISTINCT FROM NEW."generation"::text
+     OR audit_keys IS DISTINCT FROM NEW."keysSha256" THEN
     RAISE EXCEPTION 'ops_observer_transition_audit_mismatch' USING ERRCODE = 'OB075';
   END IF;
 

@@ -64,12 +64,33 @@ async function genesis(reason: string, mode: string, supersedes: string | null) 
   return id;
 }
 
-async function audit(genesisId: string, overrides: { action?: string; targetId?: string; entryHash?: string | null } = {}) {
+type AuditOverrides = {
+  action?: string;
+  targetId?: string;
+  entryHash?: string | null;
+  actorUserId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+/**
+ * The state_advanced entry the store writes for the state as this connection
+ * now sees it: the ops-observer actor, this generation and key stamp.
+ */
+async function audit(genesisId: string, overrides: AuditOverrides = {}) {
   const id = randomUUID();
   const entryHash = overrides.entryHash === undefined ? randomUUID().replaceAll("-", "").padEnd(64, "0") : overrides.entryHash;
+  const { rows } = await q(`SELECT generation, "stampKeysSha256" FROM "OpsObserverState" WHERE "genesisId" = $1`, [genesisId]);
+  const metadata = {
+    systemActor: "ops-observer",
+    generation: rows[0]?.generation,
+    keysSha256: rows[0]?.stampKeysSha256,
+    ...overrides.metadata,
+  };
   await q(
-    `INSERT INTO "AdminAuditLog" (id, action, "targetType", "targetId", "entryHash") VALUES ($1, $2, 'OpsObserverState', $3, $4)`,
-    [id, overrides.action ?? "ops_observer.state_advanced", overrides.targetId ?? genesisId, entryHash],
+    `INSERT INTO "AdminAuditLog" (id, action, "targetType", "targetId", "entryHash", "actorUserId", metadata)
+     VALUES ($1, $2, 'OpsObserverState', $3, $4, $5, $6)`,
+    [id, overrides.action ?? "ops_observer.state_advanced", overrides.targetId ?? genesisId, entryHash,
+      overrides.actorUserId ?? null, JSON.stringify(metadata)],
   );
   return { id, entryHash };
 }
@@ -90,6 +111,30 @@ const append = (row: { genesisId: string; generation: number; auditLogId: string
      VALUES ($1, $2, $3, $4, $5, ${deadline})`,
     [row.genesisId, row.generation, row.auditLogId, row.auditEntryHash, row.keysSha256],
   );
+
+type AuditOverrideCase = [AuditOverrides, string | undefined];
+
+/** Sets a ledger row's createdAt past the guard, as a fixture only. */
+async function age(genesisId: string, generation: number) {
+  await q(`ALTER TABLE "OpsObserverTransition" DISABLE TRIGGER USER`);
+  await q(`UPDATE "OpsObserverTransition" SET "createdAt" = clock_timestamp() - interval '7 years 1 day'
+            WHERE "genesisId" = $1 AND generation = $2`, [genesisId, generation]);
+  await q(`ALTER TABLE "OpsObserverTransition" ENABLE TRIGGER USER`);
+}
+
+/** Advances the state with no ledger row, optionally moving the checkpoint. */
+async function advanceStateOnly(genesisId: string, checkpoint?: { generation: number; auditId: string; auditHash: string }) {
+  await inTransaction(() =>
+    q(
+      `UPDATE "OpsObserverState" SET generation = generation + 1, keys = $2,
+         "verifiedThroughGeneration" = coalesce($3, "verifiedThroughGeneration"),
+         "verifiedThroughAuditId" = coalesce($4, "verifiedThroughAuditId"),
+         "verifiedThroughAuditHash" = coalesce($5, "verifiedThroughAuditHash"), "runDeadlineAt" = ${soon(60)}
+        WHERE "genesisId" = $1`,
+      [genesisId, JSON.stringify({ n: Math.random() }), checkpoint?.generation ?? null, checkpoint?.auditId ?? null, checkpoint?.auditHash ?? null],
+    ),
+  );
+}
 
 /** A new head genesis replacing the current one, with its state at generation 0. */
 async function newHead() {
@@ -120,7 +165,7 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
     await q(`SET search_path TO "${schema}"`);
     // The columns of the shared audit table the ledger reads.
     await q(`CREATE TABLE "AdminAuditLog" (id TEXT PRIMARY KEY, action TEXT NOT NULL, "targetType" TEXT NOT NULL,
-               "targetId" TEXT, "entryHash" TEXT UNIQUE)`);
+               "targetId" TEXT, "entryHash" TEXT UNIQUE, "actorUserId" TEXT, metadata JSONB)`);
     for (const file of migrations) await q(await readFile(file, "utf8"));
 
     const g = await genesis("initial", "shadow", null);
@@ -138,6 +183,25 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
         [1, first.stampKeysSha256, true],
         [2, second.stampKeysSha256, true],
       ]);
+      // A caller-supplied createdAt is replaced by the database clock, so a row
+      // cannot be backdated into the seven-year delete window.
+      const third = await inTransaction(async () => {
+        const state = await advanceState(g);
+        const e = await audit(g);
+        await q(
+          `INSERT INTO "OpsObserverTransition" ("genesisId", generation, "auditLogId", "auditEntryHash", "keysSha256",
+             "runDeadlineAt", "createdAt")
+           VALUES ($1, $2, $3, $4, $5, ${soon(60)}, clock_timestamp() - interval '8 years')`,
+          [g, state.generation, e.id, e.entryHash, state.stampKeysSha256],
+        );
+        return state.generation;
+      });
+      const backdated = await q(
+        `SELECT "createdAt" > clock_timestamp() - interval '1 minute' AS fresh FROM "OpsObserverTransition"
+          WHERE "genesisId" = $1 AND generation = $2`,
+        [g, third],
+      );
+      assert.equal(backdated.rows[0].fresh, true);
     });
 
     await t.test("a row that is not this transaction's advance is refused", async () => {
@@ -176,7 +240,11 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
         [{}, "d".repeat(64)],
         [{ action: "ops_observer.genesis_created" }, undefined],
         [{ targetId: other }, undefined],
-      ] as const) {
+        [{ actorUserId: "user-1" }, undefined],
+        [{ metadata: { systemActor: "marketing-publisher" } }, undefined],
+        [{ metadata: { generation: 99 } }, undefined],
+        [{ metadata: { keysSha256: "e".repeat(64) } }, undefined],
+      ] as AuditOverrideCase[]) {
         await refused(
           inTransaction(async () => {
             const state = await advanceState(head);
@@ -186,6 +254,20 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
           /ops_observer_transition_audit_mismatch/,
         );
       }
+      // An entry committed by an earlier transaction, even one naming exactly
+      // the generation and key stamp of this advance, is not this advance's.
+      const keys = { fixed: "earlier" };
+      const nextGeneration = (await q(`SELECT generation FROM "OpsObserverState" WHERE "genesisId" = $1`, [head])).rows[0].generation + 1;
+      const stamp = (await q(`SELECT encode(sha256(convert_to($1::jsonb::text, 'UTF8')), 'hex') AS h`, [JSON.stringify(keys)])).rows[0].h;
+      const earlier = await audit(head, { metadata: { generation: nextGeneration, keysSha256: stamp } });
+      await refused(
+        inTransaction(async () => {
+          const state = await advanceState(head, keys);
+          assert.deepEqual([state.generation, state.stampKeysSha256], [nextGeneration, stamp]);
+          await append({ genesisId: head, generation: state.generation, auditLogId: earlier.id, auditEntryHash: earlier.entryHash, keysSha256: state.stampKeysSha256 });
+        }),
+        /ops_observer_transition_audit_mismatch/,
+      );
       // An id with no audit entry at all: there is no foreign key, so the guard is what refuses it.
       await refused(
         inTransaction(async () => {
@@ -197,9 +279,11 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
     });
 
     await t.test("rows never change and are never truncated", async () => {
-      await refused(q(`UPDATE "OpsObserverTransition" SET "keysSha256" = $2 WHERE "genesisId" = $1 AND generation = 1`, [g, "e".repeat(64)]),
+      const head = await newHead();
+      await advance(head);
+      await refused(q(`UPDATE "OpsObserverTransition" SET "keysSha256" = $2 WHERE "genesisId" = $1 AND generation = 1`, [head, "e".repeat(64)]),
         /ops_observer_transition_immutable/);
-      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [g]),
+      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [head]),
         /ops_observer_transition_retained/);
       await refused(q(`TRUNCATE "OpsObserverTransition"`), /ops_observer_transition_retained/);
     });
@@ -232,6 +316,38 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
       // The newest row stays: the checkpoint can never pass it.
       await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 3`, [fresh]),
         /ops_observer_transition_retained/);
+    });
+
+    await t.test("a checkpoint the ledger never reached does not open deletion", async () => {
+      // One ledger row, then advances that appended none while the checkpoint moved to 2.
+      const lagging = await newHead();
+      const one = await advance(lagging);
+      await advanceStateOnly(lagging);
+      await advanceStateOnly(lagging, { generation: 2, auditId: one.id, auditHash: one.entryHash! });
+      await age(lagging, 1);
+      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [lagging]),
+        /ops_observer_transition_checkpoint_missing/);
+    });
+
+    await t.test("the ledger of a superseded genesis is kept until a retirement record exists", async () => {
+      // Old enough and behind a checkpoint whose row exists: deletable, until superseded.
+      const retiring = await newHead();
+      const one = await advance(retiring);
+      await advance(retiring);
+      await inTransaction(async () => {
+        const { rows } = await q(
+          `UPDATE "OpsObserverState" SET generation = generation + 1, keys = '{"k":4}', "verifiedThroughGeneration" = 2,
+             "verifiedThroughAuditId" = $2, "verifiedThroughAuditHash" = $3, "runDeadlineAt" = ${soon(60)}
+            WHERE "genesisId" = $1 RETURNING generation, "stampKeysSha256"`,
+          [retiring, one.id, one.entryHash],
+        );
+        const e = await audit(retiring);
+        await append({ genesisId: retiring, generation: rows[0].generation, auditLogId: e.id, auditEntryHash: e.entryHash, keysSha256: rows[0].stampKeysSha256 });
+      });
+      await age(retiring, 1);
+      await newHead();
+      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 1`, [retiring]),
+        /ops_observer_transition_superseded/);
     });
 
     await t.test("a superseded genesis cannot append", async () => {
