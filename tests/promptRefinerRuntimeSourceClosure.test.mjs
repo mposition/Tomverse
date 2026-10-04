@@ -408,12 +408,21 @@ const compilerOptions = parsedConfig.options;
 // the schema-slice function for the webhook pipeline fingerprint. No computed
 // element access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+//
+// 2026-10-04, sre-ops audit actor: `lib/adminAuditSystemActors.ts` gains the
+// "ops-observer" actor (on an existing line, its constant at the end of the
+// file), `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, and
+// `lib/marketingAutomationAccess.ts` gains a dated fingerprint record above
+// its seven accesses. All three are listed; no element access is added, count
+// 228 and the position-free inventory are unchanged, so this repins positions
+// only. The value is computed over develop with billing-finance-ops' actor,
+// which that change added on existing lines and so moved nothing.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8f9f7421cb5e7e3f7ad30d210d9cc2c",
-  "881f8149289a437eff5b281ce1a31578a",
+  "7a0a1f864dc70f7be779119307cd755",
+  "a00492fdd908710e02dbd64cd5e567f10",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
