@@ -421,12 +421,22 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-04, AMUX v4 and current develop merge: marketing, account email,
 // product research and AMUX edits coexist in the fixed closure. Count and
 // position-free inventory remain unchanged; source positions are repinned.
+//
+// 2026-10-04, sre-ops audit actor: `lib/adminAuditSystemActors.ts` gains the
+// "ops-observer" actor (on an existing line, its constant at the end of the
+// file), `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, and
+// `lib/marketingAutomationAccess.ts` gains a dated fingerprint record above
+// its seven accesses. All three are listed; no element access is added, count
+// 228 and the position-free inventory are unchanged, so this repins positions
+// only. The value is computed over develop with billing-finance-ops' actor,
+// which that change added on existing lines and so moved nothing. The digest
+// below is measured over both merged changes.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "916af2420b5f30d90a6ef8b4eb2fabde",
-  "32f93e67a050fdfd94c8e66c64667b42",
+  "752b5a09a1faa21789b17fb8bdbe7c67",
+  "1bded79d07a4097e3e32c4eaaaea5416",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

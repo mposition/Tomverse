@@ -523,9 +523,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged. SupportTriageSuggestion and the account-deletion actor move it again.
  * 2026-10-04: the AMUX v4 schema and these develop changes are merged. The
  * fingerprint below is recomputed over the combined schema.
+ *
+ * 2026-10-04: the sre-ops agent's audit actor ("ops-observer") is added to
+ * `lib/adminAuditSystemActors.ts`, and `lib/adminAudit.ts` gains
+ * `writeSystemAuditLogEntry()`, which returns the entry's hash with its id
+ * (docs/policy/sre-ops.md §3-10). Both files are in the receiver's import
+ * closure. The receiver's calls and the rows it writes are unchanged; the
+ * fingerprint moves because the closure's bytes did. Computed over the merged
+ * tree, which includes the support-triage and agent-digest actors above.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "693863136dd1fac69adc8b6ea445cdf7a10d6e2f86579299390499b6a8573017";
+  "e49108a518a5b340dc27bca284640bafc0821de2bae701c6fd01a1dcd717e601";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

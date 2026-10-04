@@ -137,7 +137,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "qa-release-intake", "support-triage-worker", "support-triage-retention", "billing-finance-ops-intake", "support-triage-account-deletion", "agent-digest-retention", "qa-release-merge-lane", "ops-observer",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -282,3 +282,12 @@ export const SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS = [
 ] as const satisfies readonly SystemAuditActor[];
 export type SupportTriageSystemAuditActor =
   (typeof SUPPORT_TRIAGE_SYSTEM_AUDIT_ACTORS)[number];
+
+/**
+ * The sre-ops agent's actor (docs/policy/sre-ops.md §3-10): every monitored
+ * state transition, reservation close and retention batch the store writes.
+ * Not a person, so never approval evidence -- a genesis is the owner's own
+ * Admin action and is written with writeAdminAuditLog. Declared at the end of
+ * the file, and listed above on an existing line, so no access above moves.
+ */
+export const OPS_OBSERVER_SYSTEM_AUDIT_ACTOR = "ops-observer" as const satisfies SystemAuditActor;
