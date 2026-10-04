@@ -11,9 +11,14 @@ import {
 } from "./ideaFrontierCatalogCore.ts";
 import {
   checkAmuxIdeaFrontierSelection,
+  type AmuxIdeaFrontierApproval,
   type AmuxIdeaFrontierSelectionDecision,
   type AmuxIdeaModelSelection,
 } from "./ideaFrontierSelectionCore.ts";
+
+type VerifiedCatalogRead =
+  | { decision: "catalog_current"; approvals: AmuxIdeaFrontierApproval[]; databaseNow: Date }
+  | { decision: "hold"; reason: string };
 
 /**
  * Read-side pre-call check. Its result is a snapshot observation, not a lease
@@ -22,9 +27,7 @@ import {
  * 15-second callback timeout is an app limit, not a DB-enforced transaction
  * bound; this path is read-only and records no late success.
  */
-export async function readCurrentAmuxIdeaFrontierSelection(
-  selected: AmuxIdeaModelSelection,
-): Promise<AmuxIdeaFrontierSelectionDecision> {
+async function readVerifiedAmuxIdeaFrontierCatalog(): Promise<VerifiedCatalogRead> {
   const integrityKeys = adminAuditIntegrityKeys(process.env);
   if (integrityKeys.length === 0) {
     return { decision: "hold", reason: "model_catalog_unverified" };
@@ -108,9 +111,11 @@ export async function readCurrentAmuxIdeaFrontierSelection(
       const databaseTime = await tx.$queryRaw<Array<{ now: Date }>>`
         SELECT clock_timestamp() AS "now"
       `;
-      return checkAmuxIdeaFrontierSelection(
-        selected, catalog.approvals, databaseTime[0]?.now,
-      );
+      const databaseNow = databaseTime[0]?.now;
+      if (!(databaseNow instanceof Date) || !Number.isFinite(databaseNow.getTime())) {
+        return { decision: "hold", reason: "model_catalog_unverified" };
+      }
+      return { decision: "catalog_current", approvals: catalog.approvals, databaseNow };
     }, {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
       maxWait: 5_000,
@@ -125,4 +130,30 @@ export async function readCurrentAmuxIdeaFrontierSelection(
     console.error("AMUX v4 frontier catalog read unavailable", { code });
     return { decision: "hold", reason: "model_catalog_unavailable" };
   }
+}
+
+/** Owner-visible eligibility snapshot only. The exact model and effort must
+ * still be rechecked at confirmation and immediately before the CLI call. */
+export async function listApprovedAmuxIdeaFrontierModels(): Promise<
+  | { decision: "catalog_current"; models: Array<{
+      approvalId: string; approvalVersion: number; provider: string;
+      modelId: string; allowedEfforts: string[];
+    }> }
+  | { decision: "hold"; reason: string }
+> {
+  const catalog = await readVerifiedAmuxIdeaFrontierCatalog();
+  if (catalog.decision !== "catalog_current") return catalog;
+  return { decision: "catalog_current", models: catalog.approvals
+    .filter((row) => row.status === "approved" && row.approvedAt <= catalog.databaseNow)
+    .map((row) => ({ approvalId: row.id, approvalVersion: row.version,
+      provider: row.provider, modelId: row.modelId,
+      allowedEfforts: [...row.allowedEfforts] })) };
+}
+
+export async function readCurrentAmuxIdeaFrontierSelection(
+  selected: AmuxIdeaModelSelection,
+): Promise<AmuxIdeaFrontierSelectionDecision> {
+  const catalog = await readVerifiedAmuxIdeaFrontierCatalog();
+  if (catalog.decision !== "catalog_current") return catalog;
+  return checkAmuxIdeaFrontierSelection(selected, catalog.approvals, catalog.databaseNow);
 }
