@@ -58,8 +58,10 @@ test("collection queue pages 33 pending requests exactly once and excludes expir
     await assert.rejects(prisma.$transaction(async (tx) => {
       await commitFrontierCatalogDecision(tx, { session, request,
         decision: frontierDecision.request });
-      const created: Array<{ id: string; scopeId: string }> = [];
-      for (let index = 0; index < 35; index += 1) {
+      const staged: Array<{ id: string; scopeId: string }> = [];
+      // Two unrelated eligible requests must not shift the assertions for
+      // this test's 33-page span when suites share one routing-lane database.
+      for (let index = 0; index < 37; index += 1) {
         const ideaId = randomUUID();
         const scopeId = randomUUID();
         const submission = inspectAmuxIdeaSubmission(JSON.stringify({ version: 1,
@@ -82,8 +84,10 @@ test("collection queue pages 33 pending requests exactly once and excludes expir
             frontierApprovalId, frontierVersion: 1,
             provider: "openai", modelId, reasoningEffort: "high",
             sourceIndex: 0, attempt: 1, sourceByteLimit: 8_192 }, keys });
-        created.push({ id: result.id, scopeId });
+        staged.push({ id: result.id, scopeId });
       }
+      const other = staged.slice(0, 2);
+      const created = staged.slice(2);
       const now = new Date();
       await tx.amuxIdeaSourceScopeApproval.update({ where: { id: created[33].scopeId },
         data: { approvedAt: new Date(now.getTime() - 30 * 60_000),
@@ -97,22 +101,29 @@ test("collection queue pages 33 pending requests exactly once and excludes expir
       });
       const expected = expectedRows.map((row) => row.id);
       assert.equal(expected.length, 33);
-      const first = await listAmuxV4CollectionCandidatesInTransaction(tx, null);
-      assert.equal(first.candidates.length, 32);
-      assert.equal(first.hasMore, true);
-      assert.ok(first.nextCursor);
-      assert.deepEqual(first.candidates.map((candidate) => candidate.collectionRequestId),
-        expected.slice(0, 32));
-      const cursor = (await import("@/lib/amux/ideaCollectionQueueCore"))
-        .parseCollectionQueueCursor(first.nextCursor);
-      assert.ok(cursor);
-      const second = await listAmuxV4CollectionCandidatesInTransaction(tx, cursor);
-      assert.equal(second.hasMore, false);
-      assert.equal(second.nextCursor, null);
-      assert.deepEqual(second.candidates.map((candidate) => candidate.collectionRequestId),
-        expected.slice(32));
-      const all = [...first.candidates, ...second.candidates];
-      assert.equal(new Set(all.map((candidate) => candidate.collectionRequestId)).size, 33);
+      const { parseCollectionQueueCursor } = await import("@/lib/amux/ideaCollectionQueueCore");
+      const all: Awaited<ReturnType<typeof listAmuxV4CollectionCandidatesInTransaction>>["candidates"] = [];
+      let cursor: ReturnType<typeof parseCollectionQueueCursor> = null;
+      let pages = 0;
+      while (true) {
+        assert.ok(pages < 10, "unexpectedly large synthetic collection queue");
+        const page = await listAmuxV4CollectionCandidatesInTransaction(tx, cursor);
+        pages += 1;
+        all.push(...page.candidates);
+        if (!page.hasMore) {
+          assert.equal(page.nextCursor, null);
+          break;
+        }
+        assert.equal(page.candidates.length, 32);
+        assert.ok(page.nextCursor);
+        cursor = parseCollectionQueueCursor(page.nextCursor);
+        assert.ok(cursor);
+      }
+      assert.ok(pages >= 2);
+      assert.deepEqual(all.filter((candidate) => expected.includes(candidate.collectionRequestId))
+        .map((candidate) => candidate.collectionRequestId), expected);
+      assert.equal(new Set(all.map((candidate) => candidate.collectionRequestId)).size, all.length);
+      assert.ok(other.every((row) => all.some((candidate) => candidate.collectionRequestId === row.id)));
       assert.ok(all.every((candidate) => Number.isFinite(Date.parse(candidate.expiresAt))));
       assert.equal(all.some((candidate) => candidate.collectionRequestId === created[33].id), false);
       assert.equal(all.some((candidate) => candidate.collectionRequestId === created[34].id), false);
