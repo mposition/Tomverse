@@ -3,11 +3,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog,
-  writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { auditRowActorKind,
-  AMUX_V4_IDEA_SYSTEM_ACTOR,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
   AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
@@ -16,6 +14,7 @@ import { assessAmuxIdeaAnalysisBudget,
   AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
   AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
+import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
 
 /** This transaction body is not a claim or a dispatch permission. It reads
  * owner-approved price evidence from the app DB; no route, CLI runner or
@@ -252,18 +251,13 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   });
   if (decision.decision !== "reservation_candidate") refuse("budget_hold", decision.reason);
   const reserve = BigInt(decision.worstCaseMicroUsd);
-  const auditId = await writeSystemAuditLog({
-    tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
-    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
-    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
-    targetId: input.holdId,
-    summary: "Reserved one AMUX v4 analysis Agent cost ceiling; no model was called.",
-    metadata: { previewId: preview.id, namespace: AMUX_V4_ANALYSIS_NAMESPACE,
-      monthStart: monthStart.toISOString(), provider: decision.provider,
-      modelId: decision.modelId, pricingVersion: decision.pricingVersion,
-      priceVersionId: input.priceVersionId,
-      reservedMicroUsd: decision.worstCaseMicroUsd,
-      amountMeaning: decision.amountMeaning, modelCallStarted: false },
+  const auditId = await writeAmuxAnalysisBudgetSystemAudit({
+    tx, holdId: input.holdId, previewId: preview.id,
+    monthStartIso: monthStart.toISOString(), provider: decision.provider,
+    modelId: decision.modelId, pricingVersion: decision.pricingVersion,
+    priceVersionId: input.priceVersionId,
+    reservedMicroUsd: decision.worstCaseMicroUsd,
+    amountMeaning: decision.amountMeaning,
   });
   const updated = await tx.amuxIdeaAnalysisBudgetWindow.updateMany({
     where: { namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
