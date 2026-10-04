@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { CheckedCollectionModel } from "@/components/admin/AmuxFrontierModelsPanel";
 import type { ApprovedCollectionScope } from "@/components/admin/AmuxSourceScopeApprovalPanel";
+import { readAdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -21,7 +22,8 @@ type State =
   | { kind: "idle" | "pending" | "storage_unavailable" | "scope_expired" }
   | { kind: "recorded"; receipt: CollectionRequestReceipt; id: string;
       state: string; expiresAt: string; verifiedAtMs: number | null }
-  | { kind: "outcome_unknown"; receipt: CollectionRequestReceipt; reauthRequired?: boolean };
+  | { kind: "outcome_unknown"; receipt: CollectionRequestReceipt;
+      reauthRequired?: boolean; failureMessage?: string };
 type PreviewState = { kind: "idle" | "pending" | "unavailable" | "expired" } |
   { kind: "ready"; value: CollectionExactPreview };
 
@@ -89,6 +91,9 @@ export function AmuxCollectionRequestPanel({ ideaId, operatorId, canonicalScopeJ
       const query = new URLSearchParams({ requestId: receipt.requestId });
       const response = await adminFetch(`/api/admin/amux/ideas/collection-requests?${query}`,
         { cache: "no-store" });
+      const failure = response.ok ? null : await readAdminApiFailure(response.clone(), {
+        fallback: m.collectionRequestUnavailable, locale,
+      });
       const reply: unknown = await response.json();
       if (!mounted.current) return;
       const decision = readCollectionRequestReply(response.status, reply, receipt, "read");
@@ -97,11 +102,12 @@ export function AmuxCollectionRequestPanel({ ideaId, operatorId, canonicalScopeJ
           state: decision.state, expiresAt: decision.expiresAt,
           verifiedAtMs: Date.now() }
         : { kind: "outcome_unknown", receipt,
-          reauthRequired: response.status === 428 });
+          reauthRequired: failure?.requiresReauthentication,
+          failureMessage: failure?.message });
     } catch {
       if (mounted.current) setState({ kind: "outcome_unknown", receipt });
     } finally { inFlight.current = false; }
-  }, [available]);
+  }, [available, locale, m.collectionRequestUnavailable]);
 
   useEffect(() => {
     mounted.current = true;
@@ -158,6 +164,9 @@ export function AmuxCollectionRequestPanel({ ideaId, operatorId, canonicalScopeJ
           provider: model.provider, modelId: model.modelId,
           reasoningEffort: model.reasoningEffort, sourceIndex: 0 }),
       });
+      const failure = response.ok ? null : await readAdminApiFailure(response.clone(), {
+        fallback: m.collectionRequestUnavailable, locale,
+      });
       const reply: unknown = await response.json();
       if (!mounted.current) return;
       const decision = readCollectionRequestReply(response.status, reply, receipt, "write");
@@ -167,7 +176,8 @@ export function AmuxCollectionRequestPanel({ ideaId, operatorId, canonicalScopeJ
         return;
       }
       setState({ kind: "outcome_unknown", receipt,
-        reauthRequired: response.status === 428 });
+        reauthRequired: failure?.requiresReauthentication,
+        failureMessage: failure?.message });
     } catch {
       if (mounted.current) setState({ kind: "outcome_unknown", receipt });
     } finally {
@@ -266,6 +276,7 @@ export function AmuxCollectionRequestPanel({ ideaId, operatorId, canonicalScopeJ
     </div> : null}
     {state.kind === "outcome_unknown" ? <div role="alert" className="space-y-2">
       <p>{m.collectionRequestUnknown(state.receipt.requestId)}</p>
+      {state.failureMessage ? <p>{state.failureMessage}</p> : null}
       {!sameSelection(state.receipt) ? <p>{m.collectionRequestSelectionChanged}</p> : null}
       {state.reauthRequired ? <a className="block underline"
         href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>{m.stepUp}</a> : null}

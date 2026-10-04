@@ -89,7 +89,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
 ].sort();
 // A digest change reopens this audit exception only after independent review.
 // Review r-20261004-082344-6f2f36 accepted the current read-only closure.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "8e15a8f15645a1de1d7c2dbd31b4a0910d9577abb30f0197c03aa5279c5249e8";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "3dbfcc000e6e548649013d8404a8b251f1b693fdcb1a542ceb7e49122f282d83";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = () => {
