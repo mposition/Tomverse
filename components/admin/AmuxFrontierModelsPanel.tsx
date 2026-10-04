@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
+import { AmuxAnalysisBudgetPanel } from "@/components/admin/AmuxAnalysisBudgetPanel";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
@@ -40,9 +41,10 @@ const receiptStore = (): Storage | null => {
 };
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
-  ideaId, planReady, continuationSelection,
+  analysisBudgetAvailable, ideaId, planReady, continuationSelection,
   declaredExternalSources, operatorId, onCheckedCollectionModel }: {
   available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
+  analysisBudgetAvailable: boolean;
   ideaId: string | null;
   continuationSelection?: { chunkIndex: number; pinnedTargetRefs: string[] } | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
@@ -494,6 +496,9 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       ) : null}
       {confirmation.kind === "pending" ? <p role="status">{m.transferConfirmPending}</p> : null}
       {confirmation.kind === "confirmed" ? <p role="status">{m.transferConfirmRecorded}</p> : null}
+      {confirmation.kind === "confirmed" ? <AmuxAnalysisBudgetPanel
+        key={confirmation.value.previewId} confirmed={confirmation.value}
+        available={analysisBudgetAvailable} /> : null}
       {confirmation.kind === "expired" ? <p role="status">{m.transferConfirmExpired}</p> : null}
       {confirmation.kind === "refused" && !failure ?
         <p role="alert">{m.transferConfirmRefused}</p> : null}

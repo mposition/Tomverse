@@ -107,6 +107,10 @@ test("Claude bare analysis mounts only its dedicated read-only API key", () => {
   assert.equal(args[bindAt + 2], "/run/amux-cli/anthropic-api-key");
   assert.equal(args.includes("/home/tommy/.amux-cli-profiles/claude-api"), false);
   assert.ok(args.includes("CLAUDE_CONFIG_DIR"));
+  assert.deepEqual(args.slice(args.indexOf("CLAUDE_CODE_MAX_RETRIES"),
+    args.indexOf("CLAUDE_CODE_MAX_RETRIES") + 4),
+  ["CLAUDE_CODE_MAX_RETRIES", "0", "--setenv", "CLAUDE_CODE_MAX_OUTPUT_TOKENS"]);
+  assert.ok(args.includes("128000"));
   assert.equal(args.includes("/home/tommy/.claude/.credentials.json"), false);
   assert.equal(args.includes("ANTHROPIC_API_KEY"), false);
   assert.ok(plan.command.includes("--bare"));

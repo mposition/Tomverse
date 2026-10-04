@@ -44,7 +44,9 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
     claude.command.indexOf("--permission-mode"),
     claude.command.indexOf("--permission-mode") + 4),
   ["--permission-mode", "manual", "--permission-prompts", "none"]);
-  assert.equal(claude.command.includes("--max-turns"), false);
+  assert.deepEqual(claude.command.slice(claude.command.indexOf("--max-turns"),
+    claude.command.indexOf("--max-turns") + 4),
+  ["--max-turns", "1", "--max-budget-usd", "10.56"]);
   assert.deepEqual(claude.command.slice(-4), ["--model", anthropic.modelId,
     "--effort", anthropic.reasoningEffort]);
   assert.equal(planAmuxV4AnalysisCliInvocation({ ...openai,

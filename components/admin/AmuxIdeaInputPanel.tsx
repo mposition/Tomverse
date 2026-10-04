@@ -82,12 +82,14 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   sourceScopeApprovalAvailable,
   initialPlanAvailable, frontierModelsAvailable, collectionRequestAvailable,
   collectionPreviewReadAvailable, transferPreviewAvailable,
-  transferConfirmAvailable, analysisResultAvailable, recentAvailable, operatorId }: {
+  transferConfirmAvailable, analysisBudgetAvailable,
+  analysisResultAvailable, recentAvailable, operatorId }: {
   submissionAvailable: boolean; sourceScopePreviewAvailable: boolean;
   sourceScopeApprovalAvailable: boolean;
   initialPlanAvailable: boolean; frontierModelsAvailable: boolean; collectionRequestAvailable: boolean;
   collectionPreviewReadAvailable: boolean;
   transferPreviewAvailable: boolean; transferConfirmAvailable: boolean;
+  analysisBudgetAvailable: boolean;
   analysisResultAvailable: boolean;
   recentAvailable: boolean; operatorId: string;
 }) {
@@ -633,6 +635,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         available={frontierModelsAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
+        analysisBudgetAvailable={analysisBudgetAvailable}
         ideaId={submission.kind === "submitted" ? submission.ideaId : null}
         planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}

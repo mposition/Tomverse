@@ -143,6 +143,11 @@ export default async function AdminAmuxBacklogPage({
             process.env[AMUX_V4_COLLECTION_PREVIEW_READ_ENV])}
           transferPreviewAvailable={transferPreviewAvailable}
           transferConfirmAvailable={transferConfirmAvailable}
+          analysisBudgetAvailable={transferConfirmAvailable &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_PRICE_WRITE === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+            process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
             process.env[AMUX_V4_ANALYSIS_RESULT_READ_ENV])}
           operatorId={session.user.id} />
