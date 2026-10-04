@@ -62,6 +62,7 @@ import {
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
+import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
 import {
   OBSERVATION_SILENCE_HOURS,
   observationSilenceVerdict,
@@ -1021,6 +1022,11 @@ export async function cleanupExpiredData() {
     return verdict;
   });
 
+  // docs/policy/billing-finance-ops.md §1.3 signal 2: today's stage W digest,
+  // or an incident. Its own step, so a failure here never takes another
+  // agent's check with it.
+  const billingFinanceOpsSilence = await step("billing_finance_ops_silence", () => checkBillingFinanceOpsSilence());
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
@@ -1083,6 +1089,7 @@ export async function cleanupExpiredData() {
     agentDigestMetaPurged,
     productResearchObservations: productResearchObservations?.removed ?? null,
     productResearchSilence: productResearchSilence?.state ?? null,
+    billingFinanceOpsSilence,
     failedSteps: failures,
   };
 }
