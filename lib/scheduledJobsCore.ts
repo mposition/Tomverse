@@ -73,6 +73,10 @@ export const CRON_TRIGGERS = {
     railwayService: "Marketing Publisher",
     trigger: { kind: "everyMinutes", minutes: 5 },
   },
+  amuxV4ContentRetention: {
+    railwayService: "AMUX v4 Content Retention",
+    trigger: { kind: "everyMinutes", minutes: 5 },
+  },
 } as const satisfies Record<
   string,
   { railwayService: string; trigger: CronTrigger }

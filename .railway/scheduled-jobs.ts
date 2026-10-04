@@ -126,6 +126,24 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
       staging: ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
     },
   },
+  {
+    // Deterministic AMUX v4 retention only. The cron carries one narrowly
+    // scoped route secret, no product DB, bucket, GitHub or model credential.
+    // It stays dark until the operator provisions these three variables and
+    // explicitly applies this IaC partial after staging deletion evidence.
+    key: "amuxV4ContentRetention",
+    service: "AMUX v4 Content Retention",
+    startCommand: "npm run run:amux-v4-content-retention-once",
+    cronSchedule: "*/5 * * * *",
+    variables: {
+      production: ["TOMVERSE_AMUX_V4_CONTENT_RETENTION_TRIGGER",
+        "TOMVERSE_AMUX_V4_CONTENT_RETENTION_APP_ORIGIN",
+        "TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET"],
+      staging: ["TOMVERSE_AMUX_V4_CONTENT_RETENTION_TRIGGER",
+        "TOMVERSE_AMUX_V4_CONTENT_RETENTION_APP_ORIGIN",
+        "TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET"],
+    },
+  },
 ];
 
 /**
