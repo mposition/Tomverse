@@ -437,3 +437,37 @@ test("the Admin read shows the latch reason, the attempt id and the observed dep
   assert.equal(typeof mergeLane.openAttempt?.deployObservedAt, "string");
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });
+
+test("the same observation reported again is still recorded, and a repeated latch is recorded after a release", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
+  const same: { service: string; status: string; commitSha: string | null }[] = [];
+  const first = await recorded(attemptId, { kind: "deploy", outcome: "unreadable", observation: same });
+  assert.equal(first.latched, "deploy_unreadable");
+  const firstSeen = (await attemptRow(attemptId)).deployObservedAt;
+  // A person releases the latch only; the attempt stays open and waiting.
+  assert.equal((await releaseQaReleaseMergeLaneLatch({ session: session as never, resolution: null })).released, true);
+  // The same empty list again: recorded, latched again, the time moved on.
+  const again = await recorded(attemptId, { kind: "deploy", outcome: "unreadable", observation: same });
+  assert.equal(again.latched, "deploy_unreadable");
+  const row = await attemptRow(attemptId);
+  assert.equal(row.state, "awaiting_deploy");
+  assert.ok(row.deployObservedAt && firstSeen && row.deployObservedAt.getTime() >= firstSeen.getTime());
+  assert.deepEqual((await latchEvents()).map((event) => event.latched), [true, false, true]);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("after a failed deploy the Admin read shows the closed attempt the latch names", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
+  const failed = [{ service: "web", status: "FAILED", commitSha: MERGE_SHA }];
+  await recorded(attemptId, { kind: "deploy", outcome: "failed", observation: failed });
+  const { mergeLane } = await readAgentDigestConsole(false);
+  assert.equal(mergeLane.openAttempt, null);
+  assert.equal(mergeLane.latchAttempt?.id, attemptId);
+  assert.equal(mergeLane.latchAttempt?.state, "closed");
+  assert.equal(mergeLane.latchAttempt?.outcome, "deploy_failed");
+  assert.equal(mergeLane.latchAttempt?.pullRequestNumber, 21);
+  assert.deepEqual(mergeLane.latchAttempt?.deployObservation, failed);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});

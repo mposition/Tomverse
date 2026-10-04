@@ -17,8 +17,8 @@
 -- * The merge commit is set exactly once, on the move to awaiting_deploy,
 --   and is present from then on.
 -- * While awaiting deploy, the lane may record what it observed of the
---   staging deployments without moving the attempt; only the lane, and only
---   that column.
+--   staging deployments without moving the attempt -- the same list again
+--   included; only the lane, and only that column.
 -- * Every insert and every change is audited in the same transaction:
 --   "lastAuditLogId" must name an AdminAuditLog row this very transaction
 --   wrote, targeting this attempt. Outcomes a person records come from a
@@ -191,8 +191,11 @@ BEGIN
   END IF;
 
   IF NOT allowed AND OLD."state" = 'awaiting_deploy' AND NEW."state" = 'awaiting_deploy' THEN
-    -- Recording an observation is the one same-state change, and it is the lane's.
-    allowed := NEW."outcome" IS NULL AND NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation";
+    -- Recording what was observed is the one same-state change, and it is the
+    -- lane's: a repeated report with the same list is still a report, so the
+    -- list need not differ (QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE).
+    allowed := NEW."outcome" IS NULL AND NEW."deployObservation" IS NOT NULL
+               AND NEW."mergeCommitSha" IS NOT DISTINCT FROM OLD."mergeCommitSha";
     observation_only := allowed;
     IF NOT allowed THEN
       RAISE EXCEPTION 'QaReleaseMergeAttempt cannot move from % to %', OLD."state", NEW."state"
@@ -234,9 +237,11 @@ BEGIN
 
   NEW."consumedAt" := CASE WHEN NEW."state" = 'consumed' THEN now_ ELSE OLD."consumedAt" END;
   NEW."closedAt" := CASE WHEN NEW."state" = 'closed' THEN now_ ELSE NULL END;
+  -- The time the list was last reported: a changed list, or the lane's
+  -- same-state report of it, which may repeat the same list.
   NEW."deployObservedAt" := CASE
     WHEN NEW."deployObservation" IS NULL THEN NULL
-    WHEN NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation" THEN now_
+    WHEN NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation" OR observation_only THEN now_
     ELSE OLD."deployObservedAt"
   END;
   NEW."updatedAt" := now_;

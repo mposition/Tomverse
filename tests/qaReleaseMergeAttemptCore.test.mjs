@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE,
   QA_RELEASE_MERGE_ATTEMPT_OPEN_STATES,
   QA_RELEASE_MERGE_ATTEMPT_OUTCOMES,
   QA_RELEASE_MERGE_ATTEMPT_PERSON_OUTCOMES,
@@ -56,6 +57,11 @@ test("the migration's trigger states the core's transition table, row for row", 
   );
   const personList = /by_person := NEW\."outcome" IN \(([^)]*)\)/.exec(MIGRATION)?.[1] ?? "";
   assert.deepEqual([...personList.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...QA_RELEASE_MERGE_ATTEMPT_PERSON_OUTCOMES]);
+  // The one same-state change: the lane's observation while awaiting deploy.
+  assert.match(
+    MIGRATION,
+    new RegExp(`IF NOT allowed AND OLD\\."state" = '${QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE}' AND NEW\\."state" = '${QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE}' THEN`),
+  );
   const openStates = /one_open_per_base_key"\s*ON "QaReleaseMergeAttempt" \("base"\)\s*WHERE "state" IN \(([^)]*)\)/.exec(MIGRATION)?.[1] ?? "";
   assert.deepEqual([...openStates.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]), [...QA_RELEASE_MERGE_ATTEMPT_OPEN_STATES]);
 });

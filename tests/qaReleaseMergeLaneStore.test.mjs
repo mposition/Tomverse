@@ -78,7 +78,11 @@ test("result report arms ten statements, audits first, moves in one statement, t
   assert.ok(order.every((at) => at > 0), JSON.stringify(order));
   assert.deepEqual(order, [...order].sort((x, y) => x - y));
   // A revision mismatch never closes a deploy as a success, in SQL as in the core.
-  assert.match(fn, /AND \(\$\{!closesAsSuccess\} OR \(SELECT "revision" FROM c\) IS NOT DISTINCT FROM \$\{input\.callerRevision\}::int\)/);
+  // The move is withheld in the same statement: state and outcome stay when
+  // the move would close as a success and the revision differs.
+  const withheld = 'CASE WHEN (${closesAsSuccess} AND (SELECT "revision" FROM c) IS DISTINCT FROM ${input.callerRevision}::int) THEN';
+  assert.equal(fn.split(withheld).length - 1, 2, "state and outcome are both withheld");
+  assert.ok(fn.includes('"deployObservation" = coalesce(${observation}::jsonb, a."deployObservation")'));
 });
 
 test("a person's latch release arms nine statements, refuses an unlatched lane before writing, and binds the attempt change to what was shown", () => {

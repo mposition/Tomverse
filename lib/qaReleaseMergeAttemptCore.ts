@@ -70,6 +70,14 @@ export const QA_RELEASE_MERGE_ATTEMPT_TRANSITIONS: ReadonlyArray<{
   { from: "awaiting_deploy", to: "closed", outcomes: ["deployed", "deploy_failed", "person_deployed", "person_restored"] },
 ];
 
+/**
+ * The one state an attempt may be written in without moving: while awaiting
+ * deploy, the lane records the staging deployments it observed (policy
+ * section 8 item 5) -- repeated reports included, so the list may be the same.
+ * Only the lane, no outcome, and the merge commit unchanged.
+ */
+export const QA_RELEASE_MERGE_ATTEMPT_OBSERVATION_STATE: QaReleaseMergeAttemptState = "awaiting_deploy";
+
 /** The outcomes only a person may record, through the latch release. */
 export const QA_RELEASE_MERGE_ATTEMPT_PERSON_OUTCOMES: readonly QaReleaseMergeAttemptOutcome[] = [
   "person_not_merged",
