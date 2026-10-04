@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdtemp, rmdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, rmdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -16,6 +16,7 @@ import { AMUX_V4_CLI_HARD_DEADLINE_MS,
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 import { inspectAmuxV4AnalysisCliResult,
   planAmuxV4AnalysisCliInvocation } from "../lib/amux/ideaLocalCliContract.mjs";
+import { claimAmuxV4SyntheticS0Once } from "../lib/amux/ideaLocalS0Once.mjs";
 
 test("v13 one-shot deadline is ten minutes", () => {
   assert.equal(AMUX_V4_CLI_HARD_DEADLINE_MS, 600_000);
@@ -61,12 +62,12 @@ test("unknown CLI receipt carries only bounded exit and CONNECT counters", () =>
   assert.equal(amuxV4CliUnknownResult("deadline", null, counts).childExitCode, null);
 });
 
-test("rejected S0 call path remains code-latched off", async () => {
+test("temporary Claude-only S0 still needs one-process approval", async () => {
   const previous = process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
   try {
-    process.env.AMUX_V4_SYNTHETIC_S0_APPROVED = "1";
+    delete process.env.AMUX_V4_SYNTHETIC_S0_APPROVED;
     assert.equal(AMUX_V4_CODEX_S0_ENABLED, false);
-    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, false);
+    assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, true);
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("openai"),
       { kind: "refused" });
     assert.deepEqual(await runAmuxV4IsolatedSyntheticCliS0("anthropic"),
@@ -77,14 +78,44 @@ test("rejected S0 call path remains code-latched off", async () => {
   }
 });
 
-test("S0 script refuses even with its former environment approval", () => {
+test("S0 script refuses without one-process environment approval", () => {
   const script = fileURLToPath(new URL("../scripts/amux-v4-cli-model-s0.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, "openai"], {
-    env: { ...process.env, AMUX_V4_SYNTHETIC_S0_APPROVED: "1" },
+    env: { PATH: process.env.PATH ?? "" },
     encoding: "utf8", timeout: 5_000,
   });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /AMUX_V4_CLI_MODEL_S0_REFUSED/);
+});
+
+test("S0 claim is empty, owned, expiring and consumed before any model call", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const directory = await mkdtemp("/tmp/amux-v4-s0-once-");
+  const markerName = "s0-claude-test.claimed";
+  const markerPath = join(directory, markerName);
+  const expiresAt = Date.now() + 30_000;
+  try {
+    await chmod(directory, 0o755);
+    assert.equal(await claimAmuxV4SyntheticS0Once({ directory,
+      markerName, expiresAt }), false);
+    await chmod(directory, 0o700);
+    assert.equal(await claimAmuxV4SyntheticS0Once({ directory,
+      markerName, expiresAt, now: expiresAt }), false);
+    assert.equal(await claimAmuxV4SyntheticS0Once({ directory,
+      markerName, expiresAt }), true);
+    const marker = await lstat(markerPath);
+    assert.equal(marker.size, 0);
+    assert.equal(marker.mode & 0o777, 0o600);
+    assert.equal(marker.uid, process.getuid());
+    assert.equal(await claimAmuxV4SyntheticS0Once({ directory,
+      markerName, expiresAt }), false);
+  } finally {
+    try { await unlink(markerPath); } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await rmdir(directory);
+  }
 });
 
 test("bounded child kills its process group at the deadline without a model call", {
