@@ -490,7 +490,7 @@ pub fn completion_from_card(detail: &serde_json::Value) -> LocalCompletion {
 pub enum SettleResult {
     Settled,
     DropAndHalt,
-    ExitForReadBack,
+    HaltForReadBack,
     /// Tomverse answered busy: the settle did not happen. Keep, no halt.
     RetryNextTick,
 }
@@ -499,7 +499,7 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
     match settled {
         Some(true) => SettleResult::Settled,
         Some(false) => SettleResult::DropAndHalt,
-        None => SettleResult::ExitForReadBack,
+        None => SettleResult::HaltForReadBack,
     }
 }
 
@@ -518,7 +518,6 @@ pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
 struct SettleFollowup {
     halt: bool,
     keep_pending: bool,
-    exit_for_read_back: bool,
 }
 
 /// Only an explicit database-busy answer proves that settlement wrote nothing.
@@ -528,24 +527,39 @@ fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
         SettleResult::Settled => SettleFollowup {
             halt: false,
             keep_pending: false,
-            exit_for_read_back: false,
         },
         SettleResult::DropAndHalt => SettleFollowup {
             halt: true,
             keep_pending: false,
-            exit_for_read_back: false,
         },
-        SettleResult::ExitForReadBack => SettleFollowup {
+        SettleResult::HaltForReadBack => SettleFollowup {
             halt: true,
             keep_pending: false,
-            exit_for_read_back: true,
         },
         SettleResult::RetryNextTick => SettleFollowup {
             halt: false,
             keep_pending: true,
-            exit_for_read_back: false,
         },
     }
+}
+
+/// Discard an ambiguous settlement without replaying it. A halted bridge
+/// still retains other attempts until their heartbeats and settlements finish.
+fn apply_settle_followup<T>(
+    entry: T,
+    result: SettleResult,
+    halted: &mut bool,
+    still_running: &mut Vec<T>,
+) {
+    let followup = plan_settle_followup(result);
+    *halted |= followup.halt;
+    if followup.keep_pending {
+        still_running.push(entry);
+    }
+}
+
+fn should_exit_halted_bridge(halted: bool, pending_count: usize) -> bool {
+    halted && pending_count == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1632,7 +1646,7 @@ pub async fn run_from_env() -> i32 {
                             .await
                             .map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
-                        if result == SettleResult::ExitForReadBack {
+                        if result == SettleResult::HaltForReadBack {
                             eprintln!(
                                 "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
                                 entry.delivery.attempt_id
@@ -1643,17 +1657,10 @@ pub async fn run_from_env() -> i32 {
                                 entry.delivery.attempt_id
                             );
                         }
-                        let followup = plan_settle_followup(result);
-                        if followup.exit_for_read_back {
-                            // Stop before any other write or heartbeat. The
-                            // service unit prevents restart on exit code 3;
-                            // the operator must read back the attempt first.
-                            return BRIDGE_HALT_EXIT_CODE;
-                        }
-                        halted |= followup.halt;
-                        if followup.keep_pending {
-                            still_running.push(entry);
-                        }
+                        // Drop only the ambiguous attempt. Other attempts
+                        // still need heartbeats and settlement before the
+                        // halted bridge exits for operator read-back.
+                        apply_settle_followup(entry, result, &mut halted, &mut still_running);
                     }
                 }
             }
@@ -1663,7 +1670,7 @@ pub async fn run_from_env() -> i32 {
             eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
             halt_reported = true;
         }
-        if halted && pending.is_empty() {
+        if should_exit_halted_bridge(halted, pending.len()) {
             return BRIDGE_HALT_EXIT_CODE;
         }
 
@@ -2503,23 +2510,62 @@ mod tests {
     fn a_lost_settle_response_halts_for_read_back_without_replaying_the_write() {
         assert_eq!(plan_settle_result(Some(true)), SettleResult::Settled);
         assert_eq!(plan_settle_result(Some(false)), SettleResult::DropAndHalt);
-        assert_eq!(plan_settle_result(None), SettleResult::ExitForReadBack);
+        assert_eq!(plan_settle_result(None), SettleResult::HaltForReadBack);
         assert_eq!(
             plan_settle_followup(SettleResult::Settled),
-            SettleFollowup { halt: false, keep_pending: false, exit_for_read_back: false }
+            SettleFollowup { halt: false, keep_pending: false }
         );
         assert_eq!(
             plan_settle_followup(SettleResult::DropAndHalt),
-            SettleFollowup { halt: true, keep_pending: false, exit_for_read_back: false }
+            SettleFollowup { halt: true, keep_pending: false }
         );
         assert_eq!(
-            plan_settle_followup(SettleResult::ExitForReadBack),
-            SettleFollowup { halt: true, keep_pending: false, exit_for_read_back: true }
+            plan_settle_followup(SettleResult::HaltForReadBack),
+            SettleFollowup { halt: true, keep_pending: false }
         );
         assert_eq!(
             plan_settle_followup(SettleResult::RetryNextTick),
-            SettleFollowup { halt: false, keep_pending: true, exit_for_read_back: false }
+            SettleFollowup { halt: false, keep_pending: true }
         );
+    }
+
+    #[test]
+    fn an_unknown_settle_keeps_other_attempts_alive_until_they_finish() {
+        let mut halted = false;
+        let mut pending = vec![
+            ("unknown", SettleResult::HaltForReadBack),
+            ("busy", SettleResult::RetryNextTick),
+            ("settled", SettleResult::Settled),
+        ];
+        let mut still_running = Vec::new();
+        for (attempt, result) in pending.drain(..) {
+            apply_settle_followup(attempt, result, &mut halted, &mut still_running);
+        }
+        assert_eq!(still_running, vec!["busy"]);
+        assert!(halted);
+        assert!(!should_exit_halted_bridge(halted, still_running.len()));
+        // The next tick heartbeats the retained attempt and settles it; only
+        // then may the halted process exit with the non-restarting status.
+        let mut final_pending = Vec::new();
+        apply_settle_followup(
+            still_running.remove(0),
+            SettleResult::Settled,
+            &mut halted,
+            &mut final_pending,
+        );
+        assert!(final_pending.is_empty());
+        assert!(should_exit_halted_bridge(halted, final_pending.len()));
+    }
+
+    #[test]
+    fn the_run_loop_restores_other_pending_attempts_before_exiting() {
+        let source = include_str!("wsl_bridge.rs");
+        let loop_start = source.find("for mut entry in pending.drain(..)").unwrap();
+        let loop_end = source[loop_start..].find("pending = still_running;").unwrap() + loop_start;
+        let settle_loop = &source[loop_start..loop_end];
+        assert!(settle_loop.contains("apply_settle_followup(entry, result"));
+        assert!(!settle_loop.contains("return BRIDGE_HALT_EXIT_CODE"));
+        assert!(source[loop_end..].contains("should_exit_halted_bridge(halted, pending.len())"));
     }
 
     #[test]
@@ -2764,7 +2810,7 @@ mod tests {
         let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
         assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
         let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
-        assert_eq!(plan_settle_answer(&unknown), SettleResult::ExitForReadBack);
+        assert_eq!(plan_settle_answer(&unknown), SettleResult::HaltForReadBack);
         assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
         assert_eq!(plan_settle_answer(&Ok(false)), SettleResult::DropAndHalt);
     }

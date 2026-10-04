@@ -15,7 +15,14 @@ REQUIRED_TOKEN_KEYS = (
 )
 OPTIONAL_TOKEN_KEYS = ("cache_write_input_tokens",)
 TOKEN_KEYS = REQUIRED_TOKEN_KEYS + OPTIONAL_TOKEN_KEYS
-ATTEMPT_MARKER = re.compile(r"Execution attempt: ([0-9a-f-]{36})")
+ATTEMPT_MARKER = re.compile(r"Execution attempt: ([0-9a-fA-F-]{36})")
+
+
+def parse_timestamp(value):
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("rollout timestamp needs a timezone")
+    return parsed
 
 
 def parse_usage(value):
@@ -78,7 +85,7 @@ def extract_usage(rollout, attempt_id, task_id, turn_ids, worker, card_id, close
             if turn == turn_ids[0] and not scope_started:
                 scope_started = True
                 started_at = timestamp
-            if scope_started and datetime.fromisoformat(timestamp.replace('Z', '+00:00')) < closed_time:
+            if scope_started and parse_timestamp(timestamp) < closed_time:
                 if turn not in selected or turn in completed or active_turn is not None:
                     raise ValueError("unselected, duplicate or overlapping turn before card closure")
                 if turn != turn_ids[len(completed)]:
@@ -147,7 +154,7 @@ def extract_usage(rollout, attempt_id, task_id, turn_ids, worker, card_id, close
                 content = payload.get("content") or []
                 text = "\n".join(item.get("text", "") for item in content if isinstance(item, dict) and isinstance(item.get("text"), str))
                 attempts = ATTEMPT_MARKER.findall(text)
-                if any(value != attempt_id for value in attempts):
+                if any(value.lower() != attempt_id.lower() for value in attempts):
                     raise ValueError("another execution attempt appears in selected turn")
                 if active_turn == turn_ids[0]:
                     if attempts:
@@ -160,7 +167,7 @@ def extract_usage(rollout, attempt_id, task_id, turn_ids, worker, card_id, close
             if payload.get("turn_id") != active_turn:
                 raise ValueError("another turn completed inside selected turn")
             ended_at = timestamp
-            if datetime.fromisoformat(ended_at.replace('Z', '+00:00')) >= closed_time:
+            if parse_timestamp(ended_at) >= closed_time:
                 raise ValueError("turn ended after card closure")
             completed.append(active_turn)
             active_turn = None
