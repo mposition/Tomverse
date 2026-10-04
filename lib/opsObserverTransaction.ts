@@ -12,7 +12,9 @@
  *   - logs the transaction_timeout the session inherited, so an operator can
  *     see when this agent replaced one (operator decision N-7);
  *   - gives the callback a client that sends only tagged single-statement
- *     raw queries and refuses its (A)th statement.
+ *     raw queries and `$appendSystemAudit` (the audit chain append as the
+ *     `ops-observer` actor, charged its four statements), and refuses
+ *     anything past statement A.
  *
  * `assertNotLate(runDeadline)` is the separate short transaction that must pass
  * before a caller reports success, sends, or pings a heartbeat (§6 item 5): the
@@ -27,14 +29,41 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
+import { type AppendedAuditEntry, writeSystemAuditLogEntry } from "@/lib/adminAudit";
+import { OPS_OBSERVER_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import {
   TRANSACTION_BOUNDS,
   armArguments,
 } from "@/scripts/ops-observer/transaction-bounds-core.mjs";
-import { countingClient } from "@/scripts/ops-observer/statement-ceiling-core.mjs";
+import {
+  AUDIT_APPEND_STATEMENT_COST,
+  countingClient,
+} from "@/scripts/ops-observer/statement-ceiling-core.mjs";
 
 export type OpsObserverTransactionKind = keyof typeof TRANSACTION_BOUNDS;
+
+/** An audit entry the store appends; the actor is always `ops-observer`. */
+export type OpsObserverAuditInput = {
+  action: string;
+  targetType: string;
+  targetId?: string | null;
+  summary: string;
+  metadata?: Prisma.InputJsonObject | null;
+};
+
+/** What a store transaction may do: tagged raw statements and the audit append. */
+export type OpsObserverClient = Pick<Prisma.TransactionClient, "$queryRaw" | "$executeRaw"> & {
+  $appendSystemAudit(input: OpsObserverAuditInput): Promise<AppendedAuditEntry>;
+};
+
+const helpers = Object.freeze({
+  $appendSystemAudit: {
+    cost: AUDIT_APPEND_STATEMENT_COST,
+    run: (tx: Prisma.TransactionClient, input: OpsObserverAuditInput) =>
+      writeSystemAuditLogEntry({ ...input, tx, systemActor: OPS_OBSERVER_SYSTEM_AUDIT_ACTOR }),
+  },
+});
 
 /** What the arming function reported for this transaction. */
 export type OpsObserverArmed = {
@@ -92,7 +121,7 @@ function logArmed(kind: OpsObserverTransactionKind, armed: OpsObserverArmed) {
 export async function withOpsObserverTransaction<T>(
   kind: OpsObserverTransactionKind,
   runDeadline: Date,
-  fn: (tx: Prisma.TransactionClient, armed: OpsObserverArmed) => Promise<T>,
+  fn: (tx: OpsObserverClient, armed: OpsObserverArmed) => Promise<T>,
   client: PrismaClient = prisma,
 ): Promise<{ result: T; armed: OpsObserverArmed }> {
   const bound = TRANSACTION_BOUNDS[kind];
@@ -102,8 +131,8 @@ export async function withOpsObserverTransaction<T>(
     async (tx) => {
       armed = await arm(tx, kind, runDeadline);
       logArmed(kind, armed);
-      const counted = countingClient(tx, bound.statementCeiling - 1);
-      return fn(counted.client as Prisma.TransactionClient, armed);
+      const counted = countingClient(tx, bound.statementCeiling - 1, helpers);
+      return fn(counted.client as OpsObserverClient, armed);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,

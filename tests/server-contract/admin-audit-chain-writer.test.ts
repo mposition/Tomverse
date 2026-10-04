@@ -534,6 +534,9 @@ test("the entry writer returns the hash it inserted with the id, and the id writ
   assert.deepEqual(appended, { id: "created-by-caller-tx", entryHash: createCall().data.entryHash });
   assert.match(String(appended.entryHash), /^[0-9a-f]{64}$/);
   assert.deepEqual(kinds(), ["executeRaw", "queryRaw", "findFirst", "create"]);
+  // The ops-observer statement ceiling charges an append this many statements.
+  const { AUDIT_APPEND_STATEMENT_COST } = await import(mod("scripts/ops-observer/statement-ceiling-core.mjs"));
+  assert.equal(kinds().length, AUDIT_APPEND_STATEMENT_COST);
 
   await loadSystemWriter();
   assert.equal(await systemWriter({ ...input, tx: recordingClient("caller-tx") as never }), "created-by-caller-tx");
