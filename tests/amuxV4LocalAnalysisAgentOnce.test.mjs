@@ -9,6 +9,8 @@ import { runAmuxV4LocalAnalysisAdmissionForTest } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { runAmuxV4LocalAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
+import { amuxV4VerifiedCliOutputOrNull } from
+  "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
 import { amuxV4CanClaimAnalysisCli } from
@@ -56,6 +58,17 @@ test("Codex candidates cannot consume claims without served-model attestation", 
   "claude-opus-5-5"), true);
   assert.equal(amuxV4CanClaimAnalysisCli({ ...base, provider: "anthropic",
     modelId: "claude-opus-5-5", egressHosts: [] }, "claude-opus-5-5"), false);
+});
+
+test("unattested or refused CLI output cannot become a live draft", () => {
+  for (const kind of ["model_unverified", "refused", "catalog_unapproved",
+    "outcome_unknown"]) {
+    assert.equal(amuxV4VerifiedCliOutputOrNull({ kind,
+      inputTokens: 10, outputTokens: 2, rawModelOutput: "{}" }), null);
+  }
+  const verified = { kind: "verified_success", inputTokens: 10,
+    outputTokens: 2, rawModelOutput: "{}" };
+  assert.equal(amuxV4VerifiedCliOutputOrNull(verified), verified);
 });
 
 test("unapproved local CLI catalog stops before claim and model execution", async () => {
