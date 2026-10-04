@@ -53,16 +53,37 @@ export type AgentDigestConsole = {
     rotatedAt: Record<string, string | null>;
   } | null;
   digests: AgentDigestConsoleRow[];
+  /** The develop merge lane: its latch and the attempt it holds, as codes and numbers. */
+  mergeLane: {
+    latched: boolean;
+    latch: { sequence: number; reason: string | null; createdAt: string; attemptId: string | null } | null;
+    openAttempt: {
+      id: string;
+      state: string;
+      pullRequestNumber: number;
+      headSha: string;
+      mergeCommitSha: string | null;
+      issuedAt: string;
+    } | null;
+  };
 };
 
 export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDigestConsole> {
-  const [control, rows] = await Promise.all([
+  const [control, rows, latch, openAttempt] = await Promise.all([
     readLatestQaReleaseOperatorControl(),
     prisma.agentDigestItem.findMany({
       where: { agentKey: "qa-release" },
       orderBy: { createdAt: "desc" },
       take: AGENT_DIGEST_CONSOLE_LIMIT,
       select: { id: true, createdAt: true, sizeBytes: true, payloadSha256: true, payload: true },
+    }),
+    prisma.qaReleaseMergeLaneLatch.findFirst({
+      orderBy: { sequence: "desc" },
+      select: { sequence: true, latched: true, reason: true, createdAt: true, attemptId: true },
+    }),
+    prisma.qaReleaseMergeAttempt.findFirst({
+      where: { state: { in: ["issued", "consumed", "awaiting_deploy"] } },
+      select: { id: true, state: true, pullRequestNumber: true, headSha: true, mergeCommitSha: true, issuedAt: true },
     }),
   ]);
 
@@ -108,5 +129,15 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
       ),
     },
     digests,
+    mergeLane: {
+      latched: latch?.latched === true,
+      latch: latch && {
+        sequence: latch.sequence,
+        reason: latch.reason,
+        createdAt: latch.createdAt.toISOString(),
+        attemptId: latch.attemptId,
+      },
+      openAttempt: openAttempt && { ...openAttempt, issuedAt: openAttempt.issuedAt.toISOString() },
+    },
   };
 }
