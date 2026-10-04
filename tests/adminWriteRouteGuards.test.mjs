@@ -77,6 +77,7 @@ const SOURCE_SCOPE_SERVICE = "lib/amux/ideaSourceScopePreviewService.ts";
 const SOURCE_SCOPE_CORE = "lib/amux/ideaSourceScopePreviewCore.ts";
 const SOURCE_SCOPE_REVIEWED_FILES = [
   SOURCE_SCOPE_ROUTE,
+  "lib/adminAuditIntegrityCore.ts",
   "lib/amux/boardImportCore.ts",
   "lib/amux/ideaCrypto.ts",
   "lib/amux/ideaInputCore.ts",
@@ -88,25 +89,29 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "d0f32671b5728184011dbc8140b1e23cfda7bf159c9d6d8092202ee543cbdd6b";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "0889238334dbed4afd78dde96f3205c82c1c5bd290726aab0899ff5e9353c37a";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
-const amuxBusinessClosure = () => {
+const amuxBusinessClosure = (overrides = new Map()) => {
   const seen = new Set();
   const visit = (path) => {
     if (seen.has(path)) return;
     seen.add(path);
     const absolute = join(REPOSITORY_ROOT, ...path.split("/"));
-    const source = readFileSync(absolute, "utf8");
+    const source = overrides.get(path) ?? readFileSync(absolute, "utf8");
     for (const match of source.matchAll(/from\s+["']([^"']+)["']/g)) {
       const specifier = match[1];
-      if (!specifier.startsWith("./") && !specifier.startsWith("@/lib/amux/")) continue;
-      const target = specifier.startsWith("./")
+      if (!specifier.startsWith("./") && !specifier.startsWith("../") &&
+          !specifier.startsWith("@/lib/amux/")) continue;
+      const target = specifier.startsWith(".")
         ? resolve(dirname(absolute), specifier)
         : resolve(REPOSITORY_ROOT, specifier.slice(2));
       const withExtension = extname(target) ? target : `${target}.ts`;
       const relativePath = relative(REPOSITORY_ROOT, withExtension).split(sep).join("/");
-      if (!relativePath.startsWith("lib/amux/")) throw new Error("AMUX preview import escaped its closure");
+      if (!relativePath.startsWith("lib/amux/") &&
+          relativePath !== "lib/adminAuditIntegrityCore.ts") {
+        throw new Error("AMUX preview import escaped its closure");
+      }
       visit(relativePath);
     }
   };
@@ -287,6 +292,16 @@ test("the read-only POST audit exception closes when its source boundary changes
   assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
     [cryptoPath, `${rawCrypto}\nvoid globalThis.fetch("https://example.invalid");`],
   ])), SOURCE_SCOPE_REVIEWED_DIGEST);
+  const auditPath = "lib/adminAuditIntegrityCore.ts";
+  const rawAudit = readFileSync(join(REPOSITORY_ROOT, ...auditPath.split("/")), "utf8");
+  assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
+    [auditPath, `${rawAudit}\nvoid globalThis.fetch("https://example.invalid");`],
+  ])), SOURCE_SCOPE_REVIEWED_DIGEST);
+  const boardPath = "lib/amux/boardImportCore.ts";
+  const rawBoard = readFileSync(join(REPOSITORY_ROOT, ...boardPath.split("/")), "utf8");
+  assert.throws(() => amuxBusinessClosure(new Map([
+    [boardPath, `${rawBoard}\nimport { writeAdminAuditLog } from "../adminAudit.ts";`],
+  ])), /escaped its closure/);
   assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
     amuxSourceScopePreviewService.replace("SET TRANSACTION READ ONLY", "SELECT 1")), false);
   assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,

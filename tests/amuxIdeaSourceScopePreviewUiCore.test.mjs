@@ -5,15 +5,15 @@ import test from "node:test";
 import { classifySourceScopePreview } from "../lib/amux/ideaSourceScopePreviewUiCore.ts";
 
 const ideaId = "d218de81-0c91-4f5b-8dcb-11f335d68110";
+const requested = { repository: "mposition/Tomverse", commitSha: "a".repeat(40), path: "README.md" };
 const checked = {
   ideaId, fileCount: 1, canonicalScopeJson: JSON.stringify({ version: 1,
-    sources: [{ kind: "repository_file", repository: "mposition/Tomverse",
-      commitSha: "a".repeat(40), path: "README.md" }] }),
+    sources: [{ kind: "repository_file", ...requested }] }),
   collectionVerified: false, transferAuthorized: false,
 };
 
 test("only a complete read-only response is shown as a checked scope", () => {
-  assert.deepEqual(classifySourceScopePreview({ status: 200, body: checked }, ideaId),
+  assert.deepEqual(classifySourceScopePreview({ status: 200, body: checked }, ideaId, requested),
     { kind: "checked", canonicalScopeJson: checked.canonicalScopeJson });
   for (const reply of [
     { status: 202, body: checked },
@@ -25,14 +25,41 @@ test("only a complete read-only response is shown as a checked scope", () => {
     { status: 200, body: { ...checked, canonicalScopeJson: '{"version":1,"sources":[]}' } },
     { status: 200, body: { ...checked, fileCount: 0 } },
   ]) {
-    assert.deepEqual(classifySourceScopePreview(reply, ideaId),
+    assert.deepEqual(classifySourceScopePreview(reply, ideaId, requested),
       { kind: "error", code: "preview_unavailable" });
+  }
+});
+
+test("checked scope is the exact requested file with complete canonical metadata", () => {
+  const altered = [
+    { ...requested, repository: "other/Tomverse" },
+    { ...requested, commitSha: "b".repeat(40) },
+    { ...requested, commitSha: "z".repeat(40) },
+    { ...requested, commitSha: "" },
+    { ...requested, path: "OTHER.md" },
+    { ...requested, path: "" },
+    { ...requested, extra: "unreviewed" },
+  ];
+  for (const source of altered) {
+    const canonicalScopeJson = JSON.stringify({ version: 1,
+      sources: [{ kind: "repository_file", ...source }] });
+    assert.deepEqual(classifySourceScopePreview({ status: 200,
+      body: { ...checked, canonicalScopeJson } }, ideaId, requested),
+    { kind: "error", code: "preview_unavailable" });
+  }
+  for (const canonicalScopeJson of [
+    JSON.stringify({ version: 1, sources: [{ kind: "repository_file", ...requested }], extra: true }),
+    ` ${checked.canonicalScopeJson}`,
+  ]) {
+    assert.deepEqual(classifySourceScopePreview({ status: 200,
+      body: { ...checked, canonicalScopeJson } }, ideaId, requested),
+    { kind: "error", code: "preview_unavailable" });
   }
 });
 
 test("a refused preview displays a bounded error instead of checked status", () => {
   assert.deepEqual(classifySourceScopePreview({ status: 503,
-    body: { error: "preview_disabled", transferAuthorized: false } }, ideaId),
+    body: { error: "preview_disabled", transferAuthorized: false } }, ideaId, requested),
   { kind: "error", code: "preview_disabled" });
 });
 
@@ -43,4 +70,8 @@ test("the Admin form uses the route only after a saved idea and keeps the dark s
   assert.match(panel, /\/api\/admin\/amux\/ideas\/source-scope-preview/);
   assert.match(panel, /!sourceScopePreviewAvailable \|\| sourceScopePending/);
   assert.match(page, /sourceScopePreviewPermitted\([\s\S]*?AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV/);
+  for (const field of ["sourceRepository", "sourceCommitSha", "sourcePath"]) {
+    assert.match(panel, new RegExp(`<input value=\\{${field}\\}[\\s\\S]*?focus-visible:outline-2`));
+  }
+  assert.match(panel, /onClick=\{checkSourceScope\}[\s\S]*?focus-visible:outline-2/);
 });
