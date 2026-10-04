@@ -3,8 +3,9 @@
  * at a pull request's base (docs/policy/qa-release-agent.md version 4,
  * section 8 item 3 and appendix A):
  * - this agent's own path patterns: the fenced block under appendix A;
- * - the policy tests: every `tests/**` file a policy document, AGENTS.md or
- *   CLAUDE.md names by path.
+ * - the policy tests: every `tests/**` file that AGENTS.md, CLAUDE.md or any
+ *   file under docs/policy/ names by path -- a YAML registry there counts as
+ *   much as a Markdown policy.
  *
  * Pure: the GitHub adapter reads the files at the base commit and passes
  * their text. A document that cannot be read, or an appendix that cannot be
@@ -48,6 +49,11 @@ export function qaReleasePolicyTestPaths(documents: readonly string[]): string[]
   return [...found].sort();
 }
 
-/** Which files at the base are the documents that name policy tests (section 8 item 3). */
+/**
+ * Which files at the base are the documents that name policy tests (section 8
+ * item 3): every file under docs/policy/, whatever its extension, plus
+ * AGENTS.md and CLAUDE.md. Filtering by extension would let a test that only a
+ * YAML registry names be merged unattended.
+ */
 export const isQaReleasePolicyDocument = (path: string): boolean =>
-  path === "AGENTS.md" || path === "CLAUDE.md" || /^docs\/policy\/.+\.md$/.test(path);
+  path === "AGENTS.md" || path === "CLAUDE.md" || /^docs\/policy\/[^/].*[^/]$/.test(path);

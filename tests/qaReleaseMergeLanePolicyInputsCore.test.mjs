@@ -43,11 +43,24 @@ test("policy tests are the tests/** paths the documents name, nothing looser", (
   ]);
 });
 
-test("the documents are AGENTS.md, CLAUDE.md and docs/policy/**.md", () => {
-  for (const path of ["AGENTS.md", "CLAUDE.md", "docs/policy/qa-release-agent.md", "docs/policy/sub/x.md"]) {
+test("the documents are AGENTS.md, CLAUDE.md and every file under docs/policy/", () => {
+  for (const path of [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/policy/qa-release-agent.md",
+    "docs/policy/sub/x.md",
+    "docs/policy/tomverse-chat-data-domain-registry.yaml",
+    "docs/policy/x.txt",
+  ]) {
     assert.equal(isQaReleasePolicyDocument(path), true, path);
   }
-  for (const path of ["docs/ops/x.md", "docs/policy/x.txt", "agents.md", "lib/AGENTS.md"]) {
+  for (const path of ["docs/ops/x.md", "docs/policyx/a.md", "agents.md", "lib/AGENTS.md"]) {
     assert.equal(isQaReleasePolicyDocument(path), false, path);
   }
+});
+
+test("a test only a YAML registry under docs/policy names is still a policy test", () => {
+  const registry = readFileSync(new URL("../docs/policy/tomverse-chat-data-domain-registry.yaml", import.meta.url), "utf8");
+  assert.ok(isQaReleasePolicyDocument("docs/policy/tomverse-chat-data-domain-registry.yaml"));
+  assert.ok(qaReleasePolicyTestPaths([registry]).includes("tests/comparisonReviewRunCore.test.mjs"));
 });
