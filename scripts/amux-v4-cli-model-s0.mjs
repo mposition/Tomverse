@@ -3,15 +3,8 @@
 import { AMUX_V4_CODEX_S0_ENABLED, AMUX_V4_CLAUDE_S0_ENABLED,
   runAmuxV4IsolatedSyntheticCliS0 } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
-import { claimAmuxV4SyntheticS0Once } from "../lib/amux/ideaLocalS0Once.mjs";
 
 const provider = process.argv[2];
-const APPROVAL_EXPIRES_AT = Date.parse("2026-10-05T00:00:00.000Z");
-const CLAIM_DIRECTORY = "/home/tommy/.amux-cli-profiles";
-const MARKER = Object.freeze({
-  anthropic: "s0-claude-20261004-event-kind-4.claimed",
-  openai: "s0-codex-20261004-original.claimed",
-});
 if (process.platform !== "linux" ||
     process.argv.length !== 3 ||
     !["openai", "anthropic"].includes(provider) ||
@@ -20,15 +13,11 @@ if (process.platform !== "linux" ||
   process.stderr.write("AMUX_V4_CLI_MODEL_S0_REFUSED\n");
   process.exitCode = 2;
 } else {
-  const claimed = await claimAmuxV4SyntheticS0Once({
-    directory: CLAIM_DIRECTORY, markerName: MARKER[provider],
-    expiresAt: APPROVAL_EXPIRES_AT,
-  });
-  if (!claimed) {
+  const result = await runAmuxV4IsolatedSyntheticCliS0(provider);
+  if (result.kind === "refused") {
     process.stderr.write("AMUX_V4_CLI_MODEL_S0_REFUSED\n");
     process.exitCode = 2;
   } else {
-    const result = await runAmuxV4IsolatedSyntheticCliS0(provider);
     const transport = result.kind === "verified_success" ||
       result.kind === "model_unverified";
     const outputMatches = result.kind === "verified_success" &&
