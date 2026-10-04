@@ -85,7 +85,8 @@ test("synthetic CLI S0 remains closed after the consumed diagnosis", async () =>
 test("S0 script refuses anthropic while its code latch is closed", () => {
   assert.equal(AMUX_V4_CLAUDE_S0_ENABLED, false);
   const script = fileURLToPath(new URL("../scripts/amux-v4-cli-model-s0.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [script, "anthropic"], {
+  const result = spawnSync(process.execPath,
+    ["--import", "tsx", script, "anthropic"], {
     env: { PATH: process.env.PATH ?? "" },
     encoding: "utf8", timeout: 5_000,
   });

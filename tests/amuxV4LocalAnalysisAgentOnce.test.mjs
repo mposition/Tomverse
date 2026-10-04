@@ -31,7 +31,7 @@ const response = (body, status = 200) => Response.json(body, { status });
 test("local one-shot entry point is closed before reading configuration", () => {
   const script = fileURLToPath(new URL(
     "../scripts/amux-v4-analysis-agent-once.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [script], {
+  const result = spawnSync(process.execPath, ["--import", "tsx", script], {
     env: { PATH: process.env.PATH ?? "" }, encoding: "utf8", timeout: 5_000,
   });
   assert.equal(result.status, 2);
