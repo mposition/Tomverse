@@ -313,6 +313,13 @@ test("the sre-ops transition ledger", { skip: !rawUrl }, async (t) => {
         await append({ genesisId: fresh, generation: rows[0].generation, auditLogId: e.id, auditEntryHash: e.entryHash, keysSha256: rows[0].stampKeysSha256 });
       });
       await purge();
+      const left = await q(`SELECT generation FROM "OpsObserverTransition" WHERE "genesisId" = $1 ORDER BY generation`, [fresh]);
+      assert.deepEqual(left.rows.map((r) => r.generation), [2, 3]);
+      // The row at the checkpoint itself stays, however old: the checkpoint is
+      // 2, so generation 2 is not below it.
+      await age(fresh, 2);
+      await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 2`, [fresh]),
+        /ops_observer_transition_retained/);
       // The newest row stays: the checkpoint can never pass it.
       await refused(q(`DELETE FROM "OpsObserverTransition" WHERE "genesisId" = $1 AND generation = 3`, [fresh]),
         /ops_observer_transition_retained/);
