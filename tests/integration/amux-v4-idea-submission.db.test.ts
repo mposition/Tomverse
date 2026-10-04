@@ -77,7 +77,8 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
     keyVersion: stored.rawKeyVersion ?? 0,
   }, "idea_raw", ideaId, keys);
   assert.equal(JSON.parse(opened.toString("utf8")).idea, ideaText);
-  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId), { requestId, status: "committed", ideaId });
+  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId),
+    { requestId, status: "committed", ideaId, hasExternalSources: false });
   const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditId } });
   assert.equal(audit.actorUserId, actorUserId);
   assert.equal(audit.action, "AMUX_V4_IDEA_SUBMITTED");
@@ -105,6 +106,23 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
   }
   assert.ok(databaseUniqueError);
   assert.notEqual(submissionFailureKind(false, databaseUniqueError), "definitive_failure");
+});
+
+test("read-back preserves whether the saved idea declared external sources", async () => {
+  const sourceRequestId = randomUUID();
+  const sourceIdeaId = randomUUID();
+  const sourceInspection = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: sourceRequestId,
+    input: { version: 1, idea: "SYNTHETIC_SOURCE_REFERENCE", repositories: ["mposition/Tomverse"],
+      pullRequests: [] },
+  }));
+  if (!sourceInspection.ok) throw new Error(sourceInspection.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx, {
+    session, request, inspected: sourceInspection, ideaId: sourceIdeaId, keys,
+  }));
+  assert.deepEqual(await readIdeaSubmissionRequest(session, sourceRequestId),
+    { requestId: sourceRequestId, status: "committed", ideaId: sourceIdeaId,
+      hasExternalSources: true });
 });
 
 test("submission row and canonical audit roll back together", async () => {

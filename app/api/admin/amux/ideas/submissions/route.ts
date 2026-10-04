@@ -90,7 +90,9 @@ export async function POST(request: Request) {
     }
     const committed = await submitIdea({ session, request, inspected });
     return NextResponse.json(
-      { ideaId: committed.ideaId, requestId: committed.requestId, state: "submitted", transferReady: false },
+      { ideaId: committed.ideaId, requestId: committed.requestId, state: "submitted",
+        hasExternalSources: inspected.counts.repositoryCount + inspected.counts.pullRequestCount > 0,
+        transferReady: false },
       { status: 201, headers: noStore },
     );
   } catch (error) {
