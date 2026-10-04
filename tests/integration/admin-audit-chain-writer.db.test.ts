@@ -30,6 +30,8 @@ const reset = () =>
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "AmuxIdeaAnalysisChunk",
       "AmuxIdeaDraftUnit",
       "AmuxIdeaFrontierModelApproval",
