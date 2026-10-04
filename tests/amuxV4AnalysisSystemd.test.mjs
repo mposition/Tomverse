@@ -11,6 +11,7 @@ test("local analysis uses a bounded one-shot without a product DB credential", (
   assert.match(service, /^Type=oneshot$/m);
   assert.match(service, /^TimeoutStartSec=650s$/m);
   assert.match(service, /^KillMode=control-group$/m);
+  assert.match(service, /^ConditionFileNotEmpty=%h\/\.local\/lib\/tomverse-amux-v4\/analysis-agent-once\.mjs$/m);
   assert.match(service, /^EnvironmentFile=%h\/\.config\/tomverse-amux-v4\/analysis-agent\.env$/m);
   assert.match(service, /^ExecStart=\/usr\/bin\/node %h\/\.local\/lib\/tomverse-amux-v4\/analysis-agent-once\.mjs$/m);
   assert.doesNotMatch(service, /^(?:Restart|ExecStartPre|User)=/m);
