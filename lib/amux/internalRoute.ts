@@ -16,6 +16,7 @@ import { reportAmuxOperationalIncident } from "@/lib/amux/operationalError";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxDatabaseSqlState,
   amuxTransactionNotStartedCode,
   amuxTransientDatabaseCode,
   isAmuxDbBusyCode,
@@ -147,7 +148,8 @@ const answersNothingCommitted = (error: unknown): boolean => {
     (error instanceof AmuxDbBoundaryError &&
       error.code === "AMUX_DB_DEADLINE_EXCEEDED") ||
     databaseCode === "57014" ||
-    databaseError.includes("57014")
+    databaseError.includes("57014") ||
+    (!(error instanceof AmuxDbBoundaryError) && amuxDatabaseSqlState(error) === "57014")
   ) {
     return true;
   }
@@ -249,7 +251,8 @@ export const amuxInternalErrorResponse = (
     (error instanceof AmuxDbBoundaryError &&
       error.code === "AMUX_DB_DEADLINE_EXCEEDED") ||
     databaseCode === "57014" ||
-    databaseError.includes("57014")
+    databaseError.includes("57014") ||
+    (!(error instanceof AmuxDbBoundaryError) && amuxDatabaseSqlState(error) === "57014")
   ) {
     return amuxJsonNoStore(
       {
