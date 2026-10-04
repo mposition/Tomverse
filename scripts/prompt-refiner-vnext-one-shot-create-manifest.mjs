@@ -16,6 +16,8 @@ const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CASES_MAX_BYTES = 16 * 1024 * 1024;
 const RECEIPT_MAX_BYTES = 2 * 1024;
 const HEX_64 = /^[0-9a-f]{64}$/;
+const PREREGISTRATION_BINDING_VERSION =
+  "prompt-refiner-vnext-one-shot-preregistration-audit-id-v1";
 const DRAFT_KEYS = [
   "language", "ordinal", "baseCell", "eligibleChallengeTag",
   "expectedDirection", "allowedAbstentionReasons", "sourceText",
@@ -57,16 +59,22 @@ export function assembleOwnerManifest(casesText, receiptText, seedHex) {
     "owner_preregistration_receipt");
   const readback = strictBenchmarkObject(receipt.readback, [
     "preregistrationRecorded", "preregistrationAuditLogId",
-    "preregistrationBindingDigest", "currentPinsMatch", "dispatchAuthorized",
+    "currentPinsMatch", "dispatchAuthorized",
   ], "owner_preregistration_readback");
   if (readback.preregistrationRecorded !== true ||
       readback.currentPinsMatch !== true || readback.dispatchAuthorized !== false ||
       typeof readback.preregistrationAuditLogId !== "string" ||
-      !/^[A-Za-z0-9_-]{1,128}$/.test(readback.preregistrationAuditLogId) ||
-      typeof readback.preregistrationBindingDigest !== "string" ||
-      !HEX_64.test(readback.preregistrationBindingDigest)) {
+      !/^[A-Za-z0-9_-]{1,128}$/.test(readback.preregistrationAuditLogId)) {
     throw new Error("owner_preregistration_unavailable");
   }
+  // This is a content-free identity commitment, not offline authentication.
+  // An eventual server-owned admission must recompute it from the signed B01
+  // audit record; this CLI cannot promote a saved readback to authority.
+  const preregistrationDigest = createHash("sha256")
+    .update(canonicalBenchmarkJson({
+      version: PREREGISTRATION_BINDING_VERSION,
+      auditLogId: readback.preregistrationAuditLogId,
+    }), "utf8").digest("hex");
   const draft = strictBenchmarkObject(
     parseBenchmarkJson(casesText, CASES_MAX_BYTES), ["version", "cases"],
     "owner_cases");
@@ -86,7 +94,7 @@ export function assembleOwnerManifest(casesText, receiptText, seedHex) {
     a.language === "ko" ? -1 : 1));
   const unsigned = {
     version: "prompt-refiner-vnext-one-shot-manifest-v1",
-    preregistrationDigest: readback.preregistrationBindingDigest,
+    preregistrationDigest,
     seedHex, cases,
   };
   const rootDigest = createHash("sha256")
@@ -95,13 +103,13 @@ export function assembleOwnerManifest(casesText, receiptText, seedHex) {
   const bindingText = JSON.stringify({
     version: "prompt-refiner-vnext-one-shot-binding-v1",
     expectedRootDigest: rootDigest,
-    expectedPreregistrationDigest: readback.preregistrationBindingDigest,
+    expectedPreregistrationDigest: preregistrationDigest,
   }) + "\n";
   // All 80 case structures, quotas, witnesses, rubrics, duplicates and root
   // must pass before any private file is created. The CLI cannot prove the
   // readback's provenance, semantic truth, authorship or privacy exclusion.
   verifyPromptRefinerVnextOneShotManifestEnvelope(manifestText, rootDigest,
-    readback.preregistrationBindingDigest);
+    preregistrationDigest);
   return { manifestText, bindingText };
 }
 

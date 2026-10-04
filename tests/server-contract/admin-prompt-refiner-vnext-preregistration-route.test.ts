@@ -73,9 +73,7 @@ async function loadRoute() {
       reads++;
       if (readFailure) throw new Error(readFailure);
       return { preregistrationRecorded: true,
-        preregistrationAuditLogId: "opaque-audit-id",
-        preregistrationBindingDigest: currentPinsMatch ? "e".repeat(64) : null,
-        currentPinsMatch,
+        preregistrationAuditLogId: "opaque-audit-id", currentPinsMatch,
         dispatchAuthorized: false };
     },
     preparePromptRefinerVnextOneShotPreregistration: async (input: unknown) => {
@@ -162,8 +160,7 @@ test("read-back is owner-only, recent-auth, no-store and available with writes o
   assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.deepEqual(await response.json(), { readback: {
     preregistrationRecorded: true, preregistrationAuditLogId: "opaque-audit-id",
-    preregistrationBindingDigest: "e".repeat(64), currentPinsMatch: true,
-    dispatchAuthorized: false,
+    currentPinsMatch: true, dispatchAuthorized: false,
   } });
   assert.equal(reads, 1);
   assert.equal(writes, writesBefore);
@@ -172,8 +169,7 @@ test("read-back is owner-only, recent-auth, no-store and available with writes o
   assert.equal(drift.status, 200);
   assert.deepEqual(await drift.json(), { readback: {
     preregistrationRecorded: true, preregistrationAuditLogId: "opaque-audit-id",
-    preregistrationBindingDigest: null, currentPinsMatch: false,
-    dispatchAuthorized: false,
+    currentPinsMatch: false, dispatchAuthorized: false,
   } });
   currentPinsMatch = true;
   readFailure = "vnext_one_shot_preregistration_record_unverifiable";

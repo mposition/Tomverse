@@ -1,6 +1,7 @@
 // Synthetic data only. Never import or print an owner holdout here.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +13,7 @@ import { checkManifestFiles } from
   "../scripts/prompt-refiner-vnext-one-shot-check-manifest.mjs";
 import { syntheticManifest } from
   "./support/promptRefinerVnextOneShotSyntheticManifest.mjs";
+import { canonicalBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const script = join(root, "scripts/prompt-refiner-vnext-one-shot-create-manifest.mjs");
@@ -27,9 +29,13 @@ const draft = JSON.stringify({
 const receipt = (overrides = {}) => JSON.stringify({ readback: {
   preregistrationRecorded: true,
   preregistrationAuditLogId: "synthetic-audit-id",
-  preregistrationBindingDigest: "b".repeat(64),
   currentPinsMatch: true, dispatchAuthorized: false, ...overrides,
 } });
+const expectedPreregistrationDigest = createHash("sha256")
+  .update(canonicalBenchmarkJson({
+    version: "prompt-refiner-vnext-one-shot-preregistration-audit-id-v1",
+    auditLogId: "synthetic-audit-id",
+  }), "utf8").digest("hex");
 
 test("owner assembly binds a saved preregistration readback digest to all 80 cases", () => {
   const { manifestText, bindingText } = assembleOwnerManifest(
@@ -37,14 +43,17 @@ test("owner assembly binds a saved preregistration readback digest to all 80 cas
   const manifest = JSON.parse(manifestText);
   const binding = JSON.parse(bindingText);
   assert.equal(manifest.cases.length, 80);
-  assert.equal(manifest.preregistrationDigest, "b".repeat(64));
-  assert.equal(binding.expectedPreregistrationDigest, "b".repeat(64));
+  assert.equal(manifest.preregistrationDigest, expectedPreregistrationDigest);
+  assert.equal(binding.expectedPreregistrationDigest, expectedPreregistrationDigest);
   assert.equal(binding.expectedRootDigest, manifest.rootDigest);
   assert.notEqual(manifest.rootDigest, synthetic.rootDigest);
   assert.deepEqual(manifest.cases.map((item) => item.caseId),
     synthetic.cases.map((item) => item.caseId));
   assert.equal(assembleOwnerManifest(draft, receipt(), "00".repeat(32)).manifestText,
     manifestText);
+  assert.notEqual(assembleOwnerManifest(draft, receipt({
+    preregistrationAuditLogId: "different-signed-record",
+  }), "00".repeat(32)).bindingText, bindingText);
 });
 
 test("invalid readback shapes and incomplete cases fail closed", () => {
@@ -52,8 +61,8 @@ test("invalid readback shapes and incomplete cases fail closed", () => {
     { currentPinsMatch: false },
     { preregistrationRecorded: false },
     { dispatchAuthorized: true },
-    { preregistrationBindingDigest: "not-a-digest" },
     { preregistrationAuditLogId: "" },
+    { preregistrationAuditLogId: "unbounded/invalid" },
   ]) {
     assert.throws(() => assembleOwnerManifest(draft, receipt(bad), "00".repeat(32)));
   }
@@ -66,6 +75,9 @@ test("invalid readback shapes and incomplete cases fail closed", () => {
     "00".repeat(32)));
   assert.throws(() => assembleOwnerManifest(draft, receipt(), "00"),
     /owner_seed_invalid/);
+  assert.throws(() => assembleOwnerManifest(draft, receipt({
+    preregistrationBindingDigest: "b".repeat(64),
+  }), "00".repeat(32)));
 });
 
 test("CLI writes only new owner files, prints no case or root and refuses overwrite", () => {
