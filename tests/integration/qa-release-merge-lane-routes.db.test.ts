@@ -6,6 +6,7 @@ import { recordQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlSt
 import {
   handleQaReleaseMergeConsume,
   handleQaReleaseMergeInstruction,
+  handleQaReleaseMergeLaneState,
   handleQaReleaseMergeReport,
 } from "@/lib/qaReleaseMergeLaneRoutes";
 
@@ -151,4 +152,26 @@ test("a call past its budget answers deadline_passed and records nothing", async
     body: { error: "deadline_passed" },
   });
   assert.equal(await prisma.qaReleaseMergeAttempt.count(), 0);
+});
+
+test("the state read tells the service whether the lane is latched and which attempt it holds", async () => {
+  assert.equal((await handleQaReleaseMergeLaneState(call({}, { authorization: "Bearer nope" }), env)).status, 401);
+  const empty = await handleQaReleaseMergeLaneState(call({}), env);
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.latched, false);
+  assert.equal(empty.body.openAttempt, null);
+  assert.equal(typeof empty.body.dbNowMs, "number");
+
+  const issued = await handleQaReleaseMergeInstruction(call({ pullRequestNumber: 12, headSha: HEAD }), env);
+  const attemptId = issued.body.attemptId as string;
+  const held = await handleQaReleaseMergeLaneState(call({}), env);
+  const open = held.body.openAttempt as Record<string, unknown>;
+  assert.equal(open.id, attemptId);
+  assert.equal(open.state, "issued");
+  assert.equal(open.pullRequestNumber, 12);
+  assert.equal(open.mergeNotBeforeMs, open.issuedAtMs);
+  await handleQaReleaseMergeConsume(call({ attemptId, pullRequestNumber: 12, headSha: HEAD, base: "develop" }), env);
+  const consumed = (await handleQaReleaseMergeLaneState(call({}), env)).body.openAttempt as Record<string, unknown>;
+  assert.equal(consumed.state, "consumed");
+  assert.ok((consumed.mergeNotBeforeMs as number) >= (consumed.issuedAtMs as number));
 });
