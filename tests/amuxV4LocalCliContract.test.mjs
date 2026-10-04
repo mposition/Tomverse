@@ -162,6 +162,26 @@ test("Claude ignores only bounded pre-init UI invalidation notices", () => {
   }
 });
 
+test("Claude S0 trace records UI invalidation shape without field values", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const marker = "never leak a credential or content";
+  const event = { type: "system", subtype: "ui_invalidate",
+    uuid: marker, session_id: "session-1", components: [marker],
+    mystery_field: marker };
+  const trace = inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(JSON.stringify(event)), 0,
+    { diagnostic: true, syntheticEventType: true });
+  assert.equal(trace.kind, "outcome_unknown");
+  assert.equal(trace.rejectionPoint, "ui_invalidate_shape");
+  assert.deepEqual(trace.syntheticTrace, { total: 1, truncated: false,
+    events: [{ type: "system", phase: "before_init",
+      subtype: "ui_invalidate", fieldCount: 6,
+      fields: ["components",
+        createHash("sha256").update("mystery_field").digest("hex"),
+        "session_id", "subtype", "type", "uuid"] }] });
+  assert.equal(JSON.stringify(trace).includes(marker), false);
+});
+
 test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const maxTokens = Buffer.from([
