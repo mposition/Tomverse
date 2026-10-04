@@ -1,0 +1,23 @@
+[Unit]
+Description=Tomverse AMUX v4 local idea analysis (one claim)
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsRegular=%h/.local/lib/tomverse-amux-v4/analysis-agent-once.mjs
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/tomverse-amux-v4/analysis-agent.env
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v4/analysis-agent-once.mjs
+WorkingDirectory=%h
+TimeoutStartSec=650s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v4-analysis-agent
+
+# The timer is the only start path; a failed/unknown outcome must not restart.
