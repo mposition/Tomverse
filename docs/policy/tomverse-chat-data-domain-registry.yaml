@@ -1444,6 +1444,25 @@ domains:
       not settle account deletion, retention, or unified export; no approval
       writer or live CLI call is enabled.
 
+  - domain: amuxIdeaAnalysisPriceVersion
+    prismaModel: AmuxIdeaAnalysisPriceVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 price-approval account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId identifies the approving operator without a User
+      foreign key. The row stores versioned price evidence and canonical audit
+      references, not an idea body or provider response. Revocation is
+      one-way; account deletion, retention and unified export are not yet
+      resolved. A price approval alone never enables a live model call.
+
   - domain: amuxIdeaSubmission
     prismaModel: AmuxIdeaSubmission
     userLinkageRole: actor

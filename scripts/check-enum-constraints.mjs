@@ -651,6 +651,31 @@ const REGISTRY = {
     reason:
       "The v4 model-transfer preview has one confirmed or in-flight attempt per idea chunk; outcome_unknown remains occupied until read-back and owner resolution.",
   },
+  AmuxIdeaAnalysisBudgetHold_mode_check: {
+    owner: "database",
+    reason:
+      "The dark v4 analysis hold distinguishes subscription CLI API-conversion estimates from actual API-mode costs. No reservation writer is enabled by the schema migration.",
+  },
+  AmuxIdeaAnalysisBudgetHold_provider_check: {
+    owner: "database",
+    reason:
+      "Only the currently approved OpenAI and Anthropic analysis providers may appear in the dark hold ledger. A later provider needs a policy and migration change.",
+  },
+  AmuxIdeaAnalysisBudgetHold_status_check: {
+    owner: "database",
+    reason:
+      "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
+  },
+  AmuxIdeaAnalysisPriceVersion_provider_check: {
+    owner: "database",
+    reason:
+      "Only OpenAI and Anthropic may have owner-approved AMUX v4 analysis prices; adding a provider requires an explicit policy and migration change.",
+  },
+  AmuxIdeaAnalysisPriceVersion_mode_check: {
+    owner: "database",
+    reason:
+      "Each approved analysis price is tied to subscription CLI or API mode so estimates and actual API costs cannot be silently interchanged.",
+  },
   AmuxIdeaAnalysisChunk_state_check: {
     owner: "database",
     reason:

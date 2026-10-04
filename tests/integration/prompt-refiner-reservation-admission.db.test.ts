@@ -62,6 +62,8 @@ const reset = async () => {
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "AmuxIdeaAnalysisChunk",
       "AmuxIdeaDraftUnit",
       "AmuxIdeaFrontierModelApproval",

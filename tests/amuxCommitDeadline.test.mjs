@@ -70,6 +70,16 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001111800_amux_v4_frontier_model_catalog",
   // AMUX intake v4: immutable source-plan revision and per-revision cursor.
   "20261002100000_amux_v4_source_plan_revision",
+  // AMUX v4 worker CLI usage: additive invocation and aggregate evidence.
+  "20261002150000_amux_cli_usage_invocation",
+  "20261002160000_amux_cli_usage_aggregate_final",
+  "20261002170000_amux_cli_usage_role_snapshot",
+  "20261002180000_amux_cli_aggregate_role_vocabulary",
+  "20261002190000_amux_cli_usage_year_insert_fence",
+  // AMUX v4 idea-analysis budget ledger: additive and dark.
+  "20261003100000_amux_v4_analysis_budget_ledger",
+  "20261003110000_amux_v4_analysis_budget_total_check",
+  "20261003120000_amux_v4_analysis_price_versions",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

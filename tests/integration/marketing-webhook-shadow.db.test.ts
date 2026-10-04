@@ -49,6 +49,8 @@ const reset = async () => {
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "EngineeringAgentApproval",
       -- main's dark AMUX v4 tables also reference AdminAuditLog; the same
       -- FK closure the schema suite lists, instead of cascading.

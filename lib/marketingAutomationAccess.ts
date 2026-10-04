@@ -515,6 +515,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * admission decisions are unchanged. The same release adds the
  * agent-digest-retention system actor to lib/adminAuditSystemActors.ts, a
  * watched file; no marketing actor changes.
+ *
+ * 2026-10-08: AMUX v4 analysis budget adds a scoped system-audit action.
+ * The webhook receiver's behavior is unchanged; repin this closure digest
+ * after assembling the AMUX-only release tree.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
   "3270010d1d8818cdcdce1b605bbddc87921932c62b49069c19855a494311db4c";
