@@ -515,10 +515,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-03: product-research and CHAT-01 changed the schema after develop
  * was repinned. The value below covers the merged schema including the
  * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
- * SupportTriageRun and its two audit actors remain included in the merged schema.
+ * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged. SupportTriageSuggestion and the account-deletion actor move it again.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "838db90370ebc0fd40382638064d7d92165aee3b3a68a9e9db42badff9abded2";
+  "141de9a0dbeb28769c91847c4c0bfbc920777f697d9af5fd030879537188c4be";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

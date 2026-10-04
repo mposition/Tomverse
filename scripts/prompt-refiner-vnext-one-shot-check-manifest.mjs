@@ -1,7 +1,7 @@
 // Owner-environment structural check only. Never prints the manifest, root,
 // binding, case identifiers, or a parser exception. No seal or dispatch path.
 import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseBenchmarkJson, strictBenchmarkObject } from
   "../lib/routerDevelopmentBenchmark.ts";
@@ -114,6 +114,10 @@ function main(args) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Bundled owner runners include this module; only its own CLI may run main().
+if (process.argv[1] &&
+    basename(fileURLToPath(import.meta.url)) ===
+      "prompt-refiner-vnext-one-shot-check-manifest.mjs" &&
+    resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = main(process.argv.slice(2));
 }
