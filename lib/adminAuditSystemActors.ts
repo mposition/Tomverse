@@ -61,6 +61,11 @@ export type ProductResearchSystemAuditActor =
 export const AMUX_V4_INITIAL_SOURCE_PLAN_ACTION = "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_TARGET = "AmuxIdeaSourcePlanRevision" as const;
 export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as const;
+/** An AMUX v4 analysis budget hold is agent cost, never user credit. Its
+ * writer stays dark until the price, token-cap and local-runner gates pass. */
+export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_RESERVED" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
+export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE = "analysis-budget-reserve-v1" as const;
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -104,15 +109,26 @@ export const isSystemAuditActor = (value: unknown): value is SystemAuditActor =>
   typeof value === "string" &&
   (SYSTEM_AUDIT_ACTORS as readonly string[]).includes(value);
 
-/** Existing actors retain their established call-site contracts. The new v4
- * identity cannot be used for any other audit action or target. */
+/** Existing actors retain their established call-site contracts. Each v4
+ * intake action/target pair has its own immutable scope marker. */
+export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): string | null => {
+  if (action === AMUX_V4_INITIAL_SOURCE_PLAN_ACTION &&
+      targetType === AMUX_V4_INITIAL_SOURCE_PLAN_TARGET) {
+    return AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET) {
+    return AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE;
+  }
+  return null;
+};
+
 export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
   isSystemAuditActor(actor) &&
   (actor !== AMUX_V4_IDEA_SYSTEM_ACTOR ||
-    (action === AMUX_V4_INITIAL_SOURCE_PLAN_ACTION &&
-     targetType === AMUX_V4_INITIAL_SOURCE_PLAN_TARGET));
+    amuxV4SystemAuditScope(action, targetType) !== null);
 
 /** Whether caller-supplied metadata claims the reserved key at its top level. */
 export const metadataClaimsSystemActor = (metadata: unknown): boolean =>
@@ -158,7 +174,7 @@ export const auditRowActorKind = (
   if (actor === AMUX_V4_IDEA_SYSTEM_ACTOR) {
     const metadata = row.metadata as Record<string, unknown>;
     return systemAuditActionAllowed(actor, row.action, row.targetType) &&
-      metadata.actorScope === AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE
+      metadata.actorScope === amuxV4SystemAuditScope(row.action, row.targetType)
       ? "system" : "unknown";
   }
   return "system";

@@ -524,9 +524,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * closure. The receiver's calls and the rows it writes are unchanged; the
  * fingerprint moves because the closure's bytes did. Computed over the merged
  * tree, which includes the support-triage and agent-digest actors above.
+ *
+ * 2026-10-05: AMUX v4 adds a separately scoped system-audit action for its
+ * analysis budget hold. The webhook receiver's imports and decisions do not
+ * change; its existing audit-helper closure now has different source bytes.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "b94b182253215091763858dd7312ec34f424eda92717e779942bb0c3166dce93";
+  "d8e4d28e1aeb4ab2a63600c61370f02cbd2aea8aef12566b7ed8787f38419878";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
