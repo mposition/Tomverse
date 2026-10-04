@@ -114,12 +114,14 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
   }
   const audit = await tx.adminAuditLog.findUnique({
     where: { id: plan.creationAuditLogId },
-    select: { targetId: true, targetType: true, action: true, entryHash: true, metadata: true },
+    select: { targetId: true, targetType: true, action: true, entryHash: true,
+      actorUserId: true, actorEmail: true, ipAddress: true, userAgent: true,
+      metadata: true },
   });
   if (!audit?.entryHash || audit.targetId !== plan.id ||
       audit.targetType !== "AmuxIdeaSourcePlanRevision" ||
       audit.action !== "AMUX_V4_INITIAL_SOURCE_PLAN_CREATED" ||
-      !matchesInitialPlanSystemAudit(audit.metadata, plan.manifestDigest)) {
+      !matchesInitialPlanSystemAudit(audit, plan.manifestDigest)) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
   }
 
