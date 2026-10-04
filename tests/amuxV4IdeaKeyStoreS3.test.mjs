@@ -9,6 +9,10 @@ import { createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
 
 test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () => {
   const objects = new Map();
+  let deleteCount = 0;
+  let failNextHead = false;
+  let failHeadAfterDelete = false;
+  let loseNextDeleteReply = false;
   const server = createServer(async (request, response) => {
     const key = new URL(request.url, "http://127.0.0.1").pathname;
     if (request.method === "PUT") {
@@ -23,9 +27,14 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       response.writeHead(200, { "Content-Length": value.length,
         "Content-Type": "application/octet-stream" }); response.end(value);
     } else if (request.method === "HEAD") {
+      if (failNextHead) { failNextHead = false; response.writeHead(503); response.end(); return; }
       response.writeHead(objects.has(key) ? 200 : 404); response.end();
     } else if (request.method === "DELETE") {
-      objects.delete(key); response.writeHead(204); response.end();
+      deleteCount += 1;
+      objects.delete(key);
+      if (failHeadAfterDelete) { failNextHead = true; failHeadAfterDelete = false; }
+      response.writeHead(loseNextDeleteReply ? 503 : 204); response.end();
+      loseNextDeleteReply = false;
     } else { response.writeHead(405); response.end(); }
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -58,11 +67,33 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       { code: "conflict" });
     await deleteAmuxContentUnitKey(identity, env);
     assert.equal(objects.size, 0);
+    assert.equal(deleteCount, 1);
     await assert.rejects(loadAmuxContentUnitKeys(identity, env),
       { code: "missing" });
     // The DB ciphertext still exists but no surviving object-store key can
     // unwrap its data key, even with the global app master available.
     assert.equal(ciphertext.ciphertext.length > 0, true);
+
+    const second = { ...identity,
+      subjectId: "1f8c9c77-2e86-483e-8fbb-2d5e2c32ad79" };
+    await createAmuxContentUnitKeys(second, env);
+    loseNextDeleteReply = true;
+    await deleteAmuxContentUnitKey(second, env);
+    assert.equal(deleteCount, 2);
+    assert.equal(objects.size, 0);
+
+    const third = { ...identity,
+      subjectId: "1f8c9c77-2e86-483e-8fbb-2d5e2c32ad80" };
+    await createAmuxContentUnitKeys(third, env);
+    // Fail the first post-delete read-back. The next invocation must HEAD
+    // the missing key and must not send another DELETE.
+    const originalDeleteCount = deleteCount;
+    failHeadAfterDelete = true;
+    await assert.rejects(deleteAmuxContentUnitKey(third, env),
+      { code: "outcome_unknown" });
+    await deleteAmuxContentUnitKey(third, env);
+    assert.equal(deleteCount, originalDeleteCount + 1);
+    assert.equal(objects.size, 0);
   } finally {
     await new Promise((resolve, reject) => server.close((error) =>
       error ? reject(error) : resolve()));

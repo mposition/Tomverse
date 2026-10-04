@@ -216,18 +216,29 @@ export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
   env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const { objectKey } = identity(input);
   const { bucket, client } = connection(env);
-  try {
-    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+  const exists = async (): Promise<boolean> => {
     try {
       await client.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }));
-      throw new AmuxIdeaKeyStoreError("outcome_unknown");
+      return true;
     } catch (error) {
-      if (error instanceof AmuxIdeaKeyStoreError) throw error;
       if (typeof error === "object" && error !== null &&
           "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
-            .$metadata?.httpStatusCode === 404) return;
+            .$metadata?.httpStatusCode === 404) return false;
       throw new AmuxIdeaKeyStoreError("outcome_unknown");
     }
+  };
+  try {
+    // A prior DELETE may have committed even when its caller lost the reply.
+    // Read back first; do not issue another DELETE blindly.
+    if (!(await exists())) return;
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: objectKey }));
+    } catch (error) {
+      // A lost DELETE response can be resolved only by an independent HEAD.
+      if (!(await exists())) return;
+      throw error;
+    }
+    if (await exists()) throw new AmuxIdeaKeyStoreError("outcome_unknown");
   } catch (error) {
     if (error instanceof AmuxIdeaKeyStoreError) throw error;
     throw new AmuxIdeaKeyStoreError("outcome_unknown");

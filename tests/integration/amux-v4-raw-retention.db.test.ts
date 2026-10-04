@@ -127,6 +127,13 @@ test("payload and freeform bodies retire their different external keys", async (
       60 * 60_000), freeformCiphertext: Buffer.from("encrypted freeform"),
     freeformKeyId: amuxContentUnitKeyId(freeformTarget), freeformKeyVersion: 1,
     freeformPurgeAfter: new Date(Date.now() - 1000) } });
+  await assert.rejects(prisma.amuxIdeaTransferPreview.update({
+    where: { id: previewId }, data: { payloadPurgeAfter: null },
+  }), /payload_purge_scheduled_check|payload purge cannot be postponed/);
+  await assert.rejects(prisma.amuxIdeaAnalysisChunk.update({
+    where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+    data: { freeformPurgeAfter: null },
+  }), /freeform_purge_scheduled_check|freeform purge cannot be postponed/);
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueTransferPayloadPurge(tx, previewId)), "purged");
   assert.equal(await prisma.$transaction((tx) =>

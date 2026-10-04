@@ -223,6 +223,11 @@ export async function purgeDueAmuxAnalysisContent() {
         expiresAt: true, bodyPurgeAfter: true },
     }),
   ]);
+  // A due body without its source coordinate cannot be safely keyed for
+  // deletion. Stop the tick visibly instead of silently missing its SLA.
+  if (chunks.some((row) => !row.currentPreviewId)) {
+    throw new AmuxContentRetirementError("integrity_unavailable");
+  }
   const due: Due[] = [
     ...previews.filter((row) => row.payloadPurgeAfter).map((row) => ({
       target: { ideaId: row.ideaId, purpose: "transfer_payload" as const,
@@ -230,7 +235,7 @@ export async function purgeDueAmuxAnalysisContent() {
       apply: (tx: Prisma.TransactionClient) =>
         commitAmuxDueTransferPayloadPurge(tx, row.id),
     })),
-    ...chunks.filter((row) => row.freeformPurgeAfter && row.currentPreviewId)
+    ...chunks.filter((row) => row.freeformPurgeAfter)
       .map((row) => ({ target: { ideaId: row.ideaId,
         purpose: "analysis_freeform" as const,
         subjectId: amuxAnalysisFreeformSubjectId(row.ideaId,

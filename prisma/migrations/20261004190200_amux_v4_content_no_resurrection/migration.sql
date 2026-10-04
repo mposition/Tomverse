@@ -4,6 +4,14 @@
 -- worker and remain in force after a DB restore.
 BEGIN;
 
+ALTER TABLE "AmuxIdeaTransferPreview"
+  ADD CONSTRAINT "AmuxIdeaTransferPreview_payload_purge_scheduled_check"
+  CHECK ("payloadCiphertext" IS NULL OR "payloadPurgeAfter" IS NOT NULL);
+
+ALTER TABLE "AmuxIdeaAnalysisChunk"
+  ADD CONSTRAINT "AmuxIdeaAnalysisChunk_freeform_purge_scheduled_check"
+  CHECK ("freeformCiphertext" IS NULL OR "freeformPurgeAfter" IS NOT NULL);
+
 CREATE FUNCTION amux_v4_raw_no_resurrection_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 BEGIN
