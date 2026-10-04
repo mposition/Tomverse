@@ -188,9 +188,10 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
     let generate = dependencies.generate;
     let languageModel = { provider: "openai.responses", modelId: "gpt-5.6-luna" };
     if (!generate) {
-      const [{ generateText }, { createOpenAI }] = await Promise.all([
-        import("ai"), import("@ai-sdk/openai"),
-      ]);
+      const [{ generateText }, { createOpenAI }] = await (
+        dependencies.loadSdk?.() ?? Promise.all([
+          import("ai"), import("@ai-sdk/openai"),
+        ]));
       generate = generateText;
       languageModel = createOpenAI({ apiKey: providerKey }).responses("gpt-5.6-luna");
     }
@@ -230,7 +231,8 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
   }
 
   // The app call can take time; rehash the sealed source once more immediately
-  // before the provider boundary. A consumed slot is never reused on drift.
+  // before the provider boundary. The prepared provider client stays pinned to
+  // the key read before admission. A consumed slot is never reused on drift.
   let outcome;
   try {
     const current = readVerifiedPromptRefinerVnextOneShotOwnerCase({

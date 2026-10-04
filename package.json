@@ -250,6 +250,7 @@
     "owner:prompt-refiner-vnext-one-shot-seal": "node --import tsx scripts/prompt-refiner-vnext-one-shot-owner-seal.mjs",
     "owner:prompt-refiner-vnext-one-shot-preflight": "node --conditions=react-server --import tsx scripts/prompt-refiner-vnext-one-shot-owner-runner.mjs",
     "build:prompt-refiner-vnext-one-shot-runner-candidate": "node scripts/build-prompt-refiner-vnext-one-shot-runner-candidate.mjs",
+    "verify:prompt-refiner-vnext-one-shot-runner-candidate": "node scripts/build-prompt-refiner-vnext-one-shot-runner-candidate.mjs",
     "test:prompt-refiner-vnext-one-shot-runner-candidate": "node --conditions=react-server --import tsx --test tests/promptRefinerVnextOneShotRunnerCandidate.test.mjs",
     "shadow:prompt-refiner": "node --conditions=react-server --import tsx scripts/prompt-refiner-shadow-harness.mjs",
     "test:prompt-refiner-shadow": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",

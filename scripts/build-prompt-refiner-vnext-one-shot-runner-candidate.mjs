@@ -10,12 +10,14 @@ import { gzipSync } from "node:zlib";
 import { build, version as esbuildVersion } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const version = "0.1.0-candidate.2";
+const version = "0.1.0-candidate.3";
 const name = `prompt-refiner-vnext-one-shot-runner-${version}`;
 const packagePath = resolve(root, "bin", `${name}.mjs.gz`);
 const recordPath = resolve(root, "bin", `${name}.json`);
 const a15Commit = "256e087d503151ea1ebdf812b1c6e52a5cfb6d77";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const sourceSha256 = (bytes) => sha256(Buffer.from(
+  bytes.toString("utf8").replace(/\r\n/g, "\n"), "utf8"));
 const git = (...args) => execFileSync("git", args, {
   cwd: root, encoding: "utf8", windowsHide: true,
 }).trim();
@@ -63,9 +65,11 @@ const inputs = Object.keys(bundle.metafile.inputs).map((input) => {
   if (path === ".." || path.startsWith("../") || path.startsWith("/")) {
     throw new Error("runner_candidate_input_outside_repository");
   }
-  const digest = sha256(readFileSync(absolute));
+  const digest = path.startsWith("node_modules/")
+    ? sha256(readFileSync(absolute))
+    : sourceSha256(readFileSync(absolute));
   if (!path.startsWith("node_modules/") &&
-      sha256(gitBytes(path, sourceCommit)) !== digest) {
+      sourceSha256(gitBytes(path, sourceCommit)) !== digest) {
     throw new Error("runner_candidate_source_commit_drift");
   }
   return [path, digest];
@@ -74,8 +78,8 @@ const inputSha256 = sha256(Buffer.from(inputs
   .map(([path, digest]) => `${path}\0${digest}\n`).join(""), "utf8"));
 const runnerSha256 = sha256(runnerBytes);
 const packageSha256 = sha256(packageBytes);
-const lockSha256 = sha256(readFileSync(resolve(root, "package-lock.json")));
-if (sha256(gitBytes("package-lock.json", sourceCommit)) !== lockSha256) {
+const lockSha256 = sourceSha256(readFileSync(resolve(root, "package-lock.json")));
+if (sourceSha256(gitBytes("package-lock.json", sourceCommit)) !== lockSha256) {
   throw new Error("runner_candidate_lockfile_commit_drift");
 }
 const record = {

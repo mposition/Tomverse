@@ -88,17 +88,24 @@ test("default-off runner never asks the app or reaches a provider transport", as
   assert.equal(calls, 0);
 });
 
-test("transport preparation failure refuses before consuming an app slot", async (t) => {
+test("SDK load failure and model mismatch refuse before consuming a slot", async (t) => {
   const input = fixture(t);
   const original = globalThis.fetch;
   let appCalls = 0;
   globalThis.fetch = async () => { appCalls++; return Response.json({}); };
   try {
-    const dependencies = Object.defineProperty({}, "generate", {
-      get() { throw new Error("synthetic missing transport"); },
-    });
-    await assert.rejects(runPromptRefinerVnextOneShotOwnerSlot(input,
-      dependencies), { message: "owner_runner_preflight_unavailable" });
+    for (const loadSdk of [
+      async () => { throw new Error("synthetic import failure"); },
+      async () => [
+        { generateText: async () => boundedResponse() },
+        { createOpenAI: () => ({ responses: () => ({
+          provider: "openai.responses", modelId: "wrong-model",
+        }) }) },
+      ],
+    ]) {
+      await assert.rejects(runPromptRefinerVnextOneShotOwnerSlot(input,
+        { loadSdk }), { message: "owner_runner_preflight_unavailable" });
+    }
   } finally {
     globalThis.fetch = original;
   }
