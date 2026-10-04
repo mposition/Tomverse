@@ -80,3 +80,23 @@ test("result report arms ten statements, audits first, moves in one statement, t
   // A revision mismatch never closes a deploy as a success, in SQL as in the core.
   assert.match(fn, /AND \(\$\{!closesAsSuccess\} OR \(SELECT "revision" FROM c\) IS NOT DISTINCT FROM \$\{input\.callerRevision\}::int\)/);
 });
+
+test("a person's latch release arms nine statements, refuses an unlatched lane before writing, and binds the attempt change to what was shown", () => {
+  const block = SOURCE.slice(SOURCE.indexOf("QA_RELEASE_LATCH_RELEASE_LIMITS = Object.freeze({"));
+  assert.match(block, /statements: 9,/);
+  assert.match(block, /prismaMs: \(3 \* 9 \+ 5\) \* 1_000 \+ 5_000,/);
+  const fn = SOURCE.slice(SOURCE.indexOf("export async function releaseQaReleaseMergeLaneLatch"));
+  const order = [
+    "set_config('statement_timeout'",
+    "await takeAuditChainLock(tx);",
+    'throw new LatchReleaseRefused("not_latched")',
+    "await writeAdminAuditLog({",
+    'WHERE "id" = ${resolution.attemptId} AND "state" = ${resolution.shownState}',
+    'throw new LatchReleaseRefused("attempt_changed")',
+    'INSERT INTO "QaReleaseMergeLaneLatch"',
+  ].map((marker) => fn.indexOf(marker));
+  assert.ok(order.every((at) => at > 0), JSON.stringify(order));
+  assert.deepEqual(order, [...order].sort((x, y) => x - y));
+  // A person's write has no round: no deadline check.
+  assert.equal(fn.slice(0, fn.indexOf("\n}\n")).includes("clock_timestamp() >="), false);
+});

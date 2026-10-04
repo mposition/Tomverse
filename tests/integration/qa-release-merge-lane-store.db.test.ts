@@ -8,6 +8,7 @@ import {
   QaReleaseMergeLaneLate,
   consumeQaReleaseMergeInstruction,
   issueQaReleaseMergeInstruction,
+  releaseQaReleaseMergeLaneLatch,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
 
@@ -334,4 +335,61 @@ test("a late report records nothing", async () => {
   const attemptId = await consumedAttempt();
   await assert.rejects(report(attemptId, { kind: "merge", result: "refused" }, { budgetMs: 1 }), QaReleaseMergeLaneLate);
   assert.equal((await attemptRow(attemptId)).state, "consumed");
+});
+
+const release = (resolution: Parameters<typeof releaseQaReleaseMergeLaneLatch>[0]["resolution"]) =>
+  releaseQaReleaseMergeLaneLatch({ session: session as never, resolution });
+
+test("a person releases a latched lane, and only a latched one, audited as a person", async () => {
+  assert.deepEqual(await release(null), { released: false, reason: "not_latched" });
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "unknown" });
+  const result = await release(null);
+  assert.equal(result.released, true);
+  const events = await latchEvents();
+  assert.deepEqual(events.at(-1), { latched: false, reason: null, attemptId: null });
+  // The attempt stays open: a latch release never closes it, so the lane still holds.
+  assert.equal((await attemptRow(attemptId)).state, "consumed");
+  assert.deepEqual(await issue({ number: 40 }), { issued: false, reason: "attempt_open" });
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("a person ends a stuck attempt by what they confirmed, in the same transaction as the release", async () => {
+  // Unknown merge result, then the person confirms it landed on develop.
+  const placed = await consumedAttempt();
+  await recorded(placed, { kind: "merge", result: "unknown" });
+  assert.equal((await release({ attemptId: placed, shownState: "consumed", fact: "merged_on_develop", mergeCommitSha: MERGE_SHA })).released, true);
+  let row = await attemptRow(placed);
+  assert.equal(row.state, "awaiting_deploy");
+  assert.equal(row.mergeCommitSha, MERGE_SHA);
+  const audit = await prisma.adminAuditLog.findFirst({ where: { id: row.lastAuditLogId } });
+  assert.equal(audit?.action, "qa_release.merge_attempt_resolved");
+  assert.equal(audit?.actorUserId, session.user.id);
+
+  // The deploy then never resolves; the person confirms staging was restored.
+  await recorded(placed, { kind: "deploy", outcome: "unknown" });
+  assert.equal((await release({ attemptId: placed, shownState: "awaiting_deploy", fact: "restored" })).released, true);
+  row = await attemptRow(placed);
+  assert.equal(row.state, "closed");
+  assert.equal(row.outcome, "person_restored");
+  assert.equal((await issue({ number: 41 })).issued, true);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("a resolution for a state the attempt has left writes nothing, and the latch stays", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "unknown" });
+  const before = await latchEvents();
+  const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_resolved" } });
+  // The screen showed "issued"; the attempt is consumed.
+  assert.deepEqual(await release({ attemptId, shownState: "issued", fact: "not_merged" }), { released: false, reason: "attempt_changed" });
+  assert.deepEqual(await latchEvents(), before);
+  assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_resolved" } }), auditsBefore);
+  assert.deepEqual(
+    await release({ attemptId, shownState: "consumed", fact: "merged_on_develop", mergeCommitSha: "nope" }),
+    { released: false, reason: "invalid_resolution" },
+  );
+  assert.equal((await release({ attemptId, shownState: "consumed", fact: "not_merged" })).released, true);
+  assert.equal((await attemptRow(attemptId)).outcome, "person_not_merged");
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });
