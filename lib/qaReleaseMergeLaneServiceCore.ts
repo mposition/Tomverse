@@ -97,7 +97,9 @@ export type QaReleaseMergeLanePorts = {
 };
 
 export type QaReleaseMergeLaneRoundOutcome =
-  | { exitCode: 0; outcome: "disabled" | "latched" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "instruction_refused" | "abandoned" }
+  | { exitCode: 0; outcome: "disabled" | "latched" | "hold" | "idle" | "waiting" | "attempt_in_flight" | "abandoned" }
+  /** The pick the app declined: in S-M1 (lane switch off) this is the shadow judgement, compared with what people merged. */
+  | { exitCode: 0; outcome: "instruction_refused"; pullRequestNumber: number; headSha: string; reason: string }
   | { exitCode: 0; outcome: "reported"; report: QaReleaseMergeReport["kind"]; detail: string }
   | { exitCode: 0; outcome: "merged"; pullRequestNumber: number }
   | { exitCode: 1; outcome: "refused_to_start" | "state_unknown" | "report_not_recorded" | "candidates_unknown" };
@@ -253,7 +255,9 @@ export async function runQaReleaseMergeLaneRound(
 
   const issued = await ports.app.issue({ pullRequestNumber: pick.number, headSha: pick.headRefOid }).catch(() => null);
   if (issued === null) return { exitCode: 1, outcome: "state_unknown" };
-  if (!issued.issued) return { exitCode: 0, outcome: "instruction_refused" };
+  if (!issued.issued) {
+    return { exitCode: 0, outcome: "instruction_refused", pullRequestNumber: pick.number, headSha: pick.headRefOid, reason: issued.reason.slice(0, 64) };
+  }
   const attemptId = issued.attemptId;
 
   // Re-read right before the merge (section 3 step 1, section 8 items 4 and 6):

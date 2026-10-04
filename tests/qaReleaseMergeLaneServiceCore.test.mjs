@@ -261,3 +261,13 @@ test("a latched lane re-reads its unknown attempt at once, without the twelve-mi
   await runQaReleaseMergeLaneRound(ENV, run.ports);
   assert.deepEqual(reports(run.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
 });
+
+test("with the lane switch off (S-M1) the round names the pull request it would have merged, and touches nothing", async () => {
+  const shadow = ports({ issue: { issued: false, reason: "lane_switch_off" } });
+  const outcome = await runQaReleaseMergeLaneRound(ENV, shadow.ports);
+  assert.equal(outcome.outcome, "instruction_refused");
+  assert.equal(outcome.reason, "lane_switch_off");
+  assert.equal(typeof outcome.pullRequestNumber, "number");
+  assert.equal(outcome.headSha, HEAD);
+  for (const name of ["consume", "merge", "report"]) assert.equal(names(shadow.calls).includes(name), false, name);
+});
