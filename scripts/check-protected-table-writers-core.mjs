@@ -1209,10 +1209,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "68e1c5a0d053c78699fa1c3d3f0eeb071bf17d22489de13f367010d45e7a344e",
+    sha256: "d04e571586ba42754dac9be8ffe8da55ece5ba5daea4517a2fa9b129aa0a517b",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL. 2026-10-03: a migration that creates only a function declares the function name instead, and the question is one fixed EXISTS over pg_catalog.pg_proc in public with that name bound; the guard file only switches to presenceQueryFor(probe).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Catalogue probes run inside BEGIN READ ONLY and ROLLBACK with object names bound as parameters, never migration-supplied SQL. For CREATE OR REPLACE FUNCTION, the fixed pg_catalog.pg_proc.prosrc query reads the existing zero-argument trigger body and the guard compares its SHA-256 to the declared prior version; absent, modified, or newer bodies block. The only write remains delegated to prisma migrate resolve for baseline history (reviewed 2026-09-17).",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
