@@ -3,6 +3,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
+import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 
 /**
@@ -53,10 +54,69 @@ export type AgentDigestConsole = {
     rotatedAt: Record<string, string | null>;
   } | null;
   digests: AgentDigestConsoleRow[];
+  /**
+   * The develop merge lane: its latch, the attempt the latch names (which a
+   * failed deploy has already closed) and the attempt the lane holds open.
+   */
+  mergeLane: {
+    latched: boolean;
+    latch: { sequence: number; reason: string | null; createdAt: string; attemptId: string | null } | null;
+    latchAttempt: QaReleaseConsoleAttempt | null;
+    openAttempt: QaReleaseConsoleAttempt | null;
+  };
 };
 
+export type QaReleaseConsoleAttempt = {
+  id: string;
+  state: string;
+  pullRequestNumber: number;
+  headSha: string;
+  mergeCommitSha: string | null;
+  issuedAt: string;
+  outcome: string | null;
+  /** The staging deployments the lane last observed, re-checked against the closed shape. */
+  deployObservation: { service: string; status: string; commitSha: string | null }[] | null;
+  deployObservedAt: string | null;
+};
+
+const ATTEMPT_SELECT = {
+        id: true,
+        state: true,
+        outcome: true,
+        pullRequestNumber: true,
+        headSha: true,
+        mergeCommitSha: true,
+        issuedAt: true,
+        deployObservation: true,
+        deployObservedAt: true,
+      } as const;
+
+type AttemptRow = {
+  id: string;
+  state: string;
+  outcome: string | null;
+  pullRequestNumber: number;
+  headSha: string;
+  mergeCommitSha: string | null;
+  issuedAt: Date;
+  deployObservation: unknown;
+  deployObservedAt: Date | null;
+};
+
+const toConsoleAttempt = (row: AttemptRow): QaReleaseConsoleAttempt => ({
+  id: row.id,
+  state: row.state,
+  outcome: row.outcome,
+  pullRequestNumber: row.pullRequestNumber,
+  headSha: row.headSha,
+  mergeCommitSha: row.mergeCommitSha,
+  issuedAt: row.issuedAt.toISOString(),
+  deployObservation: qaReleaseDeployObservation(row.deployObservation),
+  deployObservedAt: row.deployObservedAt?.toISOString() ?? null,
+});
+
 export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDigestConsole> {
-  const [control, rows] = await Promise.all([
+  const [control, rows, latch, openAttempt] = await Promise.all([
     readLatestQaReleaseOperatorControl(),
     prisma.agentDigestItem.findMany({
       where: { agentKey: "qa-release" },
@@ -64,7 +124,21 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
       take: AGENT_DIGEST_CONSOLE_LIMIT,
       select: { id: true, createdAt: true, sizeBytes: true, payloadSha256: true, payload: true },
     }),
+    prisma.qaReleaseMergeLaneLatch.findFirst({
+      orderBy: { sequence: "desc" },
+      select: { sequence: true, latched: true, reason: true, createdAt: true, attemptId: true },
+    }),
+    prisma.qaReleaseMergeAttempt.findFirst({
+      where: { state: { in: ["issued", "consumed", "awaiting_deploy"] } },
+      select: ATTEMPT_SELECT,
+    }),
   ]);
+
+  // The attempt the newest latch event names: a failed deploy closed it, so
+  // it is not the open one, and it is what the latch alert sends a person to.
+  const latchAttempt = latch?.attemptId
+    ? await prisma.qaReleaseMergeAttempt.findUnique({ where: { id: latch.attemptId }, select: ATTEMPT_SELECT })
+    : null;
 
   const digests = rows.map((row): AgentDigestConsoleRow => {
     const base = {
@@ -108,5 +182,16 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
       ),
     },
     digests,
+    mergeLane: {
+      latched: latch?.latched === true,
+      latch: latch && {
+        sequence: latch.sequence,
+        reason: latch.reason,
+        createdAt: latch.createdAt.toISOString(),
+        attemptId: latch.attemptId,
+      },
+      latchAttempt: latchAttempt && toConsoleAttempt(latchAttempt),
+      openAttempt: openAttempt && toConsoleAttempt(openAttempt),
+    },
   };
 }
