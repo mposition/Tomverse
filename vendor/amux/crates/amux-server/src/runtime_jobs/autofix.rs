@@ -6178,11 +6178,12 @@ pub fn idem_of(signature: &str) -> String {
 /// The card body. Evidence first, in a fixed order, with the recheck command
 /// last — a lane picking this up should be able to reproduce the finding
 /// before reading a word of prose.
+const AUTOFIX_DESC_HEADER: &str =
+    "Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n";
+
 pub fn render_desc(f: &Finding) -> String {
     let mut s = String::new();
-    s.push_str(
-        "Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n",
-    );
+    s.push_str(AUTOFIX_DESC_HEADER);
     s.push_str(
         "It is a REPORT, not a diagnosis: the evidence below is computed, the cause is not.\n\n",
     );
@@ -7135,7 +7136,7 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 pub(crate) fn carded_count(desc: &str) -> Option<u64> {
     let current = desc.rsplit_once(REFRESH_MARK).map_or(desc, |(_, block)| block);
     let evidence = current
-        .rsplit_once("Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n")
+        .rsplit_once(AUTOFIX_DESC_HEADER)
         .map_or(current, |(_, block)| block);
     let evidence = evidence.split_once("\ndetector:").map_or(evidence, |(block, _)| block);
     evidence.lines()
@@ -8701,6 +8702,21 @@ mod tests {
             "the newest measurement sets the next doubling threshold");
         assert_eq!(super::carded_count("consecutive_failures: 31\n\ndetector: ci-failure\nre-check:\n  count: 999\n"), Some(31),
             "the recheck command is not measurement evidence");
+        let mut finding = super::Finding {
+            kind: super::DetectorKind::CiFailure,
+            signature: "ci|test|workflow|first-red".into(),
+            title: "CI red: workflow — 31x".into(),
+            evidence: vec![("consecutive_failures".into(), "31".into())],
+            recheck: "printf 'count: 999'".into(),
+            owner: None,
+            count: 31,
+            last_ts: 0.0,
+            parked_until: None,
+        };
+        let first = super::render_desc(&finding);
+        finding.evidence[0].1 = "64".into();
+        let refreshed = format!("{first}{}{}", super::REFRESH_MARK, super::render_desc(&finding));
+        assert_eq!(super::carded_count(&refreshed), Some(64));
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
         assert_eq!(super::carded_count("count: not-a-number\n"), None);
