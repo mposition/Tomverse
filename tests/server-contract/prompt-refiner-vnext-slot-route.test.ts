@@ -39,7 +39,8 @@ function loadRoute() {
           if (writeErrorCode) throw new Error(writeErrorCode);
           return { requestId, slotIndex: 0,
             slotConsumptionAuditLogId: "synthetic-slot-audit",
-            reservationConsumed: true, dispatchAuthorized: false };
+            reservationConsumed: true, dispatchAuthorized: false,
+            futureInternalField: "must-not-appear-in-runner-receipt" };
         },
       },
     });
@@ -92,7 +93,7 @@ test("slot consumption is default-off and only the dedicated runner token can ca
   }
 });
 
-test("strict input and failure response never claim dispatch or expose private errors", async () => {
+test("strict input, fixed success receipt, and failures expose no private fields", async () => {
   const route = await loadRoute();
   const oldToken = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
   const oldFlag = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED;

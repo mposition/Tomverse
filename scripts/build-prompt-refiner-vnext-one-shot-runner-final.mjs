@@ -53,6 +53,9 @@ if (git("rev-parse", "HEAD") !== sourceCommit ||
 if (esbuildVersion !== "0.28.1") {
   throw new Error("runner_final_builder_version_mismatch");
 }
+if (Number.parseInt(process.versions.node.split(".", 1)[0], 10) !== 22) {
+  throw new Error("runner_final_node_major_mismatch");
+}
 
 const bundle = await build({
   absWorkingDir: root,

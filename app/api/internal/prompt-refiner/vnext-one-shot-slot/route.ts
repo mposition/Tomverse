@@ -71,7 +71,13 @@ export async function POST(request: Request) {
         result.slotConsumptionAuditLogId.length > 128) {
       throw new Error("vnext_one_shot_slot_receipt_mismatch");
     }
-    return NextResponse.json({ ...result, dispatchAuthorized: true },
+    return NextResponse.json({
+      requestId: result.requestId,
+      slotIndex: result.slotIndex,
+      slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+      reservationConsumed: true,
+      dispatchAuthorized: true,
+    },
       { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
