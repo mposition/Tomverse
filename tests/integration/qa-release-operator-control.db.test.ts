@@ -164,7 +164,12 @@ test("nothing is ever changed or removed", async () => {
     prisma.$executeRawUnsafe(`DELETE FROM "QaReleaseOperatorControl" WHERE "revision" = $1`, row.revision),
     /append-only/,
   );
-  await assert.rejects(prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseOperatorControl"`), /append-only/);
+  // Refused either way: the merge-lane attempt table's foreign key refuses it
+  // before the append-only trigger runs.
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`TRUNCATE "QaReleaseOperatorControl"`),
+    /append-only|referenced in a foreign key constraint/,
+  );
 });
 
 test("the clock column comes from the database and no rotation time may follow it", async () => {

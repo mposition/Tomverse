@@ -74,6 +74,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
   "qa-release-intake",
+  "qa-release-merge-lane",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
