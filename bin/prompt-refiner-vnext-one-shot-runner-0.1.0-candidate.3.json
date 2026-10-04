@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0-candidate.3",
+  "status": "candidate_only",
+  "b01FinalDigest": false,
+  "dispatchAuthority": false,
+  "verificationBoundary": "owner_checksum_and_runner_self_check_not_server_attestation",
+  "a15BaseCommit": "256e087d503151ea1ebdf812b1c6e52a5cfb6d77",
+  "sourceCommit": "3d2f1ba49be063e75f848da3153b044295a09686",
+  "builder": "esbuild@0.28.1",
+  "nodeMajor": 22,
+  "packageLockSha256": "3afc30b2f5e50aaf9f2f86a2fca2b8ab1970ab12355e8d5da69708f5efd2a27b",
+  "bundledInputSha256": "536012b29d12bab5ba5b98787d24a5bca1d487ab1a4e22b10cbccfb04525b001",
+  "runnerSha256": "74b7b79ce6051bf54bf0d0c5e4fb4c33ed1a9603f4d440ea7cb83a548abca40a",
+  "packageSha256": "3488d70ae5412ab8d93d434c08f4044ca4af2576c094124cf0317d82f36ea001",
+  "packageFile": "bin/prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.3.mjs.gz",
+  "executableFile": "prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.3.mjs"
+}
