@@ -48,9 +48,10 @@ test("owner case reader rehashes sealed N80 input and maps every slot by case ID
     const expected = cases.find((item) => item.caseId === selected.caseId);
     assert.equal(selected.language, slotIndex < 40 ? "ko" : "en");
     assert.equal(selected.sourceText, expected.sourceText);
+    assert.equal(selected.manifestRoot, JSON.parse(input.synthetic.bindingText).expectedRootDigest);
     assert.equal(selected.dispatchAuthorized, false);
     assert.deepEqual(Object.keys(selected), [
-      "caseId", "language", "sourceText", "dispatchAuthorized",
+      "caseId", "language", "sourceText", "manifestRoot", "dispatchAuthorized",
     ]);
   }
 });

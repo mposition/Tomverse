@@ -53,6 +53,7 @@ export function readVerifiedPromptRefinerVnextOneShotOwnerCase(input) {
         typeof matches[0].sourceText !== "string") return refuse();
     return Object.freeze({
       caseId, language, sourceText: matches[0].sourceText,
+      manifestRoot: binding.binding.expectedRootDigest,
       dispatchAuthorized: false,
     });
   } catch {
