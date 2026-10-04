@@ -10,7 +10,7 @@ import { gzipSync } from "node:zlib";
 import { build, version as esbuildVersion } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const version = "0.1.0-candidate.1";
+const version = "0.1.0-candidate.2";
 const name = `prompt-refiner-vnext-one-shot-runner-${version}`;
 const packagePath = resolve(root, "bin", `${name}.mjs.gz`);
 const recordPath = resolve(root, "bin", `${name}.json`);
@@ -19,6 +19,9 @@ const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const git = (...args) => execFileSync("git", args, {
   cwd: root, encoding: "utf8", windowsHide: true,
 }).trim();
+const gitBytes = (path, commit) => execFileSync("git", ["show", `${commit}:${path}`], {
+  cwd: root, windowsHide: true,
+});
 
 if (git("status", "--porcelain", "--untracked-files=no") !== "") {
   throw new Error("runner_candidate_source_dirty");
@@ -52,27 +55,36 @@ if (bundle.outputFiles.length !== 1) {
 }
 const runnerBytes = bundle.outputFiles[0].contents;
 const packageBytes = gzipSync(runnerBytes, { level: 9, mtime: 0 });
+const existing = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : null;
+const sourceCommit = existing?.sourceCommit ?? git("rev-parse", "HEAD");
 const inputs = Object.keys(bundle.metafile.inputs).map((input) => {
   const absolute = resolve(root, input);
   const path = relative(root, absolute).split(sep).join("/");
   if (path === ".." || path.startsWith("../") || path.startsWith("/")) {
     throw new Error("runner_candidate_input_outside_repository");
   }
-  return [path, sha256(readFileSync(absolute))];
+  const digest = sha256(readFileSync(absolute));
+  if (!path.startsWith("node_modules/") &&
+      sha256(gitBytes(path, sourceCommit)) !== digest) {
+    throw new Error("runner_candidate_source_commit_drift");
+  }
+  return [path, digest];
 }).sort(([left], [right]) => left.localeCompare(right, "en"));
 const inputSha256 = sha256(Buffer.from(inputs
   .map(([path, digest]) => `${path}\0${digest}\n`).join(""), "utf8"));
 const runnerSha256 = sha256(runnerBytes);
 const packageSha256 = sha256(packageBytes);
 const lockSha256 = sha256(readFileSync(resolve(root, "package-lock.json")));
-const existing = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, "utf8")) : null;
-const sourceCommit = existing?.sourceCommit ?? git("rev-parse", "HEAD");
+if (sha256(gitBytes("package-lock.json", sourceCommit)) !== lockSha256) {
+  throw new Error("runner_candidate_lockfile_commit_drift");
+}
 const record = {
   schemaVersion: 1,
   version,
   status: "candidate_only",
   b01FinalDigest: false,
   dispatchAuthority: false,
+  verificationBoundary: "owner_checksum_and_runner_self_check_not_server_attestation",
   a15BaseCommit: a15Commit,
   sourceCommit,
   builder: `esbuild@${esbuildVersion}`,

@@ -153,8 +153,9 @@ async function recordUnknownStop({ origin, headers, requestId, slotIndex,
 
 /**
  * One slot's owner-only send path. The app, not an input boolean, confirms the
- * separately approved stage/run and consumes this slot before any generator is
- * resolved. The switches are absent by default. Tests inject only transports.
+ * separately approved stage/run and consumes this slot before generation.
+ * Resolve the SDK and model pin first, so a missing dependency or mismatched
+ * model cannot consume a slot. The switches are absent by default.
  */
 export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies = {}) {
   const { manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex,
@@ -180,6 +181,21 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
     manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex, now: now ?? new Date(),
   });
   if (selected.dispatchAuthorized !== false || !SHA256.test(selected.manifestRoot)) {
+    return refuse();
+  }
+  let adapter;
+  try {
+    let generate = dependencies.generate;
+    let languageModel = { provider: "openai.responses", modelId: "gpt-5.6-luna" };
+    if (!generate) {
+      const [{ generateText }, { createOpenAI }] = await Promise.all([
+        import("ai"), import("@ai-sdk/openai"),
+      ]);
+      generate = generateText;
+      languageModel = createOpenAI({ apiKey: providerKey }).responses("gpt-5.6-luna");
+    }
+    adapter = createPromptRefinerVnextOneShotAdapter({ generate, languageModel });
+  } catch {
     return refuse();
   }
   const requestId = randomUUID();
@@ -215,24 +231,14 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
 
   // The app call can take time; rehash the sealed source once more immediately
   // before the provider boundary. A consumed slot is never reused on drift.
-  let generate = dependencies.generate;
-  let languageModel = { provider: "openai.responses", modelId: "gpt-5.6-luna" };
   let outcome;
   try {
-    if (!generate) {
-      const [{ generateText }, { createOpenAI }] = await Promise.all([
-        import("ai"), import("@ai-sdk/openai"),
-      ]);
-      generate = generateText;
-      languageModel = createOpenAI({ apiKey: providerKey }).responses("gpt-5.6-luna");
-    }
     const current = readVerifiedPromptRefinerVnextOneShotOwnerCase({
       manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex, now: now ?? new Date(),
     });
     if (current.caseId !== selected.caseId ||
         current.sourceText !== selected.sourceText ||
         current.manifestRoot !== selected.manifestRoot) return refuse();
-    const adapter = createPromptRefinerVnextOneShotAdapter({ generate, languageModel });
     outcome = await adapter({ requestId, sourceText: current.sourceText });
   } catch {
     outcome = { status: "outcome_unknown", reason: "response_unverified" };
@@ -259,7 +265,8 @@ async function main(args) {
     if (args.length !== 13 || args[1] !== "--manifest" ||
         args[3] !== "--binding" || args[5] !== "--seal" ||
         args[7] !== "--slot" || args[9] !== "--run-audit" ||
-        args[11] !== "--result" || !args[12]) {
+        args[11] !== "--result" || !args[12] ||
+        !/^(?:0|[1-9][0-9]*)$/.test(args[8])) {
       process.stderr.write("usage_invalid\n");
       return 2;
     }

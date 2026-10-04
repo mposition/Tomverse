@@ -88,6 +88,23 @@ test("default-off runner never asks the app or reaches a provider transport", as
   assert.equal(calls, 0);
 });
 
+test("transport preparation failure refuses before consuming an app slot", async (t) => {
+  const input = fixture(t);
+  const original = globalThis.fetch;
+  let appCalls = 0;
+  globalThis.fetch = async () => { appCalls++; return Response.json({}); };
+  try {
+    const dependencies = Object.defineProperty({}, "generate", {
+      get() { throw new Error("synthetic missing transport"); },
+    });
+    await assert.rejects(runPromptRefinerVnextOneShotOwnerSlot(input,
+      dependencies), { message: "owner_runner_preflight_unavailable" });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal(appCalls, 0);
+});
+
 test("default-off dispatch CLI leaves no result file or content in output", (t) => {
   const input = fixture(t);
   const resultPath = join(dirname(input.manifestPath), "result.json");

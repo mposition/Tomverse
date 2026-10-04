@@ -17,7 +17,7 @@ import { syntheticManifest } from
   "./support/promptRefinerVnextOneShotSyntheticManifest.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const name = "prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.1";
+const name = "prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.2";
 const packagePath = join(root, "bin", `${name}.mjs.gz`);
 const record = join(root, "bin", `${name}.json`);
 const keyHex = "42".repeat(32);
@@ -31,12 +31,19 @@ test("candidate pin names exact executable bytes and a local A15 descendant", ()
   assert.equal(pin.status, "candidate_only");
   assert.equal(pin.b01FinalDigest, false);
   assert.equal(pin.dispatchAuthority, false);
-  assert.equal(pin.version, "0.1.0-candidate.1");
+  assert.equal(pin.version, "0.1.0-candidate.2");
+  assert.equal(pin.verificationBoundary,
+    "owner_checksum_and_runner_self_check_not_server_attestation");
   assert.equal(pin.packageSha256, sha256(archive));
   assert.equal(pin.runnerSha256, sha256(bytes));
   const ancestry = spawnSync("git", ["merge-base", "--is-ancestor",
     pin.a15BaseCommit, pin.sourceCommit], { cwd: root });
   assert.equal(ancestry.status, 0);
+  const rebuild = spawnSync(process.execPath,
+    [join(root, "scripts", "build-prompt-refiner-vnext-one-shot-runner-candidate.mjs")],
+    { cwd: root, encoding: "utf8" });
+  assert.equal(rebuild.status, 0, rebuild.stderr);
+  assert.equal(JSON.parse(rebuild.stdout).status, "candidate_bytes_verified");
 });
 
 test("standalone candidate runs all 80 synthetic cases without transport", (t) => {
@@ -79,6 +86,17 @@ test("standalone candidate runs all 80 synthetic cases without transport", (t) =
     preflight: "passed", caseCount: 80, syntheticTransportCalls: 80,
     dispatchAuthorized: false,
   });
+  for (const slot of ["", " ", "0x4f", "1e1", "01"]) {
+    const invalid = spawnSync(process.execPath,
+      ["--conditions=react-server", executable, "--dispatch-slot",
+        "--manifest", manifestPath, "--binding", bindingPath,
+        "--seal", sealPath, "--slot", slot,
+        "--run-audit", "synthetic-run-audit", "--result", join(folder, "invalid.json")],
+      { cwd: folder, env, encoding: "utf8" });
+    assert.equal(invalid.status, 2);
+    assert.equal(invalid.stderr, "usage_invalid\n");
+    assert.equal(existsSync(join(folder, "invalid.json")), false);
+  }
 
   // Even with plausible synthetic credentials, altered executable bytes must
   // fail before app admission. A child preload records any attempted fetch.
