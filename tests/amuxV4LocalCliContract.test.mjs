@@ -78,6 +78,24 @@ const claudeStream = (envelope = claudeEnvelope(), tools = [],
   envelope,
 ].map((event) => JSON.stringify(event)).join("\n"));
 
+test("Claude bare accepts only the pinned inert metadata shape without tools", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const init = { type: "system", subtype: "init", tools: [],
+    mcp_servers: [], skills: [], permissionMode: "default",
+    plugins: ["a", "b"].map((name) => ({ path: `bundled/${name}`,
+      source: `${name}@bundled` })), agents: [{}, {}, {}, {}] };
+  const parse = (candidate) => inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from([candidate, { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "answer" }] } }, claudeEnvelope()]
+      .map((event) => JSON.stringify(event)).join("\n")), 0);
+  assert.equal(parse(init).kind, "verified_success");
+  assert.equal(parse({ ...init, tools: ["Bash"] }).kind, "outcome_unknown");
+  assert.equal(parse({ ...init, plugins: [{ ...init.plugins[0],
+    path: "/tmp/.claude/plugin" }, init.plugins[1]] }).kind, "outcome_unknown");
+  assert.equal(parse({ ...init, agents: [{}, {}, {}, {}, {}] }).kind,
+    "outcome_unknown");
+});
+
 test("Claude result needs exact served model and complete usage", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const noCapabilities = claudeStream(claudeEnvelope());
