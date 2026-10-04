@@ -162,3 +162,14 @@ test("App: the state read is validated, including the merge commit an attempt aw
     await assert.rejects(app.readState(), /app_shape/);
   }
 });
+
+test("the entry script stops itself at the 10-minute hard timeout (policy section 10)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const source = readFileSync(new URL("../scripts/qa-release-merge-lane-service.mjs", import.meta.url), "utf8");
+  assert.match(source, /const HARD_TIMEOUT_MS = 10 \* 60 \* 1000;/);
+  assert.match(source, /setTimeout\(\(\) => \{\s*console\.log\(JSON\.stringify\(\{ exitCode: 1, outcome: "hard_timeout" \}\)\);\s*process\.exit\(1\);\s*\}, HARD_TIMEOUT_MS\)/);
+  // Armed before any port is built, so no call can outlive it.
+  assert.ok(source.indexOf("const supervisor = setTimeout") < source.indexOf("await runQaReleaseMergeLaneRound"));
+  const { QA_RELEASE_RESULT_SILENCE_MS } = await import("../lib/qaReleaseMergeLaneServiceCore.ts");
+  assert.ok(10 * 60 * 1000 < QA_RELEASE_RESULT_SILENCE_MS);
+});

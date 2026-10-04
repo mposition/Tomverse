@@ -156,7 +156,8 @@ test("onDevelop and commitsContaining read the compare API's relation; cancelled
     [is("GET", `${REPO}/compare/${MERGE}...develop?per_page=1`), json(200, { status: "ahead" })],
     [is("GET", `${REPO}/compare/${MERGE}...${TIP}?per_page=1`), json(200, { status: "diverged" })],
     [is("GET", `${REPO}/compare/${MERGE}...${HEAD}?per_page=1`), json(200, { status: "identical" })],
-    [is("GET", `${REPO}/commits/${TIP}/check-runs?per_page=100`), json(200, { check_runs: [{ conclusion: "cancelled" }] })],
+    [is("GET", `${REPO}/commits/${HEAD}/check-runs?per_page=100`), json(200, { total_count: 1, check_runs: [{ conclusion: "success" }] })],
+    [is("GET", `${REPO}/commits/${TIP}/check-runs?per_page=100`), json(200, { total_count: 1, check_runs: [{ conclusion: "cancelled" }] })],
   ]);
   assert.equal(await github.onDevelop(MERGE), true);
   assert.deepEqual([...(await github.commitsContaining(MERGE, [TIP, HEAD, "bad"]))], [HEAD]);
@@ -246,4 +247,19 @@ test("the only write this module makes is the merge API with the head pinned (po
   const posts = [...source.matchAll(/method: "POST",\s*url: `([^`]+)`/g)].map((match) => match[1]);
   assert.deepEqual(posts.sort(), ["${QA_RELEASE_GITHUB_API}/app/installations/${id}/access_tokens", "${QA_RELEASE_GITHUB_API}/graphql"]);
   assert.doesNotMatch(source, /mutation|\/git\/refs|\/merges\b|"base"|\/contents\/[^`]*`,\s*\{\s*method/);
+});
+
+test("a containing or cancelled lookup that is not read in full is an error, never a smaller list", async () => {
+  const failing = ports([
+    [is("GET", `${REPO}/compare/${MERGE}...${TIP}?per_page=1`), json(404, {})],
+    [is("GET", `${REPO}/commits/${TIP}/check-runs?per_page=100`), json(502, {})],
+  ]);
+  await assert.rejects(failing.github.commitsContaining(MERGE, [TIP]));
+  await assert.rejects(failing.github.cancelledCommits([TIP]));
+  const paged = ports([
+    [is("GET", `${REPO}/commits/${TIP}/check-runs?per_page=100`), json(200, { total_count: 101, check_runs: [{ conclusion: "success" }] })],
+    [is("GET", `${REPO}/compare/${MERGE}...${TIP}?per_page=1`), json(200, { status: "weird" })],
+  ]);
+  await assert.rejects(paged.github.cancelledCommits([TIP]), /github_check_runs_unread/);
+  await assert.rejects(paged.github.commitsContaining(MERGE, [TIP]), /github_shape/);
 });

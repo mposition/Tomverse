@@ -356,18 +356,18 @@ export function createQaReleaseGithubPorts(input: {
       return null;
     },
 
-    // The merge train's own rules (scripts/merge-train.mjs): a lookup that
-    // fails leaves that commit out.
+    // Unlike the merge train, a lookup that fails is not left out: the policy
+    // (version 4, section 8 item 5) treats an unread list as unreadable, which
+    // the round reports and latches on. Leaving a commit out would count a
+    // cancelled SKIPPED as a failure, or a replacement as missing, and close
+    // the attempt on a guess.
     async commitsContaining(sha, candidates) {
       const containing = new Set<string>();
       for (const candidate of candidates) {
         if (!SHA.test(candidate)) continue;
-        try {
-          const status = await compareStatus(sha, candidate);
-          if (status === "ahead" || status === "identical") containing.add(candidate);
-        } catch {
-          // Left out.
-        }
+        const status = await compareStatus(sha, candidate);
+        if (status === "ahead" || status === "identical") containing.add(candidate);
+        else if (status !== "behind" && status !== "diverged") throw new Error("github_shape");
       }
       return containing;
     },
@@ -376,12 +376,11 @@ export function createQaReleaseGithubPorts(input: {
       const cancelled = new Set<string>();
       for (const commit of commits) {
         if (!SHA.test(commit)) continue;
-        try {
-          const runs = record(await getJson(`${REPO_PATH}/commits/${commit}/check-runs?per_page=100`)).check_runs;
-          if (Array.isArray(runs) && runs.some((run) => record(run).conclusion === "cancelled")) cancelled.add(commit);
-        } catch {
-          // Left out.
-        }
+        const body = record(await getJson(`${REPO_PATH}/commits/${commit}/check-runs?per_page=100`));
+        const runs = body.check_runs;
+        // More runs than one page holds: the cancelled one may be on the next.
+        if (!Array.isArray(runs) || body.total_count !== runs.length) throw new Error("github_check_runs_unread");
+        if (runs.some((run) => record(run).conclusion === "cancelled")) cancelled.add(commit);
       }
       return cancelled;
     },

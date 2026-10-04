@@ -22,6 +22,16 @@ import { runQaReleaseMergeLaneRound } from "../lib/qaReleaseMergeLaneServiceCore
 const APP_TIMEOUT_MS = 55_000;
 const READ_TIMEOUT_MS = 30_000;
 
+// Policy section 10: the whole round is bounded at 10 minutes. Railway's cron
+// does not stop a run on its own, so the service stops itself: the twelve-
+// minute silence rule (section 8 item 5) is safe only because no round lives
+// past this. A round stopped mid-call leaves its attempt to that rule.
+const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+const supervisor = setTimeout(() => {
+  console.log(JSON.stringify({ exitCode: 1, outcome: "hard_timeout" }));
+  process.exit(1);
+}, HARD_TIMEOUT_MS);
+
 const httpWith = (timeoutMs) => async (request) => {
   const response = await fetch(request.url, {
     method: request.method,
@@ -49,5 +59,6 @@ const result = await runQaReleaseMergeLaneRound(env, {
   railway: createQaReleaseRailwayPorts({ http: readHttp, token: env.QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN ?? "" }),
 });
 
+clearTimeout(supervisor);
 console.log(JSON.stringify(result));
 process.exitCode = result.exitCode;
