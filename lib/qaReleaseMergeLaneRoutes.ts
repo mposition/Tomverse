@@ -6,6 +6,7 @@ import {
   QaReleaseMergeLaneLate,
   consumeQaReleaseMergeInstruction,
   issueQaReleaseMergeInstruction,
+  readQaReleaseMergeLaneState,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
 import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
@@ -151,4 +152,15 @@ export async function handleQaReleaseMergeReport(request: Request, env: Env = pr
     });
     return result.recorded ? answer(200, { ...result }) : answer(409, { recorded: false, reason: result.reason });
   });
+}
+
+/**
+ * The lane's state for the start of a round: whether it is latched and the
+ * attempt it holds, on the database clock. A read with no write, so it needs
+ * no revision -- the calls that write judge the revision themselves.
+ */
+export async function handleQaReleaseMergeLaneState(request: Request, env: Env = process.env) {
+  const auth = authenticate(request, env);
+  if (!auth) return answer(401, { error: "unauthorized" });
+  return guarded(async () => answer(200, { ...(await readQaReleaseMergeLaneState()) }));
 }
