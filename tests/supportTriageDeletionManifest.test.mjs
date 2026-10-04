@@ -275,7 +275,7 @@ test("account deletion deletes exactly the manifest's delete-on-account-deletion
 test("the deleted-account marker the guard refuses is the one account deletion writes", () => {
   const deletion = readFileSync(new URL("../lib/accountDeletion.ts", import.meta.url), "utf8");
   const migration = readFileSync(
-    new URL("../prisma/migrations/20261003150000_support_triage_suggestion/migration.sql", import.meta.url),
+    new URL("../prisma/migrations/20261004010000_support_triage_suggestion/migration.sql", import.meta.url),
     "utf8"
   );
   const written = /message: "([^"]+)"/.exec(deletion);

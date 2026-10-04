@@ -305,7 +305,7 @@ export const SUPPORT_TRIAGE_RUN_RETENTION_DAYS = 30;
 /**
  * `SupportTriageSuggestion` (policy sections 1, 2 and 6). The lists and the
  * transition table below are the CHECK lists and the `-- transitions:` block
- * of migration 20261003150000_support_triage_suggestion; tests compare them.
+ * of migration 20261004010000_support_triage_suggestion; tests compare them.
  */
 export const SUGGESTION_STATES = Object.freeze([
   "pending",

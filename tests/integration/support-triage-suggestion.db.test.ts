@@ -8,7 +8,7 @@ import { SUGGESTION_TRANSITIONS, SUGGESTION_STATES } from "@/lib/supportTriageCo
 //
 // What needs a database: the state machine, the lease and the display stamp
 // live in the guard trigger and the CHECK constraints of migration
-// 20261003150000_support_triage_suggestion. Some fixtures move a lease into
+// 20261004010000_support_triage_suggestion. Some fixtures move a lease into
 // the past; the trigger forbids exactly that, so they disable it for one
 // statement and re-enable it at once.
 
