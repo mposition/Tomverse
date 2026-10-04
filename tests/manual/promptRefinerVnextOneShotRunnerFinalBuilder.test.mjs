@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import test from "node:test";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "..", "..");
 const builder = join(root, "scripts", "build-prompt-refiner-vnext-one-shot-runner-final.mjs");
 const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
 const run = (...args) => spawnSync(process.execPath, [builder, ...args], {
@@ -28,6 +28,10 @@ test("final builder rejects invalid source and repository output before writing"
 });
 
 test("final builder only pins a merged commit and verifies immutable bytes", (t) => {
+  if (git("status", "--porcelain", "--untracked-files=no").stdout.trim() !== "") {
+    t.skip("final source checkout has tracked changes");
+    return;
+  }
   if (git("rev-parse", "--verify", "origin/develop^{commit}").status !== 0) {
     t.skip("origin/develop is unavailable in this checkout");
     return;
@@ -45,6 +49,16 @@ test("final builder only pins a merged commit and verifies immutable bytes", (t)
   }
   assert.equal(built.status, 0, built.stderr);
   assert.equal(JSON.parse(built.stdout).status, "final_built");
+  const pin = JSON.parse(readFileSync(join(outside,
+    "prompt-refiner-vnext-one-shot-runner-0.1.0.json"), "utf8"));
+  assert.equal(pin.version, "0.1.0");
+  assert.equal(pin.status, "rebuilt_from_merged_source");
+  assert.equal(pin.sourceCommit, head);
+  assert.equal(pin.nodeMajor, 22);
+  assert.equal(pin.b01PreregistrationPerformed, false);
+  assert.equal(pin.dispatchAuthority, false);
+  assert.equal(pin.verificationBoundary,
+    "owner_checksum_and_runner_self_check_not_server_attestation");
   const repeatedBuild = run("--build", head, outside);
   assert.equal(repeatedBuild.status, 1);
   assert.match(repeatedBuild.stderr, /runner_final_already_built/);
