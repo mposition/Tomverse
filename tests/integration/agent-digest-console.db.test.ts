@@ -78,6 +78,8 @@ test("present, expired and unreadable bodies are each shown for what they are", 
 
   const console = await readAgentDigestConsole(false);
   assert.equal(console.canWrite, false);
+  // No latch event and no attempt: the lane reads as free with nothing open.
+  assert.deepEqual(console.mergeLane, { latched: false, latch: null, latchAttempt: null, openAttempt: null });
   const byId = new Map(console.digests.map((row) => [row.id, row]));
   const shown = byId.get(present.status === "created" ? present.id : "");
   assert.equal(shown?.body, "present");

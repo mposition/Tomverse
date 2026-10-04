@@ -526,7 +526,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * tree, which includes the support-triage and agent-digest actors above.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "ebd2c6d5a2013691b9b6823b515db6e1e345d98c36727bf68edd85de25957da5";
+  "5e0a417bb77e92cea046be321c485d17858ee098b353a2178f9c1e305f30c409";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
