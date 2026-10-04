@@ -17,6 +17,9 @@ import { AMUX_V4_APPROVED_ANALYSIS_CLI_CATALOG,
   amuxV4ApprovedAnalysisCliForModel,
   amuxV4CanClaimAnalysisCli } from
   "../lib/amux/ideaLocalApprovedCliCatalog.mjs";
+import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV,
+  amuxV4LiveAnalysisCliEnabled } from
+  "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 
 const origin = "https://staging.tomverse.example";
 const secret = "v4_analysis_synthetic_012345678901234567890123456";
@@ -41,13 +44,40 @@ test("local one-shot entry point is closed before reading configuration", () => 
   assert.match(result.stderr, /AMUX_V4_LOCAL_ANALYSIS_REFUSED/);
 });
 
-test("live connector refuses before queue, claim or CLI while code latch is off", async () => {
+test("live connector requires the exact environment switch before network", async () => {
+  const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+  delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   let called = 0;
-  const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
-    agentSecret: secret, fetchImpl: async () => { called += 1;
-      throw new Error("live connector must remain closed"); } });
-  assert.deepEqual(result, { kind: "refused" });
-  assert.equal(called, 0);
+  try {
+    assert.equal(amuxV4LiveAnalysisCliEnabled(undefined), false);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("1"), false);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), true);
+    const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
+      agentSecret: secret, fetchImpl: async () => { called += 1;
+        throw new Error("live connector must remain closed"); } });
+    assert.deepEqual(result, { kind: "refused" });
+    assert.equal(called, 0);
+  } finally {
+    if (previous === undefined) delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+    else process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = previous;
+  }
+});
+
+test("non-Linux hosts cannot claim even with the live switch", async (t) => {
+  if (process.platform === "linux") return t.skip("Linux is the approved host");
+  const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+  process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = "enabled";
+  let called = 0;
+  try {
+    const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
+      agentSecret: secret, fetchImpl: async () => { called += 1;
+        throw new Error("non-Linux host reached the queue"); } });
+    assert.deepEqual(result, { kind: "refused" });
+    assert.equal(called, 0);
+  } finally {
+    if (previous === undefined) delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
+    else process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV] = previous;
+  }
 });
 
 test("Codex candidates cannot consume claims without served-model attestation", () => {

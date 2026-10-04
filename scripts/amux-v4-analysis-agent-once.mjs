@@ -1,14 +1,16 @@
-/** Local Ubuntu one-shot entry point. Until the code latch and approved CLI
- * catalog are changed in a separate reviewed release, this cannot poll,
- * claim, call a model, or submit a result. */
-import { AMUX_V4_LIVE_ANALYSIS_CLI_ENABLED } from
+/** Local Ubuntu one-shot entry point. Both the exact CLI catalog and the
+ * environment switch must admit a call before any queue access. */
+import { AMUX_V4_LIVE_ANALYSIS_CLI_ENV,
+  amuxV4LiveAnalysisCliEnabled } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 import { runAmuxV4LocalAnalysisAgentOnce } from
   "../lib/amux/ideaLocalAnalysisAgentOnce.mjs";
 import { AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from
   "../lib/amux/ideaLocalQueuePoll.mjs";
 
-if (!AMUX_V4_LIVE_ANALYSIS_CLI_ENABLED || process.platform !== "linux") {
+if (!amuxV4LiveAnalysisCliEnabled(
+      process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV]) ||
+    process.platform !== "linux") {
   process.stderr.write("AMUX_V4_LOCAL_ANALYSIS_REFUSED\n");
   process.exitCode = 2;
 } else {
