@@ -25461,7 +25461,7 @@ mod tests {
     #[tokio::test]
     async fn a_human_prompt_auto_captures_and_links_a_ledger_card() {
         let (st, _dir) = state();
-        let q = |sql: &'static str, s: &'static str| -> Option<String> {
+        let q = |sql: &str, s: &str| -> Option<String> {
             st.store
                 .read()
                 .unwrap()
@@ -29385,6 +29385,7 @@ mod steer_boundary_tests {
                 assert!(first.is_some(), "a new task must card even with an open manual card");
                 assert_eq!(first.as_ref().unwrap().status, "backlog", "a delivered prompt must preserve the active manual claim");
                 assert!(first.as_ref().unwrap().source_ref.is_some());
+                assert!(first.as_ref().unwrap().next_action.as_deref().unwrap_or_default().contains("claim this card"));
 
                 // In production the recorder atomically attaches the minted id
                 // to this exact cmd_history row; the retry predicate reads that
