@@ -526,7 +526,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * that includes billing-finance-ops' actor above.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "22a34bdbfabe1810b8ebb2ff1f7fd6127d6d61019928a1e27d0e525fc8cb579f";
+  "4551176d0ec8a2e4df210d11520f83ff4e0b8ba1cb019509e6ca525229427fc9";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

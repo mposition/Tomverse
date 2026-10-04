@@ -302,6 +302,6 @@ export async function writeSystemAuditLogEntry({
  * `writeSystemAuditLogEntry` for a caller that needs only the id -- the one
  * every system writer had before the entry's hash was returned too.
  */
-export async function writeSystemAuditLog(input: SystemAuditInput): Promise<string> {
-  return (await writeSystemAuditLogEntry(input)).id;
+export async function writeSystemAuditLog({ tx, ...entry }: SystemAuditInput): Promise<string> {
+  return (await writeSystemAuditLogEntry({ tx, ...entry })).id;
 }
