@@ -16,6 +16,9 @@
 --   insert; a consume after the expiry is refused by the database clock.
 -- * The merge commit is set exactly once, on the move to awaiting_deploy,
 --   and is present from then on.
+-- * While awaiting deploy, the lane may record what it observed of the
+--   staging deployments without moving the attempt; only the lane, and only
+--   that column.
 -- * Every insert and every change is audited in the same transaction:
 --   "lastAuditLogId" must name an AdminAuditLog row this very transaction
 --   wrote, targeting this attempt. Outcomes a person records come from a
@@ -48,6 +51,8 @@ CREATE TABLE "QaReleaseMergeAttempt" (
     "consumedAt" TIMESTAMPTZ(3),
     "closedAt" TIMESTAMPTZ(3),
     "updatedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deployObservation" JSONB,
+    "deployObservedAt" TIMESTAMPTZ(3),
 
     CONSTRAINT "QaReleaseMergeAttempt_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "QaReleaseMergeAttempt_controlRevision_fkey"
@@ -69,7 +74,14 @@ CREATE TABLE "QaReleaseMergeAttempt" (
     CONSTRAINT "QaReleaseMergeAttempt_awaiting_has_merge_commit_check"
       CHECK ("state" <> 'awaiting_deploy' OR "mergeCommitSha" IS NOT NULL),
     CONSTRAINT "QaReleaseMergeAttempt_consumed_has_time_check"
-      CHECK ("state" <> 'consumed' OR "consumedAt" IS NOT NULL)
+      CHECK ("state" <> 'consumed' OR "consumedAt" IS NOT NULL),
+    -- The staging deployments the lane last observed for this merge: an array
+    -- of at most 20 entries (the shape is checked by the app's schema).
+    CONSTRAINT "QaReleaseMergeAttempt_deploy_observation_check"
+      CHECK ("deployObservation" IS NULL
+             OR (jsonb_typeof("deployObservation") = 'array' AND jsonb_array_length("deployObservation") <= 20)),
+    CONSTRAINT "QaReleaseMergeAttempt_deploy_observed_at_check"
+      CHECK (("deployObservation" IS NULL) = ("deployObservedAt" IS NULL))
 );
 
 -- One open attempt per lane. "base" is always develop (a CHECK above), so
@@ -117,6 +129,7 @@ DECLARE
   ok BOOLEAN;
 BEGIN
   IF NEW."state" <> 'issued' OR NEW."outcome" IS NOT NULL OR NEW."mergeCommitSha" IS NOT NULL
+     OR NEW."deployObservation" IS NOT NULL OR NEW."deployObservedAt" IS NOT NULL
      OR NEW."consumedAt" IS NOT NULL OR NEW."closedAt" IS NOT NULL THEN
     RAISE EXCEPTION 'QaReleaseMergeAttempt rows start as issued'
       USING ERRCODE = 'check_violation';
@@ -144,6 +157,7 @@ DECLARE
   by_person BOOLEAN;
   ok BOOLEAN;
   ok_person BOOLEAN;
+  observation_only BOOLEAN := false;
   now_ TIMESTAMPTZ := clock_timestamp();
 BEGIN
   IF NEW."id" IS DISTINCT FROM OLD."id"
@@ -170,9 +184,20 @@ BEGIN
       THEN NEW."outcome" IN ('deployed', 'deploy_failed', 'person_deployed', 'person_restored')
     ELSE false
   END;
-  IF NOT coalesce(allowed, false) THEN
+  allowed := coalesce(allowed, false);
+  IF NOT allowed AND NOT (OLD."state" = 'awaiting_deploy' AND NEW."state" = 'awaiting_deploy') THEN
     RAISE EXCEPTION 'QaReleaseMergeAttempt cannot move from % to %', OLD."state", NEW."state"
       USING ERRCODE = 'check_violation';
+  END IF;
+
+  IF NOT allowed AND OLD."state" = 'awaiting_deploy' AND NEW."state" = 'awaiting_deploy' THEN
+    -- Recording an observation is the one same-state change, and it is the lane's.
+    allowed := NEW."outcome" IS NULL AND NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation";
+    observation_only := allowed;
+    IF NOT allowed THEN
+      RAISE EXCEPTION 'QaReleaseMergeAttempt cannot move from % to %', OLD."state", NEW."state"
+        USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 
   IF NEW."state" = 'consumed' AND now_ >= OLD."expiresAt" THEN
@@ -202,13 +227,18 @@ BEGIN
     INTO ok USING TG_TABLE_SCHEMA::text, NEW."lastAuditLogId", NEW."id", by_person;
   EXECUTE format('SELECT %I.qa_release_merge_attempt_audited($1, $2, $3, $4)', TG_TABLE_SCHEMA)
     INTO ok_person USING TG_TABLE_SCHEMA::text, NEW."lastAuditLogId", NEW."id", true;
-  IF NOT (coalesce(ok, false) OR (NEW."state" = 'awaiting_deploy' AND coalesce(ok_person, false))) THEN
+  IF NOT (coalesce(ok, false) OR (NEW."state" = 'awaiting_deploy' AND NOT observation_only AND coalesce(ok_person, false))) THEN
     RAISE EXCEPTION 'QaReleaseMergeAttempt changes are audited by the right actor in the same transaction'
       USING ERRCODE = 'check_violation';
   END IF;
 
   NEW."consumedAt" := CASE WHEN NEW."state" = 'consumed' THEN now_ ELSE OLD."consumedAt" END;
   NEW."closedAt" := CASE WHEN NEW."state" = 'closed' THEN now_ ELSE NULL END;
+  NEW."deployObservedAt" := CASE
+    WHEN NEW."deployObservation" IS NULL THEN NULL
+    WHEN NEW."deployObservation" IS DISTINCT FROM OLD."deployObservation" THEN now_
+    ELSE OLD."deployObservedAt"
+  END;
   NEW."updatedAt" := now_;
   RETURN NEW;
 END;

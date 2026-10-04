@@ -330,6 +330,10 @@ export async function reportQaReleaseMergeResult(input: {
   // Whether the move is the one a revision mismatch withholds.
   const closesAsSuccess = own.move?.to === "closed" && own.move.outcome === "deployed";
   const unreportedInterval = `${QA_RELEASE_UNREPORTED_AFTER_MS} milliseconds`;
+  // A deploy report records what the lane observed even when the attempt
+  // stays where it is (a wait, or a success withheld for another revision).
+  const observation = input.report.kind === "deploy" ? JSON.stringify(input.report.observation) : null;
+  const writes = own.move !== null || observation !== null;
   try {
     return await prisma.$transaction(
       async (tx) => {
@@ -352,30 +356,32 @@ export async function reportQaReleaseMergeResult(input: {
           metadata: { report: input.report, callerRevision: input.callerRevision },
         });
         // One statement: the newest revision, the attempt (locked) and the
-        // conditional move, decided on what that same statement reads.
+        // conditional move, decided on what that same statement reads. A
+        // success from another revision is withheld: the attempt stays and
+        // only the observation is recorded.
         const [read] = await tx.$queryRaw<ReportRead[]>`WITH c AS (
             SELECT "revision" FROM "QaReleaseOperatorControl" ORDER BY "revision" DESC LIMIT 1
           ), cur AS (
             SELECT "id", "state", "issuedAt" FROM "QaReleaseMergeAttempt" WHERE "id" = ${input.attemptId} FOR UPDATE
           ), u AS (
             UPDATE "QaReleaseMergeAttempt" a
-               SET "state" = ${own.move?.to ?? "closed"},
-                   "outcome" = ${own.move?.outcome ?? null},
+               SET "state" = CASE WHEN (${closesAsSuccess} AND (SELECT "revision" FROM c) IS DISTINCT FROM ${input.callerRevision}::int) THEN cur."state" ELSE ${own.move?.to ?? "awaiting_deploy"} END,
+                   "outcome" = CASE WHEN (${closesAsSuccess} AND (SELECT "revision" FROM c) IS DISTINCT FROM ${input.callerRevision}::int) THEN NULL ELSE ${own.move?.outcome ?? null} END,
                    "mergeCommitSha" = coalesce(${own.move?.mergeCommitSha ?? null}, a."mergeCommitSha"),
+                   "deployObservation" = coalesce(${observation}::jsonb, a."deployObservation"),
                    "lastAuditLogId" = ${auditLogId}
               FROM cur
              WHERE a."id" = cur."id"
-               AND ${own.move !== null}
+               AND ${writes}
                AND cur."state" = ANY(${[...own.from]}::text[])
-               AND (${!closesAsSuccess} OR (SELECT "revision" FROM c) IS NOT DISTINCT FROM ${input.callerRevision}::int)
                AND (${input.report.kind !== "unreported"} OR cur."issuedAt" <= clock_timestamp() - ${unreportedInterval}::interval)
-            RETURNING a."id"
+            RETURNING a."state"
           )
           SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs",
                  (SELECT "revision" FROM c) AS "newestRevision",
                  (SELECT "state" FROM cur) AS "state",
                  (SELECT floor(extract(epoch FROM "issuedAt") * 1000)::bigint FROM cur) AS "issuedAtMs",
-                 (SELECT count(*)::int FROM u) AS "moved"`;
+                 (SELECT count(*)::int FROM u WHERE u."state" IS DISTINCT FROM (SELECT "state" FROM cur)) AS "moved"`;
         const deadline = new Date(Number(read.dbNowMs) + input.budget.budgetMs - (input.budget.clock() - input.budget.startedAt));
 
         if (read.state === null) throw new ReportRefused("attempt_unknown");

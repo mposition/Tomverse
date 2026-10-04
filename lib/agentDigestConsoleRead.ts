@@ -3,6 +3,7 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
 import { QA_RELEASE_SECRET_ROTATION_FIELDS } from "@/lib/qaReleaseOperatorControlFields";
+import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 
 /**
@@ -64,6 +65,9 @@ export type AgentDigestConsole = {
       headSha: string;
       mergeCommitSha: string | null;
       issuedAt: string;
+      /** The staging deployments the lane last observed, re-checked against the closed shape. */
+      deployObservation: { service: string; status: string; commitSha: string | null }[] | null;
+      deployObservedAt: string | null;
     } | null;
   };
 };
@@ -83,7 +87,16 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
     }),
     prisma.qaReleaseMergeAttempt.findFirst({
       where: { state: { in: ["issued", "consumed", "awaiting_deploy"] } },
-      select: { id: true, state: true, pullRequestNumber: true, headSha: true, mergeCommitSha: true, issuedAt: true },
+      select: {
+        id: true,
+        state: true,
+        pullRequestNumber: true,
+        headSha: true,
+        mergeCommitSha: true,
+        issuedAt: true,
+        deployObservation: true,
+        deployObservedAt: true,
+      },
     }),
   ]);
 
@@ -137,7 +150,12 @@ export async function readAgentDigestConsole(canWrite: boolean): Promise<AgentDi
         createdAt: latch.createdAt.toISOString(),
         attemptId: latch.attemptId,
       },
-      openAttempt: openAttempt && { ...openAttempt, issuedAt: openAttempt.issuedAt.toISOString() },
+      openAttempt: openAttempt && {
+        ...openAttempt,
+        issuedAt: openAttempt.issuedAt.toISOString(),
+        deployObservation: qaReleaseDeployObservation(openAttempt.deployObservation),
+        deployObservedAt: openAttempt.deployObservedAt?.toISOString() ?? null,
+      },
     },
   };
 }

@@ -8232,6 +8232,9 @@ model QaReleaseMergeAttempt {
   consumedAt        DateTime?                @db.Timestamptz(3)
   closedAt          DateTime?                @db.Timestamptz(3)
   updatedAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  /// The staging deployments the lane last observed for this merge, and when.
+  deployObservation Json?
+  deployObservedAt  DateTime?                @db.Timestamptz(3)
 
   latchEvents QaReleaseMergeLaneLatch[]
 

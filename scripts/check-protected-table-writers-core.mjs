@@ -553,7 +553,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
     table: "QaReleaseMergeAttempt",
-    tableMentions: 18,
+    tableMentions: 19,
     writeVerbs: 13,
     reason:
       "Creates the attempt table, its partial unique index and the triggers that constrain its insert and update and refuse delete and truncate. It names those verbs to refuse or constrain them and writes no row.",

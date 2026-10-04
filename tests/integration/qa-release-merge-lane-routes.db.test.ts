@@ -92,7 +92,12 @@ test("a body that is not exactly the call's shape is refused before any write", 
     assert.deepEqual((await handleQaReleaseMergeInstruction(call(body), env)).status, 400, JSON.stringify(body));
   }
   assert.equal((await handleQaReleaseMergeReport(call({ attemptId: "x", report: { kind: "merge", result: "merged" } }), env)).status, 400);
-  assert.equal((await handleQaReleaseMergeReport(call({ attemptId: "x", report: { kind: "deploy", outcome: "maybe" } }), env)).status, 400);
+  assert.equal((await handleQaReleaseMergeReport(call({ attemptId: "x", report: { kind: "deploy", outcome: "maybe", observation: [] } }), env)).status, 400);
+  // An observation outside the closed vocabulary is refused too.
+  assert.equal(
+    (await handleQaReleaseMergeReport(call({ attemptId: "x", report: { kind: "deploy", outcome: "failed", observation: [{ service: "web", status: "ON FIRE", commitSha: null }] } }), env)).status,
+    400,
+  );
   assert.equal(await prisma.qaReleaseMergeAttempt.count(), 0);
 });
 
@@ -124,7 +129,7 @@ test("issue, consume and report run the lane end to end; a stale revision is ref
 
   // A report from a stale revision is kept and latches (section 6).
   const stale = await handleQaReleaseMergeReport(
-    call({ attemptId, report: { kind: "deploy", outcome: "succeeded" } }, { "x-qa-release-control-revision": "999" }),
+    call({ attemptId, report: { kind: "deploy", outcome: "succeeded", observation: [{ service: "web", status: "SUCCESS", commitSha: "b".repeat(40) }] } }, { "x-qa-release-control-revision": "999" }),
     env,
   );
   assert.deepEqual(stale, { status: 200, body: { recorded: true, moved: false, latched: "revision_mismatch", revisionMatched: false } });

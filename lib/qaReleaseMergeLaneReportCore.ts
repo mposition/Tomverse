@@ -15,13 +15,60 @@
 import type { QaReleaseMergeAttemptOutcome, QaReleaseMergeAttemptState } from "./qaReleaseMergeAttemptCore.ts";
 import type { QaReleaseMergeLaneLatchReason } from "./qaReleaseMergeLaneLatchCore.ts";
 
+const SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * One staging service's deployment as the lane observed it for this merge:
+ * a service name, Railway's status and the deployed commit. Shown to a
+ * person deciding whether staging serves the merge (section 8 item 5).
+ */
+export type QaReleaseDeployObservation = { service: string; status: string; commitSha: string | null };
+
+const RAILWAY_STATUSES = new Set([
+  "WAITING",
+  "NEEDS_APPROVAL",
+  "QUEUED",
+  "INITIALIZING",
+  "BUILDING",
+  "DEPLOYING",
+  "SUCCESS",
+  "SLEEPING",
+  "FAILED",
+  "CRASHED",
+  "SKIPPED",
+  "REMOVED",
+  "REMOVING",
+]);
+const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
+
+/** At most 20 entries of a closed shape, or null: nothing a service read from GitHub or a log. */
+export function qaReleaseDeployObservation(value: unknown): QaReleaseDeployObservation[] | null {
+  if (!Array.isArray(value) || value.length > 20) return null;
+  const entries: QaReleaseDeployObservation[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { service, status, commitSha, ...rest } = entry as Record<string, unknown>;
+    if (Object.keys(rest).length > 0) return null;
+    if (typeof service !== "string" || !SERVICE_NAME.test(service)) return null;
+    if (typeof status !== "string" || !RAILWAY_STATUSES.has(status)) return null;
+    if (commitSha !== null && (typeof commitSha !== "string" || !SHA.test(commitSha))) return null;
+    entries.push({ service, status, commitSha: commitSha as string | null });
+  }
+  return entries;
+}
+
 export type QaReleaseMergeReport =
   /** The merge call's answer, for a consumed attempt (section 3 step 4). */
   | { kind: "merge"; result: "merged"; mergeCommitSha: string }
   | { kind: "merge"; result: "refused" }
   | { kind: "merge"; result: "unknown" }
   /** deploymentOutcome for an attempt awaiting deploy, with the waits' limits applied. */
-  | { kind: "deploy"; outcome: "succeeded" | "failed" | "unknown" | "wait_exceeded" | "unreadable" }
+  | {
+      kind: "deploy";
+      outcome: "succeeded" | "failed" | "unknown" | "wait_exceeded" | "unreadable";
+      /** What the lane saw; empty when Railway could not be read. */
+      observation: QaReleaseDeployObservation[];
+    }
   /** No result report within 12 minutes of an issued or consumed attempt. */
   | { kind: "unreported" }
   /** The ordered pull-request re-read for an issued or consumed attempt, at its first answering step. */
@@ -39,7 +86,6 @@ export type QaReleaseReportEffect = {
   latch: QaReleaseMergeLaneLatchReason | null;
 };
 
-const SHA = /^[0-9a-f]{40}$/;
 const PRE_MERGE: readonly QaReleaseMergeAttemptState[] = ["issued", "consumed"];
 
 /** The report's own effect, before the revision check. Throws on a malformed report. */
@@ -53,6 +99,7 @@ export function qaReleaseReportEffect(report: QaReleaseMergeReport): QaReleaseRe
       if (report.result === "refused") return { from: ["consumed"], move: { to: "closed", outcome: "merge_refused" }, latch: null };
       return { from: ["consumed"], move: null, latch: "merge_result_unknown" };
     case "deploy":
+      if (qaReleaseDeployObservation(report.observation) === null) throw new RangeError("observation is not a deployment list");
       switch (report.outcome) {
         case "succeeded":
           return { from: ["awaiting_deploy"], move: { to: "closed", outcome: "deployed" }, latch: null };

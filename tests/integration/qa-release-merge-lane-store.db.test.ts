@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
+import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
 import { prisma } from "@/lib/prisma";
 import { recordQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 import {
@@ -235,6 +236,7 @@ const report = (attemptId: string, body: Parameters<typeof reportQaReleaseMergeR
   });
 
 const MERGE_SHA = "9".repeat(40);
+const OBS = [{ service: "web", status: "SUCCESS", commitSha: "9".repeat(40) }];
 /** A report expected to be recorded, narrowed for its fields. */
 const recorded = async (...args: Parameters<typeof report>) => {
   const result = await report(...args);
@@ -262,7 +264,7 @@ test("a merged report moves the attempt to awaiting deploy with its merge commit
   assert.equal(row.mergeCommitSha, MERGE_SHA);
   // The lane holds while the deploy is outstanding.
   assert.deepEqual(await issue({ number: 30 }), { issued: false, reason: "attempt_open" });
-  assert.equal((await report(attemptId, { kind: "deploy", outcome: "succeeded" })).recorded, true);
+  assert.equal((await report(attemptId, { kind: "deploy", outcome: "succeeded", observation: OBS })).recorded, true);
   row = await attemptRow(attemptId);
   assert.equal(row.state, "closed");
   assert.equal(row.outcome, "deployed");
@@ -272,7 +274,7 @@ test("a merged report moves the attempt to awaiting deploy with its merge commit
 test("a failed deploy closes and latches, queues the day's alert, and the lane stays shut", async () => {
   const attemptId = await consumedAttempt();
   await report(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
-  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "failed" }), {
+  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "failed", observation: OBS }), {
     recorded: true,
     moved: true,
     latched: "deploy_failed",
@@ -298,7 +300,7 @@ test("an unknown merge result latches and keeps the attempt open; a deploy wait 
   assert.equal((await attemptRow(attemptId)).state, "consumed");
   // The re-read then finds it on develop and moves it to awaiting deploy.
   assert.equal((await recorded(attemptId, { kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE_SHA })).moved, true);
-  assert.equal((await recorded(attemptId, { kind: "deploy", outcome: "wait_exceeded" })).latched, "deploy_wait_exceeded");
+  assert.equal((await recorded(attemptId, { kind: "deploy", outcome: "wait_exceeded", observation: OBS })).latched, "deploy_wait_exceeded");
   assert.equal((await attemptRow(attemptId)).state, "awaiting_deploy");
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });
@@ -307,7 +309,7 @@ test("a report from another revision is kept and latches, and never closes a dep
   const attemptId = await consumedAttempt();
   await report(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
   await recordControl(true);
-  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "succeeded" }, { callerRevision: revision - 1 }), {
+  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "succeeded", observation: OBS }, { callerRevision: revision - 1 }), {
     recorded: true,
     moved: false,
     latched: "revision_mismatch",
@@ -320,7 +322,7 @@ test("a report from another revision is kept and latches, and never closes a dep
 test("a report about a state the attempt has left, an unknown attempt, or an early unreported claim records nothing", async () => {
   const attemptId = await issued();
   const auditsBefore = await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_reported" } });
-  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "succeeded" }), { recorded: false, reason: "state_moved" });
+  assert.deepEqual(await report(attemptId, { kind: "deploy", outcome: "succeeded", observation: OBS }), { recorded: false, reason: "state_moved" });
   assert.deepEqual(await report("no-such-attempt", { kind: "merge", result: "refused" }), { recorded: false, reason: "attempt_unknown" });
   assert.deepEqual(await report(attemptId, { kind: "unreported" }), { recorded: false, reason: "too_early" });
   assert.equal(await prisma.adminAuditLog.count({ where: { action: "qa_release.merge_attempt_reported" } }), auditsBefore);
@@ -367,7 +369,7 @@ test("a person ends a stuck attempt by what they confirmed, in the same transact
   assert.equal(audit?.actorUserId, session.user.id);
 
   // The deploy then never resolves; the person confirms staging was restored.
-  await recorded(placed, { kind: "deploy", outcome: "unknown" });
+  await recorded(placed, { kind: "deploy", outcome: "unknown", observation: OBS });
   assert.equal((await release({ attemptId: placed, shownState: "awaiting_deploy", fact: "restored" })).released, true);
   row = await attemptRow(placed);
   assert.equal(row.state, "closed");
@@ -391,5 +393,47 @@ test("a resolution for a state the attempt has left writes nothing, and the latc
   );
   assert.equal((await release({ attemptId, shownState: "consumed", fact: "not_merged" })).released, true);
   assert.equal((await attemptRow(attemptId)).outcome, "person_not_merged");
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("a deploy report records what the lane observed, even when the attempt stays where it is", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
+  const waiting = [
+    { service: "web", status: "BUILDING", commitSha: MERGE_SHA },
+    { service: "worker", status: "SUCCESS", commitSha: "8".repeat(40) },
+  ];
+  // A wait past its limit latches and keeps the attempt open, with the observation.
+  await recorded(attemptId, { kind: "deploy", outcome: "wait_exceeded", observation: waiting });
+  let row = await attemptRow(attemptId);
+  assert.equal(row.state, "awaiting_deploy");
+  assert.deepEqual(row.deployObservation, waiting);
+  assert.ok(row.deployObservedAt);
+  // A success withheld for another revision still records what was seen.
+  await recordControl(true);
+  const served = [{ service: "web", status: "SUCCESS", commitSha: MERGE_SHA }];
+  const withheld = await recorded(attemptId, { kind: "deploy", outcome: "succeeded", observation: served }, { callerRevision: revision - 1 });
+  assert.equal(withheld.moved, false);
+  row = await attemptRow(attemptId);
+  assert.equal(row.state, "awaiting_deploy");
+  assert.deepEqual(row.deployObservation, served);
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
+});
+
+test("the Admin read shows the latch reason, the attempt id and the observed deployments", async () => {
+  const attemptId = await consumedAttempt();
+  await recorded(attemptId, { kind: "merge", result: "merged", mergeCommitSha: MERGE_SHA });
+  const seen = [{ service: "web", status: "FAILED", commitSha: MERGE_SHA }];
+  await recorded(attemptId, { kind: "deploy", outcome: "unknown", observation: seen });
+  const { mergeLane } = await readAgentDigestConsole(true);
+  assert.equal(mergeLane.latched, true);
+  assert.equal(mergeLane.latch?.reason, "deploy_unknown");
+  assert.equal(mergeLane.latch?.attemptId, attemptId);
+  assert.equal(mergeLane.openAttempt?.id, attemptId);
+  assert.equal(mergeLane.openAttempt?.state, "awaiting_deploy");
+  assert.equal(mergeLane.openAttempt?.pullRequestNumber, 21);
+  assert.equal(mergeLane.openAttempt?.mergeCommitSha, MERGE_SHA);
+  assert.deepEqual(mergeLane.openAttempt?.deployObservation, seen);
+  assert.equal(typeof mergeLane.openAttempt?.deployObservedAt, "string");
   await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_merge_lane_latched" } });
 });

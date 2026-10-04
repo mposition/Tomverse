@@ -45,6 +45,8 @@ export function QaReleaseMergeLaneSection({ lane, canWrite }: { lane: Lane; canW
       <h3 className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{m.openAttempt}</h3>
       {attempt ? (
         <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm" data-testid="qa-release-merge-lane-attempt">
+          <dt className="text-zinc-600 dark:text-zinc-400">{m.attemptId}</dt>
+          <dd className="break-all font-mono text-xs">{attempt.id}</dd>
           <dt className="text-zinc-600 dark:text-zinc-400">{m.attemptState}</dt>
           <dd className="font-mono text-xs">{attempt.state}</dd>
           <dt className="text-zinc-600 dark:text-zinc-400">{m.pullRequest}</dt>
@@ -55,6 +57,23 @@ export function QaReleaseMergeLaneSection({ lane, canWrite }: { lane: Lane; canW
           <dd className="break-all font-mono text-xs">{attempt.mergeCommitSha ?? m.none}</dd>
           <dt className="text-zinc-600 dark:text-zinc-400">{m.issuedAt}</dt>
           <dd>{attempt.issuedAt}</dd>
+          <dt className="text-zinc-600 dark:text-zinc-400">{m.deployObserved}</dt>
+          <dd>
+            {attempt.deployObservation === null ? (
+              m.deployNotObserved
+            ) : (
+              <>
+                <span>{attempt.deployObservedAt}</span>
+                <ul className="mt-1 flex flex-col gap-0.5" data-testid="qa-release-merge-lane-deployments">
+                  {attempt.deployObservation.map((entry, index) => (
+                    <li key={`${entry.service}-${index}`} className="break-all font-mono text-xs">
+                      {entry.service}: {entry.status} {entry.commitSha ?? m.none}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </dd>
         </dl>
       ) : (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.noOpenAttempt}</p>

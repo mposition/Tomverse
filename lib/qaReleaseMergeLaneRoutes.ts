@@ -8,6 +8,7 @@ import {
   issueQaReleaseMergeInstruction,
   reportQaReleaseMergeResult,
 } from "@/lib/qaReleaseMergeLaneStore";
+import { qaReleaseDeployObservation } from "@/lib/qaReleaseMergeLaneReportCore";
 import { QA_RELEASE_CONTROL_REVISION_HEADER, isQaReleaseRouteSecret } from "@/lib/qaReleaseRouteAuthCore";
 
 /**
@@ -41,7 +42,15 @@ const reportBody = z
     report: z.union([
       z.object({ kind: z.literal("merge"), result: z.literal("merged"), mergeCommitSha: SHA }).strict(),
       z.object({ kind: z.literal("merge"), result: z.enum(["refused", "unknown"]) }).strict(),
-      z.object({ kind: z.literal("deploy"), outcome: z.enum(["succeeded", "failed", "unknown", "wait_exceeded", "unreadable"]) }).strict(),
+      z
+        .object({
+          kind: z.literal("deploy"),
+          outcome: z.enum(["succeeded", "failed", "unknown", "wait_exceeded", "unreadable"]),
+          observation: z
+            .array(z.object({ service: z.string(), status: z.string(), commitSha: SHA.nullable() }).strict())
+            .max(20),
+        })
+        .strict(),
       z.object({ kind: z.literal("unreported") }).strict(),
       z.object({ kind: z.literal("reread"), result: z.literal("merged_on_develop"), mergeCommitSha: SHA }).strict(),
       z.object({ kind: z.literal("reread"), result: z.enum(["not_merged", "merged_off_develop", "merge_commit_off_develop"]) }).strict(),
@@ -52,7 +61,10 @@ const reportBody = z
 /** Parsed against the strict schema; null when the body is not exactly one report. */
 const parseReport = (value: unknown) => {
   const parsed = reportBody.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) return null;
+  // The observation's closed vocabulary (service names, Railway statuses) is the core's.
+  if (parsed.data.report.kind === "deploy" && qaReleaseDeployObservation(parsed.data.report.observation) === null) return null;
+  return parsed.data;
 };
 
 /** The body, at most 4 KiB, parsed; null when unreadable. */
