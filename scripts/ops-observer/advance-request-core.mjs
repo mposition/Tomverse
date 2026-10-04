@@ -7,15 +7,16 @@
 //   reservation: null | { ownerDate, channelCheck, items: [{ signal, scope,
 //                kind, origin, openedAt }] }
 //
-// The request does not say whether an item counts against the daily cap: the
-// store derives that from the kind and the day's earlier reservations (§5),
-// so a caller cannot exempt a message by labelling it. Each item must name a
-// page key and agree with the key state the same request writes -- the same
-// incident open time, an open key for an open/reopen/worsening message and a
-// closed, recovered key for a recovery -- so a request cannot reserve a
-// message for an incident its own keys do not describe.
+// The request does not say whether an item counts against the daily cap, and
+// its kind is not taken on trust either: new_open and a key's first worsening
+// of the day are outside the cap (§5), so a label would be an exemption. The
+// parser refuses, early, items that cannot agree with the key state the same
+// request writes (one item per page key, the same incident open time, a kind
+// the next state can carry). The store then derives what the move from the
+// current keys to these keys owes with owedMessages() -- the rules
+// evaluateKey() applies -- and reserves only items in that set.
 
-import { S2_PAGE_KEYS } from "./classify-core.mjs";
+import { REOPEN_WINDOW_MS, S2_PAGE_KEYS, S2_PAGE_SIGNALS } from "./classify-core.mjs";
 import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
 import {
@@ -24,6 +25,9 @@ import {
   UUID_PATTERN,
   parseRunDeadline,
 } from "./request-schema-core.mjs";
+
+/** The largest epoch millisecond a Date can hold. */
+const MAX_DATE_MS = 8.64e15;
 
 const BODY_KEYS = Object.freeze(["runDeadline", "runId", "baseGenesisId", "baseGeneration", "keys", "reservation"]);
 const RESERVATION_KEYS = Object.freeze(["ownerDate", "channelCheck", "items"]);
@@ -42,14 +46,76 @@ function isOwnerDate(value) {
 
 const refuse = (error) => ({ ok: false, error });
 
-/** Whether an item agrees with the key state this same request writes. */
-function itemMatchesKey(item, keyState) {
+/**
+ * The early check: whether an item could agree with the key state this same
+ * request writes. It cannot see the previous state, so it is necessary, not
+ * sufficient -- the store holds every item to owedMessage() over the current
+ * and next keys before it reserves anything.
+ */
+function itemMatchesKey(signal, item, keyState, ownerDate) {
   if (item.openedAt !== keyState.openedAt) return false;
   if (item.kind === "recovery") return keyState.status === "closed" && keyState.recoveredAt !== null;
   if (keyState.status !== "open") return false;
-  if (item.kind === "new_open") return item.origin === "new";
-  if (item.kind === "reopen") return item.origin === "reopen";
-  return true; // worsening, of an incident that began either way
+  // A new open stamps today's owner date; a reopen keeps an earlier one or
+  // follows a recovery inside the window.
+  // A reopen always follows a recovery, so it carries a recovery time; a new
+  // open has none, or one older than the reopen window.
+  if (item.kind === "new_open") {
+    return (
+      item.origin === "new" &&
+      keyState.newOpenOwnerDate === ownerDate &&
+      (keyState.recoveredAt === null || keyState.openedAt - keyState.recoveredAt >= REOPEN_WINDOW_MS)
+    );
+  }
+  if (item.kind === "reopen") return item.origin === "reopen" && keyState.recoveredAt !== null;
+  // worsening: the key sits past its signal's first band.
+  return signal.bands.indexOf(keyState.lastBand) > 0;
+}
+
+/**
+ * The message one key's move from `prev` to `next` owes, by the rules
+ * evaluateKey() applies (policy §1, §5), or null. `next` must be a state
+ * evaluateKey() produced from `prev`; the store checks the reservation against
+ * this, so the kind -- and with it whether the message is capped -- is derived,
+ * never taken from the request.
+ */
+export function owedMessage(signal, prev, next, ownerDate) {
+  if (prev.status === "closed" && next.status === "open") {
+    const isReopen =
+      prev.newOpenOwnerDate === ownerDate ||
+      (prev.recoveredAt !== null && next.openedAt - prev.recoveredAt < REOPEN_WINDOW_MS);
+    return isReopen ? "reopen" : "new_open";
+  }
+  if (prev.status === "open" && next.status === "open") {
+    return signal.bands.indexOf(next.lastBand) > signal.bands.indexOf(prev.lastBand) ? "worsening" : null;
+  }
+  if (prev.status === "open" && next.status === "closed") return "recovery";
+  return null;
+}
+
+/**
+ * Every message the move from `previousKeys` to `nextKeys` owes, one per key at
+ * most, as { signal, scope, kind, openedAt(ms) }.
+ */
+export function owedMessages(previousKeys, nextKeys, ownerDate) {
+  const owed = [];
+  for (const signal of S2_PAGE_SIGNALS) {
+    for (const scope of signal.scopes) {
+      const key = `${signal.id}#${scope}`;
+      const kind = owedMessage(signal, previousKeys[key], nextKeys[key], ownerDate);
+      if (kind) owed.push({ signal: signal.id, scope, kind, openedAt: nextKeys[key].openedAt });
+    }
+  }
+  return owed;
+}
+
+/** Whether every reserved item is a message the move actually owes. */
+export function reservationIsOwed(items, owed) {
+  return items.every((item) =>
+    owed.some(
+      (o) => o.signal === item.signal && o.scope === item.scope && o.kind === item.kind && o.openedAt === item.openedAt.getTime(),
+    ),
+  );
 }
 
 function parseReservation(reservation, keys) {
@@ -57,7 +123,7 @@ function parseReservation(reservation, keys) {
   if (!hasExactly(reservation, RESERVATION_KEYS)) return refuse("shape");
   const { ownerDate, channelCheck, items } = reservation;
   if (!isOwnerDate(ownerDate) || typeof channelCheck !== "boolean" || !Array.isArray(items)) return refuse("shape");
-  // Something must be sent; one item per key and kind; never more items than keys.
+  // Something must be sent; one key's move owes one message, so one item per key.
   if (items.length > S2_PAGE_KEYS.length || (items.length === 0 && !channelCheck)) return refuse("reservation_invalid");
   const seen = new Set();
   const parsed = [];
@@ -66,12 +132,13 @@ function parseReservation(reservation, keys) {
     const { signal, scope, kind, origin, openedAt } = item;
     if (typeof signal !== "string" || typeof scope !== "string") return refuse("shape");
     if (!MESSAGE_KINDS.includes(kind) || !ITEM_ORIGINS.includes(origin)) return refuse("shape");
-    if (!Number.isSafeInteger(openedAt) || openedAt < 0) return refuse("shape");
+    if (!Number.isSafeInteger(openedAt) || openedAt < 0 || openedAt > MAX_DATE_MS) return refuse("shape");
     const key = `${signal}#${scope}`;
     if (!S2_PAGE_KEYS.includes(key)) return refuse("reservation_invalid");
-    if (seen.has(`${key}|${kind}`)) return refuse("reservation_invalid");
-    seen.add(`${key}|${kind}`);
-    if (!itemMatchesKey(item, keys[key])) return refuse("reservation_invalid");
+    if (seen.has(key)) return refuse("reservation_invalid");
+    seen.add(key);
+    const signalDef = S2_PAGE_SIGNALS.find((s) => s.id === signal);
+    if (!itemMatchesKey(signalDef, item, keys[key], ownerDate)) return refuse("reservation_invalid");
     parsed.push({ signal, scope, kind, origin, openedAt: new Date(openedAt) });
   }
   return { ok: true, value: { ownerDate, channelCheck, items: parsed } };

@@ -127,3 +127,53 @@ test("keys, deadline, size and JSON are checked", () => {
   assert.deepEqual(parse(`${JSON.stringify(body())}${" ".repeat(REQUEST_BODY_MAX_BYTES)}`), { ok: false, error: "too_large" });
   assert.deepEqual(parse("[]"), { ok: false, error: "shape" });
 });
+
+test("consistent but impossible labels and a second item for one key are refused early", () => {
+  const item = { signal: "P3", scope: "credit_reservation_reconciliation", openedAt: NOW };
+  const reserve = (items, extra = {}) => parse(body({ reservation: { ownerDate: OWNER_DATE, channelCheck: false, items }, ...extra }));
+  // A first open labelled as a reopen; a worsening at the first band; a new
+  // open whose owner date is not today's.
+  assert.deepEqual(reserve([{ ...item, kind: "reopen", origin: "reopen" }]), { ok: false, error: "reservation_invalid" });
+  assert.deepEqual(reserve([{ ...item, kind: "worsening", origin: "new" }]), { ok: false, error: "reservation_invalid" });
+  assert.deepEqual(parse(body({ reservation: { ownerDate: "2026-10-05", channelCheck: false, items: [{ ...item, kind: "new_open", origin: "new" }] } })), {
+    ok: false,
+    error: "reservation_invalid",
+  });
+  // One key's move owes one message.
+  const keys = keysWithP3Open();
+  keys[P3_KEY] = evaluateKey(P3, keys[P3_KEY], "stuck", { now: NOW + 1, ownerDate: OWNER_DATE }).state;
+  assert.deepEqual(
+    reserve([{ ...item, kind: "new_open", origin: "new" }, { ...item, kind: "worsening", origin: "new" }], { keys }),
+    { ok: false, error: "reservation_invalid" },
+  );
+  // An open time a Date cannot hold.
+  assert.deepEqual(reserve([{ ...item, kind: "new_open", origin: "new", openedAt: 8.64e15 + 1 }]), { ok: false, error: "shape" });
+});
+
+test("owedMessage derives exactly the message evaluateKey emits, and the store's check rejects any other label", async () => {
+  const { owedMessage, owedMessages, reservationIsOwed } = await import("../scripts/ops-observer/advance-request-core.mjs");
+  let seed = 7;
+  let now = NOW;
+  for (const signal of S2_PAGE_SIGNALS) {
+    let state = initialKeyState();
+    const options = [...signal.bands, "ok", "unknown"];
+    for (let step = 0; step < 600; step += 1) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      now += (seed % 5 === 0 ? 30 : 10) * 60 * 1000;
+      const ownerDate = new Date(now).toISOString().slice(0, 10);
+      const { state: next, message } = evaluateKey(signal, state, options[seed % options.length], { now, ownerDate });
+      assert.equal(owedMessage(signal, state, next, ownerDate), message, `${signal.id} step ${step}`);
+      state = next;
+    }
+  }
+  // The store's check: only the derived kind is owed.
+  const previous = Object.fromEntries(S2_PAGE_KEYS.map((key) => [key, initialKeyState()]));
+  const next = keysWithP3Open();
+  const owed = owedMessages(previous, next, OWNER_DATE);
+  assert.deepEqual(owed, [{ signal: "P3", scope: "credit_reservation_reconciliation", kind: "new_open", openedAt: NOW }]);
+  const reserved = (kind) => [{ signal: "P3", scope: "credit_reservation_reconciliation", kind, openedAt: new Date(NOW) }];
+  assert.equal(reservationIsOwed(reserved("new_open"), owed), true);
+  assert.equal(reservationIsOwed(reserved("reopen"), owed), false);
+  assert.equal(reservationIsOwed(reserved("worsening"), owed), false);
+  assert.equal(reservationIsOwed([], owed), true);
+});
