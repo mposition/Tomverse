@@ -1239,13 +1239,13 @@ export function MobileChatShell({
 
           Now the two fixed controls never shrink, and the model button is
           the one that does. It gives up its label first and stops at a 44px
-          icon (`min-w-11`). Below a 156px content box even three 44px
-          controls and their gaps (3 x 44 + 3 x 8) no longer fit on one line,
-          so only there may the row wrap. It is measured on the header's own
+          icon (`min-w-11`). Below a 9.75rem content box even three 2.75rem
+          controls and their gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
+          so only there may the row wrap when New Chat is present. It is measured on the header's own
           width, so 320px and wider -- where all three fit at full size --
           lay out exactly as before.
         */}
-        <div className="flex items-center gap-2 @max-[156px]/header:flex-wrap">
+        <div className={`flex items-center gap-2 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
         <button
           type="button"
           onClick={(event) => openDrawer(event.currentTarget)}
@@ -1305,7 +1305,7 @@ export function MobileChatShell({
                 </span>
               </>
             )}
-            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true" />
+            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400 @max-[10.5rem]/header:hidden" aria-hidden="true" />
           </button>
         ) : (
           // Never paint "1 model" and correct it to "3" a frame later: until
