@@ -33,6 +33,7 @@ const render = (overrides: Record<string, unknown> = {}) =>
       onRequest: () => {},
       onUseSuggestion: () => {},
       onKeepOriginal: () => {},
+      onDismiss: () => {},
       ...overrides,
     } as Parameters<typeof PromptRefinerSuggestionPanel>[0])
   );
@@ -47,27 +48,46 @@ test("a changed draft cannot render a late proposal", () => {
   assert.equal(hasTestId(rendered, "prompt-refiner-idle"), true);
 });
 
-test("the ready state shows proposal and two explicit choices", () => {
+test("the ready state compares the exact original with the proposal before either choice", () => {
   const rendered = render();
   assert.equal(hasTestId(rendered, "prompt-refiner-ready"), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-original"), true);
+  assert.equal(rendered.includes(suggestion.sourcePrompt), true);
   assert.equal(rendered.includes(suggestion.refinedPrompt), true);
   assert.equal(hasTestId(rendered, "prompt-refiner-use"), true);
   assert.equal(hasTestId(rendered, "prompt-refiner-keep-original"), true);
-  assert.equal(rendered.includes(suggestion.sourcePrompt), false);
+  assert.ok(rendered.includes(promptRefinerCopy.ko.originalLabel));
+  assert.ok(rendered.includes(promptRefinerCopy.ko.comparisonLabel));
   assert.match(rendered, /role="status"/);
   assert.match(rendered, /aria-live="polite"/);
   assert.match(rendered, /tabindex="-1"/);
   assert.equal((rendered.match(/min-h-11/g) ?? []).length, 2);
 });
 
+test("comparison renders the authored whitespace and Unicode without changing the draft", () => {
+  const sourcePrompt = "  원문\t질문\n두 번째 줄  ";
+  const bound = { ...suggestion, sourcePrompt };
+  const rendered = render({
+    currentPrompt: sourcePrompt,
+    state: { status: "ready", suggestion: bound },
+  });
+  assert.ok(rendered.includes(`>${sourcePrompt}</p>`));
+  assert.ok(rendered.includes('data-testid="prompt-refiner-original"'));
+  assert.ok(rendered.includes("whitespace-pre-wrap"));
+});
+
 test("accepted fixture is a read-only preview bound to the authored source", () => {
   const state = { status: "accepted_preview" as const, suggestion };
   const rendered = render({ state });
   assert.equal(hasTestId(rendered, "prompt-refiner-accepted-preview"), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-accepted-preview-original"), true);
+  assert.ok(rendered.includes(suggestion.sourcePrompt));
   assert.ok(rendered.includes(suggestion.refinedPrompt));
   assert.ok(rendered.includes(promptRefinerCopy.ko.previewOnly));
   assert.equal(hasTestId(rendered, "prompt-refiner-use"), false);
   assert.equal(hasTestId(rendered, "prompt-refiner-request"), false);
+  assert.equal(hasTestId(rendered, "prompt-refiner-dismiss-preview"), true);
+  assert.equal((rendered.match(/min-h-11/g) ?? []).length, 1);
   const edited = render({ state, currentPrompt: "새로 작성한 문장" });
   assert.equal(hasTestId(edited, "prompt-refiner-accepted-preview"), false);
   assert.equal(hasTestId(edited, "prompt-refiner-request"), true);
@@ -88,7 +108,11 @@ test("requesting and failure copy promise that the original remains unchanged", 
   assert.equal(hasTestId(failed, "prompt-refiner-failed"), true);
   assert.match(failed, /원문은 바뀌지 않았/);
   assert.equal(failed.includes("internal"), false);
-  assert.equal((failed.match(/min-h-11/g) ?? []).length, 1);
+  assert.equal(hasTestId(failed, "prompt-refiner-dismiss-failed"), true);
+  assert.ok(failed.includes(`aria-label="${promptRefinerCopy.ko.close}"`));
+  assert.ok(failed.includes(`>${promptRefinerCopy.ko.close}</button>`));
+  assert.equal(failed.includes(`>${promptRefinerCopy.ko.keepOriginal}</button>`), false);
+  assert.equal((failed.match(/min-h-11/g) ?? []).length, 2);
 });
 
 test("all seven locales offer explicit accept and keep-original decisions", () => {
@@ -96,8 +120,21 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     keyof typeof promptRefinerCopy
   >) {
     const rendered = render({ language });
+    assert.ok(rendered.includes(promptRefinerCopy[language].comparisonLabel), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].originalLabel), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].proposalLabel), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].previewAction), language);
     assert.ok(rendered.includes(promptRefinerCopy[language].keepOriginal), language);
+    const failed = render({
+      language,
+      state: {
+        status: "failed",
+        request: { requestId: suggestion.requestId, prompt: suggestion.sourcePrompt },
+        failureCode: "internal",
+      },
+    });
+    assert.ok(failed.includes(`aria-label="${promptRefinerCopy[language].close}"`), language);
+    assert.ok(failed.includes(`>${promptRefinerCopy[language].close}</button>`), language);
     const acceptedPreview = render({
       language,
       state: { status: "accepted_preview", suggestion },

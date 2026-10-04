@@ -667,6 +667,8 @@ type ChatInputProps = {
    * draft; the owner discards it when the authored source changes.
    */
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  /** Return true only when the owner dismissed this exact fixture state. */
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /**
    * The assistant this conversation runs under (§14), or null when it runs
    * under none. Undefined when the control does not apply at all — a guest,
@@ -890,6 +892,7 @@ export function ChatInput({
   promptRefinerState,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   assistantProfile,
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
@@ -1338,10 +1341,19 @@ export function ChatInput({
       // A fixture decision is preview-only. The owner may acknowledge a
       // validated handoff, but these synthetic bytes must never enter the
       // authored composer draft or its durable draft writer.
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
       onPromptRefinerDecision?.(resolution);
     },
     [onPromptRefinerDecision, value]
+  );
+
+  const handlePromptRefinerDismiss = useCallback(
+    (requestId: string) => {
+      if (onPromptRefinerDismiss?.(requestId)) {
+        requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      }
+    },
+    [onPromptRefinerDismiss]
   );
 
   /*
@@ -3590,7 +3602,8 @@ export function ChatInput({
         {promptRefinerOffered &&
         promptRefinerState &&
         onPromptRefinerRequest &&
-        onPromptRefinerDecision ? (
+        onPromptRefinerDecision &&
+        onPromptRefinerDismiss ? (
           <PromptRefinerSuggestionPanel
             offered
             language={lang}
@@ -3610,6 +3623,7 @@ export function ChatInput({
             onKeepOriginal={(suggestion) =>
               handlePromptRefinerDecision(suggestion, "kept_original")
             }
+            onDismiss={handlePromptRefinerDismiss}
           />
         ) : null}
         {/*

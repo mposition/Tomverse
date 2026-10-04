@@ -249,6 +249,21 @@ test("keeping the original returns byte-identical authored and execution views",
   });
 });
 
+test("only an explicit accepted choice projects the suggestion into execution", () => {
+  const accepted = projectPromptRefinerChatHandoff(inputFor("accepted"));
+  const kept = projectPromptRefinerChatHandoff(inputFor("kept_original"));
+  assert.equal(accepted.authoredMessages[2].content, sourcePrompt);
+  assert.equal(kept.authoredMessages[2].content, sourcePrompt);
+  assert.equal(accepted.executionMessages[2].content, refinedPrompt);
+  assert.equal(kept.executionMessages[2].content, sourcePrompt);
+  expectCode("prompt_refiner_chat_decision_invalid", () =>
+    projectPromptRefinerChatHandoff({ ...inputFor("accepted"), decision: undefined })
+  );
+  expectCode("prompt_refiner_chat_resolution_invalid", () =>
+    projectPromptRefinerChatHandoff({ ...inputFor("accepted"), suppliedResolution: null })
+  );
+});
+
 test("scope, draft, source target and duplicate ids fail closed", () => {
   for (const changedScope of [
     { identityKey: "account:other" },
