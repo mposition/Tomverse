@@ -68,7 +68,9 @@ test("proxy rejects unapproved targets before DNS and dials only the checked IP"
   const hosts = ["api.openai.com"];
   const lookedUp = [];
   const dialed = [];
+  const decisions = [];
   const proxy = createAmuxV4EgressProxy(hosts, {
+    onConnectDecision: (decision) => decisions.push(decision),
     resolve: async (host) => { lookedUp.push(host); return ["104.18.6.192"]; },
     dial: (address, port) => {
       dialed.push([address, port]);
@@ -91,6 +93,7 @@ test("proxy rejects unapproved targets before DNS and dials only the checked IP"
     assert.match(allowed, /^HTTP\/1\.1 200 Connection Established/);
     assert.deepEqual(lookedUp, ["api.openai.com"]);
     assert.deepEqual(dialed, [["104.18.6.192", 443]]);
+    assert.deepEqual(decisions, ["denied", "approved"]);
   } finally {
     await close(proxy);
     await close(echo);

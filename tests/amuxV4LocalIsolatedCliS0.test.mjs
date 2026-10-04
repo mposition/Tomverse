@@ -11,6 +11,7 @@ import { AMUX_V4_CLI_HARD_DEADLINE_MS,
   AMUX_V4_CODEX_S0_ENABLED, AMUX_V4_CLAUDE_S0_ENABLED,
   awaitAmuxV4BoundedChild, amuxV4CliCaughtFailureStage,
   amuxV4CliExitFailureStage, amuxV4CliInspectionFailureStage,
+  amuxV4CliUnknownResult,
   runAmuxV4IsolatedSyntheticCliS0 } from
   "../lib/amux/ideaLocalIsolatedCliRunner.mjs";
 import { inspectAmuxV4AnalysisCliResult,
@@ -44,6 +45,20 @@ test("invalid CLI output maps to parser rejection without exposing output", () =
 test("spawn/setup and post-spawn I/O are separate metadata-only stages", () => {
   assert.equal(amuxV4CliCaughtFailureStage(false), "setup_or_spawn_error");
   assert.equal(amuxV4CliCaughtFailureStage(true), "child_io_error");
+});
+
+test("unknown CLI receipt carries only bounded exit and CONNECT counters", () => {
+  const counts = { approved: 1, denied: 2 };
+  assert.deepEqual(amuxV4CliUnknownResult("child_nonzero", 23, counts), {
+    kind: "outcome_unknown", failureStage: "child_nonzero",
+    parserReason: null, childExitCode: 23,
+    approvedConnects: 1, deniedConnects: 2,
+  });
+  assert.deepEqual(amuxV4CliUnknownResult("parser_rejected", 0, counts,
+    "served_model_mismatch"), { kind: "outcome_unknown",
+    failureStage: "parser_rejected", parserReason: "served_model_mismatch",
+    childExitCode: 0, approvedConnects: 1, deniedConnects: 2 });
+  assert.equal(amuxV4CliUnknownResult("deadline", null, counts).childExitCode, null);
 });
 
 test("rejected S0 call path remains code-latched off", async () => {

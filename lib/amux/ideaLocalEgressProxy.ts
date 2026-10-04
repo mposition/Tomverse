@@ -8,6 +8,8 @@ export type AmuxV4EgressProxyDeps = {
   /** DNS is resolved outside the network-isolated CLI; never dial by name. */
   resolve?: (host: string) => Promise<string[]>;
   dial?: (address: string, port: 443) => Socket;
+  /** Count-only diagnostic; no hostname or request text leaves the proxy. */
+  onConnectDecision?: (decision: "approved" | "denied") => void;
 };
 
 const MAX_HEAD_BYTES = 4_096;
@@ -60,11 +62,18 @@ export function createAmuxV4EgressProxy(
   server.on("connect", async (request: IncomingMessage, client: Socket, head: Buffer) => {
     client.setTimeout(0);
     client.pause();
-    if (head.length > MAX_HEAD_BYTES) { refuse(client, 403); return; }
-    if (active >= MAX_ACTIVE_TUNNELS) { refuse(client, 429); return; }
+    if (head.length > MAX_HEAD_BYTES) {
+      deps.onConnectDecision?.("denied"); refuse(client, 403); return;
+    }
+    if (active >= MAX_ACTIVE_TUNNELS) {
+      deps.onConnectDecision?.("denied"); refuse(client, 429); return;
+    }
     const target = planAmuxV4EgressTarget({ method: request.method,
       authority: request.url, approvedHosts: hosts });
-    if (target.decision !== "target_approved") { refuse(client, 403); return; }
+    if (target.decision !== "target_approved") {
+      deps.onConnectDecision?.("denied"); refuse(client, 403); return;
+    }
+    deps.onConnectDecision?.("approved");
     active += 1;
     let released = false;
     const release = () => { if (!released) { released = true; active -= 1; } };

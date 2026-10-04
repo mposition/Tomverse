@@ -139,6 +139,21 @@ test("Claude result needs exact served model and complete usage", () => {
     "verified_success");
 });
 
+test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const samples = [
+    [claudeStream(claudeEnvelope(), ["Bash"]), "security_no_tools_violation"],
+    [claudeStream(claudeEnvelope("different-model")), "served_model_mismatch"],
+    [claudeStream({ ...claudeEnvelope(), modelUsage: {} }), "usage_unverified"],
+    [Buffer.from("not-json"), "incomplete_output"],
+    [claudeStream({ ...claudeEnvelope(), num_turns: 2 }), "output_contract_mismatch"],
+  ];
+  for (const [stdout, failureReason] of samples) {
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true }), { kind: "outcome_unknown", failureReason });
+  }
+});
+
 test("Codex usage without served-model attestation cannot certify success", () => {
   const plan = planAmuxV4AnalysisCliInvocation(openai);
   const events = [

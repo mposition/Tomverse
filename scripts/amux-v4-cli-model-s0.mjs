@@ -23,6 +23,12 @@ if (process.platform !== "linux" ||
     process.stdout.write(JSON.stringify({ provider,
       status: result.kind, transport,
       failureStage: result.kind === "outcome_unknown" ? result.failureStage ?? null : null,
+      parserReason: result.kind === "outcome_unknown" ? result.parserReason ?? null : null,
+      childExitCode: result.kind === "outcome_unknown" ? result.childExitCode ?? null : null,
+      approvedConnects: result.kind === "outcome_unknown" ?
+        result.approvedConnects ?? null : null,
+      deniedConnects: result.kind === "outcome_unknown" ?
+        result.deniedConnects ?? null : null,
       answerMatchesS0: transport ? outputMatches : null,
       servedModelVerified: result.kind === "verified_success",
       inputTokens: transport ? result.inputTokens : null,
