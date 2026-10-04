@@ -1,6 +1,7 @@
 -- Refuse a newly completed analysis after its immutable seven-day idea
 -- deadline. Existing completed chunks remain readable and decidable; this
 -- migration neither rewrites them nor starts an analysis worker.
+-- baseline-check: present-if-function "amux_v4_chunk_completion_immutable"
 
 BEGIN;
 
