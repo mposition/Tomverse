@@ -1,4 +1,4 @@
-import { amuxDatabaseSqlState } from "@/lib/amux/readFailureCore";
+import { amuxDatabaseDiagnosticCode } from "@/lib/amux/readFailureCore";
 
 /**
  * Content-free description of a failed AMUX recovery sweep.
@@ -28,7 +28,7 @@ const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 export const amuxRecoverFailureFields = (
   step: AmuxRecoverStep,
   error: unknown,
-): { event: "amux_recover_failed"; step: AmuxRecoverStep; error_name: string; error_code: string | null; database_sqlstate: string | null } => {
+): { event: "amux_recover_failed"; step: AmuxRecoverStep; error_name: string; error_code: string | null; database_error_code: string | null } => {
   const name =
     error instanceof Error && ERROR_NAME.test(error.name) ? error.name : "unknown";
   const rawCode =
@@ -44,6 +44,6 @@ export const amuxRecoverFailureFields = (
     step,
     error_name: name,
     error_code: code,
-    database_sqlstate: amuxDatabaseSqlState(error),
+    database_error_code: amuxDatabaseDiagnosticCode(error),
   };
 };
