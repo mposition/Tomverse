@@ -21,10 +21,14 @@
  * allowed, because that is the scope docs/policy/engineering-agent.md §5.1
  * gives it.
  *
- * Nothing was holding that apart. One `actions/cache` step added to any of
- * those jobs would put unverified bytes next to a repository write token and
- * provider API keys, and the existing `credential_job_restores_cache` rule
- * would not notice: it already fires for all of them, for the verified cache.
+ * Nothing was holding that apart, and what made it hard to see was that the
+ * `credential_job_restores_cache` rule already fired for every one of those
+ * jobs, for the verified cache -- so an `actions/cache` step added beside a
+ * repository write token and provider API keys produced no new reason. That is
+ * no longer the shape of it: at zero reasons, an unverified restore added to a
+ * credentialed job is a reason appearing where there was none, which this check
+ * refuses and the posture digest in tests/agentCredentialReachability.test.mjs
+ * fails on as well. The refusal itself has not changed.
  *
  * Judgement is lib/agentCredentialReachability.ts -- the same module the agent
  * push policy uses, deliberately, so there is one answer to "which jobs hold a
