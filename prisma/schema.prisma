@@ -2260,6 +2260,13 @@ model AdminAuditLog {
 
   promptRefinerReservationStage PromptRefinerReservationStage?
   amuxReviewDecision            AmuxReviewDecision?
+  amuxV4UnitPrepareDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitPrepareAudit")
+  amuxV4UnitFinalDecisions   AmuxIdeaUnitDecision[] @relation("AmuxV4UnitFinalAudit")
+  amuxV4UnitUnknownDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownAudit")
+  amuxV4UnitUnknownResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4UnitUnknownResolvedAudit")
+  amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
+  amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
+  amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -7046,12 +7053,35 @@ model AmuxWorkItem {
   /// leaves both null. The pair check and the sourced-todo check live in SQL.
   executionBrief        String?
   executionBriefDigest  String?
+  /// Only new admin-idea-v4 cards use these fields. Existing rows remain NULL.
+  cardType              String?
+  parentFeatureNodeId   String?
+  parentStoryCardId     String?
+  v4TitleCiphertext     Bytes?
+  v4TitleKeyId          String?
+  v4TitleKeyVersion     Int?
+  v4TitleDigest         String?
+  v4TitleDigestKeyId    String?
+  v4BriefCiphertext     Bytes?
+  v4BriefKeyId          String?
+  v4BriefKeyVersion     Int?
+  v4BriefDigest         String?
+  v4BriefDigestKeyId    String?
+  v4BriefPurgedAt       DateTime?
+  v4TerminalAt          DateTime?
+  v4SourceApprovalId    String?
+  v22ReceiptId          String?   @unique
+  taskRole              String?
+  executionGrade        String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   dependencies      AmuxWorkDependency[]   @relation("AmuxTaskDependencies")
   dependents        AmuxWorkDependency[]   @relation("AmuxTaskDependents")
   routeDecisions    AmuxRouteDecision[]
+  amuxV4BaseDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionBaseCard")
+  amuxV4RegisteredDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionRegisteredCard")
+  amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedCard")
   executionAttempts AmuxExecutionAttempt[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
@@ -7070,6 +7100,9 @@ model AmuxWorkItem {
   /// immutable import snapshot.
   acceptedSourceRevision   AmuxWorkItemSourceRevision? @relation("AmuxAcceptedSourceRevision", fields: [acceptedSourceRevisionId], references: [id], onDelete: Restrict)
   acceptedSourceRevisionId String?                     @unique
+  parentFeatureNode AmuxPortfolioNode? @relation(fields: [parentFeatureNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  parentStoryCard   AmuxWorkItem?       @relation("AmuxStoryTasks", fields: [parentStoryCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  storyChildTasks   AmuxWorkItem[]      @relation("AmuxStoryTasks")
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -7078,6 +7111,8 @@ model AmuxWorkItem {
   @@index([projectKey, status, owner])
   @@index([teamKey, status, owner])
   @@index([dueAt, status])
+  @@index([parentFeatureNodeId, status])
+  @@index([parentStoryCardId, status])
   engineeringAgentRuns          EngineeringAgentRun[]          @relation("EngineeringAgentRunCard")
   engineeringAgentRegistrations EngineeringAgentRegistration[] @relation("EngineeringAgentRegistrationCard")
 }
@@ -8318,4 +8353,420 @@ model SignupConsentAttempt {
   user                       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([expiresAt])
+}
+
+/// Operator-approved Frontier eligibility for one exact CLI provider/model.
+/// Names are data, never a permanent code allowlist. A revocation is a
+/// one-way update of the current row; a later reapproval is a new version.
+/// The SQL migration also enforces one active approval per provider/model.
+model AmuxIdeaFrontierModelApproval {
+  id                   String    @id
+  provider             String
+  modelId              String
+  allowedEfforts       String[]
+  version              Int
+  status               String
+  approvedAt           DateTime
+  approvedByUserId     String
+  approvalAuditLogId   String    @unique
+  revokedAt            DateTime?
+  revokedByUserId      String?
+  revocationAuditLogId String?   @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  approvalAudit   AdminAuditLog  @relation("AmuxV4FrontierApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  revocationAudit AdminAuditLog? @relation("AmuxV4FrontierRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([provider, modelId, version])
+  @@index([provider, modelId, status])
+}
+
+/// AMUX v4 idea source. These additive tables have no enabled writer or
+/// dispatch path until the separate policy, isolation and retention gates pass.
+/// All *Digest columns are HMAC-SHA256 of canonical data under a server-held
+/// key identified by *DigestKeyId; no plain SHA-256 of a short idea is retained.
+model AmuxIdeaSubmission {
+  id                  String    @id
+  requestId           String    @unique @db.Uuid
+  actorUserId         String
+  state               String
+  rawCiphertext       Bytes?
+  rawKeyId            String?
+  rawKeyVersion       Int?
+  rawDigest           String?
+  rawDigestKeyId      String?
+  submittedAt         DateTime
+  analysisDeadlineAt  DateTime
+  analysisCompletedAt DateTime?
+  cancelledAt         DateTime?
+  rawPurgeAfter       DateTime?
+  rawPurgedAt         DateTime?
+  currentSourcePlanRevisionId String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
+  previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
+  confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
+  chunks            AmuxIdeaAnalysisChunk[]
+  draftUnits        AmuxIdeaDraftUnit[]
+  unitDecisions     AmuxIdeaUnitDecision[]
+  sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
+  currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([id, actorUserId])
+  @@unique([currentSourcePlanRevisionId, id])
+  @@index([state, analysisDeadlineAt])
+  @@index([rawPurgeAfter, rawPurgedAt])
+  @@index([actorUserId, submittedAt])
+}
+
+/// Immutable ordered source-unit manifest for one analysis revision. Only
+/// server-keyed digests, never idea text, GitHub paths or excerpts, are kept
+/// here. A new owner answer or source scope creates a new row under the same
+/// idea; global chunk identities and prior decisions are never reused.
+/// This table and its new nullable references are dark until a single writer
+/// verifies the manifest, current-plan pointer and owner confirmation.
+/// manifestDigestKeyId also identifies the HMAC key for unitDigests. The
+/// writer must domain-separate every digest by idea and revision.
+model AmuxIdeaSourcePlanRevision {
+  id                   String    @id
+  ideaId               String
+  actorUserId          String
+  revisionNumber       Int
+  startChunkIndex      Int
+  sourceUnitCount      Int
+  unitDigests          String[]
+  manifestDigest       String
+  manifestDigestKeyId  String
+  state                String
+  predecessorId        String?
+  creationAuditLogId   String    @unique
+  activatedAt          DateTime?
+  closedAt             DateTime?
+  createdAt            DateTime  @default(now())
+
+  idea                 AmuxIdeaSubmission @relation("AmuxIdeaPlans", fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  currentForIdea       AmuxIdeaSubmission? @relation("AmuxCurrentIdeaPlan")
+  predecessor          AmuxIdeaSourcePlanRevision? @relation("AmuxIdeaPlanPredecessor", fields: [predecessorId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  successors           AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanPredecessor")
+  creationAudit        AdminAuditLog @relation("AmuxIdeaPlanCreationAudit", fields: [creationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  previews             AmuxIdeaTransferPreview[]
+  chunks               AmuxIdeaAnalysisChunk[]
+
+  @@unique([ideaId, revisionNumber])
+  @@unique([ideaId, startChunkIndex])
+  @@unique([id, ideaId])
+  @@unique([id, ideaId, startChunkIndex])
+  @@index([ideaId, state])
+}
+
+/// Human-approved GitHub collection scope. The scope body may name a private
+/// repository, so it is encrypted and never copied into a public AMUX card.
+model AmuxIdeaSourceScopeApproval {
+  id                      String    @id
+  ideaId                  String
+  status                  String
+  scopeCiphertext         Bytes?
+  scopeKeyId              String?
+  scopeKeyVersion         Int?
+  scopeDigest             String
+  scopeDigestKeyId        String
+  actorUserId             String
+  authorizationAuditLogId String    @unique
+  approvedAt              DateTime
+  expiresAt               DateTime
+  consumedAt              DateTime?
+  revokedAt               DateTime?
+  scopePurgeAfter         DateTime?
+  scopePurgedAt           DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  idea     AmuxIdeaSubmission       @relation("AmuxIdeaScopeOwner", fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  previews AmuxIdeaTransferPreview[]
+
+  @@unique([id, ideaId])
+  @@index([ideaId, status, expiresAt])
+  @@index([scopePurgeAfter, scopePurgedAt])
+}
+
+/// Exact app-controlled model input confirmed by the owner for one attempt.
+/// A same-content resend has a new preview id and a new human confirmation.
+/// The SQL partial unique index AmuxIdeaTransferPreview_one_active_per_chunk
+/// must not be dropped by a later migration. `attempt` is per-chunk ordering,
+/// not the Agent-wide three-consecutive-failure counter.
+model AmuxIdeaTransferPreview {
+  id                      String    @id
+  ideaId                  String
+  sourceScopeApprovalId   String?
+  sourcePlanRevisionId    String?
+  sourceUnitOrdinal       Int?
+  chunkIndex              Int
+  attempt                 Int
+  state                   String
+  modelId                 String
+  templateVersion         String
+  payloadCiphertext       Bytes?
+  payloadKeyId            String?
+  payloadKeyVersion       Int?
+  payloadDigest           String
+  payloadDigestKeyId      String
+  expiresAt               DateTime
+  confirmedAt             DateTime?
+  confirmExpiresAt        DateTime?
+  confirmedByUserId       String?
+  confirmationAuditLogId  String?   @unique
+  consumedAt              DateTime?
+  outcomeUnknownAt        DateTime?
+  payloadPurgeAfter       DateTime?
+  payloadPurgedAt         DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  idea                AmuxIdeaSubmission             @relation("AmuxIdeaPreviews", fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  confirmedOwner      AmuxIdeaSubmission?            @relation("AmuxPreviewConfirmedOwner", fields: [ideaId, confirmedByUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  sourceScopeApproval AmuxIdeaSourceScopeApproval?   @relation(fields: [sourceScopeApprovalId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  sourcePlanRevision AmuxIdeaSourcePlanRevision? @relation(fields: [sourcePlanRevisionId, ideaId], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
+  chunk               AmuxIdeaAnalysisChunk          @relation("AmuxChunkPreviews", fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  planBoundChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundPreview", fields: [ideaId, chunkIndex, sourcePlanRevisionId], references: [ideaId, chunkIndex, sourcePlanRevisionId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaTransferPreview_chunk_plan_fkey")
+  currentForChunk     AmuxIdeaAnalysisChunk?         @relation("AmuxCurrentChunkPreview")
+  planBoundCurrentForChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundCurrentPreview")
+  unitDecisions       AmuxIdeaUnitDecision[]
+
+  @@unique([ideaId, chunkIndex, attempt])
+  @@unique([id, ideaId, chunkIndex])
+  @@unique([id, ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaTransferPreview_id_idea_chunk_plan_key")
+  @@index([sourceScopeApprovalId])
+  @@index([sourcePlanRevisionId])
+  @@index([state, expiresAt])
+  @@index([payloadPurgeAfter, payloadPurgedAt])
+}
+
+/// One bounded normalized analysis chunk. Raw provider output and normalized
+/// draft use separate retention keys; an unresolved draft purge clock is null.
+/// `attempt` is not the Agent-wide failure budget. Numeric ordinals only,
+/// never source paths or excerpts, are stored outside encrypted payloads.
+model AmuxIdeaAnalysisChunk {
+  ideaId                  String
+  actorUserId             String
+  chunkIndex              Int
+  state                   String
+  attempt                 Int
+  leaseGeneration         Int
+  currentPreviewId        String?   @unique
+  sourcePlanRevisionId    String?
+  planStartChunkIndex     Int?
+  revisionChunkIndex      Int?
+  coverageStatus          String?
+  continuationKind        String?
+  outputPartIndex         Int?
+  outputPending           Boolean?
+  draftVersion            Int?
+  draftCiphertext         Bytes?
+  draftKeyId              String?
+  draftKeyVersion         Int?
+  draftDigest             String?
+  draftDigestKeyId        String?
+  freeformCiphertext      Bytes?
+  freeformKeyId           String?
+  freeformKeyVersion      Int?
+  coveredStartOrdinal     Int?
+  coveredEndOrdinal       Int?
+  remainingStartOrdinal   Int?
+  remainingEndOrdinal     Int?
+  analysisCompletedAt     DateTime?
+  finalDecisionAt         DateTime?
+  bodyPurgeAfter          DateTime?
+  bodyPurgedAt            DateTime?
+  freeformPurgeAfter      DateTime?
+  freeformPurgedAt        DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  idea           AmuxIdeaSubmission        @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  currentPreview AmuxIdeaTransferPreview? @relation("AmuxCurrentChunkPreview", fields: [currentPreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  planBoundCurrentPreview AmuxIdeaTransferPreview? @relation("AmuxPlanBoundCurrentPreview", fields: [currentPreviewId, ideaId, chunkIndex, sourcePlanRevisionId], references: [id, ideaId, chunkIndex, sourcePlanRevisionId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisChunk_current_preview_plan_fkey")
+  previews       AmuxIdeaTransferPreview[] @relation("AmuxChunkPreviews")
+  planBoundPreviews AmuxIdeaTransferPreview[] @relation("AmuxPlanBoundPreview")
+  sourcePlanRevision AmuxIdeaSourcePlanRevision? @relation(fields: [sourcePlanRevisionId, ideaId, planStartChunkIndex], references: [id, ideaId, startChunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisChunk_source_plan_fkey")
+  draftUnits     AmuxIdeaDraftUnit[]
+
+  @@id([ideaId, chunkIndex])
+  @@unique([currentPreviewId, ideaId, chunkIndex])
+  @@unique([currentPreviewId, ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaAnalysisChunk_current_preview_plan_key")
+  @@unique([sourcePlanRevisionId, revisionChunkIndex], map: "AmuxIdeaAnalysisChunk_plan_chunk_key")
+  @@unique([ideaId, chunkIndex, sourcePlanRevisionId], map: "AmuxIdeaAnalysisChunk_idea_chunk_plan_key")
+  @@index([state, analysisCompletedAt])
+  @@index([bodyPurgeAfter, bodyPurgedAt])
+  @@index([freeformPurgeAfter, freeformPurgedAt])
+}
+
+/// One independently decidable and purgeable normalized proposal unit.
+/// A chunk never stores a monolithic draft body once unit rows are available.
+/// Each unit's envelope has its own random data key; bodyKeyId identifies the
+/// shared wrapping master key, not that data key. A decision on another unit
+/// does not delay expiry or preserve this unit's text. No writer is enabled.
+model AmuxIdeaDraftUnit {
+  id                String    @id
+  ideaId            String
+  actorUserId       String
+  chunkIndex        Int
+  unitIndex         Int
+  /// Stable, idea-scoped reference used by later analysis chunks. Legacy
+  /// dark-schema rows may be null; all new inserts require a value in SQL.
+  localRef          String?
+  unitKind          String
+  state             String
+  expiresAt         DateTime
+  bodyCiphertext    Bytes?
+  bodyKeyId         String?
+  bodyKeyVersion    Int?
+  bodyDigest        String
+  bodyDigestKeyId   String
+  finalDecisionAt   DateTime?
+  bodyPurgeAfter    DateTime?
+  bodyPurgedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  decisions AmuxIdeaUnitDecision[]
+
+  @@unique([ideaId, chunkIndex, unitIndex])
+  @@unique([id, ideaId, actorUserId, chunkIndex])
+  @@unique([ideaId, localRef])
+  @@index([actorUserId, ideaId])
+  /// The due/expiry partial indexes live only in the SQL migration; Prisma
+  /// schema cannot express their WHERE predicates.
+}
+
+/// One owner-confirmed decision on one v4 proposal unit. This additive table
+/// is dark: it neither registers a card nor grants execution. The consumed
+/// result must be joined to a future protected writer before any live path.
+/// Digests are keyed; no proposal body or source text is stored here.
+model AmuxIdeaUnitDecision {
+  id                         String    @id
+  ideaId                     String
+  draftUnitId                String
+  actorUserId                String
+  chunkIndex                 Int
+  prepareRequestId           String    @unique @db.Uuid
+  consumeRequestId           String?   @unique @db.Uuid
+  action                     String
+  state                      String
+  ownerSessionDigest         String
+  ownerSessionDigestKeyId    String
+  unitDigest                 String
+  unitDigestKeyId            String
+  confirmationDigest         String
+  confirmationDigestKeyId    String
+  sourcePreviewId            String
+  sourcePreviewDigest        String
+  sourcePreviewDigestKeyId   String
+  baseNodeId                 String?
+  baseNodeRevision           Int?
+  baseNodeDigest             String?
+  baseNodeDigestKeyId        String?
+  baseWorkItemId             String?
+  baseWorkItemRevision       Int?
+  baseWorkItemDigest         String?
+  baseWorkItemDigestKeyId    String?
+  resolvedNodeId             String?   @unique
+  registeredWorkItemId       String?   @unique
+  linkedNodeId               String?
+  linkedWorkItemId           String?
+  preparedAt                 DateTime
+  expiresAt                  DateTime
+  consumedAt                 DateTime?
+  outcomeUnknownAt           DateTime?
+  outcomeUnknownConsumeRequestId String? @unique @db.Uuid
+  outcomeUnknownAuditLogId   String?   @unique
+  outcomeUnknownResolvedAt   DateTime?
+  outcomeUnknownResolution   String?
+  outcomeUnknownResolvedAuditLogId String? @unique
+  prepareAuditLogId          String    @unique
+  finalAuditLogId            String?   @unique
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
+  draftUnit AmuxIdeaDraftUnit @relation(fields: [draftUnitId, ideaId, actorUserId, chunkIndex], references: [id, ideaId, actorUserId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaUnitDecision_draftUnitId_ideaId_actorUserId_chunkI_fkey")
+  sourcePreview AmuxIdeaTransferPreview @relation(fields: [sourcePreviewId, ideaId, chunkIndex], references: [id, ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
+  baseNode AmuxPortfolioNode? @relation("AmuxV4DecisionBaseNode", fields: [baseNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resolvedNode AmuxPortfolioNode? @relation("AmuxV4DecisionResolvedNode", fields: [resolvedNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  linkedNode AmuxPortfolioNode? @relation("AmuxV4DecisionLinkedNode", fields: [linkedNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  baseWorkItem AmuxWorkItem? @relation("AmuxV4DecisionBaseCard", fields: [baseWorkItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  registeredWorkItem AmuxWorkItem? @relation("AmuxV4DecisionRegisteredCard", fields: [registeredWorkItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  linkedWorkItem AmuxWorkItem? @relation("AmuxV4DecisionLinkedCard", fields: [linkedWorkItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prepareAuditLog AdminAuditLog @relation("AmuxV4UnitPrepareAudit", fields: [prepareAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  finalAuditLog AdminAuditLog? @relation("AmuxV4UnitFinalAudit", fields: [finalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  outcomeUnknownAuditLog AdminAuditLog? @relation("AmuxV4UnitUnknownAudit", fields: [outcomeUnknownAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  outcomeUnknownResolvedAuditLog AdminAuditLog? @relation("AmuxV4UnitUnknownResolvedAudit", fields: [outcomeUnknownResolvedAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, state, expiresAt])
+  @@index([draftUnitId, state])
+  @@index([sourcePreviewId])
+  /// Prepared/consumed uniqueness and partial state/source/audit guards are
+  /// SQL-only. The future writer must still bind owner step-up, base revision
+  /// and keyed digest, and atomic card/node/unit writes before activation.
+}
+
+/// Non-runnable Initiative -> Epic -> Feature hierarchy. Node content is
+/// encrypted; its retention period must be approved before any live writer.
+model AmuxPortfolioNode {
+  id                      String   @id
+  level                   String
+  parentId                String?
+  state                   String
+  /// DB-clock start of v8 retention after the one-way active -> archived edge.
+  /// No purge writer is enabled by these metadata fields alone.
+  archivedAt              DateTime?
+  contentPurgeAfter       DateTime?
+  revision                Int
+  titleCiphertext         Bytes?
+  descriptionCiphertext   Bytes?
+  contentKeyId            String?
+  contentKeyVersion       Int?
+  contentDigest           String
+  contentDigestKeyId      String
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  parent    AmuxPortfolioNode?          @relation("AmuxPortfolioTree", fields: [parentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  children  AmuxPortfolioNode[]         @relation("AmuxPortfolioTree")
+  revisions AmuxPortfolioNodeRevision[]
+  cards     AmuxWorkItem[]
+  amuxV4BaseDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionBaseNode")
+  amuxV4ResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionResolvedNode")
+  amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedNode")
+
+  @@index([parentId, level, state])
+  @@index([level, state, createdAt])
+  @@index([contentPurgeAfter])
+}
+
+/// Append-only evidence of an owner-approved hierarchy revision. This stores
+/// only typed metadata and a keyed digest, never a second copy of node text.
+model AmuxPortfolioNodeRevision {
+  id                      String   @id
+  nodeId                  String
+  revision                Int
+  priorRevision           Int?
+  parentIdAtApproval      String?
+  contentDigest           String
+  contentDigestKeyId      String
+  decisionId              String
+  authorizationAuditLogId String   @unique
+  approvedAt              DateTime
+  createdAt               DateTime @default(now())
+
+  node AmuxPortfolioNode @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([nodeId, revision])
+  @@index([decisionId])
 }
