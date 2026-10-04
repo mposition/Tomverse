@@ -165,6 +165,23 @@ jobs:
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Working out what diverged used to mean reading the job log, then
+      # reproducing the merge in a throwaway worktree -- which is what a person
+      # did on 2026-10-03 for the fourth of four conflicted back-merges (#2023).
+      # This prints the answer instead: which paths conflict, what each side did
+      # to them, and whether resolving to develop would change any file.
+      #
+      # It does not resolve anything and it pushes nothing. Automating the
+      # resolution was authorised, attempted twice, and withdrawn on the
+      # evidence: two independent review rounds each produced a counterexample
+      # where every check passed and main's change was still lost. The second is
+      # unanswerable by any line comparison -- develop can hold every line main
+      # added and comment them out. See scripts/back-merge-ancestry-core.mjs.
+      - name: Report what diverged
+        if: steps.merge.outputs.conflicted == 'true'
+        continue-on-error: true
+        run: node scripts/report-back-merge-divergence.mjs --ours origin/develop --theirs origin/main
+
       # Reported for the log, and worth reading: a back-merge after a squashed
       # release normally changes nothing, because the content is already on
       # develop. A non-empty diff means main carries work develop never had --

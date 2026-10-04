@@ -105,6 +105,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
     if (submission.kind !== "submitted" || !sourceScopePreviewAvailable || sourceScopePending ||
         !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()) return;
     const ideaId = submission.ideaId;
+    const requested = { repository: sourceRepository.trim(),
+      commitSha: sourceCommitSha.trim(), path: sourcePath.trim() };
     setSourceScopePending(true);
     setSourceScopeResult({ kind: "idle" });
     try {
@@ -113,11 +115,11 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ schemaVersion: 1, ideaId, scopeJson: JSON.stringify({
           version: 1,
-          sources: [{ kind: "repository_file", repository: sourceRepository.trim(),
-            commitSha: sourceCommitSha.trim(), path: sourcePath.trim() }],
+          sources: [{ kind: "repository_file", ...requested }],
         }) }),
       });
-      setSourceScopeResult(classifySourceScopePreview({ status: response.status, body: await response.json() }, ideaId));
+      setSourceScopeResult(classifySourceScopePreview(
+        { status: response.status, body: await response.json() }, ideaId, requested));
     } catch {
       setSourceScopeResult({ kind: "error", code: "preview_unavailable" });
     } finally {
@@ -387,22 +389,22 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourceRepositoryLabel}
               <input value={sourceRepository} maxLength={165} spellCheck={false} onChange={(event) => { setSourceRepository(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
             </label>
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourceCommitLabel}
               <input value={sourceCommitSha} maxLength={64} spellCheck={false} onChange={(event) => { setSourceCommitSha(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
             </label>
             <label className="flex flex-col gap-1 text-sm text-zinc-800 dark:text-zinc-100">
               {messages.sourcePathLabel}
               <input value={sourcePath} maxLength={256} spellCheck={false} onChange={(event) => { setSourcePath(event.target.value); setSourceScopeResult({ kind: "idle" }); }}
-                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 dark:border-zinc-700 dark:bg-zinc-900" />
+                disabled={sourceScopePending} className="min-h-11 rounded-lg border border-zinc-300 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:focus-visible:outline-blue-300" />
             </label>
           </div>
           <button type="button" onClick={checkSourceScope}
             disabled={!sourceScopePreviewAvailable || sourceScopePending || !sourceRepository.trim() || !sourceCommitSha.trim() || !sourcePath.trim()}
-            className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+            className="min-h-11 rounded-lg border border-blue-700 px-4 text-sm font-medium text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200 dark:focus-visible:outline-blue-300">
             {sourceScopePending ? messages.sourceScopeChecking : messages.sourceScopeCheck}
           </button>
           {!sourceScopePreviewAvailable ? <p className="text-sm text-zinc-600 dark:text-zinc-400">{messages.sourceScopeUnavailable}</p> : null}
