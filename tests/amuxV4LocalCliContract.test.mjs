@@ -35,6 +35,7 @@ test("provider-to-command plan is exact, shell-free and never infers a fallback 
   assert.equal(claude.command[0], "/run/amux-cli/claude");
   assert.ok(claude.command.includes("--safe-mode"));
   assert.ok(claude.command.includes("--restricted"));
+  assert.ok(claude.command.includes("--disable-slash-commands"));
   assert.ok(claude.command.includes("--no-session-persistence"));
   assert.ok(claude.command.includes("stream-json"));
   assert.ok(claude.command.includes("--verbose"));
@@ -78,6 +79,15 @@ const claudeStream = (envelope = claudeEnvelope(), tools = [],
 
 test("Claude result needs exact served model and complete usage", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const noCapabilities = claudeStream(claudeEnvelope());
+  const withManualMode = Buffer.from(noCapabilities.toString("utf8")
+    .replace('"tools":[]', '"tools":[],"mcp_servers":[],"skills":[],"plugins":[],"agents":[],"permissionMode":"manual"'));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withManualMode, 0).kind,
+    "verified_success");
+  const withDefaultMode = Buffer.from(withManualMode.toString("utf8")
+    .replace('"permissionMode":"manual"', '"permissionMode":"default"'));
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan, withDefaultMode, 0,
+    { diagnostic: true }).failureReason, "security_no_tools_violation");
   const completed = inspectAmuxV4AnalysisCliResult(plan,
     claudeStream(), 0);
   assert.deepEqual(completed, { kind: "verified_success",
@@ -230,11 +240,7 @@ test("Claude S0 security trace counts capabilities without tool names", () => {
     type: "system", phase: "before_init", subtype: "init",
     capabilityCounts: { tools: 1, mcp_servers: 0, skills: 0,
       plugins: 0, agents: 0 },
-    discoveryDigests: {
-      skills: createHash("sha256").update("[]").digest("hex"),
-      plugins: createHash("sha256").update("[]").digest("hex"),
-      agents: createHash("sha256").update("[]").digest("hex"),
-    }, pluginPathClasses: [], permissionMode: "restricted",
+    pluginPathClasses: [], permissionMode: "restricted",
   });
   assert.equal(JSON.stringify(diagnostic).includes("Bash"), false);
   assert.equal(JSON.stringify(diagnostic).includes("never expose"), false);
@@ -247,7 +253,8 @@ test("Claude S0 traces discovery provenance without exposing names or paths", ()
     { type: "system", subtype: "init", tools: [], mcp_servers: [],
       skills: [secret], agents: [secret],
       plugins: [{ name: secret, path: "/tmp/.claude/plugin" },
-        { name: "built-in", path: "builtin:review" }],
+        { name: "built-in", path: "builtin:review" },
+        { name: "traversal", path: "/run/amux-cli/../../home/plugin" }],
       permissionMode: "manual" },
     { type: "assistant", message: { role: "assistant",
       content: [{ type: "text", text: secret }] } },
@@ -258,13 +265,8 @@ test("Claude S0 traces discovery provenance without exposing names or paths", ()
   assert.equal(result.kind, "outcome_unknown");
   assert.equal(result.failureReason, "security_no_tools_violation");
   assert.deepEqual(result.syntheticTrace.events[0].pluginPathClasses,
-    ["sandbox_config", "embedded"]);
+    ["sandbox_config", "embedded", "other"]);
   assert.equal(result.syntheticTrace.events[0].permissionMode, "manual");
-  assert.equal(result.syntheticTrace.events[0].discoveryDigests.plugins,
-    createHash("sha256").update(JSON.stringify([
-      { name: secret, path: "/tmp/.claude/plugin" },
-      { name: "built-in", path: "builtin:review" },
-    ])).digest("hex"));
   assert.equal(JSON.stringify(result).includes(secret), false);
   assert.equal(JSON.stringify(result).includes("/tmp/.claude/plugin"), false);
 });
