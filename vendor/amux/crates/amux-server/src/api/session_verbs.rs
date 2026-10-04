@@ -1592,7 +1592,13 @@ pub(crate) fn detect_claude_status(raw_output: &str) -> String {
     }
     let n = lines.len();
     let current_start = lines.iter().rposition(|line| {
-        matches!(line.trim(), "❯" | "›") || line.contains("Type your message")
+        let line = line.trim();
+        matches!(line, "❯" | "›")
+            || line.contains("Type your message")
+            // Codex keeps an old update/trust picker in tmux scrollback after
+            // returning to its composer. Start at the newer composer so that
+            // selector text above it cannot block steering indefinitely.
+            || line.starts_with("› Ask Codex to do anything")
     }).unwrap_or(0);
     let current_lines = &lines[current_start..];
     let current = current_lines.join("\n");
@@ -6646,6 +6652,17 @@ fn codex_model_footer_chrome(raw: &str, stripped: &str) -> bool {
     let (identity, location) = (parts[0], parts[1]);
     if !(location == "~" || location.starts_with("~/") || location.starts_with('/')) {
         return false;
+    }
+
+    // Newer Codex versions colour both the model and directory while leaving
+    // the separators undimmed. Require both styled fields: plain user text
+    // resembling a footer must still be treated as unsubmitted input.
+    let raw_parts: Vec<&str> = raw.split('\u{b7}').collect();
+    if raw_parts.len() == parts.len()
+        && raw_parts[0].contains("\u{1b}[38;2;")
+        && raw_parts[1].contains("\u{1b}[38;2;")
+    {
+        return true;
     }
 
     let (plain, dim) = dim_mask(raw);
@@ -13299,6 +13316,16 @@ pub(crate) async fn steer_lane_at_boundary(state: &AppState, name: &str) -> bool
 pub(crate) fn pane_is_at_boundary(raw: &str) -> bool {
     if let Some(generating) = crate::backend::adapter::codex_pane_generation_state(raw) {
         return !generating;
+    }
+    // Codex can return to its styled empty composer after the rollout signal
+    // ages out. Its status parser deliberately returns "" for that provider,
+    // so the delivery gate needs this positive composer boundary separately.
+    if !pane_bar_says_generating(raw)
+        && detect_claude_status(raw) != "waiting"
+        && matches!(composer_state(raw), ComposerState::Placeholder(ref text) if text == "AskCodextodoanything")
+        && strip_ansi(raw).lines().any(|line| line.trim() == "\u{203a} Ask Codex to do anything")
+    {
+        return true;
     }
     !pane_bar_says_generating(raw) && detect_claude_status(raw) == "idle"
 }
@@ -26763,6 +26790,16 @@ CLAUDE-POSTFIX-COMPLETE
         // Provider/model controls: the new Claude frame must not turn a Codex
         // prompt or Gemini selector into active.
         assert_eq!(detect_claude_status("\u{203a} Ask Codex to do anything"), "");
+        let stale_codex_update = "\
+\u{203a} 1. Update now\n  2. Skip\n  3. Skip until next version\n\
+Press enter to continue\n\nWorked for 7s\n\n\
+\u{203a} Ask Codex to do anything\n  GPT-5.6-Sol xhigh";
+        assert_ne!(detect_claude_status(stale_codex_update), "waiting",
+            "an old picker above the live Codex composer must not block queued delivery");
+        assert_eq!(idle_hook_frame(stale_codex_update), IdleHookFrame::Idle,
+            "the idle-hook delivery check must accept the live Codex composer");
+        assert_eq!(detect_claude_status("\u{203a} 1. Update now\n  2. Skip\nPress enter to continue"), "waiting",
+            "a live Codex picker still requires a human decision");
         assert_eq!(detect_claude_status("\u{2502} \u{25cf} 1. Allow\n\u{2502}   2. Deny"), "waiting");
         // Resume picker needs the ⌕ search glyph.
         assert!(at_resume_picker("Resume Session \u{2315}\nEnter to select"));
@@ -31170,10 +31207,16 @@ mod composer_state_tests {
 
     #[test]
     fn a_codex_model_footer_is_chrome_not_unsubmitted_text() {
+        let current_codex = "\u{1b}[1m\u{203a}\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  \
+\u{1b}[38;2;246;226;183mGPT-5.6-Sol xhigh\u{1b}[39m \u{b7} \
+\u{1b}[38;2;171;223;167m~/worktrees/Tomverse/codex-impl\u{1b}[39m \u{b7} \
+\u{1b}[38;2;245;224;220mUpdate memory file\u{1b}[39m\n  \
+\u{1b}[1m\u{2190}\u{1b}[0m for agents \u{b7} \u{1b}[1m?\u{1b}[0m for shortcuts";
         for frame in [
             LIVE_CODEX_IDLE,
             LIVE_CODEX_IDLE_WITH_BRANCH,
             LIVE_CODEX_ASTRA_IDLE_WITH_BRANCH,
+            current_codex,
         ] {
             assert_eq!(
                 composer_state(frame),
@@ -31185,6 +31228,12 @@ mod composer_state_tests {
                 "an idle Codex prompt must not inherit its model/path/footer context as typed input"
             );
         }
+        assert!(pane_is_at_boundary(&format!(
+            "\u{203a} 1. Update now\n  2. Skip\nPress enter to continue\n\n{current_codex}"
+        )));
+        assert!(!pane_is_at_boundary(
+            "\u{203a} 1. Update now\n  2. Skip\nPress enter to continue"
+        ));
 
         // CONTROL: only Codex's dim placeholder is replaced. Ordinary typed
         // text in the current three-segment live frame must remain pending;
@@ -31205,6 +31254,9 @@ mod composer_state_tests {
             composer_state(unstyled).typed(),
             Some("gpt-5.6-solxhigh\u{b7}~/Dev/amux\u{b7}Main[default]")
         );
+        let one_coloured_field = "\u{1b}[1m\u{203a}\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  \
+\u{1b}[38;2;246;226;183mgpt-5.6-sol xhigh\u{1b}[39m \u{b7} ~/Dev/amux";
+        assert!(composer_state(one_coloured_field).typed().is_some());
     }
 
     #[test]
