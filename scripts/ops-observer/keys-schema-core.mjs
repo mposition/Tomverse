@@ -9,7 +9,7 @@
 // signal's bands; a closed key has no band. Anything else -- an extra key, a
 // missing field, a band from another signal -- is not a state this agent wrote.
 
-import { S2_PAGE_SIGNALS, STREAK_MAX } from "./classify-core.mjs";
+import { RECOVERY_STREAK, S2_PAGE_SIGNALS, STREAK_MAX } from "./classify-core.mjs";
 
 const FIELDS = Object.freeze(["status", "streak", "openedAt", "lastBand", "recoveredAt", "newOpenOwnerDate"]);
 
@@ -38,9 +38,29 @@ export function isKeyState(signal, state) {
   if (!(recoveredAt === null || isInstantMs(recoveredAt))) return false;
   if (!(newOpenOwnerDate === null || isOwnerDate(newOpenOwnerDate))) return false;
   if (status === "open") {
-    return openedAt !== null && newOpenOwnerDate !== null && signal.bands.includes(lastBand);
+    // An open key counts good samples toward recovery and recovers at
+    // RECOVERY_STREAK, so it never holds that many. It was opened (time and
+    // owner date set); a recovery time, if any, is from an earlier incident.
+    return (
+      streak < RECOVERY_STREAK &&
+      openedAt !== null &&
+      newOpenOwnerDate !== null &&
+      signal.bands.includes(lastBand) &&
+      (recoveredAt === null || recoveredAt <= openedAt)
+    );
   }
-  if (status === "closed") return lastBand === null;
+  if (status === "closed") {
+    // A closed key counts bad samples toward opening and opens at openAfter.
+    if (streak >= signal.openAfter || lastBand !== null) return false;
+    // Either it never opened (all three unset) or it opened and recovered
+    // (all three set, recovered no earlier than opened). evaluateKey() writes
+    // no other combination, and a mixed one would change whether the next
+    // open is a capped reopen or an uncapped new open (policy §5).
+    const never = openedAt === null && recoveredAt === null && newOpenOwnerDate === null;
+    const recovered =
+      openedAt !== null && recoveredAt !== null && newOpenOwnerDate !== null && recoveredAt >= openedAt;
+    return never || recovered;
+  }
   return false;
 }
 

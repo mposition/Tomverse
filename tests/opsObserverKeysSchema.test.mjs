@@ -68,6 +68,45 @@ test("a state evaluateKey() could not produce is refused", () => {
   }
 });
 
+test("streaks and closed-state triples evaluateKey() never writes are refused", () => {
+  const P1a = S2_PAGE_SIGNALS.find((s) => s.id === "P1a"); // opens after 3
+  const PD = S2_PAGE_SIGNALS.find((s) => s.id === "P-D"); // opens after 1
+  const open = { status: "open", streak: 0, openedAt: 2_000, lastBand: "false", recoveredAt: null, newOpenOwnerDate: "2026-10-04" };
+  const never = initialKeyState();
+  const recovered = { ...never, openedAt: 1_000, recoveredAt: 2_000, newOpenOwnerDate: "2026-10-04" };
+  for (const [signal, state] of [
+    [P1a, open],
+    [P1a, { ...open, streak: 1 }],
+    [P1a, { ...open, recoveredAt: 1_000 }],
+    [P1a, never],
+    [P1a, { ...never, streak: 2 }],
+    [P1a, recovered],
+    [PD, never],
+  ]) {
+    assert.equal(isKeyState(signal, state), true, JSON.stringify(state));
+  }
+  for (const [signal, state] of [
+    // An open key with a recovery-sized streak would recover on one good sample.
+    [P1a, { ...open, streak: 2 }],
+    [P1a, { ...open, streak: 3 }],
+    // A recovery after the current open belongs to no incident.
+    [P1a, { ...open, recoveredAt: 3_000 }],
+    // A closed key at its opening streak would have opened.
+    [P1a, { ...never, streak: 3 }],
+    [PD, { ...never, streak: 1 }],
+    // Mixed closed triples.
+    [P1a, { ...never, newOpenOwnerDate: "2026-10-04" }],
+    [P1a, { ...never, recoveredAt: 2_000 }],
+    [P1a, { ...never, openedAt: 1_000 }],
+    [P1a, { ...recovered, newOpenOwnerDate: null }],
+    [P1a, { ...recovered, recoveredAt: null }],
+    [P1a, { ...recovered, openedAt: null }],
+    [P1a, { ...recovered, recoveredAt: 500 }],
+  ]) {
+    assert.equal(isKeyState(signal, state), false, JSON.stringify(state));
+  }
+});
+
 test("the key set is exactly the S2 page keys", () => {
   const keys = initialKeys();
   assert.equal(keysAreValid({ ...keys, "P9#x": initialKeyState() }), false);
