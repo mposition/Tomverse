@@ -51,6 +51,9 @@ import { commitAmuxKnownIdeaAnalysisSettlement,
   AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
+import { commitAmuxIdeaAnalysisUnknownResolution,
+  AmuxIdeaAnalysisUnknownResolutionError } from
+  "@/lib/amux/ideaAnalysisUnknownResolutionService";
 import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
 import { commitAmuxSecondIdeaAnalysisDraft,
@@ -2819,7 +2822,7 @@ test("a verified second page closes the idea without admitting a card or restart
     error.code === "not_ready");
 });
 
-test("a committed unknown result blocks a later claim in a new transaction", async () => {
+test("unknown result blocks claims until owner consumes full reservation", async () => {
   const { claim, previewId, holdId, selectedModelId,
     frontierApprovalId } = await syntheticFirstClaim();
   const nextPreviewId = await confirmedPreviewId(selectedModelId, frontierApprovalId);
@@ -2844,4 +2847,38 @@ test("a committed unknown result blocks a later claim in a new transaction", asy
     commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId: nextPreviewId, keys })),
   (error: unknown) => error instanceof AmuxIdeaAnalysisClaimError &&
     error.code === "not_ready");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnknownResolution(tx, { session, request,
+      holdId, previewId, runnerStopped: true, readBackChecked: true })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisUnknownResolutionError &&
+    error.code === "not_resolvable", "the runner deadline must pass first");
+  await prisma.amuxIdeaAnalysisBudgetHold.update({ where: { id: holdId },
+    data: { dispatchedAt: new Date(Date.now() - 12 * 60_000) } });
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const resolution = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnknownResolution(tx, { session, request,
+      holdId, previewId, runnerStopped: true, readBackChecked: true }));
+  assert.equal(resolution.holdId, holdId);
+  const after = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const closed = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId },
+  });
+  assert.equal(closed.status, "owner_consumed");
+  assert.equal(closed.settledMicroUsd, closed.reservedMicroUsd);
+  assert.equal(closed.inputTokens, null);
+  assert.equal(after.reservedMicroUsd,
+    before.reservedMicroUsd - closed.reservedMicroUsd);
+  assert.equal(after.spentMicroUsd,
+    before.spentMicroUsd + closed.reservedMicroUsd);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({
+    where: { namespace, status: "outcome_unknown" } }), 0);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnknownResolution(tx, { session, request,
+      holdId, previewId, runnerStopped: true, readBackChecked: true })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisUnknownResolutionError &&
+    error.code === "not_resolvable", "owner resolution is one-time");
 });

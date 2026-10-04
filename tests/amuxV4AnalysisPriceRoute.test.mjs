@@ -75,3 +75,24 @@ test("Admin budget step is shown only after transfer confirmation", async () => 
   assert.match(budget, /method: "DELETE"/);
   assert.match(budget, /pendingRevocationId/);
 });
+
+test("unknown analysis recovery is owner-only, separately switched and never retries a model", async () => {
+  const route = await readFile(new URL(
+    "../app/api/admin/amux/ideas/analysis-unknown-resolution/route.ts",
+    import.meta.url), "utf8");
+  const service = await readFile(new URL(
+    "../lib/amux/ideaAnalysisUnknownResolutionService.ts",
+    import.meta.url), "utf8");
+  const panel = await readFile(new URL(
+    "../components/admin/AmuxAnalysisBudgetPanel.tsx", import.meta.url), "utf8");
+  assert.match(route, /getAdminRole\(session\) !== "owner"/);
+  assert.match(route, /assertRecentAdminAuthentication\(session\)/);
+  assert.match(route, /TOMVERSE_AMUX_V4_ANALYSIS_UNKNOWN_RESOLUTION/);
+  assert.match(route, /commitAmuxIdeaAnalysisUnknownResolution\(tx,/);
+  assert.match(service, /status: "owner_consumed"/);
+  assert.match(service, /settledMicroUsd: hold\.reservedMicroUsd/);
+  assert.match(service, /writeAdminAuditLog\(/);
+  assert.match(panel, /hold\.hold\.status !== "outcome_unknown"/);
+  assert.match(panel, /readBackChecked: true/);
+  assert.doesNotMatch(route, /runAmuxV4IsolatedApprovedAnalysis\(/);
+});

@@ -23,6 +23,11 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     expired: "The approved price is expired or no longer matches this profile. A new verified decision is required.",
     revokeConfirm: "I confirm revoking this unusable price version before replacing it",
     revoke: "Revoke unusable price",
+    unknownHold: "The model result is unknown. New analysis calls remain stopped until this is resolved.",
+    runnerStopped: "I verified the local runner has stopped and its 10-minute deadline passed",
+    readBackChecked: "I checked the result and reservation receipts; no verified result can be recovered",
+    consumeUnknown: "Close unknown result at full reserved Agent-cost ceiling",
+    ownerConsumed: "The owner closed the unknown result. The full reserved ceiling was counted as Agent cost; no automatic retry occurred.",
   },
   ko: {
     modelConfirm: "이 Frontier 모델과 추론 수준을 확인했습니다",
@@ -46,5 +51,10 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     expired: "승인 가격이 만료됐거나 현재 프로필과 일치하지 않습니다. 새 가격 확인과 승인이 필요합니다.",
     revokeConfirm: "새 가격으로 교체하기 전에 사용할 수 없는 가격 승인을 철회합니다",
     revoke: "사용할 수 없는 가격 승인 철회",
+    unknownHold: "모델 결과가 불명확합니다. 이를 정리할 때까지 새 분석 호출은 중단됩니다.",
+    runnerStopped: "로컬 runner가 중지됐고 10분 제한 시간이 지났음을 확인했습니다",
+    readBackChecked: "결과와 예약 기록을 조회했으며 검증된 결과를 복구할 수 없음을 확인했습니다",
+    consumeUnknown: "불명확한 결과를 Agent 예약 상한 전액 사용으로 정리",
+    ownerConsumed: "운영자가 불명확한 결과를 정리했습니다. 예약 상한 전액을 Agent 비용으로 계산했으며 자동 재시도는 없었습니다.",
   },
 });

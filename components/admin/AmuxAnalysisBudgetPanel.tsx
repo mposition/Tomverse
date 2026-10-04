@@ -48,6 +48,8 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
   const [hold, setHold] = useState<HoldReply | null>(null);
   const [checked, setChecked] = useState(false);
   const [revokeChecked, setRevokeChecked] = useState(false);
+  const [runnerStopped, setRunnerStopped] = useState(false);
+  const [readBackChecked, setReadBackChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingPriceId, setPendingPriceId] = useState<string | null>(null);
   const [pendingRevocationId, setPendingRevocationId] = useState<string | null>(null);
@@ -153,6 +155,34 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     finally { setBusy(false); }
   };
 
+  const resolveUnknown = async () => {
+    if (!available || busy || unknown || hold?.state !== "found" ||
+        hold.hold.status !== "outcome_unknown" || !runnerStopped ||
+        !readBackChecked) return;
+    setBusy(true); setFailure(false);
+    try {
+      const response = await adminFetch(
+        "/api/admin/amux/ideas/analysis-unknown-resolution", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ holdId: hold.hold.id,
+            previewId: hold.hold.previewId, runnerStopped: true,
+            readBackChecked: true }),
+        });
+      if (!response.ok) throw new Error("resolution_unknown");
+      const body: unknown = await response.json();
+      if (!body || typeof body !== "object" ||
+          (body as Record<string, unknown>).holdId !== hold.hold.id) {
+        throw new Error("resolution_unknown");
+      }
+      const current = await loadHold();
+      if (current.state !== "found" || current.hold.status !== "owner_consumed") {
+        throw new Error("resolution_not_visible");
+      }
+      setRunnerStopped(false); setReadBackChecked(false);
+    } catch { setUnknown("hold"); }
+    finally { setBusy(false); }
+  };
+
   const readBack = async () => {
     if (!unknown || busy) return;
     setBusy(true); setFailure(false);
@@ -213,7 +243,24 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
       className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">
       {m.reserve}
     </button> : null}
-    {hold?.state === "found" ? <p role="status">{m.reserved}</p> : null}
+    {hold?.state === "found" && hold.hold.status === "reserved" ?
+      <p role="status">{m.reserved}</p> : null}
+    {hold?.state === "found" && hold.hold.status === "outcome_unknown" ? <>
+      <p role="alert">{m.unknownHold}</p>
+      <label className="flex items-center gap-2"><input type="checkbox"
+        checked={runnerStopped} onChange={(event) =>
+          setRunnerStopped(event.target.checked)} />{m.runnerStopped}</label>
+      <label className="flex items-center gap-2"><input type="checkbox"
+        checked={readBackChecked} onChange={(event) =>
+          setReadBackChecked(event.target.checked)} />{m.readBackChecked}</label>
+      <button type="button" disabled={busy || !!unknown || !runnerStopped ||
+        !readBackChecked} onClick={() => void resolveUnknown()}
+      className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">
+        {m.consumeUnknown}
+      </button>
+    </> : null}
+    {hold?.state === "found" && hold.hold.status === "owner_consumed" ?
+      <p role="status">{m.ownerConsumed}</p> : null}
     {unknown ? <><p role="alert">{m.unknown}</p><button type="button"
       disabled={busy} onClick={() => void readBack()}
       className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">
