@@ -63,6 +63,16 @@ const reset = async () => {
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
       "EngineeringAgentApproval",
+      -- These dark v4 tables are empty in the finance lane. Include the
+      -- complete FK closure explicitly instead of cascading into unrelated data.
+      "AmuxIdeaUnitDecision",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaFrontierModelApproval",
       "AdminAuditLog"
     RESTART IDENTITY
   `);

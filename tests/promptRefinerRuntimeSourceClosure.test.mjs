@@ -365,7 +365,7 @@ const compilerOptions = parsedConfig.options;
 //
 // 2026-10-01, login code mail layout: `lib/emailLoginEmails.ts` imports the
 // same frame from `lib/accountEmails.ts` -- both already listed, so the file
-// set stays 190. No element access is added; this repins positions only. 2026-10-02
+// set stays 190. No element access is added; this repins positions only.
 //
 // 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
@@ -398,6 +398,15 @@ const compilerOptions = parsedConfig.options;
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
 //
+// 2026-10-02, AMUX v4 integration: the scoped system-audit actor changes
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts`, both already in the
+// 190-file closure. The count remains 228 and the position-free inventory
+// retains digest 9aa7ec49...; only source positions moved. The actor identity
+// is defined in the existing audit module to avoid adding an AMUX module to
+// the fixed runtime import closure. Repinning the marketing pipeline over the
+// merged Prisma schema also moved positions in its already-listed module;
+// the final position-free inventory is still unchanged.
+//
 // 2026-10-03, taking develop: both branches had repinned this -- develop for
 // changes of its own, this one for the actors array -- so neither value
 // described the merged tree and the one below is computed over it. The count
@@ -409,20 +418,15 @@ const compilerOptions = parsedConfig.options;
 // element access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
 //
-// 2026-10-04, sre-ops audit actor: `lib/adminAuditSystemActors.ts` gains the
-// "ops-observer" actor (on an existing line, its constant at the end of the
-// file), `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, and
-// `lib/marketingAutomationAccess.ts` gains a dated fingerprint record above
-// its seven accesses. All three are listed; no element access is added, count
-// 228 and the position-free inventory are unchanged, so this repins positions
-// only. The value is computed over develop with billing-finance-ops' actor,
-// which that change added on existing lines and so moved nothing.
+// 2026-10-04, merged main and sre-ops: account, AMUX, audit actor and
+// marketing fingerprint edits coexist in the fixed closure. The count and
+// position-free inventory stay unchanged; repin source positions below.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "7a0a1f864dc70f7be779119307cd755",
-  "a00492fdd908710e02dbd64cd5e567f10",
+  "85a2067f7f6273a1a79d405e8815d89f",
+  "aadfd76db7b487ca264dfad74b9ebf60",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

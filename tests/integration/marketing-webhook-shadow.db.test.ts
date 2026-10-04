@@ -50,6 +50,15 @@ const reset = async () => {
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
       "EngineeringAgentApproval",
+      -- Keep the v4 foreign-key closure explicit; these dark tables are empty here.
+      "AmuxIdeaUnitDecision",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaFrontierModelApproval",
       "AdminAuditLog"
     RESTART IDENTITY
   `);
