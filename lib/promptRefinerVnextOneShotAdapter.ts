@@ -53,9 +53,10 @@ const unknown = (reason: "timeout" | "provider_error" | "response_unverified"): 
 
 /**
  * A11's isolated generation boundary. Only a synthetic caller uses it today:
- * A10 returns dispatchAuthorized=false and no product route or runner imports
- * this module. A later admission must bind it to the consumed slot before any
- * paid call; these adapter checks alone never grant that authority.
+ * A10 returns dispatchAuthorized=false. The A14 owner runner imports this
+ * module only with an in-process synthetic transport; no product route or live
+ * provider path imports it. A later admission must bind it to the consumed
+ * slot before any paid call; these adapter checks alone never grant authority.
  */
 export function createPromptRefinerVnextOneShotAdapter(dependencies: {
   generate: Generate;

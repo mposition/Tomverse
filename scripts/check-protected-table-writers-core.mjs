@@ -526,6 +526,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
   },
   {
+    path: "prisma/migrations/20261004000000_agent_digest_billing_finance_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 8,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
+  },
+  {
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
@@ -790,7 +798,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 1,
+    writeVerbs: 3,
     reason:
       "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },
@@ -902,6 +910,24 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "scripts/ops-observer/statement-ceiling-core.mjs",
+    count: 2,
+    reason:
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_support_triage_group/migration.sql",
+    count: 5,
+    reason:
+      "Five reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE and then, as a separate statement with a fresh snapshot, its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_support_triage_suggestion/migration.sql",
+    count: 1,
+    reason:
+      "One read in the SupportTriageSuggestion guard trigger: the report's message, FOR SHARE, over a name built from TG_TABLE_SCHEMA quoted with %I, with the report id bound by USING. It refuses a suggestion for a deleted account's report and holds the report so an account deletion cannot slip in between. The function pins search_path to pg_catalog, pg_temp. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
     count: 1,

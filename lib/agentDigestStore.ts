@@ -32,6 +32,7 @@ import { prisma } from "@/lib/prisma";
 /** Which listed system actor records each agent's intake. */
 const INTAKE_ACTOR: Readonly<Record<AgentDigestAgentKey, SystemAuditActor>> = Object.freeze({
   "qa-release": "qa-release-intake",
+  "billing-finance-ops": "billing-finance-ops-intake",
 });
 
 export type AgentDigestRecordResult =

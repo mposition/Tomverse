@@ -61,6 +61,7 @@ import {
 } from "@/lib/foundingTesterPassCore";
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
+import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
 import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
 
 /** Batches each agent digest retention step may run in one maintenance pass. */
@@ -995,6 +996,10 @@ export async function cleanupExpiredData() {
     return verdict;
   });
 
+  // docs/policy/billing-finance-ops.md §1.3 signal 2: today's stage W digest,
+  // or an incident. Its own step, so a failure here never takes another
+  // agent's check with it.
+  const billingFinanceOpsSilence = await step("billing_finance_ops_silence", () => checkBillingFinanceOpsSilence());
   // The shared AgentDigestItem retention, for every agent
   // (docs/policy/billing-finance-ops.md §1.4): bodies past their retention
   // first, then rows whose body is gone and whose 365 days are up -- the purge
@@ -1081,6 +1086,7 @@ export async function cleanupExpiredData() {
     scheduledAccountsDeleted,
     productResearchObservations: productResearchObservations?.removed ?? null,
     productResearchSilence: productResearchSilence?.state ?? null,
+    billingFinanceOpsSilence,
     agentDigestBodiesExpired,
     agentDigestMetaPurged,
     failedSteps: failures,

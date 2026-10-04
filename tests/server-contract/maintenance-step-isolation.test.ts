@@ -190,8 +190,17 @@ mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
 mock.module(mod("lib/productResearchObservationStore.ts"), {
   namedExports: {
     sweepProductResearchObservations: async () => ({ removed: 31 }),
-    latestProductResearchSuccess: async () => new Date("2026-10-02T21:30:00.000Z"),
+    // Keep the unrelated silence check inside its 26-hour window on every run.
+    latestProductResearchSuccess: async () => new Date(Date.now() - 60 * 60 * 1000),
     readProductResearchEnabledSince: async () => new Date("2026-09-01T00:00:00.000Z"),
+  },
+});
+// The billing-finance-ops silence check (docs/policy/billing-finance-ops.md
+// §1.3 signal 2). Mocked as a module: it reads AppSetting and AgentDigestItem
+// through the database clock, which this stub does not model.
+mock.module(mod("lib/billingFinanceOpsSilence.ts"), {
+  namedExports: {
+    checkBillingFinanceOpsSilence: async () => "recorded",
   },
 });
 // The shared AgentDigestItem retention (docs/policy/billing-finance-ops.md
@@ -395,6 +404,7 @@ test("a step that throws does not skip the steps behind it", async () => {
   // is the assertion the change exists for.
   assert.deepEqual(deletedAccountIds, ["user-past-its-grace-period"]);
   assert.equal(result.scheduledAccountsDeleted, 1);
+  assert.equal(result.billingFinanceOpsSilence, "recorded");
   assert.equal(result.agentDigestBodiesExpired, 37);
   assert.equal(result.agentDigestMetaPurged, 41);
 
