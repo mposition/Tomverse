@@ -360,6 +360,10 @@ run(
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
