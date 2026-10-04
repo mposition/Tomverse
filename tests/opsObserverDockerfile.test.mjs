@@ -68,12 +68,20 @@ function problems(text) {
   const froms = instructions.filter((i) => i.keyword === "FROM");
   if (froms.length !== 1 || instructions[0]?.keyword !== "FROM") found.push("single_stage");
   if (!/^[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}$/.test(froms[0]?.args ?? "")) found.push("base_digest");
-  if (instructions.some((i) => i.keyword === "COPY" && /--from\b/.test(i.args))) found.push("single_stage");
+  // Copying from another image or stage is a second stage by another name.
+  if (instructions.some((i) => (i.keyword === "COPY" || i.keyword === "ADD") && /--from\b/.test(i.args))) {
+    found.push("single_stage");
+  }
 
   if (instructions.some((i) => i.keyword === "ARG")) found.push("arg");
   if (instructions.some((i) => /--mount=[^\s]*type=secret/.test(i.args))) found.push("secret_mount");
   for (const env of instructions.filter((i) => i.keyword === "ENV")) {
-    for (const [, name] of env.args.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=/g)) {
+    // Both forms: `ENV NAME=value ...` and the legacy `ENV NAME value`.
+    const first = env.args.split(" ")[0] ?? "";
+    const names = first.includes("=")
+      ? [...env.args.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=/g)].map((m) => m[1])
+      : [first];
+    for (const name of names) {
       if (isCredentialShaped(name) || SERVICE_NAMES.has(name)) found.push("env_secret");
     }
   }
@@ -95,6 +103,21 @@ function problems(text) {
     copiedPaths.add(source);
   }
   if ([...allowed].some((path) => !copiedPaths.has(path))) found.push("gate_closure_incomplete");
+
+  // After the gate: only the observer modules are copied, and nothing installs
+  // or fetches anything.
+  for (const instruction of instructions.slice(firstExecuting + 1)) {
+    if (instruction.keyword === "ADD") found.push("after_gate_copy");
+    if (instruction.keyword === "COPY") {
+      const [source, destination, ...rest] = instruction.args.split(" ");
+      if (rest.length > 0 || source !== destination || !source.startsWith("scripts/ops-observer/")) {
+        found.push("after_gate_copy");
+      }
+    }
+    if (instruction.keyword === "RUN" && /\b(?:npm|npx|yarn|pnpm|corepack|apk|apt|apt-get|pip|curl|wget|git)\b/.test(instruction.args)) {
+      found.push("after_gate_install");
+    }
+  }
   return [...new Set(found)];
 }
 
@@ -117,6 +140,13 @@ test("each rule catches its own violation", () => {
     ["secret_mount", variant("RUN printf", "RUN --mount=type=secret,id=x printf")],
     ["env_secret", variant("ENV NODE_ENV=production", "ENV NODE_ENV=production OPS_OBSERVER_SECRET=x")],
     ["env_secret", variant("ENV NODE_ENV=production", "ENV DATABASE_URL=postgres://x")],
+    ["env_secret", variant("ENV NODE_ENV=production", "ENV DATABASE_URL postgres://x")],
+    ["env_secret", variant("ENV NODE_ENV=production", "ENV OPS_OBSERVER_SECRET some value")],
+    ["single_stage", variant("USER observer", "ADD --from=alpine:3 /etc/hosts /etc/hosts\nUSER observer")],
+    ["after_gate_copy", variant("USER observer", "COPY . .\nUSER observer")],
+    ["after_gate_copy", variant("USER observer", "ADD https://example.com/x /x\nUSER observer")],
+    ["after_gate_install", variant("USER observer", "RUN npm install\nUSER observer")],
+    ["after_gate_install", variant("USER observer", "RUN apk add --no-cache curl\nUSER observer")],
     ["gate_first", variant("WORKDIR /observer", "WORKDIR /observer\nRUN echo before")],
     ["gate_first", variant(gateLine, "RUN node scripts/ops-observer/build-env-gate.mjs || true")],
     ["copied_before_gate", variant(gateLine, `COPY package.json package.json\n${gateLine}`)],

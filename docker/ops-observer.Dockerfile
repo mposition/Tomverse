@@ -8,10 +8,13 @@
 # A single stage with no ARG and no secret mount: Railway only exposes a
 # variable to a Docker build that the Dockerfile asks for with ARG, so asking
 # for none keeps every runtime secret out of the build. The first command the
-# image runs proves it on every build: before anything else is copied, the
-# build-environment gate fails the build, printing names only, if a runtime
-# secret name or a credential-shaped name is visible. Only the gate and the one
-# module it imports are copied ahead of it.
+# image runs checks it whenever that step executes: before anything else is
+# copied, the build-environment gate fails the build, printing names only, if
+# a runtime secret name or a credential-shaped name is visible. Only the gate
+# and the one module it imports are copied ahead of it. A build cache hit
+# reuses the step without running it again -- the cache key does not include
+# the environment -- so the gate is evidence for the builds that ran it, not
+# for every build; no later step writes the environment into a layer.
 #
 # The image holds Node and the dependency-free observer modules. No package
 # manager install, no application code, no product database client.
