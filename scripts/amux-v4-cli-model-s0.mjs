@@ -33,6 +33,12 @@ if (process.platform !== "linux" ||
         result.unexpectedEventType ?? null : null,
       unexpectedEventPhase: result.kind === "outcome_unknown" ?
         result.unexpectedEventPhase ?? null : null,
+      unexpectedSystemSubtype: result.kind === "outcome_unknown" ?
+        result.unexpectedSystemSubtype ?? null : null,
+      unexpectedSystemHasCapabilities: result.kind === "outcome_unknown" ?
+        result.unexpectedSystemHasCapabilities ?? null : null,
+      unexpectedSystemHasFreeText: result.kind === "outcome_unknown" ?
+        result.unexpectedSystemHasFreeText ?? null : null,
       childExitCode: result.kind === "outcome_unknown" ? result.childExitCode ?? null : null,
       approvedConnects: result.kind === "outcome_unknown" ?
         result.approvedConnects ?? null : null,

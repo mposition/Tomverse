@@ -203,6 +203,33 @@ test("Claude S0 diagnostic reports only bounded unexpected event type and phase"
   }
 });
 
+test("Claude S0 pre-init system diagnostic exposes no free-form event data", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  for (const [event, subtype, capabilities, freeText] of [
+    [{ type: "system", subtype: "status", status: "compacting" },
+      "status", false, false],
+    [{ type: "system", subtype: "secret_credential_value", tools: ["Bash"],
+      message: "must not leak" }, "other", true, true],
+    [{ type: "system", subtype: "hook_started", mcp_servers: [] },
+      "hook_started", true, false],
+  ]) {
+    const stdout = Buffer.from(JSON.stringify(event));
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true, syntheticEventType: true }), {
+      kind: "outcome_unknown", failureReason: "output_contract_mismatch",
+      rejectionPoint: "unexpected_event", unexpectedEventType: "system",
+      unexpectedEventPhase: "before_init",
+      unexpectedSystemSubtype: subtype,
+      unexpectedSystemHasCapabilities: capabilities,
+      unexpectedSystemHasFreeText: freeText,
+    });
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true }), { kind: "outcome_unknown",
+      failureReason: "output_contract_mismatch",
+      rejectionPoint: "unexpected_event" });
+  }
+});
+
 test("Codex parser diagnostic distinguishes tools, incomplete usage and failed turns", () => {
   const plan = planAmuxV4AnalysisCliInvocation(openai);
   const prefix = [{ type: "thread.started", thread_id: "fresh" },
