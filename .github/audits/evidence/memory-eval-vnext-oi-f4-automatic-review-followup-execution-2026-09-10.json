@@ -1,0 +1,1895 @@
+{
+  "schemaVersion": 1,
+  "recordKind": "oi_f4_automatic_review_followup_execution",
+  "preparedBy": "Codex",
+  "preparedDate": "2026-09-10",
+  "reviewCommit": "1f34a6fb0d61b8704d656fee7638a93c9ef42c75",
+  "parentTip": "aafdceca3e4270ff146077c02f480ba3fd68c9f4",
+  "userAuthorization": {
+    "request": "해당 부분 독립 검토 pass 될때까지 자동으로 진행해주세요.",
+    "scope": "Evidence/tool improvements and further independent review of V; no implicit implementation/merge/activation/human approval",
+    "supersedesInitialOneReviewLimitForThisFollowup": true
+  },
+  "outcome": {
+    "requested": "PASS",
+    "achieved": false,
+    "actual": "PASS_WITH_WARNINGS",
+    "blockingFindings": 0,
+    "additionalReviewSessions": 2,
+    "noFurtherReviewRunningOrScheduled": true,
+    "stopReason": "Reviewer identifies remaining host/actor/Railway evidence requiring separate environment/access or human disposition; no meaningful in-scope repair remains. Do not spend on repeated unchanged reviews."
+  },
+  "dispositions": {
+    "V_F1": "CLOSED: tracking-byte delta explained; actor still unknown",
+    "V_F2": "CLOSED",
+    "V_F3": "RETAINED_INFORMATIONAL",
+    "W_1": "RETAINED_INFORMATIONAL: original conjecture retained with separate correction",
+    "W_2": "CLOSED: exact V PR CI GET and actual steps observed",
+    "W_3": "CLOSED: helper hashes recorded",
+    "X_1": "Information on R1 report scope: Windows failures are implementation residuals, not V document defects"
+  },
+  "rounds": [
+    {
+      "name": "R1 warning confirmation",
+      "verdict": "PASS_WITH_WARNINGS",
+      "execution": {
+        "startedAt": "2026-09-10T09:15:10.561Z",
+        "finishedAt": "2026-09-10T09:23:11.902Z",
+        "exit": 0,
+        "signal": null,
+        "model": "claude-opus-5[1m]",
+        "cliVersion": "2.1.261",
+        "tools": [
+          "mcp__audit__config_projection",
+          "mcp__audit__followup_record",
+          "mcp__audit__gateway_source",
+          "mcp__audit__git_diff",
+          "mcp__audit__github_status",
+          "mcp__audit__hash_paths",
+          "mcp__audit__identity",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__list_paths",
+          "mcp__audit__preservation",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_json_section",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__run_baseline_checks"
+        ],
+        "toolsUsed": [
+          "mcp__audit__identity",
+          "mcp__audit__list_paths",
+          "mcp__audit__read_blob",
+          "mcp__audit__followup_record",
+          "mcp__audit__read_blob",
+          "mcp__audit__followup_record",
+          "mcp__audit__config_projection",
+          "mcp__audit__config_projection",
+          "mcp__audit__config_projection",
+          "mcp__audit__config_projection",
+          "mcp__audit__config_projection",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__gateway_source",
+          "mcp__audit__read_json_section",
+          "mcp__audit__followup_record",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__preservation",
+          "mcp__audit__run_baseline_checks",
+          "mcp__audit__github_status",
+          "mcp__audit__followup_record",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob"
+        ],
+        "permissionMode": "dontAsk",
+        "sessionId": "46c3af60-f6f4-44a4-8ac9-0d9fb42d984c",
+        "terminalReason": "completed",
+        "isError": false,
+        "numTurns": 43,
+        "permissionDenials": [],
+        "subagentsSpawned": 0,
+        "reportedListPriceEquivalentUsd": 3.2689535000000003,
+        "actualExtraChargeUnknown": true,
+        "usage": {
+          "input_tokens": 32,
+          "cache_creation_input_tokens": 188198,
+          "cache_read_input_tokens": 1106077,
+          "output_tokens": 33351,
+          "output_tokens_details": {
+            "thinking_tokens": 17515
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 188198,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [],
+          "speed": "standard"
+        },
+        "reviewerAuthoredQueries": [
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {}
+          },
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {
+              "historicalTracking": true
+            }
+          },
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {
+              "historicalTracking": true,
+              "removeSections": [
+                "codex/to-main/fix-admin-session-loop"
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {
+              "historicalTracking": true,
+              "removeSections": [
+                "codex/to-main/fix-admin-session-loop",
+                "codex/to-develop/fix-admin-session-loop"
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {
+              "historicalTracking": true,
+              "removeSections": [
+                "codex/to-main/fix-admin-session-loop",
+                "codex/to-develop/fix-admin-session-loop",
+                "codex/router-collector-cache-observation-fix"
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "starts",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          "node_modules/"
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "exists"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "object": {
+                      "path": {
+                        "get": "path"
+                      },
+                      "expectedVersion": {
+                        "get": "lock.version"
+                      },
+                      "actualVersion": {
+                        "get": "installedVersion"
+                      },
+                      "packageJsonSha256": {
+                        "get": "packageJsonSha256"
+                      },
+                      "optional": {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "lock.optional"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "concat",
+                    "args": [
+                      "tests/",
+                      {
+                        "get": ""
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "clientNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.tsx"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "concat",
+                    "args": [
+                      "tests/client/",
+                      {
+                        "get": ""
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          ""
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "exists"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "or",
+                            "args": [
+                              {
+                                "op": "bool",
+                                "args": [
+                                  {
+                                    "get": "lock.optional"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "bool",
+                                "args": [
+                                  {
+                                    "get": "lock.devOptional"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "get": "path"
+                  }
+                }
+              ],
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          ""
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "exists"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "or",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.optional"
+                              }
+                            ]
+                          },
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.devOptional"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "get": "path"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          ""
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "exists"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "or",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.optional"
+                              }
+                            ]
+                          },
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.devOptional"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "or",
+                        "args": [
+                          {
+                            "op": "and",
+                            "args": [
+                              {
+                                "op": "bool",
+                                "args": [
+                                  {
+                                    "get": "lock.os"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "or",
+                                "args": [
+                                  {
+                                    "op": "includes",
+                                    "args": [
+                                      {
+                                        "get": "lock.os"
+                                      },
+                                      "!win32"
+                                    ]
+                                  },
+                                  {
+                                    "op": "and",
+                                    "args": [
+                                      {
+                                        "op": "not",
+                                        "args": [
+                                          {
+                                            "op": "allStarts",
+                                            "args": [
+                                              {
+                                                "get": "lock.os"
+                                              },
+                                              "!"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "not",
+                                        "args": [
+                                          {
+                                            "op": "includes",
+                                            "args": [
+                                              {
+                                                "get": "lock.os"
+                                              },
+                                              "win32"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "and",
+                            "args": [
+                              {
+                                "op": "bool",
+                                "args": [
+                                  {
+                                    "get": "lock.cpu"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "or",
+                                "args": [
+                                  {
+                                    "op": "includes",
+                                    "args": [
+                                      {
+                                        "get": "lock.cpu"
+                                      },
+                                      "!x64"
+                                    ]
+                                  },
+                                  {
+                                    "op": "and",
+                                    "args": [
+                                      {
+                                        "op": "not",
+                                        "args": [
+                                          {
+                                            "op": "allStarts",
+                                            "args": [
+                                              {
+                                                "get": "lock.cpu"
+                                              },
+                                              "!"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "not",
+                                        "args": [
+                                          {
+                                            "op": "includes",
+                                            "args": [
+                                              {
+                                                "get": "lock.cpu"
+                                              },
+                                              "x64"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "get": "path"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          ""
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "exists"
+                          }
+                        ]
+                      },
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "lock.version"
+                          },
+                          {
+                            "get": "installedVersion"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "get": "path"
+                  }
+                }
+              ],
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "starts",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          "node_modules/"
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "exists"
+                          }
+                        ]
+                      },
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "hiddenVersion"
+                          },
+                          {
+                            "get": "installedVersion"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "get": "path"
+                  }
+                }
+              ],
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "ne",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          ""
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "lock.link"
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "exists"
+                          }
+                        ]
+                      },
+                      {
+                        "op": "not",
+                        "args": [
+                          {
+                            "op": "starts",
+                            "args": [
+                              {
+                                "get": "path"
+                              },
+                              "node_modules/"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "object": {
+                      "path": {
+                        "get": "path"
+                      },
+                      "version": {
+                        "get": "installedVersion"
+                      }
+                    }
+                  }
+                }
+              ],
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "bool",
+                    "args": [
+                      {
+                        "get": "lock.link"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "object": {
+                      "path": {
+                        "get": "path"
+                      },
+                      "target": {
+                        "get": "lock.resolved"
+                      },
+                      "realpath": {
+                        "get": "realpath"
+                      }
+                    }
+                  }
+                }
+              ],
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "runtime",
+              "values": true
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "absolute",
+                    "args": [
+                      {
+                        "op": "concat",
+                        "args": [
+                          "tests/",
+                          {
+                            "get": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "prepend": [
+                    "C:\\nvm4w\\nodejs\\node.exe",
+                    "--conditions=react-server",
+                    "--import",
+                    "tsx",
+                    "--test",
+                    "--test-concurrency=1",
+                    "--test-reporter=spec",
+                    "--test-reporter-destination=stdout"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "absolute",
+                    "args": [
+                      {
+                        "op": "concat",
+                        "args": [
+                          "tests/",
+                          {
+                            "get": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "prepend": [
+                    "C:\\nvm4w\\nodejs\\node.exe",
+                    "--conditions=react-server",
+                    "--import",
+                    "tsx",
+                    "--test",
+                    "--test-concurrency=1",
+                    "--test-reporter=spec",
+                    "--test-reporter-destination=stdout"
+                  ]
+                },
+                {
+                  "map": {
+                    "op": "add",
+                    "args": [
+                      {
+                        "op": "length",
+                        "args": [
+                          {
+                            "get": ""
+                          }
+                        ]
+                      },
+                      2
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "absolute",
+                    "args": [
+                      {
+                        "op": "concat",
+                        "args": [
+                          "tests/",
+                          {
+                            "get": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "prepend": [
+                    "C:\\nvm4w\\nodejs\\node.exe",
+                    "--conditions=react-server",
+                    "--import",
+                    "tsx",
+                    "--test",
+                    "--test-concurrency=1",
+                    "--test-reporter=spec",
+                    "--test-reporter-destination=stdout"
+                  ]
+                },
+                {
+                  "map": {
+                    "op": "add",
+                    "args": [
+                      {
+                        "op": "mul",
+                        "args": [
+                          2,
+                          {
+                            "op": "length",
+                            "args": [
+                              {
+                                "get": ""
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      3
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "gitPaths",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "starts",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          "tests/"
+                        ]
+                      },
+                      {
+                        "op": "or",
+                        "args": [
+                          {
+                            "op": "ends",
+                            "args": [
+                              {
+                                "get": ""
+                              },
+                              ".test.mjs"
+                            ]
+                          },
+                          {
+                            "op": "ends",
+                            "args": [
+                              {
+                                "get": ""
+                              },
+                              ".test.ts"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "eq",
+                        "args": [
+                          {
+                            "op": "length",
+                            "args": [
+                              {
+                                "op": "split",
+                                "args": [
+                                  {
+                                    "get": ""
+                                  },
+                                  "/"
+                                ]
+                              }
+                            ]
+                          },
+                          2
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "gitPaths",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "starts",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          "tests/client/"
+                        ]
+                      },
+                      {
+                        "op": "or",
+                        "args": [
+                          {
+                            "op": "ends",
+                            "args": [
+                              {
+                                "get": ""
+                              },
+                              ".test.tsx"
+                            ]
+                          },
+                          {
+                            "op": "ends",
+                            "args": [
+                              {
+                                "get": ""
+                              },
+                              ".test.ts"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "eq",
+                        "args": [
+                          {
+                            "op": "length",
+                            "args": [
+                              {
+                                "op": "split",
+                                "args": [
+                                  {
+                                    "get": ""
+                                  },
+                                  "/"
+                                ]
+                              }
+                            ]
+                          },
+                          3
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "frozenInputsAndHelpers": [
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-review-followup-2026-09-10.md",
+          "sha256": "6a6eb399abcd3edff013c835a83eae51a3cc021c27d6f86988637ffc8520aea9",
+          "bytes": 7649
+        },
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-confirmation-review-prompt-2026-09-10.md",
+          "sha256": "dc1fb55fb252747fcfa52f22b8b11c2c14c206b57da8af4315a73b6fa2f2c8d0",
+          "bytes": 10022
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/audit-mcp.cjs",
+          "sha256": "6c3166243068e75eab75f0103d4c51992f77e1bf1315ca2b4b70e9712c450365",
+          "bytes": 12024
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/reviewer-query.cjs",
+          "sha256": "2e1d6d5e87634ef06b8fe39c05a8deae5a8b6cd444158c2416c6602dee6362f7",
+          "bytes": 8663
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/environment.cjs",
+          "sha256": "b2475779a22c5154eec8f90cba5530ba10dd3e744bb29980d5d24a70831c6085",
+          "bytes": 9396
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/checks.cjs",
+          "sha256": "222d8a3a6538fc8da01dc82fbd79c9146b365f1e659280c2b673cf24ef6c6048",
+          "bytes": 2717
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/launch-review.cjs",
+          "sha256": "87c7d4c164e69b7f78ffe211ff6ee1f7f4d41b2c4ead7571fdb415f634ef0682",
+          "bytes": 3649
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/mcp.json",
+          "sha256": "cccd57c04ed02cdf0670021d4bf9f2a0bc20d2c65bfa888b33b94b047a422817",
+          "bytes": 228
+        }
+      ],
+      "reportAndRawResult": [
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-confirmation-review-2026-09-10.md",
+          "sha256": "2c4fa62536a9ecfbdd19ad46001e485da50998253e0c3ee8a6b4cc7026b3d560",
+          "bytes": 16917
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-followup-d55a39c0acc4453cae8437953921293f/claude-result.json",
+          "sha256": "2bc71393516358f4e9acf224bc43b7f11816fbe45b9f88c4ec3612f202fb3a04",
+          "bytes": 51227
+        }
+      ],
+      "prComment": {
+        "id": 5616354343,
+        "url": "https://github.com/mposition/Tomverse/pull/1328#issuecomment-5616354343",
+        "created_at": "2026-09-10T09:29:56Z"
+      }
+    },
+    {
+      "name": "R2 scope and evidence clarification",
+      "verdict": "PASS_WITH_WARNINGS",
+      "execution": {
+        "startedAt": "2026-09-10T09:29:12.343Z",
+        "finishedAt": "2026-09-10T09:35:36.404Z",
+        "exit": 0,
+        "signal": null,
+        "model": "claude-opus-5[1m]",
+        "cliVersion": "2.1.261",
+        "tools": [
+          "mcp__audit__config_projection",
+          "mcp__audit__followup_record",
+          "mcp__audit__gateway_source",
+          "mcp__audit__git_diff",
+          "mcp__audit__github_status",
+          "mcp__audit__hash_paths",
+          "mcp__audit__identity",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__list_paths",
+          "mcp__audit__preservation",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_json_section",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__run_baseline_checks",
+          "mcp__audit__scope_evidence"
+        ],
+        "toolsUsed": [
+          "mcp__audit__identity",
+          "mcp__audit__list_paths",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__followup_record",
+          "mcp__audit__read_blob",
+          "mcp__audit__followup_record",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__preservation",
+          "mcp__audit__installation_and_discovery",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__reviewer_query",
+          "mcp__audit__run_baseline_checks",
+          "mcp__audit__config_projection",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_json_section",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob",
+          "mcp__audit__read_blob",
+          "mcp__audit__followup_record",
+          "mcp__audit__scope_evidence",
+          "mcp__audit__read_blob",
+          "mcp__audit__reviewer_query"
+        ],
+        "permissionMode": "dontAsk",
+        "sessionId": "2b7d0f97-1a57-465c-8229-1b7c197f7d4c",
+        "terminalReason": "completed",
+        "isError": false,
+        "numTurns": 36,
+        "permissionDenials": [],
+        "subagentsSpawned": 0,
+        "reportedListPriceEquivalentUsd": 3.2842220000000006,
+        "actualExtraChargeUnknown": true,
+        "usage": {
+          "input_tokens": 42,
+          "cache_creation_input_tokens": 178606,
+          "cache_read_input_tokens": 1808004,
+          "output_tokens": 23758,
+          "output_tokens_details": {
+            "thinking_tokens": 10321
+          },
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 178606,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "inference_geo": "not_available",
+          "iterations": [],
+          "speed": "standard"
+        },
+        "reviewerAuthoredQueries": [
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "records",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "and",
+                    "args": [
+                      {
+                        "op": "starts",
+                        "args": [
+                          {
+                            "get": "path"
+                          },
+                          "node_modules/"
+                        ]
+                      },
+                      {
+                        "op": "and",
+                        "args": [
+                          {
+                            "op": "not",
+                            "args": [
+                              {
+                                "op": "bool",
+                                "args": [
+                                  {
+                                    "get": "lock.link"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "bool",
+                            "args": [
+                              {
+                                "get": "exists"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "map": {
+                    "object": {
+                      "path": {
+                        "get": "path"
+                      },
+                      "expectedVersion": {
+                        "get": "lock.version"
+                      },
+                      "actualVersion": {
+                        "get": "installedVersion"
+                      },
+                      "packageJsonSha256": {
+                        "get": "packageJsonSha256"
+                      },
+                      "optional": {
+                        "op": "bool",
+                        "args": [
+                          {
+                            "get": "lock.optional"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "concat",
+                    "args": [
+                      "tests/",
+                      {
+                        "get": ""
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "absolute",
+                    "args": [
+                      {
+                        "op": "concat",
+                        "args": [
+                          "tests/",
+                          {
+                            "get": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "prepend": [
+                    "C:\\nvm4w\\nodejs\\node.exe",
+                    "--conditions=react-server",
+                    "--import",
+                    "tsx",
+                    "--test",
+                    "--test-concurrency=1",
+                    "--test-reporter=spec",
+                    "--test-reporter-destination=stdout"
+                  ]
+                },
+                {
+                  "map": {
+                    "op": "add",
+                    "args": [
+                      {
+                        "op": "length",
+                        "args": [
+                          {
+                            "get": ""
+                          }
+                        ]
+                      },
+                      2
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__config_projection",
+            "input": {
+              "historicalTracking": true,
+              "removeSections": [
+                "codex/to-main/fix-admin-session-loop"
+              ]
+            }
+          },
+          {
+            "name": "mcp__audit__reviewer_query",
+            "input": {
+              "source": "serverNames",
+              "pipeline": [
+                {
+                  "filter": {
+                    "op": "or",
+                    "args": [
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.mjs"
+                        ]
+                      },
+                      {
+                        "op": "ends",
+                        "args": [
+                          {
+                            "get": ""
+                          },
+                          ".test.ts"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "sort": true
+                },
+                {
+                  "map": {
+                    "op": "absolute",
+                    "args": [
+                      {
+                        "op": "concat",
+                        "args": [
+                          "tests/",
+                          {
+                            "get": ""
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "prepend": [
+                    "C:\\nvm4w\\nodejs\\node.exe",
+                    "--conditions=react-server",
+                    "--import",
+                    "tsx",
+                    "--test",
+                    "--test-concurrency=1",
+                    "--test-reporter=spec",
+                    "--test-reporter-destination=stdout"
+                  ]
+                },
+                {
+                  "map": {
+                    "op": "add",
+                    "args": [
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "length",
+                            "args": [
+                              {
+                                "get": ""
+                              }
+                            ]
+                          },
+                          2
+                        ]
+                      },
+                      3
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "frozenInputsAndHelpers": [
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-review-scope-clarification-2026-09-10.md",
+          "sha256": "3d42f22372b0daff741e777519569850671ca7e75f3b9b85afbca3526b0b1485",
+          "bytes": 4269
+        },
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-scope-review-prompt-2026-09-10.md",
+          "sha256": "07a467bc6055e5076dcd36f8fbdc0690478410a306997a5b271ba56fc259f906",
+          "bytes": 7322
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/audit-mcp.cjs",
+          "sha256": "a3c53eee51f172738db6d2e29d6671f8d6f2116d17e1dcc2b56301e6e96b9f3c",
+          "bytes": 12169
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/reviewer-query.cjs",
+          "sha256": "2e1d6d5e87634ef06b8fe39c05a8deae5a8b6cd444158c2416c6602dee6362f7",
+          "bytes": 8663
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/scope-evidence.cjs",
+          "sha256": "7a1b2378b6064f62f9944ed26acb8f1c41a7d126c1587da03b67ff3d50f72b94",
+          "bytes": 4353
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/probe-preload.cjs",
+          "sha256": "1f740ae7243c2f167288275f76301452f12b46b93d6930d04d212284c860b55f",
+          "bytes": 299
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/launch-review.cjs",
+          "sha256": "64e661a0e358d4156646079ae542f5b61ffb00c2ae4623f9e1ca4d502a5df720",
+          "bytes": 3659
+        }
+      ],
+      "reportAndRawResult": [
+        {
+          "path": "H:/Project/ai-chat-hub/.github/audits/memory-eval-vnext-oi-f4-start-tip-scope-review-2026-09-10.md",
+          "sha256": "621948f655804bc7808d3372074f7983774b59e04795efe35862f99607eb7ad8",
+          "bytes": 19634
+        },
+        {
+          "path": "C:/Users/Vyper/AppData/Local/Temp/codex-oi-f4-scope-review-fd10a5bfbe764c79898dc111908ecbfe/claude-result.json",
+          "sha256": "2540734b57f0769e37b4a8cdeda52a9140385b6fe03e26ba0c03c37dbdcb01a4",
+          "bytes": 31158
+        }
+      ],
+      "prComment": {
+        "id": 5616452841,
+        "url": "https://github.com/mposition/Tomverse/pull/1328#issuecomment-5616452841",
+        "created_at": "2026-09-10T09:37:11Z"
+      }
+    }
+  ],
+  "cost": {
+    "perSessionCapUsd": 5,
+    "additionalReportedListPriceEquivalentUsd": 6.553175500000001,
+    "actualExtraChargeUnknown": true,
+    "notAnInvoice": true
+  },
+  "methodology": {
+    "builtinToolsDisabled": true,
+    "strictMcpOnly": true,
+    "arbitraryCommandsOrEndpoints": false,
+    "noSecretsOrEnvValuesDisclosed": true,
+    "queryLanguageNotJavascriptSandbox": true,
+    "authorProvidedScriptRerunDistinctFromReviewerQuery": true,
+    "probeChildOnlyNodeOptions": true,
+    "probeDoesNotInterceptSpawn": true,
+    "probeNotOrdinarySuiteOutput": true,
+    "singleHostLimitRetained": true
+  },
+  "preservation": {
+    "at": "2026-09-10T09:36:37.229Z",
+    "head": "1f34a6fb0d61b8704d656fee7638a93c9ef42c75",
+    "branch": "codex/memory-eval-vnext-oi-f4-start-tip-revalidation",
+    "tracked": "",
+    "staged": "",
+    "oldUntrackedCount": 39,
+    "oldUntrackedPreserved": true,
+    "protectedUnchanged": true,
+    "supportAndApprovalUnchanged": true,
+    "hiddenLockUnchanged": true,
+    "stashUnchanged": true,
+    "envMetadataUnchanged": true,
+    "configBefore": "25bb2a4abe6f336420897bdd37fe09ab102a575154566813fa4548845d008496",
+    "configAfter": "25bb2a4abe6f336420897bdd37fe09ab102a575154566813fa4548845d008496",
+    "futurePathsAbsent": true,
+    "newUntrackedPaths": [
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-confirmation-review-2026-09-10.md",
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-confirmation-review-prompt-2026-09-10.md",
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-review-followup-2026-09-10.md",
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-review-scope-clarification-2026-09-10.md",
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-scope-review-2026-09-10.md",
+      ".github/audits/memory-eval-vnext-oi-f4-start-tip-scope-review-prompt-2026-09-10.md"
+    ]
+  },
+  "localValidation": {
+    "scripts": [
+      "check:encoding:strict",
+      "check:doc-references",
+      "check:policy-section-references",
+      "check:release-records"
+    ],
+    "results": "all passed; these scripts do not themselves prove review semantics",
+    "supplementalFilesStrictUtf8Checked": true,
+    "gitDiffCheckPassed": true
+  },
+  "publication": {
+    "pr": 1328,
+    "url": "https://github.com/mposition/Tomverse/pull/1328",
+    "head": "1f34a6fb0d61b8704d656fee7638a93c9ef42c75",
+    "draft": true,
+    "autoMergeEnabled": false,
+    "originalTwoFileDiff": true,
+    "reviewArtifactsCommitted": false,
+    "ci": "11/11 completed/success on unchanged V; actual/skip distinguished; prior monitor remains paused"
+  },
+  "boundaries": {
+    "originalVBytesModified": false,
+    "originalApprovalBytesModified": false,
+    "originalReviewReportsModified": false,
+    "implementationPerformed": false,
+    "installPerformed": false,
+    "flagsChanged": false,
+    "datasetOrRegisterChanged": false,
+    "mergePerformed": false,
+    "humanApprovalIssued": false,
+    "oiF4ClosureDeclared": false,
+    "fullWindowsUnitSuitePassed": false
+  },
+  "nextStep": "Human disposition of informational review limitations, or separately supplied external evidence; do not relabel external verdict as PASS."
+}
