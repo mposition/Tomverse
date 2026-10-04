@@ -38,6 +38,8 @@ if (process.platform !== "linux" ||
       status: result.kind, transport,
       failureStage: result.kind === "outcome_unknown" ? result.failureStage ?? null : null,
       parserReason: result.kind === "outcome_unknown" ? result.parserReason ?? null : null,
+      rejectionPoint: result.kind === "outcome_unknown" ?
+        result.rejectionPoint ?? null : null,
       childExitCode: result.kind === "outcome_unknown" ? result.childExitCode ?? null : null,
       approvedConnects: result.kind === "outcome_unknown" ?
         result.approvedConnects ?? null : null,

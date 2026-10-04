@@ -52,13 +52,17 @@ test("unknown CLI receipt carries only bounded exit and CONNECT counters", () =>
   const counts = { approved: 1, denied: 2 };
   assert.deepEqual(amuxV4CliUnknownResult("child_nonzero", 23, counts), {
     kind: "outcome_unknown", failureStage: "child_nonzero",
-    parserReason: null, childExitCode: 23,
+    parserReason: null, rejectionPoint: null, childExitCode: 23,
     approvedConnects: 1, deniedConnects: 2,
   });
   assert.deepEqual(amuxV4CliUnknownResult("parser_rejected", 0, counts,
     "served_model_mismatch"), { kind: "outcome_unknown",
     failureStage: "parser_rejected", parserReason: "served_model_mismatch",
-    childExitCode: 0, approvedConnects: 1, deniedConnects: 2 });
+    rejectionPoint: null, childExitCode: 0,
+    approvedConnects: 1, deniedConnects: 2 });
+  assert.equal(amuxV4CliUnknownResult("parser_rejected", 0, counts,
+    "output_contract_mismatch", "assistant_stop").rejectionPoint,
+  "assistant_stop");
   assert.equal(amuxV4CliUnknownResult("deadline", null, counts).childExitCode, null);
 });
 

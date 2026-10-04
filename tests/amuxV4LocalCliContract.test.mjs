@@ -158,15 +158,17 @@ test("Claude parser diagnostic separates safe failure reasons without raw text",
     [claudeStream(claudeEnvelope("different-model")), "served_model_mismatch"],
     [claudeStream({ ...claudeEnvelope(), modelUsage: {} }), "usage_unverified"],
     [Buffer.from("not-json"), "incomplete_output"],
-    [claudeStream({ ...claudeEnvelope(), num_turns: 2 }), "output_contract_mismatch"],
-    [maxTokens, "output_contract_mismatch"],
-    [duplicateInit, "output_contract_mismatch"],
+    [claudeStream({ ...claudeEnvelope(), num_turns: 2 }),
+      "output_contract_mismatch", "turn_count"],
+    [maxTokens, "output_contract_mismatch", "assistant_stop"],
+    [duplicateInit, "output_contract_mismatch", "init_shape"],
     [Buffer.from(JSON.stringify({ type: "rate_limit_event" })),
-      "output_contract_mismatch"],
+      "output_contract_mismatch", "unexpected_event"],
   ];
-  for (const [stdout, failureReason] of samples) {
+  for (const [stdout, failureReason, rejectionPoint] of samples) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
-      { diagnostic: true }), { kind: "outcome_unknown", failureReason });
+      { diagnostic: true }), { kind: "outcome_unknown", failureReason,
+      ...(rejectionPoint ? { rejectionPoint } : {}) });
   }
 });
 
