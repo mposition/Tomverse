@@ -1,202 +1,135 @@
-// When an automated back-merge may keep `develop` (scripts/back-merge-ancestry-core.mjs).
+// Diagnosing a conflicted back-merge (scripts/back-merge-ancestry-core.mjs).
 //
-// The dangerous answer is "yes" given too easily: keeping `develop` is `-s ours`
-// by another name, and a hotfix reaches `main` first, so a wrong yes would erase
-// it from every future release with nothing red. These tests pin the refusals as
-// deliberately as the admissions, and the first fixture is the real conflict
-// from 2026-10-03 that a person resolved by hand in #2023.
+// Automating the resolution was authorised on 2026-10-03, attempted twice, and
+// withdrawn: two rounds of independent review each produced a counterexample,
+// and the second cannot be fixed by refining a line comparison. Both are pinned
+// below, because the next person to have this idea should meet the evidence
+// before writing the code rather than after.
+//
+// The module therefore reports and never admits. The first test here is the one
+// that matters most: it asserts the module exposes no admission at all.
 
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import * as core from "../scripts/back-merge-ancestry-core.mjs";
 import {
-  ancestryMergeDecision,
-  describeDecision,
-  pathVerdict,
+  describeDivergence,
+  divergenceReport,
+  pathDivergence,
 } from "../scripts/back-merge-ancestry-core.mjs";
 
-/* ------------------------------------------------- the real 2026-10-03 case */
+/* ------------------------------------------------- the module grants nothing */
 
-// package.json: develop added a script of its own on top of the one the
-// selective release cherry-picked onto main, and the two additions were
-// adjacent, which is why git could not merge them textually.
-const PACKAGE_BASE = `{
-  "scripts": {
-    "report:issue-backlog": "node scripts/report-issue-backlog.mjs"
+test("the module exposes no admission, by design", () => {
+  // A caller that found one would be asking for permission to push, which is
+  // what the two counterexamples below refused.
+  for (const name of Object.keys(core)) {
+    assert.doesNotMatch(
+      name,
+      /admit|approve|allow|safe|decide/i,
+      `${name} reads like permission; this module reports`
+    );
   }
-}`;
-const PACKAGE_MAIN = `{
-  "scripts": {
-    "report:check-script-inventory": "node scripts/report-check-script-inventory.mjs",
-    "report:issue-backlog": "node scripts/report-issue-backlog.mjs"
-  }
-}`;
-const PACKAGE_DEVELOP = `{
-  "scripts": {
-    "report:agent-policy-approval": "node scripts/report-agent-policy-approval.mjs",
-    "report:check-script-inventory": "node scripts/report-check-script-inventory.mjs",
-    "report:issue-backlog": "node scripts/report-issue-backlog.mjs"
-  }
-}`;
-
-test("the 2026-10-03 package.json conflict is admitted", () => {
-  const verdict = pathVerdict({
-    path: "package.json",
-    base: PACKAGE_BASE,
-    theirs: PACKAGE_MAIN,
-    ours: PACKAGE_DEVELOP,
+  const report = divergenceReport({
+    conflicts: [{ path: "a.json", base: "a\n", ours: "a\nb\n", theirs: "a\n" }],
+    treeWouldEqualDevelop: true,
   });
-  assert.equal(verdict.admitted, true, verdict.reason);
+  assert.equal("admitted" in report, false);
+  assert.match(describeDivergence(report), /not a go-ahead/);
+  assert.match(describeDivergence(report), /WITH A MERGE COMMIT/);
 });
 
-test("the whole 2026-10-03 conflict set is admitted when the tree is develop's", () => {
-  const decision = ancestryMergeDecision({
-    conflicts: [
-      { path: "package.json", base: PACKAGE_BASE, theirs: PACKAGE_MAIN, ours: PACKAGE_DEVELOP },
-      {
-        path: ".github/workflows/e2e.yml",
-        base: "jobs:\n  e2e:\n    steps:\n      - run: npx playwright test\n",
-        theirs: "jobs:\n  e2e:\n    steps:\n      - run: npx playwright test\n      # Shard weights\n",
-        ours:
-          "jobs:\n  e2e:\n    steps:\n      - name: Save the Playwright Chromium cache\n        uses: actions/cache/save@v5\n      - run: npx playwright test\n      # Shard weights\n",
-      },
-    ],
-    treeEqualsDevelop: true,
-  });
-  assert.equal(decision.admitted, true, decision.reason);
-  assert.match(describeDecision(decision), /Ancestry merge admitted/);
-});
+/* ----------------------------------------- the two counterexamples, recorded */
 
-/* ------------------------------------------------------------- the refusals */
-
-test("a line only main has is refused -- this is the hotfix case", () => {
-  // The whole point. main carries a fix develop never received; keeping
-  // develop would delete it and nothing else would notice.
-  const verdict = pathVerdict({
-    path: "lib/stripe.ts",
-    base: "const timeout = 5000;\n",
-    theirs: "const timeout = 30000;\n",
-    ours: "const timeout = 5000;\nconst retries = 2;\n",
-  });
-  assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /subsequence/);
-  assert.deepEqual(verdict.sample, ["const timeout = 30000;"]);
-});
-
-test("a line main removed and develop still has is refused", () => {
-  const verdict = pathVerdict({
-    path: "lib/flags.ts",
-    base: "export const legacy = true;\nexport const next = false;\n",
-    theirs: "export const next = false;\n",
-    ours: "export const legacy = true;\nexport const next = false;\nexport const extra = 1;\n",
-  });
-  assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /resurrect/);
-});
-
-test("a path develop does not have is refused rather than deleted", () => {
-  const verdict = pathVerdict({ path: "a.ts", base: "x\n", theirs: "x\ny\n", ours: null });
-  assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /would delete it/);
-});
-
-test("a path main does not have is refused rather than resurrected", () => {
-  const verdict = pathVerdict({ path: "a.ts", base: "x\n", theirs: null, ours: "x\n" });
-  assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /resurrect/);
-});
-
-test("no merge base means refuse, because main's change cannot be computed", () => {
-  const verdict = pathVerdict({ path: "a.ts", base: null, theirs: "x\n", ours: "x\n" });
-  assert.equal(verdict.admitted, false);
-  assert.match(verdict.reason, /merge base/);
-});
-
-test("one refused path refuses the whole set", () => {
-  const decision = ancestryMergeDecision({
-    conflicts: [
-      { path: "ok.json", base: "a\n", theirs: "a\nb\n", ours: "a\nb\nc\n" },
-      { path: "bad.ts", base: "a\n", theirs: "a\nonly-main\n", ours: "a\nc\n" },
-    ],
-    treeEqualsDevelop: true,
-  });
-  assert.equal(decision.admitted, false);
-  assert.match(decision.reason, /1 of 2 path\(s\)/);
-  assert.match(describeDecision(decision), /A person resolves this one/);
-});
-
-test("a tree that is not develop's is refused even when every path passes", () => {
-  // Without this the line-set test would be the only guard, and it is not
-  // strong enough alone: it ignores order, nesting and duplicate counts.
-  const decision = ancestryMergeDecision({
-    conflicts: [{ path: "ok.json", base: "a\n", theirs: "a\nb\n", ours: "a\nb\nc\n" }],
-    treeEqualsDevelop: false,
-  });
-  assert.equal(decision.admitted, false);
-  assert.match(decision.reason, /byte-identical/);
-});
-
-test("an unknown tree answer is refused, not assumed", () => {
-  for (const treeEqualsDevelop of [undefined, null, "true", 1]) {
-    const decision = ancestryMergeDecision({
-      conflicts: [{ path: "ok.json", base: "a\n", theirs: "a\nb\n", ours: "a\nb\nc\n" }],
-      treeEqualsDevelop,
-    });
-    assert.equal(decision.admitted, false, `treeEqualsDevelop=${String(treeEqualsDevelop)}`);
-  }
-});
-
-test("an empty conflict set is refused, not admitted as vacuously safe", () => {
-  for (const conflicts of [[], undefined, null, "package.json"]) {
-    assert.equal(ancestryMergeDecision({ conflicts, treeEqualsDevelop: true }).admitted, false);
-  }
-});
-
-/* ------------------------------------- the round 0 counterexamples, pinned */
-
-test("a blank line main inserted is a line, and its loss is refused", () => {
-  // Review round 0's counterexample against the first criterion, which filtered
-  // whitespace: main inserts a blank line between A and B, develop inserts C
-  // there. The inserts conflict, the set test saw main as adding nothing, and
-  // `-X ours` still gave develop's tree -- so both guards passed while main's
-  // edit was dropped, and recording main as a parent would have buried it.
-  const verdict = pathVerdict({
+test("counterexample 1: a blank line main inserted is still a line", () => {
+  // Round 0, against a line-SET criterion that filtered whitespace. main
+  // inserts a blank line between A and B; develop inserts C there. The set test
+  // saw main as adding nothing and the tree still equalled develop's, so both
+  // guards passed while main's edit was dropped.
+  const entry = pathDivergence({
     path: "lib/copy.ts",
     base: "const A = 1;\nconst B = 2;\n",
     theirs: "const A = 1;\n\nconst B = 2;\n",
     ours: "const A = 1;\nconst C = 3;\nconst B = 2;\n",
   });
-  assert.equal(verdict.admitted, false, verdict.reason);
-  assert.match(verdict.reason, /subsequence/);
+  assert.equal(entry.mainLinesPresent, false);
+  assert.match(entry.note, /visibly drop/);
 });
 
-test("a line main reordered is refused, because order is part of the change", () => {
-  const verdict = pathVerdict({
-    path: "lib/order.ts",
-    base: "a\nb\n",
-    theirs: "b\na\n",
-    ours: "a\nb\nc\n",
+test("counterexample 2: develop may contain every line main added and still neutralise it", () => {
+  // Round 1, and the end of the idea. main inserts a throw; develop inserts the
+  // same lines wrapped in a block comment. main's lines ARE a subsequence of
+  // develop's, nothing is deleted, and the tree is develop's -- so every
+  // line-based test passes while main's exception never executes.
+  const entry = pathDivergence({
+    path: "lib/guard.ts",
+    base: "function guard(x) {\n  return x;\n}\n",
+    theirs: 'function guard(x) {\n  throw new Error("refused");\n  return x;\n}\n',
+    ours: 'function guard(x) {\n  /*\n  throw new Error("refused");\n  */\n  return x;\n}\n',
   });
-  assert.equal(verdict.admitted, false, verdict.reason);
+
+  // The observations the module can make are all reassuring, and all beside the
+  // point: this is why there is no admission to pass.
+  assert.equal(entry.mainLinesPresent, true);
+  assert.equal(entry.resurrects, null);
+  assert.match(entry.note, /not proof that main's change still takes effect/);
+
+  const report = divergenceReport({ conflicts: [entry], treeWouldEqualDevelop: true });
+  assert.equal(report.contentNeutral, true);
+  assert.equal("admitted" in report, false);
 });
 
-test("a duplicate main added is refused when develop has only one", () => {
-  const verdict = pathVerdict({
-    path: "lib/dup.ts",
-    base: "x\n",
-    theirs: "x\nx\n",
-    ours: "x\ny\n",
+/* ----------------------------------------------------- the observations hold */
+
+test("a line only main has is reported as a visible drop", () => {
+  // The hotfix shape: main carries a fix develop never received.
+  const entry = pathDivergence({
+    path: "lib/stripe.ts",
+    base: "const timeout = 5000;\n",
+    theirs: "const timeout = 30000;\n",
+    ours: "const timeout = 5000;\nconst retries = 2;\n",
   });
-  assert.equal(verdict.admitted, false, verdict.reason);
+  assert.equal(entry.mainLinesPresent, false);
 });
 
-test("a duplicate main deleted is refused when develop still has both", () => {
-  const verdict = pathVerdict({
+test("a line main removed and develop still has is reported as a resurrection", () => {
+  const entry = pathDivergence({
+    path: "lib/flags.ts",
+    base: "export const legacy = true;\nexport const next = false;\n",
+    theirs: "export const next = false;\n",
+    ours: "export const legacy = true;\nexport const next = false;\n",
+  });
+  assert.equal(entry.resurrects, "export const legacy = true;");
+  assert.match(entry.note, /resurrect/);
+});
+
+test("a duplicate main deleted is counted, not collapsed", () => {
+  const entry = pathDivergence({
     path: "lib/dup.ts",
     base: "x\nx\ny\n",
     theirs: "x\ny\n",
-    ours: "x\nx\ny\nz\n",
+    ours: "x\nx\ny\n",
   });
-  assert.equal(verdict.admitted, false, verdict.reason);
-  assert.match(verdict.reason, /resurrect/);
+  assert.equal(entry.resurrects, "x");
+});
+
+test("order is part of the change", () => {
+  const entry = pathDivergence({ path: "lib/order.ts", base: "a\nb\n", theirs: "b\na\n", ours: "a\nb\nc\n" });
+  assert.equal(entry.mainLinesPresent, false);
+});
+
+test("a missing side or base is reported rather than guessed", () => {
+  assert.match(pathDivergence({ path: "a", base: "x\n", theirs: "x\n", ours: null }).note, /would delete it/);
+  assert.match(pathDivergence({ path: "a", base: "x\n", theirs: null, ours: "x\n" }).note, /resurrect/);
+  assert.match(pathDivergence({ path: "a", base: null, theirs: "x\n", ours: "x\n" }).note, /merge base/);
+  assert.match(pathDivergence({ path: "", base: "x\n", theirs: "x\n", ours: "x\n" }).note, /no path/);
+});
+
+test("a tree that would still change files is not called content-neutral", () => {
+  for (const treeWouldEqualDevelop of [false, undefined, null, "true", 1]) {
+    const report = divergenceReport({ conflicts: [], treeWouldEqualDevelop });
+    assert.equal(report.contentNeutral, false, String(treeWouldEqualDevelop));
+    assert.match(describeDivergence(report), /would still change files/);
+  }
 });

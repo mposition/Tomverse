@@ -1,75 +1,51 @@
 /**
- * When an automated back-merge may resolve a conflict by keeping `develop`.
+ * Diagnosing a conflicted back-merge of `main` into `develop`.
  *
  * A selective release cherry-picks, so `main` and `develop` hold the released
  * content under different commits and share no commit for it. The back-merge
  * that records the ancestry then conflicts on files `develop` has moved on
- * from, and on 2026-10-03 that happened for all four selective releases of
- * the day: the workflow refused, correctly, and a person resolved it by hand
- * in #2023. Every one of those resolutions was the same -- keep `develop` --
- * and the merged tree was byte-identical to `develop`.
+ * from. On 2026-10-03 that happened for all four selective releases of the day;
+ * a person resolved the fourth by hand in #2023, and in every case the answer
+ * was "keep develop" and the merged tree was byte-identical to `develop`.
  *
- * This module decides when that resolution is provably safe. The operator
- * authorised automating it on 2026-10-03.
+ * ## This module does not decide. It reports.
  *
- * ## The danger, stated plainly
+ * Automating that resolution was authorised on 2026-10-03, attempted twice, and
+ * **withdrawn on the evidence**. Two rounds of independent review each produced
+ * a counterexample, and the second one cannot be fixed by refining a line
+ * comparison. Both are pinned in `tests/backMergeAncestryCore.test.mjs` so the
+ * reasoning is not lost and the attempt is not repeated from scratch.
  *
- * "Keep `develop`" is `-s ours` by another name, and `-s ours` can erase a fix
- * that only `main` has. A hotfix goes to `main` first; if the back-merge threw
- * `main`'s side away, the hotfix would vanish from every future release and
- * nothing would be red. So the question is never "which side looks newer" but
- * "does `develop` already carry everything `main` changed".
+ * 1. **The blank line.** `main` inserts a blank line between A and B; `develop`
+ *    inserts C there. The inserts conflict. A line-*set* criterion that filtered
+ *    whitespace saw `main` as adding nothing, and the resolved tree still equals
+ *    `develop`'s — so both guards passed while `main`'s edit was dropped. Fixed
+ *    by comparing whole line sequences instead, blank lines included.
+ * 2. **The commented-out `throw`.** `main` inserts a `throw` statement;
+ *    `develop` inserts the same lines wrapped in a block comment. Now `main`'s
+ *    lines genuinely *are* a subsequence of `develop`'s, nothing is deleted, and
+ *    the tree is `develop`'s — every test passes, and `main`'s exception never
+ *    executes. **No line-based criterion can see this**, because the lines are
+ *    all present; only their execution context changed.
  *
- * ## The criterion
+ * The second counterexample is the end of the idea. Recording `main` as a parent
+ * tells git the change is merged, so a dropped fix never returns and nothing
+ * goes red — and the fixes that reach `main` first are hotfixes. The only
+ * conflict an automation could resolve soundly is one git merges without
+ * conflict, which the ordinary back-merge already handles.
  *
- * For each conflicting path, compare three texts: the merge base, `main`, and
- * `develop`. Keeping `develop` is admitted only when both hold:
+ * ## What is left, and why it is worth having
  *
- *   * **`main`'s entire line sequence is a subsequence of `develop`'s.** Every
- *     line `main` has appears in `develop`, in `main`'s order, counting blank
- *     lines and counting duplicates separately. So nothing `main` added is
- *     absent and nothing was reordered away.
- *   * **Nothing `main` deleted is resurrected.** Where `main` kept fewer
- *     occurrences of a line than the base had, `develop` must not hold more than
- *     `main` kept.
- *
- * If either fails the answer is `refuse` and a person resolves it, exactly as
- * today.
- *
- * ## What this criterion does NOT prove
- *
- * It reasons about lines, not meaning. It cannot see that two differently
- * spelled lines express the same change, so it refuses a reformatting `develop`
- * applied to a line `main` also touched -- a false refusal, which costs a person
- * one merge and loses nothing.
- *
- * The caller must ALSO require that the resulting tree is byte-identical to
- * `develop`'s. That is not a second proof of the same thing: it only guarantees
- * no file changes, and review round 0 showed a case where that guard passed
- * while `main`'s edit was dropped. It is here so that an admitted merge can only
- * ever record ancestry, never write content.
- *
- * Everything is fail-closed: an unreadable side, a path the base does not have,
- * a binary file, or any doubt is `refuse`.
+ * Working out what diverged took reading four job logs and reproducing the merge
+ * in a throwaway worktree. That is what this replaces: the job says which paths
+ * conflict, what each side did to them, and whether the resolution would change
+ * any file — so the person who resolves it starts from the answer instead of the
+ * investigation. Nothing here authorises a push.
  */
 
 const lines = (text) => text.split("\n");
 
-/**
- * Is `inner` a subsequence of `outer` -- every line, in order, nothing dropped?
- *
- * This replaced a line-set comparison that ignored blank lines, order and
- * duplicate counts, and review round 0 produced the counterexample that killed
- * it: main inserts a blank line between A and B while develop inserts C there.
- * The two inserts conflict, the set test saw main as having added nothing
- * because the line was blank, and `-X ours` still yields develop's tree -- so
- * both guards passed while main's edit was dropped. Recording main as a parent
- * then tells git the edit is merged, and it never comes back.
- *
- * A subsequence test has no such hole: a blank line is a line, order is checked
- * because matching is left to right, and a duplicate must match an occurrence of
- * its own.
- */
+/** Is `inner` a subsequence of `outer` — every line, in order, nothing dropped? */
 const isSubsequence = (inner, outer) => {
     let i = 0;
     for (const line of outer) {
@@ -85,149 +61,91 @@ const counts = (list) => {
     return map;
 };
 
-/** The first line of `inner` that the left-to-right walk could not place. */
-const firstUnplaced = (inner, outer) => {
-    let i = 0;
-    for (const line of outer) {
-        if (i < inner.length && inner[i] === line) i += 1;
-    }
-    return inner[i];
-};
-
 /**
- * The verdict for one conflicting path.
+ * What the two sides did to one conflicting path.
  *
  * `base`, `ours` (develop) and `theirs` (main) are the three texts, or `null`
- * where the path is absent or could not be read as text.
+ * where the path is absent or is not text. Every field is an observation; none
+ * of them is permission.
  */
-export const pathVerdict = ({ path, base, ours, theirs }) => {
+export const pathDivergence = ({ path, base, ours, theirs }) => {
     if (typeof path !== "string" || path.length === 0) {
-        return { path, admitted: false, reason: "no path given" };
+        return { path, note: "no path given" };
     }
     if (ours === null || ours === undefined) {
-        return {
-            path,
-            admitted: false,
-            reason: "develop does not have this path, so keeping develop would delete it",
-        };
+        return { path, note: "develop does not have this path; keeping develop would delete it" };
     }
     if (theirs === null || theirs === undefined) {
         return {
             path,
-            admitted: false,
-            reason: "main does not have this path -- main may have deleted it, and keeping develop would resurrect it",
+            note: "main does not have this path; main may have deleted it, and keeping develop would resurrect it",
         };
     }
     if (base === null || base === undefined) {
-        return {
-            path,
-            admitted: false,
-            reason: "the merge base does not have this path, so what main changed cannot be computed",
-        };
+        return { path, note: "the merge base does not have this path, so what main changed cannot be computed" };
     }
 
     const baseLines = lines(base);
     const oursLines = lines(ours);
     const theirsLines = lines(theirs);
 
-    // Every line main has, in main's order: nothing it added can be missing and
-    // nothing can have been reordered away.
-    if (!isSubsequence(theirsLines, oursLines)) {
-        const unplaced = firstUnplaced(theirsLines, oursLines);
-        return {
-            path,
-            admitted: false,
-            reason:
-                "main's lines are not a subsequence of develop's, so keeping develop would drop or reorder something main has",
-            sample: [unplaced === undefined ? "(end of file)" : unplaced],
-        };
-    }
+    const mainLinesPresent = isSubsequence(theirsLines, oursLines);
 
-    // A deletion is the other direction, and needs counting rather than ordering:
-    // if main removed some occurrences of a line, develop must not hold more than
-    // main kept, or keeping develop resurrects what main deleted.
     const baseCount = counts(baseLines);
     const theirsCount = counts(theirsLines);
     const oursCount = counts(oursLines);
+    let resurrects = null;
     for (const [line, before] of baseCount) {
         const kept = theirsCount.get(line) ?? 0;
         if (kept >= before) continue;
-        const held = oursCount.get(line) ?? 0;
-        if (held > kept) {
-            return {
-                path,
-                admitted: false,
-                reason: `main removed an occurrence of a line that develop still has ${held} of (main kept ${kept}), so keeping develop would resurrect it`,
-                sample: [line],
-            };
+        if ((oursCount.get(line) ?? 0) > kept) {
+            resurrects = line;
+            break;
         }
     }
 
     return {
         path,
-        admitted: true,
-        reason: "every line main has appears in develop in main's order, and develop resurrects nothing main removed",
+        mainLinesPresent,
+        resurrects,
+        note: !mainLinesPresent
+            ? "develop does not contain main's lines in main's order, so keeping develop would visibly drop something main has"
+            : resurrects !== null
+              ? "develop still holds a line main removed, so keeping develop would resurrect it"
+              : "develop contains main's lines in order and resurrects nothing — but see the module comment: that is not proof that main's change still takes effect",
     };
 };
 
 /**
- * Whether the whole conflict set may be resolved by keeping `develop`.
+ * The report for a whole conflict set.
  *
- * All or nothing: one path that cannot be admitted makes the merge a person's
- * job, because a half-automated resolution is the state nobody can review.
+ * There is no `admitted` field, on purpose. A caller that wanted one would be
+ * asking this module for permission to push, which is the thing two review
+ * rounds refused.
  */
-export const ancestryMergeDecision = ({ conflicts, treeEqualsDevelop }) => {
-    if (!Array.isArray(conflicts) || conflicts.length === 0) {
-        return {
-            admitted: false,
-            reason: "no conflict set was given, so there is nothing to admit",
-            paths: [],
-        };
-    }
-
-    const paths = conflicts.map(pathVerdict);
-    const refused = paths.filter((verdict) => !verdict.admitted);
-
-    if (refused.length > 0) {
-        return {
-            admitted: false,
-            reason: `${refused.length} of ${paths.length} path(s) cannot be resolved by keeping develop`,
-            paths,
-        };
-    }
-
-    // The caller computes this by resolving every conflict to develop's side and
-    // comparing the result with develop's tree. Without it the line-set test
-    // above would be the only guard, and it is not strong enough alone.
-    if (treeEqualsDevelop !== true) {
-        return {
-            admitted: false,
-            reason: "the resolved tree is not byte-identical to develop's, so this merge would write content rather than record ancestry",
-            paths,
-        };
-    }
-
+export const divergenceReport = ({ conflicts, treeWouldEqualDevelop }) => {
+    const paths = (Array.isArray(conflicts) ? conflicts : []).map(pathDivergence);
     return {
-        admitted: true,
-        reason: `every one of ${paths.length} path(s) is already carried by develop, and the resolved tree is develop's`,
         paths,
+        treeWouldEqualDevelop: treeWouldEqualDevelop === true,
+        contentNeutral: treeWouldEqualDevelop === true,
     };
 };
 
-/** The decision as text, for a job log a person reads after the fact. */
-export const describeDecision = (decision) =>
+/** The report as text, for the job log a person reads before resolving. */
+export const describeDivergence = (report) =>
     [
-        decision.admitted
-            ? `Ancestry merge admitted: ${decision.reason}.`
-            : `Ancestry merge refused: ${decision.reason}.`,
+        `${report.paths.length} conflicting path(s). Resolving every one to develop's side ` +
+            (report.contentNeutral
+                ? "would change no file — the merge would record ancestry only."
+                : "would still change files, so it is not an ancestry-only merge."),
         "",
-        ...decision.paths.map(
-            (verdict) =>
-                `  ${verdict.admitted ? "ok     " : "refused"} ${verdict.path}\n    ${verdict.reason}` +
-                (verdict.sample ? `\n    e.g. ${verdict.sample.map((l) => l.trim()).join(" | ")}` : "")
-        ),
+        ...report.paths.map((entry) => `  ${entry.path}\n    ${entry.note}`),
         "",
-        decision.admitted
-            ? "The merge records ancestry and changes no file. A person still merges nothing by hand."
-            : "A person resolves this one: branch from origin/develop, merge origin/main, resolve, and merge the pull request WITH A MERGE COMMIT.",
+        "This is a diagnosis, not a go-ahead. Resolve it by hand: branch from",
+        "origin/develop, merge origin/main, resolve, and merge the pull request",
+        "WITH A MERGE COMMIT. A squash records no ancestry.",
+        "",
+        "Why this is not automated: scripts/back-merge-ancestry-core.mjs, and the",
+        "two counterexamples in tests/backMergeAncestryCore.test.mjs.",
     ].join("\n");

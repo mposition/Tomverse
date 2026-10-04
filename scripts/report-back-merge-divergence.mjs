@@ -1,17 +1,19 @@
-// Decides whether a conflicted back-merge of `main` into `develop` may be
-// resolved by keeping `develop`, and reports why. Reads git; writes nothing.
+// Reports what diverged when a back-merge of `main` into `develop` conflicts.
+// Reads git; writes nothing; grants nothing.
 //
-//   node scripts/back-merge-ancestry.mjs [--ours <ref>] [--theirs <ref>]
+//   npm run report:back-merge-divergence
+//   node scripts/report-back-merge-divergence.mjs --ours <ref> --theirs <ref>
 //
-// Exit 0 admitted, 1 refused, 2 could not decide. See
-// scripts/back-merge-ancestry-core.mjs for the criterion and its limits, and
-// .github/workflows/back-merge-main-to-develop.yml for the caller.
+// Exit 0 when it had something to report, 1 when the refs merge cleanly (the
+// ordinary back-merge handles that), 2 when it could not tell.
 //
-// This runs on a checkout with both refs fetched. It needs no credential.
+// Resolving the conflict is a person's job, and
+// scripts/back-merge-ancestry-core.mjs says why it is not automated. This runs
+// on a checkout with both refs fetched and needs no credential.
 
 import { execFileSync } from "node:child_process";
 
-import { ancestryMergeDecision, describeDecision } from "./back-merge-ancestry-core.mjs";
+import { describeDivergence, divergenceReport } from "./back-merge-ancestry-core.mjs";
 
 const flag = (name) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -118,13 +120,13 @@ const treeEqualsDevelop = (() => {
     }
 })();
 
-const decision = ancestryMergeDecision({ conflicts, treeEqualsDevelop });
+const report = divergenceReport({ conflicts, treeWouldEqualDevelop: treeEqualsDevelop });
 
 console.log(`base:    ${base}`);
 console.log(`ours:    ${ours} (${git(["rev-parse", "--short", ours]).trim()})`);
 console.log(`theirs:  ${theirs} (${git(["rev-parse", "--short", theirs]).trim()})`);
 console.log(`tree of the -X ours merge equals ${ours}'s tree: ${treeEqualsDevelop}`);
 console.log("");
-console.log(describeDecision(decision));
+console.log(describeDivergence(report));
 
-process.exit(decision.admitted ? 0 : 1);
+process.exit(0);
