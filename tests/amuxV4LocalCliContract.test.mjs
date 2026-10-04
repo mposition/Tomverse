@@ -141,14 +141,52 @@ test("Claude result needs exact served model and complete usage", () => {
 
 test("Claude parser diagnostic separates safe failure reasons without raw text", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const maxTokens = Buffer.from([
+    { type: "system", subtype: "init", tools: [] },
+    { type: "assistant", message: { role: "assistant",
+      stop_reason: "max_tokens", content: [{ type: "text", text: "partial" }] } },
+    claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
+  const duplicateInit = Buffer.from([
+    { type: "system", subtype: "init", tools: [] },
+    { type: "system", subtype: "init", tools: [] },
+    { type: "assistant", message: { role: "assistant",
+      content: [{ type: "text", text: "answer" }] } }, claudeEnvelope(),
+  ].map((event) => JSON.stringify(event)).join("\n"));
   const samples = [
     [claudeStream(claudeEnvelope(), ["Bash"]), "security_no_tools_violation"],
     [claudeStream(claudeEnvelope("different-model")), "served_model_mismatch"],
     [claudeStream({ ...claudeEnvelope(), modelUsage: {} }), "usage_unverified"],
     [Buffer.from("not-json"), "incomplete_output"],
     [claudeStream({ ...claudeEnvelope(), num_turns: 2 }), "output_contract_mismatch"],
+    [maxTokens, "output_contract_mismatch"],
+    [duplicateInit, "output_contract_mismatch"],
+    [Buffer.from(JSON.stringify({ type: "rate_limit_event" })),
+      "output_contract_mismatch"],
   ];
   for (const [stdout, failureReason] of samples) {
+    assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
+      { diagnostic: true }), { kind: "outcome_unknown", failureReason });
+  }
+});
+
+test("Codex parser diagnostic distinguishes tools, incomplete usage and failed turns", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(openai);
+  const prefix = [{ type: "thread.started", thread_id: "fresh" },
+    { type: "turn.started" }];
+  const answer = { type: "item.completed",
+    item: { type: "agent_message", text: "answer" } };
+  const complete = { type: "turn.completed", usage: { input_tokens: 10,
+    cached_input_tokens: 0, output_tokens: 2, reasoning_output_tokens: 0 } };
+  const samples = [
+    [[...prefix, { type: "item.completed",
+      item: { type: "command_execution", command: "true" } }, answer, complete],
+    "security_no_tools_violation"],
+    [[...prefix, answer], "usage_unverified"],
+    [[...prefix, { type: "turn.failed" }], "output_contract_mismatch"],
+  ];
+  for (const [events, failureReason] of samples) {
+    const stdout = Buffer.from(events.map((event) => JSON.stringify(event)).join("\n"));
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true }), { kind: "outcome_unknown", failureReason });
   }

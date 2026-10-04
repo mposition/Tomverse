@@ -102,7 +102,9 @@ test("proxy rejects unapproved targets before DNS and dials only the checked IP"
 
 test("proxy refuses private DNS answers and never calls its dialer", async () => {
   let dialCount = 0;
+  const decisions = [];
   const proxy = createAmuxV4EgressProxy(["api.anthropic.com"], {
+    onConnectDecision: (decision) => decisions.push(decision),
     resolve: async () => ["104.18.6.192", "169.254.169.254"],
     dial: () => { dialCount += 1; throw new Error("must not dial"); },
   });
@@ -113,6 +115,7 @@ test("proxy refuses private DNS answers and never calls its dialer", async () =>
       "403 Forbidden");
     assert.match(denied, /403 Forbidden/);
     assert.equal(dialCount, 0);
+    assert.deepEqual(decisions, ["denied"]);
   } finally {
     await close(proxy);
   }
