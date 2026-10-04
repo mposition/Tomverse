@@ -518,7 +518,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged. SupportTriageSuggestion and the account-deletion actor move it again.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "689bee4796f2d3380a80046f7e4f243d7c3d8fe92c0ee0c39ba4aee066a72c83";
+  "141de9a0dbeb28769c91847c4c0bfbc920777f697d9af5fd030879537188c4be";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
