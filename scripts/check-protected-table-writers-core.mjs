@@ -901,9 +901,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 3,
+    writeVerbs: 5,
     reason:
-      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as account-deletion action names (delete, delete_parent_record) and in comments about them. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
@@ -1045,6 +1045,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261005010000_support_triage_decision_record/migration.sql",
+    count: 5,
+    reason:
+      "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else.",
+  },
   {
     path: "scripts/ops-observer/statement-ceiling-core.mjs",
     count: 2,
