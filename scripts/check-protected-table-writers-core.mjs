@@ -1001,6 +1001,30 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
   },
+  {
+    path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 36,
+    reason:
+      "The v4 decision migration references four immutable audit IDs through restrictive foreign keys and reads one linked row with SELECT FOR SHARE in its decision guard. Its DDL and trigger write verbs affect AmuxIdeaUnitDecision and related v4 tables only; it neither inserts nor updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261001111800_amux_v4_frontier_model_catalog/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 12,
+    reason:
+      "The Frontier catalog migration adds two restrictive audit foreign keys, declares an audit row type, and reads the approval and revocation audit rows with two SELECT statements in its guard. The write verbs create and constrain AmuxIdeaFrontierModelApproval only; no statement writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261002100000_amux_v4_source_plan_revision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 32,
+    reason:
+      "The initial source-plan migration adds one restrictive foreign key from creationAuditLogId to the existing audit row. Its write verbs create and constrain AmuxIdeaSourcePlanRevision and AmuxIdeaAnalysisChunk only; it never writes AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

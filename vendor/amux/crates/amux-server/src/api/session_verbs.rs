@@ -4666,7 +4666,9 @@ fn mint_capture_card(
         conn,
         &crate::db::board_store::NewIssue {
             acceptance_criteria: None,
-            next_action: Some("Read the delivered prompt, carry out its requested work, and record the result on this card".into()),
+            next_action: (capture_status == "doing").then(|| {
+                "Read the linked delivered prompt and carry out its approved task".into()
+            }),
             title,
             desc: captured_desc,
             // Neither Doing nor triggered Backlog is redispatched (AMUX-2613).
@@ -25492,7 +25494,7 @@ mod tests {
         assert_eq!(status, "doing", "capture mints in doing, not todo (AMUX-2613)");
         assert_eq!(
             next_action.as_deref(),
-            Some("Read the delivered prompt, carry out its requested work, and record the result on this card"),
+            Some("Read the linked delivered prompt and carry out its approved task"),
             "a captured Doing card must explain how work continues",
         );
 

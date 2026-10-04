@@ -345,6 +345,21 @@ run(
     // time, items only in their reservation's transaction and once per
     // incident kind, retention-only deletion, no late COMMIT.
     "tests/integration/ops-observer-delivery.db.test.ts",
+    // AMUX v4 inert schema still has privacy ownership, hierarchy and source
+    // integrity invariants. Exercise its database guards in the CI lane.
+    "tests/integration/amuxV4Schema.db.test.mjs",
+    "tests/integration/amuxV4SourcePlan.db.test.mjs",
+    "tests/integration/amux-v4-frontier-model.db.test.mjs",
+    // Dark Frontier owner decisions must bind model eligibility, canonical
+    // audit and versioned revocation without creating executable AMUX work.
+    "tests/integration/amux-v4-frontier-catalog-write.db.test.ts",
+    // Dark v4 submission must bind its owner, request idempotency and audit
+    // atomically without opening collection, analysis or transfer.
+    "tests/integration/amux-v4-idea-submission.db.test.ts",
+    // The idea-only initial source plan is derived without a model call or
+    // external excerpt, and its pointer, immutable row and audit are atomic.
+    "tests/integration/amux-v4-initial-source-plan.db.test.ts",
+    "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

@@ -365,7 +365,7 @@ const compilerOptions = parsedConfig.options;
 //
 // 2026-10-01, login code mail layout: `lib/emailLoginEmails.ts` imports the
 // same frame from `lib/accountEmails.ts` -- both already listed, so the file
-// set stays 190. No element access is added; this repins positions only. 2026-10-02
+// set stays 190. No element access is added; this repins positions only.
 //
 // 2026-10-02, product-research audit actors: two names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
@@ -398,6 +398,15 @@ const compilerOptions = parsedConfig.options;
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
 //
+// 2026-10-02, AMUX v4 integration: the scoped system-audit actor changes
+// `lib/adminAudit.ts` and `lib/adminAuditSystemActors.ts`, both already in the
+// 190-file closure. The count remains 228 and the position-free inventory
+// retains digest 9aa7ec49...; only source positions moved. The actor identity
+// is defined in the existing audit module to avoid adding an AMUX module to
+// the fixed runtime import closure. Repinning the marketing pipeline over the
+// merged Prisma schema also moved positions in its already-listed module;
+// the final position-free inventory is still unchanged.
+//
 // 2026-10-03, taking develop: both branches had repinned this -- develop for
 // changes of its own, this one for the actors array -- so neither value
 // described the merged tree and the one below is computed over it. The count
@@ -408,12 +417,16 @@ const compilerOptions = parsedConfig.options;
 // the schema-slice function for the webhook pipeline fingerprint. No computed
 // element access is added; count 228 and the position-free inventory are
 // unchanged, so this repins positions only.
+//
+// 2026-10-04, merge current main: marketing, account email and AMUX edits
+// coexist in the fixed closure. Count and position-free inventory remain
+// unchanged; the digest below is repinned for source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8f9f7421cb5e7e3f7ad30d210d9cc2c",
-  "881f8149289a437eff5b281ce1a31578a",
+  "e9536414735320d75e1a7ad47e8d8ee",
+  "ef9e9691496a41c03be35b505d4a193d0",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

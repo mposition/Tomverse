@@ -648,13 +648,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Backlog",
     href: "/admin/amux-backlog",
     description:
-      "Card registration, catalog import, source reconciliation and card metadata",
+      "Idea input, card registration, catalog import, source reconciliation and card metadata",
     group: "AMUX",
     writeRoles: ["owner"],
     viewRoles: ["owner"],
     aliases: [
       "amux",
       "intake",
+      "idea analysis",
+      "new idea",
       "register card",
       "catalog import",
       "board import",
@@ -669,6 +671,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "intake",
         label: "Intake",
         description: "Preview one explicit card registration, then register it",
+      },
+      {
+        id: "ideas",
+        label: "Ideas",
+        description: "Check an operator idea before any external transfer",
       },
       {
         id: "import",
