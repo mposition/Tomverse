@@ -2146,11 +2146,13 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
     </div>
     <div class="field-group">
       <label class="field-label">Provider</label>
-      <div style="display:flex;gap:6px;">
+      <div id="create-provider-buttons" style="display:flex;flex-wrap:wrap;gap:6px;">
         <button type="button" id="create-provider-claude" class="btn provider-btn selected" onclick="_selectProvider('claude')">Claude Code</button>
         <button type="button" id="create-provider-codex" class="btn provider-btn" onclick="_selectProvider('codex')">Codex</button>
         <button type="button" id="create-provider-gemini" class="btn provider-btn" onclick="_selectProvider('gemini')">Gemini</button>
         <button type="button" id="create-provider-ollama" class="btn provider-btn" onclick="_selectProvider('ollama')">Ollama</button>
+        <button type="button" id="create-provider-cursor" class="btn provider-btn" onclick="_selectProvider('cursor')">Cursor</button>
+        <button type="button" id="create-provider-copilot" class="btn provider-btn" onclick="_selectProvider('copilot')">GitHub Copilot</button>
       </div>
     </div>
     <div class="field-group" id="create-model-field">

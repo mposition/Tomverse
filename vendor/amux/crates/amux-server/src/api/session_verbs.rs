@@ -3466,8 +3466,8 @@ fn render_transcript_records(records: Vec<Value>, max_chars: usize) -> String {
 // contract).
 // ---------------------------------------------------------------------------
 
-pub const SESSION_PROVIDERS: [&str; 7] =
-    ["claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor"];
+pub const SESSION_PROVIDERS: [&str; 8] =
+    ["claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor", "copilot"];
 
 /// Resolve a stored provider for AMUX-server's own launcher. Unknown values
 /// fall back to Claude. Externally managed sessions retain their raw provider
@@ -3720,10 +3720,13 @@ fn set_effort_flag(flags: &str, effort: &str) -> Result<String, String> {
 ///
 /// `cursor` shares gemini's `--yolo` spelling — verified via
 /// `cursor-agent --help`: "`--yolo` Alias for `--force` (Run Everything)".
+///
+/// `copilot` too: its CLI reference lists `--yolo` as "Same as `--allow-all`"
+/// (tools, paths and URLs).
 fn provider_yolo_flag(provider: &str) -> &'static str {
     match provider {
         "codex" | "ollama" => "--dangerously-bypass-approvals-and-sandbox",
-        "gemini" | "cursor" => "--yolo",
+        "gemini" | "cursor" | "copilot" => "--yolo",
         "devin" => "--permission-mode=bypass",
         _ => "--dangerously-skip-permissions",
     }
@@ -3849,6 +3852,8 @@ fn default_model_for_provider(provider: &str) -> String {
         "gemini" => "auto".into(),
         "devin" => String::new(),
         "cursor" => "auto".into(),
+        // `--model auto` lets the Copilot service pick (CLI reference).
+        "copilot" => "auto".into(),
         // Ollama runs via `codex --oss --local-provider ollama --model <model>`.
         // Read from the ONE source rather than repeating the literal: this arm
         // and `OllamaAdapter::default` were two spellings of the same fact, and
@@ -3995,6 +4000,8 @@ pub fn launch_base_binary(provider: &str) -> &'static str {
         "devin" => "devin-amux",
         // AMUX_CURSOR_CMD may override this nominal adapter binary at launch.
         "cursor" => "cursor-agent",
+        // AMUX_COPILOT_CMD may override it the same way.
+        "copilot" => "copilot",
         // claude, iterm2, and anything unknown launch via build_claude_cmd,
         // whose default binary is `claude` (overridable by AMUX_CLAUDE_CMD).
         _ => "claude",
@@ -4010,7 +4017,15 @@ fn cursor_cmd_bin() -> String {
     if custom.is_empty() { launch_base_binary("cursor").to_string() } else { custom }
 }
 
-fn cursor_shell_command(bin: &str, opts: &str) -> String {
+/// `copilot`'s launch binary, overridable exactly like `cursor_cmd_bin`.
+fn copilot_cmd_bin() -> String {
+    let custom = std::env::var("AMUX_COPILOT_CMD").unwrap_or_default().trim().to_string();
+    if custom.is_empty() { launch_base_binary("copilot").to_string() } else { custom }
+}
+
+/// An overridable binary followed by already-quoted options. The binary is
+/// one shell word whatever the override contains.
+fn override_shell_command(bin: &str, opts: &str) -> String {
     format!("{}{opts}", sh_quote(bin))
 }
 
@@ -4023,6 +4038,7 @@ fn provider_label(provider: &str) -> &str {
         "iterm2" => "iTerm2",
         "ollama" => "Ollama",
         "cursor" => "Cursor",
+        "copilot" => "GitHub Copilot",
         other => {
             if other.is_empty() {
                 "Claude Code"
@@ -9496,7 +9512,48 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             if !opts.contains(&logs) {
                 opts += &format!(" --add-dir {}", sh_quote(&logs));
             }
-            cursor_shell_command(&cursor_cmd_bin(), &opts)
+            override_shell_command(&cursor_cmd_bin(), &opts)
+        }
+        "copilot" => {
+            // GitHub Copilot CLI. Flags come from its CLI reference
+            // (github/copilot-cli, _autodocs/api-reference/cli-command.md):
+            // `--yolo` is `--allow-all`, `--model auto` lets the service
+            // pick, `--add-dir` grants a directory. No resume wiring, the same
+            // documented gap as cursor: nothing records a Copilot session id
+            // per amux session, so every (re)launch starts a fresh session.
+            //
+            // NOT VERIFIED LIVE: no `copilot` binary was installed on the
+            // server when this arm was written. The folder-trust question the
+            // CLI asks on first launch in a directory, and its approval panel,
+            // have no screen fixtures, so backend::adapter has no scanner for
+            // this provider and reports nothing rather than guessing.
+            let mut copilot_flags = flags.clone();
+            let copilot_yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| copilot_flags.contains(f));
+            if copilot_yolo {
+                copilot_flags = strip_provider_yolo_flags(&copilot_flags);
+            }
+            let mut opts = String::new();
+            if !copilot_flags.is_empty() {
+                opts += &format!(" {}", shell_quote_flags(&copilot_flags));
+            }
+            if !extra_flags.is_empty() {
+                opts += &format!(" {}", shell_quote_flags(extra_flags));
+            }
+            if !opts.contains("--model") {
+                opts += " --model auto";
+            }
+            if copilot_yolo && !opts.contains("--yolo") && !opts.contains("--allow-all") {
+                opts += " --yolo";
+            }
+            // The CLI reference says `--add-dir` aborts startup on a path that
+            // is not an accessible directory, so make sure it is one first.
+            let logs_path = logs_dir();
+            let _ = std::fs::create_dir_all(&logs_path);
+            let logs = logs_path.to_string_lossy().into_owned();
+            if !opts.contains(&logs) {
+                opts += &format!(" --add-dir {}", sh_quote(&logs));
+            }
+            override_shell_command(&copilot_cmd_bin(), &opts)
         }
         _ => build_claude_cmd(&cfg, &flags, &default_flags, &session_flag, extra_flags),
     };
@@ -9505,7 +9562,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
     // cd, source the global agent credentials.
     let mut has_oauth = false;
     let mut shell_rc = String::new();
-    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" {
+    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" && provider != "copilot" {
         shell_rc.push_str("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; ");
         if let Ok(t) = std::fs::read_to_string(PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude.json")) {
             if let Ok(v) = serde_json::from_str::<Value>(&t) {
@@ -9573,7 +9630,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             sh_quote(&f.to_string_lossy())
         ));
     }
-    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && has_oauth {
+    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && provider != "copilot" && has_oauth {
         shell_rc.push_str("unset ANTHROPIC_API_KEY; ");
     }
     // Settings writes provider keys to server.env at runtime. Reading that file
@@ -28270,8 +28327,25 @@ Press enter to continue\n\nWorked for 7s\n\n\
 
     #[test]
     fn cursor_override_is_one_shell_word() {
-        let command = cursor_shell_command("/tmp/cursor agent; touch /tmp/unwanted", " --trust");
+        let command = override_shell_command("/tmp/cursor agent; touch /tmp/unwanted", " --trust");
         assert_eq!(command, "'/tmp/cursor agent; touch /tmp/unwanted' --trust");
+    }
+
+    #[test]
+    fn copilot_is_a_first_class_session_provider() {
+        assert!(SESSION_PROVIDERS.contains(&"copilot"));
+        assert_eq!(resolve_session_provider("Copilot"), "copilot");
+        assert_eq!(launch_base_binary("copilot"), "copilot");
+        assert_eq!(provider_label("copilot"), "GitHub Copilot");
+        assert_eq!(provider_yolo_flag("copilot"), "--yolo");
+        assert_eq!(default_model_for_provider("copilot"), "auto");
+        // The adapter and the launcher name the same binary, which is what
+        // `provider.launch_matches_adapter` checks at runtime.
+        let adapter = crate::provider::default_registry().resolve("copilot").expect("copilot adapter");
+        assert_eq!(
+            adapter.build_command(crate::provider::PromptMode::Interactive).first().map(String::as_str),
+            Some(launch_base_binary("copilot"))
+        );
     }
 
     #[test]

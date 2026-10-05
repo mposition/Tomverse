@@ -598,7 +598,7 @@ let _logMatches = {};       // name -> matched snippet string
 let _logSearchTimer = null;
 let _logSearchAbort = null;
 // Filters modal facets (session list). Multi-select within a facet.
-let filterProviders = new Set();   // 'claude' | 'codex' | 'gemini' | 'iterm2'
+let filterProviders = new Set();   // a sessionProvider() value
 let filterStatuses = new Set();    // 'working' | 'blocked' | 'waiting' | 'idle' | 'stopped'
 // Stable status key for filtering: card WORKING = 'active' internally.
 function _sessStatusKey(s) {
@@ -4887,18 +4887,28 @@ function providerLabel(provider) {
   if (provider === 'gemini') return 'Gemini';
   if (provider === 'ollama') return 'Ollama';
   if (provider === 'iterm2') return 'iTerm2';
+  if (provider === 'cursor') return 'Cursor';
+  if (provider === 'copilot') return 'GitHub Copilot';
+  if (provider === 'devin') return 'Devin';
   return 'Claude';
 }
 
+// Every provider the server launches (SESSION_PROVIDERS in session_verbs.rs).
+// Anything else reads as claude, which is what the server falls back to. This
+// list used to stop at iterm2, so devin and cursor workers were labelled,
+// defaulted and yolo-toggled as Claude.
+const SESSION_PROVIDER_IDS = ['claude', 'codex', 'gemini', 'devin', 'iterm2', 'ollama', 'cursor', 'copilot'];
 function sessionProvider(s) {
   const p = ((s && s.provider) || 'claude').toLowerCase();
-  return (p === 'codex' || p === 'gemini' || p === 'ollama' || p === 'iterm2') ? p : 'claude';
+  return SESSION_PROVIDER_IDS.includes(p) ? p : 'claude';
 }
 
 function providerDefaultModel(provider) {
   if (provider === 'codex') return 'gpt-5.5';
-  if (provider === 'gemini') return 'auto';
+  if (provider === 'gemini' || provider === 'cursor' || provider === 'copilot') return 'auto';
   if (provider === 'ollama') return 'qwen3.8:27b';
+  // devin-amux picks its own model; there is no default to show.
+  if (provider === 'devin') return '';
   return window._AMUX_DEFAULT_MODEL || 'sonnet';
 }
 
@@ -4907,9 +4917,11 @@ function sessionConfiguredModel(s) {
   return flagValue((s && s.flags) || '', '--model') || (s && s.active_model) || providerDefaultModel(provider);
 }
 
+// Mirrors provider_yolo_flag in session_verbs.rs.
 function providerYoloFlag(provider) {
   if (provider === 'codex' || provider === 'ollama') return '--dangerously-bypass-approvals-and-sandbox';
-  if (provider === 'gemini') return '--yolo';
+  if (provider === 'gemini' || provider === 'cursor' || provider === 'copilot') return '--yolo';
+  if (provider === 'devin') return '--permission-mode=bypass';
   return '--dangerously-skip-permissions';
 }
 
@@ -4918,6 +4930,7 @@ function stripProviderYoloFlags(flags) {
     .replace(/--dangerously-skip-permissions/g, '')
     .replace(/--dangerously-bypass-approvals-and-sandbox/g, '')
     .replace(/--yolo/g, '')
+    .replace(/--permission-mode=bypass/g, '')
     .replace(/--approval-mode(?:=|\s+)yolo/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -7619,7 +7632,9 @@ function editField(session, field, current, provider) {
       {v:'claude',l:'Claude Code'},
       {v:'codex',l:'Codex'},
       {v:'gemini',l:'Gemini'},
-      {v:'ollama',l:'Ollama (local)'}
+      {v:'ollama',l:'Ollama (local)'},
+      {v:'cursor',l:'Cursor'},
+      {v:'copilot',l:'GitHub Copilot'}
     ];
     sel.innerHTML = '';
     providers.forEach(p => { const o = document.createElement('option'); o.value = p.v; o.textContent = p.l; sel.appendChild(o); });
@@ -23391,13 +23406,16 @@ let _createBranchEdited = false;  // track if user manually changed branch name
 let _createDirIsGit = false;     // track if current dir is a git repo
 
 let _createProvider = 'claude';
+// One selected button among however many providers the dialog lists, so a
+// new provider is one button in index.html and nothing here.
+function _markCreateProvider(p) {
+  document.querySelectorAll('#create-provider-buttons .provider-btn').forEach(b => {
+    b.classList.toggle('selected', b.id === 'create-provider-' + p);
+  });
+}
 function _selectProvider(p) {
   _createProvider = p;
-  document.getElementById('create-provider-claude').classList.toggle('selected', p === 'claude');
-  document.getElementById('create-provider-codex').classList.toggle('selected', p === 'codex');
-  document.getElementById('create-provider-gemini').classList.toggle('selected', p === 'gemini');
-  const _ollamaBtn = document.getElementById('create-provider-ollama');
-  if (_ollamaBtn) _ollamaBtn.classList.toggle('selected', p === 'ollama');
+  _markCreateProvider(p);
   // Hide branch/template/session-name options for non-Claude providers since they use different mechanics
   const isClaude = p === 'claude';
   document.getElementById('create-branch-enabled').closest('.field-group').style.display = isClaude ? '' : 'none';
@@ -23428,13 +23446,9 @@ function _loadModelsForCreate(provider) {
 }
 function openCreate() {
   _createProvider = 'claude';
-  document.getElementById('create-provider-claude').classList.add('selected');
-  document.getElementById('create-provider-codex').classList.remove('selected');
-  document.getElementById('create-provider-gemini').classList.remove('selected');
+  _markCreateProvider('claude');
   const _iso0 = document.getElementById('create-isolated');
   if (_iso0) { _iso0.checked = false; _toggleIsolated(false); }
-  const _ollamaBtn0 = document.getElementById('create-provider-ollama');
-  if (_ollamaBtn0) _ollamaBtn0.classList.remove('selected');
   _loadModelsForCreate('claude');
   document.getElementById('create-branch-enabled').closest('.field-group').style.display = '';
   document.getElementById('create-template-field').style.display = '';

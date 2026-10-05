@@ -812,8 +812,10 @@ cmd_start() {
   #
   # This is D6 (two launch constructions) leaking through the door the server
   # does not own. Delegating means the provider->binary map has one home.
+  # cursor and copilot belong here for the same reason: without them this path
+  # started a cursor or copilot worker as `claude`.
   local _provider="${CC_PROVIDER:-claude}"
-  if [[ "$_provider" == "codex" || "$_provider" == "ollama" || "$_provider" == "gemini" ]]; then
+  if [[ "$_provider" == "codex" || "$_provider" == "ollama" || "$_provider" == "gemini" || "$_provider" == "cursor" || "$_provider" == "copilot" ]]; then
     if $dry_run; then
       echo "${BOLD}$name${RESET} ($_provider — started via server API: POST /api/sessions/$name/start; the server owns the provider→binary map and the provider-specific setup)"
       return

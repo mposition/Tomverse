@@ -441,6 +441,70 @@ fn parse_cursor_models(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// GitHub Copilot CLI
+// ---------------------------------------------------------------------------
+
+/// GitHub Copilot CLI (`copilot`, npm `@github/copilot`). Everything below is
+/// taken from the CLI's own reference (github/copilot-cli,
+/// `_autodocs/api-reference/cli-command.md`), NOT from a live run: no
+/// `copilot` binary was installed on the server when this adapter was added,
+/// so each claim says which kind it is.
+///
+/// - `structured_events: true` — documented: `-p/--prompt` is the
+///   non-interactive mode and `--output-format json` emits JSONL in it.
+/// - `hooks: false` — not verified either way; the conservative default.
+/// - `reports_usage: false` — no machine-readable quota API is documented;
+///   `usage()` is honestly unknown, as for every other static adapter here.
+/// - `hot_model_switch: false` — `/model` exists in the TUI, but nothing here
+///   drives it; conservative default.
+/// - `models()` returns the shared catalog's worker ids, which is empty until
+///   someone verifies them: the CLI has no documented listing command, and a
+///   guessed list would be worse than none (`--model` stays an open string).
+pub struct CopilotAdapter;
+
+#[async_trait]
+impl ProviderAdapter for CopilotAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::new("copilot")
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            hot_model_switch: false,
+            reports_usage: false,
+            structured_events: true,
+            hooks: false,
+        }
+    }
+
+    async fn usage(&self) -> ProviderUsage {
+        ProviderUsage::unknown(self.id())
+    }
+
+    async fn models(&self) -> Vec<String> {
+        crate::provider::model_catalog::worker_model_ids("copilot")
+    }
+
+    fn build_command(&self, prompt_mode: PromptMode) -> Vec<String> {
+        match prompt_mode {
+            // Bare launch: the interactive TUI. Model, `--yolo` and `--add-dir`
+            // belong to the launch arm in session_verbs.rs, which reads the
+            // worker's CC_FLAGS that this adapter cannot see (same split as
+            // CursorAdapter's `--trust`).
+            PromptMode::Interactive => vec!["copilot".into()],
+            // `-p` takes the prompt as its value, so it is LAST: the headless
+            // driver appends the prompt after this argv.
+            PromptMode::HeadlessStructured => vec![
+                "copilot".into(),
+                "--output-format".into(),
+                "json".into(),
+                "-p".into(),
+            ],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,6 +610,20 @@ mod tests {
             CodexAdapter.build_command(PromptMode::HeadlessStructured),
             vec!["codex", "exec", "--json"]
         );
+    }
+
+    #[test]
+    fn copilot_commands_follow_the_cli_reference() {
+        assert_eq!(CopilotAdapter.build_command(PromptMode::Interactive), vec!["copilot"]);
+        // `-p` must be the last token: the headless driver appends the prompt.
+        assert_eq!(
+            CopilotAdapter.build_command(PromptMode::HeadlessStructured),
+            vec!["copilot", "--output-format", "json", "-p"]
+        );
+        let caps = CopilotAdapter.capabilities();
+        assert!(caps.structured_events);
+        assert!(!caps.hooks, "hooks are unverified for copilot; claiming them would be invented");
+        assert!(!caps.reports_usage);
     }
 
     #[test]
