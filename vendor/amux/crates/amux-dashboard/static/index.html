@@ -189,9 +189,9 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
 <div class="header-row">
   <div class="header-brand" style="display:flex;gap:8px;align-items:center;">
     <h1 role="button" tabindex="0" aria-label="About amux" title="About amux" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAbout()}" id="brand-header" style="margin:0;cursor:pointer;display:flex;align-items:center;gap:6px;" onclick="openAbout()"><span id="brand-icon-header"></span><span id="brand-name-header">amux</span></h1>
-    <span role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showConnHistory()}" id="conn-status" class="conn-status online" title="Connection status — click for disconnection history" onclick="showConnHistory()"></span>
+    <span role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();showConnHistory()}" id="conn-status" class="conn-status online" title="Connection status — click for disconnection history" data-i18n-attr="title:conn.title" onclick="showConnHistory()"></span>
     <div style="position:relative;">
-      <button id="notif-btn" onclick="toggleNotifPanel()" title="Notifications" style="cursor:pointer;padding:2px 4px;font-size:1rem;opacity:0.7;line-height:1;position:relative;" aria-label="Notifications" aria-controls="notif-panel" aria-expanded="false">&#x1F514;<span id="notif-badge" class="notif-badge" style="display:none;">0</span></button>
+      <button id="notif-btn" onclick="toggleNotifPanel()" data-i18n-attr="title:header.notifications;aria-label:header.notifications" title="Notifications" style="cursor:pointer;padding:2px 4px;font-size:1rem;opacity:0.7;line-height:1;position:relative;" aria-label="Notifications" aria-controls="notif-panel" aria-expanded="false">&#x1F514;<span id="notif-badge" class="notif-badge" style="display:none;">0</span></button>
       <div id="notif-panel" class="notif-panel">
         <div class="notif-panel-header">
           <span>Notifications</span>
@@ -220,25 +220,25 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
       <div class="active-dropdown" id="active-dropdown"></div>
     </div>
     <div class="header-add-wrap">
-      <button class="header-add-btn" id="add-btn" onclick="event.stopPropagation();toggleAddMenu()" aria-label="Create or connect" title="Create or connect">+</button>
+      <button class="header-add-btn" id="add-btn" onclick="event.stopPropagation();toggleAddMenu()" aria-label="Create or connect" title="Create or connect" data-i18n-attr="title:header.create;aria-label:header.create">+</button>
       <div class="header-add-menu" id="add-menu">
-        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openCreate()"><span class="mi">&#x2795;</span> New worker</div>
-        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openConnect()"><span class="mi">&#x1F517;</span> Connect tmux</div>
-        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openConnectIterm2()"><span class="mi">&#x1F5A5;</span> Connect iTerm2 pane</div>
+        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openCreate()"><span class="mi">&#x2795;</span> <span data-i18n="header.new_worker">New worker</span></div>
+        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openConnect()"><span class="mi">&#x1F517;</span> <span data-i18n="header.connect_tmux">Connect tmux</span></div>
+        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openConnectIterm2()"><span class="mi">&#x1F5A5;</span> <span data-i18n="header.connect_iterm2">Connect iTerm2 pane</span></div>
         <div class="card-menu-sep"></div>
-        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();_orchOpen()"><span class="mi">&#x1F399;&#xFE0F;</span> Orchestrate (voice)</div>
-        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openBulkActions()"><span class="mi">&#x26A1;</span> Bulk actions</div>
+        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();_orchOpen()"><span class="mi">&#x1F399;&#xFE0F;</span> <span data-i18n="header.orchestrate_voice">Orchestrate (voice)</span></div>
+        <div class="card-menu-item" onclick="event.stopPropagation();closeAddMenu();openBulkActions()"><span class="mi">&#x26A1;</span> <span data-i18n="header.bulk_actions">Bulk actions</span></div>
       </div>
     </div>
     <div class="settings-wrap">
-      <button class="settings-btn" id="settings-btn" onclick="event.stopPropagation();toggleSettings()" aria-label="Settings" title="Settings">&#x2699;&#xFE0F;</button>
+      <button class="settings-btn" id="settings-btn" onclick="event.stopPropagation();toggleSettings()" aria-label="Settings" title="Settings" data-i18n-attr="title:header.settings;aria-label:header.settings">&#x2699;&#xFE0F;</button>
       <div class="settings-menu" id="settings-menu">
         <div class="settings-tabs" id="settings-tabs">
-          <button class="settings-tab-btn active" data-stab="account" onclick="event.stopPropagation();_settingsTab('account')">Account</button>
-          <button class="settings-tab-btn" data-stab="workers" onclick="event.stopPropagation();_settingsTab('workers')">Workers</button>
-          <button class="settings-tab-btn" data-stab="notifications" onclick="event.stopPropagation();_settingsTab('notifications')">Alerts</button>
-          <button class="settings-tab-btn" data-stab="integrations" onclick="event.stopPropagation();_settingsTab('integrations')">Connect</button>
-          <button class="settings-tab-btn" data-stab="device" onclick="event.stopPropagation();_settingsTab('device')">Device</button>
+          <button class="settings-tab-btn active" data-stab="account" onclick="event.stopPropagation();_settingsTab('account')" data-i18n="settings.tab.account">Account</button>
+          <button class="settings-tab-btn" data-stab="workers" onclick="event.stopPropagation();_settingsTab('workers')" data-i18n="settings.tab.workers">Workers</button>
+          <button class="settings-tab-btn" data-stab="notifications" onclick="event.stopPropagation();_settingsTab('notifications')" data-i18n="settings.tab.notifications">Alerts</button>
+          <button class="settings-tab-btn" data-stab="integrations" onclick="event.stopPropagation();_settingsTab('integrations')" data-i18n="settings.tab.integrations">Connect</button>
+          <button class="settings-tab-btn" data-stab="device" onclick="event.stopPropagation();_settingsTab('device')" data-i18n="settings.tab.device">Device</button>
         </div>
         <div class="settings-tab-panel active" id="stab-account" data-stab="account">
         <div class="settings-section" id="settings-usage-section">
@@ -460,7 +460,7 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
         </div>
         <div class="settings-sep"></div>
         <div class="settings-section">
-          <div class="settings-section-label">Appearance</div>
+          <div class="settings-section-label" data-i18n="settings.appearance">Appearance</div>
           <div class="settings-row" style="justify-content:space-between;align-items:center;">
             <span style="font-size:0.85rem;" id="theme-label">Dark mode</span>
             <label class="theme-toggle">
@@ -469,25 +469,34 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
             </label>
           </div>
           <div class="settings-row" style="justify-content:space-between;align-items:center;margin-top:10px;gap:8px;">
-            <span style="font-size:0.85rem;">Tabs</span>
+            <span style="font-size:0.85rem;" data-i18n="settings.tabs">Tabs</span>
             <select id="tabs-display-select" onchange="_tabsDisplaySet(this.value)"
               style="min-height:44px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.82rem;">
-              <option value="both">Icons and text</option>
-              <option value="icons">Icons only</option>
-              <option value="text">Text only</option>
+              <option value="both" data-i18n="settings.tabs.both">Icons and text</option>
+              <option value="icons" data-i18n="settings.tabs.icons">Icons only</option>
+              <option value="text" data-i18n="settings.tabs.text">Text only</option>
             </select>
           </div>
-          <div style="font-size:0.68rem;color:var(--dim);margin-top:3px;">Counts stay visible in every mode</div>
+          <div style="font-size:0.68rem;color:var(--dim);margin-top:3px;" data-i18n="settings.tabs.counts_hint">Counts stay visible in every mode</div>
           <div class="settings-row" style="justify-content:space-between;align-items:center;margin-top:8px;">
-            <span style="font-size:0.85rem;">Zoom</span>
+            <span style="font-size:0.85rem;" data-i18n="settings.zoom">Zoom</span>
             <div style="display:flex;align-items:center;gap:6px;">
               <button class="btn" style="font-size:0.78rem;padding:2px 8px;min-width:28px;" onclick="zoomOut()">−</button>
               <span id="zoom-level-display" style="font-size:0.82rem;font-weight:600;min-width:38px;text-align:center;">100%</span>
               <button class="btn" style="font-size:0.78rem;padding:2px 8px;min-width:28px;" onclick="zoomIn()">+</button>
-              <button class="btn" style="font-size:0.65rem;padding:2px 6px;color:var(--dim);" onclick="resetZoom()">Reset</button>
+              <button class="btn" style="font-size:0.65rem;padding:2px 6px;color:var(--dim);" onclick="resetZoom()" data-i18n="settings.zoom.reset">Reset</button>
             </div>
           </div>
           <div style="font-size:0.68rem;color:var(--dim);margin-top:3px;">&#x2318;+/&#x2318;− or Ctrl+/Ctrl−</div>
+          <div class="settings-row" style="justify-content:space-between;align-items:center;margin-top:10px;gap:8px;">
+            <span style="font-size:0.85rem;" data-i18n="settings.language">Language</span>
+            <select id="lang-select" onchange="amuxSetLang(this.value)" aria-label="Language" data-i18n-attr="aria-label:settings.language"
+              style="min-height:44px;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.82rem;">
+              <option value="auto" data-i18n="settings.language.auto">Browser default</option>
+              <option value="en" lang="en">English</option>
+              <option value="ko" lang="ko">한국어</option>
+            </select>
+          </div>
         </div>
         <div class="settings-sep"></div>
         <div class="settings-section">
@@ -527,33 +536,33 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
 </div>
 <div class="tab-bar-outer">
 <div class="tab-bar">
-  <button id="tab-sessions" class="active" onclick="switchView('sessions')"><span class="tab-ico">▦</span><span class="tab-lbl">Workers</span></button>
-  <button id="tab-board" onclick="switchView('board')"><span class="tab-ico">☷</span><span class="tab-lbl">Board</span></button>
-  <button id="tab-groups" onclick="switchView('groups')"><span class="tab-ico">&#x2756;</span><span class="tab-lbl">Groups</span></button>
-  <button id="tab-calendar" onclick="switchView('calendar')"><span class="tab-ico">🗓</span><span class="tab-lbl">Calendar</span></button>
-  <button id="tab-scheduler" onclick="switchView('scheduler')"><span class="tab-ico">⏱</span><span class="tab-lbl">Scheduler</span></button>
-  <button id="tab-files" onclick="switchView('files')"><span class="tab-ico">🗂</span><span class="tab-lbl">Files</span></button>
-  <button id="tab-record" onclick="switchView('record')"><span class="tab-ico">🎙</span><span class="tab-lbl">Record</span></button>
+  <button id="tab-sessions" class="active" onclick="switchView('sessions')"><span class="tab-ico">▦</span><span class="tab-lbl" data-i18n="tab.sessions">Workers</span></button>
+  <button id="tab-board" onclick="switchView('board')"><span class="tab-ico">☷</span><span class="tab-lbl" data-i18n="tab.board">Board</span></button>
+  <button id="tab-groups" onclick="switchView('groups')"><span class="tab-ico">&#x2756;</span><span class="tab-lbl" data-i18n="tab.groups">Groups</span></button>
+  <button id="tab-calendar" onclick="switchView('calendar')"><span class="tab-ico">🗓</span><span class="tab-lbl" data-i18n="tab.calendar">Calendar</span></button>
+  <button id="tab-scheduler" onclick="switchView('scheduler')"><span class="tab-ico">⏱</span><span class="tab-lbl" data-i18n="tab.scheduler">Scheduler</span></button>
+  <button id="tab-files" onclick="switchView('files')"><span class="tab-ico">🗂</span><span class="tab-lbl" data-i18n="tab.files">Files</span></button>
+  <button id="tab-record" onclick="switchView('record')"><span class="tab-ico">🎙</span><span class="tab-lbl" data-i18n="tab.record">Record</span></button>
   <button id="tab-mdai" onclick="switchView('mdai')"><span class="tab-ico">&#x2726;</span><span class="tab-lbl">MDAI</span></button>
-  <button id="tab-proxies" onclick="switchView('proxies')"><span class="tab-ico">⇄</span><span class="tab-lbl">Proxies</span></button>
-  <button id="tab-email" onclick="switchView('email')"><span class="tab-ico">📥</span><span class="tab-lbl">Email</span></button>
-  <button id="tab-connectors" onclick="switchView('connectors')"><span class="tab-ico">🔌</span><span class="tab-lbl">Connectors</span></button>
-  <button id="tab-logs" onclick="switchView('logs')"><span class="tab-ico">≡</span><span class="tab-lbl">Logs</span></button>
-  <button id="tab-grid" onclick="enterGridMode()"><span class="tab-ico">▣</span><span class="tab-lbl">Workspace</span></button>
-  <button id="tab-messages" onclick="switchView('messages')"><span class="tab-ico">✉</span><span class="tab-lbl">Messages</span></button>
-  <button id="tab-skills" onclick="switchView('skills')"><span class="tab-ico">⚙</span><span class="tab-lbl">Skills</span></button>
-  <button id="tab-sql" onclick="switchView('sql')"><span class="tab-ico">⛁</span><span class="tab-lbl">Database</span></button>
-  <button id="tab-map" onclick="switchView('map')"><span class="tab-ico">◈</span><span class="tab-lbl">Map</span></button>
-  <button id="tab-metrics" onclick="switchView('metrics')"><span class="tab-ico">↗</span><span class="tab-lbl">Metrics</span></button>
-  <button id="tab-disk" onclick="switchView('disk')"><span class="tab-ico">🖴</span><span class="tab-lbl">Disk</span></button>
-  <button id="tab-cost" onclick="switchView('cost')"><span class="tab-ico">$</span><span class="tab-lbl">Cost</span></button>
-  <button id="tab-torrents" onclick="switchView('torrents')"><span class="tab-ico">↓</span><span class="tab-lbl">Torrents</span></button>
-  <button id="tab-terminal" onclick="switchView('terminal')"><span class="tab-ico">⮞</span><span class="tab-lbl">Terminal</span></button>
-  <button id="tab-browser" onclick="switchView('browser')"><span class="tab-ico">◳</span><span class="tab-lbl">Browser</span></button>
-  <button id="tab-orchestrations" onclick="switchView('orchestrations')"><span class="tab-ico">&#x2B53;</span><span class="tab-lbl">Orchestrations</span></button>
+  <button id="tab-proxies" onclick="switchView('proxies')"><span class="tab-ico">⇄</span><span class="tab-lbl" data-i18n="tab.proxies">Proxies</span></button>
+  <button id="tab-email" onclick="switchView('email')"><span class="tab-ico">📥</span><span class="tab-lbl" data-i18n="tab.email">Email</span></button>
+  <button id="tab-connectors" onclick="switchView('connectors')"><span class="tab-ico">🔌</span><span class="tab-lbl" data-i18n="tab.connectors">Connectors</span></button>
+  <button id="tab-logs" onclick="switchView('logs')"><span class="tab-ico">≡</span><span class="tab-lbl" data-i18n="tab.logs">Logs</span></button>
+  <button id="tab-grid" onclick="enterGridMode()"><span class="tab-ico">▣</span><span class="tab-lbl" data-i18n="tab.grid">Workspace</span></button>
+  <button id="tab-messages" onclick="switchView('messages')"><span class="tab-ico">✉</span><span class="tab-lbl" data-i18n="tab.messages">Messages</span></button>
+  <button id="tab-skills" onclick="switchView('skills')"><span class="tab-ico">⚙</span><span class="tab-lbl" data-i18n="tab.skills">Skills</span></button>
+  <button id="tab-sql" onclick="switchView('sql')"><span class="tab-ico">⛁</span><span class="tab-lbl" data-i18n="tab.sql">Database</span></button>
+  <button id="tab-map" onclick="switchView('map')"><span class="tab-ico">◈</span><span class="tab-lbl" data-i18n="tab.map">Map</span></button>
+  <button id="tab-metrics" onclick="switchView('metrics')"><span class="tab-ico">↗</span><span class="tab-lbl" data-i18n="tab.metrics">Metrics</span></button>
+  <button id="tab-disk" onclick="switchView('disk')"><span class="tab-ico">🖴</span><span class="tab-lbl" data-i18n="tab.disk">Disk</span></button>
+  <button id="tab-cost" onclick="switchView('cost')"><span class="tab-ico">$</span><span class="tab-lbl" data-i18n="tab.cost">Cost</span></button>
+  <button id="tab-torrents" onclick="switchView('torrents')"><span class="tab-ico">↓</span><span class="tab-lbl" data-i18n="tab.torrents">Torrents</span></button>
+  <button id="tab-terminal" onclick="switchView('terminal')"><span class="tab-ico">⮞</span><span class="tab-lbl" data-i18n="tab.terminal">Terminal</span></button>
+  <button id="tab-browser" onclick="switchView('browser')"><span class="tab-ico">◳</span><span class="tab-lbl" data-i18n="tab.browser">Browser</span></button>
+  <button id="tab-orchestrations" onclick="switchView('orchestrations')"><span class="tab-ico">&#x2B53;</span><span class="tab-lbl" data-i18n="tab.orchestrations">Orchestrations</span></button>
 </div>
 <div class="tab-customize-wrap">
-  <button class="tab-customize-btn" onclick="event.stopPropagation();toggleTabCustomizer()" title="Show/hide tabs">&#x229E;</button>
+  <button class="tab-customize-btn" onclick="event.stopPropagation();toggleTabCustomizer()" title="Show/hide tabs" data-i18n-attr="title:tab.customize;aria-label:tab.customize">&#x229E;</button>
   <div class="tab-customizer-menu" id="tab-customizer-menu" style="display:none;"></div>
 </div>
 </div>
@@ -597,13 +606,13 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
   <div id="groups-container"></div>
 </div>
 <div id="board-view" style="display:none;">
-  <div class="board-page-heading"><div><h1>Board</h1><p>Turn work into outcomes</p></div><button class="btn primary" onclick="openBoardAdd('todo')" aria-label="Create board task">+</button></div>
-  <div class="board-quick-filters" aria-label="Quick board filters"><button onclick="_boardQuick('')">All</button><button onclick="_boardQuick('owner:human is:open')">My tasks</button><button onclick="_boardQuick('status:doing')">In progress</button><button onclick="_boardQuick('is:needsyou')">Needs you</button><button onclick="_boardQuick('status:review')">Review</button></div>
+  <div class="board-page-heading"><div><h1 data-i18n="board.title">Board</h1><p data-i18n="board.subtitle">Turn work into outcomes</p></div><button class="btn primary" onclick="openBoardAdd('todo')" aria-label="Create board task" data-i18n-attr="aria-label:board.create_task">+</button></div>
+  <div class="board-quick-filters" aria-label="Quick board filters" data-i18n-attr="aria-label:board.quick.label"><button onclick="_boardQuick('')" data-i18n="board.quick.all">All</button><button onclick="_boardQuick('owner:human is:open')" data-i18n="board.quick.mine">My tasks</button><button onclick="_boardQuick('status:doing')" data-i18n="board.quick.doing">In progress</button><button onclick="_boardQuick('is:needsyou')" data-i18n="board.quick.needsyou">Needs you</button><button onclick="_boardQuick('status:review')" data-i18n="board.quick.review">Review</button></div>
   <!-- Launch bar: type priorities, auto-fan-out to ephemeral workers -->
   <div class="board-launch-bar" id="board-launch-bar">
     <div class="launch-header" onclick="_toggleLaunchBar()">
       <span class="launch-ico">&#x1F680;</span>
-      <span class="launch-title">Launch priorities</span>
+      <span class="launch-title" data-i18n="board.launch.title">Launch priorities</span>
       <span class="launch-caret" id="launch-caret">&#x25B6;</span>
     </div>
     <div class="launch-body" id="launch-body" style="display:none;">
@@ -633,27 +642,28 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
          shares one line; the absolute search-clear stays anchored over the
          input's right edge because the input is the last child. -->
     <div class="board-search-wrap" style="flex:1;">
-      <button class="btn" id="bf-add" onclick="_bfOpenMenu(event)" title="Add a filter" style="flex:0 0 auto;min-height:44px;">+ Filter</button>
-      <input id="board-search" class="search-input" type="text" placeholder="Search or filter: is:rotting, status:doing, -worker:none" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="boardSearchQuery=this.value;_boardActiveView='';_bfSyncHash();renderBoard()">
+      <button class="btn" id="bf-add" onclick="_bfOpenMenu(event)" title="Add a filter" data-i18n-attr="title:board.filter.add_title" style="flex:0 0 auto;min-height:44px;"><span data-i18n="board.filter.add">+ Filter</span></button>
+      <input id="board-search" class="search-input" type="text" placeholder="Search or filter: is:rotting, status:doing, -worker:none" data-i18n-attr="placeholder:board.search.placeholder" autocapitalize="off" autocorrect="off" spellcheck="false" oninput="boardSearchQuery=this.value;_boardActiveView='';_bfSyncHash();renderBoard()">
       <button class="search-clear" onclick="document.getElementById('board-search').value='';boardSearchQuery='';_boardActiveView='';_bfSyncHash();renderBoard()">&#x2715;</button>
     </div>
-    <button class="btn primary board-new-btn" onclick="openBoardAdd('todo')"><span class="board-new-label">+ New issue</span><span class="board-new-icon">+</span></button>
+    <button class="btn primary board-new-btn" onclick="openBoardAdd('todo')"><span class="board-new-label" data-i18n="board.new_issue">+ New issue</span><span class="board-new-icon">+</span></button>
     <div class="board-owner-toggle">
-      <button id="bo-human" class="bv-btn" onclick="setBoardOwner('human')" title="Human issues">Human</button>
-      <button id="bo-agent" class="bv-btn" onclick="setBoardOwner('agent')" title="Worker issues">Workers</button>
+      <button id="bo-all" class="bv-btn" onclick="setBoardOwner('all')" title="All issues" data-i18n-attr="title:board.owner.all_title"><span data-i18n="board.owner.all">All</span></button>
+      <button id="bo-human" class="bv-btn" onclick="setBoardOwner('human')" title="Human issues" data-i18n-attr="title:board.owner.human_title"><span data-i18n="board.owner.human">Human</span></button>
+      <button id="bo-agent" class="bv-btn" onclick="setBoardOwner('agent')" title="Worker issues" data-i18n-attr="title:board.owner.agent_title"><span data-i18n="board.owner.agent">Workers</span></button>
     </div>
     <div class="board-view-toggle">
-      <button id="bv-list" class="bv-btn" onclick="setBoardView('list')" title="Dense list grouped by status">&#x2630;</button>
-        <button id="bv-session" class="bv-btn" onclick="setBoardView('worker')" title="Group by worker">&#x25A4;</button>
-      <button id="bv-status" class="bv-btn" onclick="setBoardView('status')" title="Group by status">&#x2630;</button>
-      <button id="bv-smart" class="bv-btn" onclick="setBoardView('smart')" title="Smart board: derived status from durable facts">&#x2728;</button>
+      <button id="bv-list" class="bv-btn" onclick="setBoardView('list')" title="Dense list grouped by status" data-i18n-attr="title:board.view.list_title">&#x2630;</button>
+        <button id="bv-session" class="bv-btn" onclick="setBoardView('worker')" title="Group by worker" data-i18n-attr="title:board.view.worker_title">&#x25A4;</button>
+      <button id="bv-status" class="bv-btn" onclick="setBoardView('status')" title="Group by status" data-i18n-attr="title:board.view.status_title">&#x2630;</button>
+      <button id="bv-smart" class="bv-btn" onclick="setBoardView('smart')" title="Smart board: derived status from durable facts" data-i18n-attr="title:board.view.smart_title">&#x2728;</button>
     </div>
     <!-- Export the CURRENT view. Reuses .board-view-toggle so it inherits the
          group styling and the 44px mobile touch targets already tuned for it,
          rather than introducing a second control shape in the same toolbar. -->
     <div class="board-view-toggle" id="board-export">
-      <button class="bv-btn" onclick="exportBoard('md')" title="Export the issues currently shown (filters applied) as Markdown">MD</button>
-      <button class="bv-btn" onclick="exportBoard('json')" title="Export the issues currently shown (filters applied) as JSON">JSON</button>
+      <button class="bv-btn" onclick="exportBoard('md')" title="Export the issues currently shown (filters applied) as Markdown" data-i18n-attr="title:board.export.md_title">MD</button>
+      <button class="bv-btn" onclick="exportBoard('json')" title="Export the issues currently shown (filters applied) as JSON" data-i18n-attr="title:board.export.json_title">JSON</button>
     </div>
     <!-- Nudges toggle — sets CC_STANDING_ORDERS at global/group/worker scope -->
     <div class="board-view-toggle" style="position:relative;">
@@ -3176,6 +3186,7 @@ setTimeout(function(){var f=document.getElementById('js-fallback');if(f&&f.style
 </div>
 
 <script src="/state/kernel.js"></script>
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>
 
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" integrity="sha384-D/t0ZMqQW31H3az8ktEiNb39wyKnS82iFY52QPACM+IjKW3jDUhyIgh2PApRqJZs" crossorigin="anonymous"></script>
