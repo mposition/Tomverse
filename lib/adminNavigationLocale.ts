@@ -250,6 +250,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     label: "에이전트 오피스",
     description: "7개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
     aliases: ["오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황"],
+    tabs: {
+      live: { label: "라이브 오피스", description: "오피스 바닥, 운영자 지시창, 데모 결재와 피드" },
+      dashboard: { label: "대시보드", description: "팀 현황판, 데모 결재, digest 브리핑과 팀별 기록 링크" },
+    },
   },
   "email-campaigns": {
     label: "이메일 캠페인",

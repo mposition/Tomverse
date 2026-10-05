@@ -281,8 +281,12 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 }
 .brand-chip b { overflow: hidden; font: 900 11px var(--font-ui); letter-spacing: .04em; text-overflow: ellipsis; white-space: nowrap; }
 .nav-tabs { display: flex; gap: 7px; }
-.nav-tabs button {
+/* The view tabs are links to ?tab= sections; the to-do is a button. */
+.nav-tabs button, .nav-tabs a {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 40px;
   padding: 7px 12px;
   border: 1.5px solid var(--ink);
@@ -292,10 +296,11 @@ a.integration-row:hover { border-color: var(--pink-deep); }
   color: var(--ink);
   font-size: 11px;
   font-weight: 900;
+  text-decoration: none;
   cursor: pointer;
 }
-.nav-tabs button:active { transform: translate(2px, 2px); box-shadow: none; }
-.nav-tabs button.active { background: var(--yellow); }
+.nav-tabs button:active, .nav-tabs a:active { transform: translate(2px, 2px); box-shadow: none; }
+.nav-tabs a.active { background: var(--yellow); }
 .nav-tabs .todo-tab { background: var(--pink-bg); }
 .todo-tab i {
   display: inline-grid;
@@ -917,7 +922,7 @@ a.integration-row:hover { border-color: var(--pink-deep); }
   .app-nav { position: static; display: grid; padding: 8px; }
   .brand-chip { justify-content: center; }
   .nav-tabs { display: grid; grid-template-columns: 1fr 1fr; }
-  .nav-tabs button { padding-inline: 7px; }
+  .nav-tabs button, .nav-tabs a { padding-inline: 7px; }
   .nav-tabs .todo-tab { grid-column: 1 / -1; }
   .live-hero { padding: 14px; }
   .live-bar { gap: 8px; padding: 10px; }

@@ -88,6 +88,8 @@ const ORDER = {
   delay: /왜|늦|지연|막힘|블로|안 되|안돼|문제|why|slow|late|delay|stuck|block/i,
   status: /뭐|현황|상황|진행|보고|어디까지|status|what|progress|report/i,
   late: /왜|늦|지연|why|late|slow/i,
+  /** A line that asks rather than orders: it may mention approval without giving it. */
+  question: /[?？]|왜|언제|어떻게|뭐|why|when|how|what|whether/i,
 } as const;
 
 type Action =
@@ -244,7 +246,8 @@ export class AgentOffice {
   approvalPending = false;
   approved = false;
   briefingReady = false;
-  meetingTitle: string | null = null;
+  /** Meetings in progress, oldest first: the day's own and any the operator called. */
+  private activeMeetings: string[] = [];
   onBriefing: (() => void) | null = null;
   chat: ChatEntry[] = [];
   focusMode = false;
@@ -259,6 +262,8 @@ export class AgentOffice {
   private side: Slot = { gen: null, wait: 0, until: null };
   private occupancy = new Set<number>();
   private seatBook = new Map<string, Pt>();
+  /** Who in each team still has to finish the work it was given. */
+  private pendingWork = new Map<string, Set<string>>();
   /** Agents in a scene: their own idle behaviour (coffee, chat) cannot cut in. */
   private locked = new Set<string>();
 
@@ -286,7 +291,8 @@ export class AgentOffice {
     this.approvalPending = false;
     this.approved = false;
     this.briefingReady = false;
-    this.meetingTitle = null;
+    this.activeMeetings = [];
+    this.pendingWork.clear();
     this.main = { gen: null, wait: 0, until: null };
     this.side = { gen: null, wait: 0, until: null };
     this.seatBook.clear();
@@ -377,6 +383,20 @@ export class AgentOffice {
 
   private narratorName() {
     return this.agentById.get(AGENT_OFFICE_NARRATOR_ID)?.name ?? "";
+  }
+
+  /** The meeting on screen: the most recent one still in progress. */
+  get meetingTitle(): string | null {
+    return this.activeMeetings.at(-1) ?? null;
+  }
+
+  private beginMeeting(title: string) {
+    this.activeMeetings.push(title);
+  }
+
+  private endMeeting(title: string) {
+    const index = this.activeMeetings.lastIndexOf(title);
+    if (index >= 0) this.activeMeetings.splice(index, 1);
   }
 
   // ── Log ────────────────────────────────────────────────────
@@ -534,7 +554,7 @@ export class AgentOffice {
     this.deptStatus.engineering = "approval";
     this.approvalPending = true;
     this.turbo = false; // a decision point always returns to normal speed
-    this.meetingTitle = s.approvalMeeting;
+    this.beginMeeting(s.approvalMeeting);
     this.pushLog("📋", s.approvalLog, "yellow");
 
     const approvers = ["engineering-lead", "qa-lead", AGENT_OFFICE_NARRATOR_ID].map(
@@ -569,7 +589,7 @@ export class AgentOffice {
     yield () => this.approved;
 
     this.approvalPending = false;
-    this.meetingTitle = null;
+    this.endMeeting(s.approvalMeeting);
     this.deptStatus.engineering = "done";
     this.say(operator, s.approvedOperator, 2.8);
     this.pushLog("✅", s.approvedLog, "mint");
@@ -646,6 +666,7 @@ export class AgentOffice {
   private startDept(deptId: string, label: string, dur: number, skip: readonly string[] = []) {
     this.deptStatus[deptId] = "working";
     const crew = this.deptAgents(deptId).filter((agent) => !skip.includes(agent.id));
+    this.pendingWork.set(deptId, new Set(crew.map((agent) => agent.id)));
     this.lock(crew);
     this.pushLog(roomOf(deptId).icon, this.copy.sim.deptStarted(this.roomName(deptId), label), "pink");
     crew.forEach((agent, i) => {
@@ -658,13 +679,21 @@ export class AgentOffice {
         { k: "work", dur: dur + Math.random() * 1.5, label },
         { k: "anim", a: "sit" },
         { k: "status", s: "idle" },
-        { k: "fn", fn: () => this.finishDept(deptId) }
+        {
+          k: "fn",
+          fn: () => {
+            this.pendingWork.get(deptId)?.delete(agent.id);
+            this.finishDept(deptId);
+          },
+        }
       );
     });
   }
 
   private finishDept(deptId: string) {
-    if (this.deptAgents(deptId).some((a) => a.status === "working")) return;
+    // Not "nobody is typing": a teammate still walking back from the lounge
+    // has not started yet, and the team is not done until they have finished.
+    if ((this.pendingWork.get(deptId)?.size ?? 0) > 0) return;
     if (this.deptStatus[deptId] === "done") return;
     this.deptStatus[deptId] = "done";
     this.unlock(this.deptAgents(deptId));
@@ -686,7 +715,7 @@ export class AgentOffice {
 
   /** A meeting: call the crew in, play their lines, send them back to their desks. */
   private *meeting(title: string, ids: string[], lines: [string, string][]): Script {
-    this.meetingTitle = title;
+    this.beginMeeting(title);
     this.pushLog("💬", this.copy.sim.meetingCalled(title, ids.length), "lav");
     const crew = ids.map((id) => this.agentById.get(id)!);
     this.lock(crew);
@@ -720,7 +749,7 @@ export class AgentOffice {
       this.stand(agent);
       this.sitAtDesk(agent);
     }
-    this.meetingTitle = null;
+    this.endMeeting(title);
     yield this.allFree(crew);
     this.unlock(crew);
   }
@@ -798,7 +827,7 @@ export class AgentOffice {
     if (ORDER.boost.test(text)) return this.boost();
     if (ORDER.convene.test(text)) return this.convene();
     if (ORDER.brief.test(text)) return this.briefNow();
-    if (ORDER.approve.test(text) && this.approvalPending) {
+    if (ORDER.approve.test(text) && !ORDER.question.test(text) && this.approvalPending) {
       this.approve();
       this.pushChat("staff", this.narratorName(), this.copy.sim.approvedByOrder);
       return;

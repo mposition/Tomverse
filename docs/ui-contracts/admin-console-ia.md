@@ -60,7 +60,7 @@ owner-only (rule 14).
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
-| Operations | Agent office | `/admin/office` | — |
+| Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
@@ -110,8 +110,11 @@ else; there is no publish link. The only facts on it are the record links:
 each team links to the page above that holds its record, and a team with no
 such page is drawn as waiting on a link instead of being given a status
 (`lib/agentOffice/roster.ts`, `tests/agentOffice.test.mjs`). It loads
-nothing, writes nothing, carries no badge and no `writeRoles`. The console
-shell owns the page's `h1`, so the office's own titles are `h2`s.
+nothing, writes nothing, carries no badge and no `writeRoles`. Its two
+sections are `?tab=` addresses (rule 2); it draws its own tab strip, as the
+original did, and those tabs are links, so moving between them keeps the
+panel and its demo day mounted. The console shell owns the page's `h1`, so
+the office's own titles are `h2`s.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

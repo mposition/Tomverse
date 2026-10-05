@@ -290,7 +290,7 @@ export function roomOf(id: string): Room {
   return room;
 }
 
-/** The tile just inside a room's first door. */
+/** The corridor tile just outside a room's first door, whichever wall it is in. */
 export function doorApproach(room: Room): Pt {
   const door = room.doors[0];
   return door.y === room.y ? { x: door.x, y: door.y - 1 } : { x: door.x, y: door.y + 1 };
