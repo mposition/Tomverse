@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +33,29 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   prompt: `{"previewId":"${previewId}","source":"synthetic"}`,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
+
+test("retention hold reads stay available while writes remain code-latched off", () => {
+  const route = readFileSync(new URL(
+    "../app/api/admin/amux/ideas/retention-holds/route.ts", import.meta.url),
+  "utf8");
+  assert.match(route, /const READ_CODE_LATCH = true;/);
+  assert.match(route, /const WRITE_CODE_LATCH = false;/);
+  assert.match(route, /export async function GET[\s\S]*?if \(!READ_CODE_LATCH/);
+  for (const method of ["POST", "DELETE"]) {
+    const body = route.split(`export async function ${method}`)[1];
+    assert.ok(body, `${method} route exists`);
+    assert.match(body, /if \(!READ_CODE_LATCH \|\| !WRITE_CODE_LATCH/);
+  }
+});
+
+test("read-only terminal statuses cannot be returned after a claim attempt", () => {
+  const source = readFileSync(new URL(
+    "../lib/amux/ideaLocalAnalysisAgentOnce.mjs", import.meta.url), "utf8");
+  const postClaim = source.split("const claimRequestId = randomUUID();")[1]
+    ?.split("export async function runAmuxV4SyntheticAnalysisAgentOnce")[0];
+  assert.ok(postClaim, "claim path boundary exists");
+  assert.doesNotMatch(postClaim, /kind:\s*"(?:unavailable|refused)"/);
+});
 
 test("local one-shot entry point is closed before reading configuration", () => {
   const script = fileURLToPath(new URL(

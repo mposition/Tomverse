@@ -33,6 +33,8 @@ if (!amuxV4LiveAnalysisCliEnabled(
   } catch { /* Only the status enum reaches logs. */ }
   // Only the status enum is emitted. Never log a claim, prompt or credential.
   process.stdout.write(`AMUX_V4_LOCAL_ANALYSIS_${result.kind}\n`);
+  // Read-only queue failures release the marker but still exit nonzero so the
+  // supervisor can distinguish an unavailable queue from a successful idle.
   if (!["idle", "draft_ready", "provider_failed", "disabled",
       "catalog_unapproved"].includes(result.kind)) {
     process.exitCode = 1;

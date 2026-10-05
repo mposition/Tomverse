@@ -9,8 +9,7 @@ import { createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
 
 test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () => {
   const objects = new Map();
-  const retainedVersions = new Set();
-  let retainVersion = false;
+  let listing = "empty";
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     const key = url.pathname;
@@ -22,11 +21,12 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       response.writeHead(200, { ETag: '"synthetic"' }); response.end();
     } else if (request.method === "GET" && url.searchParams.has("versions")) {
       const prefix = url.searchParams.get("prefix");
-      const oldVersion = retainedVersions.has(prefix);
       response.writeHead(200, { "Content-Type": "application/xml" });
-      response.end(`<ListVersionsResult><IsTruncated>false</IsTruncated>${oldVersion
-        ? `<Version><Key>${prefix}</Key><VersionId>old</VersionId></Version>`
-        : ""}</ListVersionsResult>`);
+      response.end(`<ListVersionsResult><IsTruncated>${listing === "truncated"}</IsTruncated>${
+        listing === "version" ? `<Version><Key>${prefix}</Key><VersionId>old</VersionId></Version>` :
+        listing === "delete_marker" ?
+          `<DeleteMarker><Key>${prefix}</Key><VersionId>old</VersionId></DeleteMarker>` :
+          ""}</ListVersionsResult>`);
     } else if (request.method === "GET") {
       const value = objects.get(key);
       if (!value) { response.writeHead(404); response.end(); return; }
@@ -35,9 +35,6 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
     } else if (request.method === "HEAD") {
       response.writeHead(objects.has(key) ? 200 : 404); response.end();
     } else if (request.method === "DELETE") {
-      if (retainVersion && objects.has(key)) {
-        retainedVersions.add(key.replace(/^\/amux-test-keys\//, ""));
-      }
       objects.delete(key); response.writeHead(204); response.end();
     } else { response.writeHead(405); response.end(); }
   });
@@ -74,10 +71,12 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
     await assert.rejects(loadAmuxContentUnitKeys(identity, env),
       { code: "missing" });
     assert.equal(ciphertext.ciphertext.length > 0, true);
-    retainVersion = true;
-    await createAmuxContentUnitKeys(identity, env);
-    await assert.rejects(deleteAmuxContentUnitKey(identity, env),
-      { code: "outcome_unknown" });
+    for (const variant of ["version", "delete_marker", "truncated"]) {
+      listing = variant;
+      await createAmuxContentUnitKeys(identity, env);
+      await assert.rejects(deleteAmuxContentUnitKey(identity, env),
+        { code: "outcome_unknown" });
+    }
   } finally {
     await new Promise((resolve, reject) => server.close((error) =>
       error ? reject(error) : resolve()));
