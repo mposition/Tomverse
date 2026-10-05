@@ -418,6 +418,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/opsObserverStore.ts",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its three write verbs are an UPDATE closing its own reservations, an UPDATE of its own state row and an INSERT into its own transition ledger. It writes the audit table only through $appendSystemAudit, which is writeSystemAuditLogEntry in lib/adminAudit.ts.",
+  },
+  {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
     tableMentions: 3,
