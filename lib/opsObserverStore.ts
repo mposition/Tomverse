@@ -35,6 +35,8 @@ import {
 } from "@/scripts/ops-observer/catalog-core.mjs";
 import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
+import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
+import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
 import { judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 
 type HeadRow = {
@@ -285,12 +287,29 @@ export type OpsObserverAdvanceInput = {
   baseGenesisId: string;
   baseGeneration: number;
   keys: Record<string, unknown>;
-  reservation: unknown;
+  reservation: OpsObserverReservationInput | null;
+};
+
+/** A reservation as parseAdvanceRequest() returns it. */
+export type OpsObserverReservationInput = {
+  ownerDate: string;
+  channelCheck: boolean;
+  items: { signal: string; scope: string; kind: string; origin: string; openedAt: Date }[];
 };
 
 export type OpsObserverAdvanceResult =
-  | { result: "advanced" | "noop"; sendPermitted: false; heartbeatWithheld: boolean; generation: number }
-  | { result: "conflict" | "reservation_unsupported"; sendPermitted: false }
+  | {
+      result: "advanced";
+      sendPermitted: boolean;
+      deliveryId: string | null;
+      heartbeatWithheld: boolean;
+      generation: number;
+    }
+  | { result: "noop"; sendPermitted: false; heartbeatWithheld: boolean; generation: number }
+  | {
+      result: "conflict" | "replayed" | "rejected" | "reservation_not_owed" | "channel_check_taken";
+      sendPermitted: false;
+    }
   | { result: "untrusted"; trust: string; sendPermitted: false };
 
 /** Key order does not change a key state; compare the value, not the bytes. */
@@ -320,8 +339,15 @@ async function heartbeatWithheld(tx: OpsObserverClient): Promise<boolean> {
  * keys written with the checkpoint moved to the previous generation, the
  * state_advanced audit entry as the ops-observer actor, and its ledger row --
  * all committing together or not at all. Unchanged keys with nothing to close
- * write nothing (noop). A reservation is not accepted yet: it is refused before
- * any transaction opens (docs/policy/sre-ops.md §3 rules 3, 7, 9 and 10).
+ * write nothing (noop) (docs/policy/sre-ops.md §3 rules 3, 7, 9 and 10).
+ *
+ * A reservation is inserted in the same transaction, and only then is sending
+ * permitted (§3 rule 3). Every refusal is decided before the first write: the
+ * items must be messages the key move actually owes (owedMessages), the same
+ * run must not have reserved already (replayed), the day's channel check must
+ * be free, and the daily cap is counted over this genesis's reservations for
+ * the owner date (§5) -- a reservation over it rejects the whole advance.
+ * Whether an item is capped is derived here, never taken from the request.
  *
  * Success is reported only after a separate short transaction confirms the
  * run is not past its deadline (policy §6 item 5).
@@ -330,7 +356,6 @@ export async function advanceOpsObserverState(
   input: OpsObserverAdvanceInput,
   client: PrismaClient = prisma,
 ): Promise<OpsObserverAdvanceResult> {
-  if (input.reservation !== null) return { result: "reservation_unsupported", sendPermitted: false };
   const integrityKeys = adminAuditIntegrityKeys(process.env);
   const { result } = await withOpsObserverTransaction(
     "advance",
@@ -348,6 +373,18 @@ export async function advanceOpsObserverState(
       }
       if (!keysAreValid(input.keys)) return { result: "conflict", sendPermitted: false };
 
+      // Decided from what was read, before anything is locked or written.
+      const reservation = input.reservation;
+      if (reservation && !reservationIsOwed(reservation.items, owedMessages(head.keys, input.keys, reservation.ownerDate))) {
+        return { result: "reservation_not_owed", sendPermitted: false };
+      }
+      // The checkpoint moves to the generation before this one, whose ledger
+      // row the trust check just verified; at generation 0 the genesis
+      // approval stays the checkpoint.
+      const anchor = gathered.ledgerRows.find((row) => row.generation === previousGeneration) ?? null;
+      if (previousGeneration > 0 && !anchor) return { result: "untrusted", trust: "checkpoint_broken", sendPermitted: false };
+      const checkpoint = previousGeneration;
+
       // Take the base before writing anything. Under READ COMMITTED another
       // advance may have committed since the facts were read; the lock waits
       // for it, re-reads the row, and finds no row at the base. Then nothing
@@ -358,6 +395,29 @@ export async function advanceOpsObserverState(
          FOR UPDATE`;
       if (locked.length === 0) return { result: "conflict", sendPermitted: false };
 
+      // With the base held no other advance can reserve, so these reads stay
+      // true until commit.
+      let admitted: { capped: boolean }[] = [];
+      if (reservation) {
+        const [taken] = await tx.$queryRaw<{ replayed: boolean; channelCheckTaken: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM "OpsObserverDelivery" WHERE "runId" = ${input.runId}) AS replayed,
+                 EXISTS (SELECT 1 FROM "OpsObserverDelivery" WHERE "channelCheckDate" = ${reservation.ownerDate}::date)
+                   AS "channelCheckTaken"`;
+        if (taken.replayed) return { result: "replayed", sendPermitted: false };
+        if (reservation.channelCheck && taken.channelCheckTaken) {
+          return { result: "channel_check_taken", sendPermitted: false };
+        }
+        const reservedToday = await tx.$queryRaw<{ key: string; kind: string; capped: boolean }[]>`
+          SELECT i.signal || '#' || i.scope AS key, i.kind, i.capped
+            FROM "OpsObserverDeliveryItem" i
+            JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
+           WHERE d."genesisId" = ${head.id}::uuid AND d."ownerDate" = ${reservation.ownerDate}::date`;
+        const owed = reservation.items.map((item) => ({ key: `${item.signal}#${item.scope}`, kind: item.kind }));
+        const budget = admitOwedItems({ reservedToday, owed });
+        if (budget.deferred.length > 0) return { result: "rejected", sendPermitted: false };
+        admitted = budget.admitted;
+      }
+
       // Every reservation still open is closed, whichever genesis made it: one
       // left by a genesis since replaced is just as unknown, and the marker that
       // allows one open reservation spans the table.
@@ -366,7 +426,7 @@ export async function advanceOpsObserverState(
            SET status = 'abandoned', "stampStatus" = 'abandoned', "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
          WHERE status = 'reserved'
         RETURNING id`;
-      if (abandoned.length === 0 && stableJson(input.keys) === stableJson(head.keys)) {
+      if (!reservation && abandoned.length === 0 && stableJson(input.keys) === stableJson(head.keys)) {
         return {
           result: "noop",
           sendPermitted: false,
@@ -375,12 +435,6 @@ export async function advanceOpsObserverState(
         };
       }
 
-      // The checkpoint moves to the generation before this one, whose ledger
-      // row the trust check just verified; at generation 0 the genesis
-      // approval stays the checkpoint.
-      const anchor = gathered.ledgerRows.find((row) => row.generation === previousGeneration) ?? null;
-      if (previousGeneration > 0 && !anchor) return { result: "untrusted", trust: "checkpoint_broken", sendPermitted: false };
-      const checkpoint = previousGeneration;
       const [updated] = await tx.$queryRaw<{ generation: number; stampKeysSha256: string }[]>`
         UPDATE "OpsObserverState"
            SET generation = generation + 1, keys = ${JSON.stringify(input.keys)}::jsonb,
@@ -394,6 +448,31 @@ export async function advanceOpsObserverState(
       // back the abandon with it rather than report a conflict over a write.
       if (!updated) throw new Error("ops_observer_state_update_missed_locked_row");
 
+      // The reservation and its items: the guard copies the genesis mode, marks
+      // it the one open reservation and stamps it; the item guard requires this
+      // transaction's still-reserved delivery.
+      let deliveryId: string | null = null;
+      if (reservation) {
+        deliveryId = crypto.randomUUID();
+        await tx.$executeRaw`
+          INSERT INTO "OpsObserverDelivery" (id, "genesisId", mode, "runId", status, "ownerDate", "channelCheckDate",
+            "digestItemId", "invariantVersion", "stampStatus", "runDeadlineAt")
+          VALUES (${deliveryId}::uuid, ${head.id}::uuid, ${head.mode}, ${input.runId}, 'reserved',
+            ${reservation.ownerDate}::date, ${reservation.channelCheck ? reservation.ownerDate : null}::date,
+            NULL, 0, 'reserved', ${input.runDeadline.toISOString()}::timestamptz)`;
+        if (reservation.items.length > 0) {
+          const items = reservation.items.map((item, index) => ({ ...item, capped: admitted[index].capped }));
+          await tx.$executeRaw`
+            INSERT INTO "OpsObserverDeliveryItem" (id, "deliveryId", mode, signal, scope, kind, origin, "openedAt", capped)
+            SELECT gen_random_uuid(), ${deliveryId}::uuid, ${head.mode}, x.signal, x.scope, x.kind, x.origin, x.opened, x.capped
+              FROM unnest(${items.map((i) => i.signal)}::text[], ${items.map((i) => i.scope)}::text[],
+                          ${items.map((i) => i.kind)}::text[], ${items.map((i) => i.origin)}::text[],
+                          ${items.map((i) => i.openedAt.toISOString())}::timestamptz[],
+                          ${items.map((i) => i.capped)}::boolean[])
+                AS x(signal, scope, kind, origin, opened, capped)`;
+        }
+      }
+
       const entry = await tx.$appendSystemAudit({
         action: "ops_observer.state_advanced",
         targetType: "OpsObserverState",
@@ -403,7 +482,7 @@ export async function advanceOpsObserverState(
           generation: updated.generation,
           keysSha256: updated.stampKeysSha256,
           abandonedDeliveryIds: abandoned.map((row) => row.id),
-          reservedDeliveryId: null,
+          reservedDeliveryId: deliveryId,
           digestItemId: null,
           verifiedThroughGeneration: checkpoint,
           verifiedThroughAuditHash: anchor?.auditEntryHash ?? null,
@@ -418,7 +497,9 @@ export async function advanceOpsObserverState(
         VALUES (${head.id}::uuid, ${updated.generation}, ${entry.id}, ${entry.entryHash}, ${updated.stampKeysSha256}, ${input.runDeadline.toISOString()}::timestamptz)`;
       return {
         result: "advanced",
-        sendPermitted: false,
+        // Only the request whose transaction inserted the reservation may send.
+        sendPermitted: deliveryId !== null,
+        deliveryId,
         heartbeatWithheld: await heartbeatWithheld(tx),
         generation: updated.generation,
       };
