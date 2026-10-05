@@ -146,6 +146,18 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
             <p className="whitespace-pre-wrap">{unit.proposal.summary}</p>
             <p className="text-xs">{unit.proposal.cardRef}</p>
           </div> : null}
+          {unit.proposal?.kind !== "evidence" &&
+            unit.proposal?.portfolioSignal ? <div className="space-y-1 rounded border border-zinc-300 p-2 dark:border-zinc-700">
+            <p className="font-medium">{m.portfolioSignalTitle}</p>
+            <p>{m.portfolioSignalHint}</p>
+            <p className="break-all font-mono text-xs">{unit.bodyDigest}</p>
+            <p className="whitespace-pre-wrap">{unit.proposal.portfolioSignal.rationale}</p>
+            <pre className="overflow-auto whitespace-pre-wrap break-all text-xs">
+              {JSON.stringify({ metrics: unit.proposal.portfolioSignal.metrics,
+                uncertainty: unit.proposal.portfolioSignal.uncertainty,
+                evidenceRefIds: unit.proposal.portfolioSignal.evidenceRefIds }, null, 2)}
+            </pre>
+          </div> : null}
         </li>)}
       </ol>
       {view.outcome === "propose" ? <AmuxIdeaResolutionPanel

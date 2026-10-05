@@ -7162,6 +7162,8 @@ model AmuxWorkItem {
   parentFeatureNode AmuxPortfolioNode? @relation(fields: [parentFeatureNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   parentStoryCard   AmuxWorkItem?       @relation("AmuxStoryTasks", fields: [parentStoryCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   storyChildTasks   AmuxWorkItem[]      @relation("AmuxStoryTasks")
+  portfolioAssessments AmuxPortfolioAssessment[]
+  portfolioScoreSnapshots AmuxPortfolioScoreSnapshot[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -9345,6 +9347,7 @@ model AmuxPortfolioNode {
   amuxV4BaseDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionBaseNode")
   amuxV4ResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionResolvedNode")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedNode")
+  portfolioAssessments AmuxPortfolioAssessment[]
 
   @@index([parentId, level, state])
   @@index([level, state, createdAt])
@@ -9370,6 +9373,86 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
+/// Owner-confirmed evidence for one v4 hierarchy node or Story/Task. Model
+/// suggestions are not an authority: only an owner approval becomes a row.
+/// Evidence refs are opaque IDs; no source excerpt or explanation text lives here.
+model AmuxPortfolioAssessment {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  nodeId                String?
+  cardId                String?
+  subjectKind           String
+  subjectRevision       Int
+  subjectDigest         String
+  subjectDigestKeyId    String
+  assessmentVersion     Int
+  metrics               Json
+  uncertainty           String
+  evidenceRefs          Json
+  evidenceAsOf          DateTime
+  reasonCode            String
+  modelProposalDigest   String?
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  priorAssessmentId     String?  @db.Uuid
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  node AmuxPortfolioNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  card AmuxWorkItem? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prior AmuxPortfolioAssessment? @relation("AmuxPortfolioAssessmentPrior", fields: [priorAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  successors AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentPrior")
+  initiativeScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreInitiative")
+  epicScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreEpic")
+  featureScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreFeature")
+  storyScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreStory")
+  taskScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreTask")
+
+  @@unique([nodeId, assessmentVersion])
+  @@unique([cardId, assessmentVersion])
+  @@index([nodeId, approvedAt])
+  @@index([cardId, approvedAt])
+  @@index([evidenceAsOf])
+}
+
+/// One owner-confirmed, append-only calculation from exact assessment rows.
+/// It has no status, SEV1, Todo, claim or execution authority.
+model AmuxPortfolioScoreSnapshot {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  taskId                String
+  taskRevision          Int
+  sourceApprovalId      String
+  initiativeAssessmentId String  @db.Uuid
+  epicAssessmentId      String   @db.Uuid
+  featureAssessmentId   String   @db.Uuid
+  storyAssessmentId     String?  @db.Uuid
+  taskAssessmentId      String   @db.Uuid
+  scoreVersion          String
+  scoreTotal            Int
+  components            Json
+  inputDigest           String
+  inputDigestKeyId      String
+  evidenceAsOf          DateTime
+  activeStaleAt         DateTime
+  baselineStaleAt       DateTime
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  computedAt            DateTime
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  initiativeAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreInitiative", fields: [initiativeAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  epicAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreEpic", fields: [epicAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  featureAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreFeature", fields: [featureAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  storyAssessment AmuxPortfolioAssessment? @relation("AmuxPortfolioScoreStory", fields: [storyAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  taskAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreTask", fields: [taskAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, computedAt])
+  @@index([activeStaleAt, taskId])
+  @@index([baselineStaleAt, taskId])
 }
 
 /// Owner-approved, versioned Agent worker/model ceiling inputs. These are

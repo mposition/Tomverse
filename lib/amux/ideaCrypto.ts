@@ -7,7 +7,7 @@ import {
 } from "node:crypto";
 
 /** AMUX v4 content categories use separate random data keys per sealed row. */
-export type AmuxContentPurpose = "idea_raw" | "source_scope" | "collection_result" | "transfer_payload" | "analysis_result" | "analysis_draft" | "analysis_freeform" | "derivation_confirmation" | "derivation_reason" | "node_content" | "card_title" | "card_body" | "card_brief";
+export type AmuxContentPurpose = "idea_raw" | "source_scope" | "collection_result" | "transfer_payload" | "analysis_result" | "analysis_draft" | "analysis_freeform" | "derivation_confirmation" | "derivation_reason" | "portfolio_assessment" | "portfolio_score" | "node_content" | "card_title" | "card_body" | "card_brief";
 
 export type AmuxMasterKey = {
   masterKeyId: string;
@@ -43,7 +43,7 @@ const MAX_CONTENT_BYTES = 1024 * 1024;
 const SUBJECT_ID = /^[A-Za-z0-9:_-]{1,160}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const PURPOSES: ReadonlySet<string> = new Set<AmuxContentPurpose>([
-  "idea_raw", "source_scope", "collection_result", "transfer_payload", "analysis_result", "analysis_draft", "analysis_freeform", "derivation_confirmation", "derivation_reason",
+  "idea_raw", "source_scope", "collection_result", "transfer_payload", "analysis_result", "analysis_draft", "analysis_freeform", "derivation_confirmation", "derivation_reason", "portfolio_assessment", "portfolio_score",
   "node_content", "card_title", "card_body", "card_brief",
 ]);
 
