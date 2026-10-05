@@ -252,6 +252,14 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal((await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotStage(tx, legacyStageId)))
         .approvalAuditsValid, true);
+      const legacyStage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      });
+      await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
+        where: { id: legacyStageId },
+        data: { status: "closed",
+          supersededAuditLogId: legacyStage.stageApprovalAuditLogId },
+      }), /supersession audit binding is invalid/);
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request, binding: legacyBinding,
       }), /stage_audit_binding_invalid/);
@@ -267,6 +275,51 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         } });
       }), /one-shot replacement requires a closed/i);
       assert.equal(await countOperationalAudits(), 0);
+      assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      })).status, "staged");
+      const insertReplacementFixture = (slotCount: number, failAfter = false) =>
+        prisma.$transaction(async (tx) => {
+          const legacy = await tx.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+            where: { id: legacyStageId },
+          });
+          const { auditLogId, approvedBy } = await append(tx);
+          const closeAuditLogId = await writeAdminAuditLog({
+            tx, session, request,
+            action: "prompt_refiner.vnext_one_shot.stage_superseded",
+            targetType: "PromptRefinerVnextOneShotStage",
+            targetId: legacyStageId,
+            summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+            metadata: {
+              replacementStageId: stageId,
+              previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+              replacementStageApprovalAuditLogId: auditLogId,
+            },
+          });
+          await tx.promptRefinerVnextOneShotStage.update({
+            where: { id: legacyStageId },
+            data: { status: "closed", supersededAuditLogId: closeAuditLogId },
+          });
+          await tx.promptRefinerVnextOneShotStage.create({ data: {
+            ...binding, approvedBy, approvedAt: new Date(0),
+            stageApprovalAuditLogId: auditLogId,
+          } });
+          await tx.promptRefinerVnextOneShotSlot.createMany({ data:
+            Array.from({ length: slotCount }, (_, slotIndex) => ({
+              id: `replacement-fixture-${slotIndex}`, stageId, slotIndex,
+              reservedCostMicroUsd: BigInt(29_918),
+            })),
+          });
+          if (failAfter) throw new Error("synthetic post-stage failure");
+        });
+      await assert.rejects(insertReplacementFixture(79),
+        /exactly 80 reserved slots/);
+      await assert.rejects(insertReplacementFixture(81), /slot|index|constraint/i);
+      await assert.rejects(insertReplacementFixture(80, true),
+        /synthetic post-stage failure/);
+      assert.equal(await countOperationalAudits(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
       assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: legacyStageId },
       })).status, "staged");

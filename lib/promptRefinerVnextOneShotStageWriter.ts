@@ -132,7 +132,7 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     });
     const created = await tx.promptRefinerVnextOneShotSlot.createMany({
       data: Array.from({ length: PROMPT_REFINER_VNEXT_SLOT_COUNT }, (_, slotIndex) => ({
-          id: `one-shot-v2-${slotIndex}`,
+        id: `one-shot-v2-${slotIndex}`,
         stageId: input.binding.id,
         slotIndex,
         reservedCostMicroUsd: SLOT_COST,

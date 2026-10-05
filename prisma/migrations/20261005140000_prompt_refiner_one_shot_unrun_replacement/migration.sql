@@ -20,6 +20,7 @@ CREATE FUNCTION "prompt_refiner_vnext_one_shot_supersession_guard"()
 RETURNS trigger SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
     linked_audit RECORD;
+    observed_at TIMESTAMP(3);
 BEGIN
     IF TG_OP = 'INSERT' THEN
         IF NEW."supersededAuditLogId" IS NOT NULL THEN
@@ -40,18 +41,23 @@ BEGIN
     END IF;
     EXECUTE pg_catalog.format(
         'SELECT "actorUserId", "action", "targetType", "targetId",'
-        || ' "metadata", "entryHash" FROM %I."AdminAuditLog"'
+        || ' "metadata", "entryHash", "createdAt" FROM %I."AdminAuditLog"'
         || ' WHERE "id" = $1 FOR KEY SHARE', TG_TABLE_SCHEMA
     ) INTO linked_audit USING NEW."supersededAuditLogId";
+    observed_at := clock_timestamp() AT TIME ZONE 'UTC';
     IF linked_audit."actorUserId" IS DISTINCT FROM OLD."approvedBy" OR
        linked_audit."action" IS DISTINCT FROM 'prompt_refiner.vnext_one_shot.stage_superseded' OR
        linked_audit."targetType" IS DISTINCT FROM 'PromptRefinerVnextOneShotStage' OR
        linked_audit."targetId" IS DISTINCT FROM OLD."id" OR
        linked_audit."entryHash" IS NULL OR
+       linked_audit."entryHash" !~ '^[a-f0-9]{64}$' OR
+       linked_audit."createdAt" < observed_at - INTERVAL '1 minute' OR
+       linked_audit."createdAt" > observed_at + INTERVAL '1 minute' OR
        linked_audit."metadata" ->> 'replacementStageId' IS DISTINCT FROM
          'prompt-refiner-vnext-one-shot-v2' OR
        linked_audit."metadata" ->> 'previousStageApprovalAuditLogId' IS DISTINCT FROM
-         OLD."stageApprovalAuditLogId" THEN
+         OLD."stageApprovalAuditLogId" OR
+       coalesce(linked_audit."metadata" ->> 'replacementStageApprovalAuditLogId', '') = '' THEN
         RAISE EXCEPTION 'one-shot supersession audit binding is invalid';
     END IF;
     RETURN NEW;

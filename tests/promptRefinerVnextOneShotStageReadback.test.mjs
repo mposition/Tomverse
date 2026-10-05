@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { adminAuditEntryHashVariants } from "../lib/adminAuditIntegrityCore.ts";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES,
+  promptRefinerVnextOneShotApprovalAuditMetadata } from
+  "../lib/promptRefinerVnextOneShotAuditReadback.ts";
 import { lockAndReadPromptRefinerVnextOneShotStage,
   readPromptRefinerVnextOneShotStage } from
   "../lib/promptRefinerVnextOneShotStageReadback.ts";
@@ -94,6 +98,67 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
     consumedAt: null };
   assert.equal((await readPromptRefinerVnextOneShotStage(txFor(stage, incomplete).tx))
     .reservationShapeValid, false);
+});
+
+test("replacement readback refuses missing legacy close and broken audit links", async () => {
+  const key = "synthetic-replacement-readback-key";
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = key;
+  const replacement = { ...stage, supersededAuditLogId: null };
+  const legacy = { ...stage, id: "prompt-refiner-vnext-one-shot-v1",
+    status: "closed", stageApprovalAuditLogId: "legacy-stage-audit",
+    supersededAuditLogId: "legacy-close-audit",
+    runtimeDeploymentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+  const signed = (entry) => {
+    const hashInput = { ...entry, createdAt: entry.createdAt.toISOString() };
+    delete hashInput.id;
+    delete hashInput.entryHash;
+    return { ...entry,
+      entryHash: adminAuditEntryHashVariants(hashInput, key).codepoint };
+  };
+  const commonAudit = { actorUserId: stage.approvedBy, actorEmail: null,
+    targetType: "PromptRefinerVnextOneShotStage", ipAddress: null,
+    userAgent: null, entryHash: null };
+  const stageAudit = signed({ ...commonAudit, id: stage.stageApprovalAuditLogId,
+    action: "prompt_refiner.vnext_one_shot.stage_approved", targetId: stage.id,
+    summary: PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES.stage,
+    metadata: promptRefinerVnextOneShotApprovalAuditMetadata(stage, "stage"),
+    previousHash: null, createdAt: stage.approvedAt });
+  const closeAudit = signed({ ...commonAudit, id: legacy.supersededAuditLogId,
+    action: "prompt_refiner.vnext_one_shot.stage_superseded", targetId: legacy.id,
+    summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+    metadata: { replacementStageId: stage.id,
+      previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+      replacementStageApprovalAuditLogId: stage.stageApprovalAuditLogId },
+    previousHash: stageAudit.entryHash,
+    createdAt: new Date(stage.approvedAt.getTime() + 1000) });
+  const read = (oldStage = legacy, closure = closeAudit) => {
+    const byId = new Map([[stageAudit.id, stageAudit], [closure.id, closure]]);
+    const tx = {
+      promptRefinerVnextOneShotStage: { async findUnique({ where }) {
+        return where.id === stage.id ? replacement : oldStage;
+      } },
+      promptRefinerVnextOneShotSlot: { async findMany() { return slots(); } },
+      adminAuditLog: { async findUnique({ where }) {
+        if (where.id) return byId.get(where.id) ?? null;
+        return [stageAudit, closure].find((entry) =>
+          entry.entryHash === where.entryHash) ?? null;
+      } },
+    };
+    return readPromptRefinerVnextOneShotStage(tx);
+  };
+  try {
+    assert.equal((await read()).approvalAuditsValid, true);
+    assert.equal((await read({ ...legacy, status: "staged" })).approvalAuditsValid, false);
+    assert.equal((await read(legacy, { ...closeAudit, entryHash: "0".repeat(64) }))
+      .approvalAuditsValid, false);
+    assert.equal((await read(legacy, { ...closeAudit,
+      metadata: { ...closeAudit.metadata, replacementStageApprovalAuditLogId: "other" } }))
+      .approvalAuditsValid, false);
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+  }
 });
 
 test("transactional read locks the stage before reading reservations", async () => {
