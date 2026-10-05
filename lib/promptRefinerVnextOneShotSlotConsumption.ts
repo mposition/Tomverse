@@ -7,6 +7,8 @@ import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { readPromptRefinerVnextOneShotOperationalShadow } from
+  "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD,
@@ -75,6 +77,10 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
         stage.costCeilingMicroUsd !== TOTAL ||
         stage.slotCount !== PROMPT_REFINER_VNEXT_SLOT_COUNT) {
       throw new Error("vnext_one_shot_slot_binding_mismatch");
+    }
+    const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
+    if (!shadow.valid) {
+      throw new Error("vnext_one_shot_shadow_evidence_unavailable");
     }
     const slot = await tx.promptRefinerVnextOneShotSlot.findUnique({
       where: { stageId_slotIndex: { stageId: STAGE_ID, slotIndex: input.slotIndex } },

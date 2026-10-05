@@ -108,6 +108,7 @@ test("strict input and failure response never claim dispatch or expose private e
       "vnext_one_shot_slot_binding_mismatch",
       "vnext_one_shot_slot_already_consumed",
       "vnext_one_shot_slot_transition_conflict",
+      "vnext_one_shot_shadow_evidence_unavailable",
     ]) {
       writeErrorCode = code;
       const refused = await route.POST(request());
@@ -123,7 +124,7 @@ test("strict input and failure response never claim dispatch or expose private e
     assert.deepEqual(await unavailable.json(), {
       code: "SLOT_CONSUMPTION_OUTCOME_UNKNOWN", retryAuthorized: false,
       humanReviewRequired: true });
-    assert.equal(writes, 8);
+    assert.equal(writes, 9);
   } finally {
     writeErrorCode = null;
     if (oldToken === undefined) delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
