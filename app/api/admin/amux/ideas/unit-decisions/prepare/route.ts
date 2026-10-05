@@ -24,9 +24,10 @@ const body = z.object({ ideaId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   draftUnitId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   featureNodeId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   prepareRequestId: z.uuid().regex(/^[a-f0-9-]+$/),
+  cardType: z.enum(["story", "task"]).optional(),
   decisionReason: z.string().min(3).max(500).nullable() }).strict();
 
-/** A09's first write path is deliberately dark and Story-only. */
+/** One owner-confirmed Story or Task; the shared write latch remains dark. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);

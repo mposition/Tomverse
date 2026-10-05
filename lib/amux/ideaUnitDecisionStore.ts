@@ -339,20 +339,31 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
       id: string; sourceSystem: string | null; cardType: string | null;
       parentFeatureNodeId: string | null; status: string; revision: number;
       v4TitleDigest: string | null; v4TitleDigestKeyId: string | null;
+      archivedAt: Date | null; v4SourceApprovalId: string | null;
     }>>`
       SELECT "id", "sourceSystem", "cardType", "parentFeatureNodeId",
-             "status", "revision", "v4TitleDigest", "v4TitleDigestKeyId"
+             "status", "revision", "v4TitleDigest", "v4TitleDigestKeyId",
+             "archivedAt", "v4SourceApprovalId"
       FROM "AmuxWorkItem" WHERE "id" = ${target.id} FOR SHARE
     `;
     const current = rows[0];
+    const referenceApproval = current?.v4SourceApprovalId ?
+      await tx.amuxIdeaUnitDecision.findUnique({
+        where: { id: current.v4SourceApprovalId },
+        select: { action: true, state: true, registeredWorkItemId: true },
+      }) : null;
     if (rows.length !== 1 || !current ||
         current.sourceSystem !== "admin-idea-v4" ||
         current.cardType !== target.cardType ||
         current.parentFeatureNodeId !== target.featureNodeId ||
+        current.archivedAt !== null || current.status === "cancelled" ||
         current.status !== target.status ||
         current.revision !== target.revision ||
         current.v4TitleDigest !== target.content.digest ||
-        current.v4TitleDigestKeyId !== target.content.keyId) {
+        current.v4TitleDigestKeyId !== target.content.keyId ||
+        referenceApproval?.action !== "register_card" ||
+        referenceApproval.state !== "consumed" ||
+        referenceApproval.registeredWorkItemId !== current.id) {
       throw new AmuxV4UnitDecisionError("reconfirm");
     }
   }

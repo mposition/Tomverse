@@ -14,6 +14,13 @@ import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { readVerifiedAmuxCardProposal } from "./ideaUnitProposalReadService.ts";
 import { assembleAmuxV4StoryConfirmation } from
   "./ideaStoryConfirmationSnapshotCore.ts";
+import { assembleAmuxV4TaskConfirmation } from
+  "./ideaTaskConfirmationSnapshotCore.ts";
+import { resolveAmuxV4TaskReferences } from
+  "./ideaTaskReferenceService.ts";
+import { calculateCurrentApprovedAmuxV4TaskCost,
+  AmuxV4TaskCatalogApprovalError } from
+  "./v4TaskCostCatalogApprovalService.ts";
 import { AmuxV4DuplicateReasonRequired, AmuxV4UnitDecisionError,
   AMUX_V4_UNIT_WRITE_ENV,
   amuxV4UnitWriteEnabled, commitAmuxV4CardRegistration,
@@ -30,14 +37,15 @@ export type AmuxV4StoryPrepareChoice = {
   featureNodeId: string;
   prepareRequestId: string;
   decisionReason: string | null;
+  cardType?: "story" | "task";
 };
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
-/** One Story under an independently approved Feature. The shared registration
- * latch remains closed; Task price evidence is a separate prerequisite. */
-export async function prepareAmuxV4StoryRegistration(input: {
+/** One card under an approved Feature. A Task additionally needs an approved
+ * versioned Agent-only cost catalog and resolved Story/dependency references. */
+export async function prepareAmuxV4CardRegistration(input: {
   session: Session; request: Request; choice: AmuxV4StoryPrepareChoice;
   browserNonce: string;
 }) {
@@ -60,7 +68,7 @@ export async function prepareAmuxV4StoryRegistration(input: {
   }
   const verified = await readVerifiedAmuxCardProposal(input.session,
     choice.ideaId, choice.draftUnitId);
-  if (verified.proposal.cardType !== "story") {
+  if (verified.proposal.cardType !== (choice.cardType ?? "story")) {
     throw new AmuxV4UnitDecisionError("not_ready");
   }
   const scanner = await loadAmuxCardDuplicateScanner();
@@ -161,7 +169,7 @@ export async function prepareAmuxV4StoryRegistration(input: {
         throw new AmuxV4DuplicateReasonRequired(
           duplicates.candidates.map((candidate) => candidate.id));
       }
-      const snapshot = assembleAmuxV4StoryConfirmation({
+      const common = {
         ideaId: choice.ideaId, decisionId, prepareRequestId: choice.prepareRequestId,
         actorUserId, ownerSession,
         unit: { id: unit.id, localRef: unit.localRef!,
@@ -180,16 +188,43 @@ export async function prepareAmuxV4StoryRegistration(input: {
             Parameters<typeof assembleAmuxV4StoryConfirmation>[0]["hierarchy"],
         sourceFeatureRef, duplicateScan: duplicates,
         decisionReason: choice.decisionReason, key: keys,
-      });
+      };
+      let taskCost = null;
+      let snapshot: AmuxIdeaUnitConfirmationSnapshot | null;
+      if (verified.proposal.cardType === "task") {
+        if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
+          throw new AmuxV4UnitDecisionError("not_ready");
+        }
+        const refs = await resolveAmuxV4TaskReferences(tx, {
+          ideaId: choice.ideaId, actorUserId, proposal: verified.proposal,
+          featureNodeId: feature.id,
+        });
+        try {
+          const approved = await calculateCurrentApprovedAmuxV4TaskCost(tx,
+            verified.proposal.taskRole, verified.proposal.executionGrade);
+          taskCost = { ok: true as const, receipt: approved.receipt };
+          snapshot = assembleAmuxV4TaskConfirmation({ ...common, ...refs,
+            costReceipt: approved.receipt });
+        } catch (error) {
+          if (error instanceof AmuxV4TaskCatalogApprovalError) {
+            throw new AmuxV4UnitDecisionError("not_ready");
+          }
+          throw error;
+        }
+      } else {
+        snapshot = assembleAmuxV4StoryConfirmation(common);
+      }
       if (!snapshot) throw new AmuxV4UnitDecisionError("reconfirm");
       const result = await commitAmuxV4UnitPrepare(tx, { session: input.session,
         request: input.request, snapshot, duplicateScan: duplicates,
-        taskCost: null, digestKey: keys });
+        taskCost, digestKey: keys });
       callbackReturned = true;
       return { ...result, draftUnitId: unit.id, title: verified.proposal.title,
-        cardType: "story" as const, storyKind: verified.proposal.storyKind,
+        cardType: verified.proposal.cardType,
+        storyKind: verified.proposal.storyKind,
         featureNodeId: feature.id, duplicateCandidateIds:
           duplicates.candidates.map((candidate) => candidate.id),
+        taskCostReceipt: taskCost?.receipt ?? null,
         backlogOnly: true as const, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });
@@ -201,7 +236,7 @@ export async function prepareAmuxV4StoryRegistration(input: {
 
 /** Consume one exact prepared Story. The owner-selected digest is compared
  * before creating external content keys, then checked again in the DB tx. */
-export async function consumeAmuxV4StoryRegistration(input: {
+export async function consumeAmuxV4CardRegistration(input: {
   session: Session; request: Request; decisionId: string;
   consumeRequestId: string; confirmationDigest: string;
   browserNonce: string;
@@ -231,7 +266,7 @@ export async function consumeAmuxV4StoryRegistration(input: {
   }
   const snapshot = prepared.confirmationSnapshot as
     AmuxIdeaUnitConfirmationSnapshot;
-  if (snapshot.card?.cardType !== "story" ||
+  if (!snapshot.card ||
       snapshot.decisionId !== prepared.id ||
       snapshot.ideaId !== prepared.ideaId ||
       snapshot.draftUnitId !== prepared.draftUnitId) {
@@ -239,7 +274,7 @@ export async function consumeAmuxV4StoryRegistration(input: {
   }
   const verified = await readVerifiedAmuxCardProposal(input.session,
     prepared.ideaId, prepared.draftUnitId);
-  if (verified.proposal.cardType !== "story") {
+  if (verified.proposal.cardType !== snapshot.card.cardType) {
     throw new AmuxV4UnitDecisionError("reconfirm");
   }
   const scanner = await loadAmuxCardDuplicateScanner();
@@ -261,19 +296,31 @@ export async function consumeAmuxV4StoryRegistration(input: {
     ], [
       { ideaId: prepared.ideaId, purpose: "card_title", subjectId: cardId },
       { ideaId: prepared.ideaId, purpose: "card_body", subjectId: cardId },
+      ...(snapshot.card.cardType === "task" ? [{ ideaId: prepared.ideaId,
+        purpose: "card_brief" as const, subjectId: cardId }] : []),
     ]);
   } catch { throw new AmuxV4UnitDecisionError("integrity_unavailable"); }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
-      const recalculate = async (transaction: Prisma.TransactionClient) => ({
-        duplicateScan: await scanner(transaction, {
+      const recalculate = async (transaction: Prisma.TransactionClient) => {
+        let taskCost = null;
+        if (verified.proposal.cardType === "task") {
+          if (!verified.proposal.taskRole || !verified.proposal.executionGrade) {
+            throw new AmuxV4UnitDecisionError("reconfirm");
+          }
+          const approved = await calculateCurrentApprovedAmuxV4TaskCost(transaction,
+            verified.proposal.taskRole, verified.proposal.executionGrade);
+          taskCost = { ok: true as const, receipt: approved.receipt };
+        }
+        return { duplicateScan: await scanner(transaction, {
           unitId: prepared.draftUnitId, proposal: verified.proposal,
           featureNodeId: snapshot.card!.featureNodeId,
-        }), taskCost: null,
-      });
+        }), taskCost };
+      };
       const current = deriveAmuxIdeaUnitConfirmation(snapshot, digestKey,
-        snapshot.duplicates, null);
+        snapshot.duplicates, snapshot.card?.cardType === "task" ?
+          { ok: true, receipt: snapshot.card.task!.costReceipt } : null);
       if (!current.ok || !sameAmuxIdeaUnitConfirmation(current.confirmationDigest,
           prepared.confirmationDigest)) {
         throw new AmuxV4UnitDecisionError("reconfirm");
@@ -295,6 +342,12 @@ export async function consumeAmuxV4StoryRegistration(input: {
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
+      throw new AmuxV4UnitDecisionError("not_ready");
+    }
     throw new AmuxV4UnitDecisionError("outcome_unknown");
   }
 }
+
+export const prepareAmuxV4StoryRegistration = prepareAmuxV4CardRegistration;
+export const consumeAmuxV4StoryRegistration = consumeAmuxV4CardRegistration;

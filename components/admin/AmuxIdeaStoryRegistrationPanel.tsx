@@ -13,6 +13,14 @@ import type { AmuxVisibleAnalysisUnit } from
 const ref = z.string().regex(/^[A-Za-z0-9_-]{8,80}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const requestRef = z.string().uuid();
+const costReceiptSchema = z.object({
+  ceilingMicroUsd: z.string().regex(/^(0|[1-9]\d*)$/),
+  catalogVersion: z.string().min(1), pricingVersion: z.string().min(1),
+  routes: z.array(z.object({ routeId: z.string(), workerName: z.string(),
+    provider: z.string(), modelId: z.string(),
+    perAttemptMicroUsd: z.string().regex(/^(0|[1-9]\d*)$/),
+    routePolicyDigest: digest }).strict()).min(1).max(128),
+}).passthrough();
 const catalogSchema = z.object({ features: z.array(z.object({
   ref, level: z.literal("feature"), parentRef: ref,
   revision: z.number().int().nonnegative(), contentDigest: digest,
@@ -21,15 +29,17 @@ const catalogSchema = z.object({ features: z.array(z.object({
 const preparedSchema = z.object({
   state: z.literal("prepared"), decisionId: ref, confirmationDigest: digest,
   expiresAt: z.string().datetime(), draftUnitId: ref, title: z.string(),
-  cardType: z.literal("story"), storyKind: z.enum(["general", "bug"]),
+  cardType: z.enum(["story", "task"]),
+  storyKind: z.enum(["general", "bug"]).nullable(),
   featureNodeId: ref, duplicateCandidateIds: z.array(ref).max(64),
+  taskCostReceipt: costReceiptSchema.nullable(),
   backlogOnly: z.literal(true), executionAuthorized: z.literal(false),
   retryWrite: z.literal(false), auditId: ref,
 }).strict();
 type Prepared = z.infer<typeof preparedSchema>;
 
-/** Per-Story, two-click approval. Browser text never supplies the proposal. */
-export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
+/** Per-card, two-click approval. Browser text never supplies the proposal. */
+export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
   ideaId: string; unit: AmuxVisibleAnalysisUnit;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
@@ -50,7 +60,8 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
   const [error, setError] = useState<string | null>(null);
   const proposal = unit.proposal;
   if (unit.decisionState !== "proposed" || proposal?.kind !== "card" ||
-      proposal.cardType !== "story") return null;
+      !["story", "task"].includes(proposal.cardType)) return null;
+  const isTask = proposal.cardType === "task";
 
   const fail = async (response: Response) => {
     const value: unknown = await response.json().catch(() => null);
@@ -66,7 +77,7 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
       setError(null);
     } else if (code === "outcome_unknown") { setUnknown(true); setError(null); }
     else { if (code === "reconfirm") { setDuplicateIds([]); setReason(""); }
-      setError(m.storyRegistrationFailed(code)); }
+      setError(isTask ? m.taskRegistrationFailed(code) : m.storyRegistrationFailed(code)); }
   };
   const load = async () => {
     if (busy || unknown) return;
@@ -91,14 +102,17 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
         method: "POST", cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ideaId, draftUnitId: unit.id, featureNodeId: featureId,
-          prepareRequestId,
+          prepareRequestId, cardType: proposal.cardType,
           decisionReason: duplicateIds.length ? reason.trim() || null : null }),
       });
       if (!response.ok) { await fail(response); return; }
       const parsed = preparedSchema.safeParse(await response.json());
       if (!parsed.success || parsed.data.draftUnitId !== unit.id ||
           parsed.data.title !== proposal.title ||
-          parsed.data.featureNodeId !== featureId) {
+          parsed.data.featureNodeId !== featureId ||
+          parsed.data.cardType !== proposal.cardType ||
+          (isTask && !parsed.data.taskCostReceipt) ||
+          (!isTask && parsed.data.taskCostReceipt !== null)) {
         setUnknown(true); return;
       }
       setPrepared(parsed.data);
@@ -175,8 +189,13 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
     finally { setBusy(false); }
   };
   return <section className="space-y-2 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
-    <h5 className="font-medium">{m.storyRegistrationTitle} · {proposal.title}</h5>
-    <p className="text-sm">{m.storyRegistrationHint}</p>
+    <h5 className="font-medium">{isTask ? m.taskRegistrationTitle :
+      m.storyRegistrationTitle} · {proposal.title}</h5>
+    <p className="text-sm">{isTask ? m.taskRegistrationHint :
+      m.storyRegistrationHint}</p>
+    {isTask ? <p className="text-xs">{m.taskRegistrationReferences}:
+      {proposal.parentStoryRef ?? m.taskRegistrationNoStory} ·
+      {proposal.dependencyRefs.join(", ") || m.taskRegistrationNoDependencies}</p> : null}
     <button type="button" onClick={() => void load()} disabled={busy || unknown}
       className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
       {m.resolutionLoad}</button>
@@ -201,7 +220,7 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
       disabled={busy || unknown || (duplicateIds.length > 0 &&
         reason.trim().length < 3)}
       className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
-      {m.storyRegistrationPrepare}</button> : null}
+      {isTask ? m.taskRegistrationPrepare : m.storyRegistrationPrepare}</button> : null}
     {prepared ? <div className="space-y-2 text-sm">
       <p role="status">{m.storyRegistrationPrepared}</p>
       <p>{m.storyRegistrationDecisionId}: <code className="break-all">
@@ -210,12 +229,22 @@ export function AmuxIdeaStoryRegistrationPanel({ ideaId, unit }: {
         {prepared.confirmationDigest}</code></p>
       <p>{m.storyRegistrationExpires}: {prepared.expiresAt}</p>
       <p>{m.storyRegistrationDuplicates}: {prepared.duplicateCandidateIds.join(", ") || "—"}</p>
+      {prepared.taskCostReceipt ? <div className="space-y-1">
+        <p>{m.taskRegistrationCostCeiling}:
+          {prepared.taskCostReceipt.ceilingMicroUsd} µUSD ·
+          {prepared.taskCostReceipt.catalogVersion} /
+          {prepared.taskCostReceipt.pricingVersion}</p>
+        <ul className="list-disc pl-5">{prepared.taskCostReceipt.routes.map((route) =>
+          <li key={route.routeId}>{route.workerName} · {route.provider}/
+            {route.modelId} · {route.perAttemptMicroUsd} µUSD</li>)}</ul>
+      </div> : null}
       {!registered ? <button type="button" onClick={() => void consume()}
         disabled={busy || unknown}
         className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
-        {m.storyRegistrationConsume}</button> : null}
+        {isTask ? m.taskRegistrationConsume : m.storyRegistrationConsume}</button> : null}
     </div> : null}
-    {registered ? <p role="status">{m.storyRegistrationRegistered}
+    {registered ? <p role="status">{isTask ? m.taskRegistrationRegistered :
+      m.storyRegistrationRegistered}
       {cardId ? <> · <code>{cardId}</code></> : null}</p> : null}
     {requestId ? <p className="text-xs">{m.storyRegistrationRequestId}: <code>
       {requestId}</code></p> : null}

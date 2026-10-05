@@ -9338,3 +9338,23 @@ model AmuxPortfolioNodeRevision {
   @@unique([nodeId, revision])
   @@index([decisionId])
 }
+
+/// Owner-approved, versioned Agent worker/model ceiling inputs. These are
+/// separate from Chat pricing and user credit entitlement.
+model AmuxV4TaskCostCatalogApproval {
+  id                   String    @id
+  version              Int       @unique
+  status               String
+  catalogVersion       String    @unique
+  pricingVersion       String
+  catalog              Json
+  catalogDigest        String
+  evidenceDigest       String
+  approvedByUserId     String
+  approvalAuditLogId   String    @unique
+  approvedAt           DateTime
+  revokedAt            DateTime?
+  revocationAuditLogId String?   @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}

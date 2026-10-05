@@ -23,7 +23,7 @@ const body = z.object({ decisionId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   consumeRequestId: z.uuid().regex(/^[a-f0-9-]+$/),
   confirmationDigest: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 
-/** One prepared Story, one owner confirmation, one inert backlog card. */
+/** One prepared card, one owner confirmation, one inert backlog card. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
