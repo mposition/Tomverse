@@ -685,6 +685,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The one-shot replacement migration reads the existing supersession audit row under a key-share lock in two guards. Its DDL and trigger write verbs constrain only the one-shot stage table; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261005210000_prompt_refiner_one_shot_run_approved_recovery/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 9,
+    reason:
+      "The B06 recovery migration reads linked supersession audits and counts forbidden historical audits in stage guards. It changes only the one-shot stage constraint and guard functions; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 6,
@@ -1088,6 +1096,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 5,
     reason:
       "Five dynamic SELECTs in the one-shot replacement guards use the trigger's own schema quoted with %I: two lock and read AdminAuditLog, one locks the historical stage, and two count the historical slots and replacement stage. The functions pin search_path to pg_catalog, pg_temp; each statement only reads and every variable ID is bound with USING.",
+  },
+  {
+    path: "prisma/migrations/20261005210000_prompt_refiner_one_shot_run_approved_recovery/migration.sql",
+    count: 8,
+    reason:
+      "Eight dynamic SELECTs in the B06 recovery guards use TG_TABLE_SCHEMA quoted with %I: two linked AdminAuditLog reads, one forbidden-audit count, two stage locks, two historical-slot counts, and one deferred replacement count. IDs are fixed or bound with USING, search_path is pinned to pg_catalog and pg_temp, and none writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",

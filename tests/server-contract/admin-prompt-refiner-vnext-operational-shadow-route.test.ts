@@ -100,16 +100,22 @@ async function loadRoute() {
         assert.deepEqual(input.proof, proof);
         if (unknown) throw new Error("private transaction failure");
         readbackValid = true;
-        return { stageId: "prompt-refiner-vnext-one-shot-v2",
+        return { stageId: "prompt-refiner-vnext-one-shot-v3",
           shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false };
       },
       readPromptRefinerVnextOneShotOperationalShadow: async () => ({
         present: readbackValid, valid: readbackValid,
         shadowAuditLogId: readbackValid ? "synthetic-shadow-audit" : null,
+        cacheWriteInputTokens: readbackValid ? 0 : null,
         dispatchAuthorized: false,
       }),
       promptRefinerVnextOneShotShadowTarget: () => shadowTarget,
     },
+  });
+  mock.module(mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"), {
+    namedExports: { readPromptRefinerVnextOneShotPaidAuthorization: async () => ({
+      present: false, valid: false, auditLogId: null,
+    }) },
   });
   return import(mod("app/api/admin/prompt-refiner/vnext-operational-shadow/route.ts"));
 }
@@ -143,12 +149,15 @@ test("write and readback are content-free; unknown outcome requests human readba
   assert.equal((await route.POST(request({ ...body, sourceText: "never accepted" }))).status, 400);
   const written = await route.POST(request());
   assert.equal(written.status, 201);
-  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v2",
+  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v3",
     shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false });
   const readback = await route.GET(readRequest());
   assert.equal(readback.status, 200);
-  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v2"]);
-  assert.equal((await readback.json()).readback.evidence.valid, true);
+  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v3"]);
+  const observed = (await readback.json()).readback;
+  assert.equal(observed.evidence.valid, true);
+  assert.equal(observed.evidence.cacheWriteInputTokens, 0);
+  assert.equal(observed.paidAuthorizationAuditPresent, false);
   unknown = true;
   const failed = await route.POST(request());
   assert.equal(failed.status, 503);

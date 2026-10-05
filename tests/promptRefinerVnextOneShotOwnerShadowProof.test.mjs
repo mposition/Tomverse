@@ -42,7 +42,7 @@ test("owner attestor executes the A17 runner and signs only bound zero-cost proo
     const targetPath = join(folder, "target.json");
     const synthetic = syntheticManifest();
     const binding = JSON.parse(synthetic.bindingText);
-    const now = new Date("2026-10-05T08:00:00.000Z");
+    const now = new Date();
     const ownerKeyHex = "42".repeat(32);
     const seal = createPromptRefinerVnextOneShotOwnerSeal({
       manifestText: synthetic.manifestText,

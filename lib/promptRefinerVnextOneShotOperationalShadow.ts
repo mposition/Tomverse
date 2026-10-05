@@ -29,7 +29,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const ACTION = "prompt_refiner.vnext_one_shot.operational_shadow_completed";
 const SUMMARY = "Verified the one-shot stage, run, audit and 80 reserved slots without dispatch.";
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -103,11 +103,12 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   present: boolean;
   valid: boolean;
   shadowAuditLogId: string | null;
+  cacheWriteInputTokens: 0 | null;
   dispatchAuthorized: false;
 }>> {
   const rows = await tx.adminAuditLog.findMany({
     where: { action: ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID },
+      targetId: stage?.id ?? STAGE_ID },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let valid = false;
@@ -142,6 +143,7 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   }
   return Object.freeze({ present: rows.length !== 0, valid,
     shadowAuditLogId: valid ? entry!.id : null,
+    cacheWriteInputTokens: valid ? 0 as const : null,
     dispatchAuthorized: false as const });
 }
 

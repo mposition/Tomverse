@@ -4,24 +4,24 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authOptions } from "@/lib/auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
-import {
-  assertRecentAdminAuthentication,
-  isAdminReauthenticationError,
-} from "@/lib/adminReauthentication";
+import { assertRecentAdminAuthentication, isAdminReauthenticationError } from
+  "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
   "@/lib/apiSecurity";
-import { approvePromptRefinerVnextOneShotRun } from
-  "@/lib/promptRefinerVnextOneShotRunApproval";
+import { authOptions } from "@/lib/auth";
+import { approvePromptRefinerVnextOneShotPaidDispatch } from
+  "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
-const deploymentId = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
-const requestSchema = z.object({
+const deploymentId = z.string().uuid();
+const schema = z.object({
   stageApprovalAuditLogId: z.string().min(1).max(128),
+  runApprovalAuditLogId: z.string().min(1).max(128),
+  shadowAuditLogId: z.string().min(1).max(128),
   sourceCommitSha: sha,
   sourceManifestDigest: digest,
   runnerDigest: digest,
@@ -29,10 +29,10 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_RUN_80_SLOTS"),
+  confirmation: z.literal("AUTHORIZE_VNEXT_ONE_SHOT_V3_PAID_DISPATCH_AFTER_B06"),
 }).strict();
 
-/** Separate owner approval after stage; never dispatches or calls a provider. */
+/** Future, separate owner approval. B06 does not invoke this route. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -55,29 +55,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403, headers });
     }
     await consumeApiRateLimit(request, session.user.id,
-      "admin-prompt-refiner-vnext-run-approval", { minute: 1, day: 3 });
-    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1") {
-      return NextResponse.json({ code: "RUN_WRITE_DISABLED" },
+      "admin-prompt-refiner-vnext-paid-authorization", { minute: 1, day: 1 });
+    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1") {
+      return NextResponse.json({ code: "PAID_APPROVAL_WRITE_DISABLED" },
         { status: 409, headers });
     }
-    const body = await readLimitedJson(request, 2 * 1024, requestSchema);
+    const body = await readLimitedJson(request, 2 * 1024, schema);
     const { confirmation: _confirmation, ...expected } = body;
     void _confirmation;
-    const result = await approvePromptRefinerVnextOneShotRun({
+    const result = await approvePromptRefinerVnextOneShotPaidDispatch({
       session, request, expected,
     });
-    return NextResponse.json({
-      stageId: result.stageId,
-      runApprovalAuditLogId: result.runApprovalAuditLogId,
-      dispatchAuthorized: false,
-    }, { status: 201, headers });
+    return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    return NextResponse.json({ code: "RUN_APPROVAL_OUTCOME_UNKNOWN",
+    return NextResponse.json({ code: "PAID_APPROVAL_OUTCOME_UNKNOWN",
       retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }

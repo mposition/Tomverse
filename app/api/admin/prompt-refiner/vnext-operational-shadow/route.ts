@@ -17,6 +17,8 @@ import {
 } from "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { promptRefinerVnextOneShotShadowProofSchema } from
   "@/lib/promptRefinerVnextOneShotShadowProof";
+import { readPromptRefinerVnextOneShotPaidAuthorization } from
+  "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
@@ -105,10 +107,13 @@ export async function GET(request: Request) {
     if ("response" in access) return access.response;
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v2" },
+        where: { id: "prompt-refiner-vnext-one-shot-v3" },
       });
       const snapshot = await readPromptRefinerVnextOneShotStage(tx);
       const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
+      const paidAuthorization = stage && await readPromptRefinerVnextOneShotPaidAuthorization(
+        tx, stage, evidence.shadowAuditLogId ?? "",
+      );
       return { stageStatus: snapshot.stageStatus,
         slotCount: snapshot.slotCount, reservedSlots: snapshot.reservedSlots,
         consumedSlots: snapshot.consumedSlots,
@@ -120,7 +125,9 @@ export async function GET(request: Request) {
           snapshot.slotCount === 80 && snapshot.reservedSlots === 80 &&
           snapshot.consumedSlots === 0
           ? promptRefinerVnextOneShotShadowTarget(stage) : null,
-        evidence };
+        evidence,
+        paidAuthorizationAuditPresent: paidAuthorization?.present ?? false,
+        paidAuthorizationAuditValid: paidAuthorization?.valid ?? false };
     }, { maxWait: 5_000, timeout: 10_000 });
     return NextResponse.json({ readback }, { headers });
   } catch (error) {

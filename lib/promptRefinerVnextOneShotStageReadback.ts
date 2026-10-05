@@ -14,8 +14,9 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
-const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const FIRST_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
 const SLOT_COST_MICRO_USD = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 
 type StageStatus = "staged" | "run_approved" | "closed";
@@ -56,11 +57,16 @@ async function replacementAuditIsValid(
   tx: Prisma.TransactionClient,
   stage: PromptRefinerVnextOneShotStage,
 ): Promise<boolean> {
-  if (stage.id !== STAGE_ID) return true;
+  if (stage.id === FIRST_STAGE_ID) return true;
+  const previousId = stage.id === STAGE_ID ? LEGACY_STAGE_ID :
+    stage.id === LEGACY_STAGE_ID ? FIRST_STAGE_ID : null;
+  if (!previousId) return false;
   const legacy = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: LEGACY_STAGE_ID },
+    where: { id: previousId },
   });
-  if (!legacy || legacy.status !== "closed" || legacy.runApprovalAuditLogId ||
+  if (!legacy || legacy.status !== "closed" ||
+      (previousId === FIRST_STAGE_ID && legacy.runApprovalAuditLogId !== null) ||
+      (previousId === LEGACY_STAGE_ID && !legacy.runApprovalAuditLogId) ||
       !legacy.supersededAuditLogId || legacy.approvedBy !== stage.approvedBy ||
       legacy.sourceCommitSha !== stage.sourceCommitSha ||
       legacy.sourceManifestDigest !== stage.sourceManifestDigest ||
@@ -74,13 +80,15 @@ async function replacementAuditIsValid(
   if (!audit || audit.actorUserId !== stage.approvedBy ||
       audit.action !== "prompt_refiner.vnext_one_shot.stage_superseded" ||
       audit.targetType !== "PromptRefinerVnextOneShotStage" ||
-      audit.targetId !== LEGACY_STAGE_ID ||
+      audit.targetId !== previousId ||
       !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, audit)) return false;
   const metadata = audit.metadata;
   return Boolean(metadata && typeof metadata === "object" &&
     !Array.isArray(metadata) &&
-    metadata.replacementStageId === STAGE_ID &&
+    metadata.replacementStageId === stage.id &&
     metadata.previousStageApprovalAuditLogId === legacy.stageApprovalAuditLogId &&
+    (previousId !== LEGACY_STAGE_ID ||
+      metadata.previousRunApprovalAuditLogId === legacy.runApprovalAuditLogId) &&
     metadata.replacementStageApprovalAuditLogId === stage.stageApprovalAuditLogId);
 }
 

@@ -129,7 +129,8 @@ export const promptRefinerVnextOneShotApprovalAuditEntryIsValid = (
     entry.id !== id ||
     !entry.entryHash ||
     (stage.id !== "prompt-refiner-vnext-one-shot-v1" &&
-      stage.id !== "prompt-refiner-vnext-one-shot-v2") ||
+      stage.id !== "prompt-refiner-vnext-one-shot-v2" &&
+      stage.id !== "prompt-refiner-vnext-one-shot-v3") ||
     stage.slotCount !== 80 ||
     stage.perRequestCostMicroUsd !== BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD) ||
     stage.costCeilingMicroUsd !== BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD) ||

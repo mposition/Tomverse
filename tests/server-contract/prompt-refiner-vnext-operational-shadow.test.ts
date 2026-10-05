@@ -11,7 +11,7 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v2";
+const stageId = "prompt-refiner-vnext-one-shot-v3";
 const target = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
@@ -128,7 +128,8 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
   reset();
   assert.deepEqual(await readPromptRefinerVnextOneShotOperationalShadow(
     tx as never, stage as never), {
-    present: false, valid: false, shadowAuditLogId: null, dispatchAuthorized: false,
+    present: false, valid: false, shadowAuditLogId: null,
+    cacheWriteInputTokens: null, dispatchAuthorized: false,
   });
   const result = await recordPromptRefinerVnextOneShotOperationalShadow(input());
   assert.deepEqual(result, { stageId, shadowAuditLogId: "synthetic-shadow-audit",
@@ -142,6 +143,7 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
   assert.deepEqual(await readPromptRefinerVnextOneShotOperationalShadow(
     tx as never, stage as never), {
     present: true, valid: true, shadowAuditLogId: "synthetic-shadow-audit",
+    cacheWriteInputTokens: 0,
     dispatchAuthorized: false,
   });
   // A database clock behind the app clock must not invalidate an audit that
