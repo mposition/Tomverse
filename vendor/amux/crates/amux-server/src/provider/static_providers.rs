@@ -445,14 +445,15 @@ fn parse_cursor_models(stdout: &str) -> Vec<String> {
 // GitHub Copilot CLI
 // ---------------------------------------------------------------------------
 
-/// GitHub Copilot CLI (`copilot`, npm `@github/copilot`). Everything below is
-/// taken from the CLI's own reference (github/copilot-cli,
-/// `_autodocs/api-reference/cli-command.md`), NOT from a live run: no
-/// `copilot` binary was installed on the server when this adapter was added,
-/// so each claim says which kind it is.
+/// GitHub Copilot CLI (`copilot`, npm `@github/copilot`). The flags were
+/// checked against `copilot --help` of 1.0.91 installed on the server
+/// (2026-10-05). No session was run, because the server had no Copilot login
+/// yet: the argv is verified, the screens are not, and each claim below says
+/// which kind it is.
 ///
-/// - `structured_events: true` — documented: `-p/--prompt` is the
-///   non-interactive mode and `--output-format json` emits JSONL in it.
+/// - `structured_events: true` — `--help`: `-p, --prompt <text>` runs one
+///   prompt non-interactively and `--output-format json` is "JSONL, one JSON
+///   object per line".
 /// - `hooks: false` — not verified either way; the conservative default.
 /// - `reports_usage: false` — no machine-readable quota API is documented;
 ///   `usage()` is honestly unknown, as for every other static adapter here.
