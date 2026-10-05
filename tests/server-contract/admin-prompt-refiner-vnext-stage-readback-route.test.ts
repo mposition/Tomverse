@@ -54,8 +54,10 @@ async function loadRoute() {
     },
   } });
   mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
-    readPromptRefinerVnextOneShotStage: async () => {
+    readPromptRefinerVnextOneShotStage: async (_tx: object, stageId?: string) => {
       reads++;
+      assert.equal(stageId, reads % 2 === 0 ?
+        "prompt-refiner-vnext-one-shot-v1" : undefined);
       return { stagePresent: false, stageStatus: null, slotCount: 0,
         reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
         approvalAuditsValid: false, dispatchAuthorized: false };
@@ -99,12 +101,15 @@ test("response is content-free; database failure does not leak details", async (
   assert.equal(response.status, 200);
   noStore(response);
   assert.equal(rateLimits, 1);
-  assert.equal(reads, 1);
-  assert.deepEqual(await response.json(), { readback: {
+  assert.equal(reads, 2);
+  const absent = {
     stagePresent: false, stageStatus: null, slotCount: 0,
     reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
     approvalAuditsValid: false, dispatchAuthorized: false,
-  } });
+  };
+  assert.deepEqual(await response.json(), {
+    readback: absent, previousStage: absent,
+  });
   readError = true;
   const log = mock.method(console, "error", () => {});
   const unavailable = await route.GET(request());
@@ -112,5 +117,5 @@ test("response is content-free; database failure does not leak details", async (
   assert.equal(unavailable.status, 503);
   noStore(unavailable);
   assert.deepEqual(await unavailable.json(), { error: "Read-back unavailable." });
-  assert.equal(reads, 1);
+  assert.equal(reads, 2);
 });
