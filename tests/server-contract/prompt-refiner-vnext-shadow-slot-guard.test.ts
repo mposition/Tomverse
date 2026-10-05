@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v1";
+let stageId = "prompt-refiner-vnext-one-shot-v2";
 const requestId = "11111111-1111-4111-8111-111111111111";
 const input = { requestId, slotIndex: 0,
   runApprovalAuditLogId: "synthetic-run-audit" };
@@ -15,13 +15,14 @@ let auditWrites = 0;
 let slotWrites = 0;
 
 const tx = {
-  promptRefinerVnextOneShotStage: { findUnique: async () => ({
+  promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
+    where: { id: string } }) => where.id === stageId ? ({
     id: stageId, status: "run_approved",
     runApprovalAuditLogId: input.runApprovalAuditLogId,
     manifestRoot: "a".repeat(64), runnerDigest: "b".repeat(64),
     perRequestCostMicroUsd: BigInt(29_918), costCeilingMicroUsd: BigInt(2_393_440),
     slotCount: 80,
-  }) },
+  }) : null },
   promptRefinerVnextOneShotSlot: {
     findUnique: async () => ({ id: "synthetic-slot-0", status: "reserved",
       requestId: null, consumedAt: null, reservedCostMicroUsd: BigInt(29_918) }),
@@ -72,4 +73,17 @@ test("dispatch refuses absent shadow before any slot or audit write", async () =
   assert.equal(result.slotConsumptionAuditLogId, "synthetic-slot-audit");
   assert.equal(auditWrites, 1);
   assert.equal(slotWrites, 1);
+});
+
+test("closed legacy reservations cannot be consumed for the replacement run", async () => {
+  const { consumePromptRefinerVnextOneShotSlot } = await import(
+    mod("lib/promptRefinerVnextOneShotSlotConsumption.ts"));
+  stageId = "prompt-refiner-vnext-one-shot-v1";
+  shadowValid = true;
+  const priorAudits = auditWrites;
+  const priorSlots = slotWrites;
+  await assert.rejects(consumePromptRefinerVnextOneShotSlot(input),
+    /vnext_one_shot_slot_binding_mismatch/);
+  assert.equal(auditWrites, priorAudits);
+  assert.equal(slotWrites, priorSlots);
 });

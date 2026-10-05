@@ -9,11 +9,16 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import pg from "pg";
 
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES,
+  promptRefinerVnextOneShotApprovalAuditMetadata } from
+  "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
-import { readPromptRefinerVnextOneShotStage } from
+import { lockAndReadPromptRefinerVnextOneShotStage,
+  readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { approvePromptRefinerVnextOneShotRun } from
   "@/lib/promptRefinerVnextOneShotRunApproval";
@@ -36,9 +41,11 @@ import { recordPromptRefinerVnextOneShotPreregistration } from
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const fixtureKey = "synthetic-chat01-a06-audit-integrity-key";
-const stageId = "prompt-refiner-vnext-one-shot-v1";
+const stageId = "prompt-refiner-vnext-one-shot-v2";
+const legacyStageId = "prompt-refiner-vnext-one-shot-v1";
 const countOperationalAudits = () => prisma.adminAuditLog.count({
-  where: { action: { not: "prompt_refiner.vnext_one_shot.preregistered" } },
+  where: { targetId: { not: legacyStageId },
+    action: { not: "prompt_refiner.vnext_one_shot.preregistered" } },
 });
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const binding = {
@@ -93,6 +100,8 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         "20260918090000_admin_audit_log_append_only/migration.sql"), "utf8"));
       await setup.query(await readFile(path.join(migrationPath,
         "20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql"), "utf8"));
+      await setup.query(await readFile(path.join(migrationPath,
+        "20261005140000_prompt_refiner_one_shot_unrun_replacement/migration.sql"), "utf8"));
       await setup.query(`CREATE TABLE "StageAuditProbe" ("id" TEXT PRIMARY KEY)`);
       await setup.query(`CREATE TABLE "ModelRegistryEntry" (
         "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "apiModel" TEXT NOT NULL,
@@ -122,18 +131,6 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
 
       const append = (tx: Prisma.TransactionClient) =>
         writePromptRefinerVnextOneShotStageApprovalAudit({ tx, session, request, binding });
-      const insertStage = async (tx: Prisma.TransactionClient, auditLogId: string,
-        approvedBy: string, count: number) => {
-        await tx.promptRefinerVnextOneShotStage.create({ data: {
-          ...binding, approvedBy, approvedAt: new Date(0), stageApprovalAuditLogId: auditLogId,
-        } });
-        await tx.promptRefinerVnextOneShotSlot.createMany({ data:
-          Array.from({ length: count }, (_, slotIndex) => ({
-            id: `synthetic-slot-${slotIndex}`, stageId, slotIndex,
-            reservedCostMicroUsd: BigInt(29_918),
-          })),
-        });
-      };
 
       await assert.rejects(
         writePromptRefinerVnextOneShotStageApprovalAudit({
@@ -180,31 +177,6 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(await countOperationalAudits(), 0);
       await setup.query(`DROP TRIGGER reject_stage_audit_trigger ON "AdminAuditLog"`);
       await setup.query(`DROP FUNCTION reject_stage_audit()`);
-
-      // A failure after audit and stage inserts discards both, not an orphan approval.
-      await assert.rejects(prisma.$transaction(async (tx) => {
-        const { auditLogId, approvedBy } = await append(tx);
-        await insertStage(tx, auditLogId, approvedBy, 80);
-        throw new Error("synthetic post-stage failure");
-      }), /synthetic post-stage failure/);
-      assert.equal(await countOperationalAudits(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
-
-      // The deferred 80-slot constraint fails at commit and rolls the audit back.
-      await assert.rejects(prisma.$transaction(async (tx) => {
-        const { auditLogId, approvedBy } = await append(tx);
-        await insertStage(tx, auditLogId, approvedBy, 79);
-      }), /exactly 80 reserved slots/);
-      assert.equal(await countOperationalAudits(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
-
-      await assert.rejects(prisma.$transaction(async (tx) => {
-        const { auditLogId, approvedBy } = await append(tx);
-        await insertStage(tx, auditLogId, approvedBy, 81);
-      }), /slot|index|constraint/i);
-      assert.equal(await countOperationalAudits(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
 
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request,
@@ -258,6 +230,125 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         action: "prompt_refiner.vnext_one_shot.preregistered",
       } }), 1);
 
+      const legacyBinding = { ...binding, id: legacyStageId,
+        runtimeDeploymentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+      await prisma.$transaction(async (tx) => {
+        const legacyAuditLogId = await writeAdminAuditLog({
+          tx, session, request,
+          action: "prompt_refiner.vnext_one_shot.stage_approved",
+          targetType: "PromptRefinerVnextOneShotStage",
+          targetId: legacyStageId,
+          summary: PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES.stage,
+          metadata: promptRefinerVnextOneShotApprovalAuditMetadata(
+            legacyBinding, "stage"),
+        });
+        await tx.promptRefinerVnextOneShotStage.create({ data: {
+          ...legacyBinding, approvedBy: session.user!.id!,
+          approvedAt: new Date(0), stageApprovalAuditLogId: legacyAuditLogId,
+        } });
+        await tx.promptRefinerVnextOneShotSlot.createMany({ data:
+          Array.from({ length: 80 }, (_, slotIndex) => ({
+            id: `legacy-slot-${slotIndex}`, stageId: legacyStageId, slotIndex,
+            reservedCostMicroUsd: BigInt(29_918),
+          })),
+        });
+      });
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, legacyStageId)))
+        .approvalAuditsValid, true);
+      const legacyStage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      });
+      await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
+        where: { id: legacyStageId }, data: { status: "closed" },
+      }), /first-stage close requires a supersession audit/);
+      await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
+        where: { id: legacyStageId },
+        data: { status: "closed",
+          supersededAuditLogId: legacyStage.stageApprovalAuditLogId },
+      }), /supersession audit binding is invalid/);
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding: legacyBinding,
+      }), /stage_audit_binding_invalid/);
+      assert.equal(await countOperationalAudits(), 0);
+
+      // A second stage cannot be inserted before the first closes with its
+      // own linked audit; a failed attempt leaves the old stage untouched.
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const { auditLogId, approvedBy } = await append(tx);
+        await tx.promptRefinerVnextOneShotStage.create({ data: {
+          ...binding, approvedBy, approvedAt: new Date(0),
+          stageApprovalAuditLogId: auditLogId,
+        } });
+      }), /one-shot replacement requires a closed/i);
+      assert.equal(await countOperationalAudits(), 0);
+      assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      })).status, "staged");
+      const insertReplacementFixture = (slotCount: number, failAfter = false,
+        omitReplacement = false) =>
+        prisma.$transaction(async (tx) => {
+          const legacy = await tx.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+            where: { id: legacyStageId },
+          });
+          const { auditLogId, approvedBy } = await append(tx);
+          const closeAuditLogId = await writeAdminAuditLog({
+            tx, session, request,
+            action: "prompt_refiner.vnext_one_shot.stage_superseded",
+            targetType: "PromptRefinerVnextOneShotStage",
+            targetId: legacyStageId,
+            summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+            metadata: {
+              replacementStageId: stageId,
+              previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+              replacementStageApprovalAuditLogId: auditLogId,
+            },
+          });
+          await tx.promptRefinerVnextOneShotStage.update({
+            where: { id: legacyStageId },
+            data: { status: "closed", supersededAuditLogId: closeAuditLogId },
+          });
+          if (!omitReplacement) {
+            await tx.promptRefinerVnextOneShotStage.create({ data: {
+              ...binding, approvedBy, approvedAt: new Date(0),
+              stageApprovalAuditLogId: auditLogId,
+            } });
+            await tx.promptRefinerVnextOneShotSlot.createMany({ data:
+              Array.from({ length: slotCount }, (_, slotIndex) => ({
+                id: `replacement-fixture-${slotIndex}`, stageId, slotIndex,
+                reservedCostMicroUsd: BigInt(29_918),
+              })),
+            });
+          }
+          if (failAfter) throw new Error("synthetic post-stage failure");
+        });
+      await assert.rejects(insertReplacementFixture(0, false, true),
+        /one-shot supersession requires replacement stage in the same transaction/);
+      await assert.rejects(insertReplacementFixture(79),
+        /exactly 80 reserved slots/);
+      await assert.rejects(insertReplacementFixture(81),
+        /PromptRefinerVnextOneShotSlot_index_check/);
+      await assert.rejects(insertReplacementFixture(80, true),
+        /synthetic post-stage failure/);
+      assert.equal(await countOperationalAudits(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      })).status, "staged");
+      for (const drifted of [
+        { ...binding, manifestRoot: "f".repeat(64) },
+        { ...binding, runtimeDeploymentId: legacyBinding.runtimeDeploymentId },
+      ]) {
+        await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+          session, request, binding: drifted,
+        }), /legacy_stage_not_replaceable/);
+        assert.equal(await countOperationalAudits(), 0);
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: legacyStageId },
+        })).status, "staged");
+      }
+
       // Exercise the actual A07 writer, not only a hand-built transaction.
       await setup.query(`CREATE FUNCTION reject_slot_forty() RETURNS trigger AS $$
         BEGIN
@@ -272,8 +363,11 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         session, request, binding,
       }), /synthetic slot failure/);
       assert.equal(await countOperationalAudits(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 0);
-      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 0);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: legacyStageId },
+      })).status, "staged", "slot failure must roll back the old-stage close");
       await setup.query(`DROP TRIGGER reject_slot_forty_trigger
         ON "PromptRefinerVnextOneShotSlot"`);
       await setup.query(`DROP FUNCTION reject_slot_forty()`);
@@ -290,7 +384,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(committed.length, 1, "only one concurrent stage may commit");
       assert.equal(refused.length, 1, "the duplicate stage must be refused");
       assert.match(String((refused[0] as PromiseRejectedResult).reason),
-        /unique|P2002|duplicate/i);
+        /legacy_stage_not_replaceable|unique|P2002|duplicate/i);
       const { stageApprovalAuditLogId: auditLogId, slotCount } =
         (committed[0] as PromiseFulfilledResult<Awaited<ReturnType<
           typeof createPromptRefinerVnextOneShotStageWithSlots>>>).value;
@@ -308,17 +402,66 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.match(audit.entryHash ?? "", /^[0-9a-f]{64}$/);
       const readback = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
       assert.equal(readback.approvalAuditsValid, true);
+      assert.equal(readback.stageId, stageId);
+      assert.equal(readback.runtimeDeploymentId, binding.runtimeDeploymentId);
+      assert.equal(readback.runtimeCommitSha, binding.runtimeCommitSha);
+      assert.equal(readback.stageApprovalAuditLogId, auditLogId);
+      assert.equal(readback.runApprovalAuditLogId, null);
       assert.equal(readback.reservationShapeValid, true);
       assert.equal(readback.reservedSlots, 80);
       assert.equal(readback.dispatchAuthorized, false);
-      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      const lockContender = new pg.Client({ connectionString: url.toString() });
+      await lockContender.connect();
+      try {
+        await lockContender.query(`SET search_path TO "${schema}"`);
+        await setup.query("BEGIN");
+        await setup.query(`SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+          WHERE "id" = $1 FOR NO KEY UPDATE NOWAIT`, [stageId]);
+        let unlockedReadCount = 0;
+        const blockedReadbackTx = {
+          async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+            const sql = strings.reduce((query, part, index) =>
+              query + part + (index < values.length ? `$${index + 1}` : ""), "");
+            return (await lockContender.query(sql, values)).rows;
+          },
+          promptRefinerVnextOneShotStage: { async findUnique() {
+            unlockedReadCount++;
+            throw new Error("stage_read_without_lock");
+          } },
+          promptRefinerVnextOneShotSlot: { async findMany() {
+            unlockedReadCount++;
+            throw new Error("slots_read_without_lock");
+          } },
+        } as unknown as Parameters<typeof lockAndReadPromptRefinerVnextOneShotStage>[0];
+        await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(blockedReadbackTx),
+          (error: unknown) => (error as { code?: string }).code === "55P03" &&
+            /could not obtain lock on row/.test((error as Error).message));
+        assert.equal(unlockedReadCount, 0);
+      } finally {
+        await setup.query("ROLLBACK");
+        await lockContender.end();
+      }
+      const previousReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, legacyStageId));
+      assert.equal(previousReadback.stageId, legacyStageId);
+      assert.equal(previousReadback.runtimeDeploymentId,
+        legacyBinding.runtimeDeploymentId);
+      assert.equal(previousReadback.stageApprovalAuditLogId,
+        legacyStage.stageApprovalAuditLogId);
+      assert.equal(previousReadback.runApprovalAuditLogId, null);
+      assert.equal(previousReadback.reservedSlots, 80);
+      await assert.rejects(prisma.promptRefinerVnextOneShotSlot.update({
+        where: { stageId_slotIndex: { stageId: legacyStageId, slotIndex: 0 } },
+        data: { status: "consumed", requestId: "synthetic-legacy-forbidden" },
+      }), /one-shot run approval is required before consumption/);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 160);
       assert.equal(await countOperationalAudits(), 1,
         "the refused concurrent approval must not leave an audit row");
       await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
         session, request, binding,
       }));
-      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 1);
-      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+      assert.equal(await prisma.promptRefinerVnextOneShotStage.count(), 2);
+      assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 160);
       assert.equal(await countOperationalAudits(), 1);
 
       // A09 reobserves the same source/deployment/price under the stage lock;
@@ -427,11 +570,27 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         const runAudit = await prisma.adminAuditLog.findUniqueOrThrow({
           where: { id: run.runApprovalAuditLogId },
         });
-        assert.equal(runAudit.previousHash, audit.entryHash);
+        const oldStage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: legacyStageId },
+        });
+        assert.equal(oldStage.status, "closed");
+        assert.equal(oldStage.runApprovalAuditLogId, null);
+        const closeAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+          where: { id: oldStage.supersededAuditLogId! },
+        });
+        assert.equal(closeAudit.previousHash, audit.entryHash);
+        assert.equal(runAudit.previousHash, closeAudit.entryHash);
         assert.ok(runAudit.createdAt.getTime() > advanced.approvedAt.getTime());
-        assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 80);
+        assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 160);
         const afterRun = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
         assert.equal(afterRun.approvalAuditsValid, true);
+        assert.equal(afterRun.stageId, stageId);
+        assert.equal(afterRun.runtimeDeploymentId, binding.runtimeDeploymentId);
+        assert.equal(afterRun.runtimeCommitSha, binding.runtimeCommitSha);
+        assert.equal(afterRun.stageApprovalAuditLogId, auditLogId);
+        assert.equal(afterRun.runApprovalAuditLogId, run.runApprovalAuditLogId);
+        assert.notEqual(afterRun.stageApprovalAuditLogId,
+          afterRun.runApprovalAuditLogId);
         assert.equal(afterRun.reservationShapeValid, true);
         assert.equal(afterRun.reservedSlots, 80);
         assert.equal(afterRun.consumedSlots, 0);

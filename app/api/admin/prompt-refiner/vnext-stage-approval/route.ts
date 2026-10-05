@@ -30,7 +30,7 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_STAGE_80_SLOTS"),
+  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_REPLACEMENT_STAGE_AND_CLOSE_PREVIOUS"),
 }).strict();
 
 /** Owner-only stage recording; no run approval, dispatch, or provider call. */

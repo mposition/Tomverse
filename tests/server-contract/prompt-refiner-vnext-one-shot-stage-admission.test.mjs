@@ -49,7 +49,7 @@ test.after(() => {
 test("stage binding comes from fresh app and Railway observations", async () => {
   const binding = await preparePromptRefinerVnextOneShotStageBinding(expected);
   assert.deepEqual(binding, {
-    id: "prompt-refiner-vnext-one-shot-v1", ...expected,
+    id: "prompt-refiner-vnext-one-shot-v2", ...expected,
     perRequestCostMicroUsd: 29_918n, slotCount: 80,
     costCeilingMicroUsd: 2_393_440n,
     sourceCommitPreregistrationVerified: false,

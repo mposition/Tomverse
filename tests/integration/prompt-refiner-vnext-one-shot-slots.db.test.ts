@@ -144,7 +144,7 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
          WHERE "id" = $1 FOR NO KEY UPDATE NOWAIT
       `, [stage]);
       await contender.query("BEGIN");
-      // Bound a regression that drops NOWAIT, but require the immediate row-lock error.
+      // The v1 stage remains historical even while its row is locked.
       await contender.query("SET LOCAL lock_timeout = '500ms'");
       let unlockedReadCount = 0;
       const blockedReadbackTx = {
@@ -162,12 +162,10 @@ test("vNext one-shot slots are exactly 80, priced and irreversible", { skip: !ra
           throw new Error("slots_read_without_lock");
         } },
       } as unknown as Parameters<typeof lockAndReadPromptRefinerVnextOneShotStage>[0];
-      await assert.rejects(
-        lockAndReadPromptRefinerVnextOneShotStage(blockedReadbackTx),
-        (error: unknown) =>
-          (error as { code?: string }).code === "55P03" &&
-          /could not obtain lock on row/.test((error as Error).message),
-      );
+      const activeReadback = await lockAndReadPromptRefinerVnextOneShotStage(
+        blockedReadbackTx);
+      assert.equal(activeReadback.stagePresent, false,
+        "the historical v1 row cannot be selected as the active run stage");
       assert.equal(unlockedReadCount, 0);
       await contender.query("ROLLBACK");
       await contender.query("BEGIN");

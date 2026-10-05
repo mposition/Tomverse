@@ -78,7 +78,7 @@ async function loadRoute() {
       void _confirmation;
       assert.deepEqual(input.expected, expected);
       if (failWrite) throw new Error("private run storage failed");
-      return { stageId: "prompt-refiner-vnext-one-shot-v1",
+      return { stageId: "prompt-refiner-vnext-one-shot-v2",
         runApprovalAuditLogId: "synthetic-run-audit", dispatchAuthorized: false };
     },
   } });
@@ -124,7 +124,7 @@ test("strict pins precede a single write; failure response is content-free", asy
   assert.equal(approved.status, 201);
   noStore(approved);
   assert.deepEqual(await approved.json(), {
-    stageId: "prompt-refiner-vnext-one-shot-v1",
+    stageId: "prompt-refiner-vnext-one-shot-v2",
     runApprovalAuditLogId: "synthetic-run-audit",
     dispatchAuthorized: false,
   });

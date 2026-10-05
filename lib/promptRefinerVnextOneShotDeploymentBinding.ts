@@ -5,7 +5,7 @@ import type { Prisma } from "@prisma/client";
 import { observePromptRefinerVnextOneShotDeployment } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
 const SHA = /^[0-9a-f]{40}$/;
 const DEPLOYMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
