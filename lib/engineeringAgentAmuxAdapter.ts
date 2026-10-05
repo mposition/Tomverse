@@ -269,15 +269,19 @@ export const engineeringPublishResultAttachment = (input: {
 /** The worker lease a runner request carries; the worker name is never among it. */
 export type EngineeringAgentWorkerLease = { instanceId: string; generation: number };
 
-const requireOpen = async () => {
-  if (!isEngineeringAgentAmuxAdapterOpen()) throw new EngineeringAgentStoreRefusedError("adapter_closed");
+/** Whether a call may reach AMUX now: the latch, the execution API and the effective mode. */
+const adapterPermittedNow = async (): Promise<boolean> => {
+  if (!isEngineeringAgentAmuxAdapterOpen()) return false;
   const { mode } = await readEngineeringAgentSwitches(prisma);
-  const permitted = engineeringAgentAmuxAdapterPermitted({
+  return engineeringAgentAmuxAdapterPermitted({
     codeLatch: ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
     executionApiEnabled: isAmuxExecutionApiEnabled(),
     mode,
   });
-  if (!permitted) throw new EngineeringAgentStoreRefusedError("adapter_closed");
+};
+
+const requireOpen = async () => {
+  if (!(await adapterPermittedNow())) throw new EngineeringAgentStoreRefusedError("adapter_closed");
 };
 
 /**
@@ -525,7 +529,9 @@ export async function finishEngineeringAgentRun(input: {
  * If AMUX will not take the number -- the card is not waiting on this
  * worker's review -- the pull request still exists: the item is settled and
  * bound all the same, and a state mismatch goes to a person (§11). A fact the
- * publisher reports is never dropped because the other side disagrees.
+ * publisher reports is never dropped because the other side disagrees. The
+ * same holds when the adapter is closed, the mode turned off included: the
+ * number then never reaches AMUX, and the mismatch says `adapter_closed`.
  */
 export async function recordEngineeringAgentPublisherResult(input: {
   workItemId: string;
@@ -542,7 +548,20 @@ export async function recordEngineeringAgentPublisherResult(input: {
       return { recorded: true as const, ...settled };
     });
   }
-  await requireOpen();
+  const pullRequest = input.pullRequest;
+  const settleWithoutCard = (refusal: string) =>
+    runEngineeringAgentTransaction(prisma, async (tx) => {
+      const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest });
+      await openEngineeringAgentWorkItem(tx, {
+        kind: "state_mismatch",
+        causeKey: `review_pr:${input.workItemId}`,
+        runId: null,
+        reason: refusal,
+      });
+      await input.markCommitted?.(tx, input.workItemId);
+      return { recorded: false as const, reason: refusal, ...settled };
+    });
+  if (!(await adapterPermittedNow())) return settleWithoutCard("adapter_closed");
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
     select: { run: { select: { cardId: true, amuxAttemptId: true } } },
@@ -550,7 +569,6 @@ export async function recordEngineeringAgentPublisherResult(input: {
   const cardId = item?.run?.cardId ?? null;
   const attemptId = item?.run?.amuxAttemptId ?? null;
   if (cardId === null || attemptId === null) throw new EngineeringAgentStoreRefusedError("publish_item_without_run");
-  const pullRequest = input.pullRequest;
   // The number goes on the review of this item's own attempt, and AMUX takes
   // it only while that attempt is still the card's latest.
   const recorded = await recordAmuxReviewPullRequest(
@@ -564,16 +582,5 @@ export async function recordEngineeringAgentPublisherResult(input: {
     }),
   );
   if (recorded.recorded) return recorded;
-  const refusal = recorded.reason;
-  return runEngineeringAgentTransaction(prisma, async (tx) => {
-    const settled = await recordEngineeringAgentPublishResult(tx, { ...input, pullRequest });
-    await openEngineeringAgentWorkItem(tx, {
-      kind: "state_mismatch",
-      causeKey: `review_pr:${input.workItemId}`,
-      runId: null,
-      reason: refusal,
-    });
-    await input.markCommitted?.(tx, input.workItemId);
-    return { recorded: false as const, reason: refusal, ...settled };
-  });
+  return settleWithoutCard(recorded.reason);
 }
