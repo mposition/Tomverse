@@ -77,7 +77,7 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
     let first = "";
 
     await t.test("an initial genesis that is not shadow is refused and writes nothing", async () => {
-      assert.deepEqual(await readOpsObserverAdminView(client), { head: null, trustReason: "state_missing", nextGenesisAt: null });
+      assert.deepEqual(await readOpsObserverAdminView(client), { head: null, trustReason: "state_missing", nextGenesisAt: null, genesisAllowedNow: true });
       assert.deepEqual(await genesis({ ...none, reason: "initial", mode: "live" }), { result: "transition_refused" });
       assert.deepEqual(await genesis({ ...none, reason: "recovery", mode: "shadow" }), { result: "transition_refused" });
       assert.deepEqual(await counts(), { g: 0, s: 0, a: 0 });
@@ -99,6 +99,7 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
       assert.deepEqual([view.head?.genesisId, view.head?.generation, view.head?.mode, view.trustReason],
         [first, 0, "shadow", "trusted"]);
       assert.equal(Date.parse(view.nextGenesisAt!) - Date.parse(view.head!.createdAt), 7 * 24 * 60 * 60 * 1000);
+      assert.equal(view.genesisAllowedNow, false);
     });
 
     const current = () => ({ expectedGenesisId: first, expectedGeneration: 0, expectedMode: "shadow", trustReason: "trusted" });
@@ -172,6 +173,7 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
       const view = await readOpsObserverAdminView(client);
       assert.deepEqual([view.head?.genesisId, view.head?.generation, view.head?.mode, view.trustReason],
         [head, null, "live", "state_missing"]);
+      assert.equal(view.genesisAllowedNow, true);
       const missing = { expectedGenesisId: head, expectedGeneration: null, expectedMode: "live", trustReason: "state_missing" };
       // The head is still named: an approval that says there is none is stale.
       assert.deepEqual(await genesis({ ...none, reason: "initial", mode: "shadow" }), { result: "stale" });

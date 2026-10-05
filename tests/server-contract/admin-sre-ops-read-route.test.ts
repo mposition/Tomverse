@@ -15,6 +15,7 @@ const VIEW = {
   head: { genesisId: "00000000-0000-4000-8000-000000000001", generation: 3, mode: "shadow", createdAt: "2026-10-01T00:00:00.000Z" },
   trustReason: "trusted",
   nextGenesisAt: "2026-10-08T00:00:00.000Z",
+  genesisAllowedNow: false,
 };
 const world = { session: null as unknown, isAdmin: false, reads: 0, throws: null as unknown };
 let GET: () => Promise<Response>;

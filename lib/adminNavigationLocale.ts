@@ -238,6 +238,11 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
     },
   },
+  "sre-ops": {
+    label: "SRE 에이전트",
+    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
+    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
+  },
   "agent-digests": {
     label: "Agent digest",
     description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",

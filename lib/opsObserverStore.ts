@@ -301,6 +301,8 @@ export type OpsObserverAdminView = {
   trustReason: string;
   /** When a genesis may next replace this head (the seven-day rule); null with no head. */
   nextGenesisAt: string | null;
+  /** Whether the seven-day rule allows a genesis at the time of this read. */
+  genesisAllowedNow: boolean;
 };
 
 /**
@@ -331,6 +333,7 @@ export async function readOpsObserverAdminView(client: PrismaClient = prisma): P
           : null,
         trustReason: verdict.trusted ? "trusted" : (verdict.reason ?? "state_missing"),
         nextGenesisAt: head ? new Date(head.createdAt.getTime() + GENESIS_MIN_INTERVAL_MS).toISOString() : null,
+        genesisAllowedNow: !head || Date.now() - head.createdAt.getTime() >= GENESIS_MIN_INTERVAL_MS,
       };
     },
     client,
