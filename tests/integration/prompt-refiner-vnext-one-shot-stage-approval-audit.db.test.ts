@@ -406,8 +406,15 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(readback.reservationShapeValid, true);
       assert.equal(readback.reservedSlots, 80);
       assert.equal(readback.dispatchAuthorized, false);
-      assert.equal((await prisma.$transaction((tx) =>
-        readPromptRefinerVnextOneShotStage(tx, legacyStageId))).reservedSlots, 80);
+      const previousReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, legacyStageId));
+      assert.equal(previousReadback.stageId, legacyStageId);
+      assert.equal(previousReadback.runtimeDeploymentId,
+        legacyBinding.runtimeDeploymentId);
+      assert.equal(previousReadback.stageApprovalAuditLogId,
+        legacyStage.stageApprovalAuditLogId);
+      assert.equal(previousReadback.runApprovalAuditLogId, null);
+      assert.equal(previousReadback.reservedSlots, 80);
       await assert.rejects(prisma.promptRefinerVnextOneShotSlot.update({
         where: { stageId_slotIndex: { stageId: legacyStageId, slotIndex: 0 } },
         data: { status: "consumed", requestId: "synthetic-legacy-forbidden" },
@@ -547,6 +554,8 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal(afterRun.runtimeCommitSha, binding.runtimeCommitSha);
         assert.equal(afterRun.stageApprovalAuditLogId, auditLogId);
         assert.equal(afterRun.runApprovalAuditLogId, run.runApprovalAuditLogId);
+        assert.notEqual(afterRun.stageApprovalAuditLogId,
+          afterRun.runApprovalAuditLogId);
         assert.equal(afterRun.reservationShapeValid, true);
         assert.equal(afterRun.reservedSlots, 80);
         assert.equal(afterRun.consumedSlots, 0);

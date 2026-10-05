@@ -68,7 +68,7 @@ test("missing stage is content-free and cannot dispatch", async () => {
   assert.deepEqual(calls, { stages: 1, slots: 0 });
 });
 
-test("exact 80-slot shape is observed without returning root or identifiers", async () => {
+test("exact 80-slot shape returns approval IDs without root or request IDs", async () => {
   const items = slots();
   items[0] = { ...items[0], status: "consumed", requestId: "synthetic-request",
     consumedAt: new Date("2026-10-03T00:01:00.000Z") };
