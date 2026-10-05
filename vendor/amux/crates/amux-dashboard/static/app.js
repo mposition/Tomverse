@@ -174,7 +174,7 @@ function _applyTheme(light) {
   const cb = document.getElementById('theme-checkbox');
   if (cb) cb.checked = light;
   const lbl = document.getElementById('theme-label');
-  if (lbl) lbl.textContent = light ? 'Light mode' : 'Dark mode';
+  if (lbl) lbl.textContent = light ? amuxT('settings.theme.light', 'Light mode') : amuxT('settings.theme.dark', 'Dark mode');
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = light ? '#ffffff' : '#0d1117';
   _hljsApplyTheme(light);
@@ -2556,23 +2556,24 @@ function updateConnectionStatus() {
     if (el.id === 'conn-modal-status') el.style.color = '';
     if (readState || _localWriteError) {
       el.className = 'conn-status offline';
-      el.textContent = readState === 'auth' ? 'Access required' : 'Sync error';
+      el.textContent = readState === 'auth' ? amuxT('conn.access_required', 'Access required') : amuxT('conn.sync_error', 'Sync error');
     } else if (!online) {
       el.className = 'conn-status offline';
       const total = offlineQueue.length + drafts.length;
-      el.textContent = total ? total + ' pending' : 'Offline';
+      el.textContent = total ? amuxT('conn.pending', '{n} pending', {n: total}) : amuxT('conn.offline', 'Offline');
     } else if (offlineQueue.some(_outboxNeedsAttention)) {
       el.className = 'conn-status polling';
-      el.textContent = offlineQueue.length + ' pending';
+      el.textContent = amuxT('conn.pending', '{n} pending', {n: offlineQueue.length});
     } else if (_liveSSE) {
       el.className = 'conn-status online';
-      el.textContent = 'Live';
+      el.textContent = amuxT('conn.live', 'Live');
     } else {
       el.className = 'conn-status polling';
-      el.textContent = 'Polling';
+      el.textContent = amuxT('conn.polling', 'Polling');
     }
-    el.setAttribute('aria-label', el.textContent + ' — connection details');
-    if (el.id === 'conn-status') el.title = el.textContent + ' — connection details';
+    const details = amuxT('conn.details', '{state} — connection details', {state: el.textContent});
+    el.setAttribute('aria-label', details);
+    if (el.id === 'conn-status') el.title = details;
   });
   const notice = document.getElementById('session-read-notice');
   if (notice && notice.innerHTML) { notice.innerHTML = ''; notice._noticeHTML = ''; }
@@ -11228,7 +11229,7 @@ async function saveGlobalMemory() {
   }
 }
 
-const APP_VER = '0.9.983';   // bump together with the sw.js CACHE version
+const APP_VER = '0.9.984';   // bump together with the sw.js CACHE version
 // Warm the shared catalog so model-type filters are exact on first use. A
 // failure is non-fatal (custom ids and the open-string fallback still work)
 // and is already reported by _loadModelCatalog.
@@ -25330,7 +25331,10 @@ let _boardDragId = null;
 // Stored 'session' values are migrated to the view the user actually chose.
 let boardViewMode = localStorage.getItem('amux_board_view') || 'status';
 if (boardViewMode === 'session') boardViewMode = 'worker';
-let boardOwnerFilter = localStorage.getItem('amux_board_owner') || 'human';
+// The board opens on every card. It used to open on Human, which hid every
+// worker-owned card behind a toggle and read as "My tasks" being the default.
+// A stored choice (the All/Human/Workers toggle) still wins.
+let boardOwnerFilter = localStorage.getItem('amux_board_owner') || 'all';
 // Smart Board: derived display-status data, fetched from /api/board/derived.
 let _smartBoardData = null;
 let _smartBoardFetching = false;
@@ -29131,7 +29135,7 @@ function _boardRenderViews() {
     const on = _boardActiveView === v.id;
     h += '<button class="board-view-chip' + (on ? ' active' : '') + (n ? '' : ' empty') + '"'
       +  ' title="' + esc(v.hint) + ' — ' + esc(v.q) + '"'
-      +  ' onclick="_boardApplyView(\'' + v.id + '\')">' + esc(v.name)
+      +  ' onclick="_boardApplyView(\'' + v.id + '\')">' + esc(amuxT('board.saved.' + v.id, v.name))
       +  (n ? '<span class="bvc-n">' + n + '</span>' : '') + '</button>';
   });
   _boardViews.forEach(v => {
@@ -29499,7 +29503,7 @@ function _boardCtxMenu(e, id) {
     h += '<div class="card-menu-item" onclick="event.stopPropagation();_boardCtxMove(\''
       + escJs(id) + '\',\'' + escJs(st.id) + '\')">'
       + '<span class="mi"><span class="board-status-dot" style="background:' + sty.dot + '"></span></span> '
-      + esc(st.label) + '</div>';
+      + esc(amuxStatusLabel(st)) + '</div>';
   });
   h += '<div class="card-menu-sep"></div>';
   h += '<div class="card-menu-item" onclick="event.stopPropagation();_boardCtxCopy(\''
@@ -30007,11 +30011,11 @@ function _renderBoardColumnsInto(host, items, scope) {
     html += '<div class="board-col-header"' + (isGlobal ? '' : ' style="cursor:default;"') + '>';
     html += '<span class="board-col-identity" style="display:flex;align-items:center;gap:5px;">';
     if (isGlobal) {
-      html += '<button class="board-col-collapse" onclick="toggleColCollapse(\'' + st + '\')" title="' + (collapsed ? 'Expand' : 'Collapse') + '">' + (collapsed ? '&#x25B8;' : '&#x25BE;') + '</button>';
+      html += '<button class="board-col-collapse" onclick="toggleColCollapse(\'' + st + '\')" title="' + (collapsed ? amuxT('board.col.expand', 'Expand') : amuxT('board.col.collapse', 'Collapse')) + '">' + (collapsed ? '&#x25B8;' : '&#x25BE;') + '</button>';
     }
-    html += '<span class="board-col-label" style="color:' + sty.color + '">' + esc(stObj.label) + '</span>';
+    html += '<span class="board-col-label" style="color:' + sty.color + '">' + esc(amuxStatusLabel(stObj)) + '</span>';
     if (stObj.terminal) {
-      html += '<span class="col-terminal-chip" title="Terminal state — cards here are finished">terminal</span>';
+      html += '<span class="col-terminal-chip" title="Terminal state — cards here are finished">' + amuxT('board.col.terminal', 'terminal') + '</span>';
     }
     if (stObj.stray) {
       html += '<span class="col-stray-flag" title="Cards carry the status &quot;' + esc(st)
@@ -30414,14 +30418,16 @@ function renderBoard() {
   if (bvC) bvC.classList.toggle('active', boardViewMode === 'status');
   if (bvL) bvL.classList.toggle('active', boardViewMode === 'list');
   if (bvSm) bvSm.classList.toggle('active', boardViewMode === 'smart');
+  var boAll = document.getElementById('bo-all');
   var boH = document.getElementById('bo-human');
   var boA = document.getElementById('bo-agent');
+  if (boAll) boAll.classList.toggle('active', boardOwnerFilter === 'all');
   if (boH) boH.classList.toggle('active', boardOwnerFilter === 'human');
   if (boA) boA.classList.toggle('active', boardOwnerFilter === 'agent');
 
   // A non-empty query REPLACES the Human/Sessions toggle rather than stacking
   // with it. Stacking made the chip counts lie: "Rotting 5" rendered 0 cards,
-  // because all 5 are agent-owned and the toggle defaults to Human. The count
+  // because all 5 are agent-owned and the toggle was on Human. The count
   // is computed over the same unfiltered set, so a chip that says 5 must show
   // 5. The toggle is the browse default; the query is the filter.
   const _qActive = !!(boardSearchQuery || '').trim();
@@ -30926,7 +30932,7 @@ function openBoardAdd(statusOrDate, prefillDate) {
   const dueTimeEl2 = document.getElementById('be-due-time');
   if (dueTimeEl2) dueTimeEl2.value = '';
   const sel = document.getElementById('be-status');
-  sel.innerHTML = boardStatuses.map(s => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('');
+  sel.innerHTML = boardStatuses.map(s => '<option value="' + s.id + '">' + esc(amuxStatusLabel(s)) + '</option>').join('');
   sel.value = status;
   _populateSessionSelect('be-session-add', peekSession || '');
   _tagState['be'] = [];
@@ -31716,7 +31722,7 @@ function boardDetailTab(tab) {
 function _renderDetailStatusBtns() {
   const sty = statusStyle(boardDetailStatus);
   document.getElementById('bd-status-row').innerHTML = '<label class="bd-status-control">Status <select id="bd-status-select" aria-label="Task status" style="background:' + sty.bg + ';color:' + sty.color + '" onchange="boardDetailSetStatus(this.value)">'
-    + boardStatuses.map(s => '<option value="' + esc(s.id) + '"' + (boardDetailStatus === s.id ? ' selected' : '') + '>' + esc(s.label) + '</option>').join('')
+    + boardStatuses.map(s => '<option value="' + esc(s.id) + '"' + (boardDetailStatus === s.id ? ' selected' : '') + '>' + esc(amuxStatusLabel(s)) + '</option>').join('')
     + '</select></label><button type="button" class="btn" onclick="boardDetailSave()">Move</button>';
 }
 
@@ -43490,7 +43496,12 @@ else document.addEventListener('DOMContentLoaded', _dpInit);
 let _bdRecordTab = 'preview';
 const _bdSectionOpen = new Map();
 function _boardQuick(query) {
-  boardOwnerFilter = query.includes('owner:human') ? 'human' : 'all';
+  // "All" is also the owner reset: it clears the Human/Workers toggle and is
+  // remembered the way the toggle is, so the next visit opens on every card.
+  // The other chips are queries, and a non-empty query already replaces the
+  // toggle in renderBoard, so they leave the stored choice alone. (My tasks
+  // used to flip the toggle to Human, which outlived the query once cleared.)
+  if (!query) { boardOwnerFilter = 'all'; localStorage.setItem('amux_board_owner', 'all'); }
   boardSearchQuery = query; _boardActiveView = '';
   document.getElementById('board-search').value = query;
   _bfSyncHash(); renderBoard();
