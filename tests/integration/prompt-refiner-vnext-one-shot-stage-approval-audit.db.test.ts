@@ -17,7 +17,8 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES,
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
-import { readPromptRefinerVnextOneShotStage } from
+import { lockAndReadPromptRefinerVnextOneShotStage,
+  readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { approvePromptRefinerVnextOneShotRun } from
   "@/lib/promptRefinerVnextOneShotRunApproval";
@@ -406,6 +407,37 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal(readback.reservationShapeValid, true);
       assert.equal(readback.reservedSlots, 80);
       assert.equal(readback.dispatchAuthorized, false);
+      const lockContender = new pg.Client({ connectionString: url.toString() });
+      await lockContender.connect();
+      try {
+        await lockContender.query(`SET search_path TO "${schema}"`);
+        await setup.query("BEGIN");
+        await setup.query(`SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+          WHERE "id" = $1 FOR NO KEY UPDATE NOWAIT`, [stageId]);
+        let unlockedReadCount = 0;
+        const blockedReadbackTx = {
+          async $queryRaw(strings: TemplateStringsArray, ...values: unknown[]) {
+            const sql = strings.reduce((query, part, index) =>
+              query + part + (index < values.length ? `$${index + 1}` : ""), "");
+            return (await lockContender.query(sql, values)).rows;
+          },
+          promptRefinerVnextOneShotStage: { async findUnique() {
+            unlockedReadCount++;
+            throw new Error("stage_read_without_lock");
+          } },
+          promptRefinerVnextOneShotSlot: { async findMany() {
+            unlockedReadCount++;
+            throw new Error("slots_read_without_lock");
+          } },
+        } as unknown as Parameters<typeof lockAndReadPromptRefinerVnextOneShotStage>[0];
+        await assert.rejects(lockAndReadPromptRefinerVnextOneShotStage(blockedReadbackTx),
+          (error: unknown) => (error as { code?: string }).code === "55P03" &&
+            /could not obtain lock on row/.test((error as Error).message));
+        assert.equal(unlockedReadCount, 0);
+      } finally {
+        await setup.query("ROLLBACK");
+        await lockContender.end();
+      }
       const previousReadback = await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotStage(tx, legacyStageId));
       assert.equal(previousReadback.stageId, legacyStageId);
