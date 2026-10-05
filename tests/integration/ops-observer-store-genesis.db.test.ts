@@ -126,28 +126,36 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
       assert.deepEqual(await counts(), { g: 2, s: 2, a: 2 });
     });
 
-    await t.test("a genesis waits for whoever holds the head's state row, as an advance does", async () => {
+    await t.test("a generation committed while the genesis waited is read, and the older approval is stale", async () => {
       const { genesisId: head, trust } = await read();
       const holder = new pg.Client({ connectionString: rawUrl, options: `-c search_path="${schema}"` });
       await holder.connect();
       try {
+        // Stands in for an advance: it holds the head state row, and its write
+        // (triggers off for this session only) moves the generation on.
         await holder.query("BEGIN");
+        await holder.query("SET LOCAL session_replication_role = replica");
         await holder.query(`SELECT 1 FROM "OpsObserverState" WHERE "genesisId" = $1 FOR UPDATE`, [head]);
         let settled = false;
         const pending = genesis({ expectedGenesisId: head, expectedGeneration: 0, expectedMode: "live", trustReason: trust,
-          reason: "activation", mode: "live" }).finally(() => { settled = true; });
+          reason: "recovery", mode: "live" }).finally(() => { settled = true; });
         await new Promise((resolve) => setTimeout(resolve, 400));
         assert.equal(settled, false, "the genesis must not judge while the state row is held");
-        await holder.query("ROLLBACK");
-        // Released, it judges the current head: live to live is no activation.
-        assert.deepEqual(await pending, { result: "transition_refused" });
+        await holder.query(
+          `UPDATE "OpsObserverState" SET generation = 1, "stampGeneration" = 1 WHERE "genesisId" = $1`, [head]);
+        await holder.query("COMMIT");
+        // Released, it reads generation 1: the approval of generation 0 is stale.
+        assert.deepEqual(await pending, { result: "stale" });
+        assert.deepEqual(await counts(), { g: 2, s: 2, a: 2 });
       } finally {
         await holder.end();
       }
     });
 
     await t.test("a head whose state row is missing is recovered by naming it", async () => {
-      const head = (await read()).genesisId;
+      const { rows: heads } = await q(`SELECT id FROM "OpsObserverGenesis" g
+        WHERE NOT EXISTS (SELECT 1 FROM "OpsObserverGenesis" x WHERE x."supersedesGenesisId" = g.id)`);
+      const head = heads[0].id as string;
       await age(head, 8);
       await q(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER USER`);
       try {
