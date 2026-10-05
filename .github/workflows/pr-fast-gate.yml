@@ -1081,11 +1081,29 @@ jobs:
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
 
+      # Shard weights, shard 1 then shard 2, for both projects.
+      #
+      # `--shard` balances by test count in file-sized groups, and the heavy
+      # specs sort into shard 1 (chat-unified-workspace, 116 tests / 4.1 min;
+      # guest-turnstile-verification, ~5 s a test; image-generation-workspace).
+      # From 2026-08-26 to 2026-10-05 desktop shard 1's test step grew 9.8 ->
+      # 17.0 minutes while shard 2 grew 7.6 -> 9.5, and shard 1 set PR Fast
+      # Gate's wall clock. Both projects split the same files 512 / 435.
+      #
+      # 40:55 moves the boundary to 405 / 542. Replaying the measured per-test
+      # times of a 2026-10-05 run (which reproduce its actual 16.6 / 9.5 split
+      # exactly) gives 13.9 / 12.2 minutes for desktop; file granularity makes
+      # 13.9 the lowest maximum on offer (36:59 gives 12.2 / 14.0). Every test
+      # still lands in exactly one shard, and tests/uiRiskShardWeights.test.mjs
+      # pins one weight per shard. PWTEST_SHARD_WEIGHTS is Playwright's own,
+      # undocumented knob; without it the split falls back to equal counts.
+      # Recalibrate the same way when one shard drifts well past the other.
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 20
         env:
           UI_RISK_PROJECT: ${{ matrix.project }}
+          PWTEST_SHARD_WEIGHTS: "40:55"
         run: npm run test:e2e:ui-risk:shard -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
