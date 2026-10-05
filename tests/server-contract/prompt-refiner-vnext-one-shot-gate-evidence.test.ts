@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import type { Session } from "next-auth";
-import { promptRefinerVnextOneShotSlotBindingDigest } from
+import { promptRefinerVnextOneShotGatePublicKeyDigest,
+  promptRefinerVnextOneShotSlotBindingDigest } from
   "../../lib/promptRefinerVnextOneShotGateAttestation";
 
 const root = resolve(import.meta.dirname, "..", "..");
@@ -55,6 +56,7 @@ let snapshot = { stagePresent: true, stageStatus: "run_approved", slotCount: 80,
   approvalAuditsValid: true };
 let rows: Array<Record<string, unknown>> = [];
 let shadowValid = true;
+let shadowReadError = false;
 let receiptValid = true;
 let writes = 0;
 const slotRows = Array.from({ length: 80 }, (_, slotIndex) => ({
@@ -93,7 +95,7 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
     rows.push({ id, action: input.action, targetType: input.targetType,
       targetId: input.targetId, actorUserId: "synthetic-owner",
       summary: input.summary, metadata: input.metadata,
-      createdAt: new Date("2026-10-05T00:00:03.000Z") });
+      createdAt: new Date(Date.now() + 1_000) });
     return id;
   },
 } });
@@ -108,9 +110,11 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
   namedExports: { readPromptRefinerVnextOneShotCandidateSource: async () => {} },
 });
 mock.module(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotOperationalShadow: async () => ({
-    valid: shadowValid, shadowAuditLogId: shadowValid ? target.shadowAuditLogId : null,
-  }) },
+  namedExports: { readPromptRefinerVnextOneShotOperationalShadow: async () => {
+    if (shadowReadError) throw new Error("synthetic_database_read_failed");
+    return { valid: shadowValid,
+      shadowAuditLogId: shadowValid ? target.shadowAuditLogId : null };
+  } },
 });
 mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), {
   namedExports: {
@@ -133,10 +137,13 @@ const reset = () => {
   snapshot = { stagePresent: true, stageStatus: "run_approved", slotCount: 80,
     reservedSlots: 0, consumedSlots: 80, reservationShapeValid: true,
     approvalAuditsValid: true };
-  rows = []; shadowValid = true; receiptValid = true; writes = 0;
+  rows = []; shadowValid = true; shadowReadError = false;
+  receiptValid = true; writes = 0;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = baseStage.manifestRoot;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = baseStage.runnerDigest;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 = publicB64;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST =
+    promptRefinerVnextOneShotGatePublicKeyDigest(publicB64);
 };
 async function attestation(overrides: Record<string, unknown> = {}) {
   const { signPromptRefinerVnextOneShotGateAttestation } = await import(
@@ -166,6 +173,10 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
   assert.equal(JSON.stringify(rows[0].metadata).includes(stage.manifestRoot), false);
   assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
     tx as never, stage as never)).valid, true);
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 = "rotated";
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).valid, true,
+  "historical evidence keeps its verified public key even after rotation");
   assert.equal((await gate.readPromptRefinerVnextOneShotDisposition(
     tx as never, stage as never)).valid, false);
   const decided = await gate.recordPromptRefinerVnextOneShotDisposition({
@@ -182,6 +193,12 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
 
 test("missing shadow, slot mismatch, tampered signature and duplicate gate fail before write", async () => {
   const gate = await load();
+  reset();
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST;
+  await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(),
+  }), /signer_pin_unavailable/);
+  assert.equal(writes, 0);
   reset(); shadowValid = false;
   await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
     session, request, attestation: await attestation(),
@@ -225,6 +242,43 @@ test("missing shadow, slot mismatch, tampered signature and duplicate gate fail 
     session, request, attestation: signed,
   }), /gate_duplicate/);
   assert.equal(writes, 1);
+});
+
+test("historical signed evidence survives age and database read errors stay unknown", async () => {
+  const gate = await load(); reset();
+  await gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(),
+  });
+  const metadata = rows[0].metadata as Record<string, unknown>;
+  rows[0].metadata = { ...metadata, attestation: await attestation({
+    signedAt: "2026-01-01T00:00:00.000Z",
+  }) };
+  rows[0].createdAt = new Date("2026-01-01T00:00:01.000Z");
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).valid, true);
+  shadowReadError = true;
+  await assert.rejects(gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never), /synthetic_database_read_failed/);
+});
+
+test("stored signer tampering, duplicate gate and broken audit invalidate readback", async () => {
+  const gate = await load(); reset();
+  await gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(),
+  });
+  const original = rows[0];
+  rows = [{ ...original, metadata: {
+    ...(original.metadata as Record<string, unknown>),
+    gatePublicKeyDigest: "0".repeat(64),
+  } }];
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).valid, false);
+  rows = [original, { ...original, id: "duplicate-gate" }];
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).valid, false);
+  rows = [original]; receiptValid = false;
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).valid, false);
 });
 
 test("a failed or missing gate cannot be upgraded by a person or inferred as pass", async () => {

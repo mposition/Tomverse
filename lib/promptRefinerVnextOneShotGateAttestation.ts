@@ -51,6 +51,14 @@ export function promptRefinerVnextOneShotSlotBindingDigest(value: unknown): stri
   }), "utf8").digest("hex");
 }
 
+export function promptRefinerVnextOneShotGatePublicKeyDigest(
+  publicKeyDerBase64: string,
+): string {
+  keyFromBase64(publicKeyDerBase64, "public");
+  return createHash("sha256")
+    .update(Buffer.from(publicKeyDerBase64, "base64")).digest("hex");
+}
+
 function keyFromBase64(value: string, kind: "public" | "private") {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 4096) return refuse();
   const der = Buffer.from(value, "base64");

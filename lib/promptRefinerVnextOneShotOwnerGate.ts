@@ -17,6 +17,7 @@ import {
 import {
   guardPromptRefinerVnextBilledUsage,
   PROMPT_REFINER_VNEXT_PRICE_PIN,
+  PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
 } from "./promptRefinerQualityEvaluationVnextExecutionContract";
 import { evaluatePromptRefinerVnextOneShotGateSummary,
   PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_VERSION,
@@ -240,7 +241,8 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
             summary.cost.maximumRequestCostMicroUsd, guarded.costUpperBoundMicroUsd);
         } else {
           summary.cost.heldReservationCount++;
-          summary.cost.heldReservationMicroUsd += 29_918;
+          summary.cost.heldReservationMicroUsd +=
+            PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD;
           if (guarded?.problems.some((problem) => [
             "inputTokens_above_cap", "outputTokens_above_cap",
             "cost_reconciliation_invalid",

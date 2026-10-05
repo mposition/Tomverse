@@ -13,6 +13,7 @@ import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { verifyPromptRefinerVnextOneShotGateAttestation,
   promptRefinerVnextOneShotSlotBindingDigest,
+  promptRefinerVnextOneShotGatePublicKeyDigest,
   type PromptRefinerVnextOneShotGateAttestation } from
   "@/lib/promptRefinerVnextOneShotGateAttestation";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST } from
@@ -39,6 +40,21 @@ const GATE_SUMMARY = "Recorded the content-free one-shot deterministic gate resu
 const DISPOSITION_SUMMARY = "Recorded the owner's separate one-shot disposition.";
 const SHA256 = /^[0-9a-f]{64}$/;
 
+function readGateSignerPin() {
+  const publicKey = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "";
+  const expectedDigest =
+    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST ?? "";
+  try {
+    if (!SHA256.test(expectedDigest) ||
+        promptRefinerVnextOneShotGatePublicKeyDigest(publicKey) !== expectedDigest) {
+      throw new Error("pin_mismatch");
+    }
+    return Object.freeze({ publicKey, digest: expectedDigest });
+  } catch {
+    throw new Error("vnext_one_shot_gate_signer_pin_unavailable");
+  }
+}
+
 export type PromptRefinerVnextOneShotGateTarget = Readonly<{
   stageApprovalAuditLogId: string;
   runApprovalAuditLogId: string;
@@ -54,9 +70,12 @@ const targetMatches = (stage: PromptRefinerVnextOneShotStage,
 
 const gateMetadata = (stage: PromptRefinerVnextOneShotStage,
   attestation: PromptRefinerVnextOneShotGateAttestation,
-  evaluated: ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary>) => ({
+  evaluated: ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary>,
+  signer: Readonly<{ publicKey: string; digest: string }>) => ({
   version: "prompt-refiner-vnext-one-shot-gate-evidence-v1",
   attestation,
+  gatePublicKeyDerBase64: signer.publicKey,
+  gatePublicKeyDigest: signer.digest,
   sourceCommitSha: stage.sourceCommitSha,
   sourceManifestDigest: stage.sourceManifestDigest,
   runnerDigest: stage.runnerDigest,
@@ -93,38 +112,47 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
       entry.actorUserId === stage.approvedBy && entry.summary === GATE_SUMMARY &&
       entry.metadata && typeof entry.metadata === "object" &&
       !Array.isArray(entry.metadata)) {
+    const metadata = entry.metadata as Record<string, unknown>;
+    let attestation: PromptRefinerVnextOneShotGateAttestation;
+    let evaluated: ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary>;
+    let signer: Readonly<{ publicKey: string; digest: string }>;
     try {
-      const metadata = entry.metadata as Record<string, unknown>;
-      const attestation = verifyPromptRefinerVnextOneShotGateAttestation(
-        metadata.attestation,
-        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "");
-      const evaluated = evaluatePromptRefinerVnextOneShotGateSummary(
-        attestation.summary);
-      const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
-      const slots = await readPromptRefinerVnextOneShotStage(tx);
-      const attempted = evaluated.summary.outcomes.suggested +
-        evaluated.summary.outcomes.abstained +
-        evaluated.summary.outcomes.failed + evaluated.summary.outcomes.unknown;
-      if (shadow.valid &&
-          attestation.stageApprovalAuditLogId === stage.stageApprovalAuditLogId &&
-          attestation.runApprovalAuditLogId === stage.runApprovalAuditLogId &&
-          attestation.shadowAuditLogId === shadow.shadowAuditLogId &&
-          attestation.runtimeDeploymentId === stage.runtimeDeploymentId &&
-          attestation.gateSourceDigest ===
-            PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST &&
-          slots.reservationShapeValid && slots.approvalAuditsValid &&
-          slots.consumedSlots === attempted &&
-          slots.reservedSlots === evaluated.summary.outcomes.not_dispatched &&
-          (await verifyConsumedSlotAudits(tx, attempted,
-            attestation.runApprovalAuditLogId))?.digest ===
-              attestation.slotBindingDigest &&
-          canonicalBenchmarkJson(metadata) ===
-            canonicalBenchmarkJson(gateMetadata(stage, attestation, evaluated)) &&
-          await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
-        outcome = evaluated.outcome;
+      if (typeof metadata.gatePublicKeyDerBase64 !== "string" ||
+          typeof metadata.gatePublicKeyDigest !== "string" ||
+          promptRefinerVnextOneShotGatePublicKeyDigest(
+            metadata.gatePublicKeyDerBase64) !== metadata.gatePublicKeyDigest) {
+        throw new Error("stored_signer_invalid");
       }
+      signer = { publicKey: metadata.gatePublicKeyDerBase64,
+        digest: metadata.gatePublicKeyDigest };
+      attestation = verifyPromptRefinerVnextOneShotGateAttestation(
+        metadata.attestation, signer.publicKey, entry.createdAt);
+      evaluated = evaluatePromptRefinerVnextOneShotGateSummary(
+        attestation.summary);
     } catch {
-      // A malformed stored report is invalid evidence, not a new verdict.
+      return Object.freeze({ present: true, valid: false,
+        gateAuditLogId: null, gateOutcome: null });
+    }
+    const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
+    const slots = await readPromptRefinerVnextOneShotStage(tx);
+    const attempted = evaluated.summary.outcomes.suggested +
+      evaluated.summary.outcomes.abstained +
+      evaluated.summary.outcomes.failed + evaluated.summary.outcomes.unknown;
+    if (shadow.valid &&
+        attestation.stageApprovalAuditLogId === stage.stageApprovalAuditLogId &&
+        attestation.runApprovalAuditLogId === stage.runApprovalAuditLogId &&
+        attestation.shadowAuditLogId === shadow.shadowAuditLogId &&
+        attestation.runtimeDeploymentId === stage.runtimeDeploymentId &&
+        slots.reservationShapeValid && slots.approvalAuditsValid &&
+        slots.consumedSlots === attempted &&
+        slots.reservedSlots === evaluated.summary.outcomes.not_dispatched &&
+        (await verifyConsumedSlotAudits(tx, attempted,
+          attestation.runApprovalAuditLogId))?.digest ===
+            attestation.slotBindingDigest &&
+        canonicalBenchmarkJson(metadata) ===
+          canonicalBenchmarkJson(gateMetadata(stage, attestation, evaluated, signer)) &&
+        await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
+      outcome = evaluated.outcome;
     }
   }
   return Object.freeze({ present: rows.length !== 0, valid: outcome !== null,
@@ -178,8 +206,12 @@ async function verifyConsumedSlotAudits(
       Array.from({ length: consumedSlots }, (_, index) =>
         (index + 1) * PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD)
         .some((value) => !cumulative.has(value))) return null;
-  return Object.freeze({ latest,
-    digest: promptRefinerVnextOneShotSlotBindingDigest(bindings) });
+  try {
+    return Object.freeze({ latest,
+      digest: promptRefinerVnextOneShotSlotBindingDigest(bindings) });
+  } catch {
+    return null;
+  }
 }
 
 /** Server rechecks the bound stage, all attempted slots, audit and shadow. */
@@ -191,9 +223,9 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
   if (!input.session?.user?.id || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_gate_context_invalid");
   }
+  const signer = readGateSignerPin();
   const attestation = verifyPromptRefinerVnextOneShotGateAttestation(
-    input.attestation,
-    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "");
+    input.attestation, signer.publicKey);
   const evaluated = evaluatePromptRefinerVnextOneShotGateSummary(attestation.summary);
   const root = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
   const runner = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
@@ -248,7 +280,7 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
       tx, session: input.session, request: input.request,
       action: GATE_ACTION, targetType: "PromptRefinerVnextOneShotStage",
       targetId: STAGE_ID, summary: GATE_SUMMARY,
-      metadata: gateMetadata(stage, attestation, evaluated),
+      metadata: gateMetadata(stage, attestation, evaluated, signer),
     });
     const readback = await readPromptRefinerVnextOneShotGateEvidence(tx, stage);
     if (!readback.valid || readback.gateAuditLogId !== gateAuditLogId ||

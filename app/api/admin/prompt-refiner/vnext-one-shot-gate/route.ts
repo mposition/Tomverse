@@ -54,6 +54,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ code: "GATE_EVIDENCE_REFUSED",
         retryAuthorized: false }, { status: 409, headers });
     }
+    if (error instanceof Error &&
+        error.message === "vnext_one_shot_gate_signer_pin_unavailable") {
+      return NextResponse.json({ code: "GATE_SIGNER_PIN_UNAVAILABLE",
+        retryAuthorized: false, humanReviewRequired: true },
+        { status: 503, headers });
+    }
     return NextResponse.json({ code: "GATE_EVIDENCE_OUTCOME_UNKNOWN",
       retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
