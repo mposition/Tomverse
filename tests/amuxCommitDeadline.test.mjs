@@ -92,6 +92,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261005060000_amux_v4_rejection_consistency",
   "20261005070000_amux_v4_node_link_consistency",
   "20261005080000_amux_v4_card_link_consistency",
+  "20261005090000_amux_v4_unit_actor_scope",
+  "20261005100000_amux_v4_derivation_groups",
+  "20261005110000_amux_v4_portfolio_scoring",
+  "20261005120000_amux_v4_task_dag_guard",
+  // A12: v22-only receipt and a separate, still-dark promotion gate.
+  "20261006100000_amux_v22_auto_promotion",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

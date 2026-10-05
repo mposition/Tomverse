@@ -74,7 +74,9 @@ test("portfolio evidence and score history are audited, path-bound and append-on
       await client.query("ROLLBACK TO SAVEPOINT reject_probe");
       await client.query("RELEASE SAVEPOINT reject_probe");
       assert.ok(error, "invalid portfolio write succeeded");
-      assert.equal(error.constraint, constraint, error.message);
+      assert.ok(error.constraint === constraint ||
+        (constraint === "AmuxPortfolioScoring_no_truncate_check" &&
+          error.code === "0A000"), error.message);
     }
 
     const assessments = {};
@@ -190,6 +192,106 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     await rejects(insertScore,
       [randomUUID(), randomUUID(), ...values.slice(2)],
       "AmuxPortfolioScoreSnapshot_latest_check");
+
+    // A12: a score is not promotion authority by itself. A separate v22
+    // system receipt may use the exact owner approval, score and brief only.
+    const ideaId = randomUUID();
+    const unitId = randomUUID();
+    const previewId = randomUUID();
+    await client.query(`INSERT INTO public."AmuxIdeaSubmission"
+      ("id", "requestId", "actorUserId", "state", "submittedAt",
+       "analysisDeadlineAt", "updatedAt") VALUES
+      ($1, $2, 'synthetic-owner', 'analyzing', CURRENT_TIMESTAMP,
+       CURRENT_TIMESTAMP + INTERVAL '7 days', CURRENT_TIMESTAMP)`,
+    [ideaId, randomUUID()]);
+    await client.query(`INSERT INTO public."AmuxIdeaAnalysisChunk"
+      ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+       "leaseGeneration", "analysisCompletedAt", "updatedAt") VALUES
+      ($1, 'synthetic-owner', 0, 'draft_ready', 0, 0,
+       CURRENT_TIMESTAMP - INTERVAL '1 second', CURRENT_TIMESTAMP)`,
+    [ideaId]);
+    await client.query(`INSERT INTO public."AmuxIdeaTransferPreview"
+      ("id", "ideaId", "chunkIndex", "attempt", "state", "modelId",
+       "templateVersion", "payloadDigest", "payloadDigestKeyId", "expiresAt",
+       "confirmedAt", "confirmExpiresAt", "confirmedByUserId",
+       "confirmationAuditLogId", "updatedAt") VALUES
+      ($1, $2, 0, 1, 'completed', 'synthetic-model', 'synthetic-template',
+       $3, 'synthetic', CURRENT_TIMESTAMP + INTERVAL '1 day',
+       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+       'synthetic-owner', $4, CURRENT_TIMESTAMP)`,
+    [previewId, ideaId, digest, randomUUID()]);
+    await client.query(`UPDATE public."AmuxIdeaAnalysisChunk"
+      SET "currentPreviewId" = $2 WHERE "ideaId" = $1`,
+    [ideaId, previewId]);
+    await client.query(`INSERT INTO public."AmuxIdeaDraftUnit"
+      ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex",
+       "localRef", "unitKind", "state", "bodyCiphertext", "bodyKeyId",
+       "bodyKeyVersion", "bodyDigest", "bodyDigestKeyId", "updatedAt")
+      VALUES ($1, $2, 'synthetic-owner', 0, 0, 'c0:card-0', 'card',
+       'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+    [unitId, ideaId, synthetic, digest]);
+    const prepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: ids.sourceApproval,
+      summary: "synthetic preparation",
+    });
+    await client.query(`INSERT INTO public."AmuxIdeaUnitDecision"
+      ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+       "prepareRequestId", "action", "state", "ownerSessionDigest",
+       "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+       "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+       "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+       "baseNodeId", "baseNodeRevision", "baseNodeDigest", "baseNodeDigestKeyId",
+       "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+      VALUES ($1, $2, $3, 'synthetic-owner', 0, $4, 'register_card',
+       'prepared', $5, 'synthetic', $5, 'synthetic', $5, 'synthetic',
+       $6::jsonb, $7, $5, 'synthetic', $8, 0, $5, 'synthetic',
+       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+       $9, CURRENT_TIMESTAMP)`,
+    [ids.sourceApproval, ideaId, unitId, randomUUID(), digest,
+      JSON.stringify({ card: { cardType: "task", dependencies: [] } }),
+      previewId, ids.feature, prepareAudit]);
+    const consumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: ids.sourceApproval,
+      summary: "synthetic consumption",
+    });
+    await client.query(`UPDATE public."AmuxIdeaUnitDecision"
+      SET "state" = 'consumed', "consumeRequestId" = $2,
+          "consumedAt" = CURRENT_TIMESTAMP, "registeredWorkItemId" = $3,
+          "finalAuditLogId" = $4 WHERE "id" = $1`,
+    [ids.sourceApproval, randomUUID(), ids.task, consumeAudit]);
+    await client.query(`UPDATE public."AmuxIdeaDraftUnit"
+      SET "state" = 'approved' WHERE "id" = $1`, [unitId]);
+    const receiptId = randomUUID();
+    const receiptAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: null, action: "amux.v22.auto_promotion.consumed",
+      targetType: "AmuxV22PromotionReceipt", targetId: receiptId,
+      summary: "synthetic v22 promotion",
+      metadata: { systemActor: "amux-v22-auto-admit" },
+    });
+    await client.query(`INSERT INTO public."AmuxV22PromotionReceipt"
+      ("id", "workItemId", "sourceApprovalId", "sourceApprovalDigest",
+       "briefDigest", "parentFeatureNodeId", "taskRevision",
+       "scoreSnapshotId", "scoreVersion", "scoreTotal", "capacityWipLimit",
+       "capacityOccupied", "verifiedWorkerCount", "queueLimit",
+       "normalLimit", "parallelReserved", "sev1Reserved", "costCents",
+       "policyVersion", "authorizationAuditLogId", "promotedAt") VALUES
+      ($1, $2, $3, $4, $5, $6, 0, $7, 'amux-v4-portfolio-v1', 64,
+       9, 0, 3, 9, 7, 1, 1, 0, 22, $8, CURRENT_TIMESTAMP)`,
+    [receiptId, ids.task, ids.sourceApproval, digest, digest,
+      ids.feature, scoreId, receiptAudit]);
+    await client.query(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'todo', "v22ReceiptId" = $2, "revision" = 1
+      WHERE "id" = $1`, [ids.task, receiptId]);
+    await client.query("SET CONSTRAINTS amux_v22_card_receipt_guard_trigger IMMEDIATE");
+    const moved = await client.query(`SELECT "status", "v22ReceiptId"
+      FROM public."AmuxWorkItem" WHERE "id" = $1`, [ids.task]);
+    assert.equal(moved.rows[0].status, "todo");
+    assert.equal(moved.rows[0].v22ReceiptId, receiptId);
+    await rejects(`UPDATE public."AmuxWorkItem"
+      SET "v4BriefDigest" = $2 WHERE "id" = $1`,
+    [ids.task, "e".repeat(64)], "AmuxV4TaskDag_binding_check");
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

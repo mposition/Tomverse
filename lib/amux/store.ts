@@ -253,6 +253,14 @@ const runnableDependencyFilter =
     },
   });
 
+// A12 creates unassigned v4 Task Todo rows, but A13 has not made their
+// role/grade-based worker claim safe yet. Keep them out of every legacy
+// dispatch read and claim CAS; nullable legacy sourceSystem must still pass.
+const legacyDispatchSourceFilter = (): Prisma.AmuxWorkItemWhereInput => ({
+  OR: [{ sourceSystem: null },
+    { sourceSystem: { not: "admin-idea-v4" } }],
+});
+
 /**
  * The global scheduler needs the complete runnable population.
  *
@@ -275,6 +283,7 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
       const rows = await tx.amuxWorkItem.findMany({
         where: {
           status: "todo",
+          ...legacyDispatchSourceFilter(),
           owner: null,
           archivedAt: null,
           dueParseState: { in: ["none", "valid"] },
@@ -370,6 +379,7 @@ export async function getRoutingSnapshotTask(
       where: {
         id: taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: expectedRevision,
@@ -424,6 +434,7 @@ export async function getAuthoritativeSchedulerFacts(
       where: {
         id: taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: expectedRevision,
@@ -512,6 +523,7 @@ export async function claimUnownedTodo(
       where: {
         id: input.taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: input.expectedRevision,
@@ -573,6 +585,7 @@ export async function claimUnownedTodo(
       where: {
         id: input.taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: input.expectedRevision,

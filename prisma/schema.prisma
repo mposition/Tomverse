@@ -2276,6 +2276,9 @@ model AdminAuditLog {
   amuxV4RetentionHoldApprovals AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldApprovalAudit")
   amuxV4RetentionHoldReleases AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldReleaseAudit")
   amuxV4RetentionHoldNotices AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldNoticeAudit")
+  amuxV22PromotionControls AmuxV22PromotionControl[] @relation("AmuxV22PromotionControlAudit")
+  amuxV22PromotionReceipts AmuxV22PromotionReceipt[] @relation("AmuxV22PromotionReceiptAudit")
+  amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -7129,7 +7132,7 @@ model AmuxWorkItem {
   v4BriefPurgedAt       DateTime?
   v4TerminalAt          DateTime?
   v4SourceApprovalId    String?
-  v22ReceiptId          String?   @unique
+  v22ReceiptId          String?   @unique @db.Uuid
   taskRole              String?
   executionGrade        String?
   createdAt             DateTime  @default(now())
@@ -7164,6 +7167,8 @@ model AmuxWorkItem {
   storyChildTasks   AmuxWorkItem[]      @relation("AmuxStoryTasks")
   portfolioAssessments AmuxPortfolioAssessment[]
   portfolioScoreSnapshots AmuxPortfolioScoreSnapshot[]
+  v22PromotionReceipt AmuxV22PromotionReceipt? @relation("AmuxV22PromotionCard")
+  v22AcceptedReceipt AmuxV22PromotionReceipt? @relation("AmuxV22AcceptedReceipt", fields: [v22ReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -9444,6 +9449,7 @@ model AmuxPortfolioScoreSnapshot {
   computedAt            DateTime
 
   task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22PromotionReceipts AmuxV22PromotionReceipt[]
   initiativeAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreInitiative", fields: [initiativeAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   epicAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreEpic", fields: [epicAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   featureAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreFeature", fields: [featureAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -9453,6 +9459,63 @@ model AmuxPortfolioScoreSnapshot {
   @@index([taskId, computedAt])
   @@index([activeStaleAt, taskId])
   @@index([baselineStaleAt, taskId])
+}
+
+/// Owner activation is separate from the v8 grant switch. No row is seeded.
+model AmuxV22PromotionControl {
+  id                      String   @id
+  active                  Boolean
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  activatedAt             DateTime
+  updatedAt               DateTime @updatedAt
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionControlAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Append-only evidence for one v4 Task's backlog-to-unassigned-todo move.
+/// It is not a worker claim, v8 grant, or authorization to run a CLI.
+model AmuxV22PromotionReceipt {
+  id                      String   @id @db.Uuid
+  workItemId              String   @unique
+  sourceApprovalId        String
+  sourceApprovalDigest    String
+  briefDigest             String
+  parentFeatureNodeId     String
+  parentStoryCardId       String?
+  taskRevision            Int
+  scoreSnapshotId         String   @db.Uuid
+  scoreVersion            String
+  scoreTotal              Int
+  capacityWipLimit        Int
+  capacityOccupied        Int
+  verifiedWorkerCount     Int
+  queueLimit              Int
+  normalLimit             Int
+  parallelReserved        Int
+  sev1Reserved            Int
+  costCents               Int
+  policyVersion           Int
+  authorizationAuditLogId String   @unique
+  promotedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22PromotionCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedReceipt")
+  scoreSnapshot AmuxPortfolioScoreSnapshot @relation(fields: [scoreSnapshotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionReceiptAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A lost result is never blindly retried. The shared v8 halt still applies.
+model AmuxV22PromotionUnknown {
+  id                      String   @id @db.Uuid
+  workItemId              String?
+  receiptFound            Boolean
+  authorizationAuditLogId String   @unique
+  recordedAt              DateTime
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionUnknownAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([recordedAt])
 }
 
 /// Owner-approved, versioned Agent worker/model ceiling inputs. These are

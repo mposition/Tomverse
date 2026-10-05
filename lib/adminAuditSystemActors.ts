@@ -22,11 +22,13 @@ export const AMUX_SYSTEM_AUDIT_ACTOR = "tomverse-amux-orchestrator" as const;
 export const AMUX_V4_IDEA_SYSTEM_ACTOR = "amux-v4-intake" as const;
 
 /**
- * The internal auto-promotion tick (orchestration policy version 15,
- * "자동 승격 개정"). It expires due grants and consumes a grant an owner
- * already bound to one item and one cent amount. It records nothing else.
+ * The legacy internal auto-promotion tick consumes an owner-bound grant.
  */
 export const AMUX_AUTO_PROMOTER_AUDIT_ACTOR = "amux-auto-promoter" as const;
+
+/** V22 Task admission has a distinct, scoped actor. It is not a human
+ * approval and has no authority to claim a worker or execute a Task. */
+export const AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR = "amux-v22-auto-admit" as const;
 
 /**
  * The engineering agent's actors (docs/policy/engineering-agent.md §11). Each
@@ -122,7 +124,6 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-intake-supervisor",
   "amux-intake-retention",
   "amux-portfolio-scorer",
-  "amux-v22-auto-admit",
 ] as const;
 
 export const SYSTEM_AUDIT_ACTORS = [
@@ -133,6 +134,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-vnext-one-shot-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
+  AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR,
   // Scoped below to the reviewed v4 intake actions only.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
@@ -217,6 +219,13 @@ export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
   isSystemAuditActor(actor) &&
+  (actor !== AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR ||
+    (action === "amux.v22.auto_promotion.consumed" &&
+      targetType === "AmuxV22PromotionReceipt") ||
+    (action === "amux.v22.auto_promotion.outcome_unknown" &&
+      targetType === "AmuxV22PromotionUnknown") ||
+    (action === "amux.auto_promotion.halted" &&
+      targetType === "AmuxRecommendationAutoHalt")) &&
   (actor !== AMUX_V4_IDEA_SYSTEM_ACTOR ||
     amuxV4SystemAuditScope(action, targetType) !== null);
 

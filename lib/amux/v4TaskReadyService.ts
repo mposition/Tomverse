@@ -150,10 +150,9 @@ async function currentPath(tx: Prisma.TransactionClient, card: {
   return true;
 }
 
-/** Admin-only, repeatable-read observation. #12 must recompute every fact in
- * its promotion transaction; this response is not a promotion receipt. */
-export async function readAmuxV4TaskReady(session: Session, taskId: string) {
-  const actorUserId = ownerId(session);
+/** Key material is loaded before a transaction; promotion re-reads every
+ * mutable fact under the queue lock and never treats this lookup as evidence. */
+export async function loadAmuxV4TaskReadyContext(taskId: string) {
   if (!TASK_ID.test(taskId)) throw new AmuxV4TaskReadyError("not_found");
   const initial = await prisma.amuxWorkItem.findUnique({
     where: { id: taskId }, select: { id: true, sourceSystem: true,
@@ -171,8 +170,15 @@ export async function readAmuxV4TaskReady(session: Session, taskId: string) {
     { ideaId, purpose: "card_body", subjectId: taskId },
     { ideaId, purpose: "card_brief", subjectId: taskId },
   ]);
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  return { ideaId, keys };
+}
+
+export async function evaluateAmuxV4TaskReadyInTransaction(
+  tx: Prisma.TransactionClient, taskId: string,
+  context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>,
+  expectedActorUserId: string | null,
+) {
+    const { ideaId, keys } = context;
     const card = await tx.amuxWorkItem.findUnique({ where: { id: taskId },
       select: { id: true, sourceSystem: true, sourceSnapshot: true,
         sourceDigest: true, cardType: true, status: true, archivedAt: true,
@@ -202,7 +208,8 @@ export async function readAmuxV4TaskReady(session: Session, taskId: string) {
         where: { id: card.v4SourceApprovalId },
         select: { id: true, action: true, state: true, actorUserId: true,
           ideaId: true, draftUnitId: true, unitDigest: true,
-          unitDigestKeyId: true, confirmationSnapshot: true,
+          unitDigestKeyId: true, confirmationDigest: true,
+          confirmationSnapshot: true,
           finalAuditLogId: true, registeredWorkItemId: true },
       }) : null;
     const snapshot = receipt(decision?.confirmationSnapshot ?? null);
@@ -213,12 +220,13 @@ export async function readAmuxV4TaskReady(session: Session, taskId: string) {
     }) : null;
     const sourceApprovalValid = decision?.state === "consumed" &&
       decision.action === "register_card" &&
-      decision.actorUserId === actorUserId && decision.ideaId === ideaId &&
+      (expectedActorUserId === null || decision.actorUserId === expectedActorUserId) &&
+      decision.ideaId === ideaId &&
       decision.registeredWorkItemId === card.id &&
       card.sourceSnapshot.approvalId === decision.id &&
       card.sourceDigest === decision.unitDigest &&
       snapshot?.decisionId === decision.id &&
-      snapshot.ideaId === ideaId && snapshot.actorUserId === actorUserId &&
+      snapshot.ideaId === ideaId && snapshot.actorUserId === decision.actorUserId &&
       snapshot.draftUnitId === decision.draftUnitId &&
       snapshot.card?.cardType === "task" &&
       snapshot.card.normalizedBody.digest === decision.unitDigest &&
@@ -228,7 +236,7 @@ export async function readAmuxV4TaskReady(session: Session, taskId: string) {
       snapshot.card.task.grade === card.executionGrade &&
       audit?.entryHash !== null && audit?.entryHash !== undefined &&
       audit.action === "amux.v4.unit.consume" &&
-      audit.actorUserId === actorUserId && audit.targetId === decision.id &&
+      audit.actorUserId === decision.actorUserId && audit.targetId === decision.id &&
       audit.targetType === "AmuxIdeaUnitDecision";
     let briefAndScopeVerified = false;
     if (card.v4BodyCiphertext && card.v4BodyKeyId && card.v4BodyKeyVersion &&
@@ -319,7 +327,23 @@ export async function readAmuxV4TaskReady(session: Session, taskId: string) {
       orchestratorHalted: halted !== null,
     };
     return { taskId, taskRevision: card.revision, observedAt: now.toISOString(),
+      sourceApprovalId: sourceApprovalValid ? decision.id : null,
+      sourceApprovalDigest: sourceApprovalValid ? decision.confirmationDigest : null,
+      briefDigest: card.v4BriefDigest,
+      parentFeatureNodeId: card.parentFeatureNodeId,
+      parentStoryCardId: card.parentStoryCardId,
       ...evaluateAmuxV4TaskReady(facts) };
+}
+
+/** Admin-only, repeatable-read observation. This response is not promotion
+ * authority; the writer calls the same evaluator in its own transaction. */
+export async function readAmuxV4TaskReady(session: Session, taskId: string) {
+  const actorUserId = ownerId(session);
+  const context = await loadAmuxV4TaskReadyContext(taskId);
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+    return evaluateAmuxV4TaskReadyInTransaction(tx, taskId, context,
+      actorUserId);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
     maxWait: 2_000, timeout: 8_000 });
 }
