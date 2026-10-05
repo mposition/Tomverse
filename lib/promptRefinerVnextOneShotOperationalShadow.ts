@@ -21,7 +21,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
 const ACTION = "prompt_refiner.vnext_one_shot.operational_shadow_completed";
 const SUMMARY = "Verified the one-shot stage, run, audit and 80 reserved slots without dispatch.";
 const SHA256 = /^[0-9a-f]{64}$/;

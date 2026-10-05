@@ -10,7 +10,7 @@ import { promptRefinerVnextOneShotGatePublicKeyDigest,
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v1";
+const stageId = "prompt-refiner-vnext-one-shot-v2";
 const target = { stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
   shadowAuditLogId: "synthetic-shadow-audit",
@@ -83,7 +83,8 @@ const tx = {
       where.id === target.shadowAuditLogId
         ? { createdAt: new Date("2026-10-05T00:00:00.000Z") } : null,
   },
-  promptRefinerVnextOneShotStage: { findUnique: async () => stage },
+  promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
+    where: { id: string } }) => where.id === stage.id ? stage : null },
   promptRefinerVnextOneShotSlot: { findMany: async () => slotRows },
 };
 
@@ -189,6 +190,16 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
   assert.equal(writes, 2);
   assert.equal((await gate.readPromptRefinerVnextOneShotDisposition(
     tx as never, stage as never)).valid, true);
+});
+
+test("the closed legacy stage cannot receive new gate evidence", async () => {
+  const gate = await load(); reset();
+  stage = { ...baseStage, id: "prompt-refiner-vnext-one-shot-v1",
+    status: "closed" };
+  await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(),
+  }), /gate_binding_mismatch/);
+  assert.equal(writes, 0);
 });
 
 test("missing shadow, slot mismatch, tampered signature and duplicate gate fail before write", async () => {

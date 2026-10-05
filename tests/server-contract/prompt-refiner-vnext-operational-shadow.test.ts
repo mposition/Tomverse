@@ -6,7 +6,7 @@ import type { Session } from "next-auth";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v1";
+const stageId = "prompt-refiner-vnext-one-shot-v2";
 const target = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
@@ -36,7 +36,8 @@ const tx = {
     findMany: async () => evidenceRows,
     findUnique: async () => ({ createdAt: new Date("2026-10-05T00:00:00.000Z") }),
   },
-  promptRefinerVnextOneShotStage: { findUnique: async () => stage },
+  promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
+    where: { id: string } }) => where.id === stage.id ? stage : null },
 };
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
@@ -116,6 +117,16 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
   await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()),
     /vnext_one_shot_shadow_duplicate/);
   assert.equal(writes, 1);
+});
+
+test("the closed legacy stage cannot receive new shadow evidence", async () => {
+  const { recordPromptRefinerVnextOneShotOperationalShadow } = await load();
+  reset();
+  stage = { ...baseStage, id: "prompt-refiner-vnext-one-shot-v1",
+    status: "closed" };
+  await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()),
+    /vnext_one_shot_shadow_binding_mismatch/);
+  assert.equal(writes, 0);
 });
 
 test("missing run, broken reservations, audit, custody or target refuse before write", async () => {

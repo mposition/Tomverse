@@ -19,6 +19,7 @@ let validOrigin = true;
 let writes = 0;
 let unknown = false;
 let readbackValid = false;
+const stageReadIds: string[] = [];
 let installed = false;
 const body = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
@@ -56,7 +57,11 @@ async function loadRoute() {
   } });
   mock.module(mod("lib/readOnlySnapshotTransaction.ts"), { namedExports: {
     readOnlySnapshotTransaction: async (work: (tx: object) => Promise<unknown>) =>
-      work({ promptRefinerVnextOneShotStage: { findUnique: async () => ({}) } }),
+      work({ promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
+        where: { id: string } }) => {
+        stageReadIds.push(where.id);
+        return { id: where.id };
+      } } }),
   } });
   mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
     readPromptRefinerVnextOneShotStage: async () => ({ stageStatus: "run_approved",
@@ -74,7 +79,7 @@ async function loadRoute() {
         assert.deepEqual(input.expected, expected);
         if (unknown) throw new Error("private transaction failure");
         readbackValid = true;
-        return { stageId: "prompt-refiner-vnext-one-shot-v1",
+        return { stageId: "prompt-refiner-vnext-one-shot-v2",
           shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false };
       },
       readPromptRefinerVnextOneShotOperationalShadow: async () => ({
@@ -116,10 +121,11 @@ test("write and readback are content-free; unknown outcome requests human readba
   assert.equal((await route.POST(request({ ...body, sourceText: "never accepted" }))).status, 400);
   const written = await route.POST(request());
   assert.equal(written.status, 201);
-  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v1",
+  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v2",
     shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false });
   const readback = await route.GET(readRequest());
   assert.equal(readback.status, 200);
+  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v2"]);
   assert.equal((await readback.json()).readback.evidence.valid, true);
   unknown = true;
   const failed = await route.POST(request());
