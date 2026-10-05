@@ -624,6 +624,18 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    // A shell: a pixel office for the seven agent teams that plays a demo day
+    // and links each team to the page that holds its record. It reads no
+    // agent state and writes nothing, so it carries no badge and no
+    // writeRoles.
+    id: "office",
+    label: "Agent office",
+    href: "/admin/office",
+    description: "A pixel office shell for the seven agent teams, with a link to each team's record",
+    group: "Operations",
+    aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
+  },
+  {
     id: "platform",
     label: "Platform settings",
     href: "/admin/platform",

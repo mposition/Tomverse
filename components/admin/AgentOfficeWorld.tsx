@@ -1,0 +1,370 @@
+"use client";
+
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { cx } from "@/components/admin/agentOfficeStyles";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
+import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
+import {
+  ENTRANCE,
+  ENTRANCE_MAT,
+  MEETING_ROOM,
+  OPERATOR_ROOM,
+  PROPS,
+  ROOMS,
+  TILE,
+  WORLD_H,
+  WORLD_W,
+  roomOf,
+} from "@/lib/agentOffice/world";
+
+type Props = {
+  engine: AgentOffice;
+  snap: Snapshot;
+  selectedId: string | null;
+  follow: boolean;
+  onSelect: (agent: Agent) => void;
+};
+
+type Cam = { x: number; y: number; scale: number };
+
+/** The staff layer renders once; after that the paint loop updates the DOM directly. */
+const AgentLayer = memo(function AgentLayer({
+  agents,
+  register,
+  onPick,
+  leadLabel,
+  operatorLabel,
+}: {
+  agents: Agent[];
+  register: (id: string, el: HTMLDivElement | null) => void;
+  onPick: (agent: Agent) => void;
+  leadLabel: string;
+  operatorLabel: string;
+}) {
+  return (
+    <>
+      {agents.map((agent) => (
+        <div
+          key={agent.id}
+          ref={(el) => register(agent.id, el)}
+          onPointerUp={() => onPick(agent)}
+          data-testid="agent-office-agent"
+          data-agent-id={agent.id}
+          style={
+            {
+              "--hair": agent.hair,
+              "--shirt": agent.shirt,
+              "--accent": agent.accent,
+              "--skin": agent.skin,
+            } as CSSProperties
+          }
+        >
+          <span className={cx("ag-bubble")} />
+          <span className={cx("ag-bar")}>
+            <i />
+          </span>
+          <span className={cx("ag-body")}>
+            <i className={cx("p-shadow")} />
+            <i className={cx("p-leg l")} />
+            <i className={cx("p-leg r")} />
+            <i className={cx("p-torso")} />
+            <i className={cx("p-arm l")} />
+            <i className={cx("p-arm r")} />
+            <i className={cx("p-head")}>
+              <b className={cx("p-eye l")} />
+              <b className={cx("p-eye r")} />
+            </i>
+            <i className={cx("p-hair")} />
+          </span>
+          <span className={cx("ag-tag")}>
+            {agent.name}
+            {agent.rank === "lead" ? <em>{leadLabel}</em> : null}
+            {agent.rank === "operator" ? <em>{operatorLabel}</em> : null}
+          </span>
+        </div>
+      ))}
+    </>
+  );
+});
+
+const PropLayer = memo(function PropLayer({
+  screenLabel,
+  entranceLabel,
+}: {
+  screenLabel: string;
+  entranceLabel: string;
+}) {
+  return (
+    <>
+      {PROPS.map((prop, i) => (
+        <div
+          key={i}
+          className={cx("pr", `pr-${prop.kind}`)}
+          style={{
+            left: prop.x * TILE,
+            top: prop.y * TILE,
+            width: prop.w * TILE,
+            height: prop.h * TILE,
+          }}
+        >
+          {prop.kind === "desk" ? <i className={cx("pr-monitor")} /> : null}
+          {prop.label === "screen" ? <span>{screenLabel}</span> : null}
+          {prop.label === "coffee" ? <span aria-hidden="true">☕</span> : null}
+        </div>
+      ))}
+      <div
+        className={cx("entrance-mat")}
+        style={{
+          left: ENTRANCE_MAT.x * TILE,
+          top: ENTRANCE_MAT.y * TILE,
+          width: ENTRANCE_MAT.w * TILE,
+          height: ENTRANCE_MAT.h * TILE,
+        }}
+      >
+        {entranceLabel}
+      </div>
+    </>
+  );
+});
+
+/**
+ * The live office floor: rooms, furniture and staff, with a camera that
+ * follows whatever is happening. Ported from the original AI OFFICE
+ * OfficeWorld; a demo of the agent teams, not a reading of them.
+ */
+export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onSelect }: Props) {
+  const m = useAdminMessages(adminAgentOfficeMessages);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const agentRefs = useRef(new Map<string, HTMLDivElement>());
+  const camRef = useRef<Cam>({ x: WORLD_W / 2, y: WORLD_H / 2, scale: 0.5 });
+  const targetRef = useRef<Cam>({ x: WORLD_W / 2, y: WORLD_H / 2, scale: 0.5 });
+  const selectedRef = useRef<string | null>(selectedId);
+  const dragRef = useRef({ on: false, px: 0, py: 0, moved: false });
+  const [zoom, setZoom] = useState<"fit" | "close">("fit");
+
+  useEffect(() => {
+    selectedRef.current = selectedId;
+  }, [selectedId]);
+
+  const hotRoom = useMemo(() => {
+    if (snap.spotlight) return snap.spotlight; // a room the operator asked about wins
+    if (snap.meetingTitle) return MEETING_ROOM.id;
+    if (snap.phaseIndex >= PHASE.briefing) return OPERATOR_ROOM.id;
+    const working = Object.entries(snap.deptStatus).find(([, status]) => status === "working");
+    return working?.[0] ?? null;
+  }, [snap.spotlight, snap.meetingTitle, snap.phaseIndex, snap.deptStatus]);
+
+  /** Where the camera looks: meeting > operator > a working room > the entrance at arrival. */
+  const focus = useMemo(() => {
+    if (hotRoom) {
+      const room = roomOf(hotRoom);
+      return { x: (room.x + room.w / 2) * TILE, y: (room.y + room.h / 2) * TILE };
+    }
+    if (snap.phaseIndex <= PHASE.arrival) return { x: ENTRANCE.x * TILE, y: (ENTRANCE.y - 6) * TILE };
+    return null;
+  }, [hotRoom, snap.phaseIndex]);
+
+  const register = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) agentRefs.current.set(id, el);
+    else agentRefs.current.delete(id);
+  }, []);
+
+  const onPick = useCallback(
+    (agent: Agent) => {
+      if (!dragRef.current.moved) onSelect(agent);
+    },
+    [onSelect]
+  );
+
+  // Camera target
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const compute = () => {
+      const rect = viewport.getBoundingClientRect();
+      const fit = Math.min(rect.width / WORLD_W, rect.height / WORLD_H);
+      if (zoom === "fit") {
+        targetRef.current = { x: WORLD_W / 2, y: WORLD_H / 2, scale: fit };
+        return;
+      }
+      const scale = Math.max(fit * 1.9, 0.95);
+      targetRef.current = follow && focus ? { ...focus, scale } : { ...targetRef.current, scale };
+    };
+
+    compute();
+    const observer = new ResizeObserver(compute);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [zoom, follow, focus]);
+
+  // Paint loop
+  useEffect(() => {
+    let raf = 0;
+    const compactClass = cx("compact");
+    const paint = () => {
+      const viewport = viewportRef.current;
+      const stage = stageRef.current;
+      if (viewport && stage) {
+        const cam = camRef.current;
+        const target = targetRef.current;
+        cam.x += (target.x - cam.x) * 0.07;
+        cam.y += (target.y - cam.y) * 0.07;
+        cam.scale += (target.scale - cam.scale) * 0.08;
+
+        const rect = viewport.getBoundingClientRect();
+        const ox = rect.width / 2 - cam.x * cam.scale;
+        const oy = rect.height / 2 - cam.y * cam.scale;
+        stage.style.transform = `translate3d(${ox}px, ${oy}px, 0) scale(${cam.scale})`;
+        if (stage.classList.contains(compactClass) !== cam.scale < 0.62) {
+          stage.classList.toggle(compactClass, cam.scale < 0.62);
+        }
+
+        const picked = selectedRef.current;
+        for (const agent of engine.agents) {
+          const el = agentRefs.current.get(agent.id);
+          if (!el) continue;
+
+          el.style.transform = `translate3d(${(agent.x + 0.5 + agent.jitter) * TILE}px, ${
+            (agent.y + 0.9) * TILE
+          }px, 0)`;
+          el.style.zIndex = String(200 + Math.round(agent.y));
+
+          const cls = cx(
+            "ag",
+            `f-${agent.facing}`,
+            `a-${agent.anim}`,
+            `r-${agent.rank}`,
+            agent.id === picked && "selected",
+            agent.status === "offDuty" && "offstage"
+          );
+          if (el.className !== cls) el.className = cls;
+
+          const bubble = el.firstElementChild as HTMLElement;
+          const text = agent.speech ?? "";
+          if (bubble.dataset.text !== text) {
+            bubble.dataset.text = text;
+            bubble.textContent = text;
+            bubble.className = cx("ag-bubble", agent.speechKind, text && "on");
+          }
+
+          const bar = el.children[1] as HTMLElement;
+          const fill = bar.firstElementChild as HTMLElement;
+          const show = agent.anim === "type" ? "1" : "0";
+          if (bar.style.opacity !== show) bar.style.opacity = show;
+          if (show === "1") fill.style.width = `${Math.round(agent.progress * 100)}%`;
+        }
+      }
+      raf = requestAnimationFrame(paint);
+    };
+    raf = requestAnimationFrame(paint);
+    return () => cancelAnimationFrame(raf);
+  }, [engine]);
+
+  // No pointer capture: capturing would swallow clicks on the HUD and on staff.
+  const onPointerDown = (e: ReactPointerEvent) => {
+    if ((e.target as HTMLElement).closest("[data-world-hud]")) return;
+    dragRef.current = { on: true, px: e.clientX, py: e.clientY, moved: false };
+  };
+  const onPointerMove = (e: ReactPointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag.on) return;
+    const dx = e.clientX - drag.px;
+    const dy = e.clientY - drag.py;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    drag.px = e.clientX;
+    drag.py = e.clientY;
+    const scale = camRef.current.scale || 1;
+    targetRef.current = {
+      ...targetRef.current,
+      x: clamp(targetRef.current.x - dx / scale, 0, WORLD_W),
+      y: clamp(targetRef.current.y - dy / scale, 0, WORLD_H),
+    };
+  };
+  const onPointerUp = () => {
+    dragRef.current.on = false;
+    window.setTimeout(() => {
+      dragRef.current.moved = false;
+    }, 0);
+  };
+
+  const roomName = (id: string) => engine.roomName(id);
+
+  return (
+    <div className={cx("world-frame")} data-testid="agent-office-world">
+      <div
+        className={cx("world-viewport")}
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onPointerLeave={onPointerUp}
+      >
+        <div className={cx("world-stage")} ref={stageRef} style={{ width: WORLD_W, height: WORLD_H }}>
+          <div className={cx("world-floor")} />
+
+          {ROOMS.map((room) => {
+            const status = snap.deptStatus[room.id];
+            return (
+              <div
+                key={room.id}
+                className={cx("rm", `rm-${room.kind}`, status, hotRoom === room.id && "hot")}
+                style={{
+                  left: room.x * TILE,
+                  top: room.y * TILE,
+                  width: room.w * TILE,
+                  height: room.h * TILE,
+                }}
+              >
+                <span className={cx("rm-head")}>
+                  <b>
+                    {room.icon} {roomName(room.id)}
+                  </b>
+                  {status ? (
+                    <i className={cx("rm-dot", status)} title={m.deptStatus[status]} />
+                  ) : null}
+                </span>
+                <span className={cx("rm-code")}>{room.short}</span>
+                {room.doors.map((door) => (
+                  <span
+                    key={`${door.x}-${door.y}`}
+                    className={cx("rm-door")}
+                    style={{ left: (door.x - room.x) * TILE, top: (door.y - room.y) * TILE }}
+                  />
+                ))}
+              </div>
+            );
+          })}
+
+          <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
+          <AgentLayer
+            agents={engine.agents}
+            register={register}
+            onPick={onPick}
+            leadLabel={m.world.lead}
+            operatorLabel={m.world.operator}
+          />
+        </div>
+
+        <div className={cx("world-hud")} data-world-hud="">
+          <button type="button" className={cx(zoom === "fit" && "on")} onClick={() => setZoom("fit")}>
+            {m.world.fit}
+          </button>
+          <button type="button" className={cx(zoom === "close" && "on")} onClick={() => setZoom("close")}>
+            {m.world.close}
+          </button>
+        </div>
+        <div className={cx("world-hint")}>{m.world.hint}</div>
+      </div>
+    </div>
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
