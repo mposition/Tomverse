@@ -1,6 +1,7 @@
 // What the genesis screen says about one request: only a 200 with an id is
-// created, only a 409 with a code is a refusal, and anything that may have
-// followed a commit is unknown (docs/policy/sre-ops.md §3 rule 7).
+// created, only a 409 with one of the store's pre-write refusal codes is a
+// refusal, and anything that may have followed a commit -- a 409 late
+// included -- is unknown (docs/policy/sre-ops.md §3 rule 7).
 
 import assert from "node:assert/strict";
 import test from "node:test";
