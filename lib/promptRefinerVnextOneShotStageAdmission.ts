@@ -14,7 +14,7 @@ import {
 import type { PromptRefinerVnextOneShotAuditBinding } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
