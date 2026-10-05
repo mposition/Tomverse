@@ -256,6 +256,9 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         where: { id: legacyStageId },
       });
       await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
+        where: { id: legacyStageId }, data: { status: "closed" },
+      }), /first-stage close requires a supersession audit/);
+      await assert.rejects(prisma.promptRefinerVnextOneShotStage.update({
         where: { id: legacyStageId },
         data: { status: "closed",
           supersededAuditLogId: legacyStage.stageApprovalAuditLogId },
@@ -278,7 +281,8 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: legacyStageId },
       })).status, "staged");
-      const insertReplacementFixture = (slotCount: number, failAfter = false) =>
+      const insertReplacementFixture = (slotCount: number, failAfter = false,
+        omitReplacement = false) =>
         prisma.$transaction(async (tx) => {
           const legacy = await tx.promptRefinerVnextOneShotStage.findUniqueOrThrow({
             where: { id: legacyStageId },
@@ -300,21 +304,26 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
             where: { id: legacyStageId },
             data: { status: "closed", supersededAuditLogId: closeAuditLogId },
           });
-          await tx.promptRefinerVnextOneShotStage.create({ data: {
-            ...binding, approvedBy, approvedAt: new Date(0),
-            stageApprovalAuditLogId: auditLogId,
-          } });
-          await tx.promptRefinerVnextOneShotSlot.createMany({ data:
-            Array.from({ length: slotCount }, (_, slotIndex) => ({
-              id: `replacement-fixture-${slotIndex}`, stageId, slotIndex,
-              reservedCostMicroUsd: BigInt(29_918),
-            })),
-          });
+          if (!omitReplacement) {
+            await tx.promptRefinerVnextOneShotStage.create({ data: {
+              ...binding, approvedBy, approvedAt: new Date(0),
+              stageApprovalAuditLogId: auditLogId,
+            } });
+            await tx.promptRefinerVnextOneShotSlot.createMany({ data:
+              Array.from({ length: slotCount }, (_, slotIndex) => ({
+                id: `replacement-fixture-${slotIndex}`, stageId, slotIndex,
+                reservedCostMicroUsd: BigInt(29_918),
+              })),
+            });
+          }
           if (failAfter) throw new Error("synthetic post-stage failure");
         });
+      await assert.rejects(insertReplacementFixture(0, false, true),
+        /one-shot supersession requires replacement stage in the same transaction/);
       await assert.rejects(insertReplacementFixture(79),
         /exactly 80 reserved slots/);
-      await assert.rejects(insertReplacementFixture(81), /slot|index|constraint/i);
+      await assert.rejects(insertReplacementFixture(81),
+        /PromptRefinerVnextOneShotSlot_index_check/);
       await assert.rejects(insertReplacementFixture(80, true),
         /synthetic post-stage failure/);
       assert.equal(await countOperationalAudits(), 0);

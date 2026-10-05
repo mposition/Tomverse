@@ -29,6 +29,11 @@ BEGIN
         RETURN NEW;
     END IF;
     IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    IF OLD."id" = 'prompt-refiner-vnext-one-shot-v1' AND
+       OLD."status" = 'staged' AND NEW."status" = 'closed' AND
+       NEW."supersededAuditLogId" IS NULL THEN
+        RAISE EXCEPTION 'one-shot first-stage close requires a supersession audit';
+    END IF;
     IF NEW."supersededAuditLogId" IS NOT DISTINCT FROM OLD."supersededAuditLogId" THEN
         RETURN NEW;
     END IF;
@@ -131,3 +136,33 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER "prompt_refiner_vnext_one_shot_replacement_guard_trigger"
 BEFORE INSERT ON "PromptRefinerVnextOneShotStage"
 FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_vnext_one_shot_replacement_guard"();
+
+-- A close carrying a replacement audit cannot commit on its own. This
+-- constraint is deferred so the app can close v1 and then insert v2
+-- inside the same transaction, while never persisting a
+-- closed v1 with no replacement stage.
+CREATE FUNCTION "prompt_refiner_vnext_one_shot_replacement_complete"()
+RETURNS trigger SET search_path = pg_catalog, pg_temp AS $$
+DECLARE
+    replacement_count BIGINT;
+BEGIN
+    IF OLD."id" <> 'prompt-refiner-vnext-one-shot-v1' OR
+       OLD."status" <> 'staged' OR NEW."status" <> 'closed' OR
+       NEW."supersededAuditLogId" IS NULL THEN
+        RETURN NEW;
+    END IF;
+    EXECUTE pg_catalog.format(
+        'SELECT count(*) FROM %I."PromptRefinerVnextOneShotStage"'
+        || ' WHERE "id" = ''prompt-refiner-vnext-one-shot-v2'''
+        || ' AND "status" = ''staged''', TG_TABLE_SCHEMA
+    ) INTO replacement_count;
+    IF replacement_count <> 1 THEN
+        RAISE EXCEPTION 'one-shot supersession requires replacement stage in the same transaction';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER "prompt_refiner_vnext_one_shot_replacement_complete_trigger"
+AFTER UPDATE ON "PromptRefinerVnextOneShotStage"
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION "prompt_refiner_vnext_one_shot_replacement_complete"();
