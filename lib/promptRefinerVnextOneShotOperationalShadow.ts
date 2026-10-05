@@ -36,8 +36,8 @@ const SHA256 = /^[0-9a-f]{64}$/;
 
 export function promptRefinerVnextOneShotShadowTarget(
   stage: PromptRefinerVnextOneShotStage,
-): PromptRefinerVnextOneShotShadowTarget {
-  return promptRefinerVnextOneShotShadowTargetSchema.parse({
+): PromptRefinerVnextOneShotShadowTarget | null {
+  const parsed = promptRefinerVnextOneShotShadowTargetSchema.safeParse({
     stageApprovalAuditLogId: stage.stageApprovalAuditLogId,
     runApprovalAuditLogId: stage.runApprovalAuditLogId,
     sourceCommitSha: stage.sourceCommitSha,
@@ -52,6 +52,7 @@ export function promptRefinerVnextOneShotShadowTarget(
     reservedSlots: PROMPT_REFINER_VNEXT_SLOT_COUNT,
     consumedSlots: 0,
   });
+  return parsed.success ? parsed.data : null;
 }
 
 function readSignerPin() {
@@ -121,14 +122,15 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   if (entry && stage?.id === STAGE_ID && signedAt && signerDigest &&
       SHA256.test(signerDigest) && Number.isFinite(signedMs) &&
       new Date(signedMs).toISOString() === signedAt &&
-      signedMs <= entry.createdAt.getTime() &&
-      entry.createdAt.getTime() - signedMs <= 10 * 60_000 &&
       (stage.status === "run_approved" || stage.status === "closed") &&
       stage.runApprovalAuditLogId &&
       stage.slotCount === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
       stage.perRequestCostMicroUsd === BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD) &&
       stage.costCeilingMicroUsd === BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD) &&
       entry.actorUserId === stage.approvedBy && entry.summary === SUMMARY &&
+      // The write verified freshness using the app clock. Readback checks the
+      // hash-chained audit without comparing it with a different DB clock.
+      // The stored signer digest records the historical pin, including after rotation.
       canonicalBenchmarkJson(metadata) ===
         canonicalBenchmarkJson(shadowMetadata(stage, signedAt, signerDigest)) &&
       await promptRefinerVnextOneShotApprovalAuditsAreValid(tx, stage)) {
@@ -176,8 +178,10 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });
-    if (!stage || stage.approvedBy !== input.session.user.id ||
-        canonicalBenchmarkJson(promptRefinerVnextOneShotShadowTarget(stage)) !==
+    if (!stage) throw new Error("vnext_one_shot_shadow_binding_mismatch");
+    const target = promptRefinerVnextOneShotShadowTarget(stage);
+    if (stage.approvedBy !== input.session.user.id || !target ||
+        canonicalBenchmarkJson(target) !==
           canonicalBenchmarkJson(
             promptRefinerVnextOneShotShadowTargetSchema.strip().parse(proof)) ||
         stage.manifestRoot !== root || proof.manifestRoot !== root ||

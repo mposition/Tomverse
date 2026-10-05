@@ -640,7 +640,7 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         })).status, "reserved", "missing shadow must not consume a slot");
         const shadowProof = signPromptRefinerVnextOneShotShadowProof({
           version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
-          ...promptRefinerVnextOneShotShadowTarget(advanced),
+          ...promptRefinerVnextOneShotShadowTarget(advanced)!,
           manifestRoot: binding.manifestRoot,
           runnerPreflightDigest:
             PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,

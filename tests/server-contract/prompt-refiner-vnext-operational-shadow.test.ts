@@ -144,6 +144,12 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
     present: true, valid: true, shadowAuditLogId: "synthetic-shadow-audit",
     dispatchAuthorized: false,
   });
+  // A database clock behind the app clock must not invalidate an audit that
+  // passed the app-clock freshness check before its transactional write.
+  evidenceRows[0].createdAt = new Date(Date.now() - 30_000);
+  runCreatedAt = new Date(Date.now() - 60_000);
+  assert.equal((await readPromptRefinerVnextOneShotOperationalShadow(
+    tx as never, stage as never)).valid, true);
   await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()),
     /vnext_one_shot_shadow_duplicate/);
   assert.equal(writes, 1);
@@ -160,7 +166,8 @@ test("the closed legacy stage cannot receive new shadow evidence", async () => {
 });
 
 test("missing run, broken reservations, audit, custody or target refuse before write", async () => {
-  const { recordPromptRefinerVnextOneShotOperationalShadow } = await load();
+  const { recordPromptRefinerVnextOneShotOperationalShadow,
+    promptRefinerVnextOneShotShadowTarget } = await load();
   reset();
   const mutations = [
     () => { snapshot.stageStatus = "staged"; },
@@ -171,12 +178,14 @@ test("missing run, broken reservations, audit, custody or target refuse before w
     () => { stage.runtimeDeploymentId = "ffffffff-ffff-ffff-ffff-ffffffffffff"; },
     () => { stage.manifestRoot = "0".repeat(64); },
     () => { stage.runnerDigest = "0".repeat(64); },
+    () => { stage.perRequestCostMicroUsd = BigInt(1); },
   ];
   for (const mutate of mutations) {
     reset(); mutate();
     await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()));
     assert.equal(writes, 0);
   }
+  assert.equal(promptRefinerVnextOneShotShadowTarget(stage as never), null);
 });
 
 test("caller claims and altered signed evidence cannot create an audit", async () => {
