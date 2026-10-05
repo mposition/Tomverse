@@ -1,10 +1,35 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { readFile as readFileAsync } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import type { Session } from "next-auth";
+import { computeAdminAuditEntryHash } from "@/lib/adminAuditIntegrityCore";
+import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
+import { prisma } from "@/lib/prisma";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
+  "@/lib/promptRefinerVnextOneShotPriceBinding";
+import { createPromptRefinerVnextOneShotStageWithSlots } from
+  "@/lib/promptRefinerVnextOneShotStageWriter";
+import { readPromptRefinerVnextOneShotStage } from
+  "@/lib/promptRefinerVnextOneShotStageReadback";
+import { consumePromptRefinerVnextOneShotSlot } from
+  "@/lib/promptRefinerVnextOneShotSlotConsumption";
+import { approvePromptRefinerVnextOneShotRun } from
+  "@/lib/promptRefinerVnextOneShotRunApproval";
+import { readPromptRefinerVnextOneShotOperationalShadow,
+  recordPromptRefinerVnextOneShotOperationalShadow,
+  promptRefinerVnextOneShotShadowTarget } from
+  "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  promptRefinerVnextOneShotShadowPublicKeyDigest,
+  signPromptRefinerVnextOneShotShadowProof } from
+  "@/lib/promptRefinerVnextOneShotShadowProof";
+import { POST as consumeSlotRoute } from
+  "@/app/api/internal/prompt-refiner/vnext-one-shot-slot/route";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const migrationRoot = resolve(fileURLToPath(new URL("../../prisma/migrations/", import.meta.url)));
@@ -12,10 +37,16 @@ const V1 = "prompt-refiner-vnext-one-shot-v1";
 const V2 = "prompt-refiner-vnext-one-shot-v2";
 const V3 = "prompt-refiner-vnext-one-shot-v3";
 const owner = "synthetic-owner";
+const auditKey = "synthetic-chat01-b06-audit-integrity-key";
+const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+const manifestDigest = createHash("sha256").update(readFileSync(resolve(projectRoot,
+  "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-candidate-source.json")))
+  .digest("hex");
 const base = {
-  sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
+  sourceCommitSha: "a".repeat(40), sourceManifestDigest: manifestDigest,
   runnerDigest: "c".repeat(64), manifestRoot: "d".repeat(64),
-  pricePinDigest: "e".repeat(64), perRequestCostMicroUsd: 29918,
+  pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
+  perRequestCostMicroUsd: 29918,
   slotCount: 80, costCeilingMicroUsd: 2393440,
 };
 const runtime = [
@@ -35,9 +66,14 @@ async function audit(client: Client, action: string, targetId: string,
     `SELECT "entryHash" FROM "AdminAuditLog"
      WHERE "entryHash" IS NOT NULL ORDER BY "createdAt" DESC, "id" DESC LIMIT 1`);
   const prior = head.rows[0];
-  const createdAt = new Date(Date.now() + ++auditCounter * 2);
+  const createdAt = new Date(Date.now() - 25_000 + ++auditCounter * 1000);
   const id = fixedId ?? randomUUID();
-  const hash = randomUUID().replaceAll("-", "").padEnd(64, "0");
+  const hash = computeAdminAuditEntryHash({
+    previousHash: prior?.entryHash ?? null, actorUserId: owner,
+    actorEmail: null, action, targetType: "PromptRefinerVnextOneShotStage",
+    targetId, summary, metadata, ipAddress: null, userAgent: null,
+    createdAt: createdAt.toISOString(),
+  }, auditKey);
   await client.query(`INSERT INTO "AdminAuditLog"
     ("id", "actorUserId", "action", "targetType", "targetId", "summary",
      "metadata", "previousHash", "entryHash", "createdAt")
@@ -95,7 +131,8 @@ async function supersede(client: Client, previous: typeof runtime[number],
 }
 
 test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
-  { skip: !testUrl, timeout: 60_000 }, async () => {
+  { skip: !testUrl, timeout: 90_000 }, async () => {
+    assert.equal(process.env.DATABASE_URL, testUrl);
     const url = new URL(testUrl!);
     const schema = url.searchParams.get("schema");
     assert.match(decodeURIComponent(url.pathname),
@@ -103,6 +140,21 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
     assert.match(schema ?? "", /^chat01_b06_test_[a-z0-9]+$/);
     url.searchParams.delete("schema");
     const client = new pg.Client({ connectionString: url.toString() });
+    const priorKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    const environmentNames = ["APP_ENV", "RAILWAY_ENVIRONMENT_NAME",
+      "RAILWAY_DEPLOYMENT_ID", "RAILWAY_GIT_COMMIT_SHA", "RAILWAY_PROJECT_ID",
+      "RAILWAY_SERVICE_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_API_TOKEN",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED",
+      "PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN"] as const;
+    const priorEnvironment = Object.fromEntries(environmentNames.map((name) =>
+      [name, process.env[name]]));
+    const priorFetch = globalThis.fetch;
+    process.env.ADMIN_AUDIT_INTEGRITY_KEY = auditKey;
     await client.connect();
     try {
       await client.query(`CREATE SCHEMA "${schema}"`);
@@ -119,8 +171,34 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
         "20261005140000_prompt_refiner_one_shot_unrun_replacement",
         "20261005210000_prompt_refiner_one_shot_run_approved_recovery",
       ]) {
-        await client.query(await readFile(resolve(migrationRoot, folder, "migration.sql"), "utf8"));
+        await client.query(await readFileAsync(resolve(migrationRoot, folder, "migration.sql"), "utf8"));
       }
+      await client.query(`CREATE TABLE "ModelRegistryEntry" (
+        "id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "apiModel" TEXT NOT NULL,
+        "provider" TEXT NOT NULL, "apiBaseUrl" TEXT NOT NULL,
+        "apiKeyEnvName" TEXT NOT NULL, "icon" TEXT NOT NULL DEFAULT '',
+        "bestFor" TEXT NOT NULL DEFAULT '', "minimumPlan" TEXT NOT NULL,
+        "usageClass" TEXT NOT NULL, "creditWeight" INTEGER NOT NULL,
+        "publiclyListed" BOOLEAN NOT NULL DEFAULT true,
+        "enabled" BOOLEAN NOT NULL DEFAULT true, "status" TEXT NOT NULL DEFAULT 'enabled',
+        "operationalReason" TEXT, "userVisibleNote" TEXT, "replacementModelId" TEXT,
+        "catalogDeleted" BOOLEAN NOT NULL DEFAULT false, "reasoning" TEXT,
+        "contextWindowTokens" INTEGER, "supportsImage" BOOLEAN NOT NULL DEFAULT false,
+        "supportsNativePdf" BOOLEAN NOT NULL DEFAULT false,
+        "webSearchOverride" TEXT, "maxImages" INTEGER,
+        "maxBase64ImagePayloadBytes" INTEGER,
+        "maxOutputTokens" INTEGER, "reservationOutputTokens" INTEGER,
+        "inputUsdPerMillionTokens" DOUBLE PRECISION,
+        "outputUsdPerMillionTokens" DOUBLE PRECISION,
+        "cachedInputPriceMultiplier" DOUBLE PRECISION,
+        "sortOrder" INTEGER NOT NULL DEFAULT 0, "updatedById" TEXT,
+        "updatedByEmail" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`);
+      const pinnedModel = staticModelRegistrySeedRows().find((row) =>
+        row.id === "gpt-5-6-luna");
+      assert.ok(pinnedModel);
+      await prisma.modelRegistryEntry.create({ data: pinnedModel });
       await client.query("BEGIN");
       const v1Audit = await writeStageAudit(client, runtime[0]);
       await insertStage(client, runtime[0], v1Audit);
@@ -153,11 +231,111 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       assert.equal((await client.query(`SELECT count(*)::int AS n
         FROM "PromptRefinerVnextOneShotStage" WHERE "id" = $1`, [V3])).rows[0].n, 0);
 
-      await client.query("BEGIN");
-      const v3Audit = await writeStageAudit(client, runtime[2]);
-      await supersede(client, runtime[1], runtime[2], v3Audit, runAudit);
-      await insertStage(client, runtime[2], v3Audit);
-      await client.query("COMMIT");
+      const legacyReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, V2));
+      assert.equal(legacyReadback.approvalAuditsValid, true);
+      const session = { user: { id: owner, email: "owner@example.test" },
+        expires: "2099-01-01T00:00:00.000Z" } as Session;
+      const request = new Request("https://example.test/stage", {
+        method: "POST", headers: { "user-agent": "b06-synthetic-integration" },
+      });
+      const binding = { id: V3, ...base,
+        perRequestCostMicroUsd: BigInt(base.perRequestCostMicroUsd),
+        costCeilingMicroUsd: BigInt(base.costCeilingMicroUsd),
+        runtimeDeploymentId: runtime[2].runtimeDeploymentId,
+        runtimeCommitSha: runtime[2].runtimeCommitSha,
+      };
+      const competing = await Promise.allSettled([
+        createPromptRefinerVnextOneShotStageWithSlots({ session, request, binding }),
+        createPromptRefinerVnextOneShotStageWithSlots({ session, request, binding }),
+      ]);
+      assert.equal(competing.filter((outcome) => outcome.status === "fulfilled").length, 1);
+      assert.equal(competing.filter((outcome) => outcome.status === "rejected").length, 1);
+      const winner = competing.find((outcome) => outcome.status === "fulfilled");
+      assert.ok(winner && winner.status === "fulfilled");
+      assert.equal(winner.value.stageId, V3);
+      assert.equal(winner.value.slotCount, 80);
+      await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots({
+        session, request, binding,
+      }));
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, V3))).approvalAuditsValid, true);
+
+      // Exercise the real app run, signed shadow and slot route against the
+      // migrated database. Fetch observes only a synthetic Railway response.
+      process.env.APP_ENV = "staging";
+      process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+      process.env.RAILWAY_DEPLOYMENT_ID = runtime[2].runtimeDeploymentId;
+      process.env.RAILWAY_GIT_COMMIT_SHA = runtime[2].runtimeCommitSha;
+      process.env.RAILWAY_PROJECT_ID = "44444444-4444-4444-8444-444444444444";
+      process.env.RAILWAY_SERVICE_ID = "55555555-5555-4555-8555-555555555555";
+      process.env.RAILWAY_ENVIRONMENT_ID = "66666666-6666-4666-8666-666666666666";
+      process.env.RAILWAY_API_TOKEN = "synthetic-railway-read-token";
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = base.manifestRoot;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = base.runnerDigest;
+      globalThis.fetch = async () => Response.json({ data: {
+        deployment: { id: runtime[2].runtimeDeploymentId, status: "SUCCESS",
+          meta: { commitHash: runtime[2].runtimeCommitSha } },
+        deployments: { edges: [{ node: {
+          id: runtime[2].runtimeDeploymentId, status: "SUCCESS",
+        } }] },
+      } });
+      const run = await approvePromptRefinerVnextOneShotRun({
+        session, request, expected: { ...binding,
+          stageApprovalAuditLogId: winner.value.stageApprovalAuditLogId },
+      });
+      assert.equal(run.dispatchAuthorized, false);
+      const runnerToken = "synthetic-b06-runner-token-12345678901234567890";
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = runnerToken;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED = "1";
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED = "1";
+      const slotRequest = () => new Request(
+        "https://example.test/api/internal/prompt-refiner/vnext-one-shot-slot", {
+          method: "POST", headers: { authorization: `Bearer ${runnerToken}`,
+            "content-type": "application/json" },
+          body: JSON.stringify({ requestId: randomUUID(), slotIndex: 0,
+            runApprovalAuditLogId: run.runApprovalAuditLogId,
+            manifestRoot: base.manifestRoot, runnerDigest: base.runnerDigest }),
+        });
+      assert.equal((await consumeSlotRoute(slotRequest())).status, 409,
+        "the real route must refuse when no shadow audit exists");
+      const keys = generateKeyPairSync("ed25519");
+      const privateKey = keys.privateKey.export({ format: "der", type: "pkcs8" })
+        .toString("base64");
+      const publicKey = keys.publicKey.export({ format: "der", type: "spki" })
+        .toString("base64");
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 = publicKey;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST =
+        promptRefinerVnextOneShotShadowPublicKeyDigest(publicKey);
+      const stage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: V3 },
+      });
+      const target = promptRefinerVnextOneShotShadowTarget(stage);
+      assert.ok(target);
+      const proof = signPromptRefinerVnextOneShotShadowProof({
+        version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
+        ...target, manifestRoot: base.manifestRoot,
+        runnerPreflightDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+        cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
+        signedAt: new Date().toISOString(),
+      }, privateKey);
+      const shadow = await recordPromptRefinerVnextOneShotOperationalShadow({
+        session, request, proof,
+      });
+      assert.equal(shadow.dispatchAuthorized, false);
+      const evidence = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotOperationalShadow(tx, stage));
+      assert.equal(evidence.valid, true);
+      assert.equal(evidence.cacheWriteInputTokens, 0);
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        requestId: randomUUID(), slotIndex: 0,
+        runApprovalAuditLogId: run.runApprovalAuditLogId,
+      }), /vnext_one_shot_paid_authorization_unavailable/);
+      assert.equal((await consumeSlotRoute(slotRequest())).status, 409,
+        "a valid signed shadow still cannot replace the missing paid audit");
+      assert.equal(await prisma.adminAuditLog.count({ where: {
+        action: "prompt_refiner.vnext_one_shot.slot_consumed",
+      } }), 0);
       const stages = await client.query<{ id: string; status: string;
         runApprovalAuditLogId: string | null; n: number }>(
         `SELECT s."id", s."status", s."runApprovalAuditLogId",
@@ -165,13 +343,29 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
           JOIN "PromptRefinerVnextOneShotSlot" sl ON sl."stageId" = s."id"
           GROUP BY s."id" ORDER BY s."id"`);
       assert.deepEqual(stages.rows.map((row) => [row.id, row.status, row.n]),
-        [[V1, "closed", 80], [V2, "closed", 80], [V3, "staged", 80]]);
+        [[V1, "closed", 80], [V2, "closed", 80], [V3, "run_approved", 80]]);
       assert.equal(stages.rows[1].runApprovalAuditLogId, runAudit);
       assert.equal((await client.query(`SELECT count(*)::int AS n
         FROM "PromptRefinerVnextOneShotSlot" WHERE "status" = 'consumed'`)).rows[0].n, 0);
+      await assert.rejects(client.query(`UPDATE "PromptRefinerVnextOneShotSlot"
+        SET "status" = 'consumed', "requestId" = $1
+        WHERE "stageId" = $2 AND "slotIndex" = 0`, [randomUUID(), V2]),
+      /one-shot run approval is required before consumption/);
+      assert.equal((await client.query(`SELECT count(*)::int AS n
+        FROM "PromptRefinerVnextOneShotSlot"
+        WHERE "stageId" = $1 AND "status" = 'consumed'`, [V2])).rows[0].n, 0);
     } finally {
       await client.query("ROLLBACK").catch(() => {});
+      await prisma.$disconnect();
       await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await client.end();
+      globalThis.fetch = priorFetch;
+      for (const name of environmentNames) {
+        const previous = priorEnvironment[name];
+        if (previous === undefined) delete process.env[name];
+        else process.env[name] = previous;
+      }
+      if (priorKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+      else process.env.ADMIN_AUDIT_INTEGRITY_KEY = priorKey;
     }
   });

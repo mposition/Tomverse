@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -66,6 +67,8 @@ test("owner attestor executes the A17 runner and signs only bound zero-cost proo
       slotCount: 80, reservedSlots: 80, consumedSlots: 0,
     };
     writeFileSync(runnerPath, runnerBytes);
+    const settledTime = new Date(Date.now() - 60_000);
+    utimesSync(runnerPath, settledTime, settledTime);
     writeFileSync(manifestPath, synthetic.manifestText);
     writeFileSync(bindingPath, synthetic.bindingText);
     writeFileSync(sealPath, seal);
@@ -74,6 +77,17 @@ test("owner attestor executes the A17 runner and signs only bound zero-cost proo
       manifestPath, bindingPath, sealPath, targetPath, runnerPath,
       ownerKeyHex, signingPrivateKeyB64: privateKey, now,
       env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+      spawn: (...args) => {
+        const result = spawnSync(...args);
+        assert.equal(result.status, 0, `synthetic A17 runner status ${result.status}; ` +
+          `signal ${result.signal}; error ${result.error?.code ?? "none"}; ` +
+          `stderr bytes ${Buffer.byteLength(result.stderr ?? "", "utf8")}`);
+        assert.equal(result.stderr, "", "synthetic runner emitted stderr");
+        assert.ok(typeof result.stdout === "string" && result.stdout.length > 0 &&
+          Buffer.byteLength(result.stdout, "utf8") <= 1024,
+        "synthetic runner stdout shape invalid");
+        return result;
+      },
     };
     const proof = createPromptRefinerVnextOneShotOwnerShadowProof(input);
     assert.deepEqual(verifyPromptRefinerVnextOneShotShadowProof(

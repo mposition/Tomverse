@@ -54,8 +54,6 @@ export async function POST(request: Request) {
     if (!hasValidMutationOrigin(request)) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403, headers });
     }
-    await consumeApiRateLimit(request, session.user.id,
-      "admin-prompt-refiner-vnext-paid-authorization", { minute: 1, day: 1 });
     if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1") {
       return NextResponse.json({ code: "PAID_APPROVAL_WRITE_DISABLED" },
         { status: 409, headers });
@@ -63,6 +61,8 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 2 * 1024, schema);
     const { confirmation: _confirmation, ...expected } = body;
     void _confirmation;
+    await consumeApiRateLimit(request, session.user.id,
+      "admin-prompt-refiner-vnext-paid-authorization", { minute: 1, day: 1 });
     const result = await approvePromptRefinerVnextOneShotPaidDispatch({
       session, request, expected,
     });
@@ -72,6 +72,17 @@ export async function POST(request: Request) {
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
+    }
+    if (error instanceof Error && [
+      "vnext_one_shot_paid_approval_context_invalid",
+      "vnext_one_shot_paid_approval_stage_unavailable",
+      "vnext_one_shot_paid_approval_binding_mismatch",
+      "vnext_one_shot_paid_approval_shadow_unavailable",
+      "vnext_one_shot_paid_approval_duplicate",
+    ].includes(error.message)) {
+      return NextResponse.json({ code: "PAID_APPROVAL_REFUSED",
+        retryAuthorized: false, humanReviewRequired: true },
+        { status: 409, headers });
     }
     return NextResponse.json({ code: "PAID_APPROVAL_OUTCOME_UNKNOWN",
       retryAuthorized: false, humanReviewRequired: true },
