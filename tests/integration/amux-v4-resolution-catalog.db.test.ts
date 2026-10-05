@@ -29,7 +29,7 @@ const session = { user: { id: actorUserId, email: actorEmail,
 
 after(async () => { await prisma.$disconnect(); });
 
-test("owner catalog is idea-bound and excludes non-v4 cards", async () => {
+test("owner catalog is idea-bound and keeps legacy cards as non-linkable hints", async () => {
   const ideaId = randomUUID();
   const submittedAt = new Date();
   await prisma.amuxIdeaSubmission.create({ data: { id: ideaId,
@@ -37,8 +37,15 @@ test("owner catalog is idea-bound and excludes non-v4 cards", async () => {
     submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000) } });
   await prisma.amuxWorkItem.create({ data: { id: `legacy-${randomUUID()}`,
     title: "synthetic legacy item", status: "backlog" } });
-  assert.deepEqual(await readAmuxIdeaResolutionCatalog(session, ideaId),
-    { nodes: [], cards: [] });
+  await prisma.amuxWorkItem.create({ data: { id: `legacy-${randomUUID()}`,
+    title: "x".repeat(201), status: "backlog" } });
+  const catalog = await readAmuxIdeaResolutionCatalog(session, ideaId);
+  assert.deepEqual(catalog.nodes, []);
+  assert.deepEqual(catalog.cards, []);
+  assert.equal(catalog.legacyCards.length >= 1, true);
+  assert.equal(catalog.legacyCards.some((card) =>
+    card.title === "synthetic legacy item"), true);
+  assert.equal(catalog.legacyCards.some((card) => card.title.length > 200), false);
   await assert.rejects(readAmuxIdeaResolutionCatalog({ ...session,
     user: { id: `other-${randomUUID()}`, email: actorEmail } } as Session, ideaId),
   (error: unknown) => error instanceof AmuxIdeaResolutionPreviewError &&

@@ -21,6 +21,8 @@ const catalogSchema = z.object({
     featureRef: ref, revision, contentDigest: digest,
     status: z.enum(["backlog", "todo", "doing", "review", "done", "blocked", "cancelled"]) })
     .strict()).max(1_000),
+  legacyCards: z.array(z.object({ ref, title: z.string().min(1).max(200) })
+    .strict()).max(1_000),
 }).strict();
 type Catalog = z.infer<typeof catalogSchema>;
 
@@ -134,6 +136,9 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
           candidate.proposal.title.normalize("NFC").toLowerCase() ===
             proposal.title.normalize("NFC").toLowerCase())
           .map((candidate) => candidate.localRef) : [];
+        const legacyMatches = catalog.legacyCards.filter((entry) =>
+          entry.title.normalize("NFC").toLowerCase() ===
+            proposal.title.normalize("NFC").toLowerCase());
         const options = isNode ? catalog.nodes.filter((entry) =>
           entry.level === proposal.level && entry.state === "active") :
           catalog.cards.filter((entry) => entry.cardType === proposal.cardType &&
@@ -146,6 +151,9 @@ export function AmuxIdeaResolutionPanel({ ideaId, chunkIndex, units }: {
                 ...sameTitleRefs, ...proposal.duplicateCandidateRefs,
               ])).join(", ")}
             </p> : null}
+          {legacyMatches.length > 0 ? <p className="text-xs text-amber-700 dark:text-amber-300">
+            {m.resolutionLegacyOverlap}: {legacyMatches.map((entry) => entry.ref).join(", ")}
+          </p> : null}
           <label className="block">{isNode ? m.resolutionNodeAction : m.resolutionCardAction}
             <select value={action} onChange={(event) => {
               setActions((current) => ({ ...current, [unit.id]: event.target.value }));

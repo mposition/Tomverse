@@ -25,12 +25,13 @@ const MAX_CATALOG = 1_000;
 const DIGEST = /^[0-9a-f]{64}$/;
 const REF = /^[A-Za-z0-9:_-]{1,128}$/;
 
-/** Metadata-only, bounded owner catalog. Card title/body is deliberately not
- * copied to the candidate response; the owner reviews content in the source
- * analysis or authorized backlog view before choosing an opaque target ID. */
+/** Bounded owner catalog. v4 card title/body is deliberately not copied to the
+ * candidate response; legacy card titles are exact-match warnings only and
+ * cannot be used as v4 link targets. */
 export async function readAmuxIdeaResolutionCatalog(
   session: Session, ideaId: string,
-): Promise<{ nodes: AmuxHierarchySnapshotNode[]; cards: AmuxExistingResolutionCard[] }> {
+): Promise<{ nodes: AmuxHierarchySnapshotNode[]; cards: AmuxExistingResolutionCard[];
+  legacyCards: Array<{ ref: string; title: string }> }> {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
       !REF.test(ideaId)) throw new AmuxIdeaResolutionPreviewError("not_found");
@@ -38,7 +39,7 @@ export async function readAmuxIdeaResolutionCatalog(
     where: { id: ideaId, actorUserId }, select: { id: true },
   });
   if (!owned) throw new AmuxIdeaResolutionPreviewError("not_found");
-  const [nodeRows, cardRows] = await prisma.$transaction([
+  const [nodeRows, cardRows, legacyRows] = await prisma.$transaction([
     prisma.amuxPortfolioNode.findMany({ take: MAX_CATALOG + 1,
       orderBy: { id: "asc" }, select: { id: true, level: true, parentId: true,
         revision: true, contentDigest: true, state: true } }),
@@ -46,8 +47,13 @@ export async function readAmuxIdeaResolutionCatalog(
       take: MAX_CATALOG + 1, orderBy: { id: "asc" },
       select: { id: true, sourceSystem: true, cardType: true, storyKind: true,
         parentFeatureNodeId: true, revision: true, v4TitleDigest: true, status: true } }),
+    prisma.amuxWorkItem.findMany({ where: { OR: [
+      { sourceSystem: null }, { sourceSystem: { not: "admin-idea-v4" } },
+    ], archivedAt: null }, take: MAX_CATALOG + 1, orderBy: { id: "asc" },
+    select: { id: true, title: true } }),
   ]);
-  if (nodeRows.length > MAX_CATALOG || cardRows.length > MAX_CATALOG) {
+  if (nodeRows.length > MAX_CATALOG || cardRows.length > MAX_CATALOG ||
+      legacyRows.length > MAX_CATALOG) {
     throw new AmuxIdeaResolutionPreviewError("catalog_too_large");
   }
   const nodes = nodeRows.map((row) => {
@@ -81,7 +87,16 @@ export async function readAmuxIdeaResolutionCatalog(
       featureRef: row.parentFeatureNodeId, revision: row.revision,
       contentDigest: row.v4TitleDigest, status: row.status as AmuxExistingResolutionCard["status"] };
   });
-  return { nodes, cards };
+  const legacyCards = legacyRows.flatMap((row) => {
+    if (!REF.test(row.id) || typeof row.title !== "string") {
+      throw new AmuxIdeaResolutionPreviewError("integrity_unavailable");
+    }
+    // A07 proposal titles are 1..200 characters. Longer or empty legacy
+    // titles cannot match and must not break a different proposal's preview.
+    return row.title.length >= 1 && row.title.length <= 200
+      ? [{ ref: row.id, title: row.title }] : [];
+  });
+  return { nodes, cards, legacyCards };
 }
 
 /** Server re-reads the HMAC-verified A07 units. Browser-supplied proposal or
