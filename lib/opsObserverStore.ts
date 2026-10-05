@@ -310,7 +310,9 @@ export type OpsObserverAdminView = {
  * or without its state row, and the trust verdict -- exactly the values a
  * genesis request must name back. Unlike the services' read it reports the
  * head of an untrusted chain, because that is what a recovery replaces; it
- * carries no keys. One bounded `state_read` transaction.
+ * carries no keys. One bounded `state_read` transaction, and the deadline is
+ * checked again before the view is returned, so a late read shows nothing
+ * rather than a head the owner would then bind.
  */
 export async function readOpsObserverAdminView(client: PrismaClient = prisma): Promise<OpsObserverAdminView> {
   const integrityKeys = adminAuditIntegrityKeys(process.env);
