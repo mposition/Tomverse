@@ -95,8 +95,9 @@ never invokes that route.
 The B06 deployment is refused before v3 stage approval unless its reviewed
 commit includes the v3 paid-audit guard in the slot route, the owner paid
 approval route, and a passing CI test with an exact `run_approved` v3 stage,
-a valid B06 shadow audit, 80 reserved and zero consumed slots, matching
-candidate/root/runner/price and active deployment pins, **both** environment
+a valid B06 shadow audit that the slot route itself verifies, 80 reserved and
+zero consumed slots, matching candidate/root/runner/price, the 29,918 and
+2,393,440 microUSD ceilings, and active deployment pins, **both** environment
 switches set to `1`, and a valid runner token and slot request. With only the
 paid-authorization audit absent, the slot route must refuse before slot or
 audit mutation. The test must establish that all other admission predicates
@@ -169,5 +170,7 @@ and code. The PR and staging deployment must be verified separately. B06 is
 complete only when the app's owner readback shows v3's exact deployment and
 commit, same candidate/root/runner/price binding, valid stage/run/shadow
 audits, 80 reserved and zero consumed slots, an audit recording explicit integer
-`cacheWriteInputTokens: 0`, no paid-authorization audit, and dispatch blocked
-through shadow completion.
+`cacheWriteInputTokens: 0` from the A17 signed proof for that exact v3 binding
+(not a missing, defaulted, derived or unrelated zero), no paid-authorization
+audit, and dispatch blocked through shadow completion. The paid-approval route
+must apply this same strict shadow readback before any future write.
