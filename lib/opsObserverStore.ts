@@ -338,6 +338,9 @@ export async function readOpsObserverAdminView(client: PrismaClient = prisma): P
     },
     client,
   );
+  // Like the services' read (policy §6): a late read is not returned as the
+  // head and verdict the owner will bind.
+  await assertNotLate(runDeadline, client);
   return result;
 }
 
