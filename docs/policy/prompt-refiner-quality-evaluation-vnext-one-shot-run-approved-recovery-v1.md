@@ -95,7 +95,8 @@ never invokes that route.
 The B06 deployment is refused before v3 stage approval unless its reviewed
 commit includes the v3 paid-audit guard in the slot route, the owner paid
 approval route, and a passing CI test with an exact `run_approved` v3 stage,
-a valid B06 shadow audit that the slot route itself verifies, 80 reserved and
+a valid B06 shadow audit that the slot route itself verifies against the strict
+signed-proof and exact-binding readback criteria below, 80 reserved and
 zero consumed slots, matching candidate/root/runner/price, the 29,918 and
 2,393,440 microUSD ceilings, and active deployment pins, **both** environment
 switches set to `1`, and a valid runner token and slot request. With only the
@@ -141,7 +142,8 @@ any replacement or paid run. An uncertain shadow write is read back once:
 completion requires one valid v3 shadow audit, the same active deployment ID
 and commit, valid v3 stage and run audits, all 80 slots reserved and zero
 consumed, an app audit recording the proof's explicit integer
-`cacheWriteInputTokens: 0` (not a missing or derived zero), no paid-authorization
+`cacheWriteInputTokens: 0` from the A17 signed proof for that exact v3 binding
+(not a missing, defaulted, derived or unrelated zero), no paid-authorization
 audit, and `dispatchAuthorized: false`. Absent,
 duplicate, mismatched or invalid evidence stops the attempt without a second
 POST. The later paid-approval route must also refuse a drifted deployment and
