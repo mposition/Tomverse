@@ -71,17 +71,17 @@ export type QaReleaseChangedFile = {
  */
 export const QA_RELEASE_PROTECTED_TABLE_PATTERN = /QaRelease[A-Za-z0-9_]*|AgentDigestItem/;
 
-const MIGRATION_SQL_PATH = /^prisma\/migrations\/[^/]+\/migration\.sql$/;
+export const QA_RELEASE_MIGRATION_SQL_PATH = /^prisma\/migrations\/[^/]+\/migration\.sql$/;
 
 export type QaReleaseExclusionInput = {
   headBranch: string;
   changedFiles: readonly QaReleaseChangedFile[];
   /** False when the changed-file list could not be read to its last page. */
   changedFilesComplete: boolean;
-  /** `tests/**` paths named by the policy documents at the pull request's base. */
-  policyTestPaths: readonly string[];
-  /** This agent's own path patterns, read from the policy at the pull request's base. */
-  agentOwnPatterns: readonly string[];
+  /** `tests/**` paths named by the policy documents at the pull request's base; null when unread. */
+  policyTestPaths: readonly string[] | null;
+  /** This agent's own path patterns, read from the policy at the pull request's base; null when unread. */
+  agentOwnPatterns: readonly string[] | null;
 };
 
 export type QaReleaseExclusionReason =
@@ -133,7 +133,7 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
   } else if (changedFiles.length === 0) {
     reasons.add("changed_files_empty");
   }
-  if (reasons.has("inputs_unreadable") || changedFiles === null) {
+  if (reasons.has("inputs_unreadable") || changedFiles === null || input.policyTestPaths === null || input.agentOwnPatterns === null) {
     return { excluded: true, reasons: [...reasons].sort() };
   }
 
@@ -155,7 +155,7 @@ export function judgeQaReleaseMergeLaneExclusion(input: QaReleaseExclusionInput)
       if (policyTests.has(path)) reasons.add("policy_test");
       if (ownMatchers.some((matcher) => matcher.test(path))) reasons.add("agent_own_path");
     }
-    if (isReadablePath(file.path) && MIGRATION_SQL_PATH.test(file.path)) {
+    if (isReadablePath(file.path) && QA_RELEASE_MIGRATION_SQL_PATH.test(file.path)) {
       if (typeof file.migrationSql !== "string" || QA_RELEASE_PROTECTED_TABLE_PATTERN.test(file.migrationSql)) {
         reasons.add("protected_table_migration");
       }

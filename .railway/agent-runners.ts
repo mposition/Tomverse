@@ -110,6 +110,16 @@ const QA_RELEASE_DIGEST_VARIABLES = [
 
 const QA_RELEASE_MONITOR_VARIABLES = ["QA_RELEASE_MONITOR_SECRET", "QA_RELEASE_CONTROL_REVISION"] as const;
 
+const QA_RELEASE_MERGE_LANE_VARIABLES = [
+  "QA_RELEASE_MERGE_LANE_SECRET",
+  "QA_RELEASE_MERGE_LANE_APP_ID",
+  "QA_RELEASE_MERGE_LANE_APP_PRIVATE_KEY",
+  "QA_RELEASE_MERGE_LANE_RAILWAY_TOKEN",
+  "QA_RELEASE_MERGE_LANE_ENABLED",
+  "QA_RELEASE_MERGE_LANE_KILL_SWITCH",
+  "QA_RELEASE_CONTROL_REVISION",
+] as const;
+
 /**
  * The billing-finance-ops stage W trigger's variables
  * (docs/policy/billing-finance-ops.md §3 item 6): the run secret, the dead-man
@@ -160,6 +170,22 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: QA_RELEASE_MONITOR_VARIABLES,
       staging: QA_RELEASE_MONITOR_VARIABLES,
+    },
+  },
+  {
+    key: "qa_release_merge_lane",
+    service: "QA Release Merge Lane",
+    startCommand: "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs",
+    // Policy section 10: every 10 minutes, hard timeout 10 minutes.
+    cronSchedule: "*/10 * * * *",
+    // Production only. The lane merges develop into staging, so its state --
+    // the open attempt, the latch, the operator control record -- must not
+    // live in the staging database that a failed merge sends to be restored
+    // (section 8 item 3): restoring it would erase the latch that asked for
+    // the restore. It reads staging through its Railway token, which names
+    // the staging environment itself (lib/qaReleaseMergeLaneRailway.ts).
+    environments: {
+      production: QA_RELEASE_MERGE_LANE_VARIABLES,
     },
   },
   {

@@ -89,3 +89,38 @@ export function assertQaReleaseMonitorEndpoint(candidate: string): void {
   const exact = allowedUrls.includes(candidate) && url.href === candidate && url.protocol === "https:";
   if (!exact) throw new Error("qa_release_monitor_endpoint_not_allowed");
 }
+
+export const QA_RELEASE_MERGE_LANE_PATHNAMES = Object.freeze({
+  state: "/api/internal/agents/qa-release/merge-lane/state",
+  instruction: "/api/internal/agents/qa-release/merge-lane/instruction",
+  consume: "/api/internal/agents/qa-release/merge-lane/consume",
+  report: "/api/internal/agents/qa-release/merge-lane/report",
+} as const);
+
+export type QaReleaseMergeLaneCall = keyof typeof QA_RELEASE_MERGE_LANE_PATHNAMES;
+
+/**
+ * The merge lane service's four destinations: the same fixed origins and
+ * Railway name rule as the digest, one exact path per call, and the same
+ * written-form comparison before each request is built.
+ */
+export function qaReleaseMergeLaneEndpoint(env: Record<string, string | undefined>, call: QaReleaseMergeLaneCall): string {
+  const origin = QA_RELEASE_DIGEST_ENDPOINTS[qaReleaseDigestEnvironment(env)];
+  const url = `${origin}${QA_RELEASE_MERGE_LANE_PATHNAMES[call]}`;
+  assertQaReleaseMergeLaneEndpoint(url, call);
+  return url;
+}
+
+export function assertQaReleaseMergeLaneEndpoint(candidate: string, call: QaReleaseMergeLaneCall): void {
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("qa_release_merge_lane_endpoint_invalid");
+  }
+  const allowedUrls: readonly string[] = Object.values(QA_RELEASE_DIGEST_ENDPOINTS).map(
+    (origin) => `${origin}${QA_RELEASE_MERGE_LANE_PATHNAMES[call]}`,
+  );
+  const exact = allowedUrls.includes(candidate) && url.href === candidate && url.protocol === "https:";
+  if (!exact) throw new Error("qa_release_merge_lane_endpoint_not_allowed");
+}
