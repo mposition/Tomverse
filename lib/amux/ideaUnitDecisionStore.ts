@@ -681,6 +681,145 @@ export async function commitAmuxV4UnitRejection(tx: Prisma.TransactionClient, in
   return { decisionId: prepared.id, auditId, targetCreated: false as const };
 }
 
+/** Bind one proposal to an existing approved node; no node body or execution
+ * state is changed. The decision row itself is the append-only link. */
+export async function commitAmuxV4NodeSelection(tx: Prisma.TransactionClient, input: {
+  session: Session; request: Request;
+  snapshot: AmuxIdeaUnitConfirmationSnapshot;
+  proposal: AmuxAnalysisNode;
+  context: Omit<AmuxIdeaUnitConsumeContext, "databaseNow" | "currentConfirmation">;
+  consumeRequestId: string; keys: AmuxDigestKey;
+  recalculate: (tx: Prisma.TransactionClient) => Promise<AmuxIdeaDuplicateScan>;
+}) {
+  const actorUserId = ownerId(input.session);
+  const { snapshot } = input;
+  if (snapshot.actorUserId !== actorUserId ||
+      !["select_existing_node", "link_existing_node"].includes(snapshot.action) ||
+      snapshot.target?.kind !== "node" ||
+      !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {
+    throw new AmuxV4UnitDecisionError("not_found");
+  }
+  await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  await takeAuditChainLock(tx);
+  const locked = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaUnitDecision"
+    WHERE "id" = ${snapshot.decisionId} AND "actorUserId" = ${actorUserId}
+    FOR UPDATE
+  `;
+  if (locked.length !== 1) throw new AmuxV4UnitDecisionError("not_found");
+  const prepared = await tx.amuxIdeaUnitDecision.findUnique({
+    where: { id: snapshot.decisionId },
+  });
+  if (!prepared || prepared.action !== snapshot.action ||
+      prepared.confirmationSnapshot === null ||
+      amuxCanonicalJson(prepared.confirmationSnapshot) !==
+        amuxCanonicalJson(snapshot) ||
+      prepared.baseNodeId !== snapshot.target.id ||
+      prepared.baseNodeRevision !== snapshot.target.revision ||
+      prepared.baseNodeDigest !== snapshot.target.content.digest ||
+      prepared.baseNodeDigestKeyId !== snapshot.target.content.keyId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const unit = await tx.amuxIdeaDraftUnit.findUnique({
+    where: { id: prepared.draftUnitId },
+    select: { id: true, ideaId: true, actorUserId: true, state: true,
+      localRef: true, unitKind: true, bodyDigest: true,
+      bodyDigestKeyId: true, chunkIndex: true },
+  });
+  if (!unit || unit.ideaId !== prepared.ideaId ||
+      unit.actorUserId !== actorUserId || unit.state !== "proposed" ||
+      unit.unitKind !== "node" || unit.localRef !== input.proposal.localId ||
+      unit.bodyDigest !== snapshot.unitBody.digest ||
+      unit.bodyDigestKeyId !== snapshot.unitBody.keyId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const actual = amuxContentDigest(Buffer.from(amuxCanonicalJson(input.proposal), "utf8"),
+    "analysis_draft", unit.id, input.keys);
+  if (actual.digest !== unit.bodyDigest ||
+      actual.digestKeyId !== unit.bodyDigestKeyId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  await assertCurrentProposalSource(tx, snapshot, unit.chunkIndex);
+  const path = [...snapshot.hierarchy, snapshot.target];
+  for (const target of path) {
+    const rows = await tx.$queryRaw<Array<{
+      id: string; level: string; parentId: string | null;
+      state: string; revision: number;
+      contentDigest: string; contentDigestKeyId: string;
+    }>>`
+      SELECT "id", "level", "parentId", "state", "revision",
+             "contentDigest", "contentDigestKeyId"
+      FROM "AmuxPortfolioNode" WHERE "id" = ${target.id} FOR SHARE
+    `;
+    const node = rows[0];
+    const revision = await tx.amuxPortfolioNodeRevision.findUnique({
+      where: { nodeId_revision: { nodeId: target.id,
+        revision: target.revision } },
+      select: { decisionId: true, contentDigest: true,
+        contentDigestKeyId: true },
+    });
+    const approval = revision ? await tx.amuxIdeaUnitDecision.findUnique({
+      where: { id: revision.decisionId },
+      select: { action: true, state: true, resolvedNodeId: true },
+    }) : null;
+    if (rows.length !== 1 || !node || node.state !== "active" ||
+        node.level !== target.level || node.parentId !== target.parentId ||
+        node.revision !== target.revision ||
+        node.contentDigest !== target.content.digest ||
+        node.contentDigestKeyId !== target.content.keyId ||
+        revision?.decisionId !== target.approvedDecisionId ||
+        revision.contentDigest !== target.content.digest ||
+        revision.contentDigestKeyId !== target.content.keyId ||
+        approval?.action !== "create_node" || approval.state !== "consumed" ||
+        approval.resolvedNodeId !== target.id) {
+      throw new AmuxV4UnitDecisionError("reconfirm");
+    }
+  }
+  const duplicates = await input.recalculate(tx);
+  const confirmation = deriveAmuxIdeaUnitConfirmation(snapshot,
+    input.keys, duplicates, null);
+  const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = nowRows[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxV4UnitDecisionError("integrity_unavailable");
+  }
+  const guard = checkAmuxIdeaUnitConsume({ ...prepared,
+    state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
+  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  if (guard.decision !== "allow") {
+    throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
+      "integrity_unavailable" : "reconfirm");
+  }
+  const auditId = await writeAdminAuditLog({ tx, session: input.session,
+    request: input.request, action: "amux.v4.unit.consume",
+    targetType: "AmuxIdeaUnitDecision", targetId: prepared.id,
+    summary: "Linked one AMUX v4 proposal to an approved portfolio node.",
+    metadata: { ideaId: prepared.ideaId, draftUnitId: unit.id,
+      nodeId: snapshot.target.id, action: snapshot.action,
+      confirmationDigest: prepared.confirmationDigest,
+      targetCreated: false },
+  });
+  const decision = await tx.amuxIdeaUnitDecision.updateMany({
+    where: { id: prepared.id, actorUserId, state: "prepared",
+      expiresAt: { gt: now }, outcomeUnknownAt: null,
+      confirmationDigest: confirmation.ok ? confirmation.confirmationDigest : "" },
+    data: { state: "consumed", consumeRequestId: input.consumeRequestId,
+      consumedAt: now, finalAuditLogId: auditId,
+      linkedNodeId: snapshot.target.id },
+  });
+  const draft = await tx.amuxIdeaDraftUnit.updateMany({
+    where: { id: unit.id, ideaId: prepared.ideaId,
+      actorUserId, state: "proposed" }, data: { state: "approved" },
+  });
+  if (decision.count !== 1 || draft.count !== 1) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  return { decisionId: prepared.id, nodeId: snapshot.target.id,
+    auditId, targetCreated: false as const };
+}
+
 /** Exact-ID read-back after an uncertain response. Missing is not proof of
  * no commit and must never trigger an automatic second write. */
 export async function readAmuxV4UnitDecision(session: Session, lookup: {
@@ -703,11 +842,14 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
     select: { id: true, ideaId: true, draftUnitId: true, state: true,
       action: true, confirmationDigest: true, expiresAt: true,
       outcomeUnknownAt: true, registeredWorkItemId: true,
-      resolvedNodeId: true,
+      resolvedNodeId: true, linkedNodeId: true,
+      baseNodeId: true, baseNodeRevision: true,
+      baseNodeDigest: true, baseNodeDigestKeyId: true,
       prepareAuditLogId: true, finalAuditLogId: true },
   });
   if (!row) return { state: "not_visible", retryWrite: false } as const;
-  const [prepareAudit, finalAudit, card, nodeRevision, node, rejectedDraft] = await Promise.all([
+  const [prepareAudit, finalAudit, card, nodeRevision, node, decisionDraft,
+    linkedNode, linkedRevision] = await Promise.all([
     prisma.adminAuditLog.findUnique({ where: { id: row.prepareAuditLogId },
       select: { action: true, actorUserId: true, targetType: true,
         targetId: true, entryHash: true } }),
@@ -731,12 +873,24 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       select: { id: true, revision: true, contentDigest: true,
         contentDigestKeyId: true, authorizationAuditLogId: true },
     }) : Promise.resolve(null),
-    row.state === "consumed" && row.action === "reject_unit" ?
+    row.state === "consumed" && ["reject_unit", "select_existing_node",
+      "link_existing_node"].includes(row.action) ?
       prisma.amuxIdeaDraftUnit.findUnique({ where: { id: row.draftUnitId },
         select: { state: true, ideaId: true, actorUserId: true } }) :
       Promise.resolve(null),
+    row.linkedNodeId ? prisma.amuxPortfolioNode.findUnique({
+      where: { id: row.linkedNodeId },
+      select: { id: true, level: true, parentId: true },
+    }) : Promise.resolve(null),
+    row.linkedNodeId && row.baseNodeRevision !== null ?
+      prisma.amuxPortfolioNodeRevision.findUnique({ where: {
+        nodeId_revision: { nodeId: row.linkedNodeId,
+          revision: row.baseNodeRevision },
+      }, select: { decisionId: true, contentDigest: true,
+        contentDigestKeyId: true } }) : Promise.resolve(null),
   ]);
-  if (!["register_card", "create_node", "reject_unit"].includes(row.action) ||
+  if (!["register_card", "create_node", "reject_unit",
+      "select_existing_node", "link_existing_node"].includes(row.action) ||
       !prepareAudit?.entryHash || prepareAudit.action !== "amux.v4.unit.prepare" ||
       prepareAudit.actorUserId !== actorUserId ||
       prepareAudit.targetType !== "AmuxIdeaUnitDecision" ||
@@ -766,9 +920,19 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
           nodeRevision.authorizationAuditLogId !== row.finalAuditLogId ||
           node.authorizationAuditLogId !== row.finalAuditLogId)) ||
       (row.state === "consumed" && row.action === "reject_unit" &&
-        (!rejectedDraft || rejectedDraft.state !== "rejected" ||
-          rejectedDraft.ideaId !== row.ideaId ||
-          rejectedDraft.actorUserId !== actorUserId ||
+        (!decisionDraft || decisionDraft.state !== "rejected" ||
+          decisionDraft.ideaId !== row.ideaId ||
+          decisionDraft.actorUserId !== actorUserId ||
+          row.registeredWorkItemId !== null || row.resolvedNodeId !== null)) ||
+      (row.state === "consumed" &&
+        ["select_existing_node", "link_existing_node"].includes(row.action) &&
+        (!linkedNode || !linkedRevision || !decisionDraft ||
+          decisionDraft.state !== "approved" ||
+          decisionDraft.ideaId !== row.ideaId ||
+          decisionDraft.actorUserId !== actorUserId ||
+          linkedNode.id !== row.baseNodeId ||
+          linkedRevision.contentDigest !== row.baseNodeDigest ||
+          linkedRevision.contentDigestKeyId !== row.baseNodeDigestKeyId ||
           row.registeredWorkItemId !== null || row.resolvedNodeId !== null))) {
     return { state: "integrity_unavailable", retryWrite: false } as const;
   }
@@ -791,6 +955,12 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
     return { state: "consumed", action: "reject_unit", retryWrite: false,
       decisionId: row.id, ideaId: row.ideaId,
       draftUnitId: row.draftUnitId } as const;
+  }
+  if (row.state === "consumed" && linkedNode) {
+    return { state: "consumed", action: row.action,
+      retryWrite: false, decisionId: row.id,
+      ideaId: row.ideaId, draftUnitId: row.draftUnitId,
+      nodeId: linkedNode.id, targetCreated: false } as const;
   }
   if (row.state !== "prepared") {
     return { state: row.state, retryWrite: false, decisionId: row.id,
@@ -836,7 +1006,8 @@ export async function cancelAmuxV4UnitDecision(input: {
           draftUnitId: true, outcomeUnknownAt: true },
       });
       if (!decision || decision.state !== "prepared" ||
-      !["register_card", "create_node", "reject_unit"].includes(decision.action) ||
+      !["register_card", "create_node", "reject_unit",
+        "select_existing_node", "link_existing_node"].includes(decision.action) ||
           decision.outcomeUnknownAt !== null) {
         throw new AmuxV4UnitDecisionError("reconfirm");
       }

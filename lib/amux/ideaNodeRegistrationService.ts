@@ -39,7 +39,7 @@ function owner(session: Session) {
 
 /** Build an exact approved ancestor path. A node with a forged revision or
  * an archived parent cannot become a registration target. */
-async function approvedAncestors(tx: Prisma.TransactionClient,
+export async function approvedAncestors(tx: Prisma.TransactionClient,
   parentNodeId: string | null): Promise<Node[]> {
   const reversed: Node[] = [];
   let cursor = parentNodeId;

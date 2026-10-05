@@ -972,6 +972,73 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     assert.deepEqual(createdNode.rows[0], {
       level: "initiative", decisionState: "consumed", unitState: "approved",
     });
+    // Selecting the existing node adds a separate decision/link; no second
+    // portfolio node is created, and an unapproved source draft cannot commit.
+    const selectUnitId = randomUUID();
+    const selectDecisionId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaDraftUnit"
+       ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
+        "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+        "bodyDigest", "bodyDigestKeyId", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 0, 101, 'c0:node-101', 'node',
+               'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+      [selectUnitId, ids.idea, title, digest],
+    );
+    const selectPrepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: selectDecisionId,
+      summary: "synthetic node selection preparation",
+    });
+    await client.query(
+      `INSERT INTO public."AmuxIdeaUnitDecision"
+       ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+        "prepareRequestId", "action", "state", "ownerSessionDigest",
+        "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+        "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+        "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+        "baseNodeId", "baseNodeRevision", "baseNodeDigest", "baseNodeDigestKeyId",
+        "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+       VALUES ($1, $2, $3, 'synthetic-owner', 0, $4,
+               'select_existing_node', 'prepared', $5, 'synthetic', $6,
+               'synthetic', $7, 'synthetic', $8::jsonb, $9, $10, 'synthetic',
+               $11, 0, $12, 'synthetic', CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP + INTERVAL '15 minutes', $13, CURRENT_TIMESTAMP)`,
+      [selectDecisionId, ids.idea, selectUnitId, randomUUID(),
+        "b".repeat(64), digest, "c".repeat(64),
+        JSON.stringify({ action: "select_existing_node",
+          target: { id: newInitiativeId, revision: 0,
+            content: { digest } }, decisionReason: null }), decisionPreviewId,
+        digest, newInitiativeId, digest, selectPrepareAudit],
+    );
+    const selectConsumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: selectDecisionId,
+      summary: "synthetic node selection consumption",
+    });
+    const consumeSelection = `UPDATE public."AmuxIdeaUnitDecision"
+      SET "state" = 'consumed', "consumeRequestId" = $2,
+          "linkedNodeId" = $3, "finalAuditLogId" = $4 WHERE "id" = $1`;
+    await client.query("SAVEPOINT incomplete_selection_probe");
+    await client.query(consumeSelection,
+      [selectDecisionId, randomUUID(), newInitiativeId, selectConsumeAudit]);
+    await expectRejected(
+      `SET CONSTRAINTS amux_v4_linked_node_decision_complete IMMEDIATE`,
+      [], "AmuxV4NodeLink_consistency_check",
+    );
+    await client.query("ROLLBACK TO SAVEPOINT incomplete_selection_probe");
+    await client.query("RELEASE SAVEPOINT incomplete_selection_probe");
+    await client.query(consumeSelection,
+      [selectDecisionId, randomUUID(), newInitiativeId, selectConsumeAudit]);
+    await client.query(`UPDATE public."AmuxIdeaDraftUnit"
+      SET "state" = 'approved' WHERE "id" = $1`, [selectUnitId]);
+    await client.query(`SET CONSTRAINTS amux_v4_linked_node_decision_complete IMMEDIATE`);
+    const linked = await client.query(
+      `SELECT "linkedNodeId", "resolvedNodeId" FROM public."AmuxIdeaUnitDecision"
+       WHERE "id" = $1`, [selectDecisionId]);
+    assert.deepEqual(linked.rows[0], {
+      linkedNodeId: newInitiativeId, resolvedNodeId: null,
+    });
     await client.query("ROLLBACK TO SAVEPOINT node_registration_probe");
     await client.query("RELEASE SAVEPOINT node_registration_probe");
     const nodeRollback = await client.query(

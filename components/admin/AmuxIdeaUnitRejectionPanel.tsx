@@ -116,19 +116,21 @@ export function AmuxIdeaUnitRejectionPanel({ ideaId, unit }: {
     finally { setBusy(false); }
   };
   const cancel = async () => {
-    if (!prepared || busy || unknown || rejected || cancelled) return;
+    const decisionId = prepared?.decisionId ?? readbackPreparedId;
+    if (!decisionId || busy || rejected || cancelled) return;
     setBusy(true); setError(null);
     try {
       const response = await adminFetch("/api/admin/amux/ideas/unit-decisions/cancel", {
         method: "POST", cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decisionId: prepared.decisionId }),
+        body: JSON.stringify({ decisionId }),
       });
       if (!response.ok) { await fail(response); return; }
       const value: unknown = await response.json();
       if (!value || typeof value !== "object" || !("state" in value) ||
           value.state !== "cancelled") { setUnknown(true); return; }
-      setCancelled(true); setPrepared(null);
+      setCancelled(true); setPrepared(null); setUnknown(false);
+      setReadbackPreparedId(null);
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
@@ -166,7 +168,7 @@ export function AmuxIdeaUnitRejectionPanel({ ideaId, unit }: {
       {m.storyRegistrationReadBack}</button> : null}
     {readbackPreparedId ? <p className="break-all text-xs">
       {m.storyRegistrationDecisionId}: {readbackPreparedId}</p> : null}
-    {prepared && !unknown && !rejected && !cancelled ? <button type="button"
+    {(prepared || readbackPreparedId) && !rejected && !cancelled ? <button type="button"
       onClick={() => void cancel()} disabled={busy}
       className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">
       {m.storyRegistrationCancel}</button> : null}

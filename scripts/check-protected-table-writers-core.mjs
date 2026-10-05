@@ -1081,6 +1081,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The deferred rejection guard reads the already-written canonical consume audit and checks the matching rejected draft at COMMIT. Its trigger creation writes no AdminAuditLog rows.",
   },
+  {
+    path: "prisma/migrations/20261005070000_amux_v4_node_link_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred node-link guard reads a prior canonical human consume audit and checks its approved draft and v4 target. It creates no AdminAuditLog rows.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
