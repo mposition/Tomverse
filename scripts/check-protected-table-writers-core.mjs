@@ -677,6 +677,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The dark vNext one-shot migration keeps immutable audit IDs as plain columns and trigger-checks both linked audit rows under key-share locks. Its write verbs create or guard the new stage and slot tables, including two statement-level TRUNCATE guards; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261005140000_prompt_refiner_one_shot_unrun_replacement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 12,
+    reason:
+      "The one-shot replacement migration reads the existing supersession audit row under a key-share lock in two guards. Its DDL and trigger write verbs constrain only the one-shot stage table; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 6,
@@ -1074,6 +1082,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 5,
     reason:
       "Five dynamic SELECTs in the one-shot stage and slot guards use the trigger's own schema quoted with %I and bind IDs with USING: two AdminAuditLog reads use FOR KEY SHARE, two stage-status reads use FOR SHARE, and one slot count in the deferred constraint trigger has no lock clause. The functions pin search_path to pg_catalog, pg_temp; none of these reads writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005140000_prompt_refiner_one_shot_unrun_replacement/migration.sql",
+    count: 5,
+    reason:
+      "Five dynamic SELECTs in the one-shot replacement guards use the trigger's own schema quoted with %I: two lock and read AdminAuditLog, one locks the historical stage, and two count the historical slots and replacement stage. The functions pin search_path to pg_catalog, pg_temp; each statement only reads and every variable ID is bound with USING.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",

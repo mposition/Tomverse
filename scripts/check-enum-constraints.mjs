@@ -620,6 +620,11 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_id_check: {
+    owner: "database",
+    reason:
+      "The one-shot stage has exactly two immutable identities: the audited original v1 and its single approved unrun replacement v2. Admission, run approval, and readback use pinned literals rather than a runtime list; a future identity requires a separate policy and migration.",
+  },
   PromptRefinerVnextOneShotStage_status_check: {
     owner: "database",
     reason:
