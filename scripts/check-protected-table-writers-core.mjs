@@ -1047,9 +1047,9 @@ export const RAW_SQL_ALLOWLIST = [
 export const RUNTIME_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20261005010000_support_triage_decision_record/migration.sql",
-    count: 5,
+    count: 8,
     reason:
-      "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else.",
+      "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else. The other three uses are support_triage_group_member_guard() replaced unchanged except for a REPEATABLE READ refusal: the report FOR SHARE, the group FOR UPDATE, then its member count.",
   },
   {
     path: "scripts/ops-observer/statement-ceiling-core.mjs",

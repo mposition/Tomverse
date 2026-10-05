@@ -11,11 +11,17 @@
 --   * decidedAt is the database's clock and retentionUntil is exactly twelve
 --     months later (a CHECK, so a different period needs a migration);
 --   * records and links are inserted and deleted, never updated;
---   * a record commits with at least one link and at most fifty;
+--   * a record commits with at least one link and at most fifty, and a link
+--     is never inserted under REPEATABLE READ, where the cap could not hold;
 --   * no link to a deleted account's report;
 --   * there is no record with some of its links gone: deleting any link, by
 --     account deletion or by its report's deletion, deletes the record and
 --     with it every other link.
+--
+-- The same REPEATABLE READ refusal is added to support_triage_group_member_guard()
+-- (migration 20261004020000_support_triage_group), which counts the same way;
+-- it is replaced here, in a migration that also creates tables, so the deploy
+-- guard never sees a migration that only replaces a function.
 --
 -- Time is the database's: clock_timestamp() AT TIME ZONE 'UTC'. Every function
 -- pins search_path and has no EXCEPTION handler.
@@ -145,6 +151,15 @@ BEGIN
         RAISE EXCEPTION 'SupportTriageDecisionRecordLink cannot link a deleted account''s report'
             USING ERRCODE = 'check_violation';
     END IF;
+    -- The cap below is counted with a fresh snapshot after the lock. REPEATABLE
+    -- READ would count with the transaction's first snapshot and miss a
+    -- concurrent insert the lock already waited for, so it is refused here.
+    -- READ COMMITTED takes a new snapshot per statement; SERIALIZABLE aborts
+    -- one of two transactions whose count and insert overlap.
+    IF pg_catalog.current_setting('transaction_isolation') = 'repeatable read' THEN
+        RAISE EXCEPTION 'SupportTriageDecisionRecordLink cannot be inserted under REPEATABLE READ; use READ COMMITTED or SERIALIZABLE'
+            USING ERRCODE = 'invalid_transaction_state';
+    END IF;
     -- Lock, then count in a separate statement: one statement that waited for
     -- the lock would still count with the snapshot it took before waiting.
     EXECUTE pg_catalog.format(
@@ -188,5 +203,64 @@ $$;
 CREATE TRIGGER "SupportTriageDecisionRecordLink_gone"
     AFTER DELETE ON "SupportTriageDecisionRecordLink"
     FOR EACH ROW EXECUTE FUNCTION "support_triage_decision_record_link_gone"();
+
+-- Members: the fifty-member cap refuses REPEATABLE READ too.
+CREATE OR REPLACE FUNCTION "support_triage_group_member_guard"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+VOLATILE
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    -- The message lib/accountDeletion.ts leaves on a deleted account's report.
+    deleted_marker CONSTANT TEXT := '[deleted account]';
+    -- limit: GROUP_MEMBER_CAP
+    member_cap CONSTANT INTEGER := 50;
+    report_message TEXT;
+    members INTEGER;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        RAISE EXCEPTION 'SupportTriageGroupMember rows are inserted and deleted, never updated'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    -- The report first, then the group: the global lock order. No membership
+    -- for a deleted account's report; the row is held so a deletion waits.
+    EXECUTE pg_catalog.format(
+        'SELECT f."message" FROM %I."Feedback" f WHERE f."id" = $1 FOR SHARE',
+        TG_TABLE_SCHEMA
+    ) INTO report_message USING NEW."feedbackId";
+    IF report_message = deleted_marker THEN
+        RAISE EXCEPTION 'SupportTriageGroupMember cannot be created for a deleted account''s report'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    -- The cap below is counted with a fresh snapshot after the lock. REPEATABLE
+    -- READ would count with the transaction's first snapshot and miss a
+    -- concurrent insert the lock already waited for, so it is refused here.
+    -- READ COMMITTED takes a new snapshot per statement; SERIALIZABLE aborts
+    -- one of two transactions whose count and insert overlap.
+    IF pg_catalog.current_setting('transaction_isolation') = 'repeatable read' THEN
+        RAISE EXCEPTION 'SupportTriageGroupMember cannot be inserted under REPEATABLE READ; use READ COMMITTED or SERIALIZABLE'
+            USING ERRCODE = 'invalid_transaction_state';
+    END IF;
+    -- The group is locked by one statement and its members counted by the
+    -- next, so two inserts cannot both see room for the fiftieth. One
+    -- statement would not do: under READ COMMITTED a statement that waited
+    -- for the lock still counts with the snapshot it took before waiting.
+    EXECUTE pg_catalog.format(
+        'SELECT 1 FROM %I."SupportTriageGroup" g WHERE g."id" = $1 FOR UPDATE',
+        TG_TABLE_SCHEMA
+    ) USING NEW."groupId";
+    EXECUTE pg_catalog.format(
+        'SELECT pg_catalog.count(*)::INTEGER FROM %I."SupportTriageGroupMember" m WHERE m."groupId" = $1',
+        TG_TABLE_SCHEMA
+    ) INTO members USING NEW."groupId";
+    IF members >= member_cap THEN
+        RAISE EXCEPTION 'SupportTriageGroup % already has % members', NEW."groupId", member_cap
+            USING ERRCODE = 'check_violation';
+    END IF;
+    NEW."createdAt" := clock_timestamp() AT TIME ZONE 'UTC';
+    RETURN NEW;
+END;
+$$;
 
 COMMIT;

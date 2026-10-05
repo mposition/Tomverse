@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
+import pg from "pg";
+
+import { resolvePostgresConnectionConfig } from "@/lib/postgresConnectionConfigCore.mjs";
 import { prisma } from "@/lib/prisma";
-import { DECISION_RECORD_LINKS_MAX } from "@/lib/supportTriageCore";
+import { DECISION_RECORD_LINKS_MAX, GROUP_MEMBER_CAP } from "@/lib/supportTriageCore";
 
 // SupportTriageDecisionRecord and its links (docs/policy/support-triage.md §5, §6).
 //
@@ -15,6 +18,7 @@ const DIGEST = "d".repeat(64);
 
 const reset = async () => {
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageDecisionRecord"`);
+  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-dr-" } } });
 };
 
@@ -146,3 +150,90 @@ test("the trigger functions have no EXCEPTION handler and pin their search path"
     assert.deepEqual(row.config, ["search_path=pg_catalog, pg_temp"], row.name);
   }
 });
+
+// The fifty caps under each isolation level. Both guards lock the parent and
+// then count in a separate statement. READ COMMITTED counts with a fresh
+// snapshot; SERIALIZABLE aborts one of two overlapping transactions;
+// REPEATABLE READ would count with a stale snapshot, so it is refused.
+
+const directClient = async () => {
+  const url = process.env.DATABASE_URL;
+  assert.ok(url, "DATABASE_URL must point at the test database");
+  const config = resolvePostgresConnectionConfig(url, { requireTestMarker: true });
+  const client = new pg.Client({ connectionString: config.connectionString, options: config.poolOptions });
+  await client.connect();
+  return client;
+};
+
+const fill = async (prefix: string, count: number) => {
+  const ids = Array.from({ length: count }, (_, i) => `fb-dr-${prefix}-${String(i).padStart(2, "0")}`);
+  await prisma.feedback.createMany({ data: ids.map((id) => ({ id, type: "bug", message: "isolation" })) });
+  return ids;
+};
+
+const LINK = `INSERT INTO "SupportTriageDecisionRecordLink" ("id", "recordId", "feedbackId") VALUES ('x-' || $1, 'r-iso', $1)`;
+const MEMBER = `INSERT INTO "SupportTriageGroupMember" ("groupId", "feedbackId", "primarySnapshotDigest") VALUES ('g-iso', $1, '${DIGEST}')`;
+
+/** A record or group one short of its cap, and two more reports. */
+const nearlyFull = async (kind: "link" | "member") => {
+  const ids = await fill(kind, 51);
+  if (kind === "link") {
+    await prisma.$transaction(async (tx) => {
+      await tx.supportTriageDecisionRecord.create({ data: { id: "r-iso", decisionKind: "group_confirmed", decisionEnvelopeDigest: DIGEST, digestVersion: 1 } });
+      for (const [i, feedbackId] of ids.slice(0, 49).entries()) {
+        await tx.supportTriageDecisionRecordLink.create({ data: { id: `r-iso-l${i}`, recordId: "r-iso", feedbackId } });
+      }
+    });
+  } else {
+    await prisma.supportTriageGroup.create({ data: { id: "g-iso", primaryKind: "same_account", primarySnapshotDigest: DIGEST, groupCandidateKey: "9".repeat(64) } });
+    for (const feedbackId of ids.slice(0, GROUP_MEMBER_CAP - 1)) {
+      await prisma.supportTriageGroupMember.create({ data: { groupId: "g-iso", feedbackId, primarySnapshotDigest: DIGEST } });
+    }
+  }
+  return { sql: kind === "link" ? LINK : MEMBER, fiftieth: ids[49], fiftyFirst: ids[50] };
+};
+
+const count = (kind: "link" | "member") =>
+  kind === "link"
+    ? prisma.supportTriageDecisionRecordLink.count({ where: { recordId: "r-iso" } })
+    : prisma.supportTriageGroupMember.count({ where: { groupId: "g-iso" } });
+
+for (const kind of ["link", "member"] as const) {
+  test(`${kind}: REPEATABLE READ is refused`, async () => {
+    const { sql, fiftieth } = await nearlyFull(kind);
+    const client = await directClient();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await assert.rejects(client.query(sql, [fiftieth]), /cannot be inserted under REPEATABLE READ/);
+      await client.query("ROLLBACK");
+    } finally {
+      await client.end();
+    }
+  });
+
+  test(`${kind}: two SERIALIZABLE inserts at forty-nine leave fifty, never fifty-one`, async () => {
+    const { sql, fiftieth, fiftyFirst } = await nearlyFull(kind);
+    const first = await directClient();
+    const second = await directClient();
+    try {
+      // Both take their snapshot before either inserts.
+      await first.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      await second.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      await first.query("SELECT 1");
+      await second.query("SELECT 1");
+      await first.query(sql, [fiftieth]);
+      const late = second.query(sql, [fiftyFirst]).then(
+        () => second.query("COMMIT").then(() => "committed"),
+        (error: Error) => second.query("ROLLBACK").then(() => error.message)
+      );
+      await first.query("COMMIT");
+      const outcome = await late.catch((error: Error) => error.message);
+      assert.notEqual(outcome, "committed", "the second transaction must not commit");
+      assert.match(outcome, /could not serialize|already has 50/);
+    } finally {
+      await first.end();
+      await second.end();
+    }
+    assert.equal(await count(kind), 50);
+  });
+}
