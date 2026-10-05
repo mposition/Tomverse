@@ -9515,18 +9515,18 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             override_shell_command(&cursor_cmd_bin(), &opts)
         }
         "copilot" => {
-            // GitHub Copilot CLI. Flags come from its CLI reference
-            // (github/copilot-cli, _autodocs/api-reference/cli-command.md):
-            // `--yolo` is `--allow-all`, `--model auto` lets the service
-            // pick, `--add-dir` grants a directory. No resume wiring, the same
+            // GitHub Copilot CLI. Every flag here was checked against
+            // `copilot --help` of 1.0.91 on the server: `--yolo` enables all
+            // permissions (= --allow-all), `--model auto` lets Copilot pick,
+            // `--add-dir` grants a directory. No resume wiring, the same
             // documented gap as cursor: nothing records a Copilot session id
             // per amux session, so every (re)launch starts a fresh session.
             //
-            // NOT VERIFIED LIVE: no `copilot` binary was installed on the
-            // server when this arm was written. The folder-trust question the
-            // CLI asks on first launch in a directory, and its approval panel,
-            // have no screen fixtures, so backend::adapter has no scanner for
-            // this provider and reports nothing rather than guessing.
+            // SCREENS NOT VERIFIED: no session was run (no Copilot login on
+            // the server yet), so the folder-trust question on first launch in
+            // a directory and the approval panel have no screen fixtures.
+            // backend::adapter has no scanner for this provider and reports
+            // nothing rather than guessing.
             let mut copilot_flags = flags.clone();
             let copilot_yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| copilot_flags.contains(f));
             if copilot_yolo {
