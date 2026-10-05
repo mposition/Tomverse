@@ -349,6 +349,14 @@ lazy_re!(RE_CURSOR_TRUST, r"(?i)workspace trust required|do you trust the conten
 // panel may use different wording this pattern would miss.
 lazy_re!(RE_CURSOR_APPROVAL, r"(?i)waiting for approval\.\.\.|run this command\?");
 
+// GitHub Copilot CLI's first-launch folder-trust dialog, observed 2026-10-05
+// against Copilot CLI 1.0.91 in a scratch tmux pane on the server: a box
+// titled "Confirm folder trust" asking "Do you trust the files in this
+// folder?". `--yolo` does NOT skip it. The launch path seeds the folder into
+// ~/.copilot/config.json, so a worker should not park here; this is the
+// fallback that makes it read as waiting if it ever does.
+lazy_re!(RE_COPILOT_TRUST, r"(?i)confirm folder trust|do you trust the files in this folder");
+
 // The "Working" spinner: a leading braille spinner glyph (U+2800-U+28FF)
 // followed by the literal word. Verified live as `⠘⠤ Working`; the exact
 // glyph rotates per animation frame, which is why the class is a Unicode
@@ -429,6 +437,7 @@ impl TerminalAdapter {
             // ollama workers run codex --oss --local-provider ollama; same output format.
             "ollama" => scan_codex(&clean, &self.provider),
             "cursor" => scan_cursor(&clean),
+            "copilot" => scan_copilot(&clean),
             // Unknown provider: no pattern knowledge, no invented events
             // (Invariant 8 / Invariant 20's rule generalized: never report
             // what was not observed through a pattern we actually hold).
@@ -1379,6 +1388,30 @@ fn scan_cursor(clean: &str) -> Vec<WorkerEvent> {
     Vec::new()
 }
 
+/// GitHub Copilot CLI screen states. ONE state is observed and mapped: the
+/// folder-trust dialog (see `RE_COPILOT_TRUST`). The tail is 30 lines, not
+/// 20, because that dialog alone is 17 rows tall.
+///
+/// UNVERIFIED, stated rather than guessed at: the tool/command approval panel,
+/// the working spinner, rate-limit or quota banners, and a crashed process.
+/// Seeing any of them needs a real prompt, which spends the account's Copilot
+/// requests, so none was sent. The idle composer WAS seen (a bare `❯` line
+/// between two rules), but it is deliberately not mapped: without the working
+/// screen there is no evidence the same line is absent while a turn runs, and
+/// calling a busy worker idle would hand it more work. Everything except the
+/// trust dialog therefore returns an empty vec, the same "nothing observed"
+/// answer an unknown provider gets.
+fn scan_copilot(clean: &str) -> Vec<WorkerEvent> {
+    let tail = last_n_raw_lines(clean, 30);
+    if RE_COPILOT_TRUST.is_match(&tail) {
+        return vec![WorkerEvent::Waiting(WaitReason {
+            reason: "trust_prompt".to_string(),
+            detail: Some("copilot folder trust dialog".to_string()),
+        })];
+    }
+    Vec::new()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -2235,6 +2268,56 @@ CLAUDE-POSTFIX-COMPLETE
     #[test]
     fn cursor_workspace_trust_dialog_is_a_trust_prompt() {
         assert_eq!(waiting_reasons(&adapter("cursor").scan(FX_CURSOR_TRUST)), vec!["trust_prompt"]);
+    }
+
+    // -- GitHub Copilot CLI fixtures — from `tmux capture-pane -p` against a
+    // real `copilot` 1.0.91 in a scratch tmux pane on the server (2026-10-05),
+    // not a production worker. Box rules are shortened and right padding
+    // trimmed; the words are verbatim. See `scan_copilot` for what is and is
+    // not mapped.
+
+    const FX_COPILOT_TRUST: &str = "\
+╭──────────────────────────────────────────────────────╮
+│ Confirm folder trust                                 │
+│ ──────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────╮ │
+│ │ /tmp/copilot-probe-6ZcJ                          │ │
+│ ╰──────────────────────────────────────────────────╯ │
+│                                                      │
+│ Copilot can read files in this folder and, with your permission, edit them or run code and shell commands. It will │
+│ remember your permissions for the rest of this session. │
+│                                                      │
+│ Do you trust the files in this folder?               │
+│                                                      │
+│ ❯ 1. Yes                                             │
+│   2. Yes, and remember this folder for future sessions │
+│   3. No (Esc)                                        │
+│                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel    │
+╰──────────────────────────────────────────────────────╯";
+
+    // The composer after the folder was trusted (option 2). The "added to
+    // trusted folders" line must not read as the trust dialog.
+    const FX_COPILOT_IDLE: &str = "\
+ ● Folder /tmp/copilot-probe-QBF8 has been added to trusted folders.
+ ● MCP Servers reloaded: 1 server connected
+ /tmp/copilot-probe-QBF8                                          Session: 0 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ← open sidebar · Interactive · Allow All · / commands · ? help · tab next tab   GPT-5.6 Sol";
+
+    #[test]
+    fn copilot_folder_trust_dialog_is_a_trust_prompt() {
+        assert_eq!(waiting_reasons(&adapter("copilot").scan(FX_COPILOT_TRUST)), vec!["trust_prompt"]);
+    }
+
+    #[test]
+    fn copilot_idle_composer_is_deliberately_not_mapped() {
+        // Seen, but without the working screen there is no evidence it is
+        // absent mid-turn; reporting idle there would hand a busy worker more
+        // work. Pin the empty answer so mapping it is a decision, not a drift.
+        assert!(adapter("copilot").scan(FX_COPILOT_IDLE).is_empty());
     }
 
     #[test]
