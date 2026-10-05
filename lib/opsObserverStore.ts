@@ -37,9 +37,6 @@ import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
 import { judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 
-/** Ledger rows read past the checkpoint; more than this is not a healthy chain. */
-const LEDGER_READ_LIMIT = 64;
-
 type HeadRow = {
   id: string;
   createdAt: Date;
@@ -56,7 +53,9 @@ type HeadRow = {
   verifiedThroughGeneration: number | null;
   verifiedThroughAuditId: string | null;
   verifiedThroughAuditHash: string | null;
+  stampCheckpointSha256: string | null;
   recomputedKeysSha256: string | null;
+  recomputedCheckpointSha256: string | null;
 };
 
 type AuditRow = {
@@ -116,14 +115,17 @@ const judgedAudit = (row: AuditRow, keys: string[]) => ({
 
 async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
   // 1. The genesis head (the one nobody replaced), its predecessor's time, its
-  //    state row, and the key stamp recomputed the way the state trigger does.
+  //    state row, and both stamps recomputed the way the state trigger does.
   const heads = await tx.$queryRaw<HeadRow[]>`
     SELECT g.id, g."createdAt", g.mode, g."requestDigest", g."supersedesGenesisId",
            p."createdAt" AS "previousCreatedAt",
            s."genesisId" AS "stateGenesisId", s.generation, s.keys, s."invariantVersion",
            s."stampGeneration", s."stampKeysSha256", s."verifiedThroughGeneration",
-           s."verifiedThroughAuditId", s."verifiedThroughAuditHash",
-           encode(sha256(convert_to(s.keys::text, 'UTF8')), 'hex') AS "recomputedKeysSha256"
+           s."verifiedThroughAuditId", s."verifiedThroughAuditHash", s."stampCheckpointSha256",
+           encode(sha256(convert_to(s.keys::text, 'UTF8')), 'hex') AS "recomputedKeysSha256",
+           encode(sha256(convert_to(
+             s."verifiedThroughGeneration"::text || ':' || coalesce(s."verifiedThroughAuditId", '') || ':' ||
+             coalesce(s."verifiedThroughAuditHash", ''), 'UTF8')), 'hex') AS "recomputedCheckpointSha256"
       FROM "OpsObserverGenesis" g
       LEFT JOIN "OpsObserverGenesis" p ON p.id = g."supersedesGenesisId"
       LEFT JOIN "OpsObserverState" s ON s."genesisId" = g.id
@@ -169,16 +171,21 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
     SELECT tablename AS "table", indexname AS name FROM pg_catalog.pg_indexes
      WHERE schemaname = current_schema() AND tablename = ANY(${[...OPS_OBSERVER_OWN_TABLES]}::text[])`;
 
-  // 6-7. The ledger from the checkpoint generation onward, and the entries it names.
+  // 6-7. The ledger from the checkpoint generation through the generation read
+  //      above -- never past it, so an advance committed meanwhile is not read as
+  //      a row out of range -- and the entries it names. Not capped: a cap would
+  //      cut a healthy chain. What keeps the range short is that every advance
+  //      moves the checkpoint to the generation before it, in the same
+  //      transaction, so it is one or two rows.
   const checkpoint = head.verifiedThroughGeneration ?? 0;
+  const through = head.generation ?? 0;
   const ledgerRows = await tx.$queryRaw<
     { generation: number; auditLogId: string; auditEntryHash: string; keysSha256: string }[]
   >`
     SELECT generation, "auditLogId", "auditEntryHash", "keysSha256"
       FROM "OpsObserverTransition"
-     WHERE "genesisId" = ${head.id}::uuid AND generation >= ${Math.max(1, checkpoint)}
-     ORDER BY generation
-     LIMIT ${LEDGER_READ_LIMIT}`;
+     WHERE "genesisId" = ${head.id}::uuid AND generation >= ${Math.max(1, checkpoint)} AND generation <= ${through}
+     ORDER BY generation`;
   const ledgerAudit =
     ledgerRows.length === 0
       ? []
@@ -206,6 +213,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
     verifiedThroughGeneration: checkpoint,
     verifiedThroughAuditId: head.verifiedThroughAuditId,
     verifiedThroughAuditHash: head.verifiedThroughAuditHash,
+    stampCheckpointSha256: head.stampCheckpointSha256,
   };
   return {
     head,
@@ -225,6 +233,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
       keysSchemaValid: keysAreValid(head.keys),
       catalogComplete: catalogProblems({ triggers, constraints, indexes }).length === 0,
       recomputedKeysSha256: head.recomputedKeysSha256,
+      recomputedCheckpointSha256: head.recomputedCheckpointSha256,
       transitionVerdict: transitionVerdict({
         state,
         ledgerRows,

@@ -138,6 +138,37 @@ test("the ops-observer state read", { skip: !rawUrl }, async (t) => {
       assert.deepEqual(await read(), { trust: "schema" });
     });
 
+    await t.test("a checkpoint whose stamp the trigger did not write is not trusted", async () => {
+      const restoreKeys = `UPDATE "OpsObserverState" SET keys = $2,
+          "stampKeysSha256" = encode(sha256(convert_to($2::jsonb::text, 'UTF8')), 'hex') WHERE "genesisId" = $1`;
+      await q(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER USER`);
+      try {
+        await q(restoreKeys, [genesisId, JSON.stringify(keys)]);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverState" ENABLE TRIGGER USER`);
+      }
+      assert.equal((await read()).trust, "trusted");
+      // Checkpoint fields written past the trigger leave the stored stamp
+      // describing a different checkpoint than the row holds.
+      await q(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER USER`);
+      try {
+        await q(`UPDATE "OpsObserverState" SET "stampCheckpointSha256" = $2 WHERE "genesisId" = $1`, [genesisId, "f".repeat(64)]);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverState" ENABLE TRIGGER USER`);
+      }
+      assert.deepEqual(await read(), { trust: "unenforced_write" });
+      await q(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER USER`);
+      try {
+        await q(
+          `UPDATE "OpsObserverState" SET "stampCheckpointSha256" = encode(sha256(convert_to('0::', 'UTF8')), 'hex') WHERE "genesisId" = $1`,
+          [genesisId],
+        );
+      } finally {
+        await q(`ALTER TABLE "OpsObserverState" ENABLE TRIGGER USER`);
+      }
+      assert.equal((await read()).trust, "trusted");
+    });
+
     await t.test("a dropped guard is a missing invariant", async () => {
       await q(`DROP TRIGGER "OpsObserverTransition_no_truncate" ON "OpsObserverTransition"`);
       // The schema check comes first; restore valid keys under their real stamp.
