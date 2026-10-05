@@ -10,6 +10,8 @@ import { AmuxIdeaNodeSelectionPanel } from
   "@/components/admin/AmuxIdeaNodeSelectionPanel";
 import { AmuxIdeaCardRegistrationPanel } from
   "@/components/admin/AmuxIdeaStoryRegistrationPanel";
+import { AmuxIdeaCardLinkPanel } from
+  "@/components/admin/AmuxIdeaCardLinkPanel";
 import { AmuxIdeaUnitRejectionPanel } from
   "@/components/admin/AmuxIdeaUnitRejectionPanel";
 import { adminFetch } from "@/lib/adminFetch";
@@ -157,6 +159,10 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         unit.decisionState === "proposed" && unit.proposal?.kind === "card" &&
         ["story", "task"].includes(unit.proposal.cardType)).map((unit) =>
         <AmuxIdeaCardRegistrationPanel key={unit.id} ideaId={ideaId} unit={unit} />) : null}
+      {view.outcome === "propose" ? view.units.filter((unit) =>
+        unit.decisionState === "proposed" && unit.proposal?.kind === "card" &&
+        ["story", "task"].includes(unit.proposal.cardType)).map((unit) =>
+        <AmuxIdeaCardLinkPanel key={`link:${unit.id}`} ideaId={ideaId} unit={unit} />) : null}
       {view.outcome === "propose" ? view.units.filter((unit) =>
         unit.decisionState === "proposed" &&
         (unit.proposal?.kind === "node" || unit.proposal?.kind === "card"))

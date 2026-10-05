@@ -793,6 +793,77 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     assert.deepEqual(registered.rows[0], {
       status: "backlog", owner: null, claimedAt: null,
     });
+    // A second proposal may link the existing card, but it cannot claim that
+    // link is complete without finalizing its own draft in the same tx.
+    const linkUnitId = randomUUID();
+    const linkDecisionId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaDraftUnit"
+       ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
+        "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+        "bodyDigest", "bodyDigestKeyId", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 0, 103, 'c0:card-103', 'card',
+               'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+      [linkUnitId, ids.idea, title, digest],
+    );
+    const linkPrepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: linkDecisionId,
+      summary: "synthetic card link preparation",
+    });
+    await client.query(
+      `INSERT INTO public."AmuxIdeaUnitDecision"
+       ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+        "prepareRequestId", "action", "state", "ownerSessionDigest",
+        "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+        "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+        "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+        "baseWorkItemId", "baseWorkItemRevision", "baseWorkItemDigest",
+        "baseWorkItemDigestKeyId", "preparedAt", "expiresAt",
+        "prepareAuditLogId", "updatedAt")
+       VALUES ($1, $2, $3, 'synthetic-owner', 0, $4,
+               'link_existing_card', 'prepared', $5, 'synthetic', $6,
+               'synthetic', $7, 'synthetic', $8::jsonb, $9, $10, 'synthetic',
+               $11, 0, $12, 'synthetic', CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP + INTERVAL '15 minutes', $13, CURRENT_TIMESTAMP)`,
+      [linkDecisionId, ids.idea, linkUnitId, randomUUID(),
+        "c".repeat(64), digest, "d".repeat(64),
+        JSON.stringify({ action: "link_existing_card",
+          target: { id: registeredStoryId, revision: 0,
+            content: { digest: titleDigest }, status: "backlog",
+            cardType: "story", storyKind: "general",
+            featureNodeId: ids.feature },
+          decisionReason: { digest } }), decisionPreviewId, digest,
+        registeredStoryId, titleDigest, linkPrepareAudit],
+    );
+    const linkConsumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: linkDecisionId,
+      summary: "synthetic card link consumption",
+    });
+    const consumeLink = `UPDATE public."AmuxIdeaUnitDecision"
+      SET "state" = 'consumed', "consumeRequestId" = $2,
+          "linkedWorkItemId" = $3, "finalAuditLogId" = $4 WHERE "id" = $1`;
+    await client.query("SAVEPOINT incomplete_card_link_probe");
+    await client.query(consumeLink,
+      [linkDecisionId, randomUUID(), registeredStoryId, linkConsumeAudit]);
+    await expectRejected(
+      `SET CONSTRAINTS amux_v4_linked_card_decision_complete IMMEDIATE`,
+      [], "AmuxV4CardLink_consistency_check",
+    );
+    await client.query("ROLLBACK TO SAVEPOINT incomplete_card_link_probe");
+    await client.query("RELEASE SAVEPOINT incomplete_card_link_probe");
+    await client.query(consumeLink,
+      [linkDecisionId, randomUUID(), registeredStoryId, linkConsumeAudit]);
+    await client.query(`UPDATE public."AmuxIdeaDraftUnit"
+      SET "state" = 'approved' WHERE "id" = $1`, [linkUnitId]);
+    await client.query(`SET CONSTRAINTS amux_v4_linked_card_decision_complete IMMEDIATE`);
+    const linkedCard = await client.query(
+      `SELECT "linkedWorkItemId", "registeredWorkItemId"
+       FROM public."AmuxIdeaUnitDecision" WHERE "id" = $1`, [linkDecisionId]);
+    assert.deepEqual(linkedCard.rows[0], {
+      linkedWorkItemId: registeredStoryId, registeredWorkItemId: null,
+    });
     await client.query("ROLLBACK TO SAVEPOINT registration_probe");
     await client.query("RELEASE SAVEPOINT registration_probe");
     const rollbackProof = await client.query(

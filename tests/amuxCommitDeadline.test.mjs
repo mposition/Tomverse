@@ -91,6 +91,7 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261005050000_amux_v4_task_cost_catalog_approval",
   "20261005060000_amux_v4_rejection_consistency",
   "20261005070000_amux_v4_node_link_consistency",
+  "20261005080000_amux_v4_card_link_consistency",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
