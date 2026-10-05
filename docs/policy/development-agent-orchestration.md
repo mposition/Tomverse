@@ -55,6 +55,7 @@ approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 23
 | 22 | 2026-09-30 mposition | 전략적 계층·점수와 자동 실행 풀 편입, 별도 Task DAG·실행 등급, 병행/SEV1 예약, develop과 main의 PR·배포 권한 분리, 운영자 최종 완료, 실패 복구·결과 환류, 전 worker CLI 토큰 계측, Admin Kanban·계층 목록을 승인한다. 기존 v16 단계 순환은 새 카드에 적용하지 않는다. 이 승인 자체로 migration·flag·Publisher 권한·자동 병합/배포를 켜지 않는다. |
 | 23 | 2026-10-01 mposition | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. 이 승인 자체로 제품 bridge·claim·실행 API를 켜지 않는다. |
 | 24 | 2026-10-02 mposition | v23의 AMUX invariant confidence 일괄 `healthy` 요구를 실패 0건·unknown 사유별 증거 계약으로 정정한다. 다른 활성화 게이트와 권한은 바꾸지 않는다. 이 승인 자체로 bridge·claim·제품 실행을 켜지 않는다. |
+| 25 | (승인 대기) | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter는 이 래치와 버전 18의 실행 API 게이트가 모두 참일 때만 열리고, 실제 동작은 engineering Agent 운영 mode가 허용할 때만 일어난다. 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1196,3 +1197,16 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 근거: 새 Ubuntu AMUX의 저장소·board probe는 `ok`였고 첫 관측에서 505개 invariant 중 462 pass·0 fail·43 unknown이었다. 후속 관측은 461 pass·0 fail·44 unknown으로 `hooks.reports_are_attributed`가 더해졌다. unknown 40개는 최신 500행에 값이 없는 컬럼의 `schema.timestamp_units_declared`로, 테이블 전체가 비었다는 뜻이 아니다. 나머지는 `host.memory_not_critical`, `schedules.cost_title_matches_kind`, `session.self_reports_landing` 및 후속 `hooks.reports_are_attributed`이다. worker 보고 hook의 두 unknown은 표본 부족이므로 한 worker 제한 실행 전에 **제품 카드가 아닌 로컬 합성 AMUX 작업**으로 실제 self-report와 attribution 도착을 관측한다. 호스트 메모리는 8개 worker 부하에서 `/proc/meminfo`로 별도 확인한다. 이 수치는 진단 스냅샷이지 앞으로 유지된다는 가정이 아니다.
 
 `AMUX_INVARIANT_RESULT_BUDGET` 변경은 실패를 숨기는 면제가 아니다. 기존 50만 행 기준에서 7일 보존되는 `unknown` 약 75만 건 때문에 `store.result_log_bounded`가 실패했고, **v24 승인 전에** 운영 설정을 100만 행으로 조정한 뒤 0 fail이 됐다. **2026-10-02 승인 시점 이후에 한해** 유효 예산 100만 행의 지속 사용을 허용한다. 승인 전 0 fail은 진단 기록으로만 쓰고, 승인 후 같은 설정을 다시 읽고 invariant를 재실행해야 게이트 증거가 된다. 과거 설정 변경을 소급 승인하지 않는다. 활성화 전후에 유효 result 예산과 write `probe_budget_ms`, 설정 파일의 소유자·권한·digest·변경 이력, 상태별 행 수·가장 오래된 시각·증가율·DB 크기·write probe 지연과 disk 여유를 대조한다. worker가 고칠 수 있는 user unit 파일의 값만으로 게이트를 통과시키지 않고 분리된 운영자 확인과 관측 기록을 요구한다. 두 예산값의 임의 변경은 기존 판정을 무효화하고 bridge 중지·claim 차단·재검토를 요구한다. 예산의 80%를 넘으면 증가율과 보존 종료 시점의 예상 행 수를 운영자에게 알린다. 실제 보존 한도 초과나 지연·디스크 압박이 있으면 예산값을 더 올려 통과시키지 않고 원인을 고친다. v23의 계정·비밀 교체·중복 실행 방지·사람 활성화 결정은 이 정정으로 완화되지 않는다. **v24 승인 자체는 bridge·claim·제품 실행을 켜지 않는다.**
+
+## 버전 25 — engineering adapter 코드 래치 (초안, 승인 대기)
+
+승인 기록: 승인 전이다. 운영자가 승인하면 `approvedBy`·`approvedAt`과 위 표의 승인 칸, 머리말의 승인 문장을 함께 채운다. 작성자는 Claude이고, 독립 검토는 작성자와 다른 provider가 한다. **이 절이 승인되기 전에는 래치 코드를 바꾸지 않는다.**
+
+이 버전은 버전 12가 false로 출고한 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`(`lib/engineeringAgentAmuxAdapter.ts`)를 true로 바꾼다. Authority 절의 adapter 규칙은 그대로다.
+
+- **열리는 조건.** adapter가 AMUX writer를 부르는 경로는 이 래치와 버전 18의 실행 API 게이트(코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`)가 **모두** 참일 때만 열린다. 실행 API 게이트가 이미 열린 환경에서는 이 버전의 배포로 adapter 경로 자체가 열린다.
+- **실제 동작은 engineering Agent의 운영 mode가 정한다.** mode는 `off`로 남는다. `off`에서 `shadow`로 가는 것은 `docs/policy/engineering-agent.md` §12의 armed gate와 §14의 `shadow` 진입 조건을 지난 운영자의 Admin 조작뿐이다. 이 버전은 그 조건 어느 것도 대신하지 않는다.
+- **허용 동작은 버전 12의 목록 그대로다**: worker 등록과 heartbeat, claim, execution start·heartbeat·settle(결과는 `review`·`todo`·`blocked`뿐), delivery pull·ack, review 대상 PR 번호, settle 시점 비용 원장. recover, 승격, 승인, 카드 내용 수정, `done`은 열지 않는다. worker identity는 서버 상수 `engineering-runner`이고 요청 본문에서 받지 않는다.
+- **바꾸지 않는 것.** 환경 변수, worker catalog, 용량 행, 자동 승격, 추천 풀, Railway 서비스와 IaC, 게시 GitHub App, engineering mode를 이 버전이 설정하거나 켜지 않는다. AMUX 비용 원장의 금액을 admission에 쓰는 것은 여전히 별도 버전이다.
+- **구현.** 승인 뒤에 래치 상수를 true로 바꾸고, `tests/engineeringAgentAmuxAdapter.test.mjs`의 출고 값 기대를 이 버전으로 옮긴다. 판정 함수 `engineeringAgentAmuxAdapterPermitted()`의 두 조건은 그대로 둔다.
+- **사고 대응.** 이상이 보이면 먼저 `docs/policy/engineering-agent.md` §12의 정지·mode `off`를 쓴다. 래치를 다시 false로 내리는 것은 그다음 코드 변경이다.
