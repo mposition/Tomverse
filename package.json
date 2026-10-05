@@ -46,7 +46,7 @@
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:one-shot-restage-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts",
     "test:one-shot-restage": "node --conditions=react-server --import tsx --test tests/promptRefinerVnextOneShotAuditReadback.test.mjs tests/promptRefinerVnextOneShotCandidateSourceReadback.test.mjs tests/promptRefinerVnextOneShotDeploymentBinding.test.mjs tests/promptRefinerVnextOneShotPriceBinding.test.mjs tests/promptRefinerVnextOneShotStageReadback.test.mjs",
-    "test:one-shot-restage-contract": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test tests/server-contract/prompt-refiner-vnext-one-shot-stage-admission.test.mjs tests/server-contract/admin-prompt-refiner-vnext-stage-approval-route.test.ts tests/server-contract/admin-prompt-refiner-vnext-stage-readback-route.test.ts",
+    "test:one-shot-restage-contract": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test tests/server-contract/prompt-refiner-vnext-one-shot-stage-admission.test.mjs tests/server-contract/admin-prompt-refiner-vnext-stage-approval-route.test.ts tests/server-contract/admin-prompt-refiner-vnext-stage-readback-route.test.ts tests/server-contract/admin-prompt-refiner-vnext-run-approval-route.test.ts",
     "test:unit": "node scripts/run-unit-tests.mjs",
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",
     "report:amux-staging-evidence": "node scripts/report-amux-staging-evidence.mjs",
