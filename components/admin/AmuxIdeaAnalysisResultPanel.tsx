@@ -15,20 +15,23 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
 
 /** Owner-only page section. All model-derived text is rendered as React text,
  * never as HTML. No approval, registration, or model request originates here. */
-export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
+export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
+  ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
+}) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const [loading, setLoading] = useState(false);
+  const [chunkIndex, setChunkIndex] = useState(0);
   const [view, setView] = useState<AmuxIdeaAnalysisResultView | null>(null);
   const [unavailable, setUnavailable] = useState(false);
   const [needsReauthentication, setNeedsReauthentication] = useState(false);
 
-  const refresh = async () => {
+  const refresh = async (page = chunkIndex) => {
     if (loading) return;
     setLoading(true);
     setUnavailable(false);
     setNeedsReauthentication(false);
     try {
-      const params = new URLSearchParams({ ideaId });
+      const params = new URLSearchParams({ ideaId, chunkIndex: String(page) });
       const response = await adminFetch(`/api/admin/amux/ideas/analysis-result?${params}`,
         { cache: "no-store" });
       if (response.status === 428) {
@@ -39,7 +42,10 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
       const parsed = parseAmuxIdeaAnalysisResultView(response.status,
         await response.json(), ideaId);
       if (!parsed) { setView(null); setUnavailable(true); }
-      else setView(parsed);
+      else {
+        setView(parsed); setChunkIndex(page);
+        if (parsed.state === "partial") onContinuationReady?.(parsed.nextChunkIndex);
+      }
     } catch { setView(null); setUnavailable(true); }
     finally { setLoading(false); }
   };
@@ -54,6 +60,11 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
       className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
       {m.analysisResultRefresh}
     </button>
+    {chunkIndex > 0 ? <button type="button" disabled={loading}
+      onClick={() => void refresh(chunkIndex - 1)}
+      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      {m.analysisResultPreviousPage}
+    </button> : null}
     {loading ? <p role="status">{m.analysisResultLoading}</p> : null}
     {needsReauthentication ? <a className="underline"
       href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
@@ -63,10 +74,27 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
     {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
-    {view?.state === "ready" ? <div className="space-y-3">
+    {view?.state === "ready" || view?.state === "partial" ||
+      view?.state === "needs_owner_input" ? <div className="space-y-3">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
         {view.completedAt} · {view.previewId}
       </p>
+      {view.state === "partial" ? <div role="status" className="space-y-1">
+        <p>{m.analysisResultPartial}</p>
+        <p className="font-medium">{m.analysisResultRemaining}</p>
+        <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
+        <button type="button" disabled={loading}
+          onClick={() => void refresh(view.nextChunkIndex)}
+          className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+          {m.analysisResultNextPage}
+        </button>
+      </div> : null}
+      {view.state === "needs_owner_input" ? <div role="status" className="space-y-1">
+        <p>{m.analysisResultNeedsOwner}</p>
+        <p className="whitespace-pre-wrap">{view.ownerQuestion ?? m.analysisResultScopeExpired}</p>
+        <p className="font-medium">{m.analysisResultRemaining}</p>
+        <p className="whitespace-pre-wrap">{view.remainingScope ?? m.analysisResultScopeExpired}</p>
+      </div> : null}
       <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
       {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
       <ol className="space-y-2">

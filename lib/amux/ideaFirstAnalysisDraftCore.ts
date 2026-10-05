@@ -1,5 +1,5 @@
-import { inspectAmuxAnalysisContinuation } from "./ideaAnalysisContinuationCore.ts";
-import { sealAmuxAnalysisDraft, type SealedAmuxAnalysisDraft } from "./ideaAnalysisDraftSealCore.ts";
+import { prepareAmuxAnalysisPageDraft } from "./ideaAnalysisPageDraftCore.ts";
+import type { SealedAmuxAnalysisDraft } from "./ideaAnalysisDraftSealCore.ts";
 import type { AmuxContentKeys } from "./ideaCrypto.ts";
 
 /** A first, idea-only analysis can finish without a continuation worker.
@@ -17,11 +17,14 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
   | { decision: "ready"; draft: SealedAmuxAnalysisDraft;
       coveredStartOrdinal: 0; coveredEndOrdinal: 0; outputPartIndex: 0 }
   | { decision: "hold"; reason: "invalid_result" | "owner_input" | "continuation_required" } {
-  const inspected = inspectAmuxAnalysisContinuation({
+  const prepared = prepareAmuxAnalysisPageDraft({
+    ideaId: input.ideaId,
+    previewId: input.previewId,
     raw: input.raw,
-    expectedPreviewId: input.previewId,
-    expectedChunkIndex: 0,
-    expectedRevisionChunkIndex: 0,
+    keys: input.keys,
+    unitIds: input.unitIds,
+    chunkIndex: 0,
+    revisionChunkIndex: 0,
     permittedSourceRefIds: ["operator_idea"],
     permittedTargetRefs: [],
     sourceUnitCount: 1,
@@ -29,22 +32,17 @@ export function prepareFirstIdeaOnlyAnalysisDraft(input: {
     coveredEndOrdinal: 0,
     history: [],
   });
-  if (!inspected.ok) return { decision: "hold",
-    reason: inspected.stage === "owner_input" ? "owner_input" : "invalid_result" };
-  if (inspected.cursor.nextCursor !== null ||
-      inspected.parsed.chunk.coverageStatus !== "complete" ||
-      inspected.parsed.chunk.continuationKind !== null) {
+  if (prepared.decision === "needs_owner_input") {
+    return { decision: "hold", reason: "owner_input" };
+  }
+  if (prepared.decision !== "ready") {
+    return { decision: "hold", reason: "invalid_result" };
+  }
+  if (prepared.nextCursor !== null ||
+      prepared.draft.coverageStatus !== "complete" ||
+      prepared.draft.continuationKind !== null) {
     return { decision: "hold", reason: "continuation_required" };
   }
-  const sealed = sealAmuxAnalysisDraft({ ...input,
-    expectedPreviewId: input.previewId,
-    expectedChunkIndex: 0,
-    expectedRevisionChunkIndex: 0,
-    previousContinuationKind: null,
-    permittedSourceRefIds: ["operator_idea"],
-    permittedTargetRefs: [],
-  });
-  if (!sealed.ok) return { decision: "hold", reason: "invalid_result" };
-  return { decision: "ready", draft: sealed.draft,
+  return { decision: "ready", draft: prepared.draft,
     coveredStartOrdinal: 0, coveredEndOrdinal: 0, outputPartIndex: 0 };
 }

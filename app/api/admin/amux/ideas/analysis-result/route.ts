@@ -55,7 +55,14 @@ export async function GET(request: Request): Promise<Response> {
     });
     const params = new URL(request.url).searchParams;
     const ideaId = params.get("ideaId");
-    if (params.size !== 1 || !ideaId || !isAmuxIdeaRequestId(ideaId)) {
+    const chunkText = params.get("chunkIndex");
+    const chunkIndex = chunkText === null ? 0 : Number(chunkText);
+    if (![1, 2].includes(params.size) || !ideaId ||
+        !isAmuxIdeaRequestId(ideaId) ||
+        (params.size === 2 && (params.getAll("chunkIndex").length !== 1 ||
+          !/^(0|[1-9][0-9]*)$/.test(chunkText ?? ""))) ||
+        !Number.isSafeInteger(chunkIndex) || chunkIndex < 0 ||
+        chunkIndex >= 2_147_483_647) {
       return NextResponse.json({ error: "schema_rejected" },
         { status: 400, headers: noStore });
     }
@@ -67,10 +74,10 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     const [chunks, units] = await Promise.all([
       prisma.amuxIdeaAnalysisChunk.findMany({ where: { ideaId,
-        chunkIndex: 0, freeformCiphertext: { not: null } },
+        chunkIndex, freeformCiphertext: { not: null } },
         select: { currentPreviewId: true } }),
       prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId,
-        chunkIndex: 0, bodyCiphertext: { not: null } }, select: { id: true } }),
+        chunkIndex, bodyCiphertext: { not: null } }, select: { id: true } }),
     ]);
     const identities: AmuxContentKeyIdentity[] = [];
     for (const chunk of chunks) {
@@ -82,7 +89,8 @@ export async function GET(request: Request): Promise<Response> {
     for (const unit of units) identities.push({ ideaId,
       purpose: "analysis_draft", subjectId: unit.id });
     const keys = await loadAmuxContentKeyRing(identities);
-    const result = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys);
+    const result = await readAmuxFirstIdeaAnalysisResult(session, ideaId, keys,
+      chunkIndex);
     return NextResponse.json(result, { headers: noStore });
   } catch (error) {
     if (error instanceof AmuxIdeaAnalysisResultReadError) {

@@ -14,7 +14,7 @@ export type PreparedIdeaTransferPreview = {
 
 export function readPreparedIdeaTransferPreview(
   status: number, body: unknown, expectedPreviewId: string, expectedIdeaId: string,
-  selected: AvailableFrontierModel, effort: string,
+  selected: AvailableFrontierModel, effort: string, chunkIndex = 0,
 ): PreparedIdeaTransferPreview | null {
   if ((status !== 200 && status !== 201) || !body || typeof body !== "object" ||
       Array.isArray(body)) return null;
@@ -33,7 +33,9 @@ export function readPreparedIdeaTransferPreview(
   const choice = record.selection;
   if (!choice || typeof choice !== "object" || Array.isArray(choice)) return null;
   const model = choice as Record<string, unknown>;
-  if (record.version !== 1 || record.previewId !== expectedPreviewId ||
+  if (record.version !== (chunkIndex === 0 ? 1 : 2) ||
+      (chunkIndex > 0 && record.chunkIndex !== chunkIndex) ||
+      record.previewId !== expectedPreviewId ||
       record.ideaId !== expectedIdeaId ||
       record.templateVersion !== "amux-v4-analysis-prompt-v3" ||
       typeof record.prompt !== "string" || record.prompt.length === 0 ||
@@ -47,16 +49,19 @@ export function readPreparedIdeaTransferPreview(
     payloadDigestKeyId: reply.payloadDigestKeyId };
 }
 
-export function previewReceiptKey(operatorId: string, ideaId: string): string {
-  return `amux-v4-transfer-preview:${operatorId}:${ideaId}`;
+export function previewReceiptKey(operatorId: string, ideaId: string,
+  chunkIndex = 0): string {
+  return `amux-v4-transfer-preview:${operatorId}:${ideaId}` +
+    (chunkIndex > 0 ? `:${chunkIndex}` : "");
 }
 
-export function readPreviewReceipt(storage: Storage | null, operatorId: string, ideaId: string):
+export function readPreviewReceipt(storage: Storage | null, operatorId: string,
+  ideaId: string, chunkIndex = 0):
   { kind: "absent" } | { kind: "present"; previewId: string;
     model: AvailableFrontierModel; effort: string } | { kind: "unavailable" } {
   if (!storage || !isAmuxIdeaRequestId(ideaId)) return { kind: "unavailable" };
   try {
-    const raw = storage.getItem(previewReceiptKey(operatorId, ideaId));
+    const raw = storage.getItem(previewReceiptKey(operatorId, ideaId, chunkIndex));
     if (raw === null) return { kind: "absent" };
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { kind: "unavailable" };
@@ -87,17 +92,17 @@ export function readPreviewReceipt(storage: Storage | null, operatorId: string, 
 
 export function reservePreviewReceipt(
   storage: Storage | null, operatorId: string, ideaId: string, previewId: string,
-  model: AvailableFrontierModel, effort: string,
+  model: AvailableFrontierModel, effort: string, chunkIndex = 0,
 ): boolean {
   if (!storage || !isAmuxIdeaRequestId(ideaId) || !isAmuxIdeaRequestId(previewId) ||
       !model.allowedEfforts.includes(effort)) return false;
   try {
-    if (storage.getItem(previewReceiptKey(operatorId, ideaId)) !== null) return false;
+    if (storage.getItem(previewReceiptKey(operatorId, ideaId, chunkIndex)) !== null) return false;
     const receipt = JSON.stringify({ ideaId, previewId,
       model: { approvalId: model.approvalId, approvalVersion: model.approvalVersion,
         provider: model.provider, modelId: model.modelId }, effort });
-    storage.setItem(previewReceiptKey(operatorId, ideaId), receipt);
-    return storage.getItem(previewReceiptKey(operatorId, ideaId)) ===
+    storage.setItem(previewReceiptKey(operatorId, ideaId, chunkIndex), receipt);
+    return storage.getItem(previewReceiptKey(operatorId, ideaId, chunkIndex)) ===
       receipt;
   } catch { return false; }
 }

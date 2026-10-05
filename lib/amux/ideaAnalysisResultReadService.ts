@@ -29,10 +29,13 @@ export class AmuxIdeaAnalysisResultReadError extends Error {
  * the 24-hour freeform expiry does not hide 30-day unit proposals. */
 export async function readAmuxFirstIdeaAnalysisResult(
   session: Session, ideaId: string, keys: AmuxContentKeys,
+  chunkIndex = 0,
 ): Promise<AmuxIdeaAnalysisResultView> {
   const actorUserId = session.user?.id;
   if (!actorUserId || !isAdminSession(session) || getAdminRole(session) !== "owner" ||
-      !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId)) {
+      !/^[A-Za-z0-9:_-]{1,128}$/.test(ideaId) ||
+      !Number.isSafeInteger(chunkIndex) || chunkIndex < 0 ||
+      chunkIndex >= 2_147_483_647) {
     throw new AmuxIdeaAnalysisResultReadError("not_found");
   }
   return prisma.$transaction(async (tx) => {
@@ -53,7 +56,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
     });
     if (!idea) throw new AmuxIdeaAnalysisResultReadError("not_found");
     if (idea.state === "cancelled") return { state: "cancelled" };
-    if (idea.state === "submitted") {
+    if (idea.state === "submitted" && chunkIndex === 0) {
       const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
         where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
         select: { state: true, attempt: true, currentPreviewId: true },
@@ -68,20 +71,26 @@ export async function readAmuxFirstIdeaAnalysisResult(
       }
       return { state: "pending" };
     }
-    if (idea.state === "analyzing") return { state: "pending" };
-    if (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt) {
+    if (idea.state !== "analyzing" &&
+        (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+      where: { ideaId_chunkIndex: { ideaId, chunkIndex } },
     });
+    if (!chunk || chunk.state !== "draft_ready") return { state: "pending" };
+    const partial = chunk.coverageStatus === "more" &&
+      chunk.continuationKind === "output";
+    const needsOwnerInput = chunk.coverageStatus === "needs_owner_input" &&
+      chunk.continuationKind === null;
     const units = await tx.amuxIdeaDraftUnit.findMany({
-      where: { ideaId, actorUserId, chunkIndex: 0 },
+      where: { ideaId, actorUserId, chunkIndex },
       orderBy: { unitIndex: "asc" },
     });
     const audits = await tx.adminAuditLog.findMany({
       where: { action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
-        targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET, targetId: `${ideaId}:0` },
+        targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+        targetId: `${ideaId}:${chunkIndex}` },
       take: 2,
     });
     const audit = audits[0];
@@ -91,16 +100,36 @@ export async function readAmuxFirstIdeaAnalysisResult(
         chunk.state !== "draft_ready" || chunk.draftVersion !== 2 ||
         chunk.draftCiphertext !== null || !chunk.currentPreviewId ||
         !chunk.analysisCompletedAt ||
-        chunk.analysisCompletedAt.getTime() !== idea.analysisCompletedAt.getTime() ||
+        (!partial && !needsOwnerInput &&
+          chunk.analysisCompletedAt.getTime() !== idea.analysisCompletedAt?.getTime()) ||
         !audit?.entryHash || auditRowActorKind(audit) !== "system" ||
         !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
         meta?.ideaId !== ideaId || meta.previewId !== chunk.currentPreviewId ||
+        meta.chunkIndex !== chunkIndex ||
         meta.unitCount !== units.length ||
         !matchesAmuxIdeaAnalysisUnitCommitments(meta.unitCommitments, units) ||
         meta.cardRegistrationStarted !== false ||
-        !["propose", "reject"].includes(String(meta.outcome)) ||
+        !(needsOwnerInput ? meta.outcome === "needs_information" :
+          partial ? meta.outcome === "propose" :
+          ["propose", "reject"].includes(String(meta.outcome))) ||
         units.length > 40) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+    }
+    if (partial) {
+      const next = await tx.amuxIdeaAnalysisChunk.findUnique({
+        where: { ideaId_chunkIndex: { ideaId, chunkIndex: chunkIndex + 1 } },
+        select: { actorUserId: true, sourcePlanRevisionId: true,
+          planStartChunkIndex: true, revisionChunkIndex: true, state: true },
+      });
+      if (!next || next.actorUserId !== actorUserId ||
+          next.sourcePlanRevisionId !== chunk.sourcePlanRevisionId ||
+          next.planStartChunkIndex !== 0 ||
+          next.revisionChunkIndex !== chunkIndex + 1 ||
+          chunk.coverageStatus !== "more" || chunk.continuationKind !== "output" ||
+          chunk.outputPending !== true || chunk.remainingStartOrdinal !== 0 ||
+          chunk.remainingEndOrdinal !== 0) {
+        throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
+      }
     }
     if (!chunk.freeformPurgeAfter ||
         (!chunk.freeformCiphertext && chunk.freeformPurgedAt === null &&
@@ -129,10 +158,19 @@ export async function readAmuxFirstIdeaAnalysisResult(
           throw new Error("freeform structure mismatch");
         }
         freeformValue = parsed as Record<string, unknown>;
-        if (freeformValue.previewId !== previewId || freeformValue.chunkIndex !== 0 ||
+        if (freeformValue.previewId !== previewId ||
+            freeformValue.chunkIndex !== chunkIndex ||
             freeformValue.outcome !== meta!.outcome ||
             typeof freeformValue.coveredScope !== "string" ||
-            !amuxAnalysisTextSafe(freeformValue.coveredScope)) {
+            !amuxAnalysisTextSafe(freeformValue.coveredScope) ||
+            (partial && (freeformValue.coverageStatus !== "more" ||
+              freeformValue.continuationKind !== "output" ||
+              typeof freeformValue.remainingScope !== "string" ||
+              !amuxAnalysisTextSafe(freeformValue.remainingScope))) ||
+            (needsOwnerInput && (freeformValue.coverageStatus !== "needs_owner_input" ||
+              freeformValue.continuationKind !== "input" ||
+              typeof freeformValue.ownerQuestion !== "string" ||
+              !amuxAnalysisTextSafe(freeformValue.ownerQuestion)))) {
           throw new Error("freeform identity mismatch");
         }
       }
@@ -166,7 +204,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
           throw new Error("proposal digest mismatch");
         }
         const inspectedUnit = inspectAmuxStoredAnalysisUnit({
-          raw: plain.toString("utf8"), chunkIndex: 0,
+          raw: plain.toString("utf8"), chunkIndex,
           permittedSourceRefIds: ["operator_idea"],
         });
         if (!inspectedUnit.ok || inspectedUnit.unit.localId !== unit.localRef ||
@@ -179,19 +217,34 @@ export async function readAmuxFirstIdeaAnalysisResult(
           decisionState: unit.state as AmuxVisibleAnalysisUnit["decisionState"],
           proposal: inspectedUnit.unit });
       }
-      if (freeformValue && proposalUnits.length === units.length) {
+      if (chunkIndex === 0 && freeformValue &&
+          proposalUnits.length === units.length) {
         const inspected = inspectAmuxAnalysisChunk({
           raw: JSON.stringify({ ...freeformValue, units: proposalUnits }),
           expectedPreviewId: previewId, expectedChunkIndex: 0,
           expectedRevisionChunkIndex: 0, previousContinuationKind: null,
           permittedSourceRefIds: ["operator_idea"], permittedTargetRefs: [],
         });
-        if (!inspected.ok || inspected.chunk.coverageStatus !== "complete" ||
-            inspected.chunk.continuationKind !== null ||
+        if (!inspected.ok || inspected.chunk.coverageStatus !==
+              (needsOwnerInput ? "needs_owner_input" : partial ? "more" : "complete") ||
+            inspected.chunk.continuationKind !==
+              (needsOwnerInput ? "input" : partial ? "output" : null) ||
             inspected.chunk.outcome !== meta!.outcome) {
-          throw new Error("complete proposal mismatch");
+          throw new Error("proposal mismatch");
         }
       }
+      if (partial) return { state: "partial", ideaId, previewId,
+        completedAt: chunk.analysisCompletedAt.toISOString(), outcome: "propose",
+        coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
+        remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
+        nextChunkIndex: chunkIndex + 1, units: visibleUnits };
+      if (needsOwnerInput) return { state: "needs_owner_input", ideaId, previewId,
+        completedAt: chunk.analysisCompletedAt.toISOString(),
+        outcome: "needs_information",
+        coveredScope: freeformValue?.coveredScope as string | undefined ?? null,
+        remainingScope: freeformValue?.remainingScope as string | undefined ?? null,
+        ownerQuestion: freeformValue?.ownerQuestion as string | undefined ?? null,
+        units: visibleUnits };
       return { state: "ready", ideaId, previewId,
         completedAt: chunk.analysisCompletedAt.toISOString(),
         outcome: meta!.outcome as "propose" | "reject",
