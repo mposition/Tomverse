@@ -18,7 +18,8 @@ import { prisma } from "@/lib/prisma";
 
 const READ_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_READ";
 const WRITE_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_WRITE";
-const CODE_LATCH = false;
+const READ_CODE_LATCH = true;
+const WRITE_CODE_LATCH = false;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const createSchema = z.object({ id: uuid, ideaId: uuid,
@@ -67,7 +68,7 @@ export async function GET(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!CODE_LATCH || process.env[READ_ENV] !== "enabled") {
+    if (!READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
       return NextResponse.json({ error: "retention_hold_read_disabled" },
         { status: 409, headers: noStore });
     }
@@ -103,7 +104,8 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!CODE_LATCH || process.env[READ_ENV] !== "enabled" ||
+    if (!READ_CODE_LATCH || !WRITE_CODE_LATCH ||
+        process.env[READ_ENV] !== "enabled" ||
         process.env[WRITE_ENV] !== "enabled") {
       return NextResponse.json({ error: "retention_hold_write_disabled" },
         { status: 409, headers: noStore });
@@ -130,7 +132,8 @@ export async function DELETE(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!CODE_LATCH || process.env[READ_ENV] !== "enabled" ||
+    if (!READ_CODE_LATCH || !WRITE_CODE_LATCH ||
+        process.env[READ_ENV] !== "enabled" ||
         process.env[WRITE_ENV] !== "enabled") {
       return NextResponse.json({ error: "retention_hold_write_disabled" },
         { status: 409, headers: noStore });

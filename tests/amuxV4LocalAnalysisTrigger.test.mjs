@@ -30,7 +30,7 @@ test("a known settled result clears the marker for the next one-shot", async () 
     release: async () => { marked = false; },
   };
   for (const kind of ["idle", "draft_ready", "provider_failed", "disabled",
-    "catalog_unapproved"]) {
+    "catalog_unapproved", "unavailable", "refused"]) {
     assert.deepEqual(await runAmuxV4LocalAnalysisTrigger(async () =>
       ({ kind }), state), { kind });
     assert.equal(marked, false);
