@@ -43,7 +43,8 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
   const q = (sql: string, params?: unknown[]) => (params ? admin.query(sql, params) : admin.query(sql));
   const pool = new pg.Pool({ connectionString: rawUrl, options: `-c search_path="${schema}"` });
   const client = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) });
-  const read = () => readOpsObserverState(inSeconds(120), client);
+  type Trusted = { trust: string; genesisId: string; mode: string; generation: number };
+  const read = async () => (await readOpsObserverState(inSeconds(120), client)) as Trusted;
   const genesis = (input: Record<string, unknown>) =>
     createOpsObserverGenesis({ session, ...input } as Parameters<typeof createOpsObserverGenesis>[0], client);
   const counts = async () => {
@@ -123,6 +124,46 @@ test("the ops-observer genesis", { skip: !rawUrl }, async (t) => {
       const { rows } = await q(`SELECT "supersedesGenesisId" FROM "OpsObserverGenesis" WHERE id = $1`, [state.genesisId]);
       assert.equal(rows[0].supersedesGenesisId, first);
       assert.deepEqual(await counts(), { g: 2, s: 2, a: 2 });
+    });
+
+    await t.test("a genesis waits for whoever holds the head's state row, as an advance does", async () => {
+      const { genesisId: head, trust } = await read();
+      const holder = new pg.Client({ connectionString: rawUrl, options: `-c search_path="${schema}"` });
+      await holder.connect();
+      try {
+        await holder.query("BEGIN");
+        await holder.query(`SELECT 1 FROM "OpsObserverState" WHERE "genesisId" = $1 FOR UPDATE`, [head]);
+        let settled = false;
+        const pending = genesis({ expectedGenesisId: head, expectedGeneration: 0, expectedMode: "live", trustReason: trust,
+          reason: "activation", mode: "live" }).finally(() => { settled = true; });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.equal(settled, false, "the genesis must not judge while the state row is held");
+        await holder.query("ROLLBACK");
+        // Released, it judges the current head: live to live is no activation.
+        assert.deepEqual(await pending, { result: "transition_refused" });
+      } finally {
+        await holder.end();
+      }
+    });
+
+    await t.test("a head whose state row is missing is recovered by naming it", async () => {
+      const head = (await read()).genesisId;
+      await age(head, 8);
+      await q(`ALTER TABLE "OpsObserverState" DISABLE TRIGGER USER`);
+      try {
+        await q(`DELETE FROM "OpsObserverState" WHERE "genesisId" = $1`, [head]);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverState" ENABLE TRIGGER USER`);
+      }
+      assert.deepEqual(await readOpsObserverState(inSeconds(120), client), { trust: "state_missing" });
+      const missing = { expectedGenesisId: head, expectedGeneration: null, expectedMode: "live", trustReason: "state_missing" };
+      // The head is still named: an approval that says there is none is stale.
+      assert.deepEqual(await genesis({ ...none, reason: "initial", mode: "shadow" }), { result: "stale" });
+      const created = await genesis({ ...missing, reason: "recovery", mode: "live" });
+      assert.equal(created.result, "created");
+      const state = await read();
+      assert.deepEqual([state.trust, state.genesisId, state.mode, state.generation],
+        ["trusted", (created as { genesisId: string }).genesisId, "live", 0]);
     });
   } finally {
     await client.$disconnect();

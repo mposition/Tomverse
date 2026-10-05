@@ -145,7 +145,9 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
   const head = heads.length === 1 ? heads[0] : null;
   const base = { auditKeyCount: integrityKeys.length };
   if (!head || head.stateGenesisId === null) {
-    return { facts: { ...base, genesis: null, state: null }, head: null, ledgerRows: [], deliveries: [] };
+    // The genesis head without its state is not trusted, but it is still the
+    // head a recovery must name and supersede.
+    return { facts: { ...base, genesis: null, state: null }, head: null, chainHead: head, ledgerRows: [], deliveries: [] };
   }
 
   // 2. The human approval of this genesis.
@@ -227,6 +229,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
   };
   return {
     head,
+    chainHead: head,
     deliveries,
     ledgerRows,
     facts: {
@@ -678,10 +681,21 @@ export async function createOpsObserverGenesis(
       "genesis",
       runDeadline,
       async (tx): Promise<OpsObserverGenesisResult> => {
+        // Serialize with the advance before anything is judged: it takes the
+        // same row lock on the head's state, so an advance committed while
+        // this waited is read below and the approval of the generation before
+        // it is stale -- never a replacement of state the owner did not see.
+        await tx.$queryRaw`
+          SELECT s."genesisId" FROM "OpsObserverState" s
+            JOIN "OpsObserverGenesis" g ON g.id = s."genesisId"
+           WHERE NOT EXISTS (SELECT 1 FROM "OpsObserverGenesis" x WHERE x."supersedesGenesisId" = g.id)
+             FOR UPDATE OF s`;
         const gathered = await gatherFacts(tx, integrityKeys);
         const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
         const trust = verdict.trusted ? "trusted" : (verdict.reason ?? "state_missing");
-        const head = gathered.head;
+        // The chain head, with or without its state row: a head whose state is
+        // missing is what a recovery replaces.
+        const head = gathered.chainHead;
         const current = {
           genesisId: head?.id ?? null,
           generation: (head?.generation as number | null) ?? null,
