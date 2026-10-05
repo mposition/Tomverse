@@ -112,6 +112,9 @@ test("uncertain v4 unit consumption freezes one receipt until owner no-commit co
     assert.equal(resolved.state, "invalidated");
     assert.equal((await store.readAmuxV4UnitDecision(session,
       { decisionId: ids.decision })).state, "invalidated");
+    await assert.rejects(store.confirmAmuxV4UnitNoCommit({ session, request,
+      decisionId: ids.decision, consumeRequestId: ids.consume,
+      confirmation: "no_commit" }), (error) => error.code === "reconfirm");
     assert.equal(await store.markAmuxV4UnitConsumeOutcomeUnknown({ session,
       decisionId: ids.decision, consumeRequestId: ids.consume }), "unavailable");
     const audit = await prisma.adminAuditLog.findMany({ where: {
