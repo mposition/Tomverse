@@ -7115,6 +7115,12 @@ model AmuxWorkItem {
   v4TitleKeyVersion     Int?
   v4TitleDigest         String?
   v4TitleDigestKeyId    String?
+  v4BodyCiphertext      Bytes?
+  v4BodyKeyId           String?
+  v4BodyKeyVersion      Int?
+  v4BodyDigest          String?
+  v4BodyDigestKeyId     String?
+  v4BodyPurgedAt        DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
   v4BriefKeyVersion     Int?
@@ -9222,6 +9228,9 @@ model AmuxIdeaUnitDecision {
   unitDigestKeyId            String
   confirmationDigest         String
   confirmationDigestKeyId    String
+  /// Non-body owner-reviewed selection and cost receipt. Immutable after prepare;
+  /// the plaintext proposal and idea source are never copied here.
+  confirmationSnapshot       Json?
   sourcePreviewId            String
   sourcePreviewDigest        String
   sourcePreviewDigestKeyId   String

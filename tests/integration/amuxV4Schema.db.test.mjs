@@ -317,6 +317,11 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await expectRejected(insertDecision, [...decisionParams.slice(0, 3), 1, ...decisionParams.slice(4)],
       "AmuxIdeaUnitDecision_unit_binding_check");
     await client.query(insertDecision, decisionParams);
+    await expectRejected(
+      `UPDATE public."AmuxIdeaUnitDecision"
+       SET "confirmationSnapshot" = '{}'::jsonb WHERE "id" = $1`,
+      [decisionId], "AmuxIdeaUnitDecision_confirmation_snapshot_immutable_check",
+    );
     await expectRejected(insertDecision, [randomUUID(), ...decisionParams.slice(1, 4), randomUUID(),
       ...decisionParams.slice(5)], "AmuxIdeaUnitDecision_prepare_audit_check");
     const unknownAuditId = await decisionAudit("amux.v4.unit.outcome_unknown", null,
@@ -694,14 +699,17 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       ("id", "title", "status", "sourceSystem", "sourceKey", "sourceVersion",
        "sourceDigest", "sourceSnapshot", "cardType", "storyKind", "parentFeatureNodeId",
        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion",
-       "v4TitleDigest", "v4TitleDigestKeyId", "v4SourceApprovalId", "updatedAt")
+       "v4TitleDigest", "v4TitleDigestKeyId", "v4BodyCiphertext",
+       "v4BodyKeyId", "v4BodyKeyVersion", "v4BodyDigest",
+       "v4BodyDigestKeyId", "v4SourceApprovalId", "updatedAt")
       VALUES ($1, 'AMUX Story', 'backlog', 'admin-idea-v4', $2, 'v1', $3,
               $4::jsonb, 'story', 'general', $5, $6, 'synthetic', 1, $7, 'synthetic',
-              'synthetic-approval', CURRENT_TIMESTAMP)`;
+              $6, 'synthetic', 1, $7, 'synthetic',
+              $8, CURRENT_TIMESTAMP)`;
     const storyParams = [
       ids.story, sourceKey, digest,
       JSON.stringify({ schemaVersion: null, ideaId: null, approvalId: null }),
-      ids.feature, title, titleDigest,
+      ids.feature, title, titleDigest, "synthetic-approval",
     ];
     await expectRejected(
       insertStory,
@@ -713,6 +721,9 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       ideaId: "synthetic_idea_01",
       approvalId: "synthetic_approval_01",
     });
+    await expectRejected(insertStory,
+      [storyParams[0], String(storyParams[1]).toLowerCase(), ...storyParams.slice(2)],
+      "AmuxWorkItem_source_complete_check");
     await client.query(insertStory, storyParams);
     await expectRejected(
       `UPDATE public."AmuxWorkItem" SET "storyKind" = NULL WHERE "id" = $1`,
@@ -723,6 +734,186 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       [ids.story],
     );
     assert.equal(todoError.code, "23514");
+
+    // A09's inert registration must be an all-or-nothing decision/card/unit
+    // write. The synthetic fixture does not grant route access or run a model.
+    const registerDecisionId = randomUUID();
+    const registeredStoryId = randomUUID();
+    const registerPrepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: registerDecisionId,
+      summary: "synthetic story registration preparation", metadata: null,
+    });
+    await client.query(
+      `INSERT INTO public."AmuxIdeaUnitDecision"
+       ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+        "prepareRequestId", "action", "state", "ownerSessionDigest",
+        "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+        "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+        "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+        "baseNodeId", "baseNodeRevision", "baseNodeDigest", "baseNodeDigestKeyId",
+        "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+       VALUES ($1, $2, $3, 'synthetic-owner', 0, $4, 'register_card', 'prepared',
+               $5, 'synthetic', $6, 'synthetic', $7, 'synthetic', $8::jsonb,
+               $9, $10, 'synthetic', $11, 0, $12, 'synthetic',
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+               $13, CURRENT_TIMESTAMP)`,
+      [registerDecisionId, ids.idea, decisionUnitId, randomUUID(),
+        "e".repeat(64), digest, "f".repeat(64), JSON.stringify({ schemaVersion: 1 }),
+        decisionPreviewId, digest, ids.feature, digest, registerPrepareAudit],
+    );
+    await client.query("SAVEPOINT registration_probe");
+    const registeredStoryParams = [registeredStoryId, randomUUID().replaceAll("-", "").toUpperCase(),
+      digest, JSON.stringify({ schemaVersion: "amux-v4", ideaId: ids.idea,
+        approvalId: registerDecisionId }), ids.feature, title, titleDigest,
+      registerDecisionId];
+    await client.query(insertStory, registeredStoryParams);
+    const registerConsumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: registerDecisionId,
+      summary: "synthetic story registration consumption", metadata: null,
+    });
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+       "consumeRequestId" = $2, "registeredWorkItemId" = $3,
+       "finalAuditLogId" = $4 WHERE "id" = $1`,
+      [registerDecisionId, randomUUID(), registeredStoryId, registerConsumeAudit],
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'approved'
+       WHERE "id" = $1`, [decisionUnitId],
+    );
+    const registered = await client.query(
+      `SELECT "status", "owner", "claimedAt" FROM public."AmuxWorkItem"
+       WHERE "id" = $1`, [registeredStoryId],
+    );
+    assert.deepEqual(registered.rows[0], {
+      status: "backlog", owner: null, claimedAt: null,
+    });
+    await client.query("ROLLBACK TO SAVEPOINT registration_probe");
+    await client.query("RELEASE SAVEPOINT registration_probe");
+    const rollbackProof = await client.query(
+      `SELECT d."state" AS "decisionState", u."state" AS "unitState",
+              w."id" AS "cardId"
+       FROM public."AmuxIdeaUnitDecision" d
+       JOIN public."AmuxIdeaDraftUnit" u ON u."id" = d."draftUnitId"
+       LEFT JOIN public."AmuxWorkItem" w ON w."id" = $2
+       WHERE d."id" = $1`, [registerDecisionId, registeredStoryId],
+    );
+    assert.deepEqual(rollbackProof.rows[0], {
+      decisionState: "prepared", unitState: "proposed", cardId: null,
+    });
+    const registerCancelAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.cancel",
+      targetType: "AmuxIdeaUnitDecision", targetId: registerDecisionId,
+      summary: "synthetic cancellation of unconsumed confirmation", metadata: null,
+    });
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'cancelled',
+       "finalAuditLogId" = $2 WHERE "id" = $1`,
+      [registerDecisionId, registerCancelAudit],
+    );
+    await expectRejected(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+       "consumeRequestId" = $2, "registeredWorkItemId" = $3,
+       "finalAuditLogId" = $4 WHERE "id" = $1`,
+      [registerDecisionId, randomUUID(), registeredStoryId, registerConsumeAudit],
+      "AmuxIdeaUnitDecision_terminal_immutable_check",
+    );
+
+    // An Initiative proposal must have its own decision. A node, its
+    // revision, the consumed decision and the approved draft roll back as a
+    // single unit; a Story approval cannot silently approve its parent.
+    const nodeUnitId = randomUUID();
+    const nodeDecisionId = randomUUID();
+    const newInitiativeId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaDraftUnit"
+       ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
+        "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+        "bodyDigest", "bodyDigestKeyId", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 0, 100, 'c0:node-100', 'node',
+               'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+      [nodeUnitId, ids.idea, title, digest],
+    );
+    const nodePrepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: nodeDecisionId,
+      summary: "synthetic node preparation", metadata: null,
+    });
+    await client.query(
+      `INSERT INTO public."AmuxIdeaUnitDecision"
+       ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+        "prepareRequestId", "action", "state", "ownerSessionDigest",
+        "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+        "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+        "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+        "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+       VALUES ($1, $2, $3, 'synthetic-owner', 0, $4, 'create_node', 'prepared',
+               $5, 'synthetic', $6, 'synthetic', $7, 'synthetic', $8::jsonb,
+               $9, $10, 'synthetic', CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP + INTERVAL '15 minutes', $11, CURRENT_TIMESTAMP)`,
+      [nodeDecisionId, ids.idea, nodeUnitId, randomUUID(),
+        "1".repeat(64), digest, "2".repeat(64),
+        JSON.stringify({ schemaVersion: 1 }), decisionPreviewId, digest,
+        nodePrepareAudit],
+    );
+    await client.query("SAVEPOINT node_registration_probe");
+    const nodeConsumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: nodeDecisionId,
+      summary: "synthetic node consumption", metadata: null,
+    });
+    await client.query(
+      `INSERT INTO public."AmuxPortfolioNode"
+       ("id", "level", "state", "revision", "titleCiphertext",
+        "descriptionCiphertext", "contentKeyId", "contentKeyVersion",
+        "contentDigest", "contentDigestKeyId", "approvedByUserId",
+        "authorizationAuditLogId", "updatedAt")
+       VALUES ($1, 'initiative', 'active', 0, $2, $2, 'synthetic', 1,
+               $3, 'synthetic', 'synthetic-owner', $4, CURRENT_TIMESTAMP)`,
+      [newInitiativeId, title, digest, nodeConsumeAudit],
+    );
+    await client.query(
+      `INSERT INTO public."AmuxPortfolioNodeRevision"
+       ("id", "nodeId", "revision", "contentDigest", "contentDigestKeyId",
+        "decisionId", "authorizationAuditLogId", "approvedAt")
+       VALUES ($1, $2, 0, $3, 'synthetic', $4, $5, CURRENT_TIMESTAMP)`,
+      [randomUUID(), newInitiativeId, digest, nodeDecisionId, nodeConsumeAudit],
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+       "consumeRequestId" = $2, "resolvedNodeId" = $3,
+       "finalAuditLogId" = $4 WHERE "id" = $1`,
+      [nodeDecisionId, randomUUID(), newInitiativeId, nodeConsumeAudit],
+    );
+    await client.query(
+      `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'approved'
+       WHERE "id" = $1`, [nodeUnitId],
+    );
+    const createdNode = await client.query(
+      `SELECT n."level", d."state" AS "decisionState",
+              u."state" AS "unitState" FROM public."AmuxPortfolioNode" n
+       JOIN public."AmuxIdeaUnitDecision" d ON d."resolvedNodeId" = n."id"
+       JOIN public."AmuxIdeaDraftUnit" u ON u."id" = d."draftUnitId"
+       WHERE n."id" = $1`, [newInitiativeId],
+    );
+    assert.deepEqual(createdNode.rows[0], {
+      level: "initiative", decisionState: "consumed", unitState: "approved",
+    });
+    await client.query("ROLLBACK TO SAVEPOINT node_registration_probe");
+    await client.query("RELEASE SAVEPOINT node_registration_probe");
+    const nodeRollback = await client.query(
+      `SELECT d."state" AS "decisionState", u."state" AS "unitState",
+              n."id" AS "nodeId"
+       FROM public."AmuxIdeaUnitDecision" d
+       JOIN public."AmuxIdeaDraftUnit" u ON u."id" = d."draftUnitId"
+       LEFT JOIN public."AmuxPortfolioNode" n ON n."id" = $2
+       WHERE d."id" = $1`, [nodeDecisionId, newInitiativeId],
+    );
+    assert.deepEqual(nodeRollback.rows[0], {
+      decisionState: "prepared", unitState: "proposed", nodeId: null,
+    });
 
     // Empty-table fixture cleanup is the sole allowed TRUNCATE path.
     await client.query("ROLLBACK");

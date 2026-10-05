@@ -4,6 +4,10 @@ import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
+import { AmuxIdeaNodeRegistrationPanel } from
+  "@/components/admin/AmuxIdeaNodeRegistrationPanel";
+import { AmuxIdeaStoryRegistrationPanel } from
+  "@/components/admin/AmuxIdeaStoryRegistrationPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -14,8 +18,8 @@ const list = (values: string[]) => <ul className="list-disc pl-5">
   {values.map((value, index) => <li key={`${index}:${value}`}>{value}</li>)}
 </ul>;
 
-/** Owner-only page section. All model-derived text is rendered as React text,
- * never as HTML. No approval, registration, or model request originates here. */
+/** Owner-only page section. Model-derived text is rendered as React text,
+ * never as HTML; the separate Story panel owns the gated confirmation flow. */
 export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
   ideaId: string; onContinuationReady?: (chunkIndex: number) => void;
 }) {
@@ -137,6 +141,14 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       {view.outcome === "propose" ? <AmuxIdeaResolutionPanel
         key={`${view.previewId}:${chunkIndex}:${view.units.map((unit) => unit.bodyDigest).join(":")}`}
         ideaId={ideaId} chunkIndex={chunkIndex} units={view.units} /> : null}
+      {view.outcome === "propose" ? view.units.filter((unit) =>
+        unit.decisionState === "proposed" && unit.proposal?.kind === "node")
+        .map((unit) => <AmuxIdeaNodeRegistrationPanel
+          key={unit.id} ideaId={ideaId} unit={unit} />) : null}
+      {view.outcome === "propose" ? view.units.filter((unit) =>
+        unit.decisionState === "proposed" && unit.proposal?.kind === "card" &&
+        unit.proposal.cardType === "story").map((unit) =>
+        <AmuxIdeaStoryRegistrationPanel key={unit.id} ideaId={ideaId} unit={unit} />) : null}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;
