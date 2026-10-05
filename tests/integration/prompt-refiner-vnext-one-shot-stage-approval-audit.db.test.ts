@@ -398,6 +398,11 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
       assert.match(audit.entryHash ?? "", /^[0-9a-f]{64}$/);
       const readback = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
       assert.equal(readback.approvalAuditsValid, true);
+      assert.equal(readback.stageId, stageId);
+      assert.equal(readback.runtimeDeploymentId, binding.runtimeDeploymentId);
+      assert.equal(readback.runtimeCommitSha, binding.runtimeCommitSha);
+      assert.equal(readback.stageApprovalAuditLogId, auditLogId);
+      assert.equal(readback.runApprovalAuditLogId, null);
       assert.equal(readback.reservationShapeValid, true);
       assert.equal(readback.reservedSlots, 80);
       assert.equal(readback.dispatchAuthorized, false);
@@ -537,6 +542,11 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal(await prisma.promptRefinerVnextOneShotSlot.count(), 160);
         const afterRun = await prisma.$transaction(readPromptRefinerVnextOneShotStage);
         assert.equal(afterRun.approvalAuditsValid, true);
+        assert.equal(afterRun.stageId, stageId);
+        assert.equal(afterRun.runtimeDeploymentId, binding.runtimeDeploymentId);
+        assert.equal(afterRun.runtimeCommitSha, binding.runtimeCommitSha);
+        assert.equal(afterRun.stageApprovalAuditLogId, auditLogId);
+        assert.equal(afterRun.runApprovalAuditLogId, run.runApprovalAuditLogId);
         assert.equal(afterRun.reservationShapeValid, true);
         assert.equal(afterRun.reservedSlots, 80);
         assert.equal(afterRun.consumedSlots, 0);

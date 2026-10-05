@@ -22,7 +22,12 @@ type StageStatus = "staged" | "run_approved" | "closed";
 
 export type PromptRefinerVnextOneShotStageReadback = Readonly<{
   stagePresent: boolean;
+  stageId: string | null;
   stageStatus: StageStatus | null;
+  runtimeDeploymentId: string | null;
+  runtimeCommitSha: string | null;
+  stageApprovalAuditLogId: string | null;
+  runApprovalAuditLogId: string | null;
   slotCount: number;
   reservedSlots: number;
   consumedSlots: number;
@@ -33,7 +38,12 @@ export type PromptRefinerVnextOneShotStageReadback = Readonly<{
 
 const ABSENT_STAGE: PromptRefinerVnextOneShotStageReadback = Object.freeze({
   stagePresent: false,
+  stageId: null,
   stageStatus: null,
+  runtimeDeploymentId: null,
+  runtimeCommitSha: null,
+  stageApprovalAuditLogId: null,
+  runApprovalAuditLogId: null,
   slotCount: 0,
   reservedSlots: 0,
   consumedSlots: 0,
@@ -151,7 +161,12 @@ export async function readPromptRefinerVnextOneShotStage(
     stage.status === "closed" ? stage.status : null;
   return Object.freeze({
     stagePresent: true,
+    stageId: stage.id,
     stageStatus,
+    runtimeDeploymentId: stage.runtimeDeploymentId,
+    runtimeCommitSha: stage.runtimeCommitSha,
+    stageApprovalAuditLogId: stage.stageApprovalAuditLogId,
+    runApprovalAuditLogId: stage.runApprovalAuditLogId,
     slotCount: slots.length,
     reservedSlots,
     consumedSlots,

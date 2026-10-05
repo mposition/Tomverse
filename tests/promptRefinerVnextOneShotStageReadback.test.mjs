@@ -58,7 +58,10 @@ test("missing stage is content-free and cannot dispatch", async () => {
   const { tx, calls } = txFor(null, []);
   const result = await readPromptRefinerVnextOneShotStage(tx);
   assert.deepEqual(result, {
-    stagePresent: false, stageStatus: null, slotCount: 0,
+    stagePresent: false, stageId: null, stageStatus: null,
+    runtimeDeploymentId: null, runtimeCommitSha: null,
+    stageApprovalAuditLogId: null, runApprovalAuditLogId: null,
+    slotCount: 0,
     reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
     approvalAuditsValid: false, dispatchAuthorized: false,
   });
@@ -73,6 +76,11 @@ test("exact 80-slot shape is observed without returning root or identifiers", as
   const result = await readPromptRefinerVnextOneShotStage(tx);
   assert.equal(result.reservationShapeValid, true);
   assert.equal(result.slotCount, 80);
+  assert.equal(result.stageId, stage.id);
+  assert.equal(result.runtimeDeploymentId, stage.runtimeDeploymentId);
+  assert.equal(result.runtimeCommitSha, stage.runtimeCommitSha);
+  assert.equal(result.stageApprovalAuditLogId, stage.stageApprovalAuditLogId);
+  assert.equal(result.runApprovalAuditLogId, null);
   assert.equal(result.reservedSlots, 79);
   assert.equal(result.consumedSlots, 1);
   assert.equal(result.approvalAuditsValid, false);
