@@ -14,6 +14,8 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
 import { createPromptRefinerVnextOneShotStageWithSlots } from
   "@/lib/promptRefinerVnextOneShotStageWriter";
+import { recordPromptRefinerVnextOneShotPreregistration } from
+  "@/lib/promptRefinerVnextOneShotPreregistration";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { consumePromptRefinerVnextOneShotSlot } from
@@ -58,15 +60,14 @@ const runtime = [
     runtimeCommitSha: "3".repeat(40) },
 ];
 type Client = pg.Client;
-let auditCounter = 0;
-
 async function audit(client: Client, action: string, targetId: string,
   summary: string, metadata: unknown, fixedId?: string) {
-  const head = await client.query<{ entryHash: string }>(
-    `SELECT "entryHash" FROM "AdminAuditLog"
+  const head = await client.query<{ entryHash: string; createdAt: Date }>(
+    `SELECT "entryHash", "createdAt" FROM "AdminAuditLog"
      WHERE "entryHash" IS NOT NULL ORDER BY "createdAt" DESC, "id" DESC LIMIT 1`);
   const prior = head.rows[0];
-  const createdAt = new Date(Date.now() - 25_000 + ++auditCounter * 1000);
+  const createdAt = new Date(Math.max(Date.now(),
+    (prior?.createdAt.getTime() ?? 0) + 2));
   const id = fixedId ?? randomUUID();
   const hash = computeAdminAuditEntryHash({
     previousHash: prior?.entryHash ?? null, actorUserId: owner,
@@ -199,6 +200,16 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
         row.id === "gpt-5-6-luna");
       assert.ok(pinnedModel);
       await prisma.modelRegistryEntry.create({ data: pinnedModel });
+      const session = { user: { id: owner, email: "owner@example.test" },
+        expires: "2099-01-01T00:00:00.000Z" } as Session;
+      const request = new Request("https://example.test/stage", {
+        method: "POST", headers: { "user-agent": "b06-synthetic-integration" },
+      });
+      process.env.RAILWAY_GIT_COMMIT_SHA = base.sourceCommitSha;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = base.runnerDigest;
+      await recordPromptRefinerVnextOneShotPreregistration({
+        session, request, pins: base,
+      });
       await client.query("BEGIN");
       const v1Audit = await writeStageAudit(client, runtime[0]);
       await insertStage(client, runtime[0], v1Audit);
@@ -234,11 +245,6 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       const legacyReadback = await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotStage(tx, V2));
       assert.equal(legacyReadback.approvalAuditsValid, true);
-      const session = { user: { id: owner, email: "owner@example.test" },
-        expires: "2099-01-01T00:00:00.000Z" } as Session;
-      const request = new Request("https://example.test/stage", {
-        method: "POST", headers: { "user-agent": "b06-synthetic-integration" },
-      });
       const binding = { id: V3, ...base,
         perRequestCostMicroUsd: BigInt(base.perRequestCostMicroUsd),
         costCeilingMicroUsd: BigInt(base.costCeilingMicroUsd),

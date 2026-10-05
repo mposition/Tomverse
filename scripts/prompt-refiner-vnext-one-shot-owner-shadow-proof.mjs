@@ -26,11 +26,13 @@ const FORBIDDEN_ENV = /(?:^|_)DATABASE_(?:[A-Z0-9]+_)*URL$|(?:^|_)DIRECT_URL(?:_
 const refuse = () => { throw new Error("owner_shadow_proof_unavailable"); };
 
 const fingerprint = (path) => {
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 ||
-      stat.size > 32 * 1024 * 1024) return refuse();
-  return Object.freeze({ dev: stat.dev, ino: stat.ino, size: stat.size,
-    mtimeMs: stat.mtimeMs });
+  const stat = lstatSync(path, { bigint: true });
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0n ||
+      stat.size > 32n * 1024n * 1024n) return refuse();
+  // Windows file IDs can exceed Number.MAX_SAFE_INTEGER. Decimal strings keep
+  // the before/after identity comparison exact in the canonical JSON check.
+  return Object.freeze({ dev: stat.dev.toString(), ino: stat.ino.toString(),
+    size: stat.size.toString(), mtimeNs: stat.mtimeNs.toString() });
 };
 
 /** No app call, provider call, or slot consumption occurs in this function. */
@@ -103,7 +105,9 @@ export function createPromptRefinerVnextOneShotOwnerShadowProof(input) {
       runnerPreflightDigest:
         PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
       cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
-      signedAt: now.toISOString(),
+      // The seal is checked at entry; the signed observation is made only
+      // after the exact A17 runner has finished its 80 explicit zero checks.
+      signedAt: new Date().toISOString(),
     }, signingPrivateKeyB64);
   } catch {
     // Never echo paths, root, manifest, case IDs, model-shaped output or keys.

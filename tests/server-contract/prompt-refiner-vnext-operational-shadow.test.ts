@@ -131,7 +131,8 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
     present: false, valid: false, shadowAuditLogId: null,
     cacheWriteInputTokens: null, dispatchAuthorized: false,
   });
-  const result = await recordPromptRefinerVnextOneShotOperationalShadow(input());
+  const submitted = input();
+  const result = await recordPromptRefinerVnextOneShotOperationalShadow(submitted);
   assert.deepEqual(result, { stageId, shadowAuditLogId: "synthetic-shadow-audit",
     dispatchAuthorized: false });
   assert.equal(writes, 1);
@@ -139,7 +140,7 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
   assert.equal(evidenceRows[0].metadata &&
     JSON.stringify(evidenceRows[0].metadata).includes("manifestRoot"), false);
   assert.equal((evidenceRows[0].metadata as Record<string, unknown>)
-    .cacheWriteInputTokens, 0);
+    .cacheWriteInputTokens, submitted.proof.cacheWriteInputTokens);
   assert.deepEqual(await readPromptRefinerVnextOneShotOperationalShadow(
     tx as never, stage as never), {
     present: true, valid: true, shadowAuditLogId: "synthetic-shadow-audit",
@@ -219,6 +220,16 @@ test("mismatched, duplicate and unverifiable shadow rows never read back as vali
   reset();
   await recordPromptRefinerVnextOneShotOperationalShadow(input());
   const original = evidenceRows[0];
+  for (const value of [undefined, true, "0", 1]) {
+    const metadata = { ...(original.metadata as object),
+      cacheWriteInputTokens: value };
+    if (value === undefined) delete metadata.cacheWriteInputTokens;
+    evidenceRows = [{ ...original, metadata }];
+    const readback = await readPromptRefinerVnextOneShotOperationalShadow(
+      tx as never, stage as never);
+    assert.equal(readback.valid, false);
+    assert.equal(readback.cacheWriteInputTokens, null);
+  }
   evidenceRows = [{ ...original, metadata: { ...(original.metadata as object),
     runApprovalAuditLogId: "different-run" } }];
   assert.equal((await readPromptRefinerVnextOneShotOperationalShadow(

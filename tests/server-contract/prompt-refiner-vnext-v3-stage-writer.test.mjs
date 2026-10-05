@@ -25,6 +25,8 @@ const previous = { ...binding, id: v2,
 };
 let shadowPresent = false;
 let forbiddenAudits = 0;
+let preregValid = true;
+let preregReads = 0;
 let closed = 0;
 let created = null;
 let slots = null;
@@ -78,18 +80,27 @@ mock.module(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts"), {
     present: shadowPresent,
   }) },
 });
+mock.module(mod("lib/promptRefinerVnextOneShotPreregistration.ts"), {
+  namedExports: { assertPromptRefinerVnextOneShotPreregistrationForStage:
+    async () => {
+      preregReads++;
+      if (!preregValid) throw new Error("vnext_one_shot_preregistration_unavailable");
+    } },
+});
 const { createPromptRefinerVnextOneShotStageWithSlots } = await import(
   mod("lib/promptRefinerVnextOneShotStageWriter.ts"));
 const input = { session: { user: { id: "synthetic-owner" } },
   request: new Request("https://example.test/stage", { method: "POST" }), binding };
 const reset = () => { closed = 0; created = null; slots = null; supersession = null;
-  shadowPresent = false; forbiddenAudits = 0; };
+  shadowPresent = false; forbiddenAudits = 0; preregValid = true;
+  preregReads = 0; };
 
 test("v3 recovery binds the prior run audit and reserves 80 new slots", async () => {
   reset();
   const result = await createPromptRefinerVnextOneShotStageWithSlots(input);
   assert.equal(result.stageId, v3);
   assert.equal(result.dispatchAuthorized, false);
+  assert.equal(preregReads, 1);
   assert.equal(closed, 1);
   assert.equal(created.id, v3);
   assert.equal(created.sourceCommitSha, previous.sourceCommitSha);
@@ -100,6 +111,13 @@ test("v3 recovery binds the prior run audit and reserves 80 new slots", async ()
     slot.id.startsWith("one-shot-v3-") && slot.reservedCostMicroUsd === 29918n));
   assert.equal(supersession.metadata.previousRunApprovalAuditLogId,
     previous.runApprovalAuditLogId);
+});
+
+test("v3 recovery refuses without the original signed B01 preregistration", async () => {
+  reset(); preregValid = false;
+  await assert.rejects(createPromptRefinerVnextOneShotStageWithSlots(input),
+    /preregistration_unavailable/);
+  assert.equal(closed, 0); assert.equal(created, null); assert.equal(slots, null);
 });
 
 test("historical shadow or unknown evidence refuses before close and new slots", async () => {

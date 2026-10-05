@@ -91,7 +91,9 @@ test("owner attestor executes the A17 runner and signs only bound zero-cost proo
     };
     const proof = createPromptRefinerVnextOneShotOwnerShadowProof(input);
     assert.deepEqual(verifyPromptRefinerVnextOneShotShadowProof(
-      proof, publicKey, now), proof);
+      proof, publicKey, new Date()), proof);
+    assert.ok(Date.parse(proof.signedAt) >= now.getTime(),
+      "the signed observation follows the completed A17 preflight");
     assert.equal(proof.runnerDigest, target.runnerDigest);
     assert.equal(proof.manifestRoot, synthetic.rootDigest);
     assert.equal(proof.runnerPreflightDigest,

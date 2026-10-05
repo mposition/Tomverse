@@ -72,7 +72,7 @@ function readSignerPin() {
 }
 
 const shadowMetadata = (stage: PromptRefinerVnextOneShotStage,
-  signedAt: string, signerDigest: string) => ({
+  signedAt: string, signerDigest: string, cacheWriteInputTokens: 0) => ({
   version: "prompt-refiner-vnext-one-shot-operational-shadow-v2",
   stageApprovalAuditLogId: stage.stageApprovalAuditLogId,
   runApprovalAuditLogId: stage.runApprovalAuditLogId,
@@ -88,7 +88,7 @@ const shadowMetadata = (stage: PromptRefinerVnextOneShotStage,
   consumedSlots: 0,
   costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
   runnerPreflightDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
-  cacheWriteInputTokens: 0,
+  cacheWriteInputTokens,
   providerCalls: 0,
   slotConsumeCalls: 0,
   signedAt,
@@ -119,8 +119,14 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   const signerDigest = metadata && typeof metadata === "object" &&
     !Array.isArray(metadata) && typeof metadata.signerPublicKeyDigest === "string"
     ? metadata.signerPublicKeyDigest : null;
+  const cacheWriteInputTokens = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) &&
+    typeof metadata.cacheWriteInputTokens === "number" &&
+    Number.isInteger(metadata.cacheWriteInputTokens) &&
+    metadata.cacheWriteInputTokens === 0 ? 0 as const : null;
   const signedMs = signedAt ? Date.parse(signedAt) : NaN;
   if (entry && stage?.id === STAGE_ID && signedAt && signerDigest &&
+      cacheWriteInputTokens === 0 &&
       SHA256.test(signerDigest) && Number.isFinite(signedMs) &&
       new Date(signedMs).toISOString() === signedAt &&
       (stage.status === "run_approved" || stage.status === "closed") &&
@@ -133,7 +139,8 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
       // hash-chained audit without comparing it with a different DB clock.
       // The stored signer digest records the historical pin, including after rotation.
       canonicalBenchmarkJson(metadata) ===
-        canonicalBenchmarkJson(shadowMetadata(stage, signedAt, signerDigest)) &&
+        canonicalBenchmarkJson(shadowMetadata(stage, signedAt, signerDigest,
+          cacheWriteInputTokens)) &&
       await promptRefinerVnextOneShotApprovalAuditsAreValid(tx, stage)) {
     const runAudit = await tx.adminAuditLog.findUnique({
       where: { id: stage.runApprovalAuditLogId }, select: { createdAt: true },
@@ -143,7 +150,7 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   }
   return Object.freeze({ present: rows.length !== 0, valid,
     shadowAuditLogId: valid ? entry!.id : null,
-    cacheWriteInputTokens: valid ? 0 as const : null,
+    cacheWriteInputTokens: valid ? cacheWriteInputTokens : null,
     dispatchAuthorized: false as const });
 }
 
@@ -199,7 +206,8 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
       action: ACTION,
       targetType: "PromptRefinerVnextOneShotStage", targetId: STAGE_ID,
       summary: SUMMARY,
-      metadata: shadowMetadata(stage, proof.signedAt, signer.digest),
+      metadata: shadowMetadata(stage, proof.signedAt, signer.digest,
+        proof.cacheWriteInputTokens),
     });
     const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
     if (!evidence.valid || evidence.shadowAuditLogId !== shadowAuditLogId) {

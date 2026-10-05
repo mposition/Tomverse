@@ -12,6 +12,8 @@ import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
 import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { assertPromptRefinerVnextOneShotPreregistrationForStage } from
+  "@/lib/promptRefinerVnextOneShotPreregistration";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
@@ -59,6 +61,11 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
         !price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("vnext_one_shot_stage_price_mismatch");
     }
+    // B01 remains a separate signed gate. V3 copies the same source, runner
+    // and price pins from V2; it cannot introduce a new preregistration.
+    await assertPromptRefinerVnextOneShotPreregistrationForStage(
+      tx, input.binding, input.session.user?.id ?? "",
+    );
     if (input.binding.id !== REPLACEMENT_STAGE_ID) {
       throw new Error("vnext_one_shot_replacement_id_invalid");
     }
