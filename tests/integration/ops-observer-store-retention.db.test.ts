@@ -181,7 +181,7 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       };
       await q("BEGIN");
       await q(`DELETE FROM "OpsObserverDelivery" WHERE id = $1`, [recent.deliveryId]);
-      assert.equal(await code(() => q("COMMIT")), "OB051");
+      assert.equal(await code(() => q("COMMIT")), "OB013");
       await q("BEGIN");
       await q(`SELECT set_config('ops_observer.retention_deadline', (clock_timestamp() + interval '300 milliseconds')::text, true)`);
       await q(`DELETE FROM "OpsObserverDelivery" WHERE id = $1`, [recent.deliveryId]);

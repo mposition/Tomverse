@@ -8,7 +8,7 @@
 -- transaction-local setting ops_observer.retention_deadline, and this one
 -- deferred trigger, run at COMMIT for every deleted reservation:
 --
---   1. refuses a delete whose transaction named no deadline (OB051), so no
+--   1. refuses a delete whose transaction named no deadline (OB013), so no
 --      delete escapes the check by leaving the setting out;
 --   2. holds the named deadline to the same claim every row passes (at most
 --      180 seconds ahead);
@@ -27,7 +27,7 @@ DECLARE
 BEGIN
   named := current_setting('ops_observer.retention_deadline', true);
   IF named IS NULL OR named = '' THEN
-    RAISE EXCEPTION 'ops_observer_retention_deadline_missing' USING ERRCODE = 'OB051';
+    RAISE EXCEPTION 'ops_observer_retention_deadline_missing' USING ERRCODE = 'OB013';
   END IF;
   claimed := named::timestamptz;
   EXECUTE format('SELECT %I.ops_observer_deadline_claim($1)', TG_TABLE_SCHEMA) USING claimed;
