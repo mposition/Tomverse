@@ -10,6 +10,8 @@ import { writePromptRefinerVnextOneShotStageApprovalAudit } from
   "@/lib/promptRefinerVnextOneShotStageApprovalAudit";
 import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
+import { readPromptRefinerVnextOneShotOperationalShadow } from
+  "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { assertPromptRefinerVnextOneShotPreregistrationForStage } from
   "@/lib/promptRefinerVnextOneShotPreregistration";
 import { readPromptRefinerVnextOneShotStage } from
@@ -24,8 +26,13 @@ import {
 
 const SLOT_COST = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 const RUN_CEILING = BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD);
-const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
-const REPLACEMENT_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const FIRST_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const REPLACEMENT_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const LEGACY_DEPLOYMENT_ID = "3565f671-c168-4d3d-8573-8e79126e1c63";
+const LEGACY_COMMIT_SHA = "291e6d07f284e6333c34a3061dd94da77752aad9";
+const LEGACY_STAGE_AUDIT_ID = "cmuuyx04a001d02qt3ald6khq";
+const LEGACY_RUN_AUDIT_ID = "cmuuz1ltu002002qtnct9lojp";
 
 /**
  * A07 storage primitive. The owner-only route must reobserve source and
@@ -54,6 +61,8 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
         !price.pricePinMatchesRegistry || price.problems.length !== 0) {
       throw new Error("vnext_one_shot_stage_price_mismatch");
     }
+    // B01 remains a separate signed gate. V3 copies the same source, runner
+    // and price pins from V2; it cannot introduce a new preregistration.
     await assertPromptRefinerVnextOneShotPreregistrationForStage(
       tx, input.binding, input.session.user?.id ?? "",
     );
@@ -70,22 +79,55 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     const legacyReadback = await readPromptRefinerVnextOneShotStage(
       tx, LEGACY_STAGE_ID
     );
+    const firstReadback = await readPromptRefinerVnextOneShotStage(tx, FIRST_STAGE_ID);
     const legacy = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: LEGACY_STAGE_ID },
     });
-    if (!legacy || legacyReadback.stageStatus !== "staged" ||
+    if (!legacy || legacyReadback.stageStatus !== "run_approved" ||
         !legacyReadback.reservationShapeValid ||
         !legacyReadback.approvalAuditsValid ||
         legacyReadback.reservedSlots !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
         legacyReadback.consumedSlots !== 0 ||
-        legacy.runApprovalAuditLogId !== null ||
+        !firstReadback.stagePresent || firstReadback.stageStatus !== "closed" ||
+        !firstReadback.approvalAuditsValid ||
+        firstReadback.reservedSlots !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
+        firstReadback.consumedSlots !== 0 ||
+        legacy.runtimeDeploymentId !== LEGACY_DEPLOYMENT_ID ||
+        legacy.runtimeCommitSha !== LEGACY_COMMIT_SHA ||
+        legacy.stageApprovalAuditLogId !== LEGACY_STAGE_AUDIT_ID ||
+        legacy.runApprovalAuditLogId !== LEGACY_RUN_AUDIT_ID ||
         legacy.approvedBy !== approvedBy ||
         legacy.sourceCommitSha !== input.binding.sourceCommitSha ||
         legacy.sourceManifestDigest !== input.binding.sourceManifestDigest ||
         legacy.runnerDigest !== input.binding.runnerDigest ||
         legacy.manifestRoot !== input.binding.manifestRoot ||
         legacy.pricePinDigest !== input.binding.pricePinDigest ||
-        legacy.runtimeDeploymentId === input.binding.runtimeDeploymentId) {
+        legacy.runtimeDeploymentId === input.binding.runtimeDeploymentId ||
+        legacy.runtimeCommitSha === input.binding.runtimeCommitSha) {
+      throw new Error("vnext_one_shot_legacy_stage_not_replaceable");
+    }
+    const legacySlots = await tx.promptRefinerVnextOneShotSlot.findMany({
+      where: { stageId: LEGACY_STAGE_ID },
+      select: { id: true, slotIndex: true },
+    });
+    if (legacySlots.length !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
+        legacySlots.some((slot) => slot.id !== `one-shot-v2-${slot.slotIndex}`)) {
+      throw new Error("vnext_one_shot_legacy_stage_not_replaceable");
+    }
+    const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, legacy);
+    const forbiddenAudits = await tx.adminAuditLog.count({
+      where: { OR: [
+        { targetType: "PromptRefinerVnextOneShotStage", targetId: LEGACY_STAGE_ID,
+          action: { in: ["prompt_refiner.vnext_one_shot.outcome_unknown",
+            "prompt_refiner.vnext_one_shot.gate_evaluated",
+            "prompt_refiner.vnext_one_shot.disposition_recorded",
+            "prompt_refiner.vnext_one_shot.paid_dispatch_authorized"] } },
+        { targetType: "PromptRefinerVnextOneShotSlot",
+          action: "prompt_refiner.vnext_one_shot.slot_consumed",
+          targetId: { startsWith: "one-shot-v2-" } },
+      ] },
+    });
+    if (shadow.present || forbiddenAudits !== 0) {
       throw new Error("vnext_one_shot_legacy_stage_not_replaceable");
     }
     const supersededAuditLogId = await writeAdminAuditLog({
@@ -93,17 +135,18 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
       action: "prompt_refiner.vnext_one_shot.stage_superseded",
       targetType: "PromptRefinerVnextOneShotStage",
       targetId: LEGACY_STAGE_ID,
-      summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+      summary: "Closed the zero-consumption run-approved one-shot stage for B06 recovery.",
       metadata: {
         replacementStageId: REPLACEMENT_STAGE_ID,
         previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+        previousRunApprovalAuditLogId: legacy.runApprovalAuditLogId,
         replacementStageApprovalAuditLogId: auditLogId,
       },
     });
     const closed = await tx.promptRefinerVnextOneShotStage.updateMany({
       where: {
-        id: LEGACY_STAGE_ID, status: "staged",
-        runApprovalAuditLogId: null,
+        id: LEGACY_STAGE_ID, status: "run_approved",
+        runApprovalAuditLogId: LEGACY_RUN_AUDIT_ID,
       },
       data: { status: "closed", supersededAuditLogId },
     });
@@ -132,7 +175,7 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     });
     const created = await tx.promptRefinerVnextOneShotSlot.createMany({
       data: Array.from({ length: PROMPT_REFINER_VNEXT_SLOT_COUNT }, (_, slotIndex) => ({
-        id: `one-shot-v2-${slotIndex}`,
+        id: `one-shot-v3-${slotIndex}`,
         stageId: input.binding.id,
         slotIndex,
         reservedCostMicroUsd: SLOT_COST,

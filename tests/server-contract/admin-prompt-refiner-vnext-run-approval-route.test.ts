@@ -16,7 +16,7 @@ let role = "owner";
 let recent = true;
 let validOrigin = true;
 let writes = 0;
-let failWrite = false;
+let failWrite: string | null = null;
 let installed = false;
 const pins = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
@@ -77,8 +77,8 @@ async function loadRoute() {
       const { confirmation: _confirmation, ...expected } = pins;
       void _confirmation;
       assert.deepEqual(input.expected, expected);
-      if (failWrite) throw new Error("private run storage failed");
-      return { stageId: "prompt-refiner-vnext-one-shot-v2",
+      if (failWrite) throw new Error(failWrite);
+      return { stageId: "prompt-refiner-vnext-one-shot-v3",
         runApprovalAuditLogId: "synthetic-run-audit", dispatchAuthorized: false };
     },
   } });
@@ -124,12 +124,16 @@ test("strict pins precede a single write; failure response is content-free", asy
   assert.equal(approved.status, 201);
   noStore(approved);
   assert.deepEqual(await approved.json(), {
-    stageId: "prompt-refiner-vnext-one-shot-v2",
+    stageId: "prompt-refiner-vnext-one-shot-v3",
     runApprovalAuditLogId: "synthetic-run-audit",
     dispatchAuthorized: false,
   });
   assert.equal(writes, 1);
-  failWrite = true;
+  failWrite = "vnext_one_shot_price_mismatch";
+  const refused = await route.POST(request());
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).retryAuthorized, false);
+  failWrite = "private run storage failed";
   const failed = await route.POST(request());
   assert.equal(failed.status, 503);
   noStore(failed);

@@ -13,7 +13,12 @@ import { authOptions } from "@/lib/auth";
 import {
   readPromptRefinerVnextOneShotOperationalShadow,
   recordPromptRefinerVnextOneShotOperationalShadow,
+  promptRefinerVnextOneShotShadowTarget,
 } from "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { promptRefinerVnextOneShotShadowProofSchema } from
+  "@/lib/promptRefinerVnextOneShotShadowProof";
+import { readPromptRefinerVnextOneShotPaidAuthorization } from
+  "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
@@ -21,19 +26,19 @@ import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const requestSchema = z.object({
-  stageApprovalAuditLogId: z.string().min(1).max(128),
-  runApprovalAuditLogId: z.string().min(1).max(128),
-  runtimeDeploymentId: z.string().regex(
-    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
+  proof: promptRefinerVnextOneShotShadowProofSchema,
   confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_OPERATIONAL_SHADOW_80_SLOTS"),
 }).strict();
 const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_shadow_context_invalid",
+  "vnext_one_shot_shadow_proof_invalid",
+  "vnext_one_shot_shadow_signer_pin_unavailable",
   "vnext_one_shot_shadow_custody_pin_unavailable",
   "vnext_one_shot_shadow_stage_unavailable",
   "vnext_one_shot_shadow_binding_mismatch",
   "vnext_one_shot_shadow_duplicate",
   "vnext_one_shot_shadow_evidence_unverified",
+  "vnext_one_shot_price_mismatch",
 ]);
 
 async function owner(request: Request, mutation: boolean) {
@@ -75,11 +80,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ code: "SHADOW_WRITE_DISABLED" },
         { status: 409, headers });
     }
-    const body = await readLimitedJson(request, 2 * 1024, requestSchema);
-    const { confirmation: _confirmation, ...expected } = body;
-    void _confirmation;
+    const body = await readLimitedJson(request, 4 * 1024, requestSchema);
     const result = await recordPromptRefinerVnextOneShotOperationalShadow({
-      session: access.session, request, expected,
+      session: access.session, request, proof: body.proof,
     });
     return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
@@ -105,16 +108,27 @@ export async function GET(request: Request) {
     if ("response" in access) return access.response;
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v2" },
+        where: { id: "prompt-refiner-vnext-one-shot-v3" },
       });
       const snapshot = await readPromptRefinerVnextOneShotStage(tx);
       const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
+      const paidAuthorization = stage && await readPromptRefinerVnextOneShotPaidAuthorization(
+        tx, stage, evidence.shadowAuditLogId ?? "",
+      );
       return { stageStatus: snapshot.stageStatus,
         slotCount: snapshot.slotCount, reservedSlots: snapshot.reservedSlots,
         consumedSlots: snapshot.consumedSlots,
         reservationShapeValid: snapshot.reservationShapeValid,
         approvalAuditsValid: snapshot.approvalAuditsValid,
-        evidence };
+        dispatchAuthorized: snapshot.dispatchAuthorized,
+        target: stage && snapshot.stageStatus === "run_approved" &&
+          snapshot.reservationShapeValid && snapshot.approvalAuditsValid &&
+          snapshot.slotCount === 80 && snapshot.reservedSlots === 80 &&
+          snapshot.consumedSlots === 0
+          ? promptRefinerVnextOneShotShadowTarget(stage) : null,
+        evidence,
+        paidAuthorizationAuditPresent: paidAuthorization?.present ?? false,
+        paidAuthorizationAuditValid: paidAuthorization?.valid ?? false };
     }, { maxWait: 5_000, timeout: 10_000 });
     return NextResponse.json({ readback }, { headers });
   } catch (error) {

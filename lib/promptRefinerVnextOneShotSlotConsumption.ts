@@ -5,17 +5,23 @@ import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { prisma } from "@/lib/prisma";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { readPromptRefinerVnextOneShotPaidAuthorization } from
+  "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+export const PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY =
+  "v3-paid-audit-guard-v1" as const;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const COST = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
@@ -67,6 +73,7 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
       throw new Error("vnext_one_shot_slot_reservation_unavailable");
     }
     await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });
@@ -81,6 +88,15 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
     const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
     if (!shadow.valid) {
       throw new Error("vnext_one_shot_shadow_evidence_unavailable");
+    }
+    if (!shadow.shadowAuditLogId) {
+      throw new Error("vnext_one_shot_shadow_evidence_unavailable");
+    }
+    const paid = await readPromptRefinerVnextOneShotPaidAuthorization(
+      tx, stage, shadow.shadowAuditLogId,
+    );
+    if (!paid.valid) {
+      throw new Error("vnext_one_shot_paid_authorization_unavailable");
     }
     const slot = await tx.promptRefinerVnextOneShotSlot.findUnique({
       where: { stageId_slotIndex: { stageId: STAGE_ID, slotIndex: input.slotIndex } },

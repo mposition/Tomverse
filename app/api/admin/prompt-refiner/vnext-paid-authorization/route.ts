@@ -4,25 +4,24 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authOptions } from "@/lib/auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
-import {
-  assertRecentAdminAuthentication,
-  isAdminReauthenticationError,
-} from "@/lib/adminReauthentication";
+import { assertRecentAdminAuthentication, isAdminReauthenticationError } from
+  "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
   "@/lib/apiSecurity";
+import { authOptions } from "@/lib/auth";
+import { approvePromptRefinerVnextOneShotPaidDispatch } from
+  "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
-import { preparePromptRefinerVnextOneShotStageBinding } from
-  "@/lib/promptRefinerVnextOneShotStageAdmission";
-import { createPromptRefinerVnextOneShotStageWithSlots } from
-  "@/lib/promptRefinerVnextOneShotStageWriter";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
-const deploymentId = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
-const requestSchema = z.object({
+const deploymentId = z.string().uuid();
+const schema = z.object({
+  stageApprovalAuditLogId: z.string().min(1).max(128),
+  runApprovalAuditLogId: z.string().min(1).max(128),
+  shadowAuditLogId: z.string().min(1).max(128),
   sourceCommitSha: sha,
   sourceManifestDigest: digest,
   runnerDigest: digest,
@@ -30,10 +29,10 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_RUN_APPROVED_RECOVERY_V3_AND_CLOSE_V2"),
+  confirmation: z.literal("AUTHORIZE_VNEXT_ONE_SHOT_V3_PAID_DISPATCH_AFTER_B06"),
 }).strict();
 
-/** Owner-only stage recording; no run approval, dispatch, or provider call. */
+/** Future, separate owner approval. B06 does not invoke this route. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -55,33 +54,38 @@ export async function POST(request: Request) {
     if (!hasValidMutationOrigin(request)) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403, headers });
     }
-    await consumeApiRateLimit(request, session.user.id,
-      "admin-prompt-refiner-vnext-stage-approval", { minute: 1, day: 3 });
-    // Deployment of this code never enables a holdout or paid path by itself.
-    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_STAGE_WRITE_ENABLED !== "1") {
-      return NextResponse.json({ code: "STAGE_WRITE_DISABLED" },
+    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1") {
+      return NextResponse.json({ code: "PAID_APPROVAL_WRITE_DISABLED" },
         { status: 409, headers });
     }
-    const body = await readLimitedJson(request, 2 * 1024, requestSchema);
-    const binding = await preparePromptRefinerVnextOneShotStageBinding(body);
-    const result = await createPromptRefinerVnextOneShotStageWithSlots({
-      session, request, binding,
+    const body = await readLimitedJson(request, 2 * 1024, schema);
+    const { confirmation: _confirmation, ...expected } = body;
+    void _confirmation;
+    await consumeApiRateLimit(request, session.user.id,
+      "admin-prompt-refiner-vnext-paid-authorization", { minute: 3, day: 12 });
+    const result = await approvePromptRefinerVnextOneShotPaidDispatch({
+      session, request, expected,
     });
-    return NextResponse.json({
-      stageId: result.stageId,
-      stageApprovalAuditLogId: result.stageApprovalAuditLogId,
-      slotCount: result.slotCount,
-      dispatchAuthorized: false,
-    }, { status: 201, headers });
+    return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    // Neither the root nor the runner digest nor an infrastructure failure is
-    // ever echoed or logged by the route.
-    return NextResponse.json({ code: "STAGE_APPROVAL_OUTCOME_UNKNOWN",
+    if (error instanceof Error && [
+      "vnext_one_shot_paid_approval_context_invalid",
+      "vnext_one_shot_paid_approval_stage_unavailable",
+      "vnext_one_shot_paid_approval_binding_mismatch",
+      "vnext_one_shot_paid_approval_shadow_unavailable",
+      "vnext_one_shot_paid_approval_duplicate",
+      "vnext_one_shot_price_mismatch",
+    ].includes(error.message)) {
+      return NextResponse.json({ code: "PAID_APPROVAL_REFUSED",
+        retryAuthorized: false, humanReviewRequired: true },
+        { status: 409, headers });
+    }
+    return NextResponse.json({ code: "PAID_APPROVAL_OUTCOME_UNKNOWN",
       retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }

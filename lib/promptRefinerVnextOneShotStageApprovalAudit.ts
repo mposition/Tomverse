@@ -19,7 +19,7 @@ import {
 const HEX_40 = /^[0-9a-f]{40}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const DEPLOYMENT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 
 function assertExactBinding(binding: PromptRefinerVnextOneShotAuditBinding): void {
   if (!binding || binding.id !== STAGE_ID ||

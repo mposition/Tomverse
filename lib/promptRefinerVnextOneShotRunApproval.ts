@@ -11,10 +11,12 @@ import {
 } from "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export type PromptRefinerVnextOneShotRunApprovalPins = Readonly<{
@@ -63,6 +65,7 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
       throw new Error("vnext_one_shot_run_stage_not_ready");
     }
     await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });

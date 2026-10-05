@@ -16,7 +16,7 @@ const environment = {
   RAILWAY_API_TOKEN: "synthetic-token",
 };
 const approvedStage = {
-  id: "prompt-refiner-vnext-one-shot-v2",
+  id: "prompt-refiner-vnext-one-shot-v3",
   status: "run_approved",
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: commitSha,
