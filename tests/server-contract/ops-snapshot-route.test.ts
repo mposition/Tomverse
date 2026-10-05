@@ -13,7 +13,7 @@ const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
 const PAGE = "p".repeat(40);
 const DIGEST = "d".repeat(40);
 
-const world = { calls: [] as string[], failJobs: false };
+const world = { calls: [] as string[], failJobs: false, hangBudgets: false };
 let POST: (request: Request) => Promise<Response>;
 
 before(async () => {
@@ -39,6 +39,7 @@ before(async () => {
     namedExports: {
       getProviderBudgetStatuses: async () => {
         world.calls.push("budgets");
+        if (world.hangBudgets) return new Promise(() => {});
         return { usageUnavailable: false, providers: [{ provider: "anthropic", periods: [
           { period: "day", usedMicroUsd: 10, limitMicroUsd: 1000, resetAt: "2026-10-06T00:00:00.000Z" },
         ] }] };
@@ -51,6 +52,7 @@ before(async () => {
 beforeEach(() => {
   world.calls = [];
   world.failJobs = false;
+  world.hangBudgets = false;
   process.env.OPS_OBSERVER_SECRET = PAGE;
   process.env.OPS_OBSERVER_DIGEST_SECRET = DIGEST;
 });
@@ -104,4 +106,17 @@ test("a failing source makes only its section unknown, and its error never leave
   assert.notEqual(body.readiness, "unknown");
   assert.notEqual(body.providerBudgets, "unknown");
   assert.ok(!JSON.stringify(body).includes("hunter2"));
+});
+
+test("a source that never answers costs only its own section", async () => {
+  world.hangBudgets = true;
+  const started = Date.now();
+  const response = await call(PAGE);
+  const elapsed = Date.now() - started;
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.providerBudgets, "unknown");
+  assert.notEqual(body.readiness, "unknown");
+  assert.notEqual(body.scheduledJobs, "unknown");
+  assert.ok(elapsed < 8_000, String(elapsed));
 });

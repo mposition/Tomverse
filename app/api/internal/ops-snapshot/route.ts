@@ -1,10 +1,11 @@
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 import { getProviderBudgetStatuses } from "@/lib/providerBudgetStatus";
 import { computeReadinessChecks } from "@/lib/readinessChecks";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { opsObserverCaller } from "@/scripts/ops-observer/route-auth-core.mjs";
-import { buildSnapshot } from "@/scripts/ops-observer/snapshot-core.mjs";
+import { buildSnapshot, settleWithin } from "@/scripts/ops-observer/snapshot-core.mjs";
 
 // The machine read the ops observers poll (docs/policy/sre-ops.md §1, §3
 // rule 7, §7, §8). POST so the request leaves nothing in URLs, caches or
@@ -37,11 +38,12 @@ export async function POST(request: Request) {
 
   const now = new Date();
   // Readiness before the database aggregates: it is the one a broken
-  // database must not starve.
-  const [readiness] = await Promise.allSettled([computeReadinessChecks()]);
-  const [jobs, budgets] = await Promise.allSettled([
-    getScheduledJobsDashboard(now),
-    getProviderBudgetStatuses({ now }),
+  // database must not starve. Every section has its own time limit, so a
+  // source that never answers costs only its own section.
+  const readiness = await settleWithin(computeReadinessChecks());
+  const [jobs, budgets] = await Promise.all([
+    settleWithin(getScheduledJobsDashboard(now)),
+    settleWithin(getProviderBudgetStatuses({ now })),
   ]);
   const built = buildSnapshot({
     readiness,

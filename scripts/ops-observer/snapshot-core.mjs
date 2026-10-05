@@ -97,3 +97,25 @@ export function buildSnapshot({ readiness, jobs, budgets, now, commitSha }) {
   };
   return parseSnapshot(value);
 }
+
+/** How long one section may take before it is reported unknown. */
+export const SECTION_TIMEOUT_MS = 5_000;
+
+/**
+ * Settles `promise` within `ms`, in Promise.allSettled's shape. A source that
+ * never answers -- an exhausted pool, a database that accepts and stalls --
+ * becomes a rejection here, so its section is unknown and the others still
+ * go out. The source keeps running; the snapshot no longer waits for it.
+ */
+export function settleWithin(promise, ms = SECTION_TIMEOUT_MS) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("ops_snapshot_section_timeout")), ms);
+  });
+  return Promise.race([promise, timeout])
+    .then(
+      (value) => ({ status: "fulfilled", value }),
+      (reason) => ({ status: "rejected", reason }),
+    )
+    .finally(() => clearTimeout(timer));
+}

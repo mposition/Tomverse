@@ -86,3 +86,16 @@ test("a source that produces an unparseable value makes the build fail closed", 
   const result = build({ jobs: ok(badJobs) });
   assert.equal(result.ok, false);
 });
+
+test("a source that never answers is settled as a rejection within its limit", async () => {
+  const { settleWithin } = await import("../scripts/ops-observer/snapshot-core.mjs");
+  const started = Date.now();
+  const hung = await settleWithin(new Promise(() => {}), 50);
+  assert.equal(hung.status, "rejected");
+  assert.ok(Date.now() - started < 1_000);
+  assert.deepEqual(await settleWithin(Promise.resolve(7), 50), { status: "fulfilled", value: 7 });
+  assert.equal((await settleWithin(Promise.reject(new Error("x")), 50)).status, "rejected");
+  // The built snapshot then carries that section as unknown.
+  const result = build({ jobs: hung });
+  assert.equal(result.snapshot.scheduledJobs, "unknown");
+});
