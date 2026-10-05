@@ -128,10 +128,10 @@ export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient, inpu
   const unitRows = await tx.$queryRaw<Array<{
     id: string; localRef: string | null; unitKind: string; state: string;
     bodyDigest: string; bodyDigestKeyId: string; expiresAt: Date;
-    chunkIndex: number;
+    chunkIndex: number; derivationGroupId: string | null;
   }>>`
     SELECT "id", "localRef", "unitKind", "state", "bodyDigest",
-           "bodyDigestKeyId", "expiresAt", "chunkIndex"
+           "bodyDigestKeyId", "expiresAt", "chunkIndex", "derivationGroupId"
     FROM "AmuxIdeaDraftUnit"
     WHERE "id" = ${snapshot.draftUnitId} AND "ideaId" = ${snapshot.ideaId}
       AND "actorUserId" = ${actorUserId} FOR UPDATE
@@ -142,6 +142,29 @@ export async function commitAmuxV4UnitPrepare(tx: Prisma.TransactionClient, inpu
       unit.bodyDigest !== snapshot.unitBody.digest ||
       unit.bodyDigestKeyId !== snapshot.unitBody.keyId) {
     throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  if (await tx.amuxIdeaDerivationEdge.count({ where: {
+    sourceUnitId: unit.id,
+  } }) !== 0) {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  if (unit.derivationGroupId !== null) {
+    const group = await tx.amuxIdeaDerivationGroup.findFirst({ where: {
+      id: unit.derivationGroupId, ideaId: snapshot.ideaId, actorUserId,
+    }, select: { id: true, approvalAuditLogId: true, sourceCount: true } });
+    const edges = await tx.amuxIdeaDerivationEdge.count({ where: {
+      groupId: unit.derivationGroupId, targetUnitId: unit.id,
+    } });
+    const audit = group ? await tx.adminAuditLog.findUnique({ where: {
+      id: group.approvalAuditLogId,
+    }, select: { action: true, targetType: true, targetId: true,
+      actorUserId: true, entryHash: true } }) : null;
+    if (!group || edges !== group.sourceCount || !audit?.entryHash ||
+        audit.action !== "amux.v4.derivation.approve" ||
+        audit.targetType !== "AmuxIdeaDerivationGroup" ||
+        audit.targetId !== group.id || audit.actorUserId !== actorUserId) {
+      throw new AmuxV4UnitDecisionError("integrity_unavailable");
+    }
   }
   const preview = await assertCurrentProposalSource(tx, snapshot,
     unit.chunkIndex);

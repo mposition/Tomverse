@@ -111,7 +111,8 @@ export async function previewAmuxIdeaResolution(input: {
       chunkIndex: input.chunkIndex, freeformCiphertext: { not: null } },
       select: { currentPreviewId: true } }),
     prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: input.ideaId,
-      chunkIndex: input.chunkIndex, bodyCiphertext: { not: null } },
+      chunkIndex: input.chunkIndex, derivationGroupId: null,
+      bodyCiphertext: { not: null } },
       select: { id: true } }),
   ]);
   const identities: AmuxContentKeyIdentity[] = [];

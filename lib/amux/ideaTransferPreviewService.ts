@@ -194,7 +194,8 @@ export async function readPreviousOutputPage(tx: Prisma.TransactionClient, input
   } finally { priorPayload.fill(0); }
   const units = await tx.amuxIdeaDraftUnit.findMany({
     where: { ideaId: input.ideaId, actorUserId: input.actorUserId,
-      chunkIndex: priorIndex }, orderBy: { unitIndex: "asc" },
+      chunkIndex: priorIndex, derivationGroupId: null },
+    orderBy: { unitIndex: "asc" },
   });
   if (!matchesAmuxIdeaAnalysisUnitCommitments(meta.unitCommitments, units)) {
     throw new IdeaTransferPreviewError("integrity_unavailable");
@@ -570,6 +571,7 @@ export async function prepareIdeaOnlyTransferPreview(
     const priorUnits = chunkIndex > 0
       ? await prisma.amuxIdeaDraftUnit.findMany({ where: {
         ideaId: choice.ideaId, chunkIndex: chunkIndex - 1,
+        derivationGroupId: null,
       }, select: { id: true } }) : [];
     keys = await createAmuxContentKeyRing([
       { ideaId: choice.ideaId, purpose: "idea_raw", subjectId: choice.ideaId },

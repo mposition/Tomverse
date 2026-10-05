@@ -77,7 +77,8 @@ export async function GET(request: Request): Promise<Response> {
         chunkIndex, freeformCiphertext: { not: null } },
         select: { currentPreviewId: true } }),
       prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId,
-        chunkIndex, bodyCiphertext: { not: null } }, select: { id: true } }),
+        chunkIndex, derivationGroupId: null,
+        bodyCiphertext: { not: null } }, select: { id: true } }),
     ]);
     const identities: AmuxContentKeyIdentity[] = [];
     for (const chunk of chunks) {

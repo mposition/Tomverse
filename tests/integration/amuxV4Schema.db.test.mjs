@@ -379,14 +379,32 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     assert.equal(retainedDecision.rowCount, 1, "cascading truncate must retain the decision");
 
+    const expiryIdeaId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaSubmission"
+       ("id", "requestId", "actorUserId", "state", "submittedAt",
+        "analysisDeadlineAt", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 'analyzing', CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP + INTERVAL '7 days', CURRENT_TIMESTAMP)`,
+      [expiryIdeaId, randomUUID()],
+    );
+    await client.query(
+      `INSERT INTO public."AmuxIdeaAnalysisChunk"
+       ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+        "leaseGeneration", "analysisCompletedAt", "updatedAt")
+       VALUES ($1, 'synthetic-owner', 0, 'draft_ready', 0, 0,
+               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
+               CURRENT_TIMESTAMP)`,
+      [expiryIdeaId],
+    );
     await client.query(
       `INSERT INTO public."AmuxIdeaAnalysisChunk"
        ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
         "leaseGeneration", "analysisCompletedAt", "updatedAt")
        VALUES ($1, 'synthetic-owner', 1, 'draft_ready', 0, 0,
-               (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '30 days' + INTERVAL '5 seconds',
+               clock_timestamp() AT TIME ZONE 'UTC',
                CURRENT_TIMESTAMP)`,
-      [ids.idea],
+      [expiryIdeaId],
     );
 
     const insertUnit = `INSERT INTO public."AmuxIdeaDraftUnit"
@@ -397,50 +415,50 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
               $7, 'synthetic', CURRENT_TIMESTAMP)`;
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "not-the-owner", 1, 0, title, digest, "c1:card-0"],
+      [randomUUID(), expiryIdeaId, "not-the-owner", 1, 0, title, digest, "c1:card-0"],
       "AmuxIdeaDraftUnit_ideaId_actorUserId_fkey",
     );
     const firstUnitId = randomUUID();
     const secondUnitId = randomUUID();
-    await client.query(insertUnit, [firstUnitId, ids.idea, "synthetic-owner", 1, 0, title, digest, "c1:card-0"]);
-    await client.query(insertUnit, [secondUnitId, ids.idea, "synthetic-owner", 1, 1, title, digest, "c1:card-1"]);
+    await client.query(insertUnit, [firstUnitId, expiryIdeaId, "synthetic-owner", 1, 0, title, digest, "c1:card-0"]);
+    await client.query(insertUnit, [secondUnitId, expiryIdeaId, "synthetic-owner", 1, 1, title, digest, "c1:card-1"]);
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, null],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, null],
       "AmuxIdeaDraftUnit_local_ref_required_check",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c01:card-2"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c01:card-2"],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c0:card-2"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c0:card-2"],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:node-2"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c1:node-2"],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-10000"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c1:card-10000"],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );
     await client.query(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 3, title, digest, "c1:card-9999"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 3, title, digest, "c1:card-9999"],
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, `c1:card-${"9".repeat(122)}`],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, `c1:card-${"9".repeat(122)}`],
       "AmuxIdeaDraftUnit_local_ref_shape_check",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-0"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c1:card-0"],
       "AmuxIdeaDraftUnit_ideaId_localRef_key",
     );
     await expectRejected(
@@ -450,7 +468,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 1, title, digest, "c1:card-9"],
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 1, title, digest, "c1:card-9"],
       "AmuxIdeaDraftUnit_ideaId_chunkIndex_unitIndex_key",
     );
     await client.query("SELECT pg_sleep(5.5)");
@@ -461,8 +479,8 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     );
     await expectRejected(
       insertUnit,
-      [randomUUID(), ids.idea, "synthetic-owner", 1, 2, title, digest, "c1:card-2"],
-      "AmuxIdeaDraftUnit_insert_expired_check",
+      [randomUUID(), expiryIdeaId, "synthetic-owner", 1, 2, title, digest, "c1:card-2"],
+      "AmuxIdeaDraftUnit_first_expiry_check",
     );
     await expectRejected(
       `DELETE FROM public."AmuxIdeaDraftUnit" WHERE "id" = $1`,
@@ -506,7 +524,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       `SELECT u."expiresAt" = c."analysisCompletedAt" + INTERVAL '30 days' AS "clockOk"
        FROM public."AmuxIdeaDraftUnit" u
        JOIN public."AmuxIdeaAnalysisChunk" c
-         ON c."ideaId" = u."ideaId" AND c."chunkIndex" = u."chunkIndex"
+         ON c."ideaId" = u."ideaId" AND c."chunkIndex" = 0
        WHERE u."id" = $1`,
       [firstUnitId],
     );

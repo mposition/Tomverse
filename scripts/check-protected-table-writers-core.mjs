@@ -530,6 +530,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
   },
   {
+    path: "prisma/migrations/20261005100000_amux_v4_derivation_groups/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 33,
+    reason:
+      "The derivation group has a restrictive audit foreign key and its insert guard SELECTs the exact owner audit row under a share lock. Every write verb in this migration creates or constrains derivation tables; none inserts, updates or deletes AdminAuditLog. The canonical audit is written by lib/adminAudit.ts in the same transaction.",
+  },
+  {
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,

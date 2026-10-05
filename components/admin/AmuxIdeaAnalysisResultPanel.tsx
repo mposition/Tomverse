@@ -16,6 +16,8 @@ import { AmuxIdeaUnitRejectionPanel } from
   "@/components/admin/AmuxIdeaUnitRejectionPanel";
 import { AmuxIdeaUnknownDecisionRecoveryPanel } from
   "@/components/admin/AmuxIdeaUnknownDecisionRecoveryPanel";
+import { AmuxIdeaDerivationPanel } from
+  "@/components/admin/AmuxIdeaDerivationPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -148,6 +150,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
       </ol>
       {view.outcome === "propose" ? <AmuxIdeaResolutionPanel
         key={`${view.previewId}:${chunkIndex}:${view.units.map((unit) => unit.bodyDigest).join(":")}`}
+        ideaId={ideaId} chunkIndex={chunkIndex} units={view.units} /> : null}
+      {view.outcome === "propose" ? <AmuxIdeaDerivationPanel
+        key={`derivation:${view.previewId}:${chunkIndex}`}
         ideaId={ideaId} chunkIndex={chunkIndex} units={view.units} /> : null}
       {view.outcome === "propose" ? view.units.filter((unit) =>
         unit.decisionState === "proposed" && unit.proposal?.kind === "node")

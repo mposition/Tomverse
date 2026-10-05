@@ -7,6 +7,8 @@ import { amuxAnalysisFreeformSubjectId } from "./ideaAnalysisDraftSealCore.ts";
 import { readAmuxFirstIdeaAnalysisResult } from "./ideaAnalysisResultReadService.ts";
 import { loadAmuxContentKeyRing, type AmuxContentKeyIdentity } from
   "./ideaKeyStore.ts";
+import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
+import { inspectAmuxStoredAnalysisUnit } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisCard, AmuxAnalysisNode } from
   "./ideaAnalysisChunkCore.ts";
 
@@ -35,7 +37,9 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     id: draftUnitId, ideaId, actorUserId, state: "proposed",
   }, select: { id: true, localRef: true, unitKind: true,
     bodyDigest: true, bodyDigestKeyId: true,
-    chunkIndex: true, expiresAt: true } });
+    chunkIndex: true, expiresAt: true, derivationGroupId: true,
+    bodyCiphertext: true, bodyKeyId: true, bodyKeyVersion: true,
+    bodyPurgedAt: true, bodyPurgeAfter: true } });
   if (!unit) throw new AmuxIdeaUnitProposalReadError("not_found");
   if (!["card", "node"].includes(unit.unitKind) || !unit.localRef) {
     throw new AmuxIdeaUnitProposalReadError("not_ready");
@@ -45,8 +49,64 @@ export async function readVerifiedAmuxUnitProposal(session: Session,
     select: { currentPreviewId: true, freeformCiphertext: true },
   });
   if (!chunk?.currentPreviewId) throw new AmuxIdeaUnitProposalReadError("not_ready");
+  if (unit.derivationGroupId !== null) {
+    const [group, edges, audit] = await Promise.all([
+      prisma.amuxIdeaDerivationGroup.findFirst({ where: {
+        id: unit.derivationGroupId, ideaId, actorUserId,
+      } }),
+      prisma.amuxIdeaDerivationEdge.findMany({ where: {
+        groupId: unit.derivationGroupId, targetUnitId: unit.id,
+      }, select: { sourceUnitId: true } }),
+      prisma.amuxIdeaDerivationGroup.findUnique({ where: {
+        id: unit.derivationGroupId,
+      }, select: { approvalAuditLogId: true } }).then((row) =>
+        row ? prisma.adminAuditLog.findUnique({ where: {
+          id: row.approvalAuditLogId,
+        }, select: { action: true, targetType: true, targetId: true,
+          actorUserId: true, entryHash: true } }) : null),
+    ]);
+    if (!group || !audit?.entryHash ||
+        audit.action !== "amux.v4.derivation.approve" ||
+        audit.targetType !== "AmuxIdeaDerivationGroup" ||
+        audit.targetId !== group.id || audit.actorUserId !== actorUserId ||
+        edges.length !== group.sourceCount || !unit.bodyCiphertext ||
+        !unit.bodyKeyId || !unit.bodyKeyVersion ||
+        unit.bodyPurgedAt !== null || new Date() >= unit.expiresAt ||
+        (unit.bodyPurgeAfter && new Date() >= unit.bodyPurgeAfter)) {
+      throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
+    }
+    try {
+      const keys = await loadAmuxContentKeyRing([{ ideaId,
+        purpose: "analysis_draft", subjectId: unit.id }]);
+      const plain = openAmuxContent({ ciphertext: Buffer.from(unit.bodyCiphertext),
+        keyId: unit.bodyKeyId, keyVersion: unit.bodyKeyVersion },
+      "analysis_draft", unit.id, keys);
+      try {
+        if (!verifyAmuxContentDigest(plain, "analysis_draft", unit.id,
+          unit.bodyDigest, unit.bodyDigestKeyId, keys)) {
+          throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
+        }
+        const inspected = inspectAmuxStoredAnalysisUnit({
+          raw: plain.toString("utf8"), chunkIndex: unit.chunkIndex,
+          permittedSourceRefIds: ["operator_idea"],
+        });
+        if (!inspected.ok || inspected.unit.kind !== "card" ||
+            inspected.unit.localId !== unit.localRef) {
+          throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
+        }
+        return { proposal: inspected.unit, unit: { id: unit.id,
+          localRef: unit.localRef, bodyDigest: unit.bodyDigest,
+          bodyDigestKeyId: unit.bodyDigestKeyId, chunkIndex: unit.chunkIndex,
+          expiresAt: unit.expiresAt }, previewId: chunk.currentPreviewId };
+      } finally { plain.fill(0); }
+    } catch (error) {
+      if (error instanceof AmuxIdeaUnitProposalReadError) throw error;
+      throw new AmuxIdeaUnitProposalReadError("integrity_unavailable");
+    }
+  }
   const siblings = await prisma.amuxIdeaDraftUnit.findMany({ where: {
     ideaId, actorUserId, chunkIndex: unit.chunkIndex,
+    derivationGroupId: null,
     bodyCiphertext: { not: null },
   }, select: { id: true } });
   const identities: AmuxContentKeyIdentity[] = siblings.map((sibling) => ({

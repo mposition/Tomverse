@@ -9184,6 +9184,8 @@ model AmuxIdeaDraftUnit {
   localRef          String?
   unitKind          String
   state             String
+  /// Owner-authored split/merge output; null for model-authored units.
+  derivationGroupId String?
   expiresAt         DateTime
   bodyCiphertext    Bytes?
   bodyKeyId         String?
@@ -9206,6 +9208,37 @@ model AmuxIdeaDraftUnit {
   @@index([actorUserId, ideaId])
   /// The due/expiry partial indexes live only in the SQL migration; Prisma
   /// schema cannot express their WHERE predicates.
+}
+
+/// Owner-approved split/merge provenance. Contains keyed commitments, never
+/// source or derived proposal text. One group may contain several edges.
+model AmuxIdeaDerivationGroup {
+  id                    String   @id
+  ideaId                String
+  actorUserId           String
+  requestId             String   @unique @db.Uuid
+  operation             String
+  sourceCount           Int
+  targetCount           Int
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  reasonDigest          String
+  reasonDigestKeyId     String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  @@index([ideaId, actorUserId])
+}
+
+/// Immutable source-to-derived-unit edge; original proposal rows stay intact.
+model AmuxIdeaDerivationEdge {
+  id           String @id
+  groupId      String
+  sourceUnitId String
+  targetUnitId String
+
+  @@unique([groupId, sourceUnitId, targetUnitId])
+  @@index([targetUnitId])
 }
 
 /// One owner-confirmed decision on one v4 proposal unit. This additive table

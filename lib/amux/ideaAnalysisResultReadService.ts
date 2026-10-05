@@ -84,7 +84,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
     const needsOwnerInput = chunk.coverageStatus === "needs_owner_input" &&
       chunk.continuationKind === null;
     const units = await tx.amuxIdeaDraftUnit.findMany({
-      where: { ideaId, actorUserId, chunkIndex },
+      where: { ideaId, actorUserId, chunkIndex,
+        derivationGroupId: null },
       orderBy: { unitIndex: "asc" },
     });
     const audits = await tx.adminAuditLog.findMany({
