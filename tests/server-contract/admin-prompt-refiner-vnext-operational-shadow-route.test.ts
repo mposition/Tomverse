@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  signPromptRefinerVnextOneShotShadowProof } from
+  "../../lib/promptRefinerVnextOneShotShadowProof";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -21,10 +25,28 @@ let unknown = false;
 let readbackValid = false;
 const stageReadIds: string[] = [];
 let installed = false;
-const body = {
+const keys = generateKeyPairSync("ed25519");
+const privateKey = keys.privateKey.export({ format: "der", type: "pkcs8" })
+  .toString("base64");
+const shadowTarget = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
+  sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
+  runnerDigest: "c".repeat(64), runtimeCommitSha: "d".repeat(40),
+  pricePinDigest: "e".repeat(64),
+  perRequestCostMicroUsd: 29_918, costCeilingMicroUsd: 2_393_440,
+  slotCount: 80, reservedSlots: 80, consumedSlots: 0,
+};
+const proof = signPromptRefinerVnextOneShotShadowProof({
+  version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
+  ...shadowTarget, manifestRoot: "f".repeat(64),
+  runnerPreflightDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
+  signedAt: new Date().toISOString(),
+}, privateKey);
+const body = {
+  proof,
   confirmation: "RECORD_VNEXT_ONE_SHOT_OPERATIONAL_SHADOW_80_SLOTS",
 };
 
@@ -66,28 +88,34 @@ async function loadRoute() {
   mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
     readPromptRefinerVnextOneShotStage: async () => ({ stageStatus: "run_approved",
       slotCount: 80, reservedSlots: 80, consumedSlots: 0,
-      reservationShapeValid: true, approvalAuditsValid: true }),
+      reservationShapeValid: true, approvalAuditsValid: true,
+      dispatchAuthorized: false }),
   } });
   mock.module(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts"), {
     namedExports: {
       recordPromptRefinerVnextOneShotOperationalShadow: async (input: {
-        expected: Record<string, unknown>;
+        proof: Record<string, unknown>;
       }) => {
         writes++;
-        const { confirmation: _confirmation, ...expected } = body;
-        void _confirmation;
-        assert.deepEqual(input.expected, expected);
+        assert.deepEqual(input.proof, proof);
         if (unknown) throw new Error("private transaction failure");
         readbackValid = true;
-        return { stageId: "prompt-refiner-vnext-one-shot-v2",
+        return { stageId: "prompt-refiner-vnext-one-shot-v3",
           shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false };
       },
       readPromptRefinerVnextOneShotOperationalShadow: async () => ({
         present: readbackValid, valid: readbackValid,
         shadowAuditLogId: readbackValid ? "synthetic-shadow-audit" : null,
+        cacheWriteInputTokens: readbackValid ? 0 : null,
         dispatchAuthorized: false,
       }),
+      promptRefinerVnextOneShotShadowTarget: () => shadowTarget,
     },
+  });
+  mock.module(mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"), {
+    namedExports: { readPromptRefinerVnextOneShotPaidAuthorization: async () => ({
+      present: false, valid: false, auditLogId: null,
+    }) },
   });
   return import(mod("app/api/admin/prompt-refiner/vnext-operational-shadow/route.ts"));
 }
@@ -121,12 +149,15 @@ test("write and readback are content-free; unknown outcome requests human readba
   assert.equal((await route.POST(request({ ...body, sourceText: "never accepted" }))).status, 400);
   const written = await route.POST(request());
   assert.equal(written.status, 201);
-  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v2",
+  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v3",
     shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false });
   const readback = await route.GET(readRequest());
   assert.equal(readback.status, 200);
-  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v2"]);
-  assert.equal((await readback.json()).readback.evidence.valid, true);
+  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v3"]);
+  const observed = (await readback.json()).readback;
+  assert.equal(observed.evidence.valid, true);
+  assert.equal(observed.evidence.cacheWriteInputTokens, 0);
+  assert.equal(observed.paidAuthorizationAuditPresent, false);
   unknown = true;
   const failed = await route.POST(request());
   assert.equal(failed.status, 503);

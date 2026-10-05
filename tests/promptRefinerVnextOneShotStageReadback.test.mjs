@@ -13,7 +13,7 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
 import { staticModelRegistrySeedRows } from "../lib/modelRegistryShared.ts";
 
 const stage = {
-  id: "prompt-refiner-vnext-one-shot-v2",
+  id: "prompt-refiner-vnext-one-shot-v3",
   status: "staged",
   slotCount: 80,
   sourceCommitSha: "a".repeat(40),
@@ -40,12 +40,12 @@ const txFor = (row, items) => {
     calls,
     tx: {
       promptRefinerVnextOneShotStage: { async findUnique({ where }) {
-        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v2" });
+        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v3" });
         calls.stages++;
         return row;
       } },
       promptRefinerVnextOneShotSlot: { async findMany({ where }) {
-        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v2" });
+        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v3" });
         calls.slots++;
         return items;
       } },
@@ -113,8 +113,9 @@ test("replacement readback refuses missing legacy close and broken audit links",
   const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = key;
   const replacement = { ...stage, supersededAuditLogId: null };
-  const legacy = { ...stage, id: "prompt-refiner-vnext-one-shot-v1",
+  const legacy = { ...stage, id: "prompt-refiner-vnext-one-shot-v2",
     status: "closed", stageApprovalAuditLogId: "legacy-stage-audit",
+    runApprovalAuditLogId: "legacy-run-audit",
     supersededAuditLogId: "legacy-close-audit",
     runtimeDeploymentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
   const signed = (entry) => {
@@ -137,6 +138,7 @@ test("replacement readback refuses missing legacy close and broken audit links",
     summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
     metadata: { replacementStageId: stage.id,
       previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+      previousRunApprovalAuditLogId: legacy.runApprovalAuditLogId,
       replacementStageApprovalAuditLogId: stage.stageApprovalAuditLogId },
     previousHash: stageAudit.entryHash,
     createdAt: new Date(stage.approvedAt.getTime() + 1000) });
@@ -175,7 +177,7 @@ test("transactional read locks the stage before reading reservations", async () 
   tx.$queryRaw = async (strings, id) => {
     const sql = strings.join("?");
     assert.match(sql, /FOR NO KEY UPDATE NOWAIT/);
-    assert.equal(id, "prompt-refiner-vnext-one-shot-v2");
+    assert.equal(id, "prompt-refiner-vnext-one-shot-v3");
     locks++;
     if (!sql.includes('"status"')) {
       if (locks === 1) assert.deepEqual(calls, { stages: 0, slots: 0 });

@@ -17,6 +17,8 @@ const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_slot_already_consumed",
   "vnext_one_shot_slot_transition_conflict",
   "vnext_one_shot_shadow_evidence_unavailable",
+  "vnext_one_shot_paid_authorization_unavailable",
+  "vnext_one_shot_price_mismatch",
 ]);
 const bodySchema = z.object({
   requestId: z.string().regex(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),

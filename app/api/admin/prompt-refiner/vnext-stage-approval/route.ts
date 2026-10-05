@@ -30,7 +30,7 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_REPLACEMENT_STAGE_AND_CLOSE_PREVIOUS"),
+  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_RUN_APPROVED_RECOVERY_V3_AND_CLOSE_V2"),
 }).strict();
 
 /** Owner-only stage recording; no run approval, dispatch, or provider call. */
@@ -81,7 +81,8 @@ export async function POST(request: Request) {
     }
     // Neither the root nor the runner digest nor an infrastructure failure is
     // ever echoed or logged by the route.
-    return NextResponse.json({ code: "STAGE_APPROVAL_UNAVAILABLE" },
+    return NextResponse.json({ code: "STAGE_APPROVAL_OUTCOME_UNKNOWN",
+      retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }
 }

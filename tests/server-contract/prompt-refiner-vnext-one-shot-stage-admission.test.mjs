@@ -1,23 +1,35 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
+import { promptRefinerVnextOneShotShadowPublicKeyDigest } from
+  "../../lib/promptRefinerVnextOneShotShadowProof.ts";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 let source = { sourceCommitSha: "a".repeat(40),
   sourceManifestDigest: "b".repeat(64) };
 let deployment = { deploymentId: "12345678-1234-1234-1234-123456789abc",
-  commitSha: "a".repeat(40), runtimeAndRailwayAgree: true,
+  commitSha: "c".repeat(40), runtimeAndRailwayAgree: true,
   activeDeploymentConfirmed: true };
 let sourceReads = 0;
 let deploymentReads = 0;
 mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
-  namedExports: { previewPromptRefinerVnextOneShotCandidateSourcePin: async () => {
+  namedExports: { verifyPromptRefinerVnextOneShotCandidateSourceAtRoot: async (
+    _root, _runtimeCommit, pin) => {
+    assert.deepEqual(pin, { sourceCommitSha: "a".repeat(40),
+      sourceManifestDigest: "b".repeat(64) });
     sourceReads++;
     return source;
   } },
 });
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
+  promptRefinerVnextOneShotStage: { findUnique: async ({ where }) => {
+    assert.equal(where.id, "prompt-refiner-vnext-one-shot-v2");
+    return { sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64) };
+  } },
+} } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback.ts"), {
   namedExports: { observePromptRefinerVnextOneShotDeployment: async () => {
     deploymentReads++;
@@ -33,8 +45,19 @@ const expected = {
   sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
   runnerDigest: "c".repeat(64), manifestRoot: "d".repeat(64),
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
-  runtimeCommitSha: "a".repeat(40), pricePinDigest: "e".repeat(64),
+  runtimeCommitSha: "c".repeat(40), pricePinDigest: "e".repeat(64),
 };
+for (const name of ["DISPATCH_ENABLED", "SLOT_CONSUME_ENABLED",
+  "SHADOW_WRITE_ENABLED", "RUN_WRITE_ENABLED", "PAID_APPROVAL_WRITE_ENABLED"]) {
+  process.env[`PROMPT_REFINER_VNEXT_ONE_SHOT_${name}`] = "1";
+}
+const shadowPublicKey = generateKeyPairSync("ed25519").publicKey.export({
+  format: "der", type: "spki",
+}).toString("base64");
+process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 = shadowPublicKey;
+process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST =
+  promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey);
+process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = "t".repeat(40);
 const priorManifestRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
 const priorRunnerDigest = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
 process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = expected.manifestRoot;
@@ -49,7 +72,7 @@ test.after(() => {
 test("stage binding comes from fresh app and Railway observations", async () => {
   const binding = await preparePromptRefinerVnextOneShotStageBinding(expected);
   assert.deepEqual(binding, {
-    id: "prompt-refiner-vnext-one-shot-v2", ...expected,
+    id: "prompt-refiner-vnext-one-shot-v3", ...expected,
     perRequestCostMicroUsd: 29_918n, slotCount: 80,
     costCeilingMicroUsd: 2_393_440n,
     sourceCommitPreregistrationVerified: false,
@@ -78,13 +101,12 @@ test("stale or disagreeing source, deployment and price pins fail closed", async
     commitSha: "f".repeat(40) };
   await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
     /stage_observation_mismatch/);
-  deployment = { ...deployment, commitSha: "a".repeat(40) };
+  deployment = { ...deployment, commitSha: "c".repeat(40) };
   source = { ...source, sourceManifestDigest: "f".repeat(64) };
   await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
     /stage_observation_mismatch/);
   source = { ...source, sourceManifestDigest: expected.sourceManifestDigest };
   deployment = { ...deployment, commitSha: "b".repeat(40) };
-  source = { ...source, sourceCommitSha: "b".repeat(40) };
   const laterDeployment = await preparePromptRefinerVnextOneShotStageBinding({
     ...expected, runtimeCommitSha: "b".repeat(40),
   });
@@ -105,4 +127,21 @@ test("missing or different server custody pins refuse before external observatio
     /stage_custody_pin_mismatch/);
   assert.deepEqual([sourceReads, deploymentReads], before);
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = expected.manifestRoot;
+});
+
+test("v3 stage refuses missing future-route pins and an app-held provider key", async () => {
+  const token = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
+  await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
+    /recovery_capability_unavailable/);
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = token;
+  const signer = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST = "0".repeat(64);
+  await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
+    /recovery_capability_unavailable/);
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST = signer;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY = "synthetic-never-used";
+  await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),
+    /recovery_capability_unavailable/);
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY;
 });

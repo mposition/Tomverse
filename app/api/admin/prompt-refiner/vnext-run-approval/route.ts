@@ -16,6 +16,14 @@ import { approvePromptRefinerVnextOneShotRun } from
   "@/lib/promptRefinerVnextOneShotRunApproval";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
+const DEFINITE_REFUSALS = new Set([
+  "vnext_one_shot_run_approval_context_invalid",
+  "vnext_one_shot_run_custody_pin_unavailable",
+  "vnext_one_shot_run_stage_not_ready",
+  "vnext_one_shot_run_binding_mismatch",
+  "vnext_one_shot_price_mismatch",
+]);
+
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -77,7 +85,12 @@ export async function POST(request: Request) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    return NextResponse.json({ code: "RUN_APPROVAL_UNAVAILABLE" },
+    if (error instanceof Error && DEFINITE_REFUSALS.has(error.message)) {
+      return NextResponse.json({ code: "RUN_APPROVAL_REFUSED",
+        retryAuthorized: false }, { status: 409, headers });
+    }
+    return NextResponse.json({ code: "RUN_APPROVAL_OUTCOME_UNKNOWN",
+      retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }
 }

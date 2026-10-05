@@ -11,7 +11,7 @@ import {
 } from "@/lib/promptRefinerStageAdmissionCore";
 import { parseBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const MANIFEST_PATH =
   "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-candidate-source.json";
 const MANIFEST_VERSION = "prompt-refiner-vnext-one-shot-candidate-source-v1";
