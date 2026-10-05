@@ -18,7 +18,8 @@ import { assembleAmuxV4UnitRejection } from
   "./ideaUnitRejectionSnapshotCore.ts";
 import { AmuxV4UnitDecisionError, AMUX_V4_UNIT_WRITE_ENV,
   amuxV4UnitWriteEnabled, commitAmuxV4UnitPrepare,
-  commitAmuxV4UnitRejection } from "./ideaUnitDecisionStore.ts";
+  commitAmuxV4UnitRejection,
+  markAmuxV4UnitConsumeOutcomeUnknown } from "./ideaUnitDecisionStore.ts";
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -181,6 +182,9 @@ export async function consumeAmuxV4UnitRejection(input: {
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    await markAmuxV4UnitConsumeOutcomeUnknown({ session: input.session,
+      decisionId: input.decisionId,
+      consumeRequestId: input.consumeRequestId });
     throw new AmuxV4UnitDecisionError("outcome_unknown");
   }
 }

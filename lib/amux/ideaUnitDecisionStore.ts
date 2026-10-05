@@ -4,8 +4,12 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog,
+  writeSystemAuditLogEntry } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
+import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
+import { assertRecentAdminAuthentication } from
+  "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
 import { type AmuxIdeaDuplicateScan,
   deriveAmuxIdeaUnitConfirmation,
@@ -1015,6 +1019,10 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
     select: { id: true, ideaId: true, draftUnitId: true, state: true,
       action: true, confirmationDigest: true, expiresAt: true,
       outcomeUnknownAt: true, registeredWorkItemId: true,
+      outcomeUnknownConsumeRequestId: true,
+      outcomeUnknownAuditLogId: true,
+      outcomeUnknownResolvedAt: true,
+      outcomeUnknownResolvedAuditLogId: true,
       resolvedNodeId: true, linkedNodeId: true,
       linkedWorkItemId: true, baseWorkItemId: true,
       baseNodeId: true, baseNodeRevision: true,
@@ -1023,7 +1031,8 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
   });
   if (!row) return { state: "not_visible", retryWrite: false } as const;
   const [prepareAudit, finalAudit, card, nodeRevision, node, decisionDraft,
-    linkedNode, linkedRevision, linkedCard] = await Promise.all([
+    linkedNode, linkedRevision, linkedCard, unknownAudit,
+    unknownResolvedAudit] = await Promise.all([
     prisma.adminAuditLog.findUnique({ where: { id: row.prepareAuditLogId },
       select: { action: true, actorUserId: true, targetType: true,
         targetId: true, entryHash: true } }),
@@ -1067,6 +1076,16 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       select: { id: true, sourceSystem: true,
         v4SourceApprovalId: true },
     }) : Promise.resolve(null),
+    row.outcomeUnknownAuditLogId ? prisma.adminAuditLog.findUnique({
+      where: { id: row.outcomeUnknownAuditLogId },
+      select: { action: true, actorUserId: true, targetType: true,
+        targetId: true, entryHash: true, metadata: true },
+    }) : Promise.resolve(null),
+    row.outcomeUnknownResolvedAuditLogId ? prisma.adminAuditLog.findUnique({
+      where: { id: row.outcomeUnknownResolvedAuditLogId },
+      select: { action: true, actorUserId: true, targetType: true,
+        targetId: true, entryHash: true },
+    }) : Promise.resolve(null),
   ]);
   if (!["register_card", "create_node", "reject_unit",
       "select_existing_node", "link_existing_node",
@@ -1075,12 +1094,27 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       prepareAudit.actorUserId !== actorUserId ||
       prepareAudit.targetType !== "AmuxIdeaUnitDecision" ||
       prepareAudit.targetId !== row.id ||
+      (row.outcomeUnknownAt !== null && (!unknownAudit?.entryHash ||
+        unknownAudit.action !== "amux.v4.unit.outcome_unknown" ||
+        unknownAudit.actorUserId !== null ||
+        unknownAudit.targetType !== "AmuxIdeaUnitDecision" ||
+        unknownAudit.targetId !== row.id ||
+        typeof unknownAudit.metadata !== "object" ||
+        unknownAudit.metadata === null ||
+        (unknownAudit.metadata as Record<string, unknown>).systemActor !==
+          AMUX_SYSTEM_AUDIT_ACTOR)) ||
+      (row.outcomeUnknownResolvedAt !== null &&
+        (!unknownResolvedAudit?.entryHash ||
+        unknownResolvedAudit.action !== "amux.v4.unit.no_commit_confirmed" ||
+        unknownResolvedAudit.actorUserId !== actorUserId ||
+        unknownResolvedAudit.targetType !== "AmuxIdeaUnitDecision" ||
+        unknownResolvedAudit.targetId !== row.id)) ||
       (row.finalAuditLogId !== null && (!finalAudit?.entryHash ||
         finalAudit.action !== ({ consumed: "amux.v4.unit.consume",
           cancelled: "amux.v4.unit.cancel", invalidated: "amux.v4.unit.invalidate",
           expired: "amux.v4.unit.expire" } as Record<string, string>)[row.state] ||
         finalAudit.targetType !== "AmuxIdeaUnitDecision" ||
-        (row.state === "expired" ?
+        (["expired", "invalidated"].includes(row.state) ?
           (finalAudit.actorUserId !== null ||
             typeof finalAudit.metadata !== "object" ||
             finalAudit.metadata === null ||
@@ -1124,10 +1158,12 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
           row.registeredWorkItemId !== null || row.resolvedNodeId !== null))) {
     return { state: "integrity_unavailable", retryWrite: false } as const;
   }
-  if (row.outcomeUnknownAt !== null) {
+  if (row.outcomeUnknownAt !== null &&
+      row.outcomeUnknownResolvedAt === null) {
     return { state: "outcome_unknown", retryWrite: false,
       decisionId: row.id, ideaId: row.ideaId,
-      draftUnitId: row.draftUnitId } as const;
+      draftUnitId: row.draftUnitId,
+      consumeRequestId: row.outcomeUnknownConsumeRequestId } as const;
   }
   if (row.state === "consumed" && card) {
     return { state: "consumed", retryWrite: false, decisionId: row.id,
@@ -1172,6 +1208,137 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
     ideaId: row.ideaId, draftUnitId: row.draftUnitId,
     confirmationDigest: row.confirmationDigest,
     expiresAt: row.expiresAt.toISOString() } as const;
+}
+
+/** A lost consume response must freeze the exact receipt before it can be
+ * offered to another request. The original transaction and this observation
+ * serialize on the decision row; a committed consume is never overwritten. */
+export async function markAmuxV4UnitConsumeOutcomeUnknown(input: {
+  session: Session; decisionId: string; consumeRequestId: string;
+}): Promise<"recorded" | "already_unknown" | "committed" | "unavailable"> {
+  const actorUserId = ownerId(input.session);
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(input.decisionId) ||
+      !/^[a-f0-9-]{36}$/.test(input.consumeRequestId)) return "unavailable";
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AmuxIdeaUnitDecision"
+        WHERE "id" = ${input.decisionId} AND "actorUserId" = ${actorUserId}
+        FOR UPDATE
+      `;
+      if (rows.length !== 1) return "unavailable" as const;
+      const row = await tx.amuxIdeaUnitDecision.findUnique({
+        where: { id: input.decisionId },
+        select: { state: true, consumeRequestId: true,
+          outcomeUnknownAt: true },
+      });
+      if (row?.state === "consumed" &&
+          row.consumeRequestId === input.consumeRequestId) {
+        return "committed" as const;
+      }
+      if (row?.state !== "prepared") return "unavailable" as const;
+      if (row.outcomeUnknownAt !== null) return "already_unknown" as const;
+      const audit = await writeSystemAuditLogEntry({ tx,
+        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.v4.unit.outcome_unknown",
+        targetType: "AmuxIdeaUnitDecision", targetId: input.decisionId,
+        summary: "Recorded an uncertain AMUX v4 unit consume outcome.",
+        metadata: { consumeRequestId: input.consumeRequestId },
+      });
+      const updated = await tx.amuxIdeaUnitDecision.updateMany({
+        where: { id: input.decisionId, actorUserId, state: "prepared",
+          outcomeUnknownAt: null },
+        data: { outcomeUnknownAt: new Date(),
+          outcomeUnknownConsumeRequestId: input.consumeRequestId,
+          outcomeUnknownAuditLogId: audit.id },
+      });
+      if (updated.count !== 1) throw new Error("unknown marker lost its lock");
+      return "recorded" as const;
+    }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
+  } catch { return "unavailable"; }
+}
+
+/** The owner may close only an observed, still-prepared unknown receipt.
+ * Resolution and invalidation are separate guarded transitions in one tx;
+ * neither transition permits reusing this 15-minute confirmation. */
+export async function confirmAmuxV4UnitNoCommit(input: {
+  session: Session; request: Request; decisionId: string;
+  consumeRequestId: string; confirmation: "no_commit";
+}) {
+  const actorUserId = ownerId(input.session);
+  await assertRecentAdminAuthentication(input.session);
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(input.decisionId) ||
+      !/^[a-f0-9-]{36}$/.test(input.consumeRequestId) ||
+      input.confirmation !== "no_commit") {
+    throw new AmuxV4UnitDecisionError("not_ready");
+  }
+  let callbackReturned = false;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "AmuxIdeaUnitDecision"
+        WHERE "id" = ${input.decisionId} AND "actorUserId" = ${actorUserId}
+        FOR UPDATE
+      `;
+      if (rows.length !== 1) throw new AmuxV4UnitDecisionError("not_found");
+      const row = await tx.amuxIdeaUnitDecision.findUnique({
+        where: { id: input.decisionId },
+        select: { id: true, ideaId: true, draftUnitId: true,
+          state: true, outcomeUnknownAt: true,
+          outcomeUnknownConsumeRequestId: true,
+          outcomeUnknownResolvedAt: true, finalAuditLogId: true },
+      });
+      if (!row || row.state !== "prepared" ||
+          row.outcomeUnknownAt === null ||
+          row.outcomeUnknownResolvedAt !== null ||
+          row.finalAuditLogId !== null ||
+          row.outcomeUnknownConsumeRequestId !== input.consumeRequestId) {
+        throw new AmuxV4UnitDecisionError("reconfirm");
+      }
+      const appliedCard = await tx.amuxWorkItem.findFirst({
+        where: { v4SourceApprovalId: row.id }, select: { id: true },
+      });
+      const appliedNode = await tx.amuxPortfolioNodeRevision.findFirst({
+        where: { decisionId: row.id }, select: { id: true },
+      });
+      if (appliedCard || appliedNode) {
+        throw new AmuxV4UnitDecisionError("integrity_unavailable");
+      }
+      const humanAuditId = await writeAdminAuditLog({ tx,
+        session: input.session, request: input.request,
+        action: "amux.v4.unit.no_commit_confirmed",
+        targetType: "AmuxIdeaUnitDecision", targetId: row.id,
+        summary: "Owner confirmed no AMUX v4 unit consume committed.",
+        metadata: { ideaId: row.ideaId, draftUnitId: row.draftUnitId,
+          consumeRequestId: input.consumeRequestId },
+      });
+      await tx.amuxIdeaUnitDecision.update({ where: { id: row.id },
+        data: { outcomeUnknownResolvedAt: new Date(),
+          outcomeUnknownResolution: "no_commit",
+          outcomeUnknownResolvedAuditLogId: humanAuditId },
+      });
+      const systemAudit = await writeSystemAuditLogEntry({ tx,
+        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.v4.unit.invalidate",
+        targetType: "AmuxIdeaUnitDecision", targetId: row.id,
+        summary: "Invalidated a confirmed uncommitted AMUX v4 receipt.",
+        metadata: { consumeRequestId: input.consumeRequestId },
+      });
+      await tx.amuxIdeaUnitDecision.update({ where: { id: row.id },
+        data: { state: "invalidated", finalAuditLogId: systemAudit.id },
+      });
+      callbackReturned = true;
+      return { state: "invalidated" as const, decisionId: row.id,
+        auditId: humanAuditId, retryWrite: false as const };
+    }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
+  } catch (error) {
+    if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    throw new AmuxV4UnitDecisionError("outcome_unknown");
+  }
 }
 
 /** Explicit owner cancellation of an unconsumed preparation. This never

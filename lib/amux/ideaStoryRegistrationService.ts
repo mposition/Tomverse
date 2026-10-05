@@ -24,7 +24,7 @@ import { calculateCurrentApprovedAmuxV4TaskCost,
 import { AmuxV4DuplicateReasonRequired, AmuxV4UnitDecisionError,
   AMUX_V4_UNIT_WRITE_ENV,
   amuxV4UnitWriteEnabled, commitAmuxV4CardRegistration,
-  commitAmuxV4UnitPrepare } from
+  commitAmuxV4UnitPrepare, markAmuxV4UnitConsumeOutcomeUnknown } from
   "./ideaUnitDecisionStore.ts";
 import { deriveAmuxIdeaUnitConfirmation,
   sameAmuxIdeaUnitConfirmation,
@@ -345,6 +345,9 @@ export async function consumeAmuxV4CardRegistration(input: {
     if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
       throw new AmuxV4UnitDecisionError("not_ready");
     }
+    await markAmuxV4UnitConsumeOutcomeUnknown({ session: input.session,
+      decisionId: input.decisionId,
+      consumeRequestId: input.consumeRequestId });
     throw new AmuxV4UnitDecisionError("outcome_unknown");
   }
 }

@@ -14,6 +14,8 @@ import { AmuxIdeaCardLinkPanel } from
   "@/components/admin/AmuxIdeaCardLinkPanel";
 import { AmuxIdeaUnitRejectionPanel } from
   "@/components/admin/AmuxIdeaUnitRejectionPanel";
+import { AmuxIdeaUnknownDecisionRecoveryPanel } from
+  "@/components/admin/AmuxIdeaUnknownDecisionRecoveryPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -168,6 +170,8 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         (unit.proposal?.kind === "node" || unit.proposal?.kind === "card"))
         .map((unit) => <AmuxIdeaUnitRejectionPanel
           key={`reject:${unit.id}`} ideaId={ideaId} unit={unit} />) : null}
+      {view.outcome === "propose" ? <AmuxIdeaUnknownDecisionRecoveryPanel
+        ideaId={ideaId} /> : null}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;
