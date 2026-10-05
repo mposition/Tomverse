@@ -152,9 +152,10 @@ test("the trigger functions have no EXCEPTION handler and pin their search path"
 });
 
 // The fifty caps under each isolation level. Both guards lock the parent and
-// then count in a separate statement. READ COMMITTED counts with a fresh
-// snapshot; SERIALIZABLE aborts one of two overlapping transactions;
-// REPEATABLE READ would count with a stale snapshot, so it is refused.
+// then count in a separate statement, which only READ COMMITTED counts with a
+// fresh snapshot; every other level is refused. A SERIALIZABLE writer racing a
+// READ COMMITTED one would count with its stale snapshot, and SSI does not
+// see the READ COMMITTED side.
 
 const directClient = async () => {
   const url = process.env.DATABASE_URL;
@@ -199,37 +200,42 @@ const count = (kind: "link" | "member") =>
     : prisma.supportTriageGroupMember.count({ where: { groupId: "g-iso" } });
 
 for (const kind of ["link", "member"] as const) {
-  test(`${kind}: REPEATABLE READ is refused`, async () => {
-    const { sql, fiftieth } = await nearlyFull(kind);
-    const client = await directClient();
-    try {
-      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
-      await assert.rejects(client.query(sql, [fiftieth]), /cannot be inserted under REPEATABLE READ/);
-      await client.query("ROLLBACK");
-    } finally {
-      await client.end();
-    }
-  });
+  for (const level of ["REPEATABLE READ", "SERIALIZABLE"]) {
+    test(`${kind}: ${level} is refused`, async () => {
+      const { sql, fiftieth } = await nearlyFull(kind);
+      const client = await directClient();
+      try {
+        await client.query(`BEGIN ISOLATION LEVEL ${level}`);
+        await assert.rejects(client.query(sql, [fiftieth]), /inserted only under READ COMMITTED/);
+        await client.query("ROLLBACK");
+      } finally {
+        await client.end();
+      }
+      assert.equal(await count(kind), 49);
+    });
+  }
 
-  test(`${kind}: two SERIALIZABLE inserts at forty-nine leave fifty, never fifty-one`, async () => {
+  test(`${kind}: two READ COMMITTED inserts at forty-nine leave fifty, never fifty-one`, async () => {
     const { sql, fiftieth, fiftyFirst } = await nearlyFull(kind);
     const first = await directClient();
     const second = await directClient();
     try {
-      // Both take their snapshot before either inserts.
-      await first.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
-      await second.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
-      await first.query("SELECT 1");
-      await second.query("SELECT 1");
+      const secondPid = (await second.query("SELECT pg_catalog.pg_backend_pid() AS pid")).rows[0].pid as number;
+      await first.query("BEGIN");
       await first.query(sql, [fiftieth]);
       const late = second.query(sql, [fiftyFirst]).then(
-        () => second.query("COMMIT").then(() => "committed"),
-        (error: Error) => second.query("ROLLBACK").then(() => error.message)
+        () => "inserted",
+        (error: Error) => error.message
       );
+      for (let i = 0; ; i += 1) {
+        const [row] = await prisma.$queryRaw<{ n: number }[]>`
+          SELECT pg_catalog.cardinality(pg_catalog.pg_blocking_pids(${secondPid}::int))::int AS n`;
+        if (row.n > 0) break;
+        assert.ok(i < 100, "the second insert never waited on the first");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       await first.query("COMMIT");
-      const outcome = await late.catch((error: Error) => error.message);
-      assert.notEqual(outcome, "committed", "the second transaction must not commit");
-      assert.match(outcome, /could not serialize|already has 50/);
+      assert.match(await late, /already has 50/);
     } finally {
       await first.end();
       await second.end();

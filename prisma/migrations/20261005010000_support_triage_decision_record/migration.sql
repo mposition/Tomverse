@@ -12,13 +12,14 @@
 --     months later (a CHECK, so a different period needs a migration);
 --   * records and links are inserted and deleted, never updated;
 --   * a record commits with at least one link and at most fifty, and a link
---     is never inserted under REPEATABLE READ, where the cap could not hold;
+--     is inserted only under READ COMMITTED, the one level where the cap holds
+--     against every concurrent writer;
 --   * no link to a deleted account's report;
 --   * there is no record with some of its links gone: deleting any link, by
 --     account deletion or by its report's deletion, deletes the record and
 --     with it every other link.
 --
--- The same REPEATABLE READ refusal is added to support_triage_group_member_guard()
+-- The same READ COMMITTED requirement is added to support_triage_group_member_guard()
 -- (migration 20261004020000_support_triage_group), which counts the same way;
 -- it is replaced here, in a migration that also creates tables, so the deploy
 -- guard never sees a migration that only replaces a function.
@@ -151,13 +152,14 @@ BEGIN
         RAISE EXCEPTION 'SupportTriageDecisionRecordLink cannot link a deleted account''s report'
             USING ERRCODE = 'check_violation';
     END IF;
-    -- The cap below is counted with a fresh snapshot after the lock. REPEATABLE
-    -- READ would count with the transaction's first snapshot and miss a
-    -- concurrent insert the lock already waited for, so it is refused here.
-    -- READ COMMITTED takes a new snapshot per statement; SERIALIZABLE aborts
-    -- one of two transactions whose count and insert overlap.
-    IF pg_catalog.current_setting('transaction_isolation') = 'repeatable read' THEN
-        RAISE EXCEPTION 'SupportTriageDecisionRecordLink cannot be inserted under REPEATABLE READ; use READ COMMITTED or SERIALIZABLE'
+    -- The cap below is counted after the lock, and only READ COMMITTED counts
+    -- with a fresh snapshot there. REPEATABLE READ and SERIALIZABLE count with
+    -- the transaction's first snapshot and would miss an insert the lock
+    -- already waited for; SSI does not cover a concurrent READ COMMITTED
+    -- writer, so SERIALIZABLE is refused too. (PostgreSQL runs READ
+    -- UNCOMMITTED as READ COMMITTED.)
+    IF pg_catalog.current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+        RAISE EXCEPTION 'SupportTriageDecisionRecordLink is inserted only under READ COMMITTED'
             USING ERRCODE = 'invalid_transaction_state';
     END IF;
     -- Lock, then count in a separate statement: one statement that waited for
@@ -204,7 +206,7 @@ CREATE TRIGGER "SupportTriageDecisionRecordLink_gone"
     AFTER DELETE ON "SupportTriageDecisionRecordLink"
     FOR EACH ROW EXECUTE FUNCTION "support_triage_decision_record_link_gone"();
 
--- Members: the fifty-member cap refuses REPEATABLE READ too.
+-- Members: the fifty-member cap requires READ COMMITTED too.
 CREATE OR REPLACE FUNCTION "support_triage_group_member_guard"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -233,13 +235,14 @@ BEGIN
         RAISE EXCEPTION 'SupportTriageGroupMember cannot be created for a deleted account''s report'
             USING ERRCODE = 'check_violation';
     END IF;
-    -- The cap below is counted with a fresh snapshot after the lock. REPEATABLE
-    -- READ would count with the transaction's first snapshot and miss a
-    -- concurrent insert the lock already waited for, so it is refused here.
-    -- READ COMMITTED takes a new snapshot per statement; SERIALIZABLE aborts
-    -- one of two transactions whose count and insert overlap.
-    IF pg_catalog.current_setting('transaction_isolation') = 'repeatable read' THEN
-        RAISE EXCEPTION 'SupportTriageGroupMember cannot be inserted under REPEATABLE READ; use READ COMMITTED or SERIALIZABLE'
+    -- The cap below is counted after the lock, and only READ COMMITTED counts
+    -- with a fresh snapshot there. REPEATABLE READ and SERIALIZABLE count with
+    -- the transaction's first snapshot and would miss an insert the lock
+    -- already waited for; SSI does not cover a concurrent READ COMMITTED
+    -- writer, so SERIALIZABLE is refused too. (PostgreSQL runs READ
+    -- UNCOMMITTED as READ COMMITTED.)
+    IF pg_catalog.current_setting('transaction_isolation') NOT IN ('read committed', 'read uncommitted') THEN
+        RAISE EXCEPTION 'SupportTriageGroupMember is inserted only under READ COMMITTED'
             USING ERRCODE = 'invalid_transaction_state';
     END IF;
     -- The group is locked by one statement and its members counted by the
