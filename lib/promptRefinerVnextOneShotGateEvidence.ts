@@ -12,6 +12,7 @@ import { readPromptRefinerVnextOneShotCandidateSource } from
 import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { verifyPromptRefinerVnextOneShotGateAttestation,
+  promptRefinerVnextOneShotSlotBindingDigest,
   type PromptRefinerVnextOneShotGateAttestation } from
   "@/lib/promptRefinerVnextOneShotGateAttestation";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST } from
@@ -114,8 +115,9 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
           slots.reservationShapeValid && slots.approvalAuditsValid &&
           slots.consumedSlots === attempted &&
           slots.reservedSlots === evaluated.summary.outcomes.not_dispatched &&
-          await verifyConsumedSlotAudits(tx, attempted,
-            attestation.runApprovalAuditLogId) !== null &&
+          (await verifyConsumedSlotAudits(tx, attempted,
+            attestation.runApprovalAuditLogId))?.digest ===
+              attestation.slotBindingDigest &&
           canonicalBenchmarkJson(metadata) ===
             canonicalBenchmarkJson(gateMetadata(stage, attestation, evaluated)) &&
           await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
@@ -132,7 +134,7 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
 async function verifyConsumedSlotAudits(
   tx: Prisma.TransactionClient, consumedSlots: number,
   runApprovalAuditLogId: string,
-): Promise<Date | null> {
+): Promise<Readonly<{ latest: Date; digest: string }> | null> {
   const slots = await tx.promptRefinerVnextOneShotSlot.findMany({
     where: { stageId: STAGE_ID, status: "consumed" },
     select: { id: true, slotIndex: true, requestId: true },
@@ -148,6 +150,8 @@ async function verifyConsumedSlotAudits(
   if (audits.size !== rows.length) return null;
   let latest = new Date(0);
   const cumulative = new Set<number>();
+  const bindings: Array<{ slotIndex: number; requestId: string;
+    slotConsumptionAuditLogId: string }> = [];
   for (const slot of slots) {
     const entry = audits.get(slot.id);
     const metadata = entry?.metadata;
@@ -166,13 +170,16 @@ async function verifyConsumedSlotAudits(
         metadata.systemActor !== "prompt-refiner-vnext-one-shot-runner" ||
         !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) return null;
     cumulative.add(metadata.cumulativeReservedCostMicroUsd as number);
+    bindings.push({ slotIndex: slot.slotIndex,
+      requestId: slot.requestId, slotConsumptionAuditLogId: entry.id });
     if (entry.createdAt > latest) latest = entry.createdAt;
   }
   if (cumulative.size !== consumedSlots ||
       Array.from({ length: consumedSlots }, (_, index) =>
         (index + 1) * PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD)
         .some((value) => !cumulative.has(value))) return null;
-  return latest;
+  return Object.freeze({ latest,
+    digest: promptRefinerVnextOneShotSlotBindingDigest(bindings) });
 }
 
 /** Server rechecks the bound stage, all attempted slots, audit and shadow. */
@@ -221,7 +228,7 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
     const attempted = evaluated.summary.outcomes.suggested +
       evaluated.summary.outcomes.abstained + evaluated.summary.outcomes.failed +
       evaluated.summary.outcomes.unknown;
-    const lastSlotAuditAt = await verifyConsumedSlotAudits(tx, attempted,
+    const slotAudits = await verifyConsumedSlotAudits(tx, attempted,
       attestation.runApprovalAuditLogId);
     const shadowAudit = await tx.adminAuditLog.findUnique({
       where: { id: attestation.shadowAuditLogId },
@@ -229,8 +236,9 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
     });
     if (snapshot.consumedSlots !== attempted ||
         snapshot.reservedSlots !== evaluated.summary.outcomes.not_dispatched ||
-        !lastSlotAuditAt || !shadowAudit ||
-        Date.parse(attestation.signedAt) < lastSlotAuditAt.getTime() ||
+        !slotAudits || slotAudits.digest !== attestation.slotBindingDigest ||
+        !shadowAudit ||
+        Date.parse(attestation.signedAt) < slotAudits.latest.getTime() ||
         Date.parse(attestation.signedAt) < shadowAudit.createdAt.getTime()) {
       throw new Error("vnext_one_shot_gate_slot_evidence_mismatch");
     }

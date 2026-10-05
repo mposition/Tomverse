@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import type { Session } from "next-auth";
+import { promptRefinerVnextOneShotSlotBindingDigest } from
+  "../../lib/promptRefinerVnextOneShotGateAttestation";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -38,7 +40,7 @@ const summary = { version: "prompt-refiner-vnext-one-shot-gate-v1",
   toolCallCount: 0, providerRetryCount: 0,
   cost: { completeUsageCount: 80, heldReservationCount: 0,
     knownCostMicroUsd: 80, heldReservationMicroUsd: 0,
-    maximumRequestCostMicroUsd: 1 },
+    maximumRequestCostMicroUsd: 1, observedOverCapCount: 0 },
   latency: { terminalObservedCount: 80, p90Ms: 100, maximumMs: 100 },
   audit: { fixedReviewed: 4, fixedClear: 4, exceptionRequired: 0,
     exceptionReviewed: 0, exceptionClear: 0, overflowCandidates: 0,
@@ -56,7 +58,8 @@ let shadowValid = true;
 let receiptValid = true;
 let writes = 0;
 const slotRows = Array.from({ length: 80 }, (_, slotIndex) => ({
-  id: `slot-${slotIndex}`, slotIndex, requestId: `request-${slotIndex}`,
+  id: `slot-${slotIndex}`, slotIndex,
+  requestId: `11111111-1111-4111-8111-${String(slotIndex).padStart(12, "0")}`,
   status: "consumed",
 }));
 const consumedAudits = slotRows.map((slot) => ({
@@ -143,6 +146,9 @@ async function attestation(overrides: Record<string, unknown> = {}) {
   return signPromptRefinerVnextOneShotGateAttestation({
     version: "prompt-refiner-vnext-one-shot-gate-attestation-v1", ...target,
     gateSourceDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST,
+    slotBindingDigest: promptRefinerVnextOneShotSlotBindingDigest(slotRows.map(
+      (slot) => ({ slotIndex: slot.slotIndex, requestId: slot.requestId,
+        slotConsumptionAuditLogId: `slot-audit-${slot.slotIndex}` }))),
     signedAt: new Date().toISOString(), summary, ...overrides,
   }, privateB64);
 }
@@ -197,6 +203,13 @@ test("missing shadow, slot mismatch, tampered signature and duplicate gate fail 
       gateSourceDigest: "0".repeat(64),
     }),
   }), /binding_mismatch/);
+  assert.equal(writes, 0);
+  reset();
+  await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation({
+      slotBindingDigest: "0".repeat(64),
+    }),
+  }), /slot_evidence_mismatch/);
   assert.equal(writes, 0);
   reset();
   const signed = await attestation();

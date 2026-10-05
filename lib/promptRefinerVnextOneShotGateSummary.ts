@@ -63,6 +63,7 @@ export const promptRefinerVnextOneShotGateSummarySchema = z.object({
     knownCostMicroUsd: money,
     heldReservationMicroUsd: money,
     maximumRequestCostMicroUsd: money,
+    observedOverCapCount: count,
   }).strict(),
   latency: z.object({
     terminalObservedCount: count,
@@ -126,6 +127,7 @@ export function evaluatePromptRefinerVnextOneShotGateSummary(value: unknown): Re
       s.cost.knownCostMicroUsd >
         s.cost.completeUsageCount * PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD ||
       s.cost.maximumRequestCostMicroUsd > s.cost.knownCostMicroUsd ||
+      s.cost.observedOverCapCount > s.cost.heldReservationCount ||
       s.latency.terminalObservedCount > terminal ||
       (s.latency.terminalObservedCount === 0) !==
         (s.latency.p90Ms === null && s.latency.maximumMs === null) ||
@@ -150,7 +152,8 @@ export function evaluatePromptRefinerVnextOneShotGateSummary(value: unknown): Re
   if (s.toolCallCount > 0 || s.providerRetryCount > 0) {
     definite.push("tool_or_retry_violation");
   }
-  if (s.cost.maximumRequestCostMicroUsd >
+  if (s.cost.observedOverCapCount > 0 ||
+      s.cost.maximumRequestCostMicroUsd >
         PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD ||
       s.cost.knownCostMicroUsd + s.cost.heldReservationMicroUsd >
         PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD) {

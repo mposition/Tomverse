@@ -35,11 +35,16 @@ function fixture() {
   const manifest = syntheticManifest();
   const cases = JSON.parse(manifest.manifestText).cases;
   const results = cases.map((item) => {
+    const slotIndex = (item.language === "ko" ? 0 : 40) +
+      Number(item.caseId.slice(-3)) - 1;
     const abstain = item.expectedDirection === "abstain_preferred";
     const constrained = item.eligibleChallengeTag === "constrained_format";
     const boundary = item.eligibleChallengeTag === "boundary_near_miss";
     return {
       caseId: item.caseId, status: abstain ? "abstained" : "suggested",
+      slotIndex,
+      requestId: `11111111-1111-4111-8111-${String(slotIndex).padStart(12, "0")}`,
+      slotConsumptionAuditLogId: `synthetic-slot-audit-${slotIndex}`,
       modelOutput: abstain
         ? { outcome: "abstained", refinedPrompt: null,
           abstentionReason: "unsafe_to_rewrite" }
@@ -103,6 +108,11 @@ test("missing, unknown and tampered restricted observations refuse or stay insuf
     modelOutput: null, reasonCode: "unknown_after_dispatch", usage: null,
     latencyMs: null };
   assert.equal(score(unknown).outcome, "insufficient_evidence");
+  const unreached = fixture();
+  unreached.results[0] = { ...unreached.results[0], status: "not_dispatched",
+    requestId: null, slotConsumptionAuditLogId: null,
+    modelOutput: null, reasonCode: null, usage: null, latencyMs: null };
+  assert.equal(score(unreached).outcome, "insufficient_evidence");
   const incomplete = fixture();
   incomplete.results[0].usage.cacheWriteInputTokens = null;
   assert.equal(score(incomplete).outcome, "insufficient_evidence");
@@ -133,6 +143,11 @@ test("confirmed failure, cell, challenge, latency and cost thresholds are decisi
     outputTokens: 4_096, cachedInputTokens: 1,
     cacheWriteInputTokens: 99_998, reasoningTokens: 0 }; });
   assert.equal(score(costly).summary.cost.knownCostMicroUsd, 2_393_440);
+  const overCap = fixture();
+  overCap.results[0].usage.inputTokens = 100_001;
+  const overCapScore = score(overCap);
+  assert.equal(overCapScore.outcome, "fail");
+  assert.ok(overCapScore.reasonCodes.includes("cost_ceiling_exceeded"));
 });
 
 test("attestation accepts only signed content-free numbers for the exact target", () => {
@@ -144,6 +159,7 @@ test("attestation accepts only signed content-free numbers for the exact target"
   const attestation = signPromptRefinerVnextOneShotGateAttestation({
     version: "prompt-refiner-vnext-one-shot-gate-attestation-v1",
     ...target, gateSourceDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST,
+    slotBindingDigest: score(f).slotBindingDigest,
     signedAt, summary: score(f).summary,
   }, privateB64);
   assert.deepEqual(verifyPromptRefinerVnextOneShotGateAttestation(

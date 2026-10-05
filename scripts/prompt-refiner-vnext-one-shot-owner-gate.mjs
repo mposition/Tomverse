@@ -64,6 +64,7 @@ export function createPromptRefinerVnextOneShotOwnerGateAttestation(input) {
     return signPromptRefinerVnextOneShotGateAttestation({
       version: "prompt-refiner-vnext-one-shot-gate-attestation-v1",
       ...target, gateSourceDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_SOURCE_DIGEST,
+      slotBindingDigest: evaluated.slotBindingDigest,
       signedAt: now.toISOString(), summary: evaluated.summary,
     }, signingPrivateKeyB64);
   } catch {
@@ -79,7 +80,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       manifestPath: process.argv[2], bindingPath: process.argv[3],
       sealPath: process.argv[4], resultsPath: process.argv[5],
       auditsPath: process.argv[6], targetPath: process.argv[7],
-      ownerKeyHex: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_OWNER_KEY_HEX,
+      ownerKeyHex: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_OWNER_SEAL_KEY_HEX,
       signingPrivateKeyB64:
         process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PRIVATE_KEY_B64,
     });

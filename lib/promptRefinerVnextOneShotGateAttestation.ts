@@ -1,5 +1,5 @@
 /** The owner signer sees restricted inputs; the app receives this closed, content-free envelope. */
-import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { z } from "zod";
 
 import { evaluatePromptRefinerVnextOneShotGateSummary,
@@ -10,6 +10,13 @@ import { canonicalBenchmarkJson } from "./routerDevelopmentBenchmark";
 const id = z.string().min(1).max(128);
 const deploymentId = z.string().regex(
   /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+const requestId = z.string().regex(
+  /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/);
+const bindingSchema = z.object({
+  slotIndex: z.number().int().min(0).max(79),
+  requestId,
+  slotConsumptionAuditLogId: id,
+}).strict();
 const signedSchema = z.object({
   version: z.literal("prompt-refiner-vnext-one-shot-gate-attestation-v1"),
   stageApprovalAuditLogId: id,
@@ -17,6 +24,7 @@ const signedSchema = z.object({
   shadowAuditLogId: id,
   runtimeDeploymentId: deploymentId,
   gateSourceDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  slotBindingDigest: z.string().regex(/^[0-9a-f]{64}$/),
   signedAt: z.string().datetime({ offset: false }),
   summary: promptRefinerVnextOneShotGateSummarySchema,
 }).strict();
@@ -28,6 +36,20 @@ export type PromptRefinerVnextOneShotGateAttestation =
   z.infer<typeof promptRefinerVnextOneShotGateAttestationSchema>;
 
 const refuse = (): never => { throw new Error("vnext_one_shot_gate_attestation_invalid"); };
+
+/** Digest only consumed slot/request/audit identities; no case ID or content enters it. */
+export function promptRefinerVnextOneShotSlotBindingDigest(value: unknown): string {
+  const parsed = z.array(bindingSchema).max(80).safeParse(value);
+  if (!parsed.success ||
+      new Set(parsed.data.map((item) => item.slotIndex)).size !== parsed.data.length ||
+      new Set(parsed.data.map((item) => item.requestId)).size !== parsed.data.length ||
+      new Set(parsed.data.map((item) => item.slotConsumptionAuditLogId)).size !==
+        parsed.data.length) return refuse();
+  return createHash("sha256").update(canonicalBenchmarkJson({
+    version: "prompt-refiner-vnext-one-shot-slot-bindings-v1",
+    bindings: [...parsed.data].sort((a, b) => a.slotIndex - b.slotIndex),
+  }), "utf8").digest("hex");
+}
 
 function keyFromBase64(value: string, kind: "public" | "private") {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 4096) return refuse();

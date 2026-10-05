@@ -22,6 +22,8 @@ import { evaluatePromptRefinerVnextOneShotGateSummary,
   PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_VERSION,
   type PromptRefinerVnextOneShotGateSummary } from
   "./promptRefinerVnextOneShotGateSummary";
+import { promptRefinerVnextOneShotSlotBindingDigest } from
+  "./promptRefinerVnextOneShotGateAttestation";
 import { canonicalBenchmarkJson, parseBenchmarkJson } from
   "./routerDevelopmentBenchmark";
 
@@ -33,6 +35,10 @@ const criticalClass = z.enum([
 ]);
 const resultSchema = z.object({
   caseId: z.string().regex(ID),
+  slotIndex: z.number().int().min(0).max(79),
+  requestId: z.string().regex(
+    /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/).nullable(),
+  slotConsumptionAuditLogId: z.string().min(1).max(128).nullable(),
   status: z.enum(["suggested", "abstained", "failed", "unknown", "not_dispatched"]),
   modelOutput: z.unknown().nullable(),
   reasonCode: z.enum([
@@ -104,7 +110,8 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
   expectedPreregistrationDigest: string;
   results: unknown;
   audits: unknown;
-}>): ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary> {
+}>): ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary> &
+  Readonly<{ slotBindingDigest: string }> {
   try {
     verifyPromptRefinerVnextOneShotManifestEnvelope(
       input.manifestText, input.expectedRootDigest,
@@ -118,7 +125,13 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
     const cases = new Map(manifest.cases.map((item) => [item.caseId, item]));
     const observations = new Map<string, Result>();
     for (const result of results) {
-      if (!cases.has(result.caseId) || observations.has(result.caseId)) return refuse();
+      const expectedIndex = (result.caseId.startsWith("prsvnext-ko-") ? 0 : 40) +
+        Number(result.caseId.slice(-3)) - 1;
+      if (!cases.has(result.caseId) || observations.has(result.caseId) ||
+          result.slotIndex !== expectedIndex ||
+          (result.status === "not_dispatched") !==
+            (result.requestId === null &&
+              result.slotConsumptionAuditLogId === null)) return refuse();
       observations.set(result.caseId, result);
     }
     if (observations.size !== 80 || new Set(audits.map((a) => a.caseId)).size !== audits.length) {
@@ -139,7 +152,7 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
       toolCallCount: 0, providerRetryCount: 0,
       cost: { completeUsageCount: 0, heldReservationCount: 0,
         knownCostMicroUsd: 0, heldReservationMicroUsd: 0,
-        maximumRequestCostMicroUsd: 0 },
+        maximumRequestCostMicroUsd: 0, observedOverCapCount: 0 },
       latency: { terminalObservedCount: 0, p90Ms: null, maximumMs: null },
       audit: { fixedReviewed: 0, fixedClear: 0, exceptionRequired: 0,
         exceptionReviewed: 0, exceptionClear: 0, overflowCandidates: 0,
@@ -228,6 +241,10 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
         } else {
           summary.cost.heldReservationCount++;
           summary.cost.heldReservationMicroUsd += 29_918;
+          if (guarded?.problems.some((problem) => [
+            "inputTokens_above_cap", "outputTokens_above_cap",
+            "cost_reconciliation_invalid",
+          ].includes(problem))) summary.cost.observedOverCapCount++;
           priority = Math.min(priority ?? 3, 3);
         }
       }
@@ -281,7 +298,13 @@ export function scorePromptRefinerVnextOneShotOwnerGate(input: Readonly<{
         summary.criticalViolations[audit.criticalClass!]++;
       }
     }
-    return evaluatePromptRefinerVnextOneShotGateSummary(summary);
+    const evaluated = evaluatePromptRefinerVnextOneShotGateSummary(summary);
+    const slotBindingDigest = promptRefinerVnextOneShotSlotBindingDigest(
+      results.filter((result) => result.status !== "not_dispatched")
+        .map((result) => ({ slotIndex: result.slotIndex,
+          requestId: result.requestId,
+          slotConsumptionAuditLogId: result.slotConsumptionAuditLogId })));
+    return Object.freeze({ ...evaluated, slotBindingDigest });
   } catch {
     // Never echo an exception containing restricted material or a root.
     return refuse();
