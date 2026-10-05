@@ -5,11 +5,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { genesisOutcome } from "../lib/adminSreOpsGenesisOutcome.ts";
+import { GENESIS_PRE_WRITE_REFUSALS, genesisOutcome } from "../lib/adminSreOpsGenesisOutcome.ts";
 
 test("each answer maps to what the screen may claim", () => {
   assert.deepEqual(genesisOutcome({ status: 200, payload: { result: { genesisId: "g" } } }), { kind: "created", genesisId: "g" });
-  assert.deepEqual(genesisOutcome({ status: 409, payload: { code: "stale" } }), { kind: "refused", code: "stale" });
+  for (const code of GENESIS_PRE_WRITE_REFUSALS) {
+    assert.deepEqual(genesisOutcome({ status: 409, payload: { code } }), { kind: "refused", code });
+  }
   assert.deepEqual(genesisOutcome({ status: 428, payload: {} }), { kind: "requiresReauthentication" });
   assert.deepEqual(genesisOutcome({ status: 403, payload: { code: "ADMIN_REAUTHENTICATION_REQUIRED" } }), { kind: "requiresReauthentication" });
 });
@@ -20,6 +22,9 @@ test("a lost, late or unreadable answer is unknown, never not-approved", () => {
     { status: 500, payload: {} },
     { status: 200, payload: {} },
     { status: 409, payload: {} },
+    // The route answers late for a deadline missed after the commit, too.
+    { status: 409, payload: { code: "late" } },
+    { status: 409, payload: { code: "something_new" } },
     { status: 502, payload: { code: "stale" } },
   ]) {
     assert.deepEqual(genesisOutcome(answer), { kind: "unknown" }, JSON.stringify(answer));
