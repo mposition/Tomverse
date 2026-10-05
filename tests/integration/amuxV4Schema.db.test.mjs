@@ -692,11 +692,11 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
 
     const insertStory = `INSERT INTO public."AmuxWorkItem"
       ("id", "title", "status", "sourceSystem", "sourceKey", "sourceVersion",
-       "sourceDigest", "sourceSnapshot", "cardType", "parentFeatureNodeId",
+       "sourceDigest", "sourceSnapshot", "cardType", "storyKind", "parentFeatureNodeId",
        "v4TitleCiphertext", "v4TitleKeyId", "v4TitleKeyVersion",
        "v4TitleDigest", "v4TitleDigestKeyId", "v4SourceApprovalId", "updatedAt")
       VALUES ($1, 'AMUX Story', 'backlog', 'admin-idea-v4', $2, 'v1', $3,
-              $4::jsonb, 'story', $5, $6, 'synthetic', 1, $7, 'synthetic',
+              $4::jsonb, 'story', 'general', $5, $6, 'synthetic', 1, $7, 'synthetic',
               'synthetic-approval', CURRENT_TIMESTAMP)`;
     const storyParams = [
       ids.story, sourceKey, digest,
@@ -714,6 +714,10 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       approvalId: "synthetic_approval_01",
     });
     await client.query(insertStory, storyParams);
+    await expectRejected(
+      `UPDATE public."AmuxWorkItem" SET "storyKind" = NULL WHERE "id" = $1`,
+      [ids.story], "AmuxWorkItem_v4_story_kind_check",
+    );
     const todoError = await expectRejected(
       `UPDATE public."AmuxWorkItem" SET "status" = 'todo' WHERE "id" = $1`,
       [ids.story],

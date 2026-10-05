@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxIdeaResolutionPanel } from "@/components/admin/AmuxIdeaResolutionPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -133,6 +134,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
           </div> : null}
         </li>)}
       </ol>
+      {view.outcome === "propose" ? <AmuxIdeaResolutionPanel
+        key={`${view.previewId}:${chunkIndex}:${view.units.map((unit) => unit.bodyDigest).join(":")}`}
+        ideaId={ideaId} chunkIndex={chunkIndex} units={view.units} /> : null}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;

@@ -7106,6 +7106,8 @@ model AmuxWorkItem {
   executionBriefDigest  String?
   /// Only new admin-idea-v4 cards use these fields. Existing rows remain NULL.
   cardType              String?
+  /// For v4 Stories only: Bug is a Story subtype, not an executable card.
+  storyKind             String?
   parentFeatureNodeId   String?
   parentStoryCardId     String?
   v4TitleCiphertext     Bytes?
