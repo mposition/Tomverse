@@ -348,10 +348,23 @@ export async function advanceOpsObserverState(
       }
       if (!keysAreValid(input.keys)) return { result: "conflict", sendPermitted: false };
 
+      // Take the base before writing anything. Under READ COMMITTED another
+      // advance may have committed since the facts were read; the lock waits
+      // for it, re-reads the row, and finds no row at the base. Then nothing
+      // has been written and the conflict is the whole answer.
+      const locked = await tx.$queryRaw<{ generation: number }[]>`
+        SELECT generation FROM "OpsObserverState"
+         WHERE "genesisId" = ${head.id}::uuid AND generation = ${previousGeneration}
+         FOR UPDATE`;
+      if (locked.length === 0) return { result: "conflict", sendPermitted: false };
+
+      // Every reservation still open is closed, whichever genesis made it: one
+      // left by a genesis since replaced is just as unknown, and the marker that
+      // allows one open reservation spans the table.
       const abandoned = await tx.$queryRaw<{ id: string }[]>`
         UPDATE "OpsObserverDelivery"
            SET status = 'abandoned', "stampStatus" = 'abandoned', "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
-         WHERE "genesisId" = ${head.id}::uuid AND status = 'reserved'
+         WHERE status = 'reserved'
         RETURNING id`;
       if (abandoned.length === 0 && stableJson(input.keys) === stableJson(head.keys)) {
         return {
@@ -377,7 +390,9 @@ export async function advanceOpsObserverState(
                "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
          WHERE "genesisId" = ${head.id}::uuid AND generation = ${previousGeneration}
         RETURNING generation, "stampKeysSha256"`;
-      if (!updated) return { result: "conflict", sendPermitted: false };
+      // The row is locked at the base, so this cannot miss; if it does, roll
+      // back the abandon with it rather than report a conflict over a write.
+      if (!updated) throw new Error("ops_observer_state_update_missed_locked_row");
 
       const entry = await tx.$appendSystemAudit({
         action: "ops_observer.state_advanced",

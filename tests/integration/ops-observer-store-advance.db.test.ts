@@ -160,6 +160,81 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
       assert.deepEqual(again, { result: "noop", sendPermitted: false, heartbeatWithheld: true, generation: before.generation + 1 });
       assert.equal((await read()).trust, "trusted");
     });
+
+    // A recovery genesis after the first, the seven-day rule met by moving the
+    // first genesis back past its guard (fixture only).
+    const recoveryId = randomUUID();
+    await t.test("a reservation left by a replaced genesis is closed by the next advance", async () => {
+      const leftOpen = randomUUID();
+      await q(`INSERT INTO "OpsObserverDelivery" (id, "genesisId", mode, "runId", status, "ownerDate", "invariantVersion", "stampStatus", "runDeadlineAt")
+               VALUES ($1, $2, 'shadow', 'run-left-by-old-genesis', 'reserved', '2026-10-05', 0, 'reserved', clock_timestamp() + interval '60 seconds')`,
+        [leftOpen, genesisId]);
+      await q(`ALTER TABLE "OpsObserverGenesis" DISABLE TRIGGER USER`);
+      try {
+        await q(`UPDATE "OpsObserverGenesis" SET "createdAt" = clock_timestamp() - interval '8 days' WHERE id = $1`, [genesisId]);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverGenesis" ENABLE TRIGGER USER`);
+      }
+      const at = "2026-10-05T00:00:01.000";
+      const entry = {
+        previousHash: null, actorUserId: "owner-1", actorEmail: "owner@example.test",
+        action: "ops_observer.genesis_created", targetType: "OpsObserverGenesis", targetId: recoveryId,
+        summary: "Recovery genesis.", metadata: { requestDigest: DIGEST, supersedesGenesisId: genesisId, mode: "shadow" },
+        ipAddress: null, userAgent: null, createdAt: `${at}Z`,
+      };
+      await q("BEGIN");
+      await q(`INSERT INTO "OpsObserverGenesis" (id, reason, mode, "supersedesGenesisId", "requestDigest", "invariantVersion", "runDeadlineAt")
+               VALUES ($1, 'recovery', 'shadow', $2, $3, 1, clock_timestamp() + interval '60 seconds')`, [recoveryId, genesisId, DIGEST]);
+      await q(`INSERT INTO "AdminAuditLog" (id, "actorUserId", "actorEmail", action, "targetType", "targetId", summary, metadata, "entryHash", "createdAt")
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [randomUUID(), entry.actorUserId, entry.actorEmail, entry.action, entry.targetType, entry.targetId, entry.summary,
+          JSON.stringify(entry.metadata), computeAdminAuditEntryHash(entry, KEY), at]);
+      await q(`INSERT INTO "OpsObserverState" ("genesisId", generation, keys, "invariantVersion", "stampGeneration",
+                 "stampKeysSha256", "stampCheckpointSha256", "runDeadlineAt")
+               VALUES ($1, 0, $2, 0, 0, '', '', clock_timestamp() + interval '60 seconds')`, [recoveryId, JSON.stringify(initial)]);
+      await q("COMMIT");
+      assert.equal((await read()).trust, "trusted");
+
+      const result = await advance(0, withStreak(1), { baseGenesisId: recoveryId });
+      assert.deepEqual(result, { result: "advanced", sendPermitted: false, heartbeatWithheld: true, generation: 1 });
+      const { rows } = await q(`SELECT status FROM "OpsObserverDelivery" WHERE id = $1`, [leftOpen]);
+      assert.equal(rows[0].status, "abandoned");
+    });
+
+    await t.test("an advance that loses the race to another writes nothing at all", async () => {
+      const pending = randomUUID();
+      await q(`INSERT INTO "OpsObserverDelivery" (id, "genesisId", mode, "runId", status, "ownerDate", "invariantVersion", "stampStatus", "runDeadlineAt")
+               VALUES ($1, $2, 'shadow', 'run-open-during-race', 'reserved', '2026-10-05', 0, 'reserved', clock_timestamp() + interval '60 seconds')`,
+        [pending, recoveryId]);
+      const ledgerBefore = (await q(`SELECT count(*)::int AS n FROM "OpsObserverTransition"`)).rows[0].n;
+      const auditBefore = (await q(`SELECT count(*)::int AS n FROM "AdminAuditLog"`)).rows[0].n;
+
+      // Another writer holds the state row and moves the generation while this
+      // advance is between reading its facts and taking the base.
+      const other = new pg.Client({ connectionString: rawUrl });
+      await other.connect();
+      try {
+        await other.query(`SET search_path TO "${schema}"`);
+        await other.query("BEGIN");
+        await other.query(`SELECT 1 FROM "OpsObserverState" WHERE "genesisId" = $1 FOR UPDATE`, [recoveryId]);
+        const racing = advance(1, withStreak(2), { baseGenesisId: recoveryId });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await other.query(
+          `UPDATE "OpsObserverState" SET generation = generation + 1, keys = $2, "runDeadlineAt" = clock_timestamp() + interval '60 seconds'
+            WHERE "genesisId" = $1`,
+          [recoveryId, JSON.stringify(withStreak(3))],
+        );
+        await other.query("COMMIT");
+        assert.deepEqual(await racing, { result: "conflict", sendPermitted: false });
+      } finally {
+        await other.query("ROLLBACK").catch(() => undefined);
+        await other.end();
+      }
+      const { rows } = await q(`SELECT status FROM "OpsObserverDelivery" WHERE id = $1`, [pending]);
+      assert.equal(rows[0].status, "reserved", "the losing advance must not have closed the reservation");
+      assert.equal((await q(`SELECT count(*)::int AS n FROM "OpsObserverTransition"`)).rows[0].n, ledgerBefore);
+      assert.equal((await q(`SELECT count(*)::int AS n FROM "AdminAuditLog"`)).rows[0].n, auditBefore);
+    });
   } finally {
     await client.$disconnect().catch(() => undefined);
     await pool.end().catch(() => undefined);
