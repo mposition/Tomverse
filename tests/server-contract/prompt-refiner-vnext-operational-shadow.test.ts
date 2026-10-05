@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import type { Session } from "next-auth";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  promptRefinerVnextOneShotShadowPublicKeyDigest,
+  signPromptRefinerVnextOneShotShadowProof } from
+  "../../lib/promptRefinerVnextOneShotShadowProof";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
@@ -12,6 +17,13 @@ const target = {
   runApprovalAuditLogId: "synthetic-run-audit",
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
 };
+const shadowKeys = generateKeyPairSync("ed25519");
+const privateKey = shadowKeys.privateKey.export({
+  format: "der", type: "pkcs8",
+}).toString("base64");
+const publicKey = shadowKeys.publicKey.export({
+  format: "der", type: "spki",
+}).toString("base64");
 const baseStage = {
   id: stageId, status: "run_approved", approvedBy: "synthetic-owner",
   ...target,
@@ -31,10 +43,11 @@ let receiptValid = true;
 let writes = 0;
 let sourceReads = 0;
 let writeFailure = false;
+let runCreatedAt = new Date();
 const tx = {
   adminAuditLog: {
     findMany: async () => evidenceRows,
-    findUnique: async () => ({ createdAt: new Date("2026-10-05T00:00:00.000Z") }),
+    findUnique: async () => ({ createdAt: runCreatedAt }),
   },
   promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
     where: { id: string } }) => where.id === stage.id ? stage : null },
@@ -48,7 +61,7 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
     evidenceRows.push({ id: "synthetic-shadow-audit", action: input.action,
       targetType: input.targetType, targetId: input.targetId,
       actorUserId: "synthetic-owner", summary: input.summary,
-      metadata: input.metadata, createdAt: new Date("2026-10-05T00:00:01.000Z") });
+      metadata: input.metadata, createdAt: new Date() });
     return "synthetic-shadow-audit";
   },
 } });
@@ -70,18 +83,29 @@ mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), {
 mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (tx: object) => Promise<unknown>) => work(tx) },
 } });
-mock.module(mod("lib/routerDevelopmentBenchmark.ts"), { namedExports: {
-  canonicalBenchmarkJson: (value: unknown) => JSON.stringify(value),
-} });
-
 type ShadowModule = typeof import("../../lib/promptRefinerVnextOneShotOperationalShadow");
 const load = () => import(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts")) as
   Promise<ShadowModule>;
+const proof = () => signPromptRefinerVnextOneShotShadowProof({
+  version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
+  ...target,
+  sourceCommitSha: baseStage.sourceCommitSha,
+  sourceManifestDigest: baseStage.sourceManifestDigest,
+  runnerDigest: baseStage.runnerDigest,
+  runtimeCommitSha: baseStage.runtimeCommitSha,
+  pricePinDigest: baseStage.pricePinDigest,
+  perRequestCostMicroUsd: 29_918, costCeilingMicroUsd: 2_393_440,
+  slotCount: 80, reservedSlots: 80, consumedSlots: 0,
+  manifestRoot: baseStage.manifestRoot,
+  runnerPreflightDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
+  signedAt: new Date().toISOString(),
+}, privateKey);
 const input = () => ({
   session: { user: { id: "synthetic-owner" } } as Session,
   request: new Request("https://example.test/api/admin/prompt-refiner/vnext-operational-shadow",
     { method: "POST" }),
-  expected: target,
+  proof: proof(),
 });
 const reset = () => {
   stage = { ...baseStage };
@@ -90,8 +114,12 @@ const reset = () => {
     reservationShapeValid: true, approvalAuditsValid: true };
   evidenceRows = []; auditsValid = true; receiptValid = true;
   writes = 0; sourceReads = 0; writeFailure = false;
+  runCreatedAt = new Date(Date.now() - 2_000);
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = baseStage.manifestRoot;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = baseStage.runnerDigest;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 = publicKey;
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST =
+    promptRefinerVnextOneShotShadowPublicKeyDigest(publicKey);
 };
 
 test("app records one content-free shadow for the exact synthetic stage/run/80 slots", async () => {
@@ -109,6 +137,8 @@ test("app records one content-free shadow for the exact synthetic stage/run/80 s
   assert.equal(sourceReads, 1);
   assert.equal(evidenceRows[0].metadata &&
     JSON.stringify(evidenceRows[0].metadata).includes("manifestRoot"), false);
+  assert.equal((evidenceRows[0].metadata as Record<string, unknown>)
+    .cacheWriteInputTokens, 0);
   assert.deepEqual(await readPromptRefinerVnextOneShotOperationalShadow(
     tx as never, stage as never), {
     present: true, valid: true, shadowAuditLogId: "synthetic-shadow-audit",
@@ -147,6 +177,29 @@ test("missing run, broken reservations, audit, custody or target refuse before w
     await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()));
     assert.equal(writes, 0);
   }
+});
+
+test("caller claims and altered signed evidence cannot create an audit", async () => {
+  const { recordPromptRefinerVnextOneShotOperationalShadow } = await load();
+  for (const altered of [
+    { cacheWriteInputTokens: true },
+    { cacheWriteInputTokens: "0" },
+    { cacheWriteInputTokens: 1 },
+    { runtimeCommitSha: "0".repeat(40) },
+  ]) {
+    reset();
+    await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow({
+      ...input(), proof: { ...proof(), ...altered },
+    }), /vnext_one_shot_shadow_proof_invalid/);
+    assert.equal(writes, 0);
+    assert.equal(sourceReads, 0);
+  }
+  reset();
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST =
+    "0".repeat(64);
+  await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow(input()),
+    /vnext_one_shot_shadow_signer_pin_unavailable/);
+  assert.equal(writes, 0);
 });
 
 test("mismatched, duplicate and unverifiable shadow rows never read back as valid", async () => {

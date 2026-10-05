@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -25,8 +25,13 @@ import { approvePromptRefinerVnextOneShotRun } from
 import { consumePromptRefinerVnextOneShotSlot } from
   "@/lib/promptRefinerVnextOneShotSlotConsumption";
 import { readPromptRefinerVnextOneShotOperationalShadow,
-  recordPromptRefinerVnextOneShotOperationalShadow } from
+  recordPromptRefinerVnextOneShotOperationalShadow,
+  promptRefinerVnextOneShotShadowTarget } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+  promptRefinerVnextOneShotShadowPublicKeyDigest,
+  signPromptRefinerVnextOneShotShadowProof } from
+  "@/lib/promptRefinerVnextOneShotShadowProof";
 import { createPromptRefinerVnextOneShotAdapter } from
   "@/lib/promptRefinerVnextOneShotAdapter";
 import { readPromptRefinerVnextOneShotUnknownStop,
@@ -43,6 +48,13 @@ const testUrl = process.env.TEST_DATABASE_URL?.trim();
 const fixtureKey = "synthetic-chat01-a06-audit-integrity-key";
 const stageId = "prompt-refiner-vnext-one-shot-v2";
 const legacyStageId = "prompt-refiner-vnext-one-shot-v1";
+const shadowKeys = generateKeyPairSync("ed25519");
+const shadowPrivateKey = shadowKeys.privateKey.export({
+  format: "der", type: "pkcs8",
+}).toString("base64");
+const shadowPublicKey = shadowKeys.publicKey.export({
+  format: "der", type: "spki",
+}).toString("base64");
 const countOperationalAudits = () => prisma.adminAuditLog.count({
   where: { targetId: { not: legacyStageId },
     action: { not: "prompt_refiner.vnext_one_shot.preregistered" } },
@@ -477,6 +489,9 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         RAILWAY_API_TOKEN: "synthetic-read-only-token",
         PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT: binding.manifestRoot,
         PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST: binding.runnerDigest,
+        PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64: shadowPublicKey,
+        PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST:
+          promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey),
       };
       const priorEnv = Object.fromEntries(Object.keys(envPins).map((key) =>
         [key, process.env[key]]));
@@ -623,12 +638,17 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         assert.equal((await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
           where: { stageId_slotIndex: { stageId, slotIndex: 0 } },
         })).status, "reserved", "missing shadow must not consume a slot");
+        const shadowProof = signPromptRefinerVnextOneShotShadowProof({
+          version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
+          ...promptRefinerVnextOneShotShadowTarget(advanced),
+          manifestRoot: binding.manifestRoot,
+          runnerPreflightDigest:
+            PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+          cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
+          signedAt: new Date().toISOString(),
+        }, shadowPrivateKey);
         const shadow = await recordPromptRefinerVnextOneShotOperationalShadow({
-          session, request, expected: {
-            stageApprovalAuditLogId: auditLogId,
-            runApprovalAuditLogId: run.runApprovalAuditLogId,
-            runtimeDeploymentId: binding.runtimeDeploymentId,
-          },
+          session, request, proof: shadowProof,
         });
         assert.equal(shadow.dispatchAuthorized, false);
         assert.equal(await countOperationalAudits(), 3);
@@ -637,14 +657,12 @@ test("stage audit and 80 slots commit or roll back in the same PG17 transaction"
         });
         assert.equal(shadowAudit.previousHash, runAudit.entryHash);
         assert.equal(JSON.stringify(shadowAudit.metadata).includes(binding.manifestRoot), false);
+        assert.equal((shadowAudit.metadata as Record<string, unknown>)
+          .cacheWriteInputTokens, 0);
         assert.equal((await prisma.$transaction(async (tx) =>
           readPromptRefinerVnextOneShotOperationalShadow(tx, advanced))).valid, true);
         await assert.rejects(recordPromptRefinerVnextOneShotOperationalShadow({
-          session, request, expected: {
-            stageApprovalAuditLogId: auditLogId,
-            runApprovalAuditLogId: run.runApprovalAuditLogId,
-            runtimeDeploymentId: binding.runtimeDeploymentId,
-          },
+          session, request, proof: shadowProof,
         }), /shadow_duplicate/);
         assert.equal(await countOperationalAudits(), 3);
 

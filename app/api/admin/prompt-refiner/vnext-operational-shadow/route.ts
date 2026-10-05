@@ -13,7 +13,10 @@ import { authOptions } from "@/lib/auth";
 import {
   readPromptRefinerVnextOneShotOperationalShadow,
   recordPromptRefinerVnextOneShotOperationalShadow,
+  promptRefinerVnextOneShotShadowTarget,
 } from "@/lib/promptRefinerVnextOneShotOperationalShadow";
+import { promptRefinerVnextOneShotShadowProofSchema } from
+  "@/lib/promptRefinerVnextOneShotShadowProof";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
@@ -21,14 +24,13 @@ import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const requestSchema = z.object({
-  stageApprovalAuditLogId: z.string().min(1).max(128),
-  runApprovalAuditLogId: z.string().min(1).max(128),
-  runtimeDeploymentId: z.string().regex(
-    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
+  proof: promptRefinerVnextOneShotShadowProofSchema,
   confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_OPERATIONAL_SHADOW_80_SLOTS"),
 }).strict();
 const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_shadow_context_invalid",
+  "vnext_one_shot_shadow_proof_invalid",
+  "vnext_one_shot_shadow_signer_pin_unavailable",
   "vnext_one_shot_shadow_custody_pin_unavailable",
   "vnext_one_shot_shadow_stage_unavailable",
   "vnext_one_shot_shadow_binding_mismatch",
@@ -75,11 +77,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ code: "SHADOW_WRITE_DISABLED" },
         { status: 409, headers });
     }
-    const body = await readLimitedJson(request, 2 * 1024, requestSchema);
-    const { confirmation: _confirmation, ...expected } = body;
-    void _confirmation;
+    const body = await readLimitedJson(request, 4 * 1024, requestSchema);
     const result = await recordPromptRefinerVnextOneShotOperationalShadow({
-      session: access.session, request, expected,
+      session: access.session, request, proof: body.proof,
     });
     return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
@@ -114,6 +114,12 @@ export async function GET(request: Request) {
         consumedSlots: snapshot.consumedSlots,
         reservationShapeValid: snapshot.reservationShapeValid,
         approvalAuditsValid: snapshot.approvalAuditsValid,
+        dispatchAuthorized: snapshot.dispatchAuthorized,
+        target: stage && snapshot.stageStatus === "run_approved" &&
+          snapshot.reservationShapeValid && snapshot.approvalAuditsValid &&
+          snapshot.slotCount === 80 && snapshot.reservedSlots === 80 &&
+          snapshot.consumedSlots === 0
+          ? promptRefinerVnextOneShotShadowTarget(stage) : null,
         evidence };
     }, { maxWait: 5_000, timeout: 10_000 });
     return NextResponse.json({ readback }, { headers });
