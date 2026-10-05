@@ -24,12 +24,15 @@ here: v1 is closed and v2 is already `run_approved`. Deploying the B06 proof
 receiver changes the app deployment ID and commit, so the existing v2 approval
 cannot authorize a shadow on that new deployment.
 
-If this addendum receives its own exact approval, it **supersedes only** the
-unrun replacement's sentence forbidding a third stage ID for this named,
-already-approved, zero-consumption v2 stage and B06 deployment drift. It
-permits exactly one v3 and no reset, v4 or repeated recovery under this
-policy. The older prohibition remains in force for every other case. This is
-not a general exception for future deployment changes.
+If this addendum receives its own exact approval, it **supersedes only for
+this named recovery** the unrun replacement's clauses forbidding a repeated
+replacement and a third stage ID, and its clause making only v2's 80 slots
+eligible for the paid run. It permits exactly one v3 with 80 new slots. After
+separate paid authorization, only v3's slots can ever be eligible for the
+single 2,393,440 microUSD run; v1 and v2 slots remain ineligible. No reset,
+v4 or repeated recovery is allowed under this policy. The older clauses
+remain in force for every other case. This is not a general exception for
+future deployment changes.
 
 ## 1. Exact source stage and reason
 
@@ -75,26 +78,39 @@ deployment. Stage approval cannot stand in for run approval. The app must
 read back v3's stage and run audits, deployment ID and commit, 80 reserved and
 zero consumed slots before B06 shadow. The exact target deployment must
 already contain the reviewed paid-slot route and its separate owner-only paid
-approval route. Its `PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED=1` setting
-only makes the route reachable; it is **not** paid authority. Under the same
+approval route. Its `PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED=1` and
+`PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED=1` settings only make the
+slot route reachable; neither is paid authority. Under the same
 audit and stage locks, the slot route must refuse every request until a
 distinct, valid, hash-chained paid-authorization audit for this exact v3
 stage, deployment, candidate, root, runner, price and ceiling exists. That
 audit is absent throughout B06, so paid calls and slot consumption remain
 blocked even with the environment switch set. The approval route is included
 in this deployment but may write only after a valid B06 shadow readback,
-separate exact operator spend authorization, recent reauthentication and an
+separate exact owner spend authorization, recent reauthentication and an
 explicit confirmation. This policy grants no such authorization and B06
 never invokes that route.
 
+The B06 deployment is refused before v3 stage approval unless its reviewed
+commit includes the v3 paid-audit guard in the slot route, the owner paid
+approval route, and passing CI tests that call the slot route with **both**
+environment switches set to `1`, a valid runner token and request, and no
+paid audit. That request must refuse before slot mutation. V3 stage admission also checks a
+server-owned capability version exported by the guarded slot implementation;
+an absent or mismatched version refuses stage creation. A caller field or
+environment claim cannot satisfy that check. No earlier build with only the
+environment switch is eligible for this recovery.
+
 The shadow write is disabled by default and may be enabled only in the exact
 deployment that will host stage, run and shadow. All required environment
-pins, keys and switches are fixed before stage approval; no environment edit
-or redeployment occurs between v3 stage, run, shadow and any later separately
-approved paid run. Later paid authorization changes only the app's audited DB
-state through its owner route, not the Railway deployment. The owner-held A17
-runner receives provider credentials only after a separate paid approval;
-none are needed for B06.
+pins, keys and switches **in the app deployment** are fixed before stage
+approval; no app environment edit or redeployment occurs between v3 stage,
+run, shadow and any later separately approved paid run. Later paid
+authorization changes only the app's audited DB state through its owner
+route, not the Railway deployment. The distinct owner-held A17 runner process
+receives `PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY` only after a separate
+paid approval; changing that owner-process environment does not change the
+app's deployment ID. The provider key is absent from the B06 shadow process.
 
 The B06 shadow accepts only the owner-held, signed, content-free proof produced
 after the exact A17 final runner checks the sealed 80-case manifest without a
@@ -114,9 +130,14 @@ If v3 exists and is valid, the owner may continue its distinct run approval
 on that same deployment. If v3 is absent, invalid, or the deployment drifts,
 B06 remains incomplete and this recovery stops; the formal quality gate stays
 unassessed. A new explicit policy and owner decision would be required before
-any replacement or paid run. An uncertain shadow write is read back once: one valid audit proves
-completion; absent, duplicate or invalid evidence stops the attempt without
-a second POST. Historical v1/v2 rows are never reset or deleted.
+any replacement or paid run. An uncertain shadow write is read back once:
+completion requires one valid v3 shadow audit, the same active deployment ID
+and commit, valid v3 stage and run audits, all 80 slots reserved and zero
+consumed, integer cache-write zero, and `dispatchAuthorized: false`. Absent,
+duplicate, mismatched or invalid evidence stops the attempt without a second
+POST. The later paid-approval route must also refuse a drifted deployment and
+must not treat a B06 shadow receipt as spend authority. Historical v1/v2 rows
+are never reset or deleted.
 
 ## 3. Approval and verification gates
 
