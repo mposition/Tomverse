@@ -87,6 +87,7 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261005010000_amux_v4_story_kind",
   // A09: immutable, non-body owner confirmation metadata.
   "20261005030000_amux_v4_unit_confirmation_snapshot",
+  "20261005040000_amux_v4_registration_consistency",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

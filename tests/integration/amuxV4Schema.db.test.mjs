@@ -724,6 +724,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await expectRejected(insertStory,
       [storyParams[0], String(storyParams[1]).toLowerCase(), ...storyParams.slice(2)],
       "AmuxWorkItem_source_complete_check");
+    await client.query("SAVEPOINT initial_story_probe");
     await client.query(insertStory, storyParams);
     await expectRejected(
       `UPDATE public."AmuxWorkItem" SET "storyKind" = NULL WHERE "id" = $1`,
@@ -734,6 +735,8 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       [ids.story],
     );
     assert.equal(todoError.code, "23514");
+    await client.query("ROLLBACK TO SAVEPOINT initial_story_probe");
+    await client.query("RELEASE SAVEPOINT initial_story_probe");
 
     // A09's inert registration must be an all-or-nothing decision/card/unit
     // write. The synthetic fixture does not grant route access or run a model.
@@ -931,6 +934,145 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
         [], "AmuxIdeaUnitDecision_no_truncate_check",
       );
       await client.query("ROLLBACK");
+    }
+  } finally {
+    await client.query("ROLLBACK").catch(() => {});
+    await client.end();
+  }
+});
+
+test("a consumed node decision is durable only with its draft, node, revision and audit", {
+  skip: allowed ? undefined : "requires a dedicated loopback test database",
+}, async () => {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    for (const approveDraft of [false, true]) {
+      const ideaId = randomUUID();
+      const previewId = randomUUID();
+      const unitId = randomUUID();
+      const decisionId = randomUUID();
+      const nodeId = randomUUID();
+      const bodyDigest = "a".repeat(64);
+      await client.query("BEGIN");
+      await client.query("SET LOCAL TIME ZONE 'UTC'");
+      await client.query(
+        `INSERT INTO public."AmuxIdeaSubmission"
+         ("id", "requestId", "actorUserId", "state", "submittedAt",
+          "analysisDeadlineAt", "updatedAt")
+         VALUES ($1, $2, 'synthetic-owner', 'submitted', CURRENT_TIMESTAMP,
+                 CURRENT_TIMESTAMP + INTERVAL '7 days', CURRENT_TIMESTAMP)`,
+        [ideaId, randomUUID()],
+      );
+      await client.query(
+        `INSERT INTO public."AmuxIdeaAnalysisChunk"
+         ("ideaId", "actorUserId", "chunkIndex", "state", "attempt",
+          "leaseGeneration", "analysisCompletedAt", "updatedAt")
+         VALUES ($1, 'synthetic-owner', 0, 'draft_ready', 0, 0,
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, [ideaId],
+      );
+      await client.query(
+        `INSERT INTO public."AmuxIdeaTransferPreview"
+         ("id", "ideaId", "chunkIndex", "attempt", "state", "modelId",
+          "templateVersion", "payloadDigest", "payloadDigestKeyId",
+          "expiresAt", "confirmedAt", "confirmExpiresAt",
+          "confirmedByUserId", "confirmationAuditLogId", "updatedAt")
+         VALUES ($1, $2, 0, 1, 'completed', 'synthetic-model',
+                 'synthetic-template', $3, 'synthetic',
+                 CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP,
+                 CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+                 'synthetic-owner', $4, CURRENT_TIMESTAMP)`,
+        [previewId, ideaId, bodyDigest, randomUUID()],
+      );
+      await client.query(
+        `UPDATE public."AmuxIdeaAnalysisChunk"
+         SET "currentPreviewId" = $2 WHERE "ideaId" = $1 AND "chunkIndex" = 0`,
+        [ideaId, previewId],
+      );
+      await client.query(
+        `INSERT INTO public."AmuxIdeaDraftUnit"
+         ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex",
+          "localRef", "unitKind", "state", "bodyCiphertext", "bodyKeyId",
+          "bodyKeyVersion", "bodyDigest", "bodyDigestKeyId", "updatedAt")
+         VALUES ($1, $2, 'synthetic-owner', 0, 0, 'c0:node-0', 'node',
+                 'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+        [unitId, ideaId, Buffer.from("synthetic"), bodyDigest],
+      );
+      const prepareAudit = await appendSyntheticAdminAudit(client, {
+        actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+        targetType: "AmuxIdeaUnitDecision", targetId: decisionId,
+        summary: "synthetic node preparation", metadata: null,
+      });
+      await client.query(
+        `INSERT INTO public."AmuxIdeaUnitDecision"
+         ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+          "prepareRequestId", "action", "state", "ownerSessionDigest",
+          "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+          "confirmationDigest", "confirmationDigestKeyId",
+          "confirmationSnapshot", "sourcePreviewId", "sourcePreviewDigest",
+          "sourcePreviewDigestKeyId", "preparedAt", "expiresAt",
+          "prepareAuditLogId", "updatedAt")
+         VALUES ($1, $2, $3, 'synthetic-owner', 0, $4, 'create_node',
+                 'prepared', $5, 'synthetic', $6, 'synthetic',
+                 $7, 'synthetic', $8::jsonb, $9, $10, 'synthetic',
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+                 $11, CURRENT_TIMESTAMP)`,
+        [decisionId, ideaId, unitId, randomUUID(), "1".repeat(64),
+          bodyDigest, "2".repeat(64), JSON.stringify({ nodeProposal: {
+            id: nodeId, level: "initiative", parentId: null } }),
+          previewId, bodyDigest, prepareAudit],
+      );
+      const consumeAudit = await appendSyntheticAdminAudit(client, {
+        actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+        targetType: "AmuxIdeaUnitDecision", targetId: decisionId,
+        summary: "synthetic node consumption", metadata: null,
+      });
+      await client.query(
+        `INSERT INTO public."AmuxPortfolioNode"
+         ("id", "level", "state", "revision", "titleCiphertext",
+          "descriptionCiphertext", "contentKeyId", "contentKeyVersion",
+          "contentDigest", "contentDigestKeyId", "approvedByUserId",
+          "authorizationAuditLogId", "updatedAt")
+         VALUES ($1, 'initiative', 'active', 0, $2, $2, 'synthetic', 1,
+                 $3, 'synthetic', 'synthetic-owner', $4, CURRENT_TIMESTAMP)`,
+        [nodeId, Buffer.from("synthetic"), bodyDigest, consumeAudit],
+      );
+      await client.query(
+        `INSERT INTO public."AmuxPortfolioNodeRevision"
+         ("id", "nodeId", "revision", "contentDigest",
+          "contentDigestKeyId", "decisionId", "authorizationAuditLogId",
+          "approvedAt") VALUES ($1, $2, 0, $3, 'synthetic', $4, $5,
+                                  CURRENT_TIMESTAMP)`,
+        [randomUUID(), nodeId, bodyDigest, decisionId, consumeAudit],
+      );
+      await client.query(
+        `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'consumed',
+         "consumeRequestId" = $2, "resolvedNodeId" = $3,
+         "finalAuditLogId" = $4 WHERE "id" = $1`,
+        [decisionId, randomUUID(), nodeId, consumeAudit],
+      );
+      if (approveDraft) {
+        await client.query(
+          `UPDATE public."AmuxIdeaDraftUnit" SET "state" = 'approved'
+           WHERE "id" = $1`, [unitId],
+        );
+        await client.query("COMMIT");
+        const saved = await client.query(
+          `SELECT "state", "resolvedNodeId" FROM public."AmuxIdeaUnitDecision"
+           WHERE "id" = $1`, [decisionId],
+        );
+        assert.deepEqual(saved.rows[0], {
+          state: "consumed", resolvedNodeId: nodeId,
+        });
+      } else {
+        await assert.rejects(client.query("COMMIT"), (error) =>
+          error.constraint === "AmuxV4Registration_consistency_check");
+        const absent = await client.query(
+          `SELECT "id" FROM public."AmuxIdeaUnitDecision" WHERE "id" = $1`,
+          [decisionId],
+        );
+        assert.equal(absent.rowCount, 0);
+      }
     }
   } finally {
     await client.query("ROLLBACK").catch(() => {});
