@@ -4,10 +4,12 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { takeAuditChainLock, writeAdminAuditLog,
-  writeSystemAuditLogEntry } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
-import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/adminAuditSystemActors";
+import { AMUX_V4_IDEA_SYSTEM_ACTOR, SYSTEM_AUDIT_ACTOR_METADATA_KEY } from
+  "@/lib/adminAuditSystemActors";
+import { writeAmuxV4UnitHousekeepingAudit } from
+  "@/lib/amux/ideaUnitDecisionSystemAudit";
 import { assertRecentAdminAuthentication } from
   "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
@@ -1101,8 +1103,8 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
         unknownAudit.targetId !== row.id ||
         typeof unknownAudit.metadata !== "object" ||
         unknownAudit.metadata === null ||
-        (unknownAudit.metadata as Record<string, unknown>).systemActor !==
-          AMUX_SYSTEM_AUDIT_ACTOR)) ||
+        (unknownAudit.metadata as Record<string, unknown>)[SYSTEM_AUDIT_ACTOR_METADATA_KEY] !==
+          AMUX_V4_IDEA_SYSTEM_ACTOR)) ||
       (row.outcomeUnknownResolvedAt !== null &&
         (!unknownResolvedAudit?.entryHash ||
         unknownResolvedAudit.action !== "amux.v4.unit.no_commit_confirmed" ||
@@ -1118,8 +1120,8 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
           (finalAudit.actorUserId !== null ||
             typeof finalAudit.metadata !== "object" ||
             finalAudit.metadata === null ||
-            (finalAudit.metadata as Record<string, unknown>).systemActor !==
-              "tomverse-amux-orchestrator") :
+            (finalAudit.metadata as Record<string, unknown>)[SYSTEM_AUDIT_ACTOR_METADATA_KEY] !==
+              AMUX_V4_IDEA_SYSTEM_ACTOR) :
           finalAudit.actorUserId !== actorUserId) ||
         finalAudit.targetId !== row.id)) ||
       (row.state === "consumed" && row.action === "register_card" && (!card ||
@@ -1240,8 +1242,7 @@ export async function markAmuxV4UnitConsumeOutcomeUnknown(input: {
       }
       if (row?.state !== "prepared") return "unavailable" as const;
       if (row.outcomeUnknownAt !== null) return "already_unknown" as const;
-      const audit = await writeSystemAuditLogEntry({ tx,
-        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      const audit = await writeAmuxV4UnitHousekeepingAudit({ tx,
         action: "amux.v4.unit.outcome_unknown",
         targetType: "AmuxIdeaUnitDecision", targetId: input.decisionId,
         summary: "Recorded an uncertain AMUX v4 unit consume outcome.",
@@ -1257,7 +1258,25 @@ export async function markAmuxV4UnitConsumeOutcomeUnknown(input: {
       if (updated.count !== 1) throw new Error("unknown marker lost its lock");
       return "recorded" as const;
     }, { isolationLevel: "Serializable", maxWait: 5_000, timeout: 15_000 });
-  } catch { return "unavailable"; }
+  } catch {
+    // A serializable loser may fail after the other marker committed. This is
+    // read-only reconciliation of the exact request, never a blind retry.
+    try {
+      const observed = await readAmuxV4UnitDecision(input.session,
+        { decisionId: input.decisionId });
+      if (observed.state === "outcome_unknown" &&
+          observed.consumeRequestId === input.consumeRequestId) {
+        return "already_unknown";
+      }
+      if (observed.state === "consumed" &&
+          await prisma.amuxIdeaUnitDecision.findFirst({
+            where: { id: input.decisionId, actorUserId,
+              state: "consumed", consumeRequestId: input.consumeRequestId },
+            select: { id: true },
+          })) return "committed";
+    } catch { /* Keep the decision unavailable if readback fails. */ }
+    return "unavailable";
+  }
 }
 
 /** The owner may close only an observed, still-prepared unknown receipt.
@@ -1321,8 +1340,7 @@ export async function confirmAmuxV4UnitNoCommit(input: {
           outcomeUnknownResolution: "no_commit",
           outcomeUnknownResolvedAuditLogId: humanAuditId },
       });
-      const systemAudit = await writeSystemAuditLogEntry({ tx,
-        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+      const systemAudit = await writeAmuxV4UnitHousekeepingAudit({ tx,
         action: "amux.v4.unit.invalidate",
         targetType: "AmuxIdeaUnitDecision", targetId: row.id,
         summary: "Invalidated a confirmed uncommitted AMUX v4 receipt.",

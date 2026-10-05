@@ -325,7 +325,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
     await expectRejected(insertDecision, [randomUUID(), ...decisionParams.slice(1, 4), randomUUID(),
       ...decisionParams.slice(5)], "AmuxIdeaUnitDecision_prepare_audit_check");
     const unknownAuditId = await decisionAudit("amux.v4.unit.outcome_unknown", null,
-      { systemActor: "tomverse-amux-orchestrator" });
+      { systemActor: "amux-v4-intake" });
     await client.query(
       `UPDATE public."AmuxIdeaUnitDecision"
        SET "outcomeUnknownAt" = CURRENT_TIMESTAMP,
@@ -355,7 +355,7 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       "AmuxIdeaUnitDecision_consume_boundary_check",
     );
     const invalidateAuditId = await decisionAudit("amux.v4.unit.invalidate", null,
-      { systemActor: "tomverse-amux-orchestrator" });
+      { systemActor: "amux-v4-intake" });
     await client.query(
       `UPDATE public."AmuxIdeaUnitDecision" SET "state" = 'invalidated',
        "finalAuditLogId" = $2 WHERE "id" = $1`,
