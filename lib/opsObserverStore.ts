@@ -41,7 +41,7 @@ import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
 import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
-import { confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
+import { DELIVERY_RETENTION_DAYS, confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
 import { GENESIS_MIN_INTERVAL_MS, deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 import { OPS_OBSERVER_INVARIANT_VERSION, genesisRefusal } from "@/scripts/ops-observer/genesis-core.mjs";
 import { S2_PAGE_KEYS, initialKeyState } from "@/scripts/ops-observer/classify-core.mjs";
@@ -810,5 +810,61 @@ export async function createOpsObserverGenesis(
     throw error;
   }
   if (result.result === "created") await assertNotLate(runDeadline, client);
+  return result;
+}
+
+/** The most reservations one retention batch deletes. */
+export const DELIVERY_RETENTION_BATCH_LIMIT = 500;
+
+/** How far ahead a retention batch sets its own deadline (inside its 30 s Prisma timeout). */
+const RETENTION_DEADLINE_MS = 25_000;
+
+/**
+ * One retention batch for the reservations (docs/policy/sre-ops.md §10): up
+ * to `limit` closed reservations whose close is at least
+ * DELIVERY_RETENTION_DAYS old, oldest first, with their items (the foreign
+ * key cascades). A `reserved` row is never selected and the delete trigger
+ * refuses one anyway, as it refuses anything closed more recently. Rows
+ * another transaction holds are skipped, not waited on. A batch that deleted
+ * anything leaves one system audit entry with the count, in the same
+ * transaction; an empty batch writes nothing.
+ */
+export async function purgeOpsObserverDeliveries(
+  limit: number = DELIVERY_RETENTION_BATCH_LIMIT,
+  client: PrismaClient = prisma,
+): Promise<{ deleted: number }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > DELIVERY_RETENTION_BATCH_LIMIT) {
+    throw new Error("ops_observer_retention_limit_invalid");
+  }
+  const runDeadline = new Date(Date.now() + RETENTION_DEADLINE_MS);
+  const { result } = await withOpsObserverTransaction(
+    "retention_batch",
+    runDeadline,
+    async (tx) => {
+      const deleted = await tx.$queryRaw<{ id: string }[]>`
+        DELETE FROM "OpsObserverDelivery"
+         WHERE id IN (
+           SELECT id FROM "OpsObserverDelivery"
+            WHERE status <> 'reserved'
+              AND coalesce("confirmedAt", "shadowedAt", "abandonedAt")
+                  <= clock_timestamp() - make_interval(days => ${DELIVERY_RETENTION_DAYS})
+            ORDER BY coalesce("confirmedAt", "shadowedAt", "abandonedAt"), id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED)
+        RETURNING id`;
+      if (deleted.length > 0) {
+        await tx.$appendSystemAudit({
+          action: "ops_observer.deliveries_purged",
+          targetType: "OpsObserverDelivery",
+          targetId: null,
+          summary: "Deleted closed ops-observer reservations past their retention.",
+          metadata: { count: deleted.length, retentionDays: DELIVERY_RETENTION_DAYS },
+        });
+      }
+      return { deleted: deleted.length };
+    },
+    client,
+  );
+  await assertNotLate(runDeadline, client);
   return result;
 }

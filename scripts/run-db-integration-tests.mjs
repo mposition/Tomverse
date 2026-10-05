@@ -385,6 +385,9 @@ run(
     // sre-ops genesis: the owner's approval bound to the head, the transition
     // and seven-day rules, and a created chain the state read trusts.
     "tests/integration/ops-observer-store-genesis.db.test.ts",
+    // sre-ops retention: closed reservations past ninety days deleted in
+    // bounded batches with their items; reserved and recent rows stay.
+    "tests/integration/ops-observer-store-retention.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
