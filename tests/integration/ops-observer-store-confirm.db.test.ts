@@ -149,6 +149,25 @@ test("the ops-observer confirm", { skip: !rawUrl }, async (t) => {
       assert.equal(await statusOf(deliveryId), "confirmed");
       assert.deepEqual(await auditActions(deliveryId), ["ops_observer.delivery_confirmed"]);
       assert.equal(((await readOpsObserverState(inSeconds(120), client)) as { trust: string }).trust, "trusted");
+
+      // A reservation forged past the trigger under the replaced shadow
+      // genesis, claiming live: the current chain is trusted, but this row's
+      // own stamps are not, and the confirm touches nothing.
+      const forged = randomUUID();
+      await q(`ALTER TABLE "OpsObserverDelivery" DISABLE TRIGGER USER`);
+      try {
+        await q(`INSERT INTO "OpsObserverDelivery" (id, "genesisId", mode, "runId", status, "reservedMarker", "ownerDate",
+                   "invariantVersion", "stampStatus", "runDeadlineAt")
+                 VALUES ($1, $2, 'live', 'run-forged', 'reserved', 1, '2026-10-08', 1, 'reserved', clock_timestamp() + interval '60 seconds')`,
+          [forged, shadowGenesis]);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverDelivery" ENABLE TRIGGER USER`);
+      }
+      assert.deepEqual(await confirm(forged, "run-forged"), { result: "untrusted", trust: "unenforced_write" });
+      assert.equal(await statusOf(forged), "reserved");
+      assert.deepEqual(await auditActions(forged), []);
+      const stamps = await q(`SELECT "invariantVersion" FROM "OpsObserverDelivery" WHERE id = $1`, [forged]);
+      assert.equal(stamps.rows[0].invariantVersion, 1, "the forged row keeps the stamps it was written with");
     });
   } finally {
     await client.$disconnect().catch(() => undefined);

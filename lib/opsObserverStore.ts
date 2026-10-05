@@ -38,7 +38,7 @@ import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-cor
 import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
 import { confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
-import { judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
+import { deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 
 type HeadRow = {
   id: string;
@@ -540,11 +540,21 @@ export async function confirmOpsObserverDelivery(
       const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
       if (!verdict.trusted) return { result: "untrusted", trust: verdict.reason ?? "state_missing" };
 
-      const [row] = await tx.$queryRaw<{ genesisId: string; mode: string; status: string }[]>`
-        SELECT "genesisId", mode, status FROM "OpsObserverDelivery"
-         WHERE id = ${input.deliveryId}::uuid AND "runId" = ${input.runId}
-         FOR UPDATE`;
+      // The row and the mode of the genesis that made it. The trust check reads
+      // only the current genesis's open reservation; this one may be older, so
+      // its own stamps are checked here before it is touched -- the close would
+      // otherwise overwrite them with the trigger's.
+      const [row] = await tx.$queryRaw<
+        { genesisId: string; mode: string; status: string; invariantVersion: number; stampStatus: string; genesisMode: string }[]
+      >`
+        SELECT d."genesisId", d.mode, d.status, d."invariantVersion", d."stampStatus", g.mode AS "genesisMode"
+          FROM "OpsObserverDelivery" d
+          JOIN "OpsObserverGenesis" g ON g.id = d."genesisId"
+         WHERE d.id = ${input.deliveryId}::uuid AND d."runId" = ${input.runId}
+         FOR UPDATE OF d`;
       if (!row) return { result: "not_found" };
+      const stamp = deliveryStampReason([row], row.genesisMode) as string | null;
+      if (stamp) return { result: "untrusted", trust: stamp };
       if (row.status === "confirmed" || row.status === "shadowed") return { result: "replayed" };
       if (row.status !== "reserved") return { result: "abandoned" };
 
