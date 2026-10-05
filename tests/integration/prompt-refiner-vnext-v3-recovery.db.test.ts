@@ -238,6 +238,42 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       await assert.rejects(client.query(`UPDATE "PromptRefinerVnextOneShotStage"
         SET "status" = 'closed' WHERE "id" = $1`, [V2]),
       /supersession audit/);
+      for (const action of [
+        "prompt_refiner.vnext_one_shot.operational_shadow_completed",
+        "prompt_refiner.vnext_one_shot.outcome_unknown",
+        "prompt_refiner.vnext_one_shot.gate_evaluated",
+        "prompt_refiner.vnext_one_shot.disposition_recorded",
+        "prompt_refiner.vnext_one_shot.paid_dispatch_authorized",
+      ]) {
+        await client.query("BEGIN");
+        const replacementAudit = await writeStageAudit(client, runtime[2]);
+        await supersede(client, runtime[1], runtime[2], replacementAudit, runAudit);
+        await audit(client, action, V2, "Synthetic forbidden historical evidence.", {});
+        await assert.rejects(insertStage(client, runtime[2], replacementAudit),
+          /forbidden historical evidence/,
+          `${action} must prevent the v3 recovery in PostgreSQL`);
+        await client.query("ROLLBACK");
+      }
+      await client.query("BEGIN");
+      let replacementAudit = await writeStageAudit(client, runtime[2]);
+      await supersede(client, runtime[1], runtime[2], replacementAudit, runAudit);
+      await client.query(`INSERT INTO "AdminAuditLog"
+        ("id", "actorUserId", "action", "targetType", "targetId", "summary")
+        VALUES ($1,$2,'prompt_refiner.vnext_one_shot.slot_consumed',
+          'PromptRefinerVnextOneShotSlot','one-shot-v2-0',
+          'Synthetic forbidden historical slot audit.')`, [randomUUID(), owner]);
+      await assert.rejects(insertStage(client, runtime[2], replacementAudit),
+        /forbidden historical evidence/);
+      await client.query("ROLLBACK");
+      await client.query("BEGIN");
+      await client.query(`UPDATE "PromptRefinerVnextOneShotSlot"
+        SET "status" = 'consumed', "requestId" = $1
+        WHERE "stageId" = $2 AND "slotIndex" = 0`, [randomUUID(), V2]);
+      replacementAudit = await writeStageAudit(client, runtime[2]);
+      await supersede(client, runtime[1], runtime[2], replacementAudit, runAudit);
+      await assert.rejects(insertStage(client, runtime[2], replacementAudit),
+        /untouched historical slots/);
+      await client.query("ROLLBACK");
       await client.query("BEGIN");
       const badV3Audit = await writeStageAudit(client, runtime[2]);
       await supersede(client, runtime[1], runtime[2], badV3Audit, runAudit);
