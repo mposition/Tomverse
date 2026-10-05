@@ -65,7 +65,8 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let valid = false;
-  if (entry && stage?.id === STAGE_ID && stage.status === "run_approved" &&
+  if (entry && stage?.id === STAGE_ID &&
+      (stage.status === "run_approved" || stage.status === "closed") &&
       stage.runApprovalAuditLogId &&
       stage.slotCount === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
       stage.perRequestCostMicroUsd === BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD) &&
