@@ -362,6 +362,9 @@ run(
     // The analysis-only USD 50 ledger migration must install its namespace,
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
+    // Retention must clear due bodies, preserve the audit trail and retire
+    // external unit keys without silently extending a legal hold.
+    "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
