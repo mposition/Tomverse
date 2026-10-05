@@ -412,7 +412,9 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
       payloadDigestKeyId: sealed.digestKeyId, expiresAt,
-      payloadPurgeAfter: new Date(expiresAt.getTime() + 24 * 60 * 60_000),
+      // A later output page may be owner-confirmed on another day. The
+      // analysis deadline bounds unfinished retention; completion shortens it.
+      payloadPurgeAfter: new Date(idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000),
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
       where: { ideaId: idea.id, chunkIndex, actorUserId,

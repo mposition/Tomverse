@@ -762,6 +762,10 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
   ["pending", 0, 0, 1, 1, null]);
   assert.equal(next.sourcePlanRevisionId, first.sourcePlanRevisionId);
   assert.equal(preview.state, "completed");
+  assert.equal(first.freeformPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
+  assert.equal(preview.payloadPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
   assert.equal(units.length, 11);
   assert.equal(await prisma.amuxWorkItem.count({ where: {
     sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
@@ -866,6 +870,24 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: {
     ideaId: claim.ideaId,
   } }), 20);
+  const finishedIdea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: claim.ideaId }, select: { analysisCompletedAt: true },
+  });
+  assert.ok(finishedIdea.analysisCompletedAt);
+  const finalPurgeDeadline = finishedIdea.analysisCompletedAt.getTime() +
+    24 * 60 * 60_000;
+  const retainedPages = await prisma.amuxIdeaAnalysisChunk.findMany({
+    where: { ideaId: claim.ideaId }, select: { freeformPurgeAfter: true },
+  });
+  const retainedPayloads = await prisma.amuxIdeaTransferPreview.findMany({
+    where: { ideaId: claim.ideaId }, select: { payloadPurgeAfter: true },
+  });
+  assert.equal(retainedPages.length, 3);
+  assert.equal(retainedPayloads.length, 3);
+  assert.ok(retainedPages.every((row) => row.freeformPurgeAfter &&
+    row.freeformPurgeAfter.getTime() <= finalPurgeDeadline));
+  assert.ok(retainedPayloads.every((row) => row.payloadPurgeAfter &&
+    row.payloadPurgeAfter.getTime() <= finalPurgeDeadline));
 });
 
 test("a bounded owner question is saved as a pause, not a provider failure", async () => {
@@ -894,6 +916,8 @@ test("a bounded owner question is saved as a pause, not a provider failure", asy
   ]);
   assert.equal(idea.state, "analyzing");
   assert.equal(chunk.coverageStatus, "needs_owner_input");
+  assert.equal(chunk.freeformPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
   assert.equal(next, null);
   const visible = await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys);
   assert.equal(visible.state, "needs_owner_input");
