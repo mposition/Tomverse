@@ -40,6 +40,9 @@ mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
 mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
   namedExports: { readPromptRefinerVnextOneShotCandidateSource: async () => {} },
 });
+mock.module(mod("lib/promptRefinerVnextOneShotPriceGuard.ts"), {
+  namedExports: { assertPromptRefinerVnextOneShotCurrentPrice: async () => {} },
+});
 mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), {
   namedExports: { lockAndReadPromptRefinerVnextOneShotStage: async () => ({
     stagePresent: true, stageStatus: "run_approved", slotCount: 80,

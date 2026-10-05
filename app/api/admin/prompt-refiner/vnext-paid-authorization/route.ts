@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     const { confirmation: _confirmation, ...expected } = body;
     void _confirmation;
     await consumeApiRateLimit(request, session.user.id,
-      "admin-prompt-refiner-vnext-paid-authorization", { minute: 1, day: 1 });
+      "admin-prompt-refiner-vnext-paid-authorization", { minute: 3, day: 12 });
     const result = await approvePromptRefinerVnextOneShotPaidDispatch({
       session, request, expected,
     });
@@ -79,6 +79,7 @@ export async function POST(request: Request) {
       "vnext_one_shot_paid_approval_binding_mismatch",
       "vnext_one_shot_paid_approval_shadow_unavailable",
       "vnext_one_shot_paid_approval_duplicate",
+      "vnext_one_shot_price_mismatch",
     ].includes(error.message)) {
       return NextResponse.json({ code: "PAID_APPROVAL_REFUSED",
         retryAuthorized: false, humanReviewRequired: true },

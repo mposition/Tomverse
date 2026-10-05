@@ -38,6 +38,7 @@ const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_shadow_binding_mismatch",
   "vnext_one_shot_shadow_duplicate",
   "vnext_one_shot_shadow_evidence_unverified",
+  "vnext_one_shot_price_mismatch",
 ]);
 
 async function owner(request: Request, mutation: boolean) {

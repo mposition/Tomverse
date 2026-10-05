@@ -11,6 +11,8 @@ import {
 } from "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import {
@@ -184,6 +186,7 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
       throw new Error("vnext_one_shot_shadow_stage_unavailable");
     }
     await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });

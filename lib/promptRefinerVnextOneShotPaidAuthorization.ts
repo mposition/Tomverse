@@ -9,6 +9,8 @@ import { promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
@@ -106,6 +108,7 @@ export async function approvePromptRefinerVnextOneShotPaidDispatch(input: {
       throw new Error("vnext_one_shot_paid_approval_stage_unavailable");
     }
     await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });

@@ -11,6 +11,8 @@ import {
 } from "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 
@@ -63,6 +65,7 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
       throw new Error("vnext_one_shot_run_stage_not_ready");
     }
     await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: STAGE_ID },
     });

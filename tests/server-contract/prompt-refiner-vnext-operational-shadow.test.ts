@@ -77,6 +77,9 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
     sourceReads++;
   } },
 });
+mock.module(mod("lib/promptRefinerVnextOneShotPriceGuard.ts"), {
+  namedExports: { assertPromptRefinerVnextOneShotCurrentPrice: async () => {} },
+});
 mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), {
   namedExports: { lockAndReadPromptRefinerVnextOneShotStage: async () => snapshot },
 });
