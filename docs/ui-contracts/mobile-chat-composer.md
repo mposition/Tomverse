@@ -239,6 +239,15 @@ the 320–430px contract:
   (pinned at 137px and 120px). The button's label may wrap to two lines rather
   than setting the button's minimum width to the whole label, which pushed the
   chevron past the composer's `overflow-hidden` edge.
+- **The header's menu, model and new-chat controls stay reachable at 44px**
+  (MOBILE-HEADER-NARROW-01, pinned at 137px, 195px and 206px in
+  `tests/e2e/mobile-header-spacing.spec.ts`). The menu and new-chat buttons
+  never shrink. The model button is the one that does: it gives up its label
+  first and stops at a 44px icon (`min-w-11`). Below a 156px header content
+  box, three 44px controls and their gaps no longer fit on one line, so only
+  there does the row wrap. The switch is a container query on the header's
+  own width, so 320px and wider lay out as before. Before this, the model
+  button alone refused to shrink, and the other two were squeezed to 20-32px.
 - **The conversation section keeps `MIN_CONVERSATION_AREA_REM`.** `min-h-0`
   alone let it reach 0px when the header and the dock outgrew the screen,
   leaving the starters, or the answers, nowhere to be drawn. The floor is a
