@@ -28,7 +28,8 @@ export const adminSreOpsMessages = defineAdminMessages({
       "Approve this genesis? It replaces the current head and starts a new chain at generation 0. This is audited and cannot be undone.",
     created: "Genesis {id} approved.",
     refused: "Refused: {code}.",
-    failed: "The genesis was not approved. Try again.",
+    outcomeUnknown:
+      "The answer was lost, so whether the genesis was approved is unknown. The chain is being read again; check it before approving anything.",
     reauthenticationRequired: "Your sign-in is no longer recent enough to approve a genesis.",
     signInAgain: "Sign in again",
     readFailed: "The chain could not be read. Nothing is shown rather than a guess; try again.",
@@ -59,7 +60,8 @@ export const adminSreOpsMessages = defineAdminMessages({
       "이 genesis를 승인할까요? 현재 head를 대체하고 세대 0에서 새 체인을 시작합니다. 감사 기록에 남으며 되돌릴 수 없습니다.",
     created: "Genesis {id}를 승인했습니다.",
     refused: "거절됨: {code}.",
-    failed: "genesis가 승인되지 않았습니다. 다시 시도하세요.",
+    outcomeUnknown:
+      "응답을 받지 못해 genesis 승인 여부를 알 수 없습니다. 체인을 다시 읽고 있으니, 다시 승인하기 전에 먼저 확인하세요.",
     reauthenticationRequired: "genesis를 승인하려면 최근 로그인이 필요합니다.",
     signInAgain: "다시 로그인",
     readFailed: "체인을 읽지 못했습니다. 추측으로 채우지 않고 비워 둡니다. 다시 시도하세요.",

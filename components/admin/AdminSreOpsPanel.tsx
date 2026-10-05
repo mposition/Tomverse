@@ -7,6 +7,7 @@ import { Lock } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminSreOpsMessages } from "@/lib/adminMessages/sreOps";
+import { type GenesisOutcome, genesisOutcome } from "@/lib/adminSreOpsGenesisOutcome";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import type { OpsObserverAdminView } from "@/lib/opsObserverStore";
 import { genesisOffer } from "@/scripts/ops-observer/genesis-core.mjs";
@@ -56,6 +57,21 @@ function AdminSreOpsChain({ view, canApprove }: { view: OpsObserverAdminView; ca
         : m.reason_initial
     : null;
 
+  const show = (outcome: GenesisOutcome) => {
+    if (outcome.kind === "requiresReauthentication") {
+      setReauthenticationRequired(true);
+    } else if (outcome.kind === "refused") {
+      setNotice({ tone: "error", text: fill(m.refused, { code: outcome.code }) });
+    } else if (outcome.kind === "created") {
+      setNotice({ tone: "ok", text: fill(m.created, { id: outcome.genesisId }) });
+      router.refresh();
+    } else {
+      // Not known whether it committed: say so and re-read, never "not approved".
+      setNotice({ tone: "error", text: m.outcomeUnknown });
+      router.refresh();
+    }
+  };
+
   const approve = async () => {
     if (!offer || !window.confirm(m.confirmApprove)) return;
     setBusy(true);
@@ -77,22 +93,12 @@ function AdminSreOpsChain({ view, canApprove }: { view: OpsObserverAdminView; ca
         code?: unknown;
         result?: { genesisId?: unknown };
       };
-      if (response.status === 428 || payload.code === "ADMIN_REAUTHENTICATION_REQUIRED") {
-        setReauthenticationRequired(true);
-        return;
-      }
-      if (response.status === 409 && typeof payload.code === "string") {
-        setNotice({ tone: "error", text: fill(m.refused, { code: payload.code }) });
-        return;
-      }
-      if (!response.ok || typeof payload.result?.genesisId !== "string") {
-        setNotice({ tone: "error", text: m.failed });
-        return;
-      }
-      setNotice({ tone: "ok", text: fill(m.created, { id: payload.result.genesisId }) });
-      router.refresh();
+      show(genesisOutcome({ status: response.status, payload }));
     } catch {
-      setNotice({ tone: "error", text: m.failed });
+      // A timeout or a lost response: the genesis may have committed after the
+      // request was abandoned. The re-read shows which; a repeat of the same
+      // approval is refused as stale if it did.
+      show(genesisOutcome("no_answer"));
     } finally {
       setBusy(false);
     }
