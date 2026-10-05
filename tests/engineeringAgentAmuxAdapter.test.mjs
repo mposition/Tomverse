@@ -43,12 +43,33 @@ import {
 // docs/policy/development-agent-orchestration.md, Authority, version 12) and
 // the round-5 review fixes that sit beside it.
 
-test("the adapter ships closed, and opens only with both its latch and the execution API", () => {
+test("the adapter ships closed, and opens only with its latch, the execution API and a mode that is not off", () => {
   assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, false, "version 12 ships the latch off");
   assert.equal(isEngineeringAgentAmuxAdapterOpen(), false);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true }), true);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false }), false);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true }), false);
+  for (const mode of ["shadow", "t1"]) {
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true, mode }), false, mode);
+  }
+  // Authority: the writer path runs only when the latch and the operating mode
+  // are both open. Mode off closes every adapter call, not only a new run.
+  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode: "off" }), false);
+});
+
+test("every adapter operation checks the whole gate, mode included, before it touches AMUX", () => {
+  const source = readFileSync(new URL("../lib/engineeringAgentAmuxAdapter.ts", import.meta.url), "utf8");
+  const gate = source.slice(source.indexOf("const requireOpen = async"), source.indexOf("};", source.indexOf("const requireOpen = async")));
+  assert.match(gate, /readEngineeringAgentSwitches\(prisma\)/, "requireOpen reads the effective mode");
+  assert.match(gate, /engineeringAgentAmuxAdapterPermitted\(/, "requireOpen applies the whole gate");
+  assert.equal((source.match(/^ {2}requireOpen\(\);$/gm) ?? []).length, 0, "a requireOpen() call is not awaited");
+  const exported = [...source.matchAll(/^export async function (\w+)/gm)].map((match) => match[1]);
+  for (const name of exported) {
+    const body = source.slice(source.indexOf(`export async function ${name}`));
+    const next = body.indexOf("\nexport ", 1);
+    const own = next < 0 ? body : body.slice(0, next);
+    if (!/(?:register|heartbeat|pull|ack|start|finish|record|settle|claim)/i.test(name)) continue;
+    assert.match(own, /await requireOpen\(\);/, `${name} calls AMUX without the whole gate`);
+  }
 });
 
 test("the worker is the policy's one identity, and a run id is minted in the widest run-id form", () => {
