@@ -8963,13 +8963,30 @@ fn codex_dir_already_known(config_text: &str, dir: &str) -> bool {
 /// temp + rename. Unlike codex's TOML this file cannot be appended to, so the
 /// object is re-serialised: the leading comment lines and every other key are
 /// kept, though key order may change.
+///
+/// Because it is a read-merge-write, two copilot workers starting at once
+/// would both read the old list and the second rename would drop the first
+/// folder; with one shared temp name they could also interleave writes into a
+/// file already renamed into place. `session_op_lock` is per session, so it
+/// does not cover this. The whole read-merge-write is therefore serialised by
+/// a process-wide lock (every launch runs in this one server process) and each
+/// write uses its own temp file. A running `copilot` writing the same file is
+/// outside this lock; that is the same exposure codex's seed has.
 fn seed_copilot_dir_trust(work_dir: &str) {
     if work_dir.is_empty() {
         return;
     }
     let Some(home) = std::env::var_os("HOME") else { return };
-    let path = std::path::Path::new(&home).join(".copilot/config.json");
-    let text = match std::fs::read_to_string(&path) {
+    seed_copilot_dir_trust_at(&std::path::Path::new(&home).join(".copilot/config.json"), work_dir);
+}
+
+static COPILOT_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static COPILOT_CONFIG_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn seed_copilot_dir_trust_at(path: &std::path::Path, work_dir: &str) {
+    // A poisoned lock still serialises; the guarded data is `()`.
+    let _guard = COPILOT_CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let text = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(_) => return, // unreadable: fail-open, never block a launch
@@ -8978,9 +8995,12 @@ fn seed_copilot_dir_trust(work_dir: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let tmp = path.with_extension("json.amux-trust-tmp");
+    let seq = COPILOT_CONFIG_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.amux-trust-tmp.{}.{seq}", std::process::id()));
     if std::fs::write(&tmp, body.as_bytes()).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 }
 
@@ -28467,6 +28487,40 @@ Press enter to continue\n\nWorked for 7s\n\n\
         assert!(copilot_config_with_trust("// x\nnot json", "/d").is_none());
         assert!(copilot_config_with_trust("{\"trustedFolders\": \"/d\"}", "/e").is_none());
         assert!(copilot_config_with_trust("[]", "/d").is_none());
+    }
+
+    #[test]
+    fn concurrent_copilot_trust_seeds_lose_no_folder() {
+        // Many copilot workers starting at once all read-merge-write the same
+        // file; none of their folders may be dropped and the file must stay
+        // valid, with no temp files left behind.
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "// managed\n{\n  \"appTipShown\": true\n}\n").unwrap();
+        let threads: Vec<_> = (0..16)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || seed_copilot_dir_trust_at(&path, &format!("/work/{i}")))
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("// managed\n"), "{text}");
+        let body: Value = serde_json::from_str(text.split_once('\n').unwrap().1).unwrap();
+        let folders = body["trustedFolders"].as_array().unwrap();
+        for i in 0..16 {
+            assert!(folders.contains(&json!(format!("/work/{i}"))), "lost /work/{i}: {text}");
+        }
+        assert_eq!(folders.len(), 16);
+        assert_eq!(body["appTipShown"], json!(true));
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name() != "config.json")
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
     }
 
     #[test]
