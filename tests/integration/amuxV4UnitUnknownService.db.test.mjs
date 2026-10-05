@@ -89,8 +89,13 @@ test("uncertain v4 unit consumption freezes one receipt until owner no-commit co
           CURRENT_TIMESTAMP + INTERVAL '15 minutes', ${prepareAuditId},
           CURRENT_TIMESTAMP)`;
     });
-    assert.equal(await store.markAmuxV4UnitConsumeOutcomeUnknown({ session,
-      decisionId: ids.decision, consumeRequestId: ids.consume }), "recorded");
+    const competingMarkers = await Promise.all([
+      store.markAmuxV4UnitConsumeOutcomeUnknown({ session,
+        decisionId: ids.decision, consumeRequestId: ids.consume }),
+      store.markAmuxV4UnitConsumeOutcomeUnknown({ session,
+        decisionId: ids.decision, consumeRequestId: ids.consume }),
+    ]);
+    assert.deepEqual(competingMarkers.sort(), ["already_unknown", "recorded"]);
     assert.equal(await store.markAmuxV4UnitConsumeOutcomeUnknown({ session,
       decisionId: ids.decision, consumeRequestId: ids.consume }), "already_unknown");
     const unknown = await store.readAmuxV4UnitDecision(session,
