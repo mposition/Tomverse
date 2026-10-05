@@ -7636,11 +7636,17 @@ function editField(session, field, current, provider) {
       {v:'cursor',l:'Cursor'},
       {v:'copilot',l:'GitHub Copilot'}
     ];
+    // A provider this list does not offer (devin, iterm2: started outside the
+    // dashboard) is still the worker's provider. Show it and keep it selected;
+    // otherwise the select falls back to its first option and saving rewrites
+    // CC_PROVIDER to Claude.
+    const cur = (current || 'claude').toLowerCase();
+    if (!providers.some(p => p.v === cur)) providers.unshift({v: cur, l: providerLabel(cur)});
     sel.innerHTML = '';
     providers.forEach(p => { const o = document.createElement('option'); o.value = p.v; o.textContent = p.l; sel.appendChild(o); });
     inpWrap.style.display = 'none';
     sel.style.display = 'block';
-    sel.value = (current || 'claude').toLowerCase();
+    sel.value = cur;
   } else if (field === 'model') {
     inpWrap.style.display = 'none';
     sel.style.display = 'block';

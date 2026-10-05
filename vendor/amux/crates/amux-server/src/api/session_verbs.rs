@@ -8950,6 +8950,104 @@ fn codex_dir_already_known(config_text: &str, dir: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Copilot analog of [`seed_codex_dir_trust`]. `copilot` stops at a "Confirm
+/// folder trust … Do you trust the files in this folder?" dialog the first
+/// time it runs in a directory, and `--yolo` does not skip it. Both were
+/// observed 2026-10-05 against Copilot CLI 1.0.91 in a scratch tmux pane on
+/// the server, as was where the "remember this folder" answer lands: the
+/// `trustedFolders` array in `~/.copilot/config.json`, a JSON object after
+/// two `//` comment lines ("This file is managed automatically.").
+///
+/// Same discipline as codex: fail-open on the spawn path, an existing entry is
+/// left alone, a file that does not parse is never written, and the write is
+/// temp + rename. Unlike codex's TOML this file cannot be appended to, so the
+/// object is re-serialised: the leading comment lines and every other key are
+/// kept, though key order may change.
+fn seed_copilot_dir_trust(work_dir: &str) {
+    if work_dir.is_empty() {
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME") else { return };
+    let path = std::path::Path::new(&home).join(".copilot/config.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(_) => return, // unreadable: fail-open, never block a launch
+    };
+    let Some(body) = copilot_config_with_trust(&text, work_dir) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.amux-trust-tmp");
+    if std::fs::write(&tmp, body.as_bytes()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// `config_text` with `dir` added to `trustedFolders`, or `None` when nothing
+/// should be written: `dir` is already listed, or the text after its leading
+/// `//` lines is not a JSON object with an array (or no) `trustedFolders`.
+/// Refusing beats corrupting a file Copilot manages. Pure, so it is tested
+/// without a real `~/.copilot`.
+fn copilot_config_with_trust(config_text: &str, dir: &str) -> Option<String> {
+    let mut header_len = 0;
+    for line in config_text.split_inclusive('\n') {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("//") {
+            header_len += line.len();
+        } else {
+            break;
+        }
+    }
+    let (header, body) = config_text.split_at(header_len);
+    let mut doc: Value = if body.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(body).ok()?
+    };
+    let folders = doc
+        .as_object_mut()?
+        .entry("trustedFolders")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()?;
+    if folders.iter().any(|f| f.as_str() == Some(dir)) {
+        return None;
+    }
+    folders.push(Value::String(dir.to_string()));
+    let mut out = header.to_string();
+    out.push_str(&serde_json::to_string_pretty(&doc).ok()?);
+    out.push('\n');
+    Some(out)
+}
+
+/// The options after `copilot` in a worker launch. Every flag was checked
+/// against `copilot --help` of 1.0.91 on the server: `--yolo` enables all
+/// permissions (= `--allow-all`), `--model auto` lets Copilot pick, `--add-dir`
+/// grants a directory. Any provider's yolo spelling in CC_FLAGS becomes
+/// `--yolo`, the same translation the cursor arm makes. Pure, so the argv is
+/// pinned by tests rather than only by a live launch.
+fn copilot_launch_opts(flags: &str, extra_flags: &str, logs: &str) -> String {
+    let yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| flags.contains(f));
+    let own_flags = if yolo { strip_provider_yolo_flags(flags) } else { flags.to_string() };
+    let mut opts = String::new();
+    if !own_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(&own_flags));
+    }
+    if !extra_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(extra_flags));
+    }
+    if !opts.contains("--model") {
+        opts += " --model auto";
+    }
+    if yolo && !opts.contains("--yolo") && !opts.contains("--allow-all") {
+        opts += " --yolo";
+    }
+    if !opts.contains(logs) {
+        opts += &format!(" --add-dir {}", sh_quote(logs));
+    }
+    opts
+}
+
 /// The CHEAP, synchronous reasons a session cannot start — the ones knowable
 /// without the op-lock or a tmux query. Returns the human reason, or None if
 /// nothing cheap blocks the launch.
@@ -9189,6 +9287,10 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
     // fail-open discipline; only touches ~/.codex for codex-launching providers.
     if matches!(provider_of(&cfg).as_str(), "codex" | "ollama") {
         seed_codex_dir_trust(&work_dir);
+    }
+    // Copilot's own folder-trust dialog, which `--yolo` does not skip.
+    if provider_of(&cfg) == "copilot" {
+        seed_copilot_dir_trust(&work_dir);
     }
     let mut flags = cfg.get_or("CC_FLAGS", "").to_string();
     #[cfg(unix)]
@@ -9515,44 +9617,18 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             override_shell_command(&cursor_cmd_bin(), &opts)
         }
         "copilot" => {
-            // GitHub Copilot CLI. Every flag here was checked against
-            // `copilot --help` of 1.0.91 on the server: `--yolo` enables all
-            // permissions (= --allow-all), `--model auto` lets Copilot pick,
-            // `--add-dir` grants a directory. No resume wiring, the same
-            // documented gap as cursor: nothing records a Copilot session id
-            // per amux session, so every (re)launch starts a fresh session.
+            // GitHub Copilot CLI; the options are built by the pure
+            // `copilot_launch_opts`, which says where each flag was checked.
+            // The folder-trust dialog is handled before this match by
+            // `seed_copilot_dir_trust`. No resume wiring, the same documented
+            // gap as cursor: nothing records a Copilot session id per amux
+            // session, so every (re)launch starts a fresh session.
             //
-            // SCREENS NOT VERIFIED: no session was run (no Copilot login on
-            // the server yet), so the folder-trust question on first launch in
-            // a directory and the approval panel have no screen fixtures.
-            // backend::adapter has no scanner for this provider and reports
-            // nothing rather than guessing.
-            let mut copilot_flags = flags.clone();
-            let copilot_yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| copilot_flags.contains(f));
-            if copilot_yolo {
-                copilot_flags = strip_provider_yolo_flags(&copilot_flags);
-            }
-            let mut opts = String::new();
-            if !copilot_flags.is_empty() {
-                opts += &format!(" {}", shell_quote_flags(&copilot_flags));
-            }
-            if !extra_flags.is_empty() {
-                opts += &format!(" {}", shell_quote_flags(extra_flags));
-            }
-            if !opts.contains("--model") {
-                opts += " --model auto";
-            }
-            if copilot_yolo && !opts.contains("--yolo") && !opts.contains("--allow-all") {
-                opts += " --yolo";
-            }
             // The CLI reference says `--add-dir` aborts startup on a path that
             // is not an accessible directory, so make sure it is one first.
             let logs_path = logs_dir();
             let _ = std::fs::create_dir_all(&logs_path);
-            let logs = logs_path.to_string_lossy().into_owned();
-            if !opts.contains(&logs) {
-                opts += &format!(" --add-dir {}", sh_quote(&logs));
-            }
+            let opts = copilot_launch_opts(&flags, extra_flags, &logs_path.to_string_lossy());
             override_shell_command(&copilot_cmd_bin(), &opts)
         }
         _ => build_claude_cmd(&cfg, &flags, &default_flags, &session_flag, extra_flags),
@@ -28346,6 +28422,51 @@ Press enter to continue\n\nWorked for 7s\n\n\
             adapter.build_command(crate::provider::PromptMode::Interactive).first().map(String::as_str),
             Some(launch_base_binary("copilot"))
         );
+    }
+
+    #[test]
+    fn copilot_launch_opts_pin_the_argv() {
+        let logs = "/home/w/.amux/logs";
+        let add_dir = format!(" --add-dir {}", sh_quote(logs));
+        // A worker with no flags: Copilot picks the model, no permissions widened.
+        assert_eq!(copilot_launch_opts("", "", logs), format!(" --model auto{add_dir}"));
+        // Any provider's yolo spelling becomes copilot's own `--yolo`, once.
+        for yolo in ["--dangerously-skip-permissions", "--yolo", "--permission-mode=bypass"] {
+            let opts = copilot_launch_opts(yolo, "", logs);
+            assert_eq!(opts, format!(" --model auto --yolo{add_dir}"), "from {yolo}");
+        }
+        // The worker's own model wins, and an explicit --allow-all is not doubled.
+        let opts = copilot_launch_opts("--model gpt-5.4 --allow-all --dangerously-skip-permissions", "", logs);
+        assert!(opts.contains("--model gpt-5.4") && !opts.contains("--model auto"), "{opts}");
+        assert!(!opts.contains("--yolo") && !opts.contains("--dangerously"), "{opts}");
+        // Per-launch extra flags follow the stored ones.
+        assert_eq!(
+            copilot_launch_opts("", "--reasoning-effort high", logs),
+            format!(" --reasoning-effort high --model auto{add_dir}")
+        );
+    }
+
+    #[test]
+    fn copilot_trust_seed_keeps_the_file_and_never_duplicates() {
+        // The shape observed in ~/.copilot/config.json on the server.
+        let observed = "// User settings belong in settings.json.\n\
+                        // This file is managed automatically.\n\
+                        {\n  \"firstLaunchAt\": \"2026-10-05T07:10:42.619Z\",\n  \"appTipShown\": true,\n  \
+                        \"trustedFolders\": [\n    \"/tmp/a\"\n  ]\n}\n";
+        let out = copilot_config_with_trust(observed, "/home/w/repo").expect("new folder is added");
+        assert!(out.starts_with("// User settings belong in settings.json.\n// This file is managed automatically.\n"));
+        let body: Value = serde_json::from_str(out.splitn(3, '\n').nth(2).unwrap()).unwrap();
+        assert_eq!(body["trustedFolders"], json!(["/tmp/a", "/home/w/repo"]));
+        assert_eq!(body["appTipShown"], json!(true), "Copilot's own keys survive");
+        // Already trusted: nothing to write.
+        assert!(copilot_config_with_trust(&out, "/home/w/repo").is_none());
+        // No file yet: a minimal object.
+        let fresh: Value = serde_json::from_str(&copilot_config_with_trust("", "/d").unwrap()).unwrap();
+        assert_eq!(fresh, json!({"trustedFolders": ["/d"]}));
+        // Never write into a file this does not understand.
+        assert!(copilot_config_with_trust("// x\nnot json", "/d").is_none());
+        assert!(copilot_config_with_trust("{\"trustedFolders\": \"/d\"}", "/e").is_none());
+        assert!(copilot_config_with_trust("[]", "/d").is_none());
     }
 
     #[test]
