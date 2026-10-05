@@ -85,7 +85,7 @@ audit and stage locks, the slot route must refuse every request until a
 distinct, valid, hash-chained paid-authorization audit for this exact v3
 stage, deployment, candidate, root, runner, price and ceiling exists. That
 audit is absent throughout B06, so paid calls and slot consumption remain
-blocked even with the environment switch set. The approval route is included
+blocked even with both environment switches set. The approval route is included
 in this deployment but may write only after a valid B06 shadow readback,
 separate exact owner spend authorization, recent reauthentication and an
 explicit confirmation. This policy grants no such authorization and B06
@@ -153,8 +153,9 @@ read or transmitted to the candidate author or reviewer.
 The implementation must pass synthetic rollback, concurrent duplicate,
 deployment and source drift, audit integrity, old-stage immutability,
 zero-consumption, no-provider-call, proof-rejection and content-free readback
-tests, including the missing-paid-audit refusal with the dispatch environment
-switch set. An independent reviewer other than the author must review the policy
+tests, including the missing-paid-audit refusal with both environment switches
+set and v3 stage refusal when the guarded-slot capability version is absent or
+mismatched. An independent reviewer other than the author must review the policy
 and code. The PR and staging deployment must be verified separately. B06 is
 complete only when the app's owner readback shows v3's exact deployment and
 commit, same candidate/root/runner/price binding, valid stage/run/shadow
