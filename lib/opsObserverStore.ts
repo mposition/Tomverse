@@ -827,7 +827,9 @@ const RETENTION_DEADLINE_MS = 25_000;
  * refuses one anyway, as it refuses anything closed more recently. Rows
  * another transaction holds are skipped, not waited on. A batch that deleted
  * anything leaves one system audit entry with the count, in the same
- * transaction; an empty batch writes nothing.
+ * transaction; an empty batch writes nothing. The batch names its deadline in
+ * the transaction-local setting the retention trigger reads at COMMIT, so a
+ * late batch rolls back whole, deletes included.
  */
 export async function purgeOpsObserverDeliveries(
   limit: number = DELIVERY_RETENTION_BATCH_LIMIT,
@@ -841,6 +843,11 @@ export async function purgeOpsObserverDeliveries(
     "retention_batch",
     runDeadline,
     async (tx) => {
+      // The deferred retention trigger checks this at COMMIT (policy §6 item
+      // 5): a delete has no row deadline, so the batch names its own, and a
+      // batch past it does not commit.
+      await tx.$queryRaw`
+        SELECT set_config('ops_observer.retention_deadline', ${runDeadline.toISOString()}, true)`;
       const deleted = await tx.$queryRaw<{ id: string }[]>`
         DELETE FROM "OpsObserverDelivery"
          WHERE id IN (

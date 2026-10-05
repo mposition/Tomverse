@@ -1096,6 +1096,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Nine uses in the sre-ops transition ledger guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: on delete it locks its genesis FOR SHARE and reads whether it was superseded, and its verified checkpoint with whether the ledger row at that checkpoint exists; on insert it locks its genesis FOR SHARE and reads whether it was superseded, reads its state row FOR SHARE (generation, key stamp, whether this transaction wrote it), reads whether the previous generation's row exists, reads the linked AdminAuditLog row FOR KEY SHARE (hash, action, target, actor, metadata generation and key stamp, whether this transaction wrote it), and calls the deadline claim function. The schema is the trigger own, never input, quoted with %I (the ledger's own name via TG_TABLE_NAME); every value is bound with USING. They read, lock and never write.",
   },
   {
+    path: "prisma/migrations/20261005030000_ops_observer_retention_deadline/migration.sql",
+    count: 1,
+    reason:
+      "One use in the sre-ops retention deadline trigger, with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: it calls the deadline claim function on the deadline the retention batch named for its transaction. The schema is the trigger own, never input, quoted with %I, and the deadline is bound with USING. It reads and never writes.",
+  },
+  {
     path: "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql",
     count: 4,
     reason:

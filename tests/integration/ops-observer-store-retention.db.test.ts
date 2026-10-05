@@ -15,7 +15,8 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore";
-import { S2_PAGE_KEYS, initialKeyState } from "../../scripts/ops-observer/classify-core.mjs";
+import { owedMessages } from "../../scripts/ops-observer/advance-request-core.mjs";
+import { S2_PAGE_KEYS, S2_PAGE_SIGNALS, evaluateKey, initialKeyState } from "../../scripts/ops-observer/classify-core.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrations = [
@@ -23,6 +24,7 @@ const migrations = [
   "20261003070000_ops_observer_genesis_state",
   "20261003090000_ops_observer_delivery",
   "20261004030000_ops_observer_transition",
+  "20261005030000_ops_observer_retention_deadline",
 ].map((name) => path.resolve(here, `../../prisma/migrations/${name}/migration.sql`));
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_retention_${randomUUID().replaceAll("-", "")}`;
@@ -73,17 +75,35 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
   }
 
   /** A channel-check reservation through the advance; returns its id and run. */
-  async function reserve(genesisId: string, ownerDate: string) {
-    const state = (await readOpsObserverState(inSeconds(120), client)) as { trust: string; generation: number; keys: Record<string, unknown> };
+  const P3 = S2_PAGE_SIGNALS.find((signal) => signal.id === "P3")!;
+  const P3_KEY = "P3#credit_reservation_reconciliation";
+  let clock = Date.parse("2026-10-01T00:00:00.000Z");
+
+  /**
+   * One advance through the store. With an observation the P3 key moves by
+   * evaluateKey(); the reservation carries exactly what that move owes, or the
+   * channel check when it owes nothing (`reserve: false` advances without one).
+   */
+  async function advance(genesisId: string, ownerDate: string, observation: string | null, reserve = true) {
+    const state = (await readOpsObserverState(inSeconds(120), client)) as {
+      trust: string; generation: number; keys: Record<string, ReturnType<typeof initialKeyState>>;
+    };
     assert.equal(state.trust, "trusted");
+    clock += 600_000;
+    const keys = observation
+      ? { ...state.keys, [P3_KEY]: evaluateKey(P3, state.keys[P3_KEY], observation, { now: clock, ownerDate }).state }
+      : state.keys;
+    const items = owedMessages(state.keys, keys, ownerDate).map((o: { signal: string; scope: string; kind: string; openedAt: number }) => ({
+      signal: o.signal, scope: o.scope, kind: o.kind, origin: o.kind === "reopen" ? "reopen" : "new", openedAt: new Date(o.openedAt),
+    }));
     const runId = `run-${randomUUID().slice(0, 8)}`;
     const result = await advanceOpsObserverState(
-      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: state.generation, keys: state.keys,
-        reservation: { ownerDate, channelCheck: true, items: [] } },
+      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: state.generation, keys,
+        reservation: reserve ? { ownerDate, channelCheck: items.length === 0, items } : null },
       client,
     );
     assert.equal(result.result, "advanced");
-    return { deliveryId: (result as { deliveryId: string }).deliveryId, runId, state };
+    return { deliveryId: (result as { deliveryId: string }).deliveryId, runId, items: items.length };
   }
   const confirm = (deliveryId: string, runId: string) =>
     confirmOpsObserverDelivery({ runDeadline: inSeconds(150), deliveryId, runId }, client);
@@ -115,14 +135,19 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       (await q(`SELECT metadata FROM "AdminAuditLog" WHERE action = 'ops_observer.deliveries_purged' ORDER BY "createdAt"`)).rows
         .map((r) => r.metadata);
 
-    // Three closed reservations and one still reserved.
-    const old1 = await reserve(shadowGenesis, "2026-10-01");
+    // Three closed reservations and one still reserved; two carry an item.
+    const old1 = await advance(shadowGenesis, "2026-10-01", "delayed"); // new_open
+    assert.equal(old1.items, 1);
     await confirm(old1.deliveryId, old1.runId);
-    const old2 = await reserve(shadowGenesis, "2026-10-02");
+    const old2 = await advance(shadowGenesis, "2026-10-02", null); // channel check
     await confirm(old2.deliveryId, old2.runId);
-    const recent = await reserve(shadowGenesis, "2026-10-03");
+    await advance(shadowGenesis, "2026-10-03", "ok", false); // one good evaluation, nothing owed
+    const recent = await advance(shadowGenesis, "2026-10-03", "ok"); // recovery
+    assert.equal(recent.items, 1);
     await confirm(recent.deliveryId, recent.runId);
-    const open = await reserve(shadowGenesis, "2026-10-04");
+    const open = await advance(shadowGenesis, "2026-10-04", null);
+    const itemsOf = async (id: string) =>
+      (await q(`SELECT count(*)::int AS n FROM "OpsObserverDeliveryItem" WHERE "deliveryId" = $1`, [id])).rows[0].n;
 
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
       assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 0 });
@@ -133,14 +158,41 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       await age(old1.deliveryId, 120);
       await age(old2.deliveryId, 100);
       await age(recent.deliveryId, 89);
-      const itemsBefore = (await q(`SELECT count(*)::int AS n FROM "OpsObserverDeliveryItem"`)).rows[0].n;
+      assert.deepEqual([await itemsOf(old1.deliveryId), await itemsOf(recent.deliveryId)], [1, 1]);
       assert.deepEqual(await purgeOpsObserverDeliveries(1, client), { deleted: 1 });
       assert.deepEqual([await exists(old1.deliveryId), await exists(old2.deliveryId)], [false, true]);
       assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 1 });
       assert.deepEqual([await exists(old2.deliveryId), await exists(recent.deliveryId), await exists(open.deliveryId)],
         [false, true, true]);
-      assert.equal((await q(`SELECT count(*)::int AS n FROM "OpsObserverDeliveryItem"`)).rows[0].n, itemsBefore);
+      // The deleted reservation took its item; the recent one keeps its own.
+      assert.deepEqual([await itemsOf(old1.deliveryId), await itemsOf(recent.deliveryId)], [0, 1]);
       assert.deepEqual(await purgeAudits(), [1, 2].map(() => ({ count: 1, retentionDays: 90, systemActor: "ops-observer" })));
+    });
+
+    await t.test("a delete that names no deadline, or commits past it, does not commit", async () => {
+      await age(recent.deliveryId, 10); // 99 days: the delete guard allows it
+      const code = async (fn: () => Promise<unknown>) => {
+        try {
+          await fn();
+          return null;
+        } catch (error) {
+          return (error as { code?: string }).code ?? "thrown";
+        }
+      };
+      await q("BEGIN");
+      await q(`DELETE FROM "OpsObserverDelivery" WHERE id = $1`, [recent.deliveryId]);
+      assert.equal(await code(() => q("COMMIT")), "OB051");
+      await q("BEGIN");
+      await q(`SELECT set_config('ops_observer.retention_deadline', (clock_timestamp() + interval '300 milliseconds')::text, true)`);
+      await q(`DELETE FROM "OpsObserverDelivery" WHERE id = $1`, [recent.deliveryId]);
+      await q("SELECT pg_sleep(0.5)");
+      assert.equal(await code(() => q("COMMIT")), "OB012");
+      await q("BEGIN");
+      await q(`SELECT set_config('ops_observer.retention_deadline', (clock_timestamp() + interval '600 seconds')::text, true)`);
+      await q(`DELETE FROM "OpsObserverDelivery" WHERE id = $1`, [recent.deliveryId]);
+      assert.equal(await code(() => q("COMMIT")), "OB011");
+      // Each refusal rolled back the delete and its item.
+      assert.deepEqual([await exists(recent.deliveryId), await itemsOf(recent.deliveryId)], [true, 1]);
     });
 
     await t.test("a reserved row is never deleted, however old", async () => {
@@ -150,7 +202,9 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       } finally {
         await q(`ALTER TABLE "OpsObserverDelivery" ENABLE TRIGGER USER`);
       }
-      assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 0 });
+      // The 99-day close goes (through the store, deadline named); the reserved row stays.
+      assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 1 });
+      assert.equal(await exists(recent.deliveryId), false);
       assert.equal(await exists(open.deliveryId), true);
     });
 
