@@ -5,6 +5,7 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
+import { SYSTEM_AUDIT_ACTOR_METADATA_KEY } from "@/lib/adminAuditSystemActors";
 import { promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
@@ -195,7 +196,8 @@ async function verifyConsumedSlotAudits(
           PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD ||
         (metadata.cumulativeReservedCostMicroUsd as number) >
           consumedSlots * PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD ||
-        metadata.systemActor !== "prompt-refiner-vnext-one-shot-runner" ||
+        metadata[SYSTEM_AUDIT_ACTOR_METADATA_KEY] !==
+          "prompt-refiner-vnext-one-shot-runner" ||
         !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) return null;
     cumulative.add(metadata.cumulativeReservedCostMicroUsd as number);
     bindings.push({ slotIndex: slot.slotIndex,
