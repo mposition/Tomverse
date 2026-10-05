@@ -44,14 +44,14 @@ test("local one-shot entry point is closed before reading configuration", () => 
   assert.match(result.stderr, /AMUX_V4_LOCAL_ANALYSIS_REFUSED/);
 });
 
-test("live connector requires the exact environment switch before network", async () => {
+test("live connector remains code-latched before any network access", async () => {
   const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   let called = 0;
   try {
     assert.equal(amuxV4LiveAnalysisCliEnabled(undefined), false);
     assert.equal(amuxV4LiveAnalysisCliEnabled("1"), false);
-    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), true);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), false);
     const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
       agentSecret: secret, fetchImpl: async () => { called += 1;
         throw new Error("live connector must remain closed"); } });
@@ -192,6 +192,36 @@ test("synthetic one-shot polls, claims, passes only typed prompt, submits and st
     assert.equal(submitted.outcome, "verified_success");
     assert.equal(visited.every(({ options }) =>
       options.headers.authorization === `Bearer ${secret}`), true);
+  } finally {
+    if (previousEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousEnv;
+    if (previousOrigin === undefined) delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+    else process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previousOrigin;
+  }
+});
+
+test("result writer disabled after a model call is an unknown halt", async () => {
+  const previousEnv = process.env.NODE_ENV;
+  const previousOrigin = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  process.env.NODE_ENV = "test";
+  process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = `${origin}/`;
+  try {
+    let calls = 0;
+    const result = await runAmuxV4SyntheticAnalysisAgentOnce({
+      origin: `${origin}/`, agentSecret: secret,
+      fetchImpl: async (url) => {
+        if (url.endsWith("/analysis-queue")) return response({
+          candidates: [candidate], hasMore: false, nextCursor: null });
+        if (url.endsWith("/analysis-claim")) return response(claim);
+        if (url.endsWith("/analysis-result")) return response({
+          available: false, reason: "analysis_result_disabled" }, 409);
+        throw new Error("unexpected read-back after a definitive disabled result");
+      },
+      fakeExecute: async () => { calls += 1; return { rawModelOutput: "{}",
+        inputTokens: 2, outputTokens: 1 }; },
+    });
+    assert.deepEqual(result, { kind: "result_unknown" });
+    assert.equal(calls, 1);
   } finally {
     if (previousEnv === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = previousEnv;

@@ -18,7 +18,7 @@ import { prisma } from "@/lib/prisma";
 
 const READ_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_READ";
 const WRITE_ENV = "TOMVERSE_AMUX_V4_RETENTION_HOLD_WRITE";
-const CODE_LATCH = true;
+const CODE_LATCH = false;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const uuid = z.string().uuid();
 const createSchema = z.object({ id: uuid, ideaId: uuid,

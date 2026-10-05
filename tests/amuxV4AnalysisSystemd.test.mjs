@@ -14,6 +14,7 @@ test("local analysis uses a bounded one-shot without a product DB credential", (
   assert.match(service, /^ConditionFileNotEmpty=%h\/\.local\/lib\/tomverse-amux-v4\/analysis-agent-once\.mjs$/m);
   assert.match(service, /^EnvironmentFile=%h\/\.config\/tomverse-amux-v4\/analysis-agent\.env$/m);
   assert.match(service, /^ExecStart=\/usr\/bin\/node %h\/\.local\/lib\/tomverse-amux-v4\/analysis-agent-once\.mjs$/m);
+  assert.match(service, /^ReadWritePaths=%h\/\.local\/state\/tomverse-amux-v4-analysis$/m);
   assert.doesNotMatch(service, /^(?:Restart|ExecStartPre|User)=/m);
   assert.doesNotMatch(service, /(?:DATABASE_URL|DIRECT_DATABASE_URL|STRIPE_|GITHUB_TOKEN|ANTHROPIC_API_KEY)/);
 });

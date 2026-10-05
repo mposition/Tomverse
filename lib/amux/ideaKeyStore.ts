@@ -2,7 +2,7 @@ import "server-only";
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand,
-  PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+  ListObjectVersionsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 import { amuxContentKeyCoordinate, type AmuxContentKeys,
   type AmuxContentPurpose, type AmuxMasterKey } from "./ideaCrypto.ts";
@@ -224,7 +224,20 @@ export async function deleteAmuxContentUnitKey(input: AmuxContentKeyIdentity,
       if (error instanceof AmuxIdeaKeyStoreError) throw error;
       if (typeof error === "object" && error !== null &&
           "$metadata" in error && (error as { $metadata?: { httpStatusCode?: number } })
-            .$metadata?.httpStatusCode === 404) return;
+            .$metadata?.httpStatusCode === 404) {
+        // HEAD only proves that the current key is absent. A delete marker in
+        // a versioned bucket can hide a restorable older data key, so require
+        // a complete version listing before recording irreversible deletion.
+        const versions = await client.send(new ListObjectVersionsCommand({
+          Bucket: bucket, Prefix: objectKey, MaxKeys: 1000,
+        }));
+        if (versions.IsTruncated === false &&
+            !versions.Versions?.some((item) => item.Key === objectKey) &&
+            !versions.DeleteMarkers?.some((item) => item.Key === objectKey)) {
+          return;
+        }
+        throw new AmuxIdeaKeyStoreError("outcome_unknown");
+      }
       throw new AmuxIdeaKeyStoreError("outcome_unknown");
     }
   } catch (error) {

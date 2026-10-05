@@ -16,8 +16,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%h/.local/state/tomverse-amux-v4-analysis
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=amux-v4-analysis-agent
 
-# The timer is the only start path; a failed/unknown outcome must not restart.
+# The timer may start again, but a failed/unknown outcome leaves a durable
+# marker that rejects queue access until an operator reconciles the receipt.

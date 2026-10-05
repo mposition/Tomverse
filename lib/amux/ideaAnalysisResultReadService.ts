@@ -53,9 +53,22 @@ export async function readAmuxFirstIdeaAnalysisResult(
     });
     if (!idea) throw new AmuxIdeaAnalysisResultReadError("not_found");
     if (idea.state === "cancelled") return { state: "cancelled" };
-    if (idea.state === "submitted" || idea.state === "analyzing") {
+    if (idea.state === "submitted") {
+      const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
+        where: { ideaId_chunkIndex: { ideaId, chunkIndex: 0 } },
+        select: { state: true, attempt: true, currentPreviewId: true },
+      });
+      if (chunk?.state === "awaiting_preview" && chunk.currentPreviewId) {
+        const preview = await tx.amuxIdeaTransferPreview.findUnique({
+          where: { id: chunk.currentPreviewId },
+          select: { ideaId: true, attempt: true, state: true },
+        });
+        if (preview?.ideaId === ideaId && preview.attempt === chunk.attempt &&
+            preview.state === "provider_failed") return { state: "provider_failed" };
+      }
       return { state: "pending" };
     }
+    if (idea.state === "analyzing") return { state: "pending" };
     if (idea.state !== "awaiting_owner" || !idea.analysisCompletedAt) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }

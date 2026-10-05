@@ -93,18 +93,41 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
     where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 0 } },
   });
+  const firstAttempt = chunk?.state === "pending" && chunk.attempt === 0 &&
+    chunk.currentPreviewId === null;
+  const retryAttempt = chunk?.state === "awaiting_preview" &&
+    Number.isSafeInteger(chunk.attempt) && chunk.attempt > 0 &&
+    chunk.attempt < 2_147_483_647 && chunk.currentPreviewId !== null &&
+    chunk.leaseGeneration === 0;
   if (!idea || !chunk || idea.actorUserId !== actorUserId ||
       idea.state !== "submitted" || now >= idea.analysisDeadlineAt ||
       !idea.currentSourcePlanRevisionId || idea.rawPurgedAt !== null ||
       !idea.rawCiphertext || !idea.rawKeyId || !idea.rawKeyVersion ||
       !idea.rawDigest || !idea.rawDigestKeyId ||
-      chunk.actorUserId !== actorUserId || chunk.state !== "pending" ||
-      chunk.attempt !== 0 || chunk.currentPreviewId !== null ||
+      chunk.actorUserId !== actorUserId || (!firstAttempt && !retryAttempt) ||
       chunk.chunkIndex !== 0 || chunk.revisionChunkIndex !== 0 ||
       chunk.planStartChunkIndex !== 0 ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId) {
     throw new IdeaTransferPreviewError("not_ready");
   }
+  if (retryAttempt) {
+    const previous = await tx.amuxIdeaTransferPreview.findUnique({
+      where: { id: chunk.currentPreviewId! },
+      select: { ideaId: true, chunkIndex: true, attempt: true, state: true,
+        consumedAt: true },
+    });
+    const settled = await tx.amuxIdeaAnalysisBudgetHold.findUnique({
+      where: { previewId: chunk.currentPreviewId! },
+      select: { status: true, closedAt: true },
+    });
+    if (!previous || previous.ideaId !== idea.id ||
+        previous.chunkIndex !== 0 || previous.attempt !== chunk.attempt ||
+        previous.state !== "provider_failed" || !previous.consumedAt ||
+        settled?.status !== "failed" || !settled.closedAt) {
+      throw new IdeaTransferPreviewError("not_ready");
+    }
+  }
+  const nextAttempt = chunk.attempt + 1;
   const plan = await tx.amuxIdeaSourcePlanRevision.findUnique({
     where: { id: idea.currentSourcePlanRevisionId },
   });
@@ -187,7 +210,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
     await tx.amuxIdeaTransferPreview.create({ data: {
       id: choice.previewId, ideaId: idea.id,
       sourcePlanRevisionId: plan.id, sourceUnitOrdinal: 0,
-      chunkIndex: 0, attempt: 1, state: "prepared",
+      chunkIndex: 0, attempt: nextAttempt, state: "prepared",
       modelId: choice.modelId, templateVersion: prompt.version,
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
@@ -196,9 +219,12 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
       where: { ideaId: idea.id, chunkIndex: 0, actorUserId,
-        state: "pending", attempt: 0, currentPreviewId: null,
+        state: chunk.state, attempt: chunk.attempt,
+        currentPreviewId: chunk.currentPreviewId,
+        leaseGeneration: 0,
         sourcePlanRevisionId: plan.id },
-      data: { state: "awaiting_preview", attempt: 1, currentPreviewId: choice.previewId },
+      data: { state: "awaiting_preview", attempt: nextAttempt,
+        currentPreviewId: choice.previewId },
     });
     if (updated.count !== 1) throw new IdeaTransferPreviewError("not_ready");
     await writeAdminAuditLog({ tx, session: input.session, request: input.request,
