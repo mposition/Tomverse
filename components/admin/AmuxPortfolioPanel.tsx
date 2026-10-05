@@ -59,6 +59,7 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [latest, setLatest] = useState<unknown>(null);
+  const [readiness, setReadiness] = useState<unknown>(null);
 
   const resetPreview = () => { setPending(null); setPreview(null);
     setConfirmed(false); setResult(null); };
@@ -134,6 +135,25 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
         setError(m.invalid); return;
       }
       setLatest(value);
+    } catch { setError(m.invalid); }
+    finally { setBusy(false); }
+  };
+  const loadReadiness = async () => {
+    if (!taskId.trim() || busy) { setError(m.invalid); return; }
+    setBusy(true); setError(null); setReadiness(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/portfolio?" +
+        new URLSearchParams({ kind: "task_ready", taskId: taskId.trim() }),
+      { cache: "no-store" });
+      if (!response.ok) { await messageFor(response); return; }
+      const value: unknown = await response.json();
+      if (!value || typeof value !== "object" || !("ready" in value) ||
+          typeof value.ready !== "boolean" || !("reasons" in value) ||
+          !Array.isArray(value.reasons) || !("promotionAuthorized" in value) ||
+          value.promotionAuthorized !== false) {
+        setError(m.invalid); return;
+      }
+      setReadiness(value);
     } catch { setError(m.invalid); }
     finally { setBusy(false); }
   };
@@ -261,7 +281,15 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
         className="min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.calculate}</button>
       <button type="button" disabled={busy} onClick={() => void loadLatest()}
         className="ml-2 min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.latest}</button>
+      <button type="button" disabled={busy} onClick={() => void loadReadiness()}
+        className="ml-2 min-h-11 rounded border border-zinc-400 px-3 disabled:opacity-50">{m.readiness}</button>
     </div>
+    {readiness ? <div className="space-y-1 rounded border border-zinc-300 p-3 dark:border-zinc-700">
+      <p>{m.readinessHint}</p>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
+        {JSON.stringify(readiness, null, 2)}
+      </pre>
+    </div> : null}
     {latest ? <div className="space-y-1 rounded border border-zinc-300 p-3 dark:border-zinc-700">
       <p>{m.historical}</p>
       <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">

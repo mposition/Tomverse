@@ -21,6 +21,8 @@ import { amuxPortfolioAssessmentApprovalSchema,
   amuxPortfolioScoreApprovalSchema,
   amuxPortfolioScorePayloadSchema } from "@/lib/amux/portfolioScoreSchemas";
 import { loadCurrentAmuxContentKeys } from "@/lib/amux/ideaKeyConfig";
+import { AmuxV4TaskReadyError, readAmuxV4TaskReady } from
+  "@/lib/amux/v4TaskReadyService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
@@ -137,6 +139,11 @@ export async function GET(request: Request) {
       const result = await readLatestAmuxPortfolioScore(session, taskId);
       return NextResponse.json(result, { headers: noStore });
     }
+    if (kind === "task_ready") {
+      const result = await readAmuxV4TaskReady(session,
+        url.searchParams.get("taskId") ?? "");
+      return NextResponse.json(result, { headers: noStore });
+    }
     const requestId = url.searchParams.get("requestId") ?? "";
     if (!z.uuid().safeParse(requestId).success ||
         (kind !== "assessment" && kind !== "score")) {
@@ -151,6 +158,11 @@ export async function GET(request: Request) {
     if (isAdminReauthenticationError(error)) {
       return NextResponse.json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" },
         { status: 428, headers: noStore });
+    }
+    if (error instanceof AmuxV4TaskReadyError) {
+      return NextResponse.json({ error: error.code }, {
+        status: error.code === "not_found" ? 404 :
+          error.code === "forbidden" ? 403 : 503, headers: noStore });
     }
     const security = apiSecurityResponse(error);
     if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }

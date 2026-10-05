@@ -31,26 +31,36 @@ after(async () => { await prisma.$disconnect(); });
 
 test("owner catalog is idea-bound and keeps legacy cards as non-linkable hints", async () => {
   const ideaId = randomUUID();
+  const matchingLegacyId = `legacy-${randomUUID()}`;
+  const longLegacyId = `legacy-${randomUUID()}`;
   const submittedAt = new Date();
-  await prisma.amuxIdeaSubmission.create({ data: { id: ideaId,
-    requestId: randomUUID(), actorUserId, state: "submitted",
-    submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000) } });
-  await prisma.amuxWorkItem.create({ data: { id: `legacy-${randomUUID()}`,
-    title: "synthetic legacy item", status: "backlog" } });
-  await prisma.amuxWorkItem.create({ data: { id: `legacy-${randomUUID()}`,
-    title: "x".repeat(201), status: "backlog" } });
-  const catalog = await readAmuxIdeaResolutionCatalog(session, ideaId);
-  assert.deepEqual(catalog.nodes, []);
-  assert.deepEqual(catalog.cards, []);
-  assert.equal(catalog.legacyCards.length >= 1, true);
-  assert.equal(catalog.legacyCards.some((card) =>
-    card.title === "synthetic legacy item"), true);
-  assert.equal(catalog.legacyCards.some((card) => card.title.length > 200), false);
-  await assert.rejects(readAmuxIdeaResolutionCatalog({ ...session,
-    user: { id: `other-${randomUUID()}`, email: actorEmail } } as Session, ideaId),
-  (error: unknown) => error instanceof AmuxIdeaResolutionPreviewError &&
-    error.code === "not_found");
-  await assert.rejects(readAmuxIdeaResolutionCatalog(session, randomUUID()),
+  try {
+    await prisma.amuxIdeaSubmission.create({ data: { id: ideaId,
+      requestId: randomUUID(), actorUserId, state: "submitted",
+      submittedAt, analysisDeadlineAt: new Date(submittedAt.getTime() + 7 * 86_400_000) } });
+    await prisma.amuxWorkItem.create({ data: { id: matchingLegacyId,
+      title: "synthetic legacy item", status: "backlog" } });
+    await prisma.amuxWorkItem.create({ data: { id: longLegacyId,
+      title: "x".repeat(201), status: "backlog" } });
+    const catalog = await readAmuxIdeaResolutionCatalog(session, ideaId);
+    assert.equal(catalog.nodes.every((node) => !("title" in node)), true);
+    assert.equal(catalog.cards.some((card) =>
+      card.ref === matchingLegacyId || card.ref === longLegacyId), false);
+    assert.equal(catalog.legacyCards.length >= 1, true);
+    assert.equal(catalog.legacyCards.some((card) =>
+      card.ref === matchingLegacyId && card.title === "synthetic legacy item"), true);
+    assert.equal(catalog.legacyCards.some((card) => card.ref === longLegacyId), false);
+    await assert.rejects(readAmuxIdeaResolutionCatalog({ ...session,
+      user: { id: `other-${randomUUID()}`, email: actorEmail } } as Session, ideaId),
     (error: unknown) => error instanceof AmuxIdeaResolutionPreviewError &&
       error.code === "not_found");
+    await assert.rejects(readAmuxIdeaResolutionCatalog(session, randomUUID()),
+      (error: unknown) => error instanceof AmuxIdeaResolutionPreviewError &&
+        error.code === "not_found");
+  } finally {
+    await prisma.amuxWorkItem.deleteMany({ where: { id: {
+      in: [matchingLegacyId, longLegacyId] } } });
+    await prisma.amuxIdeaSubmission.deleteMany({ where: { id: ideaId,
+      actorUserId } });
+  }
 });
