@@ -57,7 +57,18 @@ export type OpsObserverClient = Pick<Prisma.TransactionClient, "$queryRaw" | "$e
   $appendSystemAudit(input: OpsObserverAuditInput): Promise<AppendedAuditEntry>;
 };
 
-const helpers = Object.freeze({
+/**
+ * A statement-counted helper: a fixed cost, pinned by a test against the
+ * statements its function sends, and a function run on the real client. Only
+ * lib code registers one -- never a transaction's callback.
+ */
+export type OpsObserverHelper = {
+  cost: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  run: (tx: Prisma.TransactionClient, input: any) => Promise<unknown>;
+};
+
+const helpers: Readonly<Record<string, OpsObserverHelper>> = Object.freeze({
   $appendSystemAudit: {
     cost: AUDIT_APPEND_STATEMENT_COST,
     run: (tx: Prisma.TransactionClient, input: OpsObserverAuditInput) =>
@@ -123,15 +134,21 @@ export async function withOpsObserverTransaction<T>(
   runDeadline: Date,
   fn: (tx: OpsObserverClient, armed: OpsObserverArmed) => Promise<T>,
   client: PrismaClient = prisma,
+  extraHelpers: Readonly<Record<string, OpsObserverHelper>> = {},
 ): Promise<{ result: T; armed: OpsObserverArmed }> {
   const bound = TRANSACTION_BOUNDS[kind];
   if (!bound) throw new Error("ops_observer_transaction_kind_unknown");
+  // A caller in lib may add a pinned-cost helper; it may not replace one.
+  for (const name of Object.keys(extraHelpers)) {
+    if (Object.hasOwn(helpers, name)) throw new Error("ops_observer_helper_name_taken");
+  }
+  const registered = { ...helpers, ...extraHelpers };
   let armed: OpsObserverArmed | null = null;
   const result = await client.$transaction(
     async (tx) => {
       armed = await arm(tx, kind, runDeadline);
       logArmed(kind, armed);
-      const counted = countingClient(tx, bound.statementCeiling - 1, helpers);
+      const counted = countingClient(tx, bound.statementCeiling - 1, registered);
       return fn(counted.client as OpsObserverClient, armed);
     },
     {

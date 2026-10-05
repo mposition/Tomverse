@@ -18,13 +18,17 @@
 
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { createHash } from "node:crypto";
+
+import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Session } from "next-auth";
 
 import {
   ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
   adminAuditEntryHashVariants,
   adminAuditIntegrityKeys,
 } from "@/lib/adminAuditIntegrityCore";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
 import { type OpsObserverClient, assertNotLate, withOpsObserverTransaction } from "@/lib/opsObserverTransaction";
@@ -38,7 +42,10 @@ import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-cor
 import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
 import { confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
-import { deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
+import { GENESIS_MIN_INTERVAL_MS, deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
+import { OPS_OBSERVER_INVARIANT_VERSION, genesisRefusal } from "@/scripts/ops-observer/genesis-core.mjs";
+import { S2_PAGE_KEYS, initialKeyState } from "@/scripts/ops-observer/classify-core.mjs";
+import { AUDIT_APPEND_STATEMENT_COST } from "@/scripts/ops-observer/statement-ceiling-core.mjs";
 
 type HeadRow = {
   id: string;
@@ -581,5 +588,164 @@ export async function confirmOpsObserverDelivery(
     client,
   );
   if (result.result === "confirmed" || result.result === "shadowed") await assertNotLate(input.runDeadline, client);
+  return result;
+}
+
+/** How far ahead an Admin genesis request sets its own deadline (within the 180 s claim limit). */
+export const GENESIS_REQUEST_DEADLINE_MS = 120_000;
+
+export type OpsObserverGenesisInput = {
+  session: Session;
+  request?: Request;
+  reason: "initial" | "recovery" | "activation";
+  mode: "shadow" | "live";
+  /** The state the owner looked at when approving: the screen binds these. */
+  expectedGenesisId: string | null;
+  expectedGeneration: number | null;
+  expectedMode: string | null;
+  trustReason: string;
+};
+
+export type OpsObserverGenesisResult =
+  | { result: "created"; genesisId: string; requestDigest: string }
+  | { result: "stale" | "genesis_too_soon" | "transition_refused" | "already_consumed" };
+
+/** The approval binds this exact JSON, keys sorted, hashed with SHA-256. */
+export function genesisRequestDigest(input: Omit<OpsObserverGenesisInput, "session" | "request">): string {
+  return createHash("sha256")
+    .update(
+      stableJson({
+        agentKey: "sre-ops",
+        expectedGenesisId: input.expectedGenesisId,
+        expectedGeneration: input.expectedGeneration,
+        expectedMode: input.expectedMode,
+        trustReason: input.trustReason,
+        reason: input.reason,
+        mode: input.mode,
+      }),
+      "utf8",
+    )
+    .digest("hex");
+}
+
+/** The PostgreSQL SQLSTATE an error carries, by code only. */
+function sqlState(error: unknown): string | null {
+  const e = error as { code?: unknown; meta?: { driverAdapterError?: { cause?: { code?: unknown; originalCode?: unknown } } } };
+  const cause = e?.meta?.driverAdapterError?.cause;
+  for (const candidate of [cause?.originalCode, cause?.code, e?.code]) {
+    if (typeof candidate === "string" && /^[0-9A-Z]{5}$/.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+type OpsObserverAdminAuditInput = Omit<Parameters<typeof writeAdminAuditLog>[0], "tx">;
+type OpsObserverAdminClient = OpsObserverClient & {
+  $appendAdminAudit(input: OpsObserverAdminAuditInput): Promise<string>;
+};
+
+/** The owner's audit entry, charged the four statements of an append. */
+const ADMIN_HELPERS = Object.freeze({
+  $appendAdminAudit: {
+    cost: AUDIT_APPEND_STATEMENT_COST,
+    run: (tx: Prisma.TransactionClient, input: OpsObserverAdminAuditInput) => writeAdminAuditLog({ ...input, tx }),
+  },
+});
+
+/**
+ * The Admin genesis (docs/policy/sre-ops.md §8, decisions D5b and N-6): the
+ * owner's approval to start, recover or activate the agent's state chain.
+ *
+ * One `genesis` transaction. The current head and trust verdict are read
+ * again and must be exactly what the owner approved (else `stale`, nothing
+ * written); the reason must fit the chain (`initial` with no genesis,
+ * `recovery` of an untrusted chain in its own mode, `activation` of a trusted
+ * shadow chain to live); a head younger than seven days refuses
+ * (`genesis_too_soon`). Then the genesis row, the owner's audit entry naming
+ * the request digest, predecessor and mode -- what the trust check's T1 reads
+ * -- and the generation-0 state row, last. A concurrent approval of the same
+ * head loses on the database's unique replacement (`already_consumed`).
+ */
+export async function createOpsObserverGenesis(
+  input: OpsObserverGenesisInput,
+  client: PrismaClient = prisma,
+): Promise<OpsObserverGenesisResult> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  const runDeadline = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS);
+  const requestDigest = genesisRequestDigest(input);
+  let result: OpsObserverGenesisResult;
+  try {
+    ({ result } = await withOpsObserverTransaction(
+      "genesis",
+      runDeadline,
+      async (tx): Promise<OpsObserverGenesisResult> => {
+        const gathered = await gatherFacts(tx, integrityKeys);
+        const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
+        const trust = verdict.trusted ? "trusted" : (verdict.reason ?? "state_missing");
+        const head = gathered.head;
+        const current = {
+          genesisId: head?.id ?? null,
+          generation: (head?.generation as number | null) ?? null,
+          mode: head?.mode ?? null,
+        };
+        if (
+          current.genesisId !== input.expectedGenesisId ||
+          current.generation !== input.expectedGeneration ||
+          current.mode !== input.expectedMode ||
+          trust !== input.trustReason
+        ) {
+          return { result: "stale" };
+        }
+        const supersedesGenesisId = head?.id ?? null;
+        const refusal = genesisRefusal(
+          { reason: input.reason, mode: input.mode, supersedesGenesisId },
+          head ? { id: head.id, mode: head.mode } : null,
+        );
+        if (refusal) return { result: "transition_refused" };
+        if (input.reason === "activation" && trust !== "trusted") return { result: "transition_refused" };
+        if (input.reason === "recovery" && trust === "trusted") return { result: "transition_refused" };
+        if (head && Date.now() - head.createdAt.getTime() < GENESIS_MIN_INTERVAL_MS) return { result: "genesis_too_soon" };
+
+        const genesisId = crypto.randomUUID();
+        await tx.$executeRaw`
+          INSERT INTO "OpsObserverGenesis" (id, reason, mode, "supersedesGenesisId", "requestDigest", "invariantVersion", "runDeadlineAt")
+          VALUES (${genesisId}::uuid, ${input.reason}, ${input.mode}, ${supersedesGenesisId}::uuid, ${requestDigest}, ${OPS_OBSERVER_INVARIANT_VERSION},
+                  ${runDeadline.toISOString()}::timestamptz)`;
+        await (tx as OpsObserverAdminClient).$appendAdminAudit({
+          session: input.session,
+          request: input.request,
+          action: "ops_observer.genesis_created",
+          targetType: "OpsObserverGenesis",
+          targetId: genesisId,
+          summary: `Approved an ops-observer ${input.reason} genesis (${input.mode}).`,
+          metadata: {
+            requestDigest,
+            supersedesGenesisId,
+            mode: input.mode,
+            reason: input.reason,
+            expectedGenesisId: input.expectedGenesisId,
+            expectedGeneration: input.expectedGeneration,
+            expectedMode: input.expectedMode,
+            trustReason: input.trustReason,
+          },
+        });
+        const keys = Object.fromEntries(S2_PAGE_KEYS.map((key) => [key, initialKeyState()]));
+        await tx.$executeRaw`
+          INSERT INTO "OpsObserverState" ("genesisId", generation, keys, "invariantVersion", "stampGeneration",
+            "stampKeysSha256", "stampCheckpointSha256", "runDeadlineAt")
+          VALUES (${genesisId}::uuid, 0, ${JSON.stringify(keys)}::jsonb, 0, 0, '', '', ${runDeadline.toISOString()}::timestamptz)`;
+        return { result: "created", genesisId, requestDigest };
+      },
+      client,
+      ADMIN_HELPERS,
+    ));
+  } catch (error) {
+    const state = sqlState(error);
+    // A concurrent approval of the same head took the replacement first.
+    if (state === "23505") return { result: "already_consumed" };
+    // The head moved under the request: what the owner approved is gone.
+    if (state === "OB022" || state === "OB021") return { result: "stale" };
+    throw error;
+  }
+  if (result.result === "created") await assertNotLate(runDeadline, client);
   return result;
 }
