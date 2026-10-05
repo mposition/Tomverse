@@ -5938,6 +5938,7 @@ model PromptRefinerVnextOneShotStage {
   approvedAt                 DateTime
   stageApprovalAuditLogId    String   @unique
   runApprovalAuditLogId      String?  @unique
+  supersededAuditLogId       String?  @unique
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 

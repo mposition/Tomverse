@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Session } from "next-auth";
 
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { type PromptRefinerVnextOneShotAuditBinding } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
@@ -11,6 +12,8 @@ import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
 import { assertPromptRefinerVnextOneShotPreregistrationForStage } from
   "@/lib/promptRefinerVnextOneShotPreregistration";
+import { readPromptRefinerVnextOneShotStage } from
+  "@/lib/promptRefinerVnextOneShotStageReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
 import {
@@ -21,6 +24,8 @@ import {
 
 const SLOT_COST = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 const RUN_CEILING = BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD);
+const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const REPLACEMENT_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
 
 /**
  * A07 storage primitive. The owner-only route must reobserve source and
@@ -52,6 +57,59 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     await assertPromptRefinerVnextOneShotPreregistrationForStage(
       tx, input.binding, input.session.user?.id ?? "",
     );
+    if (input.binding.id !== REPLACEMENT_STAGE_ID) {
+      throw new Error("vnext_one_shot_replacement_id_invalid");
+    }
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id" FROM "PromptRefinerVnextOneShotStage"
+      WHERE "id" = ${LEGACY_STAGE_ID} FOR NO KEY UPDATE NOWAIT
+    `;
+    if (locked.length !== 1 || locked[0]?.id !== LEGACY_STAGE_ID) {
+      throw new Error("vnext_one_shot_legacy_stage_unavailable");
+    }
+    const legacyReadback = await readPromptRefinerVnextOneShotStage(
+      tx, LEGACY_STAGE_ID
+    );
+    const legacy = await tx.promptRefinerVnextOneShotStage.findUnique({
+      where: { id: LEGACY_STAGE_ID },
+    });
+    if (!legacy || legacyReadback.stageStatus !== "staged" ||
+        !legacyReadback.reservationShapeValid ||
+        !legacyReadback.approvalAuditsValid ||
+        legacyReadback.reservedSlots !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
+        legacyReadback.consumedSlots !== 0 ||
+        legacy.runApprovalAuditLogId !== null ||
+        legacy.approvedBy !== approvedBy ||
+        legacy.sourceCommitSha !== input.binding.sourceCommitSha ||
+        legacy.sourceManifestDigest !== input.binding.sourceManifestDigest ||
+        legacy.runnerDigest !== input.binding.runnerDigest ||
+        legacy.manifestRoot !== input.binding.manifestRoot ||
+        legacy.pricePinDigest !== input.binding.pricePinDigest ||
+        legacy.runtimeDeploymentId === input.binding.runtimeDeploymentId) {
+      throw new Error("vnext_one_shot_legacy_stage_not_replaceable");
+    }
+    const supersededAuditLogId = await writeAdminAuditLog({
+      tx, session: input.session, request: input.request,
+      action: "prompt_refiner.vnext_one_shot.stage_superseded",
+      targetType: "PromptRefinerVnextOneShotStage",
+      targetId: LEGACY_STAGE_ID,
+      summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+      metadata: {
+        replacementStageId: REPLACEMENT_STAGE_ID,
+        previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+        replacementStageApprovalAuditLogId: auditLogId,
+      },
+    });
+    const closed = await tx.promptRefinerVnextOneShotStage.updateMany({
+      where: {
+        id: LEGACY_STAGE_ID, status: "staged",
+        runApprovalAuditLogId: null,
+      },
+      data: { status: "closed", supersededAuditLogId },
+    });
+    if (closed.count !== 1) {
+      throw new Error("vnext_one_shot_legacy_stage_close_conflict");
+    }
     await tx.promptRefinerVnextOneShotStage.create({
       data: {
         id: input.binding.id,
@@ -74,7 +132,7 @@ export async function createPromptRefinerVnextOneShotStageWithSlots(input: {
     });
     const created = await tx.promptRefinerVnextOneShotSlot.createMany({
       data: Array.from({ length: PROMPT_REFINER_VNEXT_SLOT_COUNT }, (_, slotIndex) => ({
-        id: `one-shot-${slotIndex}`,
+          id: `one-shot-v2-${slotIndex}`,
         stageId: input.binding.id,
         slotIndex,
         reservedCostMicroUsd: SLOT_COST,

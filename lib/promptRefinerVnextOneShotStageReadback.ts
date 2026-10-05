@@ -1,8 +1,9 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import type { Prisma, PromptRefinerVnextOneShotStage } from "@prisma/client";
 
-import { promptRefinerVnextOneShotApprovalAuditsAreValid } from
+import { promptRefinerVnextOneShotApprovalAuditsAreValid,
+  promptRefinerVnextOneShotAuditReceiptIsValid } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { assertPromptRefinerVnextOneShotActiveDeploymentForAdmission } from
   "@/lib/promptRefinerVnextOneShotDeploymentBinding";
@@ -13,7 +14,8 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
 const SLOT_COST_MICRO_USD = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
 
 type StageStatus = "staged" | "run_approved" | "closed";
@@ -39,6 +41,38 @@ const ABSENT_STAGE: PromptRefinerVnextOneShotStageReadback = Object.freeze({
   approvalAuditsValid: false,
   dispatchAuthorized: false,
 });
+
+async function replacementAuditIsValid(
+  tx: Prisma.TransactionClient,
+  stage: PromptRefinerVnextOneShotStage,
+): Promise<boolean> {
+  if (stage.id !== STAGE_ID) return true;
+  const legacy = await tx.promptRefinerVnextOneShotStage.findUnique({
+    where: { id: LEGACY_STAGE_ID },
+  });
+  if (!legacy || legacy.status !== "closed" || legacy.runApprovalAuditLogId ||
+      !legacy.supersededAuditLogId || legacy.approvedBy !== stage.approvedBy ||
+      legacy.sourceCommitSha !== stage.sourceCommitSha ||
+      legacy.sourceManifestDigest !== stage.sourceManifestDigest ||
+      legacy.runnerDigest !== stage.runnerDigest ||
+      legacy.manifestRoot !== stage.manifestRoot ||
+      legacy.pricePinDigest !== stage.pricePinDigest ||
+      legacy.runtimeDeploymentId === stage.runtimeDeploymentId) return false;
+  const audit = await tx.adminAuditLog.findUnique({
+    where: { id: legacy.supersededAuditLogId },
+  });
+  if (!audit || audit.actorUserId !== stage.approvedBy ||
+      audit.action !== "prompt_refiner.vnext_one_shot.stage_superseded" ||
+      audit.targetType !== "PromptRefinerVnextOneShotStage" ||
+      audit.targetId !== LEGACY_STAGE_ID ||
+      !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, audit)) return false;
+  const metadata = audit.metadata;
+  return Boolean(metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) &&
+    metadata.replacementStageId === STAGE_ID &&
+    metadata.previousStageApprovalAuditLogId === legacy.stageApprovalAuditLogId &&
+    metadata.replacementStageApprovalAuditLogId === stage.stageApprovalAuditLogId);
+}
 
 /**
  * A future admission caller must take this lock before registry-price and
@@ -74,17 +108,18 @@ export async function lockAndReadPromptRefinerVnextOneShotStage(
 
 /** Content-free diagnostic only; never grants stage, run, or dispatch authority. */
 export async function readPromptRefinerVnextOneShotStage(
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  stageId: string = STAGE_ID
 ): Promise<PromptRefinerVnextOneShotStageReadback> {
   const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: STAGE_ID },
+    where: { id: stageId },
   });
   if (!stage) {
     return ABSENT_STAGE;
   }
 
   const slots = await tx.promptRefinerVnextOneShotSlot.findMany({
-    where: { stageId: STAGE_ID },
+    where: { stageId },
     select: {
       slotIndex: true,
       status: true,
@@ -126,7 +161,8 @@ export async function readPromptRefinerVnextOneShotStage(
       indices.size === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
       reservedSlots + consumedSlots === PROMPT_REFINER_VNEXT_SLOT_COUNT,
     approvalAuditsValid: stageStatus !== null &&
-      await promptRefinerVnextOneShotApprovalAuditsAreValid(tx, stage),
+      await promptRefinerVnextOneShotApprovalAuditsAreValid(tx, stage) &&
+      await replacementAuditIsValid(tx, stage),
     dispatchAuthorized: false,
   });
 }

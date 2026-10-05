@@ -9,7 +9,7 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
 import { staticModelRegistrySeedRows } from "../lib/modelRegistryShared.ts";
 
 const stage = {
-  id: "prompt-refiner-vnext-one-shot-v1",
+  id: "prompt-refiner-vnext-one-shot-v2",
   status: "staged",
   slotCount: 80,
   sourceCommitSha: "a".repeat(40),
@@ -36,12 +36,12 @@ const txFor = (row, items) => {
     calls,
     tx: {
       promptRefinerVnextOneShotStage: { async findUnique({ where }) {
-        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v1" });
+        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v2" });
         calls.stages++;
         return row;
       } },
       promptRefinerVnextOneShotSlot: { async findMany({ where }) {
-        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v1" });
+        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v2" });
         calls.slots++;
         return items;
       } },
@@ -102,7 +102,7 @@ test("transactional read locks the stage before reading reservations", async () 
   tx.$queryRaw = async (strings, id) => {
     const sql = strings.join("?");
     assert.match(sql, /FOR NO KEY UPDATE NOWAIT/);
-    assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
+    assert.equal(id, "prompt-refiner-vnext-one-shot-v2");
     locks++;
     if (!sql.includes('"status"')) {
       if (locks === 1) assert.deepEqual(calls, { stages: 0, slots: 0 });
