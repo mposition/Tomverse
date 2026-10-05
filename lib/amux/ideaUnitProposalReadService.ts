@@ -19,7 +19,7 @@ export class AmuxIdeaUnitProposalReadError extends Error {
 
 /** Reuse the A07 full-chunk commitment check; a browser-provided proposal is
  * never a registration source. This is called again before consuming. */
-async function readVerifiedAmuxUnitProposal(session: Session,
+export async function readVerifiedAmuxUnitProposal(session: Session,
   ideaId: string, draftUnitId: string): Promise<{
     proposal: AmuxAnalysisCard | AmuxAnalysisNode;
     unit: { id: string; localRef: string; bodyDigest: string;

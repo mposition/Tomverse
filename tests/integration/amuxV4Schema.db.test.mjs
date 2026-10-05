@@ -824,6 +824,74 @@ test("AMUX v4 schema rejects hierarchy, source-shape and premature Todo writes",
       "AmuxIdeaUnitDecision_terminal_immutable_check",
     );
 
+    // A rejection is an audited final decision, not an approval cancellation.
+    // The deferred guard rejects a consumed decision whose draft stayed open.
+    await client.query("SAVEPOINT rejection_probe");
+    const rejectUnitId = randomUUID();
+    const rejectDecisionId = randomUUID();
+    await client.query(
+      `INSERT INTO public."AmuxIdeaDraftUnit"
+       ("id", "ideaId", "actorUserId", "chunkIndex", "unitIndex", "localRef",
+        "unitKind", "state", "bodyCiphertext", "bodyKeyId", "bodyKeyVersion",
+        "bodyDigest", "bodyDigestKeyId", "updatedAt")
+       VALUES ($1, $2, 'synthetic-owner', 0, 102, 'c0:card-102', 'card',
+               'proposed', $3, 'synthetic', 1, $4, 'synthetic', CURRENT_TIMESTAMP)`,
+      [rejectUnitId, ids.idea, title, digest],
+    );
+    const rejectPrepareAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.prepare",
+      targetType: "AmuxIdeaUnitDecision", targetId: rejectDecisionId,
+      summary: "synthetic rejection preparation",
+    });
+    await client.query(
+      `INSERT INTO public."AmuxIdeaUnitDecision"
+       ("id", "ideaId", "draftUnitId", "actorUserId", "chunkIndex",
+        "prepareRequestId", "action", "state", "ownerSessionDigest",
+        "ownerSessionDigestKeyId", "unitDigest", "unitDigestKeyId",
+        "confirmationDigest", "confirmationDigestKeyId", "confirmationSnapshot",
+        "sourcePreviewId", "sourcePreviewDigest", "sourcePreviewDigestKeyId",
+        "preparedAt", "expiresAt", "prepareAuditLogId", "updatedAt")
+       VALUES ($1, $2, $3, 'synthetic-owner', 0, $4,
+               'reject_unit', 'prepared', $5, 'synthetic', $6, 'synthetic',
+               $7, 'synthetic', $8::jsonb, $9, $10, 'synthetic',
+               CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '15 minutes',
+               $11, CURRENT_TIMESTAMP)`,
+      [rejectDecisionId, ids.idea, rejectUnitId, randomUUID(),
+        "c".repeat(64), digest, "d".repeat(64),
+        JSON.stringify({ action: "reject_unit", decisionReason: { digest } }),
+        decisionPreviewId, digest, rejectPrepareAudit],
+    );
+    const rejectConsumeAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v4.unit.consume",
+      targetType: "AmuxIdeaUnitDecision", targetId: rejectDecisionId,
+      summary: "synthetic rejection consumption",
+    });
+    const consumeReject = `UPDATE public."AmuxIdeaUnitDecision"
+      SET "state" = 'consumed', "consumeRequestId" = $2,
+          "finalAuditLogId" = $3 WHERE "id" = $1`;
+    await client.query("SAVEPOINT incomplete_rejection_probe");
+    await client.query(consumeReject,
+      [rejectDecisionId, randomUUID(), rejectConsumeAudit]);
+    await expectRejected(`SET CONSTRAINTS amux_v4_rejected_decision_complete IMMEDIATE`,
+      [], "AmuxV4Rejection_consistency_check");
+    await client.query("ROLLBACK TO SAVEPOINT incomplete_rejection_probe");
+    await client.query("RELEASE SAVEPOINT incomplete_rejection_probe");
+    await client.query(consumeReject,
+      [rejectDecisionId, randomUUID(), rejectConsumeAudit]);
+    await client.query(`UPDATE public."AmuxIdeaDraftUnit"
+      SET "state" = 'rejected' WHERE "id" = $1`, [rejectUnitId]);
+    await client.query(`SET CONSTRAINTS amux_v4_rejected_decision_complete IMMEDIATE`);
+    const rejected = await client.query(
+      `SELECT d."state" AS "decisionState", u."state" AS "unitState"
+       FROM public."AmuxIdeaUnitDecision" d
+       JOIN public."AmuxIdeaDraftUnit" u ON u."id" = d."draftUnitId"
+       WHERE d."id" = $1`, [rejectDecisionId]);
+    assert.deepEqual(rejected.rows[0], {
+      decisionState: "consumed", unitState: "rejected",
+    });
+    await client.query("ROLLBACK TO SAVEPOINT rejection_probe");
+    await client.query("RELEASE SAVEPOINT rejection_probe");
+
     // An Initiative proposal must have its own decision. A node, its
     // revision, the consumed decision and the approved draft roll back as a
     // single unit; a Story approval cannot silently approve its parent.

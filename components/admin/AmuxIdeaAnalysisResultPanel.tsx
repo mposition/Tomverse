@@ -8,6 +8,8 @@ import { AmuxIdeaNodeRegistrationPanel } from
   "@/components/admin/AmuxIdeaNodeRegistrationPanel";
 import { AmuxIdeaCardRegistrationPanel } from
   "@/components/admin/AmuxIdeaStoryRegistrationPanel";
+import { AmuxIdeaUnitRejectionPanel } from
+  "@/components/admin/AmuxIdeaUnitRejectionPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -149,6 +151,11 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
         unit.decisionState === "proposed" && unit.proposal?.kind === "card" &&
         ["story", "task"].includes(unit.proposal.cardType)).map((unit) =>
         <AmuxIdeaCardRegistrationPanel key={unit.id} ideaId={ideaId} unit={unit} />) : null}
+      {view.outcome === "propose" ? view.units.filter((unit) =>
+        unit.decisionState === "proposed" &&
+        (unit.proposal?.kind === "node" || unit.proposal?.kind === "card"))
+        .map((unit) => <AmuxIdeaUnitRejectionPanel
+          key={`reject:${unit.id}`} ideaId={ideaId} unit={unit} />) : null}
       <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
     </div> : null}
   </section>;

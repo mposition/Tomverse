@@ -7,6 +7,7 @@ import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
+import { scanAmuxV4Input } from "./localIntakeCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { calculateV4TaskCeilingFromCatalog,
   inspectV4TaskCostCatalog, type V4TaskCostCatalog } from
@@ -41,7 +42,17 @@ function inspectedCatalog(raw: unknown) {
   if (!inspection.ok) {
     throw new AmuxV4TaskCatalogApprovalError("schema_rejected");
   }
-  return { inspection, catalog: JSON.parse(serialized) as V4TaskCostCatalog };
+  const catalog = JSON.parse(serialized) as V4TaskCostCatalog;
+  const labels = [catalog.catalogVersion, catalog.pricingVersion,
+    catalog.gradeRulesVersion,
+    ...catalog.gradeRules.flatMap((rule) => [rule.role, rule.grade]),
+    ...catalog.routes.flatMap((route) => [route.routeId, route.workerName,
+      route.provider, route.modelId, route.pricingSource,
+      ...route.roles, ...route.grades])];
+  if (labels.some((label) => !scanAmuxV4Input(label).ok)) {
+    throw new AmuxV4TaskCatalogApprovalError("schema_rejected");
+  }
+  return { inspection, catalog };
 }
 
 async function databaseNow(tx: Prisma.TransactionClient): Promise<Date> {

@@ -17,7 +17,8 @@ import type { AmuxAnalysisCard } from "./ideaAnalysisChunkCore.ts";
 import type { AmuxAnalysisNode } from "./ideaAnalysisChunkCore.ts";
 import { inspectAmuxV4CardRegistration } from "./ideaUnitRegistrationCore.ts";
 import { inspectAmuxV4NodeCreation } from "./ideaNodeRegistrationCore.ts";
-import type { AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
+import { checkAmuxIdeaUnitConsume,
+  type AmuxIdeaUnitConsumeContext } from "./ideaUnitConsumeGuard.ts";
 import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 
@@ -584,6 +585,102 @@ export async function commitAmuxV4NodeCreation(tx: Prisma.TransactionClient, inp
   return { decisionId: plan.decisionId, nodeId: plan.id, auditId };
 }
 
+/** A rejected proposal is a consumed owner decision with no card or node.
+ * Rejection does not delete the draft or mutate any previously approved unit. */
+export async function commitAmuxV4UnitRejection(tx: Prisma.TransactionClient, input: {
+  session: Session; request: Request;
+  snapshot: AmuxIdeaUnitConfirmationSnapshot;
+  proposal: AmuxAnalysisCard | AmuxAnalysisNode;
+  context: Omit<AmuxIdeaUnitConsumeContext, "databaseNow" | "currentConfirmation">;
+  consumeRequestId: string; keys: AmuxDigestKey;
+}) {
+  const actorUserId = ownerId(input.session);
+  if (input.snapshot.actorUserId !== actorUserId ||
+      input.snapshot.action !== "reject_unit" ||
+      !/^[0-9a-f-]{36}$/.test(input.consumeRequestId)) {
+    throw new AmuxV4UnitDecisionError("not_found");
+  }
+  await tx.$executeRaw`SELECT set_config('statement_timeout', '5000', true)`;
+  await takeAuditChainLock(tx);
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "AmuxIdeaUnitDecision"
+    WHERE "id" = ${input.snapshot.decisionId}
+      AND "actorUserId" = ${actorUserId} FOR UPDATE
+  `;
+  if (rows.length !== 1) throw new AmuxV4UnitDecisionError("not_found");
+  const prepared = await tx.amuxIdeaUnitDecision.findUnique({
+    where: { id: input.snapshot.decisionId },
+  });
+  if (!prepared || prepared.action !== "reject_unit" ||
+      prepared.confirmationSnapshot === null ||
+      amuxCanonicalJson(prepared.confirmationSnapshot) !==
+        amuxCanonicalJson(input.snapshot)) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const unit = await tx.amuxIdeaDraftUnit.findUnique({
+    where: { id: prepared.draftUnitId },
+    select: { id: true, ideaId: true, actorUserId: true, chunkIndex: true,
+      localRef: true, unitKind: true, state: true, bodyDigest: true,
+      bodyDigestKeyId: true },
+  });
+  if (!unit || unit.ideaId !== prepared.ideaId ||
+      unit.actorUserId !== actorUserId || unit.state !== "proposed" ||
+      unit.localRef !== input.proposal.localId ||
+      unit.localRef !== input.snapshot.localRef ||
+      unit.unitKind !== input.proposal.kind ||
+      unit.bodyDigest !== input.snapshot.unitBody.digest ||
+      unit.bodyDigestKeyId !== input.snapshot.unitBody.keyId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  await assertCurrentProposalSource(tx, input.snapshot, unit.chunkIndex);
+  const actual = amuxContentDigest(Buffer.from(amuxCanonicalJson(input.proposal), "utf8"),
+    "analysis_draft", unit.id, input.keys);
+  if (actual.digest !== unit.bodyDigest ||
+      actual.digestKeyId !== unit.bodyDigestKeyId) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  const nowRows = await tx.$queryRaw<Array<{ now: Date }>>`
+    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  `;
+  const now = nowRows[0]?.now;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new AmuxV4UnitDecisionError("integrity_unavailable");
+  }
+  const confirmation = deriveAmuxIdeaUnitConfirmation(input.snapshot,
+    input.keys, null, null);
+  const guard = checkAmuxIdeaUnitConsume({ ...prepared,
+    state: prepared.state as "prepared" | "consumed" | "cancelled" | "invalidated" | "expired" },
+  { ...input.context, databaseNow: now, currentConfirmation: confirmation });
+  if (guard.decision !== "allow") {
+    throw new AmuxV4UnitDecisionError(guard.decision === "halt" ?
+      "integrity_unavailable" : "reconfirm");
+  }
+  const auditId = await writeAdminAuditLog({ tx, session: input.session,
+    request: input.request, action: "amux.v4.unit.consume",
+    targetType: "AmuxIdeaUnitDecision", targetId: prepared.id,
+    summary: "Rejected one AMUX v4 proposal without registering a target.",
+    metadata: { ideaId: prepared.ideaId, draftUnitId: unit.id,
+      action: "reject_unit", confirmationDigest: prepared.confirmationDigest,
+      targetCreated: false },
+  });
+  const decision = await tx.amuxIdeaUnitDecision.updateMany({
+    where: { id: prepared.id, actorUserId, state: "prepared",
+      expiresAt: { gt: now }, outcomeUnknownAt: null,
+      confirmationDigest: confirmation.ok ? confirmation.confirmationDigest : "" },
+    data: { state: "consumed", consumeRequestId: input.consumeRequestId,
+      consumedAt: now, finalAuditLogId: auditId },
+  });
+  const draft = await tx.amuxIdeaDraftUnit.updateMany({
+    where: { id: unit.id, ideaId: prepared.ideaId,
+      actorUserId, state: "proposed" },
+    data: { state: "rejected" },
+  });
+  if (decision.count !== 1 || draft.count !== 1) {
+    throw new AmuxV4UnitDecisionError("reconfirm");
+  }
+  return { decisionId: prepared.id, auditId, targetCreated: false as const };
+}
+
 /** Exact-ID read-back after an uncertain response. Missing is not proof of
  * no commit and must never trigger an automatic second write. */
 export async function readAmuxV4UnitDecision(session: Session, lookup: {
@@ -610,7 +707,7 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       prepareAuditLogId: true, finalAuditLogId: true },
   });
   if (!row) return { state: "not_visible", retryWrite: false } as const;
-  const [prepareAudit, finalAudit, card, nodeRevision, node] = await Promise.all([
+  const [prepareAudit, finalAudit, card, nodeRevision, node, rejectedDraft] = await Promise.all([
     prisma.adminAuditLog.findUnique({ where: { id: row.prepareAuditLogId },
       select: { action: true, actorUserId: true, targetType: true,
         targetId: true, entryHash: true } }),
@@ -634,8 +731,12 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
       select: { id: true, revision: true, contentDigest: true,
         contentDigestKeyId: true, authorizationAuditLogId: true },
     }) : Promise.resolve(null),
+    row.state === "consumed" && row.action === "reject_unit" ?
+      prisma.amuxIdeaDraftUnit.findUnique({ where: { id: row.draftUnitId },
+        select: { state: true, ideaId: true, actorUserId: true } }) :
+      Promise.resolve(null),
   ]);
-  if (!["register_card", "create_node"].includes(row.action) ||
+  if (!["register_card", "create_node", "reject_unit"].includes(row.action) ||
       !prepareAudit?.entryHash || prepareAudit.action !== "amux.v4.unit.prepare" ||
       prepareAudit.actorUserId !== actorUserId ||
       prepareAudit.targetType !== "AmuxIdeaUnitDecision" ||
@@ -663,7 +764,12 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
           nodeRevision.contentDigest !== node.contentDigest ||
           nodeRevision.contentDigestKeyId !== node.contentDigestKeyId ||
           nodeRevision.authorizationAuditLogId !== row.finalAuditLogId ||
-          node.authorizationAuditLogId !== row.finalAuditLogId))) {
+          node.authorizationAuditLogId !== row.finalAuditLogId)) ||
+      (row.state === "consumed" && row.action === "reject_unit" &&
+        (!rejectedDraft || rejectedDraft.state !== "rejected" ||
+          rejectedDraft.ideaId !== row.ideaId ||
+          rejectedDraft.actorUserId !== actorUserId ||
+          row.registeredWorkItemId !== null || row.resolvedNodeId !== null))) {
     return { state: "integrity_unavailable", retryWrite: false } as const;
   }
   if (row.outcomeUnknownAt !== null) {
@@ -680,6 +786,11 @@ export async function readAmuxV4UnitDecision(session: Session, lookup: {
     return { state: "consumed", retryWrite: false, decisionId: row.id,
       ideaId: row.ideaId, draftUnitId: row.draftUnitId,
       nodeId: nodeRevision.nodeId } as const;
+  }
+  if (row.state === "consumed" && row.action === "reject_unit") {
+    return { state: "consumed", action: "reject_unit", retryWrite: false,
+      decisionId: row.id, ideaId: row.ideaId,
+      draftUnitId: row.draftUnitId } as const;
   }
   if (row.state !== "prepared") {
     return { state: row.state, retryWrite: false, decisionId: row.id,
@@ -725,14 +836,14 @@ export async function cancelAmuxV4UnitDecision(input: {
           draftUnitId: true, outcomeUnknownAt: true },
       });
       if (!decision || decision.state !== "prepared" ||
-      !["register_card", "create_node"].includes(decision.action) ||
+      !["register_card", "create_node", "reject_unit"].includes(decision.action) ||
           decision.outcomeUnknownAt !== null) {
         throw new AmuxV4UnitDecisionError("reconfirm");
       }
       const auditId = await writeAdminAuditLog({ tx, session: input.session,
         request: input.request, action: "amux.v4.unit.cancel",
         targetType: "AmuxIdeaUnitDecision", targetId: decision.id,
-        summary: "Cancelled one unconsumed AMUX v4 card confirmation.",
+        summary: "Cancelled one unconsumed AMUX v4 unit confirmation.",
         metadata: { ideaId: decision.ideaId,
           draftUnitId: decision.draftUnitId, action: decision.action },
       });
