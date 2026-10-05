@@ -10,8 +10,9 @@ approvedAt: null
 
 # Prompt Refiner vNext one-shot: B06 run-approved recovery
 
-This addendum is limited to completing the unpaid B06 operational shadow for
-the approved [one-shot v2 policy](prompt-refiner-quality-evaluation-vnext-one-shot-v2.md).
+This addendum defines the unpaid B06 operational shadow recovery and the
+future paid-run eligibility and guard for its v3 stage under the approved
+[one-shot v2 policy](prompt-refiner-quality-evaluation-vnext-one-shot-v2.md).
 It does not revise the N=80 numeric gate, candidate, corpus, A17 final runner,
 price, owner custody, or holdout access boundary. It grants no provider call,
 slot consumption, product traffic, or quality disposition.
@@ -93,10 +94,15 @@ never invokes that route.
 
 The B06 deployment is refused before v3 stage approval unless its reviewed
 commit includes the v3 paid-audit guard in the slot route, the owner paid
-approval route, and passing CI tests that call the slot route with **both**
-environment switches set to `1`, a valid runner token and request, and no
-paid audit. That request must refuse before slot mutation. V3 stage admission also checks a
-server-owned capability version exported by the guarded slot implementation;
+approval route, and a passing CI test with an exact `run_approved` v3 stage,
+a valid B06 shadow audit, 80 reserved and zero consumed slots, matching
+candidate/root/runner/price and active deployment pins, **both** environment
+switches set to `1`, and a valid runner token and slot request. With only the
+paid-authorization audit absent, the slot route must refuse before slot or
+audit mutation. The test must establish that all other admission predicates
+are satisfied so a refusal for another reason cannot pass it. V3 stage
+admission also checks a server-owned capability version exported by the
+guarded slot implementation;
 an absent or mismatched version refuses stage creation. A caller field or
 environment claim cannot satisfy that check. No earlier build with only the
 environment switch is eligible for this recovery.
@@ -133,7 +139,9 @@ unassessed. A new explicit policy and owner decision would be required before
 any replacement or paid run. An uncertain shadow write is read back once:
 completion requires one valid v3 shadow audit, the same active deployment ID
 and commit, valid v3 stage and run audits, all 80 slots reserved and zero
-consumed, integer cache-write zero, and `dispatchAuthorized: false`. Absent,
+consumed, an app audit recording the proof's explicit integer
+`cacheWriteInputTokens: 0` (not a missing or derived zero), no paid-authorization
+audit, and `dispatchAuthorized: false`. Absent,
 duplicate, mismatched or invalid evidence stops the attempt without a second
 POST. The later paid-approval route must also refuse a drifted deployment and
 must not treat a B06 shadow receipt as spend authority. Historical v1/v2 rows
@@ -154,10 +162,12 @@ The implementation must pass synthetic rollback, concurrent duplicate,
 deployment and source drift, audit integrity, old-stage immutability,
 zero-consumption, no-provider-call, proof-rejection and content-free readback
 tests, including the missing-paid-audit refusal with both environment switches
-set and v3 stage refusal when the guarded-slot capability version is absent or
-mismatched. An independent reviewer other than the author must review the policy
+set and all other admission predicates satisfied, and v3 stage refusal when
+the guarded-slot capability version is absent or mismatched. An independent
+reviewer other than the author must review the policy
 and code. The PR and staging deployment must be verified separately. B06 is
 complete only when the app's owner readback shows v3's exact deployment and
 commit, same candidate/root/runner/price binding, valid stage/run/shadow
-audits, 80 reserved and zero consumed slots, integer cache-write zero, and
-dispatch blocked through shadow completion.
+audits, 80 reserved and zero consumed slots, an audit recording explicit integer
+`cacheWriteInputTokens: 0`, no paid-authorization audit, and dispatch blocked
+through shadow completion.
