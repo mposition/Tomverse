@@ -634,6 +634,20 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     description: "A pixel office shell for the seven agent teams, with a link to each team's record",
     group: "Operations",
     aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
+    // The office draws its own tab strip, as the original UI did; its tabs are
+    // links to these sections, and one demo engine runs under both.
+    tabs: [
+      {
+        id: "live",
+        label: "Live office",
+        description: "The office floor, the operator console, the demo approval and the feed",
+      },
+      {
+        id: "dashboard",
+        label: "Dashboard",
+        description: "Team board, demo approval, digest brief and each team's record link",
+      },
+    ],
   },
   {
     id: "platform",

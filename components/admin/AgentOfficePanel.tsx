@@ -1,12 +1,14 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import AgentOfficeWorld from "@/components/admin/AgentOfficeWorld";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import { AGENT_OFFICE_DEPTS, AGENT_OFFICE_TEAM_IDS, agentOfficeDept } from "@/lib/agentOffice/roster";
 import {
@@ -14,6 +16,7 @@ import {
   PHASE,
   PHASE_COUNT,
   type Agent,
+  type AgentStatus,
   type DeptStatus,
   type OfficeCopy,
   type Snapshot,
@@ -24,7 +27,24 @@ import { DEPT_ROOMS } from "@/lib/agentOffice/world";
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
 
+const OFFICE_PATH = "/admin/office";
+/** A section is an address (docs/ui-contracts/admin-console-ia.md, rule 2). */
+const viewHref = (view: View) => `${OFFICE_PATH}?tab=${view}`;
+
 const FILTERS: readonly Filter[] = ["all", "working", "done", "approval", "blocked"];
+
+/** The colour a person's status pill takes, from the same five tones as a room. */
+const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
+  working: "working",
+  meeting: "approval",
+  reporting: "approval",
+  blocked: "blocked",
+  onBreak: "done",
+  offDuty: "waiting",
+  commuting: "waiting",
+  idle: "waiting",
+  moving: "waiting",
+};
 
 function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; accent: string }) {
   const style = {
@@ -57,11 +77,11 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
  * nothing else. The only facts on the screen are the record links, which
  * point at the console pages each team already has.
  */
-export function AgentOfficePanel() {
+export function AgentOfficePanel({ view }: { view: View }) {
   const m = useAdminMessages(adminAgentOfficeMessages);
+  const router = useRouter();
   const [engine] = useState(() => new AgentOffice(m));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
-  const [view, setView] = useState<View>("live");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
   const [briefing, setBriefing] = useState(false);
@@ -103,22 +123,52 @@ export function AgentOfficePanel() {
 
   const onSelect = useCallback((agent: Agent) => setSelectedId(agent.id), []);
 
+  /** To the live office, by address; the panel stays mounted and the day goes on. */
+  const goLive = useCallback(() => {
+    if (view !== "live") router.push(viewHref("live"), { scroll: false });
+  }, [router, view]);
+
+  // A card in the live office to bring into view once that section is on
+  // screen. From the dashboard the section arrives after a navigation, so the
+  // scroll waits for it rather than for a fixed delay.
+  const pendingReveal = useRef<string | null>(null);
+  const reveal = useCallback(
+    (id: string) => {
+      pendingReveal.current = id;
+      if (view === "live") {
+        window.setTimeout(() => {
+          document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          pendingReveal.current = null;
+        }, 60);
+      } else {
+        goLive();
+      }
+    },
+    [goLive, view]
+  );
+  useEffect(() => {
+    const id = pendingReveal.current;
+    if (view !== "live" || !id) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      pendingReveal.current = null;
+    }, 60);
+    return () => window.clearTimeout(timer);
+  }, [view]);
+
   const askAgent = useCallback(
     (agent: Agent) => {
       engine.command(m.console.ask(agent.name));
       setSelectedId(null);
-      window.setTimeout(
-        () => document.getElementById("agent-office-console")?.scrollIntoView({ behavior: "smooth", block: "center" }),
-        60
-      );
+      reveal("agent-office-console");
     },
-    [engine, m]
+    [engine, m, reveal]
   );
 
   const start = () => {
     engine.start();
     setBriefing(false);
-    setView("live");
+    goLive();
     showToast(m.live.toastStart(engine.staff.length));
   };
 
@@ -155,35 +205,26 @@ export function AgentOfficePanel() {
               <b>{m.nav.brandName}</b>
             </div>
             <div className={cx("nav-tabs")}>
-              <button
-                type="button"
+              <Link
+                href={viewHref("live")}
+                scroll={false}
                 className={cx(view === "live" && "active")}
-                aria-pressed={view === "live"}
-                onClick={() => setView("live")}
+                aria-current={view === "live" ? "page" : undefined}
               >
                 {m.nav.live}
-              </button>
-              <button
-                type="button"
+              </Link>
+              <Link
+                href={viewHref("dashboard")}
+                scroll={false}
                 className={cx(view === "dashboard" && "active")}
-                aria-pressed={view === "dashboard"}
-                onClick={() => setView("dashboard")}
+                aria-current={view === "dashboard" ? "page" : undefined}
               >
                 {m.nav.dashboard}
-              </button>
+              </Link>
               <button
                 type="button"
                 className={cx("todo-tab", todo > 0 && "urgent")}
-                onClick={() => {
-                  setView("live");
-                  window.setTimeout(
-                    () =>
-                      document
-                        .getElementById("agent-office-approval")
-                        ?.scrollIntoView({ behavior: "smooth", block: "center" }),
-                    60
-                  );
-                }}
+                onClick={() => reveal("agent-office-approval")}
               >
                 {m.nav.todo} <i>{todo}</i>
               </button>
@@ -241,10 +282,7 @@ export function AgentOfficePanel() {
           engine={engine}
           agent={selected}
           onClose={() => setSelectedId(null)}
-          onAsk={(agent) => {
-            setView("live");
-            askAgent(agent);
-          }}
+          onAsk={askAgent}
         />
       ) : null}
       {briefing ? (
@@ -561,15 +599,15 @@ function OperatorConsole({ m, engine, snap }: { m: OfficeCopy; engine: AgentOffi
   );
 }
 
-/** Closes on Escape, as every console dialog does. */
-function useEscape(onClose: () => void) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+/**
+ * The focus contract every aria-modal surface owes (components/useModalDialog.ts):
+ * focus moves in, Tab cycles inside, Escape closes, the page behind does not
+ * scroll, and focus returns to what opened it.
+ */
+function useOfficeDialog(onClose: () => void, initialFocusRef: RefObject<HTMLButtonElement | null>) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  useModalDialog({ open: true, onClose, dialogRef, panelRef: dialogRef, initialFocusRef });
+  return dialogRef;
 }
 
 function ProfileModal({
@@ -585,11 +623,13 @@ function ProfileModal({
   onClose: () => void;
   onAsk: (agent: Agent) => void;
 }) {
-  useEscape(onClose);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useOfficeDialog(onClose, closeRef);
   const dept = agentOfficeDept(agent.deptId);
   return (
     <div className={cx("modal-backdrop")} onClick={onClose}>
       <section
+        ref={dialogRef}
         className={cx("win team-modal")}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -599,7 +639,7 @@ function ProfileModal({
       >
         <div className={cx("win-bar")}>
           <span>{m.profile.windowTitle}</span>
-          <button type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon} autoFocus>
+          <button ref={closeRef} type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon}>
             ✕
           </button>
         </div>
@@ -607,7 +647,7 @@ function ProfileModal({
           <div className={cx("profile-top")}>
             <PixelEmployee hair={agent.hair} shirt={agent.shirt} accent={agent.accent} />
             <div>
-              <span className={cx("status-pill working")}>{m.agentStatus[agent.status]}</span>
+              <span className={cx("status-pill", AGENT_STATUS_TONE[agent.status])}>{m.agentStatus[agent.status]}</span>
               <h2>
                 {agent.name}
                 {agent.callsign ? <small> · {agent.callsign}</small> : null}
@@ -670,10 +710,12 @@ function BriefingModal({
   snap: Snapshot;
   onClose: () => void;
 }) {
-  useEscape(onClose);
+  const okRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useOfficeDialog(onClose, okRef);
   return (
     <div className={cx("modal-backdrop")} onClick={onClose}>
       <section
+        ref={dialogRef}
         className={cx("win team-modal secretary")}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -694,10 +736,12 @@ function BriefingModal({
               <span className={cx("dot green")} />
               {m.briefing.done(snap.stats.done)}
             </li>
-            <li>
-              <span className={cx("dot green")} />
-              {m.briefing.approved}
-            </li>
+            {snap.approved ? (
+              <li>
+                <span className={cx("dot green")} />
+                {m.briefing.approved}
+              </li>
+            ) : null}
             <li>
               <span className={cx("dot gray")} />
               {m.briefing.blocked(snap.stats.blocked)}
@@ -707,7 +751,7 @@ function BriefingModal({
             <span className={cx("tiny-label")}>{m.briefing.decisionLabel}</span>
             <strong>{m.briefing.decisionNone}</strong>
           </div>
-          <button type="button" className={cx("btn btn-primary")} onClick={onClose} autoFocus>
+          <button ref={okRef} type="button" className={cx("btn btn-primary")} onClick={onClose}>
             {m.briefing.ok}
           </button>
         </div>
@@ -781,27 +825,27 @@ function DashboardView({
         <article className={cx("metric yellow")}>
           <span>{m.dashboard.metricStaff}</span>
           <strong>{engine.staff.length}</strong>
-          <small>STAFF</small>
+          <small>{m.dashboard.stampStaff}</small>
         </article>
         <article className={cx("metric mint")}>
           <span>{m.dashboard.metricDone}</span>
           <strong>{snap.stats.done}</strong>
-          <small>DONE</small>
+          <small>{m.dashboard.stampDone}</small>
         </article>
         <article className={cx("metric pink")}>
           <span>{m.dashboard.metricWorking}</span>
           <strong>{snap.stats.working}</strong>
-          <small>WORKING</small>
+          <small>{m.dashboard.stampWorking}</small>
         </article>
         <article className={cx("metric lav")}>
           <span>{m.dashboard.metricApproval}</span>
           <strong>{snap.stats.approval}</strong>
-          <small>APPROVAL</small>
+          <small>{m.dashboard.stampApproval}</small>
         </article>
         <article className={cx("metric white")}>
           <span>{m.dashboard.metricBlocked}</span>
           <strong>{snap.stats.blocked}</strong>
-          <small>WAITING</small>
+          <small>{m.dashboard.stampBlocked}</small>
         </article>
       </section>
 

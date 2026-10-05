@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import { ADMIN_NAVIGATION } from "../lib/adminNavigation.ts";
 import { adminAgentOfficeMessages } from "../lib/adminMessages/agentOffice.ts";
@@ -184,4 +185,61 @@ test("the console answers in the office's language and finds the team it names",
 
   en.command("hello there");
   assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.sim.unknown);
+});
+
+test("a question that mentions approval does not give it", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.ko);
+  office.speed = 10;
+  office.start();
+  runUntil(office, () => office.approvalPending);
+
+  office.command("왜 아직 승인이 안 됐어?");
+  office.command("Why is the approval still pending?");
+  assert.equal(office.approved, false);
+
+  office.command("승인해");
+  assert.equal(office.approved, true);
+});
+
+test("a team is not done while someone it gave work to is still on the way", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.en);
+  const far = office.agentById.get("qa-m2");
+  const spot = LOUNGE_ROOM.loiter.at(-1);
+  // Everyone is at a desk except one teammate, who is across the office.
+  for (const agent of office.agents) {
+    if (agent.rank === "operator") continue;
+    agent.x = agent.home.x;
+    agent.y = agent.home.y;
+    agent.status = "idle";
+  }
+  far.x = spot.x;
+  far.y = spot.y;
+
+  office["startDept"]("qa", "test", 0.5);
+  runUntil(office, () => office.deptStatus.qa === "done", 20000);
+  assert.equal(far.progress, 1, "qa was marked done before its last member finished");
+});
+
+test("ending one meeting leaves the other one on screen", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.en);
+  office["beginMeeting"]("the day's meeting");
+  office["beginMeeting"]("the operator's call");
+  assert.equal(office.meetingTitle, "the operator's call");
+  office["endMeeting"]("the operator's call");
+  assert.equal(office.meetingTitle, "the day's meeting");
+  office["endMeeting"]("the day's meeting");
+  assert.equal(office.meetingTitle, null);
+});
+
+test("the office's two sections are addresses, not component state", () => {
+  const item = ADMIN_NAVIGATION.find((entry) => entry.id === "office");
+  assert.deepEqual(item.tabs.map((tab) => tab.id), ["live", "dashboard"]);
+  const page = readFileSync("app/(site)/(application)/admin/office/page.tsx", "utf8");
+  assert.match(page, /resolveAdminTab\(TABS, query\.tab\)/);
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /<Link\s+href=\{viewHref\("live"\)\}/);
+  assert.match(panel, /<Link\s+href=\{viewHref\("dashboard"\)\}/);
+  assert.doesNotMatch(panel, /useState<View>/);
+  // Both dialogs keep the shared focus contract.
+  assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, 2);
 });
