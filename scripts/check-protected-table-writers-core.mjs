@@ -418,6 +418,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/promptRefinerVnextOneShotTerminalReceipt.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The AdminAuditLog delegate only reads terminal and stop receipts. The one SQL write verb is FOR NO KEY UPDATE NOWAIT on PromptRefinerVnextOneShotStage, a row lock before writeSystemAuditLog appends the receipt through the sole audit writer. No statement here inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
     tableMentions: 3,

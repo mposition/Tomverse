@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { createPromptRefinerVnextOneShotOwnerSeal } from
   "../lib/promptRefinerVnextOneShotOwnerSeal.ts";
-import { runPromptRefinerVnextOneShotOwnerSlot } from
+import { recordPromptRefinerVnextOneShotTerminalReceipt,
+  runPromptRefinerVnextOneShotOwnerSlot } from
   "../scripts/prompt-refiner-vnext-one-shot-owner-runner.mjs";
 import { syntheticManifest } from
   "./support/promptRefinerVnextOneShotSyntheticManifest.mjs";
@@ -76,6 +77,40 @@ async function invokeWithMockFetch(input, { fetch, generate }) {
     globalThis.fetch = original;
   }
 }
+
+test("terminal settlement sends only telemetry once and never retries a lost response", async () => {
+  const previous = globalThis.fetch;
+  let calls = 0;
+  const result = { status: "bounded_response", requestId:
+    "11111111-1111-4111-8111-111111111111", slotIndex: 0,
+    slotConsumptionAuditLogId: "synthetic-slot-audit",
+    output: { outcome: "abstained", refinedPrompt: null,
+      abstentionReason: "unsafe_to_rewrite" },
+    usage: { inputTokens: 1, outputTokens: 1,
+      cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0 },
+    costUpperBoundMicroUsd: 1, intentToTerminalLatencyMs: 10 };
+  const input = { origin: "https://app.example.test",
+    token: "synthetic-runner-token-with-at-least-32-characters",
+    runApprovalAuditLogId: "synthetic-run-audit" };
+  try {
+    globalThis.fetch = async (url, options) => {
+      calls++;
+      assert.equal(String(url), "https://app.example.test/api/internal/prompt-refiner/vnext-one-shot-terminal");
+      const payload = JSON.parse(options.body);
+      assert.equal(payload.resultKind, "abstained");
+      assert.equal(JSON.stringify(payload).includes("unsafe_to_rewrite"), false);
+      assert.equal(JSON.stringify(payload).includes("refinedPrompt"), false);
+      return Response.json({ terminalAuditLogId: "synthetic-terminal-audit",
+        requestId: result.requestId, slotIndex: 0,
+        observedCostMicroUsd: 1, dispatchAuthorized: false }, { status: 201 });
+    };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(result, input), true);
+    assert.equal(calls, 1);
+    globalThis.fetch = async () => { calls++; throw new Error("lost response"); };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(result, input), false);
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = previous; }
+});
 
 test("default-off runner never asks the app or reaches a provider transport", async (t) => {
   const input = fixture(t);

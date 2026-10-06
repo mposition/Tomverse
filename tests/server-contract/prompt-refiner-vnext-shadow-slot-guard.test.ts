@@ -67,6 +67,9 @@ mock.module(mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"), {
 mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (tx: object) => Promise<unknown>) => work(tx) },
 } });
+mock.module(mod("lib/promptRefinerVnextOneShotTerminalReceipt.ts"), {
+  namedExports: { assertPromptRefinerVnextOneShotTerminalsComplete: async () => {} },
+});
 test("dispatch refuses absent shadow before any slot or audit write", async () => {
   const { consumePromptRefinerVnextOneShotSlot } = await import(
     mod("lib/promptRefinerVnextOneShotSlotConsumption.ts"));

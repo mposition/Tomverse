@@ -13,6 +13,8 @@ import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { readPromptRefinerVnextOneShotPaidAuthorization } from
   "@/lib/promptRefinerVnextOneShotPaidAuthorization";
+import { assertPromptRefinerVnextOneShotTerminalsComplete } from
+  "@/lib/promptRefinerVnextOneShotTerminalReceipt";
 import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD,
@@ -98,6 +100,7 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
     if (!paid.valid) {
       throw new Error("vnext_one_shot_paid_authorization_unavailable");
     }
+    await assertPromptRefinerVnextOneShotTerminalsComplete(tx);
     const slot = await tx.promptRefinerVnextOneShotSlot.findUnique({
       where: { stageId_slotIndex: { stageId: STAGE_ID, slotIndex: input.slotIndex } },
     });

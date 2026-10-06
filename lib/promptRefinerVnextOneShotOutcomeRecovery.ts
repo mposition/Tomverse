@@ -47,7 +47,7 @@ const metadata = (input: UnknownInput) => ({
   reservedCostMicroUsd: PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
 });
 
-async function verifyConsumedRequest(
+export async function verifyPromptRefinerVnextOneShotConsumedRequest(
   tx: Prisma.TransactionClient, input: UnknownInput,
 ): Promise<{ slotId: string }> {
   const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
@@ -110,7 +110,13 @@ export async function stopPromptRefinerVnextOneShotUnknown(input: UnknownInput) 
     if (!stage || stage.status !== "run_approved") {
       throw new Error("vnext_one_shot_unknown_stage_not_running");
     }
-    await verifyConsumedRequest(tx, input);
+    const consumed = await verifyPromptRefinerVnextOneShotConsumedRequest(tx, input);
+    if (await tx.adminAuditLog.count({ where: {
+      action: "prompt_refiner.vnext_one_shot.terminal_recorded",
+      targetType: "PromptRefinerVnextOneShotSlot", targetId: consumed.slotId,
+    } }) !== 0) {
+      throw new Error("vnext_one_shot_unknown_terminal_already_recorded");
+    }
     const stopAuditLogId = await writeSystemAuditLog({
       tx,
       systemActor: "prompt-refiner-vnext-one-shot-runner",
@@ -147,7 +153,7 @@ export async function readPromptRefinerVnextOneShotUnknownStop(
     if (stage?.status !== "closed") {
       throw new Error("vnext_one_shot_unknown_not_closed");
     }
-    await verifyConsumedRequest(tx, input);
+    await verifyPromptRefinerVnextOneShotConsumedRequest(tx, input);
     const receipt = await tx.adminAuditLog.findUnique({
       where: { id: input.stopAuditLogId },
     });
