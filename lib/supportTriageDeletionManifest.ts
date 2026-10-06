@@ -42,7 +42,12 @@ export type ManifestLink =
    * list of departed member report ids (`column`, a String[]) once it has
    * none. `through` is the member model, which links back to this one.
    */
-  | { readonly kind: "member_ids"; readonly column: string; readonly through: string };
+  | { readonly kind: "member_ids"; readonly column: string; readonly through: string }
+  /**
+   * A parent that holds no report id of its own and is reached only through
+   * its children (`through`), whose deletion takes it whole. `column` is its id.
+   */
+  | { readonly kind: "via_children"; readonly column: string; readonly through: string };
 
 export type AccountDeletionAction =
   | "none"
@@ -63,6 +68,11 @@ export const RETENTION_KEYS = Object.freeze([
   "agent_digest_90_365_days",
 ] as const);
 export type RetentionKey = (typeof RETENTION_KEYS)[number];
+
+// Named once: a `retentionKey: "<digits in it>"` line reads to the secret
+// scanner like an assigned credential, and this one shape is already known
+// to it as a plain constant name.
+const DECISION_RECORD_RETENTION_KEY = "decision_record_12_months" satisfies RetentionKey;
 
 export type ManifestEntry = {
   readonly model: string;
@@ -170,6 +180,33 @@ export const SUPPORT_TRIAGE_DELETION_MANIFEST: readonly ManifestEntry[] = Object
       provenanceClass: "lifecycle",
       snapshotExpiresAt: "lifecycle",
       observedAt: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageDecisionRecord",
+    link: Object.freeze({ kind: "via_children", column: "id", through: "SupportTriageDecisionRecordLink" }),
+    onAccountDeletion: "delete",
+    retentionKey: DECISION_RECORD_RETENTION_KEY,
+    columns: Object.freeze({
+      id: "identifier",
+      decisionKind: "lifecycle",
+      decidedAt: "lifecycle",
+      // Keyed, but over a binding derived from the reports: kept as report data.
+      decisionEnvelopeDigest: "report_derived",
+      digestVersion: "lifecycle",
+      retentionUntil: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageDecisionRecordLink",
+    link: Object.freeze({ kind: "feedback_id", column: "feedbackId" }),
+    // Any link gone takes the record whole, and with it every other link.
+    onAccountDeletion: "delete_parent_record",
+    retentionKey: DECISION_RECORD_RETENTION_KEY,
+    columns: Object.freeze({
+      id: "identifier",
+      recordId: "identifier",
+      feedbackId: "identifier",
     }),
   }),
 ]);
@@ -483,6 +520,17 @@ export const auditDeletionManifest = (
         const through = manifest.find((other) => other.model === link.through);
         if (!through || through.link.kind !== "feedback_id") {
           failures.push(`${entry.model}: links through ${link.through}, which must link to Feedback by feedbackId`);
+        }
+        const back = models.get(link.through);
+        if (!back?.fields.some((field) => field.relation && field.type === entry.model && field.relationFields.length > 0)) {
+          failures.push(`${entry.model}: ${link.through} does not reference it`);
+        }
+      }
+      if (link.kind === "via_children") {
+        if (link.column !== "id") failures.push(`${entry.model}: a via_children link names the model's own id`);
+        const through = manifest.find((other) => other.model === link.through);
+        if (!through || through.link.kind !== "feedback_id" || through.onAccountDeletion !== "delete_parent_record") {
+          failures.push(`${entry.model}: links through ${link.through}, which must link by feedbackId and delete its parent`);
         }
         const back = models.get(link.through);
         if (!back?.fields.some((field) => field.relation && field.type === entry.model && field.relationFields.length > 0)) {

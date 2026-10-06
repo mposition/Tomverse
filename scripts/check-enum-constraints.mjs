@@ -1553,6 +1553,13 @@ const REGISTRY = {
     list: "SUGGESTION_STATUSES",
     reason: "open until the operator dismisses it or sends it to AMUX.",
   },
+  SupportTriageDecisionRecord_decisionKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "DECISION_KINDS",
+    reason:
+      "What a person decided: a suggestion accepted or rejected, a group confirmed or dismissed, a sample judged. One record per decision; the record itself is never changed.",
+  },
   SupportTriageGroup_state_check: {
     owner: "list",
     module: "lib/supportTriageCore.ts",

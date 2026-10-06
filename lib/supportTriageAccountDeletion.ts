@@ -21,12 +21,14 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 export type SupportTriageDeletionCounts = {
   readonly suggestions: number;
   readonly groups: number;
+  readonly decisionRecords: number;
 };
 
 /** Models this module deletes, by manifest name. */
 export const SUPPORT_TRIAGE_ACCOUNT_DELETION_MODELS = Object.freeze([
   "SupportTriageSuggestion",
   "SupportTriageGroup",
+  "SupportTriageDecisionRecord",
 ] as const);
 
 /**
@@ -47,7 +49,7 @@ export const deleteSupportTriageDataForAccount = async (
   tx: Prisma.TransactionClient,
   anonymisedReportIds: readonly string[]
 ): Promise<SupportTriageDeletionCounts> => {
-  if (anonymisedReportIds.length === 0) return { suggestions: 0, groups: 0 };
+  if (anonymisedReportIds.length === 0) return { suggestions: 0, groups: 0, decisionRecords: 0 };
   const ids = [...anonymisedReportIds];
   const suggestions = await tx.supportTriageSuggestion.deleteMany({
     where: { feedbackId: { in: ids } },
@@ -66,7 +68,12 @@ export const deleteSupportTriageDataForAccount = async (
     groups.length === 0
       ? { count: 0 }
       : await tx.supportTriageGroup.deleteMany({ where: { id: { in: groups.map((group) => group.id) } } });
-  return { suggestions: suggestions.count, groups: deletedGroups.count };
+  // A decision record goes whole when any report it was bound to is the
+  // account's, other accounts' links included: no half record survives.
+  const decisionRecords = await tx.supportTriageDecisionRecord.deleteMany({
+    where: { links: { some: { feedbackId: { in: ids } } } },
+  });
+  return { suggestions: suggestions.count, groups: deletedGroups.count, decisionRecords: decisionRecords.count };
 };
 
 /** The transaction's last statement: one content-free entry, or none. */
@@ -74,7 +81,7 @@ export const flushSupportTriageDeletionAudit = async (
   tx: Prisma.TransactionClient,
   counts: SupportTriageDeletionCounts
 ): Promise<void> => {
-  if (counts.suggestions === 0 && counts.groups === 0) return;
+  if (counts.suggestions === 0 && counts.groups === 0 && counts.decisionRecords === 0) return;
   await writeSystemAuditLog({
     tx,
     systemActor: "support-triage-account-deletion",
@@ -83,6 +90,6 @@ export const flushSupportTriageDeletionAudit = async (
     targetType: "SupportTriageAccountData",
     targetId: null,
     summary: "Support-triage data deleted with an account",
-    metadata: { suggestions: counts.suggestions, groups: counts.groups },
+    metadata: { suggestions: counts.suggestions, groups: counts.groups, decisionRecords: counts.decisionRecords },
   });
 };

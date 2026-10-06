@@ -454,3 +454,22 @@ export const SIGNAL_PROVENANCE_CLASSES = Object.freeze([
   "account_derived",
   "autofix_derived",
 ] as const);
+
+/**
+ * `SupportTriageDecisionRecord` (policy sections 5 and 6). The kinds are the
+ * CHECK list of migration 20261005010000_support_triage_decision_record.
+ */
+export const DECISION_KINDS = Object.freeze([
+  "suggestion_accepted",
+  "suggestion_rejected",
+  "group_confirmed",
+  "group_dismissed",
+  "sample_judged",
+] as const);
+export type DecisionKind = (typeof DECISION_KINDS)[number];
+
+/** How long a decision record is kept (operator decision X2); a CHECK holds it. */
+export const DECISION_RECORD_RETENTION_MONTHS = 12;
+
+/** Reports one decision can be bound to: a group's members at most. */
+export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
