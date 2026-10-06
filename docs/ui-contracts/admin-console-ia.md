@@ -35,8 +35,8 @@
 
 ## The navigation
 
-Seven groups, twenty-seven entries. One page, one job. The owner sees all
-twenty-seven; every other role sees twenty-five, because two AMUX entries are
+Seven groups, twenty-eight entries. One page, one job. The owner sees all
+twenty-eight; every other role sees twenty-six, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
@@ -60,6 +60,7 @@ owner-only (rule 14).
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
+| Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
@@ -98,6 +99,22 @@ drawing a digest that is not there. It carries no badge. Its one control
 records the next operator control revision, offered to owner and ops only;
 its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
+
+**Agent office** is a shell: a pixel office for the seven agent teams and the
+digest desk, after the original AI OFFICE UI by godseng.mom. It plays a demo
+day in the browser and reads no agent's state, so under rule 8 everything on
+it that could be read as a fact says it is a demo -- a notice above the
+office, a chip on the approval card, "SIMULATION" and "SIM CLOCK" where the
+original said real-time. Its approve button advances the demo and nothing
+else; there is no publish link. The only facts on it are the record links:
+each team links to the page above that holds its record, and a team with no
+such page is drawn as waiting on a link instead of being given a status
+(`lib/agentOffice/roster.ts`, `tests/agentOffice.test.mjs`). It loads
+nothing, writes nothing, carries no badge and no `writeRoles`. Its two
+sections are `?tab=` addresses (rule 2); it draws its own tab strip, as the
+original did, and those tabs are links, so moving between them keeps the
+panel and its demo day mounted. The console shell owns the page's `h1`, so
+the office's own titles are `h2`s.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to
