@@ -4,6 +4,8 @@ import test from "node:test";
 import { gitObjectId } from "../lib/engineeringAgentTreeVerify.ts";
 import { verifyEngineeringAgentV22SparseCandidate } from
   "../lib/engineeringAgentV22SparseCandidate.ts";
+import { loadEngineeringAgentV22Candidate } from
+  "../lib/engineeringAgentV22CandidateLoad.ts";
 
 const before = Buffer.from("export const value = 1;\n");
 const after = Buffer.from("export const value = 2;\n");
@@ -33,4 +35,33 @@ test("v22 sparse candidate refuses missing base bytes and unsafe evidence", () =
   assert.deepEqual(verifyEngineeringAgentV22SparseCandidate({ ...input,
     files: [{ ...file, path: "../file.ts" }] }),
   { ok: false, reason: "files_invalid" });
+});
+
+test("pinned GitHub loader reads only named old blobs and wipes their bytes", async () => {
+  const fetched = Buffer.from(before);
+  const reads = [];
+  const result = await loadEngineeringAgentV22Candidate({
+    baseSha: "a".repeat(40), files: [file],
+  }, {
+    readBase: async (sha) => {
+      reads.push(`base:${sha}`);
+      return { base, rootTreeId: root, baseGitattributes: null };
+    },
+    readBlob: async (oid) => { reads.push(`blob:${oid}`); return fetched; },
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(reads, [`base:${"a".repeat(40)}`, `blob:${beforeOid}`]);
+  assert.deepEqual(fetched, Buffer.alloc(before.length));
+});
+
+test("invalid sparse paths never reach GitHub", async () => {
+  let reads = 0;
+  const result = await loadEngineeringAgentV22Candidate({
+    baseSha: "a".repeat(40), files: [{ ...file, path: "../file.ts" }],
+  }, {
+    readBase: async () => { reads++; throw new Error("unexpected read"); },
+    readBlob: async () => { reads++; throw new Error("unexpected read"); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(reads, 0);
 });
