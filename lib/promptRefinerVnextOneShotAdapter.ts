@@ -28,6 +28,14 @@ type Outcome = Readonly<{
   status: "bounded_response";
   output: PromptRefinerVnextModelOutput;
   costUpperBoundMicroUsd: number;
+  usage: Readonly<{
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteInputTokens: 0;
+    reasoningTokens: number | null;
+  }>;
+  intentToTerminalLatencyMs: number;
   cacheWriteInputTokens: 0;
   toolCallCount: 0;
   dispatchAuthorized: false;
@@ -131,8 +139,11 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
     } finally {
       cancel(timeoutHandle);
     }
-    if (timedOut || settled.kind === "timeout" ||
-        now() - started >= PROMPT_REFINER_VNEXT_TIMEOUT_MS) return unknown("timeout");
+    const elapsedMs = now() - started;
+    if (timedOut || settled.kind === "timeout" || !Number.isFinite(elapsedMs) ||
+        elapsedMs < 0 || elapsedMs >= PROMPT_REFINER_VNEXT_TIMEOUT_MS) {
+      return unknown("timeout");
+    }
     if (settled.kind === "error") return unknown("provider_error");
 
     try {
@@ -153,14 +164,15 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
           !Number.isSafeInteger(details.cacheWriteTokens)) {
         return unknown("response_unverified");
       }
+      const normalizedUsage = {
+        inputTokens: usage?.inputTokens,
+        outputTokens: usage?.outputTokens,
+        cachedInputTokens: details.cacheReadTokens,
+        cacheWriteInputTokens: details.cacheWriteTokens,
+        reasoningTokens: record(usage?.outputTokenDetails)?.reasoningTokens ?? null,
+      };
       const checked = guardPromptRefinerVnextBilledUsage({
-        usage: {
-          inputTokens: usage?.inputTokens,
-          outputTokens: usage?.outputTokens,
-          cachedInputTokens: details.cacheReadTokens,
-          cacheWriteInputTokens: details.cacheWriteTokens,
-          reasoningTokens: record(usage?.outputTokenDetails)?.reasoningTokens ?? null,
-        },
+        usage: normalizedUsage,
         effectivePricePin: PROMPT_REFINER_VNEXT_PRICE_PIN,
       });
       if (!checked.complete || checked.costUpperBoundMicroUsd === null ||
@@ -171,6 +183,14 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
       return Object.freeze({
         status: "bounded_response", output,
         costUpperBoundMicroUsd: checked.costUpperBoundMicroUsd,
+        usage: Object.freeze({
+          inputTokens: normalizedUsage.inputTokens as number,
+          outputTokens: normalizedUsage.outputTokens as number,
+          cachedInputTokens: normalizedUsage.cachedInputTokens as number,
+          cacheWriteInputTokens: 0 as const,
+          reasoningTokens: normalizedUsage.reasoningTokens as number | null,
+        }),
+        intentToTerminalLatencyMs: Math.ceil(elapsedMs),
         cacheWriteInputTokens: 0, toolCallCount: 0, dispatchAuthorized: false,
       });
     } catch {
