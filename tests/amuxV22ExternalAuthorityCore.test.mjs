@@ -21,8 +21,12 @@ test("v22 workers and the app cannot publish, merge or deploy", () => {
       assert.equal(decideAmuxV22ExternalAuthority({ actor, action }).allowed,
         false, `${actor} ${action}`);
     }
+    assert.deepEqual(decideAmuxV22ExternalAuthority({ actor,
+      action: "publish_main_pr" }),
+    { allowed: false, reason: "main_pr_owner_only" });
   }
   assert.match(AMUX_V22_WORKER_AUTHORITY_NOTICE, /Do not push/);
+  assert.match(AMUX_V22_WORKER_AUTHORITY_NOTICE, /main PR/);
   assert.match(AMUX_V22_WORKER_AUTHORITY_NOTICE, /main merge/);
 });
 
