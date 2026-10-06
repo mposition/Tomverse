@@ -54,7 +54,7 @@ test("one verified invocation can settle review or a known Task failure", async 
       projectedApiCostMicrousd: 200n, source: receipt.source,
       actualModelId: receipt.actualModelId,
       selectedModelId: receipt.selectedModelId }],
-    reservedCostMicrousd: 250n };
+    reservedCostMicrousd: 250n, resultStored: true };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), true);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
@@ -83,7 +83,7 @@ test("a failed or expensive receipt cannot claim a successful Task", async () =>
       projectedApiCostMicrousd: 200n, source: failed.receipt.source,
       actualModelId: failed.receipt.actualModelId,
       selectedModelId: failed.receipt.selectedModelId }],
-    reservedCostMicrousd: 250n };
+    reservedCostMicrousd: 250n, resultStored: true };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,

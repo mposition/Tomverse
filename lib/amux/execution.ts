@@ -1047,11 +1047,22 @@ export async function settleAmuxV22TaskExecution(input: {
           selectedModelId: true },
       });
       const expectedIds = input.invocationIds;
+      const storedResult = input.outcome === "succeeded" ?
+        await tx.amuxV22TaskResult.findUnique({
+          where: { attemptId: input.attemptId },
+          select: { taskId: true, bodyPurgedAt: true },
+        }) : null;
       const receiptsComplete = v22ExecutionReceiptVerified({
         attemptId: attempt.id, invocationIds: expectedIds, events,
         outcome: input.outcome,
         reservedCostMicrousd: attempt.reservedCostMicrousd,
+        resultStored: storedResult?.taskId === task.id &&
+          storedResult.bodyPurgedAt === null,
       });
+      if (input.outcome === "succeeded" &&
+          (!storedResult || storedResult.taskId !== task.id ||
+            storedResult.bodyPurgedAt !== null))
+        return { settled: false as const, reason: "result_unverified" as const };
       if (input.outcome !== "blocked" && !receiptsComplete)
         return { settled: false as const, reason: "usage_unverified" as const };
       const budget = settlementDestinationForBudget({

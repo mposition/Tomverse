@@ -25,13 +25,14 @@ test("each attempt fits the assigned route and cumulative owner ceiling", () => 
 
 test("v22 settlement accepts only its one preallocated invocation receipt", () => {
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
-    outcome: "succeeded", reservedCostMicrousd: 1_000n,
+    outcome: "succeeded", resultStored: true, reservedCostMicrousd: 1_000n,
     events: [{ invocationId: "attempt-1", status: "succeeded",
       completeness: "reported_complete", projectedApiCostMicrousd: 700n,
       source: "claude_result", actualModelId: "claude-opus-5-5",
       selectedModelId: "claude-opus-5-5" }],
   };
   assert.equal(v22ExecutionReceiptVerified(base), true);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, resultStored: false }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base, outcome: "failed",
     events: [{ ...base.events[0], status: "failed" }] }), true);
   assert.equal(v22ExecutionReceiptVerified({ ...base, outcome: "succeeded",

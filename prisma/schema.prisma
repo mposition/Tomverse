@@ -7148,6 +7148,7 @@ model AmuxWorkItem {
   amuxV4RegisteredDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionRegisteredCard")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedCard")
   executionAttempts AmuxExecutionAttempt[]
+  v22TaskResults    AmuxV22TaskResult[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -7238,6 +7239,7 @@ model AmuxExecutionAttempt {
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
   cliUsageEvents    AmuxCliUsageEvent[]
+  v22TaskResult     AmuxV22TaskResult?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -7247,6 +7249,32 @@ model AmuxExecutionAttempt {
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
   engineeringAgentRun EngineeringAgentRun?
+}
+
+/// One encrypted, reviewable text result per v22 attempt. The sidecar keeps
+/// plaintext only in memory for a bounded transfer window; the journal keeps
+/// only a digest and cannot recreate the body after a sidecar restart.
+model AmuxV22TaskResult {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  sourceSha256    String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -8937,6 +8965,7 @@ model AmuxIdeaSubmission {
   currentSourcePlanRevisionId String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  v22TaskResults      AmuxV22TaskResult[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")

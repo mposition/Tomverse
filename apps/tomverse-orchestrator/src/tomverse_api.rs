@@ -916,6 +916,77 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 }
 
 impl TomverseApi {
+    pub async fn v22_task_result_readback(
+        &self, attempt_id: &str, expected_digest: &str,
+    ) -> Result<V22UsageRecord> {
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/execution/result", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await.context("v22 result read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("v22 result read-back failed");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) {
+            return Ok(V22UsageRecord::Recorded);
+        }
+        if body.get("status").and_then(Value::as_str) == Some("absent") {
+            return Ok(V22UsageRecord::Rejected);
+        }
+        bail!("v22 result read-back conflict")
+    }
+
+    /// A result is sent at most once. A lost answer is resolved by exact
+    /// attempt/digest read-back; the model is never called again for recovery.
+    pub async fn v22_task_result_record_once(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        result_text: &str,
+        expected_digest: &str,
+    ) -> Result<V22UsageRecord> {
+        if result_text.is_empty() || result_text.len() > 65_536 ||
+            result_text.contains('\0') || expected_digest.len() != 64 ||
+            !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("invalid v22 result envelope");
+        }
+        let path = format!("{}/api/internal/amux/v22/execution/result", self.base_url);
+        let response = self.client.post(&path)
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&serde_json::json!({
+                "attemptId": attempt_id, "worker": worker,
+                "resultText": result_text, "sourceSha256": expected_digest,
+            })).send().await;
+        let mut definitely_rejected = false;
+        if let Ok(response) = response {
+            let status = response.status();
+            if status == StatusCode::OK {
+                let answer = read_raw_answer(response, 4096).await?;
+                let body: Value = serde_json::from_slice(&answer.body)?;
+                if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) {
+                    return Ok(V22UsageRecord::Recorded);
+                }
+                bail!("v22 result write response mismatch");
+            }
+            definitely_rejected = status == StatusCode::CONFLICT ||
+                status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED;
+        }
+        match self.v22_task_result_readback(attempt_id, expected_digest).await? {
+            V22UsageRecord::Recorded => Ok(V22UsageRecord::Recorded),
+            V22UsageRecord::Rejected if definitely_rejected => Ok(V22UsageRecord::Rejected),
+            V22UsageRecord::Rejected =>
+                bail!("v22 result write outcome unknown; read-back absent"),
+        }
+    }
+
     /// Submit the exact content-free A14 receipt once. An ambiguous write is
     /// resolved only by a GET for the same invocation ID, never by re-POST.
     pub async fn v22_cli_usage_record_once(

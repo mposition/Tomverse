@@ -282,6 +282,7 @@ pub enum V22SidecarState {
     OutcomeUnknown,
     Busy,
     NotFound,
+    Confirmed,
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +290,8 @@ pub struct V22SidecarResult {
     pub state: V22SidecarState,
     pub usage_receipt: Option<serde_json::Value>,
     pub usage_receipt_digest: Option<String>,
+    pub result_text: Option<String>,
+    pub result_sha256: Option<String>,
 }
 
 #[allow(async_fn_in_trait)]
@@ -306,7 +309,12 @@ pub trait LocalAmux {
 
     async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
-            usage_receipt: None, usage_receipt_digest: None })
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: None, result_sha256: None })
+    }
+
+    async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -1125,7 +1133,8 @@ async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) ->
         V22SidecarState::InProgress | V22SidecarState::Succeeded |
         V22SidecarState::Failed | V22SidecarState::OutcomeUnknown =>
             BridgeTickResult::Pending { attempt_id: delivery.attempt_id.clone() },
-        V22SidecarState::Busy | V22SidecarState::NotFound =>
+        V22SidecarState::Busy | V22SidecarState::NotFound |
+        V22SidecarState::Confirmed =>
             BridgeTickResult::Halted { attempt_id: delivery.attempt_id.clone() },
     }
 }
@@ -1338,8 +1347,8 @@ async fn v22_sidecar_call(
         stream.write_all(&request).await?;
         stream.shutdown().await?;
         let mut response = Vec::new();
-        stream.take(4097).read_to_end(&mut response).await?;
-        if response.len() > 4096 {
+        stream.take(327681).read_to_end(&mut response).await?;
+        if response.len() > 327680 {
             bail!("v22 sidecar response exceeds limit");
         }
         let value: serde_json::Value = serde_json::from_slice(&response)?;
@@ -1353,10 +1362,13 @@ async fn v22_sidecar_call(
             Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
             Some("busy") => V22SidecarState::Busy,
             Some("not_found") => V22SidecarState::NotFound,
+            Some("confirmed") => V22SidecarState::Confirmed,
             _ => bail!("invalid v22 sidecar result"),
         };
         let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
         let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+        let result_text = value.get("resultText").and_then(|v| v.as_str());
+        let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
         if receipt.is_some() != digest.is_some() ||
             digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
                 b.is_ascii_hexdigit())) ||
@@ -1364,8 +1376,18 @@ async fn v22_sidecar_call(
                 V22SidecarState::Succeeded | V22SidecarState::Failed) {
             bail!("invalid v22 sidecar usage receipt envelope");
         }
+        if result_text.is_some_and(|text| text.is_empty() ||
+            text.len() > 65_536 || text.contains('\0')) ||
+            result_sha256.is_some_and(|digest| digest.len() != 64 ||
+                !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            result_text.is_some() && result_sha256.is_none() ||
+            result_text.is_some() && state != V22SidecarState::Succeeded {
+            bail!("invalid v22 sidecar result envelope");
+        }
         Ok(V22SidecarResult { state, usage_receipt: receipt,
-            usage_receipt_digest: digest.map(str::to_owned) })
+            usage_receipt_digest: digest.map(str::to_owned),
+            result_text: result_text.map(str::to_owned),
+            result_sha256: result_sha256.map(str::to_owned) })
     };
     tokio::time::timeout(Duration::from_secs(5), operation)
         .await.context("v22 sidecar transport timed out")?
@@ -1381,6 +1403,21 @@ async fn v22_sidecar_call(
 }
 
 impl LocalAmux for HttpLocal {
+    async fn confirm_v22_result(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid v22 result digest");
+        }
+        let answer = v22_sidecar_call(socket, serde_json::json!({
+            "op": "confirm_result", "attemptId": attempt_id,
+            "sourceSha256": sha256,
+        }), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar result not confirmed");
+        }
+        Ok(())
+    }
+
     async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
         let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
         if delivery.assignment_id.is_none() ||
@@ -1853,25 +1890,58 @@ pub async fn run_from_env() -> i32 {
                                     result.usage_receipt_digest.as_deref()?, outcome))
                             });
                             if let Some((receipt, digest, outcome)) = verified {
-                                match api.v22_cli_usage_record_once(
-                                    &entry.delivery.attempt_id, receipt, digest).await {
+                                let result_record = if outcome == "succeeded" {
+                                    match v22_result.as_ref().and_then(|result|
+                                        result.result_sha256.as_deref()) {
+                                        Some(sha256) => match v22_result.as_ref().and_then(
+                                            |result| result.result_text.as_deref()) {
+                                            Some(text) => api.v22_task_result_record_once(
+                                                &entry.delivery.attempt_id,
+                                                &entry.delivery.worker, text, sha256).await,
+                                            None => api.v22_task_result_readback(
+                                                &entry.delivery.attempt_id, sha256).await,
+                                        },
+                                        None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                    }
+                                } else {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                };
+                                match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
-                                        let answer = api.v22_execution_settle_verified(
-                                            &entry.delivery, &session.instance_id,
-                                            session.generation, outcome).await;
-                                        match answer {
-                                            Ok(ref refused) if !refused.settled &&
-                                                refused.reason.as_deref() ==
-                                                    Some("usage_unverified") =>
+                                        if outcome == "succeeded" {
+                                            if let Some(sha256) = v22_result.as_ref().and_then(
+                                                |result| result.result_sha256.as_deref()) {
+                                                let _ = local.confirm_v22_result(
+                                                    &entry.delivery.attempt_id, sha256).await;
+                                            }
+                                        }
+                                        match api.v22_cli_usage_record_once(
+                                            &entry.delivery.attempt_id, receipt, digest).await {
+                                            Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                                let answer = api.v22_execution_settle_verified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation, outcome).await;
+                                                match answer {
+                                                    Ok(ref refused) if !refused.settled &&
+                                                        matches!(refused.reason.as_deref(),
+                                                            Some("usage_unverified" | "result_unverified")) =>
+                                                        api.v22_execution_settle_unverified(
+                                                            &entry.delivery, &session.instance_id,
+                                                            session.generation).await,
+                                                    other => other,
+                                                }
+                                            }
+                                            Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
                                                 api.v22_execution_settle_unverified(
                                                     &entry.delivery, &session.instance_id,
                                                     session.generation).await,
-                                            other => other,
+                                            Err(error) => Err(error),
                                         }
-                                    }
+                                    },
                                     Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
-                                        api.v22_execution_settle_unverified(&entry.delivery,
-                                            &session.instance_id, session.generation).await,
+                                        api.v22_execution_settle_unverified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation).await,
                                     Err(error) => Err(error),
                                 }
                             } else {

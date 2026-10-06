@@ -35,13 +35,15 @@ export function v22ExecutionReceiptVerified(input: {
     selectedModelId: string }>;
   outcome: "succeeded" | "failed" | "blocked";
   reservedCostMicrousd: bigint;
+  resultStored: boolean;
 }) {
   if (input.invocationIds.length !== 1 ||
       input.invocationIds[0] !== input.attemptId ||
       input.events.length !== 1 ||
       input.reservedCostMicrousd <= BigInt(0)) return false;
   const event = input.events[0];
-  return event.invocationId === input.attemptId &&
+  return (input.outcome !== "succeeded" || input.resultStored) &&
+    event.invocationId === input.attemptId &&
     event.completeness === "reported_complete" &&
     // Codex JSONL currently reports the configured model, not an attested
     // provider-served model. Keep its usage for telemetry but never settle a

@@ -22,6 +22,7 @@ const config = { worker: "worker-a", binaryPath: "/usr/bin/claude",
   worktreePath: "/tmp/worktree", homePath: "/home/tommy",
   claudeConfigDir: "/home/tommy/.amux-cli-profiles/claude" };
 const usage = { type: "result", subtype: "success", is_error: false,
+  result: "Synthetic review result",
   num_turns: 1, modelUsage: { "claude-opus-5-5": {
     inputTokens: 10, outputTokens: 5,
     cacheReadInputTokens: 2, cacheCreationInputTokens: 1,
@@ -82,7 +83,7 @@ test("the one-shot request and CLI command have bounded capabilities", () => {
   assert.equal(args.some((arg) => arg.includes("Bash")), false);
 });
 
-test("one child returns a content-free success", async () => {
+test("one child returns a reviewable result and a content-free receipt", async () => {
   const fake = fakeSpawn(JSON.stringify(usage));
   const result = await runAmuxV22OneShot(request, config, {
     syntheticPlatform: true, spawnChild: fake.spawnChild,
@@ -96,6 +97,9 @@ test("one child returns a content-free success", async () => {
   assert.equal(result.usageReceipt.observed.inputTokens, 10);
   assert.match(result.usageReceiptDigest, /^[0-9a-f]{64}$/);
   assert.match(result.outputDigest, /^[0-9a-f]{64}$/);
+  assert.equal(result.resultText, usage.result);
+  assert.match(result.resultSha256, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(result.usageReceipt).includes(usage.result), false);
   assert.equal(JSON.stringify(result).includes(request.prompt), false);
   assert.equal(fake.calls.length, 1);
   assert.equal(fake.calls[0].spawnOptions.shell, false);
@@ -154,6 +158,30 @@ test("durable claim prevents duplicate CLI invocation across handler restart", a
     assert.equal(calls, 1);
     await assert.rejects(restarted({ ...execute,
       prompt: "Different brief" }), /conflict/);
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
+test("result text is available for exact transfer but never persisted in the sidecar journal", async () => {
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-result-"));
+  try {
+    const text = "Private review result";
+    const sha256 = (await import("node:crypto")).createHash("sha256")
+      .update(text).digest("hex");
+    const handler = createAmuxV22SidecarHandler({ worker: "worker-a",
+      stateDir, run: async (input) => ({ kind: "succeeded",
+        attemptId: input.attemptId, resultText: text,
+        resultSha256: sha256 }) });
+    assert.equal((await handler({ op: "execute", ...request })).kind,
+      "in_progress");
+    const result = await readFinished(handler);
+    assert.equal(result.resultText, text);
+    assert.equal(result.resultSha256, sha256);
+    assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
+      "utf8")).includes(text), false);
+    assert.equal((await handler({ op: "confirm_result", attemptId,
+      sourceSha256: sha256 })).kind, "confirmed");
+    assert.equal((await handler({ op: "readback", attemptId })).resultText,
+      undefined);
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
