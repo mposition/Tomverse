@@ -322,7 +322,8 @@ impl ScanLoop {
             // StatusChanged every pass (Invariant 37, ethos rule 5). Runs
             // before the empty-events guard because an active pane's scan is
             // empty by design.
-            if adapter.generating(&captured) {
+            let generating = adapter.generating(&captured);
+            if generating {
                 let event = {
                     let conn = self.store.read()?;
                     let prior = crate::db::queries::get_worker(&conn, &wid_str)
@@ -355,6 +356,16 @@ impl ScanLoop {
             }
 
             if events.is_empty() {
+                // A pane that is purely generating has left whatever the last
+                // emitted events described. Forget them, or the idle prompt
+                // after this turn hashes the same as the one before it, is
+                // deduped as "still on screen", and the worker the turn just
+                // made Active stays Active after the turn ends. A frame that
+                // still carries events keeps its dedupe, so a banner that
+                // stays up while generating is not re-applied every pass.
+                if generating {
+                    self.last_scan.lock().unwrap().remove(&worker);
+                }
                 continue;
             }
             // Dedupe: same events from the same worker as last pass = the
@@ -526,6 +537,9 @@ mod tests {
     struct ScriptedBackend {
         name: &'static str,
         frame: String,
+        /// Frames returned by successive captures before falling back to
+        /// `frame`, for passes that must see the pane change.
+        sequence: std::sync::Mutex<std::collections::VecDeque<String>>,
         /// Native agent states the backend reports (backend_ref -> status).
         /// Empty = the tmux default (no native voice).
         native: BTreeMap<String, String>,
@@ -554,7 +568,7 @@ mod tests {
             Ok(vec![])
         }
         async fn capture(&self, _p: &ProcessRef, _l: u32) -> crate::backend::Result<String> {
-            Ok(self.frame.clone())
+            Ok(self.sequence.lock().unwrap().pop_front().unwrap_or_else(|| self.frame.clone()))
         }
         async fn agent_states(&self) -> crate::backend::Result<BTreeMap<String, String>> {
             Ok(self.native.clone())
@@ -588,13 +602,17 @@ mod tests {
     /// A tmux worker whose provider is codex (hookless: the scrape is its only
     /// voice), for the AMUX-3165 active-via-scrape path.
     fn seed_codex_worker(store: &SharedStore, w: &WorkerId) {
-        let (id, sid) = (w.to_string(), format!("ses_{w}"));
+        seed_hookless_worker(store, w, "codex");
+    }
+
+    fn seed_hookless_worker(store: &SharedStore, w: &WorkerId, provider: &str) {
+        let (id, sid, provider) = (w.to_string(), format!("ses_{w}"), provider.to_string());
         store
             .write(move |conn| {
                 conn.execute(
                     "INSERT INTO _amux_workers (id, display_name, provider, created_at, updated_at)
-                     VALUES (?1, 'term', 'codex', 'now', 'now')",
-                    params![id],
+                     VALUES (?1, 'term', ?2, 'now', 'now')",
+                    params![id, provider],
                 )?;
                 conn.execute(
                     "INSERT INTO _amux_sessions (id, worker_id, backend, backend_ref, started_at)
@@ -1026,6 +1044,58 @@ mod tests {
             !matches!(worker_state(&store, &w), WorkerState::Active { .. }),
             "an idle codex model bar must not read Active"
         );
+    }
+
+    // Copilot's composer between its rules, with the status row below.
+    const COPILOT_RULE: &str = "────────────────────────────────";
+    fn copilot_frame(status: &str) -> String {
+        format!(" ● amux-copilot-probe\n{COPILOT_RULE}\n❯\n{COPILOT_RULE}\n {status}")
+    }
+
+    /// idle -> working -> idle in ONE scan loop must end idle. The two idle
+    /// prompts emit identical events, so without forgetting the first one
+    /// while the pane generates, the second is deduped as "still on screen"
+    /// and the worker the turn made Active stays Active after the turn ends.
+    #[tokio::test]
+    async fn idle_prompt_after_a_scraped_turn_is_not_deduped() {
+        let cases = [
+            ("codex", CODEX_IDLE.to_string(), CODEX_WORKING.to_string()),
+            (
+                "copilot",
+                copilot_frame("← open sidebar · Interactive · Manual Approval · / commands"),
+                copilot_frame("● Working · 106 B esc interrupt"),
+            ),
+        ];
+        for (n, (provider, idle, working)) in cases.into_iter().enumerate() {
+            let store = store();
+            let w = wid(40 + n as u128);
+            seed_hookless_worker(&store, &w, provider);
+            let scan = ScanLoop::new(
+                store.clone(),
+                vec![Arc::new(ScriptedBackend {
+                    name: "tmux",
+                    frame: idle.clone(),
+                    sequence: std::sync::Mutex::new(
+                        [idle.clone(), working.clone(), idle.clone()].into(),
+                    ),
+                    ..Default::default()
+                })],
+                Some(Arc::new(MockProtocol::new())),
+            );
+            scan.scan_once().await.unwrap();
+            assert!(!matches!(worker_state(&store, &w), WorkerState::Active { .. }), "{provider}: starts idle");
+            scan.scan_once().await.unwrap();
+            assert!(matches!(worker_state(&store, &w), WorkerState::Active { .. }), "{provider}: turn runs");
+            let r3 = scan.scan_once().await.unwrap();
+            assert!(r3.events_applied > 0, "{provider}: the idle prompt after the turn must apply: {r3:?}");
+            assert!(
+                !matches!(worker_state(&store, &w), WorkerState::Active { .. }),
+                "{provider}: a finished turn must not leave the worker Active"
+            );
+            // The same idle frame again is a banner still on screen: deduped.
+            let r4 = scan.scan_once().await.unwrap();
+            assert_eq!(r4.events_applied, 0, "{provider}: unchanged idle pane must dedupe: {r4:?}");
+        }
     }
 
     // ---- /api/debug/scan publish (AF-80) -----------------------------------
