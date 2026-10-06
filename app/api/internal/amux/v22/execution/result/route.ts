@@ -168,8 +168,10 @@ export async function POST(request: Request): Promise<Response> {
         callbackReturned = true;
         return value;
       }, { maxWait: 5_000, timeout: 10_000 });
+      const patchStored = result.patchSha256 !== null;
       return amuxJsonNoStore({ ...result,
-        filesDigest: patch?.filesDigest ?? null, patchRejected });
+        filesDigest: patchStored ? patch?.filesDigest ?? null : null,
+        patchRejected: patchRejected || (patch !== undefined && !patchStored) });
     } catch (error) {
       if (!callbackReturned && error instanceof AmuxV22TaskResultError)
         return amuxJsonNoStore({ error: error.code }, 409);

@@ -76,13 +76,25 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       task.v22AssignmentId !== attempt.v22AssignmentId ||
       v22TaskResultIdeaId(task.sourceSnapshot) !== input.ideaId)
     throw new AmuxV22TaskResultError("binding_mismatch");
-  if (input.patch) {
+  let patch = input.patch;
+  if (patch) {
     const assignment = await tx.amuxV22WorkerAssignment.findUnique({
       where: { id: attempt.v22AssignmentId },
       select: { role: true, workItemId: true },
     });
     if (assignment?.role !== "implement" || assignment.workItemId !== task.id)
-      throw new AmuxV22TaskResultError("binding_mismatch");
+      patch = undefined;
+    else {
+      // Settlement and quarantine lock this attempt before ending its run.
+      // Recheck after our attempt/task locks, in the result transaction, so a
+      // run that ended after the route's early check cannot retain a patch.
+      const run = await tx.engineeringAgentRun.findUnique({
+        where: { amuxAttemptId: input.attemptId },
+        select: { status: true, baseSha: true },
+      });
+      if (run?.status !== "active" || run.baseSha !== patch.baseSha)
+        patch = undefined;
+    }
   }
   const prior = await tx.amuxV22TaskResult.findUnique({
     where: { attemptId: input.attemptId },
@@ -94,15 +106,15 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       select: { patchSha256: true, baseSha: true, digest: true,
         digestKeyId: true, byteLength: true },
     });
-    let sameEvidence = input.patch ? false : priorPatch === null;
-    if (input.patch && priorPatch) {
-      const evidence = encodeV22PatchEvidence(input.patch.text,
-        input.patch.files);
+    let sameEvidence = patch ? false : priorPatch === null;
+    if (patch && priorPatch) {
+      const evidence = encodeV22PatchEvidence(patch.text,
+        patch.files);
       try {
         const digest = amuxContentDigest(evidence, "task_patch",
-          input.attemptId, input.patch.keys);
-        sameEvidence = priorPatch.patchSha256 === input.patch.sha256 &&
-          priorPatch.baseSha === input.patch.baseSha &&
+          input.attemptId, patch.keys);
+        sameEvidence = priorPatch.patchSha256 === patch.sha256 &&
+          priorPatch.baseSha === patch.baseSha &&
           priorPatch.digest === digest.digest &&
           priorPatch.digestKeyId === digest.digestKeyId &&
           priorPatch.byteLength === evidence.length;
@@ -113,18 +125,18 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
         !sameEvidence)
       throw new AmuxV22TaskResultError("result_conflict");
     return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
-      patchSha256: input.patch?.sha256 ?? null, duplicate: true };
+      patchSha256: patch?.sha256 ?? null, duplicate: true };
   }
   const bytes = Buffer.from(input.text, "utf8");
   const sealed = sealAmuxContent(bytes, "task_result", input.attemptId,
     input.keys);
-  const patchBytes = input.patch ? encodeV22PatchEvidence(input.patch.text,
-    input.patch.files) : null;
+  const patchBytes = patch ? encodeV22PatchEvidence(patch.text,
+    patch.files) : null;
   let sealedPatch: ReturnType<typeof sealAmuxContent> | null = null;
   try {
-    if (input.patch && patchBytes) sealedPatch =
+    if (patch && patchBytes) sealedPatch =
       sealAmuxContent(patchBytes, "task_patch", input.attemptId,
-        input.patch.keys);
+        patch.keys);
     await tx.amuxV22TaskResult.create({ data: {
       attemptId: input.attemptId, taskId: task.id, ideaId: input.ideaId,
       ciphertext: new Uint8Array(sealed.ciphertext), keyId: sealed.keyId,
@@ -132,13 +144,13 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       digestKeyId: sealed.digestKeyId,
       sourceSha256: input.sourceSha256, byteLength: bytes.length,
     } });
-    if (input.patch && patchBytes && sealedPatch) {
+    if (patch && patchBytes && sealedPatch) {
       await tx.amuxV22TaskPatch.create({ data: {
         attemptId: input.attemptId, taskId: task.id, ideaId: input.ideaId,
         ciphertext: new Uint8Array(sealedPatch.ciphertext),
         keyId: sealedPatch.keyId, keyVersion: sealedPatch.keyVersion,
         digest: sealedPatch.digest, digestKeyId: sealedPatch.digestKeyId,
-        patchSha256: input.patch.sha256, baseSha: input.patch.baseSha,
+        patchSha256: patch.sha256, baseSha: patch.baseSha,
         byteLength: patchBytes.length,
       } });
     }
@@ -148,10 +160,10 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       summary: "Recorded one encrypted v22 Task result.",
       metadata: { taskId: task.id, sourceSha256: input.sourceSha256,
         byteLength: bytes.length,
-        patchSha256: input.patch?.sha256 ?? null },
+        patchSha256: patch?.sha256 ?? null },
     });
     return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
-      patchSha256: input.patch?.sha256 ?? null, duplicate: false };
+      patchSha256: patch?.sha256 ?? null, duplicate: false };
   } finally { bytes.fill(0); sealed.ciphertext.fill(0);
     patchBytes?.fill(0); sealedPatch?.ciphertext.fill(0); }
 }
