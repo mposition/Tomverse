@@ -21,16 +21,29 @@
  * keyRetiredAt are those moments), and decision records at their own
  * retentionUntil. A cancellation is charged to the class whose statement was
  * running, and only that class's window is skipped.
+ *
+ * A suggestion is kept 30 days after it became terminal or after its report
+ * closed, whichever is earlier. The report has no closure timestamp, so the
+ * batch makes the two the same moment: before deleting, it moves every open
+ * suggestion of a closed report to `invalidated`, so its terminal time is at
+ * most one retention interval after the closure.
+ *
+ * A class whose statement was cancelled is quarantined for the rest of the
+ * run: later batches carry the other classes without it, so their deletes
+ * commit, and the quarantined class is retried alone, smaller, and skipped
+ * past its window after two cancellations at the floor size.
  */
 import "server-only";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { FEEDBACK_STATUSES, isTerminalFeedbackStatus } from "@/lib/feedbackLifecycleCore";
 import { prisma } from "@/lib/prisma";
 import {
   LANE_TIMEOUTS,
   RETENTION_BATCH_SIZES,
   RETENTION_OVERDUE_GRACE_SECONDS,
   RETENTION_CLASSES,
+  SUGGESTION_STATES,
   SUGGESTION_TERMINAL_STATES,
   SUPPORT_TRIAGE_RUN_RETENTION_DAYS,
   TERMINAL_GROUP_RETENTION_DAYS,
@@ -70,6 +83,26 @@ type WindowRow = { id: string; at: Date };
 type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 const GROUP_TERMINAL_STATES = ["dismissed", "expired", "invalidated"];
+const CLOSED_REPORT_STATUSES = FEEDBACK_STATUSES.filter(isTerminalFeedbackStatus);
+const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_TERMINAL_STATES.includes(state));
+
+/**
+ * Moves up to `size` open suggestions of closed reports to invalidated. The
+ * report is read, not locked: this write locks only suggestion rows, so an
+ * account deletion holding the report waits here and never the other way.
+ */
+const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
+  tx.$executeRaw`
+    UPDATE "SupportTriageSuggestion" s
+       SET "state" = 'invalidated'
+     WHERE s."id" IN (
+       SELECT o."id"
+         FROM "SupportTriageSuggestion" o
+         JOIN "Feedback" f ON f."id" = o."feedbackId"
+        WHERE f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
+          AND o."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+        ORDER BY o."id"
+        LIMIT ${size}::integer)`;
 
 /** The rows of one class past their boundary, after the cursor, oldest first. */
 const readWindow = (tx: Tx, cls: RetentionClass, after: Cursor, size: number) => {
@@ -142,9 +175,10 @@ type BatchResult =
   | {
       readonly kind: "deleted";
       readonly deleted: ClassCounts;
+      readonly invalidated: number;
       /** Per class, where the window ended; absent when it was empty. */
       readonly last: Partial<Record<RetentionClass, Cursor>>;
-      /** Classes whose window was full: more may lie past the cursor. */
+      /** Classes that may hold more work past the cursor. */
       readonly full: readonly RetentionClass[];
     }
   | { readonly kind: "cancelled"; readonly cls: RetentionClass; readonly window: Cursor; readonly windowRows: number };
@@ -152,7 +186,7 @@ type BatchResult =
 const runBatch = async (input: {
   readonly runId: string;
   readonly deadlineAt: Date;
-  readonly size: number;
+  readonly sizes: Readonly<Record<RetentionClass, number>>;
   readonly classes: readonly RetentionClass[];
   readonly cursors: Readonly<Partial<Record<RetentionClass, Cursor>>>;
 }): Promise<BatchResult> => {
@@ -164,23 +198,29 @@ const runBatch = async (input: {
       async (tx) => {
         await armSupportTriageTransaction(tx, "retention");
         const deleted = zeroCounts();
+        let invalidated = 0;
         const last: Partial<Record<RetentionClass, Cursor>> = {};
         const full: RetentionClass[] = [];
         for (const cls of input.classes) {
           current = cls;
           windowEnd = null;
           windowRows = 0;
-          const window = await readWindow(tx, cls, input.cursors[cls] ?? null, input.size);
+          const size = input.sizes[cls];
+          if (cls === "suggestions") {
+            invalidated = await invalidateClosedReportSuggestions(tx, size);
+            if (invalidated === size) full.push(cls);
+          }
+          const window = await readWindow(tx, cls, input.cursors[cls] ?? null, size);
           const lastRow = window[window.length - 1];
           windowEnd = lastRow ? { at: lastRow.at, id: lastRow.id } : null;
           windowRows = window.length;
           if (windowEnd) last[cls] = windowEnd;
-          if (window.length === input.size) full.push(cls);
+          if (window.length === size && !full.includes(cls)) full.push(cls);
           if (window.length > 0) deleted[cls] = await deleteWindow(tx, cls, window.map((row) => row.id));
         }
         const total = RETENTION_CLASSES.reduce((sum, cls) => sum + deleted[cls], 0);
-        // Nothing past its boundary: nothing written, so nothing to audit.
-        if (total === 0) return { kind: "deleted" as const, deleted, last, full };
+        // Nothing written, so nothing to audit.
+        if (total === 0 && invalidated === 0) return { kind: "deleted" as const, deleted, invalidated, last, full };
         await writeSystemAuditLog({
           tx,
           systemActor: "support-triage-retention",
@@ -188,11 +228,16 @@ const runBatch = async (input: {
           targetType: "SupportTriageRun",
           targetId: input.runId,
           summary: "Support-triage retention batch",
-          metadata: { deleted: total, batchSize: input.size, ...deleted },
+          metadata: {
+            deleted: total,
+            batchSize: Math.max(...input.classes.map((cls) => input.sizes[cls])),
+            ...deleted,
+            invalidated,
+          },
         });
         // Last round trip: the database clock against the run deadline.
         await tx.$executeRaw`SELECT "support_triage_assert_deadline"(${input.deadlineAt}::timestamp(3))`;
-        return { kind: "deleted" as const, deleted, last, full };
+        return { kind: "deleted" as const, deleted, invalidated, last, full };
       },
       { timeout: LANE_TIMEOUTS.retention.prismaTransactionTimeoutMs }
     );
@@ -225,6 +270,14 @@ const overdueState = async () => {
       SELECT s."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
         FROM "SupportTriageSuggestion" s WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
       UNION ALL
+      -- An open suggestion of a closed report not yet invalidated. The report's
+      -- updatedAt is no earlier than its closure, so this can only under-state
+      -- how long the row has been due, never report one that is not.
+      SELECT f."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
+        FROM "SupportTriageSuggestion" s JOIN "Feedback" f ON f."id" = s."feedbackId"
+       WHERE f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
+         AND s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+      UNION ALL
       SELECT g."keyRetiredAt" + make_interval(days => ${TERMINAL_GROUP_RETENTION_DAYS}::integer)
         FROM "SupportTriageGroup" g WHERE g."state" = ANY(${GROUP_TERMINAL_STATES}::text[])
       UNION ALL
@@ -246,48 +299,62 @@ export const runSupportTriageRetention = async (): Promise<RetentionRunResult> =
   let batchesCompleted = 0;
   let deleted = 0;
   let blocked = 0;
-  let size: number = RETENTION_BATCH_SIZES[0];
-  let floorCancellations = 0;
   const cursors: Partial<Record<RetentionClass, Cursor>> = {};
-  // Classes that may still hold rows past the cursor; a class leaves when its
+  const sizes = Object.fromEntries(RETENTION_CLASSES.map((cls) => [cls, RETENTION_BATCH_SIZES[0]])) as Record<
+    RetentionClass,
+    number
+  >;
+  const floorCancellations = zeroCounts();
+  // Classes that may still hold work past the cursor; a class leaves when its
   // window comes back short.
   let pending: RetentionClass[] = [...RETENTION_CLASSES];
+  // Classes cancelled in this run: retried alone so they cannot hold back the rest.
+  const quarantined = new Set<RetentionClass>();
   try {
     for (;;) {
+      if (pending.length === 0) break; // nothing more past its boundary after any cursor
       const remainingMs = run.deadlineAt.getTime() - (await databaseNow()).getTime();
       if (!mayStartRetentionBatch({ remainingMs, batchesStarted })) break;
       batchesStarted += 1;
-      const result = await runBatch({ runId: run.id, deadlineAt: run.deadlineAt, size, classes: pending, cursors });
+      const healthy = pending.filter((cls) => !quarantined.has(cls));
+      const classes = healthy.length > 0 ? healthy : [pending[0]];
+      const result = await runBatch({ runId: run.id, deadlineAt: run.deadlineAt, sizes, classes, cursors });
       if (result.kind === "deleted") {
         const batchDeleted = RETENTION_CLASSES.reduce((sum, cls) => sum + result.deleted[cls], 0);
-        // A batch counts as completed when it deleted something: an empty
-        // batch after a skipped window is not progress.
-        if (batchDeleted > 0) batchesCompleted += 1;
+        // A batch counts as completed when it wrote something: an empty batch
+        // after a skipped window is not progress.
+        if (batchDeleted + result.invalidated > 0) batchesCompleted += 1;
         deleted += batchDeleted;
-        // A committed batch clears the strike: two floor cancellations of the
-        // same window, in a row, are what move the cursor.
-        floorCancellations = 0;
-        for (const cls of pending) {
+        for (const cls of classes) {
           const windowEnd = result.last[cls];
           if (windowEnd) cursors[cls] = windowEnd;
+          // A committed batch clears the strike: two floor cancellations of
+          // the same window, in a row, are what move the cursor.
+          floorCancellations[cls] = 0;
         }
-        pending = pending.filter((cls) => result.full.includes(cls));
-        if (pending.length === 0) break; // nothing more past its boundary after any cursor
+        pending = pending.filter((cls) => !classes.includes(cls) || result.full.includes(cls));
         continue;
       }
-      const smaller = reducedRetentionBatchSize(size);
+      const cls = result.cls;
+      if (classes.length > 1) {
+        // Set it aside at a smaller size; the others go on without it.
+        quarantined.add(cls);
+        sizes[cls] = reducedRetentionBatchSize(sizes[cls]) ?? sizes[cls];
+        continue;
+      }
+      const smaller = reducedRetentionBatchSize(sizes[cls]);
       if (smaller !== null) {
-        size = smaller;
+        sizes[cls] = smaller;
         continue;
       }
-      floorCancellations += 1;
-      if (floorCancellations >= 2) {
+      floorCancellations[cls] += 1;
+      if (floorCancellations[cls] >= 2) {
         // Move past the window that keeps cancelling; the next run starts over.
         // Count the rows actually skipped, not the batch size. A window that
         // was never read cannot be skipped; the gate's batch cap ends the run.
         blocked += result.windowRows;
-        if (result.window) cursors[result.cls] = result.window;
-        floorCancellations = 0;
+        if (result.window) cursors[cls] = result.window;
+        floorCancellations[cls] = 0;
       }
     }
     const { overdueRemaining, oldestOverdueAgeSeconds } = await overdueState();
