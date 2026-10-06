@@ -76,6 +76,14 @@ export const amuxCliUsageReceiptSchema = z.object({
 
 export type AmuxCliUsageReceipt = z.infer<typeof amuxCliUsageReceiptSchema>;
 
+/** v22 accepts no silent CLI model fallback. A different served model has a
+ * different approved route and price and therefore cannot settle this Task. */
+export function v22ReceiptModelMatchesAssignment(receipt: AmuxCliUsageReceipt): boolean {
+  return receipt.binding.kind !== "task_attempt" ||
+    receipt.actualModelId === null ||
+    receipt.actualModelId === receipt.selectedModelId;
+}
+
 export function amuxCliUsageReceiptDigest(receipt: AmuxCliUsageReceipt): string {
   return createHash("sha256").update("amux-cli-usage-v1\n", "utf8")
     .update(JSON.stringify(receipt), "utf8").digest("hex");

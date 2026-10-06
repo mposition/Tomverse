@@ -8,7 +8,8 @@ import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { inspectV4TaskCostCatalog, type V4TaskCostCatalog } from
   "@/lib/amux/v4TaskCostCatalogCore";
 import { amuxCliUsageReceiptDigest, amuxCliUsageReceiptSchema,
-  estimateAmuxCliApiCost, type AmuxCliApiPrice } from
+  estimateAmuxCliApiCost, v22ReceiptModelMatchesAssignment,
+  type AmuxCliApiPrice } from
   "@/lib/amux/cliUsageLedgerCore";
 
 export class AmuxCliUsageLedgerError extends Error {
@@ -90,6 +91,7 @@ export async function recordAmuxCliUsage(tx: Prisma.TransactionClient,
         attempt.task.sourceSystem === "admin-idea-v4" &&
         (attempt.endedAt !== null || !attempt.v22AssignmentId ||
           attempt.task.v22AssignmentId !== attempt.v22AssignmentId ||
+          !v22ReceiptModelMatchesAssignment(receipt) ||
           Date.parse(receipt.startedAt) < attempt.startedAt.getTime() - 120_000 ||
           !attempt.task.v22AcceptedAssignment ||
           attempt.task.v22AcceptedAssignment.workerName !== receipt.worker ||

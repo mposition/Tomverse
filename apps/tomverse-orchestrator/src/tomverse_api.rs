@@ -1142,6 +1142,64 @@ mod tests {
         assert!(response.settled);
     }
 
+    #[tokio::test]
+    async fn v22_verified_settlement_sends_only_the_attempt_invocation() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let body_start = loop {
+                let mut chunk = [0_u8; 1024];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(index) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..body_start]).unwrap();
+            let content_length: usize = headers
+                .lines()
+                .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ").map(str::to_owned))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            while request.len() - body_start < content_length {
+                let mut chunk = [0_u8; 1024];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+            }
+            let body: Value = serde_json::from_slice(&request[body_start..body_start + content_length]).unwrap();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 33\r\nConnection: close\r\n\r\n{{\"settled\":true,\"taskRevision\":4}}").unwrap();
+            body
+        });
+        let delivery = PulledDelivery {
+            attempt_id: "attempt-1".to_owned(),
+            assignment_id: Some("assignment-1".to_owned()),
+            task_id: "task-1".to_owned(),
+            worker: "worker-1".to_owned(),
+            task_revision: 3,
+            prompt: String::new(),
+            receipt_id: "receipt-1".to_owned(),
+            lease_expires_at: String::new(),
+        };
+        let api = TomverseApi::for_test_with_timeouts(
+            format!("http://{address}"),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+        );
+        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked").await.is_err());
+        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded").await.unwrap();
+        assert!(result.settled);
+        let body = server.join().unwrap();
+        assert_eq!(body["outcome"], "succeeded");
+        assert_eq!(body["attempt_id"], "attempt-1");
+        assert_eq!(body["invocation_ids"], serde_json::json!(["attempt-1"]));
+    }
+
     #[test]
     fn the_review_pr_field_is_omitted_null_or_a_number() {
         let body = |review_pr_number| {
@@ -2451,14 +2509,13 @@ impl TomverseApi {
         Ok(body)
     }
 
-    /// A local AMUX card is not an A14 usage receipt. Until the isolated
-    /// worker can report exact invocation IDs, close a terminal v22 attempt
-    /// as blocked for owner read-back, never as succeeded or retryable failed.
-    pub async fn v22_execution_settle_unverified(
+    async fn v22_execution_settle_with_receipt(
         &self,
         delivery: &PulledDelivery,
         instance_id: &str,
         generation: i64,
+        outcome: &str,
+        invocation_ids: &[&str],
     ) -> Result<ExecutionSettleResponse> {
         if delivery.assignment_id.is_none() {
             bail!("v22 settlement requires an assignment-bound delivery");
@@ -2473,8 +2530,8 @@ impl TomverseApi {
                 instance_id,
                 generation,
                 task_revision: delivery.task_revision,
-                outcome: "blocked",
-                invocation_ids: &[],
+                outcome,
+                invocation_ids,
             })
             .send().await?;
         let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
@@ -2491,6 +2548,36 @@ impl TomverseApi {
         } else {
             bail!("invalid v22 execution-settle response invariant")
         }
+    }
+
+    /// Only a supervised one-shot CLI process may use this positive path.
+    /// The app independently requires its A14 usage row to be complete,
+    /// priced, and bound to the durable attempt ID before changing status.
+    pub async fn v22_execution_settle_verified(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        outcome: &str,
+    ) -> Result<ExecutionSettleResponse> {
+        if !matches!(outcome, "succeeded" | "failed") {
+            bail!("verified v22 settlement requires a terminal CLI result");
+        }
+        self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
+            outcome, &[&delivery.attempt_id]).await
+    }
+
+    /// A local AMUX card is not an A14 usage receipt. Without a verified
+    /// one-shot result, close a terminal v22 attempt as blocked for owner
+    /// read-back, never as succeeded or automatically retryable failed.
+    pub async fn v22_execution_settle_unverified(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+    ) -> Result<ExecutionSettleResponse> {
+        self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
+            "blocked", &[]).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic

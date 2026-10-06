@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxCliUsageReceiptDigest } from
+import { amuxCliUsageReceiptDigest, v22ReceiptModelMatchesAssignment } from
   "../lib/amux/cliUsageLedgerCore.ts";
 import { executeAmuxCliWithUsageReceipt } from
   "../lib/amux/cliUsageExecutionWrapper.mjs";
@@ -40,6 +40,11 @@ test("common wrapper records a content-free receipt before releasing output", as
   assert.equal(receipt.binding.attemptId, "attempt-1");
   assert.equal(receipt.actualModelId, "claude-opus-5");
   assert.equal(receipt.observed.inputTokens, 100);
+  assert.equal(v22ReceiptModelMatchesAssignment(receipt), true);
+  assert.equal(v22ReceiptModelMatchesAssignment({ ...receipt,
+    actualModelId: null }), true);
+  assert.equal(v22ReceiptModelMatchesAssignment({ ...receipt,
+    actualModelId: "claude-opus-other" }), false);
   assert.equal(JSON.stringify(receipt).includes("prompt"), false);
 });
 
