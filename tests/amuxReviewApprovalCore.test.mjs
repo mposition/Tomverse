@@ -10,6 +10,7 @@ import {
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
+  amuxV22ReviewRetryHasVerifiedOutcome,
   isAmuxAgentApprovalEnabled,
 } from "../lib/amux/reviewApprovalCore.ts";
 
@@ -41,6 +42,21 @@ test("approval flag is enabled by one exact value only", () => {
     assert.equal(isAmuxAgentApprovalEnabled(value), false);
   }
   assert.equal(isAmuxAgentApprovalEnabled("true"), true);
+});
+
+test("v22 unknown execution cannot be manually requeued without a verified terminal receipt", () => {
+  const attempt = { v22AssignmentId: "assignment", outcome: "blocked",
+    toStatus: "blocked", reason: "reported_result" };
+  assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+    sourceSystem: "admin-idea-v4", attempt }), true);
+  for (const uncertain of [
+    { ...attempt, reason: "usage_outcome_unknown" },
+    { ...attempt, outcome: "expired", reason: "outcome_unknown" },
+    { ...attempt, v22AssignmentId: null },
+  ]) assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+    sourceSystem: "admin-idea-v4", attempt: uncertain }), false);
+  assert.equal(amuxV22ReviewRetryHasVerifiedOutcome({
+    sourceSystem: "legacy", attempt: null }), true);
 });
 
 test("approval readiness is conditional and names missing settings without values", () => {
