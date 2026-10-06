@@ -70,13 +70,17 @@ function genesisApprovalReason(genesis, auditRows) {
 }
 
 /** T3b: the state row was written under the current triggers. */
-export function stateStampReason(state, recomputedKeysSha256) {
+export function stateStampReason(state, recomputedKeysSha256, recomputedCheckpointSha256) {
+  // Both stamps: the keys, and the verified checkpoint. A checkpoint moved
+  // past the trigger would take earlier generations out of what T3c reads.
   const sound =
     state.invariantVersion === OPS_OBSERVER_INVARIANT_VERSION &&
     isCount(state.generation) &&
     state.stampGeneration === state.generation &&
     isSha256(recomputedKeysSha256) &&
-    state.stampKeysSha256 === recomputedKeysSha256;
+    state.stampKeysSha256 === recomputedKeysSha256 &&
+    isSha256(recomputedCheckpointSha256) &&
+    state.stampCheckpointSha256 === recomputedCheckpointSha256;
   return sound ? null : "unenforced_write";
 }
 
@@ -147,7 +151,7 @@ export function judgeTrust(facts) {
   if (f.catalogComplete !== true) return fail("invariants_missing");
 
   // T3b: the state row carries the stamp only the triggers write.
-  const stamp = stateStampReason(state, f.recomputedKeysSha256);
+  const stamp = stateStampReason(state, f.recomputedKeysSha256, f.recomputedCheckpointSha256);
   if (stamp) return fail(stamp);
 
   // T3c: every generation since the checkpoint has its signed transition row.

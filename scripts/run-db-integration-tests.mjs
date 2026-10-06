@@ -373,6 +373,9 @@ run(
     // sre-ops trust check T3a: the migrations' catalogue is exactly the
     // expected one, and a dropped or re-deferred rule is seen.
     "tests/integration/ops-observer-catalog.db.test.ts",
+    // sre-ops state read: the trust facts gathered in one bounded transaction,
+    // trusted with the state or the reason only (own throwaway schema).
+    "tests/integration/ops-observer-store-read.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
