@@ -2821,6 +2821,7 @@ mod tests {
         PulledDelivery {
             attempt_id: ATTEMPT_ID.into(),
             assignment_id: None,
+            v22_execution: None,
             task_id: "TASK-1".into(),
             worker: "claude-impl".into(),
             task_revision: 3,

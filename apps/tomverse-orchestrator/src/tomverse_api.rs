@@ -1179,6 +1179,7 @@ mod tests {
         let delivery = PulledDelivery {
             attempt_id: "attempt-1".to_owned(),
             assignment_id: Some("assignment-1".to_owned()),
+            v22_execution: None,
             task_id: "task-1".to_owned(),
             worker: "worker-1".to_owned(),
             task_revision: 3,
@@ -1887,10 +1888,20 @@ struct DeliveryPullRequest<'a> {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct V22ExecutionProfile {
+    pub model_id: String,
+    pub role: String,
+    pub budget_microusd: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PulledDelivery {
     pub attempt_id: String,
     #[serde(default)]
     pub assignment_id: Option<String>,
+    #[serde(default)]
+    pub v22_execution: Option<V22ExecutionProfile>,
     pub task_id: String,
     pub worker: String,
     pub task_revision: i64,

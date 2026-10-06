@@ -500,6 +500,7 @@ mod tests {
         fn delivery() -> PulledDelivery {
             PulledDelivery {
                 assignment_id: None,
+                v22_execution: None,
                 attempt_id: "00000000-0000-4000-8000-000000000011".into(),
                 task_id: "TASK-1".into(),
                 worker: "worker-a".into(),

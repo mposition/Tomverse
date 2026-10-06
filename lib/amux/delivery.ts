@@ -206,6 +206,11 @@ export type AmuxPulledDelivery =
         worker: string;
         taskRevision: number;
         prompt: string;
+        v22Execution: {
+          modelId: string;
+          role: string;
+          budgetMicrousd: number;
+        } | null;
         receiptId: string;
         leaseExpiresAt: Date;
       };
@@ -248,10 +253,10 @@ export async function pullAmuxWorkDelivery(input: {
   const briefKeys = sealedCandidate && ideaId ?
     await loadAmuxContentKeyRing([{ ideaId, purpose: "card_brief",
       subjectId: sealedCandidate.taskId }]) : null;
-  const deliveryPrompt = async (tx: Prisma.TransactionClient,
+  const deliveryContent = async (tx: Prisma.TransactionClient,
     delivery: DeliveryLockRow) => {
     if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER)
-      return delivery.prompt;
+      return { prompt: delivery.prompt, v22Execution: null };
     if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
     if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
         sealedCandidate.taskId !== delivery.taskId)
@@ -276,6 +281,21 @@ export async function pullAmuxWorkDelivery(input: {
         !card.v22AssignmentId ||
         attempt?.v22AssignmentId !== card.v22AssignmentId)
       throw new Error("v22 sealed delivery is not assignment-bound");
+    const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+      where: { id: card.v22AssignmentId },
+      select: { workItemId: true, workerName: true,
+        workerInstanceId: true, workerGeneration: true,
+        modelId: true, role: true,
+        perAttemptMicroUsd: true },
+    });
+    const budgetMicrousd = Number(assignment?.perAttemptMicroUsd);
+    if (assignment?.workItemId !== delivery.taskId ||
+        assignment?.workerName !== delivery.worker ||
+        assignment?.workerInstanceId !== delivery.workerInstanceId ||
+        assignment?.workerGeneration !== delivery.workerGeneration ||
+        !Number.isSafeInteger(budgetMicrousd) ||
+        budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
+      throw new Error("v22 delivery assignment profile is invalid");
     let plain: Buffer | null = null;
     try {
       plain = openAmuxContent({
@@ -286,8 +306,12 @@ export async function pullAmuxWorkDelivery(input: {
       if (!verifyAmuxContentDigest(plain, "card_brief", delivery.taskId,
         card.v4BriefDigest, card.v4BriefDigestKeyId, briefKeys as AmuxContentKeys))
         throw new Error("v22 sealed delivery digest mismatch");
-      return `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-        `Approved execution brief:\n${plain.toString("utf8")}`;
+      return {
+        prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
+          `Approved execution brief:\n${plain.toString("utf8")}`,
+        v22Execution: { modelId: assignment.modelId, role: assignment.role,
+          budgetMicrousd },
+      };
     } finally { plain?.fill(0); }
   };
   return withAmuxDbBoundary(
@@ -360,6 +384,7 @@ export async function pullAmuxWorkDelivery(input: {
           reason: "none" as const,
         };
       }
+      const content = await deliveryContent(tx, delivery);
 
       /*
        * A retry while the receipt lease is still live is idempotent: return
@@ -388,7 +413,8 @@ export async function pullAmuxWorkDelivery(input: {
             taskId: delivery.taskId,
             worker: delivery.worker,
             taskRevision: delivery.taskRevision,
-            prompt: await deliveryPrompt(tx, delivery),
+            prompt: content.prompt,
+            v22Execution: content.v22Execution,
             receiptId,
             leaseExpiresAt,
           },
@@ -453,7 +479,8 @@ export async function pullAmuxWorkDelivery(input: {
           taskId: delivery.taskId,
           worker: delivery.worker,
           taskRevision: delivery.taskRevision,
-          prompt: await deliveryPrompt(tx, delivery),
+          prompt: content.prompt,
+          v22Execution: content.v22Execution,
           receiptId,
           leaseExpiresAt: deliveryLeaseExpiresAt,
         },
