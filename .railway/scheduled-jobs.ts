@@ -163,7 +163,7 @@ export const RAILWAY_AGENT_SERVICES: readonly RailwayAgentService[] = [
   {
     key: "engineeringAgentRunner",
     service: "Engineering Agent Runner",
-    digest: null,
+    digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
     startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
     cronSchedule: "*/30 * * * *",
     variables: {
@@ -179,7 +179,7 @@ export const RAILWAY_AGENT_SERVICES: readonly RailwayAgentService[] = [
   {
     key: "engineeringAgentPublisher",
     service: "Engineering Agent Publisher",
-    digest: null,
+    digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
     startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
     cronSchedule: "*/10 * * * *",
     variables: {

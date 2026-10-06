@@ -14,7 +14,7 @@ import {
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 
 // The approval writer must store this exact digest. It binds the approved
 // registry price to the frozen numeric contract, not to caller-provided facts.
