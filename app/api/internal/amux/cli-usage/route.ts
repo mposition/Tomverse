@@ -13,9 +13,9 @@ import { AmuxCliUsageLedgerError, recordAmuxCliUsage } from
 import { purgeExpiredAmuxCliUsage } from "@/lib/amux/cliUsageRetention";
 import { prisma } from "@/lib/prisma";
 
-// Code-side latch remains closed until the common Ubuntu wrapper and
-// read-back have been independently verified and the operator activates it.
-const WRITE_CODE_LATCH = false;
+// The environment switch remains off by default. Deployment and activation
+// require separate approval after Ubuntu receipt/read-back verification.
+const WRITE_CODE_LATCH = true;
 const WRITE_ENV = "TOMVERSE_AMUX_CLI_USAGE_WRITE";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 

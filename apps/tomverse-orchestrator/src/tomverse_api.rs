@@ -67,6 +67,12 @@ pub struct TomverseApi {
     secret: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22UsageRecord {
+    Recorded,
+    Rejected,
+}
+
 const PRISMA_INT_MAX: i64 = 2_147_483_647;
 const MAX_QUEUE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_OWNED_QUEUE_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -910,6 +916,64 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 }
 
 impl TomverseApi {
+    /// Submit the exact content-free A14 receipt once. An ambiguous write is
+    /// resolved only by a GET for the same invocation ID, never by re-POST.
+    pub async fn v22_cli_usage_record_once(
+        &self,
+        attempt_id: &str,
+        receipt: &Value,
+        expected_digest: &str,
+    ) -> Result<V22UsageRecord> {
+        if receipt.get("invocationId").and_then(Value::as_str) != Some(attempt_id) ||
+            receipt.pointer("/binding/kind").and_then(Value::as_str) != Some("task_attempt") ||
+            receipt.pointer("/binding/attemptId").and_then(Value::as_str) != Some(attempt_id) ||
+            expected_digest.len() != 64 ||
+            !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("invalid v22 usage receipt binding");
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/cli-usage", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(receipt)
+            .send().await;
+        let mut definitely_rejected = false;
+        if let Ok(response) = response {
+            let status = response.status();
+            if status == StatusCode::OK {
+                let answer = read_raw_answer(response, 4096).await?;
+                let body: Value = serde_json::from_slice(&answer.body)?;
+                if body.get("invocationId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("receiptDigest").and_then(Value::as_str) == Some(expected_digest) {
+                    return Ok(V22UsageRecord::Recorded);
+                }
+                bail!("v22 usage write response mismatch");
+            }
+            definitely_rejected = status == StatusCode::CONFLICT ||
+                status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED;
+        }
+        let response = self.client
+            .get(format!("{}/api/internal/amux/cli-usage", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("invocationId", attempt_id)])
+            .send().await.context("v22 usage write outcome unknown; read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("v22 usage write outcome unknown; read-back failed");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("invocationId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("receiptDigest").and_then(Value::as_str) == Some(expected_digest) {
+            return Ok(V22UsageRecord::Recorded);
+        }
+        if definitely_rejected && body.get("status").and_then(Value::as_str) == Some("absent") {
+            return Ok(V22UsageRecord::Rejected);
+        }
+        bail!("v22 usage write outcome unknown or conflicting read-back")
+    }
+
     fn with_timeouts(
         base_url: String,
         secret: String,
@@ -1140,6 +1204,47 @@ mod tests {
             serde_json::json!({"settled":true,"taskRevision":4})
         ).unwrap();
         assert!(response.settled);
+    }
+
+    #[tokio::test]
+    async fn v22_usage_record_reads_back_a_lost_write_reply_without_reposting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (method, status, body) in [
+                ("POST", "503 Service Unavailable", r#"{"error":"outcome_unknown"}"#),
+                ("GET", "200 OK", concat!(
+                    "{\"status\":\"recorded\",\"invocationId\":\"attempt-1\",",
+                    "\"receiptDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+                )),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&chunk[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+                }
+                let request_line = String::from_utf8_lossy(&request);
+                assert!(request_line.starts_with(method));
+                if method == "GET" {
+                    assert!(request_line.contains("invocationId=attempt-1"));
+                }
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()).unwrap();
+            }
+        });
+        let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+            Duration::from_secs(1), Duration::from_secs(3));
+        let receipt = serde_json::json!({"invocationId":"attempt-1",
+            "binding":{"kind":"task_attempt","attemptId":"attempt-1"}});
+        let recorded = api.v22_cli_usage_record_once("attempt-1", &receipt,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
     }
 
     #[tokio::test]

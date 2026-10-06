@@ -90,6 +90,11 @@ test("one child returns a content-free success", async () => {
   assert.equal(result.kind, "succeeded");
   assert.equal(result.attemptId, attemptId);
   assert.equal(Object.hasOwn(result, "usageObservation"), false);
+  assert.equal(result.usageReceipt.binding.attemptId, attemptId);
+  assert.equal(result.usageReceipt.actualModelId, "claude-opus-5-5");
+  assert.equal(result.usageReceipt.completeness, "reported_complete");
+  assert.equal(result.usageReceipt.observed.inputTokens, 10);
+  assert.match(result.usageReceiptDigest, /^[0-9a-f]{64}$/);
   assert.match(result.outputDigest, /^[0-9a-f]{64}$/);
   assert.equal(JSON.stringify(result).includes(request.prompt), false);
   assert.equal(fake.calls.length, 1);

@@ -284,6 +284,13 @@ pub enum V22SidecarState {
     NotFound,
 }
 
+#[derive(Debug, Clone)]
+pub struct V22SidecarResult {
+    pub state: V22SidecarState,
+    pub usage_receipt: Option<serde_json::Value>,
+    pub usage_receipt_digest: Option<String>,
+}
+
 #[allow(async_fn_in_trait)]
 pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
@@ -295,6 +302,11 @@ pub trait LocalAmux {
 
     async fn readback_v22(&mut self, _attempt_id: &str) -> Result<V22SidecarState> {
         bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
+        Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
+            usage_receipt: None, usage_receipt_digest: None })
     }
 }
 
@@ -1309,7 +1321,7 @@ async fn v22_sidecar_call(
     socket_path: &str,
     payload: serde_json::Value,
     attempt_id: &str,
-) -> Result<V22SidecarState> {
+) -> Result<V22SidecarResult> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::UnixStream;
 
@@ -1334,15 +1346,26 @@ async fn v22_sidecar_call(
         if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
             bail!("v22 sidecar attempt mismatch");
         }
-        match value.get("kind").and_then(|item| item.as_str()) {
-            Some("in_progress") => Ok(V22SidecarState::InProgress),
-            Some("succeeded") => Ok(V22SidecarState::Succeeded),
-            Some("failed") => Ok(V22SidecarState::Failed),
-            Some("outcome_unknown") => Ok(V22SidecarState::OutcomeUnknown),
-            Some("busy") => Ok(V22SidecarState::Busy),
-            Some("not_found") => Ok(V22SidecarState::NotFound),
+        let state = match value.get("kind").and_then(|item| item.as_str()) {
+            Some("in_progress") => V22SidecarState::InProgress,
+            Some("succeeded") => V22SidecarState::Succeeded,
+            Some("failed") => V22SidecarState::Failed,
+            Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
+            Some("busy") => V22SidecarState::Busy,
+            Some("not_found") => V22SidecarState::NotFound,
             _ => bail!("invalid v22 sidecar result"),
+        };
+        let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
+        let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+        if receipt.is_some() != digest.is_some() ||
+            digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
+                b.is_ascii_hexdigit())) ||
+            receipt.is_some() && !matches!(state,
+                V22SidecarState::Succeeded | V22SidecarState::Failed) {
+            bail!("invalid v22 sidecar usage receipt envelope");
         }
+        Ok(V22SidecarResult { state, usage_receipt: receipt,
+            usage_receipt_digest: digest.map(str::to_owned) })
     };
     tokio::time::timeout(Duration::from_secs(5), operation)
         .await.context("v22 sidecar transport timed out")?
@@ -1353,7 +1376,7 @@ async fn v22_sidecar_call(
     _socket_path: &str,
     _payload: serde_json::Value,
     _attempt_id: &str,
-) -> Result<V22SidecarState> {
+) -> Result<V22SidecarResult> {
     bail!("v22 sidecar requires Ubuntu")
 }
 
@@ -1367,7 +1390,7 @@ impl LocalAmux for HttpLocal {
             bail!("invalid v22 one-shot delivery");
         }
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
-        v22_sidecar_call(socket, serde_json::json!({
+        Ok(v22_sidecar_call(socket, serde_json::json!({
             "op": "execute", "version": 1,
             "attemptId": delivery.attempt_id,
             "worker": delivery.worker,
@@ -1375,10 +1398,17 @@ impl LocalAmux for HttpLocal {
             "role": profile.role,
             "budgetMicrousd": profile.budget_microusd,
             "prompt": delivery.prompt,
-        }), &delivery.attempt_id).await
+        }), &delivery.attempt_id).await?.state)
     }
 
     async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        Ok(v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await?.state)
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
         v22_sidecar_call(socket, serde_json::json!({
             "op": "readback", "attemptId": attempt_id,
@@ -1774,10 +1804,13 @@ pub async fn run_from_env() -> i32 {
             let mut board: Option<Vec<LocalCardSummary>> = None;
             let mut still_running = Vec::new();
             for mut entry in pending.drain(..) {
+                let v22_result = if entry.delivery.assignment_id.is_some() {
+                    local.readback_v22_result(&entry.delivery.attempt_id).await.ok()
+                } else { None };
                 let completion = if entry.delivery.assignment_id.is_some() {
-                    match local.readback_v22(&entry.delivery.attempt_id).await {
-                        Ok(V22SidecarState::InProgress) => LocalCompletion::Running,
-                        Ok(V22SidecarState::Succeeded | V22SidecarState::Failed |
+                    match v22_result.as_ref().map(|result| result.state) {
+                        Some(V22SidecarState::InProgress) => LocalCompletion::Running,
+                        Some(V22SidecarState::Succeeded | V22SidecarState::Failed |
                             V22SidecarState::OutcomeUnknown) => LocalCompletion::Settle {
                                 outcome: "blocked", to_status: "blocked",
                                 reason: "v22_usage_receipt_missing",
@@ -1810,15 +1843,41 @@ pub async fn run_from_env() -> i32 {
                             continue;
                         };
                         let settled = if entry.delivery.assignment_id.is_some() {
-                            // Local card state is not proof of exact CLI usage.
-                            // Quarantine this completed v22 execution instead
-                            // of reporting success or an automatically retryable
-                            // failure with an unverified cost observation.
-                            api.v22_execution_settle_unverified(
-                                &entry.delivery,
-                                &session.instance_id,
-                                session.generation,
-                            ).await
+                            let verified = v22_result.as_ref().and_then(|result| {
+                                let outcome = match result.state {
+                                    V22SidecarState::Succeeded => "succeeded",
+                                    V22SidecarState::Failed => "failed",
+                                    _ => return None,
+                                };
+                                Some((result.usage_receipt.as_ref()?,
+                                    result.usage_receipt_digest.as_deref()?, outcome))
+                            });
+                            if let Some((receipt, digest, outcome)) = verified {
+                                match api.v22_cli_usage_record_once(
+                                    &entry.delivery.attempt_id, receipt, digest).await {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                        let answer = api.v22_execution_settle_verified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation, outcome).await;
+                                        match answer {
+                                            Ok(ref refused) if !refused.settled &&
+                                                refused.reason.as_deref() ==
+                                                    Some("usage_unverified") =>
+                                                api.v22_execution_settle_unverified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation).await,
+                                            other => other,
+                                        }
+                                    }
+                                    Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                        api.v22_execution_settle_unverified(&entry.delivery,
+                                            &session.instance_id, session.generation).await,
+                                    Err(error) => Err(error),
+                                }
+                            } else {
+                                api.v22_execution_settle_unverified(&entry.delivery,
+                                    &session.instance_id, session.generation).await
+                            }
                         } else {
                             api.execution_settle_with_review_pr(
                                 &entry.delivery.attempt_id,
@@ -3037,13 +3096,19 @@ mod tests {
             let wire: serde_json::Value = serde_json::from_slice(&request).unwrap();
             assert_eq!(wire["op"], "readback");
             assert_eq!(wire["attemptId"], response_attempt);
-            socket.write_all(format!("{{\"kind\":\"in_progress\",\"attemptId\":\"{}\"}}\n",
-                response_attempt).as_bytes()).await.unwrap();
+            let response = serde_json::json!({
+                "kind": "succeeded", "attemptId": response_attempt,
+                "usageReceipt": {"invocationId": response_attempt},
+                "usageReceiptDigest": "a".repeat(64),
+            });
+            socket.write_all(format!("{response}\n").as_bytes()).await.unwrap();
         });
         let result = v22_sidecar_call(socket_path.to_str().unwrap(),
             serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
             ATTEMPT_ID).await.unwrap();
-        assert_eq!(result, V22SidecarState::InProgress);
+        assert_eq!(result.state, V22SidecarState::Succeeded);
+        assert_eq!(result.usage_receipt.unwrap()["invocationId"], ATTEMPT_ID);
+        assert_eq!(result.usage_receipt_digest.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         server.await.unwrap();
     }
 
