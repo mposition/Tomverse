@@ -120,6 +120,9 @@ async function claimCandidate(taskId: string, assignmentId: string,
           promotion.briefDigest !== ready.briefDigest) {
         throw new BoardImportError("task_not_ready", 409);
       }
+      if (!amuxV22OneShotRoleSupported(card.taskRole)) {
+        throw new BoardImportError("one_shot_role_unavailable", 409);
+      }
       const lane = await currentLane(tx, taskId);
       const catalog = getConfiguredAmuxWorkerCatalog();
       if (!catalog) throw new BoardImportError("worker_catalog_unavailable", 409);
@@ -175,9 +178,6 @@ async function claimCandidate(taskId: string, assignmentId: string,
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);
       if (!requiredTool) throw new BoardImportError("role_unavailable", 409);
-      if (!amuxV22OneShotRoleSupported(card.taskRole)) {
-        throw new BoardImportError("one_shot_role_unavailable", 409);
-      }
       const busy = new Set(occupied.map((item) => item.owner));
       const matchingRoutes = approved.receipt.routes.filter((route) => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
