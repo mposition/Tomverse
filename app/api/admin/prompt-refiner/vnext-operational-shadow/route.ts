@@ -129,7 +129,8 @@ export async function GET(request: Request) {
         where: { id: stageId },
       });
       const snapshot = await readPromptRefinerVnextOneShotStage(tx, stageId);
-      const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
+      const evidence = await readPromptRefinerVnextOneShotOperationalShadow(
+        tx, stage, stageId);
       const paidAuthorization = stage && await readPromptRefinerVnextOneShotPaidAuthorization(
         tx, stage, evidence.shadowAuditLogId ?? "",
       );

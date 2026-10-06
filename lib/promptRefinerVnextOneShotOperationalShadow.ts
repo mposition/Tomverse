@@ -103,7 +103,8 @@ const shadowMetadata = (stage: PromptRefinerVnextOneShotStage,
 /** A signed, content-free app observation. Duplicates and unknown rows fail closed. */
 export async function readPromptRefinerVnextOneShotOperationalShadow(
   tx: Prisma.TransactionClient,
-  stage: PromptRefinerVnextOneShotStage | null
+  stage: PromptRefinerVnextOneShotStage | null,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<Readonly<{
   present: boolean;
   valid: boolean;
@@ -113,7 +114,7 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
 }>> {
   const rows = await tx.adminAuditLog.findMany({
     where: { action: ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: stage?.id ?? STAGE_ID },
+      targetId: stage?.id ?? stageId },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let valid = false;

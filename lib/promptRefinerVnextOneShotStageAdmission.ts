@@ -7,6 +7,8 @@ import { PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY } from
   "@/lib/promptRefinerVnextOneShotSlotConsumption";
 import { promptRefinerVnextOneShotShadowPublicKeyDigest } from
   "@/lib/promptRefinerVnextOneShotShadowProof";
+import { promptRefinerVnextOneShotGatePublicKeyDigest } from
+  "@/lib/promptRefinerVnextOneShotGateAttestation";
 import { observePromptRefinerVnextOneShotDeployment } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
@@ -64,6 +66,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST ?? "";
   const runnerToken = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN ?? "";
   let signerPinValid = false;
+  let gateSignerPinValid = successor !== "v5";
   try {
     signerPinValid = SHA256.test(shadowPublicKeyDigest) &&
       promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey) ===
@@ -71,13 +74,30 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
   } catch {
     signerPinValid = false;
   }
+  if (successor === "v5") {
+    const gatePublicKey =
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "";
+    const gatePublicKeyDigest =
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST ?? "";
+    try {
+      gateSignerPinValid = SHA256.test(gatePublicKeyDigest) &&
+        promptRefinerVnextOneShotGatePublicKeyDigest(gatePublicKey) ===
+          gatePublicKeyDigest;
+    } catch {
+      gateSignerPinValid = false;
+    }
+  }
   if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v4-paid-terminal-guard-v1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1" ||
-      !signerPinValid || runnerToken.length < 32 || runnerToken.length > 256 ||
+      !signerPinValid || !gateSignerPinValid ||
+      (successor === "v5" && (
+        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED !== "1" ||
+        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPOSITION_WRITE_ENABLED !== "1")) ||
+      runnerToken.length < 32 || runnerToken.length > 256 ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY) {
     throw new Error("vnext_one_shot_recovery_capability_unavailable");
   }

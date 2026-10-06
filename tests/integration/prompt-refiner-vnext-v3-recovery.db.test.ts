@@ -934,6 +934,11 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
         }), /predecessor_invalid/);
         assert.equal(await prisma.adminAuditLog.count(), priorAuditCount);
       }
+      await assert.rejects(createPromptRefinerVnextOneShotV5Stage({
+        session, request, binding: { ...v5Binding,
+          pricePinDigest: "1".repeat(64) },
+      }), /v5_price_mismatch/);
+      assert.equal(await prisma.adminAuditLog.count(), priorAuditCount);
       const v5Competing = await Promise.allSettled([1, 2].map(() =>
         createPromptRefinerVnextOneShotV5Stage({
           session, request, binding: v5Binding,

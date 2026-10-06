@@ -334,17 +334,26 @@ test("unpriced cache-write telemetry stops after one mock call", async (t) => {
 test("source drift after consumption prevents a provider call", async (t) => {
   const input = fixture(t);
   let generated = 0;
+  let stops = 0;
   const result = await invokeWithMockFetch(input, {
-    fetch: async (_url, options) => {
-      writeFileSync(input.manifestPath,
-        input.synthetic.manifestText.replace("synthetic ko source", "changed ko source"));
-      return grantFor(JSON.parse(options.body));
+    fetch: async (url, options) => {
+      if (url.endsWith("-slot")) {
+        writeFileSync(input.manifestPath,
+          input.synthetic.manifestText.replace("synthetic ko source", "changed ko source"));
+        return grantFor(JSON.parse(options.body));
+      }
+      stops++;
+      assert.equal(JSON.parse(options.body).reason, "response_unverified");
+      return Response.json({ stopAuditLogId: "synthetic-stop-audit",
+        reservationHeld: true, humanReviewRequired: true,
+        retryAuthorized: false, dispatchAuthorized: false }, { status: 201 });
     },
     generate: async () => { generated++; return boundedResponse(); },
   });
   assert.equal(generated, 0);
+  assert.equal(stops, 1);
   assert.equal(result.status, "outcome_unknown");
-  assert.equal(result.stopRecorded, false);
+  assert.equal(result.stopRecorded, true);
   assert.equal(result.humanReviewRequired, true);
 });
 

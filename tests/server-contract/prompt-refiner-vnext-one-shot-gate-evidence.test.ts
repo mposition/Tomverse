@@ -11,6 +11,7 @@ import { promptRefinerVnextOneShotGatePublicKeyDigest,
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const stageId = "prompt-refiner-vnext-one-shot-v4";
+const v5StageId = "prompt-refiner-vnext-one-shot-v5";
 const target = { stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
   shadowAuditLogId: "synthetic-shadow-audit",
@@ -58,7 +59,15 @@ let rows: Array<Record<string, unknown>> = [];
 let shadowValid = true;
 let shadowReadError = false;
 let receiptValid = true;
+let terminalReadback = {
+  valid: true, terminalReceipts: 80, unknownReceipts: 0,
+  consumedWithoutReceipt: 0, reservedSlots: 0, observedCostMicroUsd: 80,
+  slots: Array.from({ length: 80 }, (_, index) => ({
+    state: "terminal", resultKind: index < 64 ? "suggested" : "abstained",
+  })),
+};
 let writes = 0;
+const stageReadIds: string[] = [];
 const slotRows = Array.from({ length: 80 }, (_, slotIndex) => ({
   id: `slot-${slotIndex}`, slotIndex,
   requestId: `11111111-1111-4111-8111-${String(slotIndex).padStart(12, "0")}`,
@@ -119,9 +128,24 @@ mock.module(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts"), {
 });
 mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), {
   namedExports: {
-    lockAndReadPromptRefinerVnextOneShotStage: async () => snapshot,
-    readPromptRefinerVnextOneShotStage: async () => snapshot,
+    lockAndReadPromptRefinerVnextOneShotStage: async (_tx: unknown,
+      _options: unknown, requestedStageId: string) => {
+      stageReadIds.push(requestedStageId);
+      return snapshot;
+    },
+    readPromptRefinerVnextOneShotStage: async (_tx: unknown,
+      requestedStageId: string) => {
+      stageReadIds.push(requestedStageId);
+      return snapshot;
+    },
   },
+});
+mock.module(mod("lib/promptRefinerVnextOneShotTerminalReceipt.ts"), {
+  namedExports: { readPromptRefinerVnextOneShotTerminalReceipts:
+    async (_tx: unknown, requestedStageId: string) => {
+      stageReadIds.push(requestedStageId);
+      return terminalReadback;
+    } },
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: { $transaction: async (work: (tx: object) => Promise<unknown>) => work(tx) },
@@ -140,6 +164,14 @@ const reset = () => {
     approvalAuditsValid: true };
   rows = []; shadowValid = true; shadowReadError = false;
   receiptValid = true; writes = 0;
+  stageReadIds.length = 0;
+  terminalReadback = {
+    valid: true, terminalReceipts: 80, unknownReceipts: 0,
+    consumedWithoutReceipt: 0, reservedSlots: 0, observedCostMicroUsd: 80,
+    slots: Array.from({ length: 80 }, (_, index) => ({
+      state: "terminal", resultKind: index < 64 ? "suggested" : "abstained",
+    })),
+  };
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = baseStage.manifestRoot;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST = baseStage.runnerDigest;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 = publicB64;
@@ -190,6 +222,35 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
   assert.equal(writes, 2);
   assert.equal((await gate.readPromptRefinerVnextOneShotDisposition(
     tx as never, stage as never)).valid, true);
+});
+
+test("v5 gate requires its own 80 terminal receipts and records only v5 audits", async () => {
+  const gate = await load(); reset();
+  stage = { ...baseStage, id: v5StageId };
+  terminalReadback = { ...terminalReadback, observedCostMicroUsd: 81 };
+  await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(), stageId: v5StageId,
+  }), /gate_slot_evidence_mismatch/);
+  assert.equal(writes, 0);
+  terminalReadback = { ...terminalReadback, observedCostMicroUsd: 80 };
+  const recorded = await gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation(), stageId: v5StageId,
+  });
+  assert.equal(recorded.gateOutcome, "pass");
+  assert.equal(rows[0].targetId, v5StageId);
+  assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never, v5StageId)).valid, true);
+  const decision = await gate.recordPromptRefinerVnextOneShotDisposition({
+    session, request, stageId: v5StageId,
+    target: { ...target, gateAuditLogId: recorded.gateAuditLogId },
+    decision: "pass",
+  });
+  assert.equal(decision.finalDisposition, "pass");
+  assert.equal(rows[1].targetId, v5StageId);
+  assert.equal((await gate.readPromptRefinerVnextOneShotDisposition(
+    tx as never, stage as never, v5StageId)).valid, true);
+  assert.ok(stageReadIds.length > 0);
+  assert.ok(stageReadIds.every((id) => id === v5StageId));
 });
 
 test("the closed legacy stage cannot receive new gate evidence", async () => {
