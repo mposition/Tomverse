@@ -13,6 +13,8 @@ import { AMUX_V22_TASK_EXECUTION_ENV,
   AMUX_V22_SEALED_DELIVERY_MARKER,
   amuxV22TaskExecutionEnabled } from
   "@/lib/amux/v22TaskExecutionCore";
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
+  "@/lib/amux/v22ExternalAuthorityCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -308,7 +310,9 @@ export async function pullAmuxWorkDelivery(input: {
         throw new Error("v22 sealed delivery digest mismatch");
       return {
         prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
-          `Approved execution brief:\n${plain.toString("utf8")}`,
+          `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` +
+          `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
+          AMUX_V22_WORKER_AUTHORITY_NOTICE,
         v22Execution: { modelId: assignment.modelId, role: assignment.role,
           budgetMicrousd },
       };

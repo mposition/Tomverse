@@ -269,7 +269,8 @@ export async function startAmuxV22TaskExecution(input: {
         where: { id: input.taskId },
         select: { cardType: true, taskRole: true, executionGrade: true,
           v22AssignmentId: true, v4SourceApprovalId: true,
-          v4BriefDigest: true, v22ReceiptId: true },
+          v4BriefDigest: true, v22ReceiptId: true,
+          reviewPrNumber: true },
       });
       if (!task || !card || task.sourceSystem !== "admin-idea-v4" ||
           card.cardType !== "task" || task.status !== "todo" ||
@@ -278,6 +279,7 @@ export async function startAmuxV22TaskExecution(input: {
           card.v22AssignmentId !== input.assignmentId ||
           !card.v22ReceiptId || !card.v4SourceApprovalId ||
           !card.taskRole || !card.executionGrade || !card.v4BriefDigest ||
+          card.reviewPrNumber !== null ||
           !task.claimedAt) {
         return { started: false as const, reason: "assignment_mismatch" as const };
       }
@@ -1073,6 +1075,7 @@ export async function settleAmuxV22TaskExecution(input: {
       const next = budget.to_status;
       await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
         status: next, owner: null, claimedAt: null, v22AssignmentId: null,
+        reviewPrNumber: null,
         revision: { increment: 1 },
       } });
       await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
