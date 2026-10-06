@@ -30,7 +30,9 @@ export function v22ExecutionReceiptVerified(input: {
   attemptId: string;
   invocationIds: string[];
   events: Array<{ invocationId: string; status: string;
-    completeness: string; projectedApiCostMicrousd: bigint | null }>;
+    completeness: string; projectedApiCostMicrousd: bigint | null;
+    source: string; actualModelId: string | null;
+    selectedModelId: string }>;
   outcome: "succeeded" | "failed" | "blocked";
   reservedCostMicrousd: bigint;
 }) {
@@ -41,6 +43,12 @@ export function v22ExecutionReceiptVerified(input: {
   const event = input.events[0];
   return event.invocationId === input.attemptId &&
     event.completeness === "reported_complete" &&
+    // Codex JSONL currently reports the configured model, not an attested
+    // provider-served model. Keep its usage for telemetry but never settle a
+    // v22 Task until independent served-model evidence exists.
+    event.source === "claude_result" &&
+    event.actualModelId !== null &&
+    event.actualModelId === event.selectedModelId &&
     event.projectedApiCostMicrousd !== null &&
     event.projectedApiCostMicrousd <= input.reservedCostMicrousd &&
     (input.outcome === "succeeded" ? event.status === "succeeded" :

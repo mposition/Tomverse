@@ -27,7 +27,9 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
   const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     outcome: "succeeded", reservedCostMicrousd: 1_000n,
     events: [{ invocationId: "attempt-1", status: "succeeded",
-      completeness: "reported_complete", projectedApiCostMicrousd: 700n }],
+      completeness: "reported_complete", projectedApiCostMicrousd: 700n,
+      source: "claude_result", actualModelId: "claude-opus-5-5",
+      selectedModelId: "claude-opus-5-5" }],
   };
   assert.equal(v22ExecutionReceiptVerified(base), true);
   assert.equal(v22ExecutionReceiptVerified({ ...base, outcome: "failed",
@@ -44,6 +46,12 @@ test("v22 settlement accepts only its one preallocated invocation receipt", () =
     events: [...base.events, base.events[0]] }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base,
     events: [{ ...base.events[0], completeness: "unknown" }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], source: "codex_jsonl" }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], actualModelId: null }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], actualModelId: "claude-sonnet-5" }] }), false);
   assert.equal(v22ExecutionReceiptVerified({ ...base,
     events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
 });

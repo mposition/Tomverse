@@ -1043,7 +1043,8 @@ export async function settleAmuxV22TaskExecution(input: {
       const events = await tx.amuxCliUsageEvent.findMany({
         where: { attemptId: input.attemptId },
         select: { invocationId: true, status: true, completeness: true,
-          projectedApiCostMicrousd: true },
+          projectedApiCostMicrousd: true, source: true, actualModelId: true,
+          selectedModelId: true },
       });
       const expectedIds = input.invocationIds;
       const receiptsComplete = v22ExecutionReceiptVerified({

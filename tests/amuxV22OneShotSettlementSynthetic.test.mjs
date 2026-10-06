@@ -51,7 +51,9 @@ test("one verified invocation can settle review or a known Task failure", async 
   const evidence = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     events: [{ invocationId: receipt.invocationId,
       status: receipt.status, completeness: receipt.completeness,
-      projectedApiCostMicrousd: 200n }],
+      projectedApiCostMicrousd: 200n, source: receipt.source,
+      actualModelId: receipt.actualModelId,
+      selectedModelId: receipt.selectedModelId }],
     reservedCostMicrousd: 250n };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), true);
@@ -78,7 +80,9 @@ test("a failed or expensive receipt cannot claim a successful Task", async () =>
   const evidence = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
     events: [{ invocationId: "attempt-1", status: failed.receipt.status,
       completeness: failed.receipt.completeness,
-      projectedApiCostMicrousd: 200n }],
+      projectedApiCostMicrousd: 200n, source: failed.receipt.source,
+      actualModelId: failed.receipt.actualModelId,
+      selectedModelId: failed.receipt.selectedModelId }],
     reservedCostMicrousd: 250n };
   assert.equal(v22ExecutionReceiptVerified({ ...evidence,
     outcome: "succeeded" }), false);
