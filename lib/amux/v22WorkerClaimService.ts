@@ -20,6 +20,7 @@ import { checkV4TaskApprovedCeiling } from "./v4TaskCostCeilingCore.ts";
 import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { amuxV22ClaimCapacity, amuxV22RequiredTool,
+  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   amuxV22WorkerClaimEnabled, chooseAmuxV22WorkerRoute,
   AMUX_V22_WORKER_CLAIM_ENV, type AmuxV22ClaimLane } from
   "./v22WorkerClaimCore.ts";
@@ -174,12 +175,16 @@ async function claimCandidate(taskId: string, assignmentId: string,
       }
       const requiredTool = amuxV22RequiredTool(card.taskRole);
       if (!requiredTool) throw new BoardImportError("role_unavailable", 409);
+      if (!amuxV22OneShotRoleSupported(card.taskRole)) {
+        throw new BoardImportError("one_shot_role_unavailable", 409);
+      }
       const busy = new Set(occupied.map((item) => item.owner));
       const matchingRoutes = approved.receipt.routes.filter((route) => {
         const worker = catalog.find((item) => item.worker_name === route.workerName);
         const runtime = liveByName.get(route.workerName);
         return worker && runtime?.status === "idle" && runtime.dispatchReady &&
           !busy.has(route.workerName) && verifiedNames.has(route.workerName) &&
+          amuxV22OneShotRouteSupported(route.provider, route.modelId) &&
           worker.provider === route.provider.toLowerCase() &&
           worker.model === route.modelId &&
           worker.routing_roles.includes(card.taskRole!) &&
@@ -323,6 +328,7 @@ export async function tickV22WorkerClaim() {
           reason: "outcome_unknown" as const }; }
       }
       if (["not_unassigned_todo", "task_not_ready", "worker_unavailable",
+        "one_shot_role_unavailable",
         "review_author_unknown", "reserved_capacity_unavailable",
         "lane_capacity_full", "conflict"].includes(error.code)) continue;
       return { claimed: false as const, reason: error.code };

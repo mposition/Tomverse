@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { amuxV22ClaimCapacity, amuxV22RequiredTool, amuxV22WorkerClaimEnabled,
+  amuxV22OneShotRoleSupported, amuxV22OneShotRouteSupported,
   chooseAmuxV22WorkerRoute } from
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "../lib/amux/v22TickWire.ts";
+import { parseAmuxV22OneShotRequest } from
+  "../lib/amux/v22OneShotSidecar.mjs";
 
 test("v22 claim stays dark even when its environment switch is set", () => {
   assert.equal(amuxV22WorkerClaimEnabled("enabled"), false);
@@ -56,6 +59,32 @@ test("task role has a closed tool requirement and unknown roles hold", () => {
   assert.equal(amuxV22RequiredTool("implement"), "repo_write");
   assert.equal(amuxV22RequiredTool("review"), "repo_read");
   assert.equal(amuxV22RequiredTool("unknown"), null);
+});
+
+test("claim only selects routes the default-off one-shot sidecar can execute", () => {
+  const base = { version: 1,
+    attemptId: "00000000-0000-4000-8000-000000000001",
+    worker: "worker-a", modelId: "claude-opus-5-5",
+    budgetMicrousd: 1_000_000, prompt: "Synthetic task" };
+  for (const role of ["design", "implement", "review", "investigate"]) {
+    assert.equal(amuxV22OneShotRoleSupported(role), true);
+    assert.doesNotThrow(() => parseAmuxV22OneShotRequest(
+      { ...base, role }, "worker-a"));
+  }
+  for (const role of ["test", "verify", "operate", "unknown"]) {
+    assert.equal(amuxV22OneShotRoleSupported(role), false);
+    assert.throws(() => parseAmuxV22OneShotRequest(
+      { ...base, role }, "worker-a"));
+  }
+  assert.equal(amuxV22OneShotRouteSupported("anthropic", "claude-opus-5-5"),
+    true);
+  assert.equal(amuxV22OneShotRouteSupported("openai", "gpt-6-astra"), false);
+  assert.equal(amuxV22OneShotRouteSupported("anthropic", "gpt-6-astra"),
+    false);
+  const claim = readFileSync("lib/amux/v22WorkerClaimService.ts", "utf8");
+  assert.match(claim, /amuxV22OneShotRoleSupported\(card\.taskRole\)/);
+  assert.match(claim, /amuxV22OneShotRouteSupported\(route\.provider, route\.modelId\)/);
+  assert.match(claim, /"one_shot_role_unavailable",[\s\S]*?\]\.includes\(error\.code\)\) continue/);
 });
 
 test("v22 tick wire never disguises a receipt as a v8 grant", () => {

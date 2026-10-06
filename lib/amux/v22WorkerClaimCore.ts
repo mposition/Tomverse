@@ -13,6 +13,16 @@ const ROLE_TOOL: Record<string, string> = {
 };
 export const amuxV22RequiredTool = (role: string) => ROLE_TOOL[role] ?? null;
 
+/** The default-off A15 one-shot path only has these Claude capabilities.
+ * Do not claim a Task that the local sidecar will refuse after execution
+ * start; test/verify need a separately approved isolated test runner. */
+const ONE_SHOT_ROLES = new Set(["design", "implement", "review", "investigate"]);
+export const amuxV22OneShotRoleSupported = (role: string) =>
+  ONE_SHOT_ROLES.has(role);
+export const amuxV22OneShotRouteSupported = (provider: string, modelId: string) =>
+  provider.toLowerCase() === "anthropic" &&
+  /^claude-[A-Za-z0-9._-]{1,120}$/.test(modelId);
+
 export const amuxV22WorkerClaimEnabled = (value: string | undefined) =>
   AMUX_V22_WORKER_CLAIM_CODE_LATCH && value === "enabled";
 
