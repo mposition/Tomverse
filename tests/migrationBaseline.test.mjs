@@ -661,3 +661,22 @@ test("the sre-ops digest registration pins the billing migration's insert trigge
     });
   assert.deepEqual(between, []);
 });
+
+test("the B06 v3 recovery migration pins the deployed v2 supersession function", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261005210000_prompt_refiner_one_shot_run_approved_recovery", "migration.sql"),
+    "utf8",
+  );
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261005140000_prompt_refiner_one_shot_unrun_replacement", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /CREATE FUNCTION "prompt_refiner_vnext_one_shot_supersession_guard"\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "prompt_refiner_vnext_one_shot_supersession_guard",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+});

@@ -1,3 +1,4 @@
+-- baseline-check: replace-function-if-body-sha256 "prompt_refiner_vnext_one_shot_supersession_guard" "5f25bb1e215235540ff2aa46fbdd0d272ae10e2ab3ff62b4849238adef6613ea"
 -- One exact v2 -> v3 recovery. Existing v1/v2 rows and slots remain historical.
 ALTER TABLE "PromptRefinerVnextOneShotStage"
     DROP CONSTRAINT "PromptRefinerVnextOneShotStage_id_check";
