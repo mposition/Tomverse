@@ -459,6 +459,14 @@ impl TerminalAdapter {
         events
     }
 
+    /// Whether this scrape owns the provider's turns: hookless, with no
+    /// structured session, so [`generating`](Self::generating) is the only
+    /// signal that a turn started and the scanned screen the only signal that
+    /// it ended. The scan loop closes the turns it opened only for these.
+    pub fn scrapes_turns(&self) -> bool {
+        matches!(self.provider.as_str(), "codex" | "ollama" | "copilot")
+    }
+
     /// Does the pane show the worker actively GENERATING, by scrape?
     ///
     /// Kept SEPARATE from [`scan`](Self::scan) because "active" has no
@@ -478,6 +486,9 @@ impl TerminalAdapter {
     /// the store that the worker is running (AMUX-3165: a working ollama lane
     /// read `running=false` the whole time because nothing emitted this).
     pub fn generating(&self, captured: &str) -> bool {
+        if !self.scrapes_turns() {
+            return false;
+        }
         let clean = strip_ansi(captured);
         match self.provider.as_str() {
             // ollama runs codex --oss --local-provider ollama; same pane format.
