@@ -1651,8 +1651,18 @@ pub async fn run_from_env() -> i32 {
                             still_running.push(entry);
                             continue;
                         };
-                        let settled = api
-                            .execution_settle_with_review_pr(
+                        let settled = if entry.delivery.assignment_id.is_some() {
+                            // Local card state is not proof of exact CLI usage.
+                            // Quarantine this completed v22 execution instead
+                            // of reporting success or an automatically retryable
+                            // failure with an unverified cost observation.
+                            api.v22_execution_settle_unverified(
+                                &entry.delivery,
+                                &session.instance_id,
+                                session.generation,
+                            ).await
+                        } else {
+                            api.execution_settle_with_review_pr(
                                 &entry.delivery.attempt_id,
                                 &entry.delivery.worker,
                                 &session.instance_id,
@@ -1664,9 +1674,8 @@ pub async fn run_from_env() -> i32 {
                                 // A review always names the field, null when the
                                 // card cites no PR, so an earlier PR is cleared.
                                 (to_status == "review").then_some(review_pr_number),
-                            )
-                            .await
-                            .map(|response| response.settled);
+                            ).await
+                        }.map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
                         if result == SettleResult::HaltForReadBack {
                             eprintln!(
@@ -2811,6 +2820,7 @@ mod tests {
     fn pulled_delivery() -> PulledDelivery {
         PulledDelivery {
             attempt_id: ATTEMPT_ID.into(),
+            assignment_id: None,
             task_id: "TASK-1".into(),
             worker: "claude-impl".into(),
             task_revision: 3,

@@ -76,6 +76,8 @@ export async function POST(request: Request) {
           available: true,
           delivery: {
             attempt_id: outcome.delivery.attemptId,
+            ...(outcome.delivery.assignmentId ?
+              { assignment_id: outcome.delivery.assignmentId } : {}),
             task_id: outcome.delivery.taskId,
             worker: outcome.delivery.worker,
             task_revision: outcome.delivery.taskRevision,

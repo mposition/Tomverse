@@ -66,10 +66,14 @@ test("portfolio evidence and score history are audited, path-bound and append-on
           approvalId: ids.sourceApproval }), ids.feature, synthetic,
         titleDigest, ids.sourceApproval]);
 
-    async function rejects(sql, values, constraint) {
+    async function rejects(sql, values, constraint, deferredTrigger = null) {
       await client.query("SAVEPOINT reject_probe");
       let error;
-      try { await client.query(sql, values); }
+      try {
+        await client.query(sql, values);
+        if (deferredTrigger)
+          await client.query(`SET CONSTRAINTS ${deferredTrigger} IMMEDIATE`);
+      }
       catch (caught) { error = caught; }
       await client.query("ROLLBACK TO SAVEPOINT reject_probe");
       await client.query("RELEASE SAVEPOINT reject_probe");
@@ -339,6 +343,63 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     [ids.task]);
     assert.deepEqual(assigned.rows[0], { status: "todo", owner: "worker-one",
       v22AssignmentId: assignmentId });
+
+    // A15: the Doing transition and exactly one assignment-bound execution
+    // attempt must commit together; neither half is a valid standalone write.
+    await rejects(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'doing', "revision" = 3 WHERE "id" = $1`,
+    [ids.task], "AmuxWorkItem_v22_doing_check",
+    "amux_v22_doing_guard_trigger");
+    const attemptId = randomUUID();
+    await client.query(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'doing', "revision" = 3 WHERE "id" = $1`,
+    [ids.task]);
+    await client.query(`INSERT INTO public."AmuxExecutionAttempt"
+      ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+       "taskRevision", "attemptNumber", "reservedCostMicrousd",
+       "heartbeatAt", "leaseExpiresAt", "startedAt", "v22AssignmentId",
+       "updatedAt") VALUES ($1, $2, 'worker-one', 'instance-one', 1,
+       3, 1, 1000, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
+       CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
+    [attemptId, ids.task, assignmentId]);
+    await client.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
+      amux_v22_doing_guard_trigger IMMEDIATE`);
+    await rejects(`UPDATE public."AmuxExecutionAttempt"
+      SET "workerGeneration" = 2 WHERE "id" = $1`,
+    [attemptId], "AmuxExecutionAttempt_v22_binding_check",
+    "amux_v22_execution_attempt_guard_trigger");
+    await rejects(`INSERT INTO public."AmuxExecutionAttempt"
+      ("id", "taskId", "worker", "workerInstanceId", "workerGeneration",
+       "taskRevision", "attemptNumber", "reservedCostMicrousd",
+       "heartbeatAt", "leaseExpiresAt", "startedAt",
+       "v22AssignmentId", "updatedAt")
+      VALUES ($1, $2, 'worker-one', 'instance-one', 1, 3, 2, 1000,
+       CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '90 seconds',
+       CURRENT_TIMESTAMP, $3, CURRENT_TIMESTAMP)`,
+    [randomUUID(), ids.task, assignmentId],
+    "AmuxExecutionAttempt_v22AssignmentId_key");
+    await rejects(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'review', "owner" = NULL, "claimedAt" = NULL,
+          "v22AssignmentId" = NULL, "revision" = 4
+      WHERE "id" = $1`, [ids.task], "AmuxWorkItem_v22_live_attempt_check",
+    "amux_v22_doing_guard_trigger");
+    await client.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
+      amux_v22_doing_guard_trigger DEFERRED`);
+    await client.query(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'review', "owner" = NULL, "claimedAt" = NULL,
+          "v22AssignmentId" = NULL, "revision" = 4
+      WHERE "id" = $1`, [ids.task]);
+    await client.query(`UPDATE public."AmuxExecutionAttempt"
+      SET "endedAt" = CURRENT_TIMESTAMP, "leaseExpiresAt" = NULL,
+          "outcome" = 'succeeded', "toStatus" = 'review',
+          "endedBy" = 'worker-one' WHERE "id" = $1`, [attemptId]);
+    await client.query(`SET CONSTRAINTS amux_v22_execution_attempt_guard_trigger,
+      amux_v22_doing_guard_trigger IMMEDIATE`);
+    const ended = await client.query(`SELECT "status", "owner",
+      "v22AssignmentId" FROM public."AmuxWorkItem" WHERE "id" = $1`,
+    [ids.task]);
+    assert.deepEqual(ended.rows[0], { status: "review", owner: null,
+      v22AssignmentId: null });
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

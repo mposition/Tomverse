@@ -72,7 +72,7 @@ test("v22 Task Todo needs a bound receipt while the legacy lane is unchanged", {
     await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
       SET "status" = 'todo' WHERE "id" = $1`, [taskId]),
     ["AmuxWorkItem_sourced_todo_has_brief_check",
-      "AmuxWorkItem_v4_phase_b_inert_check"]);
+      "AmuxWorkItem_v4_execution_shape_check"]);
 
     await rejects(async () => {
       await db.query(`UPDATE public."AmuxWorkItem"
@@ -85,13 +85,13 @@ test("v22 Task Todo needs a bound receipt while the legacy lane is unchanged", {
     await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
       SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP
       WHERE "id" = $1`, [taskId]),
-    ["AmuxWorkItem_v4_phase_b_inert_check",
+    ["AmuxWorkItem_v4_execution_shape_check",
       "AmuxWorkItem_backlog_unowned_check"]);
     await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
       SET "status" = 'todo', "owner" = 'worker-one',
         "claimedAt" = CURRENT_TIMESTAMP, "v22ReceiptId" = $2
       WHERE "id" = $1`, [taskId, randomUUID()]),
-    ["AmuxWorkItem_v4_phase_b_inert_check"]);
+    ["AmuxWorkItem_v4_execution_shape_check"]);
 
     await db.query(`INSERT INTO public."AmuxWorkItem"
       ("id", "title", "status", "updatedAt")

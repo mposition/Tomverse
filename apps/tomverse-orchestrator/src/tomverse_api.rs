@@ -1123,6 +1123,26 @@ mod tests {
     }
 
     #[test]
+    fn v22_unverified_settlement_cannot_claim_success_or_retry() {
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt",
+            worker: "worker",
+            instance_id: "instance",
+            generation: 1,
+            task_revision: 3,
+            outcome: "blocked",
+            invocation_ids: &[],
+        }).unwrap();
+        assert_eq!(body["outcome"], "blocked");
+        assert_eq!(body["invocation_ids"], serde_json::json!([]));
+        assert!(body.get("to_status").is_none());
+        let response: ExecutionSettleResponse = serde_json::from_value(
+            serde_json::json!({"settled":true,"taskRevision":4})
+        ).unwrap();
+        assert!(response.settled);
+    }
+
+    #[test]
     fn the_review_pr_field_is_omitted_null_or_a_number() {
         let body = |review_pr_number| {
             serde_json::to_value(ExecutionSettleRequest {
@@ -1744,6 +1764,8 @@ pub struct OwnedTodoTask {
     pub id: String,
     pub owner: String,
     pub revision: i64,
+    #[serde(default)]
+    pub assignment_id: Option<String>,
     // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
     // compatibility"). main's server sent these six. This app keeps sending
     // title, kind, priority and created_at, which a WSL bridge built before
@@ -1809,6 +1831,8 @@ struct DeliveryPullRequest<'a> {
 #[serde(deny_unknown_fields)]
 pub struct PulledDelivery {
     pub attempt_id: String,
+    #[serde(default)]
+    pub assignment_id: Option<String>,
     pub task_id: String,
     pub worker: String,
     pub task_revision: i64,
@@ -1867,6 +1891,8 @@ struct ExecutionStartRequest<'a> {
     instance_id: &'a str,
     generation: i64,
     expected_revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignment_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1877,6 +1903,22 @@ pub struct ExecutionStartResponse {
     pub task_revision: Option<i64>,
     pub lease_expires_at: Option<String>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V22ExecutionReadback {
+    pub found: bool,
+    pub state: Option<String>,
+    #[serde(rename = "attemptId")]
+    pub attempt_id: Option<String>,
+    #[serde(rename = "taskRevision")]
+    pub task_revision: Option<i64>,
+    #[serde(rename = "leaseExpiresAt")]
+    pub lease_expires_at: Option<String>,
+    pub outcome: Option<String>,
+    #[serde(rename = "toStatus")]
+    pub to_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1897,6 +1939,17 @@ struct ExecutionSettleRequest<'a> {
     /// null (a review that names no PR clears an earlier attempt's PR).
     #[serde(skip_serializing_if = "Option::is_none")]
     review_pr_number: Option<Option<i64>>,
+}
+
+#[derive(Debug, Serialize)]
+struct V22ExecutionSettleRequest<'a> {
+    attempt_id: &'a str,
+    worker: &'a str,
+    instance_id: &'a str,
+    generation: i64,
+    task_revision: i64,
+    outcome: &'a str,
+    invocation_ids: &'a [&'a str],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1931,6 +1984,8 @@ pub struct ExecutionRecoveryResponse {
     pub reclaimed: Option<i64>,
     pub reclaimed_claims: Option<i64>,
     pub quota_observations_deleted: Option<i64>,
+    pub quarantined_v22: Option<i64>,
+    pub released_unstarted_v22: Option<i64>,
     pub more: Option<bool>,
     pub reason: Option<String>,
 }
@@ -2155,12 +2210,14 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
     ) -> Result<ExecutionHeartbeatResponse> {
+        let route = if delivery.assignment_id.is_some() {
+            "v22/execution/heartbeat"
+        } else {
+            "execution/heartbeat"
+        };
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/execution/heartbeat",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/{}", self.base_url, route))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&ExecutionHeartbeatRequest {
@@ -2221,13 +2278,16 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
         expected_revision: i64,
+        assignment_id: Option<&str>,
     ) -> Result<ExecutionStartResponse> {
+        let route = if assignment_id.is_some() {
+            "v22/execution/start"
+        } else {
+            "execution/start"
+        };
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/execution/start",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/{}", self.base_url, route))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&ExecutionStartRequest {
@@ -2236,6 +2296,7 @@ impl TomverseApi {
                 instance_id,
                 generation,
                 expected_revision,
+                assignment_id,
             })
             .send()
             .await?;
@@ -2270,6 +2331,31 @@ impl TomverseApi {
         };
         if !valid {
             bail!("invalid Tomverse AMUX execution-start response invariant");
+        }
+        Ok(body)
+    }
+
+    pub async fn v22_execution_readback(
+        &self,
+        assignment_id: &str,
+        worker: &str,
+        instance_id: &str,
+        generation: i64,
+    ) -> Result<V22ExecutionReadback> {
+        let response = self.client.get(format!(
+            "{}/api/internal/amux/v22/execution/attempt", self.base_url
+        )).timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("assignment_id", assignment_id), ("worker", worker),
+                ("instance_id", instance_id)])
+            .query(&[("generation", generation)])
+            .send().await?;
+        let (status, body): (_, V22ExecutionReadback) = read_bounded_json(
+            response, &[StatusCode::OK], MAX_LIFECYCLE_RESPONSE_BYTES,
+        ).await?;
+        if status != StatusCode::OK || !body.found ||
+            !matches!(body.state.as_deref(), Some("not_started" | "started" | "ended")) {
+            bail!("invalid v22 execution readback");
         }
         Ok(body)
     }
@@ -2363,6 +2449,48 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX execution-settle response invariant");
         }
         Ok(body)
+    }
+
+    /// A local AMUX card is not an A14 usage receipt. Until the isolated
+    /// worker can report exact invocation IDs, close a terminal v22 attempt
+    /// as blocked for owner read-back, never as succeeded or retryable failed.
+    pub async fn v22_execution_settle_unverified(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+    ) -> Result<ExecutionSettleResponse> {
+        if delivery.assignment_id.is_none() {
+            bail!("v22 settlement requires an assignment-bound delivery");
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/settle", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&V22ExecutionSettleRequest {
+                attempt_id: &delivery.attempt_id,
+                worker: &delivery.worker,
+                instance_id,
+                generation,
+                task_revision: delivery.task_revision,
+                outcome: "blocked",
+                invocation_ids: &[],
+            })
+            .send().await?;
+        let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
+            response, &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_LIFECYCLE_RESPONSE_BYTES,
+        ).await?;
+        if (status == StatusCode::OK && body.settled &&
+            body.task_revision.is_some_and(|value| (0..=PRISMA_INT_MAX).contains(&value)) &&
+            body.reason.is_none()) ||
+           (status == StatusCode::CONFLICT && !body.settled &&
+            body.task_revision.is_none() &&
+            body.reason.as_deref().is_some_and(|value| !value.is_empty())) {
+            Ok(body)
+        } else {
+            bail!("invalid v22 execution-settle response invariant")
+        }
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic
@@ -2479,6 +2607,8 @@ pub(crate) fn recovery_answer_is_valid(
                 && nonnegative(body.reclaimed)
                 && nonnegative(body.reclaimed_claims)
                 && nonnegative(body.quota_observations_deleted)
+                && nonnegative(body.quarantined_v22)
+                && nonnegative(body.released_unstarted_v22)
                 && body.reason.is_none()
         }
         StatusCode::CONFLICT => {
@@ -2486,6 +2616,8 @@ pub(crate) fn recovery_answer_is_valid(
                 && body.reclaimed.is_none()
                 && body.reclaimed_claims.is_none()
                 && nonnegative(body.quota_observations_deleted)
+                && body.quarantined_v22.is_none()
+                && body.released_unstarted_v22.is_none()
                 && body.reason.as_deref() == Some("execution_api_disabled")
         }
         _ => false,

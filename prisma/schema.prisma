@@ -7238,6 +7238,8 @@ model AmuxExecutionAttempt {
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
   cliUsageEvents    AmuxCliUsageEvent[]
+  v22AssignmentId   String? @unique @db.Uuid
+  v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, taskId])
   @@unique([taskId, attemptNumber])
@@ -9658,6 +9660,7 @@ model AmuxV22WorkerAssignment {
   promotionReceipt AmuxV22PromotionReceipt @relation(fields: [promotionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   laneDecision AmuxV22LaneDecision? @relation(fields: [laneDecisionSequence], references: [sequence], onDelete: Restrict, onUpdate: Restrict)
   authorizationAuditLog AdminAuditLog @relation("AmuxV22AssignmentAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executionAttempt AmuxExecutionAttempt? @relation("AmuxV22ExecutionAssignment")
 
   @@index([workItemId, assignedAt])
 }

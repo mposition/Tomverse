@@ -404,6 +404,7 @@ mod tests {
 
     fn delivery(worker: &str) -> PulledDelivery {
         PulledDelivery {
+            assignment_id: None,
             attempt_id: "attempt-1".into(),
             task_id: "task-1".into(),
             worker: worker.into(),

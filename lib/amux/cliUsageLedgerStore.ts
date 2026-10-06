@@ -74,7 +74,9 @@ export async function recordAmuxCliUsage(tx: Prisma.TransactionClient,
     const attempt = await tx.amuxExecutionAttempt.findUnique({
       where: { id: receipt.binding.attemptId },
       select: { taskId: true, worker: true, startedAt: true,
+        endedAt: true, v22AssignmentId: true,
         task: { select: { sourceSystem: true,
+          v22AssignmentId: true,
           v22AcceptedAssignment: { select: {
             workerName: true, provider: true, modelId: true,
           } },
@@ -86,7 +88,10 @@ export async function recordAmuxCliUsage(tx: Prisma.TransactionClient,
     }
     if (receipt.binding.kind === "task_attempt" &&
         attempt.task.sourceSystem === "admin-idea-v4" &&
-        (!attempt.task.v22AcceptedAssignment ||
+        (attempt.endedAt !== null || !attempt.v22AssignmentId ||
+          attempt.task.v22AssignmentId !== attempt.v22AssignmentId ||
+          Date.parse(receipt.startedAt) < attempt.startedAt.getTime() - 120_000 ||
+          !attempt.task.v22AcceptedAssignment ||
           attempt.task.v22AcceptedAssignment.workerName !== receipt.worker ||
           attempt.task.v22AcceptedAssignment.provider !== receipt.provider ||
           attempt.task.v22AcceptedAssignment.modelId !== receipt.selectedModelId)) {
