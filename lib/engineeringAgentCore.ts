@@ -424,6 +424,13 @@ export const RUN_OUTCOMES = [
 ] as const;
 export type RunOutcome = (typeof RUN_OUTCOMES)[number];
 
+/** v22 settlement alone records private_result; the legacy runner cannot
+ * assert that an encrypted Task result exists. */
+export const RUNNER_REPORTABLE_OUTCOMES = RUN_OUTCOMES.filter(
+  (outcome) => outcome !== "abandoned" && outcome !== "private_result",
+) as [Exclude<RunOutcome, "abandoned" | "private_result">,
+  ...Exclude<RunOutcome, "abandoned" | "private_result">[]];
+
 /** How a run's outcome settles the AMUX attempt it is bound to. */
 export const AMUX_SETTLEMENT_FOR_OUTCOME: Readonly<
   Record<RunOutcome, "review" | "retry" | "blocked" | null>

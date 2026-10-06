@@ -79,22 +79,6 @@ export async function POST(request: Request): Promise<Response> {
   } catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   let { patch, patchRejected } = normalizeV22OptionalPatch(body.patch);
   try {
-    if (patch) {
-      try {
-        const run = await prisma.engineeringAgentRun.findUnique({
-          where: { amuxAttemptId: body.attemptId },
-          select: { status: true, baseSha: true },
-        });
-        if (run?.status !== "active" || run.baseSha !== patch.baseSha) {
-          patch = undefined;
-          patchRejected = true;
-        }
-      } catch {
-        // Optional publication state cannot prevent a private result write.
-        patch = undefined;
-        patchRejected = true;
-      }
-    }
     const prior = await prisma.amuxV22TaskResult.findUnique({
       where: { attemptId: body.attemptId },
       select: { sourceSha256: true, bodyPurgedAt: true },
@@ -133,6 +117,22 @@ export async function POST(request: Request): Promise<Response> {
         patchRejected,
         duplicate: true }) :
       amuxJsonNoStore({ error: "result_conflict" }, 409);
+    if (patch) {
+      try {
+        const run = await prisma.engineeringAgentRun.findUnique({
+          where: { amuxAttemptId: body.attemptId },
+          select: { status: true, baseSha: true },
+        });
+        if (run?.status !== "active" || run.baseSha !== patch.baseSha) {
+          patch = undefined;
+          patchRejected = true;
+        }
+      } catch {
+        // Optional publication state cannot prevent a private result write.
+        patch = undefined;
+        patchRejected = true;
+      }
+    }
     const attempt = await prisma.amuxExecutionAttempt.findUnique({
       where: { id: body.attemptId }, select: { worker: true, endedAt: true,
         v22AssignmentId: true, task: { select: { sourceSystem: true,

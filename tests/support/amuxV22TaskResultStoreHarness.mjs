@@ -24,6 +24,7 @@ const keys = { masterKeyId: "synthetic", masterKeyVersion: 1,
 
 async function recordWith(run, assignmentRole = "implement") {
   const saved = { result: null, patch: null };
+  let runReads = 0;
   const tx = {
     $queryRaw: async (parts) => {
       const sql = parts.join("?");
@@ -40,24 +41,26 @@ async function recordWith(run, assignmentRole = "implement") {
     },
     amuxV22WorkerAssignment: { findUnique: async () =>
       ({ role: assignmentRole, workItemId: taskId }) },
-    engineeringAgentRun: { findUnique: async () => run },
+    engineeringAgentRun: { findUnique: async () => { runReads += 1; return run; } },
     amuxV22TaskResult: {
-      findUnique: async () => null,
+      findUnique: async () => saved.result,
       create: async ({ data }) => { saved.result = data; },
     },
     amuxV22TaskPatch: {
+      findUnique: async () => saved.patch,
       create: async ({ data }) => { saved.patch = data; },
     },
   };
   const resultText = "Synthetic private Task result";
-  const result = await recordAmuxV22TaskResult(tx, {
+  const payload = {
     attemptId, worker: "worker-1", ideaId, text: resultText,
     sourceSha256: v22TaskResultSha256(resultText), keys,
     patch: { text: patchText, sha256: createHash("sha256")
       .update(patchText).digest("hex"), baseSha, keys },
-  });
+  };
+  const result = await recordAmuxV22TaskResult(tx, payload);
   assert.ok(saved.result, "the private result is always recorded");
-  return { result, saved };
+  return { result, saved, tx, payload, runReads: () => runReads };
 }
 
 for (const [name, run, role, expectedPatch] of [
@@ -70,5 +73,15 @@ for (const [name, run, role, expectedPatch] of [
   assert.equal(saved.patch !== null, expectedPatch, name);
   assert.equal(result.patchSha256 !== null, expectedPatch, name);
 }
+
+const endedAfterWrite = { status: "active", baseSha };
+const duplicate = await recordWith(endedAfterWrite);
+assert.ok(duplicate.saved.patch);
+endedAfterWrite.status = "finished";
+const replay = await recordAmuxV22TaskResult(duplicate.tx, duplicate.payload);
+assert.equal(replay.duplicate, true);
+assert.equal(replay.patchSha256, duplicate.result.patchSha256);
+assert.equal(duplicate.runReads(), 1,
+  "an identical replay does not reinterpret the run's later status");
 
 console.log("AMUX_V22_RESULT_STORE_OK");

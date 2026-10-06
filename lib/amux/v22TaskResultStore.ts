@@ -76,6 +76,39 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       task.v22AssignmentId !== attempt.v22AssignmentId ||
       v22TaskResultIdeaId(task.sourceSnapshot) !== input.ideaId)
     throw new AmuxV22TaskResultError("binding_mismatch");
+  const prior = await tx.amuxV22TaskResult.findUnique({
+    where: { attemptId: input.attemptId },
+    select: { sourceSha256: true, taskId: true, ideaId: true },
+  });
+  if (prior) {
+    const priorPatch = await tx.amuxV22TaskPatch.findUnique({
+      where: { attemptId: input.attemptId },
+      select: { patchSha256: true, baseSha: true, digest: true,
+        digestKeyId: true, byteLength: true },
+    });
+    // A duplicate compares the original submitted evidence. Run eligibility
+    // can change after the first commit; it must not rewrite that history.
+    let sameEvidence = input.patch ? false : priorPatch === null;
+    if (input.patch && priorPatch) {
+      const evidence = encodeV22PatchEvidence(input.patch.text,
+        input.patch.files);
+      try {
+        const digest = amuxContentDigest(evidence, "task_patch",
+          input.attemptId, input.patch.keys);
+        sameEvidence = priorPatch.patchSha256 === input.patch.sha256 &&
+          priorPatch.baseSha === input.patch.baseSha &&
+          priorPatch.digest === digest.digest &&
+          priorPatch.digestKeyId === digest.digestKeyId &&
+          priorPatch.byteLength === evidence.length;
+      } finally { evidence.fill(0); }
+    }
+    if (prior.sourceSha256 !== input.sourceSha256 ||
+        prior.taskId !== task.id || prior.ideaId !== input.ideaId ||
+        !sameEvidence)
+      throw new AmuxV22TaskResultError("result_conflict");
+    return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
+      patchSha256: priorPatch?.patchSha256 ?? null, duplicate: true };
+  }
   let patch = input.patch;
   if (patch) {
     const assignment = await tx.amuxV22WorkerAssignment.findUnique({
@@ -87,7 +120,7 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
     else {
       // Settlement and quarantine lock this attempt before ending its run.
       // Recheck after our attempt/task locks, in the result transaction, so a
-      // run that ended after the route's early check cannot retain a patch.
+      // run that ended after the route's early check cannot retain a new patch.
       const run = await tx.engineeringAgentRun.findUnique({
         where: { amuxAttemptId: input.attemptId },
         select: { status: true, baseSha: true },
@@ -95,37 +128,6 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
       if (run?.status !== "active" || run.baseSha !== patch.baseSha)
         patch = undefined;
     }
-  }
-  const prior = await tx.amuxV22TaskResult.findUnique({
-    where: { attemptId: input.attemptId },
-    select: { sourceSha256: true, taskId: true, ideaId: true },
-  });
-  if (prior) {
-    const priorPatch = await tx.amuxV22TaskPatch.findUnique({
-      where: { attemptId: input.attemptId },
-      select: { patchSha256: true, baseSha: true, digest: true,
-        digestKeyId: true, byteLength: true },
-    });
-    let sameEvidence = patch ? false : priorPatch === null;
-    if (patch && priorPatch) {
-      const evidence = encodeV22PatchEvidence(patch.text,
-        patch.files);
-      try {
-        const digest = amuxContentDigest(evidence, "task_patch",
-          input.attemptId, patch.keys);
-        sameEvidence = priorPatch.patchSha256 === patch.sha256 &&
-          priorPatch.baseSha === patch.baseSha &&
-          priorPatch.digest === digest.digest &&
-          priorPatch.digestKeyId === digest.digestKeyId &&
-          priorPatch.byteLength === evidence.length;
-      } finally { evidence.fill(0); }
-    }
-    if (prior.sourceSha256 !== input.sourceSha256 ||
-        prior.taskId !== task.id || prior.ideaId !== input.ideaId ||
-        !sameEvidence)
-      throw new AmuxV22TaskResultError("result_conflict");
-    return { attemptId: input.attemptId, sourceSha256: input.sourceSha256,
-      patchSha256: patch?.sha256 ?? null, duplicate: true };
   }
   const bytes = Buffer.from(input.text, "utf8");
   const sealed = sealAmuxContent(bytes, "task_result", input.attemptId,
