@@ -31,7 +31,8 @@ import {
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const HISTORICAL_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const ACTION = "prompt_refiner.vnext_one_shot.operational_shadow_completed";
 const SUMMARY = "Verified the one-shot stage, run, audit and 80 reserved slots without dispatch.";
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -127,7 +128,8 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
     Number.isInteger(metadata.cacheWriteInputTokens) &&
     metadata.cacheWriteInputTokens === 0 ? 0 as const : null;
   const signedMs = signedAt ? Date.parse(signedAt) : NaN;
-  if (entry && stage?.id === STAGE_ID && signedAt && signerDigest &&
+  if (entry && (stage?.id === STAGE_ID || stage?.id === HISTORICAL_STAGE_ID) &&
+      signedAt && signerDigest &&
       cacheWriteInputTokens === 0 &&
       SHA256.test(signerDigest) && Number.isFinite(signedMs) &&
       new Date(signedMs).toISOString() === signedAt &&

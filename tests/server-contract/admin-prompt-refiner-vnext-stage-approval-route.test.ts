@@ -28,7 +28,7 @@ const pins = {
   runtimeDeploymentId: "12345678-1234-1234-1234-123456789abc",
   runtimeCommitSha: "a".repeat(40),
   pricePinDigest: "e".repeat(64),
-  confirmation: "APPROVE_VNEXT_ONE_SHOT_RUN_APPROVED_RECOVERY_V3_AND_CLOSE_V2",
+  confirmation: "APPROVE_VNEXT_ONE_SHOT_B03O_RECOVERY_V4_AND_CLOSE_V3",
 };
 
 async function loadRoute() {
@@ -75,14 +75,14 @@ async function loadRoute() {
       prepared++;
       assert.deepEqual(input, pins);
       if (failPreparation) throw new Error("private observation failed");
-      return { id: "prompt-refiner-vnext-one-shot-v3" };
+      return { id: "prompt-refiner-vnext-one-shot-v4" };
     },
   } });
-  mock.module(mod("lib/promptRefinerVnextOneShotStageWriter.ts"), { namedExports: {
-    createPromptRefinerVnextOneShotStageWithSlots: async () => {
+  mock.module(mod("lib/promptRefinerVnextOneShotV4StageWriter.ts"), { namedExports: {
+    createPromptRefinerVnextOneShotV4Stage: async () => {
       writes++;
       if (failWrite) throw new Error("private storage failed");
-      return { stageId: "prompt-refiner-vnext-one-shot-v3",
+      return { stageId: "prompt-refiner-vnext-one-shot-v4",
         stageApprovalAuditLogId: "synthetic-audit", slotCount: 80,
         dispatchAuthorized: false };
     },
@@ -134,7 +134,7 @@ test("strict owner pins are checked before one stage write; response is content-
   assert.equal(approved.status, 201);
   noStore(approved);
   assert.deepEqual(await approved.json(), {
-    stageId: "prompt-refiner-vnext-one-shot-v3",
+    stageId: "prompt-refiner-vnext-one-shot-v4",
     stageApprovalAuditLogId: "synthetic-audit",
     slotCount: 80, dispatchAuthorized: false,
   });

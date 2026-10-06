@@ -14,7 +14,8 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const THIRD_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const LEGACY_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
 const FIRST_STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
 const SLOT_COST_MICRO_USD = BigInt(PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD);
@@ -58,7 +59,8 @@ async function replacementAuditIsValid(
   stage: PromptRefinerVnextOneShotStage,
 ): Promise<boolean> {
   if (stage.id === FIRST_STAGE_ID) return true;
-  const previousId = stage.id === STAGE_ID ? LEGACY_STAGE_ID :
+  const previousId = stage.id === STAGE_ID ? THIRD_STAGE_ID :
+    stage.id === THIRD_STAGE_ID ? LEGACY_STAGE_ID :
     stage.id === LEGACY_STAGE_ID ? FIRST_STAGE_ID : null;
   if (!previousId) return false;
   const legacy = await tx.promptRefinerVnextOneShotStage.findUnique({
@@ -66,11 +68,14 @@ async function replacementAuditIsValid(
   });
   if (!legacy || legacy.status !== "closed" ||
       (previousId === FIRST_STAGE_ID && legacy.runApprovalAuditLogId !== null) ||
-      (previousId === LEGACY_STAGE_ID && !legacy.runApprovalAuditLogId) ||
+      ((previousId === LEGACY_STAGE_ID || previousId === THIRD_STAGE_ID) &&
+        !legacy.runApprovalAuditLogId) ||
       !legacy.supersededAuditLogId || legacy.approvedBy !== stage.approvedBy ||
       legacy.sourceCommitSha !== stage.sourceCommitSha ||
       legacy.sourceManifestDigest !== stage.sourceManifestDigest ||
-      legacy.runnerDigest !== stage.runnerDigest ||
+      (previousId === THIRD_STAGE_ID ?
+        legacy.runnerDigest === stage.runnerDigest :
+        legacy.runnerDigest !== stage.runnerDigest) ||
       legacy.manifestRoot !== stage.manifestRoot ||
       legacy.pricePinDigest !== stage.pricePinDigest ||
       legacy.runtimeDeploymentId === stage.runtimeDeploymentId) return false;
@@ -83,12 +88,23 @@ async function replacementAuditIsValid(
       audit.targetId !== previousId ||
       !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, audit)) return false;
   const metadata = audit.metadata;
-  return Boolean(metadata && typeof metadata === "object" &&
+  const shadowId = metadata && typeof metadata === "object" &&
+    !Array.isArray(metadata) && typeof metadata.previousShadowAuditLogId === "string"
+    ? metadata.previousShadowAuditLogId : null;
+  const shadow = previousId === THIRD_STAGE_ID && shadowId ?
+    await tx.adminAuditLog.findUnique({ where: { id: shadowId } }) : null;
+  const shadowValid = previousId !== THIRD_STAGE_ID || Boolean(shadow &&
+    shadow.action === "prompt_refiner.vnext_one_shot.operational_shadow_completed" &&
+    shadow.targetType === "PromptRefinerVnextOneShotStage" &&
+    shadow.targetId === THIRD_STAGE_ID &&
+    await promptRefinerVnextOneShotAuditReceiptIsValid(tx, shadow));
+  return Boolean(shadowValid && metadata && typeof metadata === "object" &&
     !Array.isArray(metadata) &&
     metadata.replacementStageId === stage.id &&
     metadata.previousStageApprovalAuditLogId === legacy.stageApprovalAuditLogId &&
-    (previousId !== LEGACY_STAGE_ID ||
+    (previousId === FIRST_STAGE_ID ||
       metadata.previousRunApprovalAuditLogId === legacy.runApprovalAuditLogId) &&
+    (previousId !== THIRD_STAGE_ID || metadata.previousShadowAuditLogId === shadowId) &&
     metadata.replacementStageApprovalAuditLogId === stage.stageApprovalAuditLogId);
 }
 

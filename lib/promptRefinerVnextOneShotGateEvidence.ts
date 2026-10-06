@@ -34,7 +34,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const GATE_ACTION = "prompt_refiner.vnext_one_shot.gate_evaluated";
 const DISPOSITION_ACTION = "prompt_refiner.vnext_one_shot.disposition_recorded";
 const GATE_SUMMARY = "Recorded the content-free one-shot deterministic gate result.";

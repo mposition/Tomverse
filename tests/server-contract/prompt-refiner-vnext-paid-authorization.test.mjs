@@ -13,7 +13,7 @@ const { promptRefinerVnextOneShotPaidAuthorizationMetadata,
   readPromptRefinerVnextOneShotPaidAuthorization } = await import(
     mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"));
 const stage = {
-  id: "prompt-refiner-vnext-one-shot-v3", status: "run_approved",
+  id: "prompt-refiner-vnext-one-shot-v4", status: "run_approved",
   approvedBy: "synthetic-owner", stageApprovalAuditLogId: "stage-audit",
   runApprovalAuditLogId: "run-audit",
   sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),

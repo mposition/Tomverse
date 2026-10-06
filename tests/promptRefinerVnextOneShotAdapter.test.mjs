@@ -66,10 +66,15 @@ test("A11 sends one bounded, tool-free request and verifies explicit zero cache 
   });
   const result = await run({ requestId, sourceText });
   assert.equal(calls, 1);
-  assert.deepEqual(result, {
+  const { intentToTerminalLatencyMs, ...receipt } = result;
+  assert.ok(Number.isInteger(intentToTerminalLatencyMs));
+  assert.ok(intentToTerminalLatencyMs >= 0 && intentToTerminalLatencyMs < 15_000);
+  assert.deepEqual(receipt, {
     status: "bounded_response",
     output,
     costUpperBoundMicroUsd: 160,
+    usage: { inputTokens: 200, outputTokens: 100, cachedInputTokens: 0,
+      cacheWriteInputTokens: 0, reasoningTokens: 10 },
     cacheWriteInputTokens: 0,
     toolCallCount: 0,
     dispatchAuthorized: false,

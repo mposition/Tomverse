@@ -75,7 +75,7 @@ export async function GET(request: Request) {
     if ("response" in access) return access.response;
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v3" },
+        where: { id: "prompt-refiner-vnext-one-shot-v4" },
       });
       return readPromptRefinerVnextOneShotDisposition(tx, stage);
     }, { maxWait: 5_000, timeout: 15_000 });
