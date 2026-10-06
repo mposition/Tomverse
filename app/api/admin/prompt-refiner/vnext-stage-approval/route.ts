@@ -15,8 +15,8 @@ import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 import { preparePromptRefinerVnextOneShotStageBinding } from
   "@/lib/promptRefinerVnextOneShotStageAdmission";
-import { createPromptRefinerVnextOneShotStageWithSlots } from
-  "@/lib/promptRefinerVnextOneShotStageWriter";
+import { createPromptRefinerVnextOneShotV4Stage } from
+  "@/lib/promptRefinerVnextOneShotV4StageWriter";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
@@ -30,7 +30,7 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_STAGE_80_SLOTS"),
+  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_B03O_RECOVERY_V4_AND_CLOSE_V3"),
 }).strict();
 
 /** Owner-only stage recording; no run approval, dispatch, or provider call. */
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     }
     const body = await readLimitedJson(request, 2 * 1024, requestSchema);
     const binding = await preparePromptRefinerVnextOneShotStageBinding(body);
-    const result = await createPromptRefinerVnextOneShotStageWithSlots({
+    const result = await createPromptRefinerVnextOneShotV4Stage({
       session, request, binding,
     });
     return NextResponse.json({
@@ -81,7 +81,8 @@ export async function POST(request: Request) {
     }
     // Neither the root nor the runner digest nor an infrastructure failure is
     // ever echoed or logged by the route.
-    return NextResponse.json({ code: "STAGE_APPROVAL_UNAVAILABLE" },
+    return NextResponse.json({ code: "STAGE_APPROVAL_OUTCOME_UNKNOWN",
+      retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }
 }
