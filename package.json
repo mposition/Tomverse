@@ -38,6 +38,7 @@
     "capture:amux-staging-evidence": "node --conditions=react-server --import tsx scripts/capture-amux-staging-evidence.mjs",
     "verify:amux-ubuntu-reboot": "node scripts/verify-amux-ubuntu-reboot.mjs",
     "local:amux-intake": "node --import tsx scripts/local-amux-intake.mjs",
+    "local:amux-v22-task-sidecar": "node scripts/amux-v22-task-sidecar.mjs",
     "build:amux-v4-egress-s0": "esbuild scripts/amux-v4-egress-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-egress-s0.mjs",
     "build:amux-v4-cli-binary-s0": "esbuild scripts/amux-v4-cli-binary-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-binary-s0.mjs",
     "build:amux-v4-cli-model-s0": "esbuild scripts/amux-v4-cli-model-s0.mjs --bundle --platform=node --format=esm --outfile=.next/amux-v4-cli-model-s0.mjs",
