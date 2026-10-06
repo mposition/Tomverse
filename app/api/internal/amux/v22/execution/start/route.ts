@@ -16,7 +16,9 @@ import { readEngineeringAgentDevelopHead } from
 import { readEngineeringAgentSwitches } from
   "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
-import { AMUX_V22_TASK_EXECUTION_ENV,
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  AMUX_V22_TASK_EXECUTION_ENV,
+  amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled } from "@/lib/amux/v22TaskExecutionCore";
 
 const requestSchema = z.object({
@@ -39,7 +41,9 @@ export async function POST(request: Request) {
       const body = await readLimitedJson(request, 4 * 1_024, requestSchema);
       let publicationBaseSha: string | null = null;
       try {
-        if ((await readEngineeringAgentSwitches(prisma)).publishAllowed &&
+        if (amuxV22EngineeringPublicationEnabled(
+          process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+            (await readEngineeringAgentSwitches(prisma)).publishAllowed &&
             await readAmuxV22PublicPrConsent(body.task_id)) {
           publicationBaseSha = await readEngineeringAgentDevelopHead();
         }

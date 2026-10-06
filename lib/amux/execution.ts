@@ -48,7 +48,9 @@ import {
   requireEngineeringAgentRunAdmission,
 } from "@/lib/engineeringAgentStore";
 import { AMUX_V22_SEALED_DELIVERY_MARKER,
-  AMUX_V22_TASK_EXECUTION_ENV, amuxV22TaskExecutionEnabled,
+  AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
+  amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified } from "@/lib/amux/v22TaskExecutionCore";
 
@@ -259,7 +261,9 @@ export async function startAmuxV22TaskExecution(input: {
 }) {
   if (!amuxV22TaskExecutionEnabled(process.env[AMUX_V22_TASK_EXECUTION_ENV]))
     return { started: false as const, reason: "v22_execution_disabled" as const };
-  const publicationBaseSha = input.publicationBaseSha &&
+  const publicationBaseSha = amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+    input.publicationBaseSha &&
     /^[0-9a-f]{40}$/.test(input.publicationBaseSha)
     ? input.publicationBaseSha : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,

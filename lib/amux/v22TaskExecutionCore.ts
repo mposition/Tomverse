@@ -6,6 +6,16 @@ export function amuxV22TaskExecutionEnabled(value: string | undefined) {
   return AMUX_V22_TASK_EXECUTION_CODE_LATCH && value === "enabled";
 }
 
+/** Opening Task execution never opens its optional public PR path. The
+ * separate publication latch remains closed until v4 policy and image proof. */
+export const AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH = false;
+export const AMUX_V22_ENGINEERING_PUBLICATION_ENV =
+  "TOMVERSE_AMUX_V22_ENGINEERING_PUBLICATION";
+
+export function amuxV22EngineeringPublicationEnabled(value: string | undefined) {
+  return AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH && value === "enabled";
+}
+
 export const AMUX_V22_SEALED_DELIVERY_MARKER = "amux-v22:sealed-brief";
 
 export function v22ExecutionCostWithinAssignment(input: {

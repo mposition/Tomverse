@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { amuxV22TaskExecutionEnabled,
+import { amuxV22EngineeringPublicationEnabled,
+  amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
 test("v22 execution stays dark even with an enabled environment value", () => {
   assert.equal(amuxV22TaskExecutionEnabled("enabled"), false);
+  assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), false);
 });
 
 test("each attempt fits the assigned route and cumulative owner ceiling", () => {
