@@ -143,7 +143,7 @@ impl ProviderRegistry {
     }
 }
 
-/// The registry every deployment starts from: all six known providers,
+/// The registry every deployment starts from: all seven known providers,
 /// registered by default. Opt-OUT, not opt-in — a capability nobody is
 /// enrolled in is decoration (ethos rule 1; the `CC_MCP` incident).
 pub fn default_registry() -> ProviderRegistry {
@@ -154,6 +154,7 @@ pub fn default_registry() -> ProviderRegistry {
     reg.register(Arc::new(static_providers::DevinAdapter));
     reg.register(Arc::new(static_providers::OllamaAdapter::default()));
     reg.register(Arc::new(static_providers::CursorAdapter));
+    reg.register(Arc::new(static_providers::CopilotAdapter));
     reg
 }
 
@@ -246,7 +247,7 @@ mod tests {
             Compaction::Automatic,
             "Claude owns compaction inside its agent loop; amux must not inject reminders"
         );
-        for p in ["gemini", "codex", "cursor"] {
+        for p in ["gemini", "codex", "cursor", "copilot"] {
             if let Some(a) = reg.resolve(p) {
                 assert_eq!(
                     a.compaction(),
@@ -260,10 +261,10 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_registers_all_six() {
+    fn default_registry_registers_all_seven() {
         let reg = default_registry();
-        assert_eq!(reg.len(), 6);
-        for id in ["claude-code", "gemini", "codex", "devin", "ollama", "cursor"] {
+        assert_eq!(reg.len(), 7);
+        for id in ["claude-code", "gemini", "codex", "devin", "ollama", "cursor", "copilot"] {
             assert!(
                 reg.get(&ProviderId::new(id)).is_some(),
                 "default registry missing {id}"
@@ -353,6 +354,13 @@ mod tests {
         // empty vec when the binary is missing or unauthenticated — same
         // honest-empty shape as ollama's `ollama list` probe above.
         conformance(&static_providers::CursorAdapter).await;
+    }
+
+    #[tokio::test]
+    async fn conformance_copilot() {
+        // usage() is unknown and models() reads the static catalog: no probe,
+        // no binary needed, so this runs the same on a host without copilot.
+        conformance(&static_providers::CopilotAdapter).await;
     }
 
     #[test]

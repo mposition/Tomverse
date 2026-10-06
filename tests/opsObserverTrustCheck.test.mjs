@@ -20,6 +20,7 @@ const GENESIS_ID = "11111111-1111-4111-8111-111111111111";
 const PREVIOUS_ID = "22222222-2222-4222-8222-222222222222";
 const DIGEST = "a".repeat(64);
 const KEYS_SHA = "b".repeat(64);
+const CHECKPOINT_SHA = "d".repeat(64);
 const CREATED = new Date("2026-10-10T00:00:00.000Z");
 
 function soundFacts() {
@@ -39,6 +40,7 @@ function soundFacts() {
       invariantVersion: OPS_OBSERVER_INVARIANT_VERSION,
       stampGeneration: 4,
       stampKeysSha256: KEYS_SHA,
+      stampCheckpointSha256: CHECKPOINT_SHA,
     },
     genesisAuditRows: [
       {
@@ -53,6 +55,7 @@ function soundFacts() {
     keysSchemaValid: true,
     catalogComplete: true,
     recomputedKeysSha256: KEYS_SHA,
+    recomputedCheckpointSha256: CHECKPOINT_SHA,
     transitionVerdict: null,
     deliveries: [
       { invariantVersion: OPS_OBSERVER_INVARIANT_VERSION, status: "reserved", stampStatus: "reserved", mode: "shadow" },
@@ -109,6 +112,8 @@ test("each broken fact names its own check's reason", () => {
     ["unenforced_write", (f) => (f.state.invariantVersion = OPS_OBSERVER_INVARIANT_VERSION + 1)],
     ["unenforced_write", (f) => (f.state.stampGeneration = 3)],
     ["unenforced_write", (f) => (f.recomputedKeysSha256 = "c".repeat(64))],
+    ["unenforced_write", (f) => (f.recomputedCheckpointSha256 = "c".repeat(64))],
+    ["unenforced_write", (f) => (f.state.stampCheckpointSha256 = "c".repeat(64))],
     ["unaudited_transition", (f) => (f.transitionVerdict = "unaudited_transition")],
     ["checkpoint_broken", (f) => (f.transitionVerdict = "checkpoint_broken")],
     ["audit_unverified", (f) => (f.transitionVerdict = "audit_unverified")],
@@ -129,6 +134,7 @@ test("a missing or malformed fact fails closed rather than passing", () => {
     "keysSchemaValid",
     "catalogComplete",
     "recomputedKeysSha256",
+    "recomputedCheckpointSha256",
     "transitionVerdict",
     "deliveries",
     "previousGenesisCreatedAt",

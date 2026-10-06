@@ -324,6 +324,9 @@ run(
     // Support-triage groups: one kind per group, members tied to its digest,
     // members then signals then the group when it ends, and the tombstone.
     "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage decision records: twelve months by CHECK, never updated,
+    // at least one link at commit, and no record outlives any of its links.
+    "tests/integration/support-triage-decision-record.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
@@ -379,6 +382,9 @@ run(
     // sre-ops trust check T3a: the migrations' catalogue is exactly the
     // expected one, and a dropped or re-deferred rule is seen.
     "tests/integration/ops-observer-catalog.db.test.ts",
+    // sre-ops state read: the trust facts gathered in one bounded transaction,
+    // trusted with the state or the reason only (own throwaway schema).
+    "tests/integration/ops-observer-store-read.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -721,17 +727,17 @@ run(
 // This suite creates and drops only its own synthetic schema. Give its Prisma
 // client that exact schema rather than letting it see the lane's public tables.
 const oneShotAuditSuite =
-  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+  "tests/integration/prompt-refiner-vnext-v3-recovery.db.test.ts";
 if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
     !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
   fail("the isolated one-shot audit suite requires a dedicated test database name");
 }
 const oneShotTestUrl = new URL(rawTestDatabaseUrl);
-oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+oneShotTestUrl.searchParams.set("schema", `chat01_b06_test_${process.pid.toString(36)}`);
 run(
   ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
     oneShotAuditSuite],
-  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  "Running the isolated one-shot v3 recovery/audit/80-slot transaction scenarios",
   { TEST_DATABASE_URL: oneShotTestUrl.toString(),
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },

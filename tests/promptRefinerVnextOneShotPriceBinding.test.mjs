@@ -8,7 +8,7 @@ import {
 } from "../lib/promptRefinerVnextOneShotPriceBinding.ts";
 
 const stage = {
-  id: "prompt-refiner-vnext-one-shot-v1",
+  id: "prompt-refiner-vnext-one-shot-v4",
   status: "run_approved",
   pricePinDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST,
   perRequestCostMicroUsd: 29_918n,

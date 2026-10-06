@@ -6575,6 +6575,13 @@ input.mdai-edge-path-input:focus { border-color: var(--accent); box-shadow: 0 0 
   #board-view .board-col:not(.col-collapsed) .col-terminal-chip { grid-column:2; justify-self:start; max-width:none; font-size:.58rem; overflow:visible; text-overflow:clip; }
 }
 
+/* Korean may break between any two syllables, so a narrow (collapsed) column
+   split 백로그 as 백로/그 where English never splits Backlog, and the settings
+   zoom row split 초기화 the same way. keep-all gives Korean the same word-level
+   wrapping English already has. */
+:lang(ko) .board-col-label,
+:lang(ko) .settings-menu { word-break: keep-all; }
+
 /* Short landscape / keyboard viewports keep the composer inside the screen. */
 @media (max-height: 480px) {
   #peek-overlay .peek-cmd-toggle { display:none; }

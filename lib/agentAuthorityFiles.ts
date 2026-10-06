@@ -149,6 +149,8 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/adminAmux*",
   "lib/adminMessages/engineeringAgent*",
   "lib/adminMessages/agentDigests*",
+  // The Agent office's copy, which names the agent teams and what each may do.
+  "lib/adminMessages/agentOffice*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",
