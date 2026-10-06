@@ -403,6 +403,23 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       assert.equal(await prisma.adminAuditLog.count({ where: {
         action: "prompt_refiner.vnext_one_shot.stage_approved", targetId: V4,
       } }), 1);
+      const closedHistoricalStage = await prisma.promptRefinerVnextOneShotStage
+        .findUniqueOrThrow({ where: { id: V3 } });
+      assert.ok(closedHistoricalStage.supersededAuditLogId);
+      assert.deepEqual({ ...closedHistoricalStage, status: "run_approved",
+        supersededAuditLogId: null, updatedAt: historicalStage.updatedAt },
+      historicalStage, "v4 may only close and link the historical stage");
+      const historicalSlots = await prisma.promptRefinerVnextOneShotSlot.findMany({
+        where: { stageId: V3 }, orderBy: { slotIndex: "asc" },
+      });
+      assert.equal(historicalSlots.length, 80);
+      assert.ok(historicalSlots.every((slot, index) =>
+        slot.id === `one-shot-v3-${index}` && slot.slotIndex === index &&
+        slot.status === "reserved" && slot.requestId === null &&
+        slot.consumedAt === null && slot.reservedCostMicroUsd === BigInt(29918)));
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotOperationalShadow(tx, closedHistoricalStage)))
+        .shadowAuditLogId, historicalShadowAudit);
       await assert.rejects(createPromptRefinerVnextOneShotV4Stage({
         session, request, binding: v4Binding,
       }), /source_not_replaceable|source_unavailable/);
