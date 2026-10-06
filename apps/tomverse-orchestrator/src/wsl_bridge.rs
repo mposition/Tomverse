@@ -11,6 +11,8 @@
  * the local board (`GET` only), links the card whose own message carries the
  * attempt marker, and settles the attempt from that card's terminal status:
  * review or blocked, never done and never back to todo.
+ * v22 assignment-bound deliveries instead use the local one-shot sidecar;
+ * without an exact A14 usage receipt their result is only blocked.
  */
 
 use std::collections::{BTreeMap, HashSet};
@@ -266,12 +268,34 @@ impl LocalExchange {
 #[allow(async_fn_in_trait)]
 pub trait AttemptPrompts {
     async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>>;
+
+    fn v22_delivery(&self, _attempt_id: &str) -> Option<&PulledDelivery> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22SidecarState {
+    InProgress,
+    Succeeded,
+    Failed,
+    OutcomeUnknown,
+    Busy,
+    NotFound,
 }
 
 #[allow(async_fn_in_trait)]
 pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
     async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
+
+    async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22(&mut self, _attempt_id: &str) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
 }
 
 impl AttemptPrompts for BTreeMap<String, String> {
@@ -1056,6 +1080,14 @@ where
         Err(error) => return Err(error),
     };
     let presence = snapshot.presence(worker);
+    if let Some(delivery) = prompts.v22_delivery(attempt_id) {
+        if !presence.is_some_and(|session| session.running) {
+            return Ok(BridgeTickResult::Halted {
+                attempt_id: attempt_id.to_owned(),
+            });
+        }
+        return Ok(dispatch_v22(delivery, local).await);
+    }
     Ok(dispatch_started(
         input,
         presence.map(|_| worker),
@@ -1065,6 +1097,25 @@ where
         local,
     )
     .await)
+}
+
+async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) -> BridgeTickResult {
+    let reply = match local.send_v22(delivery).await {
+        Ok(reply) => reply,
+        Err(_) => match local.readback_v22(&delivery.attempt_id).await {
+            Ok(reply) => reply,
+            Err(_) => return BridgeTickResult::Halted {
+                attempt_id: delivery.attempt_id.clone(),
+            },
+        },
+    };
+    match reply {
+        V22SidecarState::InProgress | V22SidecarState::Succeeded |
+        V22SidecarState::Failed | V22SidecarState::OutcomeUnknown =>
+            BridgeTickResult::Pending { attempt_id: delivery.attempt_id.clone() },
+        V22SidecarState::Busy | V22SidecarState::NotFound =>
+            BridgeTickResult::Halted { attempt_id: delivery.attempt_id.clone() },
+    }
 }
 
 async fn dispatch_started<L>(
@@ -1250,9 +1301,90 @@ pub fn interpret_read_back_body(status: u16, body: &serde_json::Value) -> ReadBa
 struct HttpLocal {
     client: reqwest::Client,
     base: String,
+    v22_socket: Option<String>,
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_call(
+    socket_path: &str,
+    payload: serde_json::Value,
+    attempt_id: &str,
+) -> Result<V22SidecarState> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_attempt_id(attempt_id) {
+        bail!("invalid v22 sidecar endpoint");
+    }
+    let mut request = serde_json::to_vec(&payload)?;
+    request.push(b'\n');
+    if request.len() > 64 * 1024 {
+        bail!("v22 sidecar request exceeds limit");
+    }
+    let operation = async {
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?;
+        stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(4097).read_to_end(&mut response).await?;
+        if response.len() > 4096 {
+            bail!("v22 sidecar response exceeds limit");
+        }
+        let value: serde_json::Value = serde_json::from_slice(&response)?;
+        if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
+            bail!("v22 sidecar attempt mismatch");
+        }
+        match value.get("kind").and_then(|item| item.as_str()) {
+            Some("in_progress") => Ok(V22SidecarState::InProgress),
+            Some("succeeded") => Ok(V22SidecarState::Succeeded),
+            Some("failed") => Ok(V22SidecarState::Failed),
+            Some("outcome_unknown") => Ok(V22SidecarState::OutcomeUnknown),
+            Some("busy") => Ok(V22SidecarState::Busy),
+            Some("not_found") => Ok(V22SidecarState::NotFound),
+            _ => bail!("invalid v22 sidecar result"),
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(5), operation)
+        .await.context("v22 sidecar transport timed out")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_call(
+    _socket_path: &str,
+    _payload: serde_json::Value,
+    _attempt_id: &str,
+) -> Result<V22SidecarState> {
+    bail!("v22 sidecar requires Ubuntu")
 }
 
 impl LocalAmux for HttpLocal {
+    async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
+        if delivery.assignment_id.is_none() ||
+            !profile.model_id.starts_with("claude-") ||
+            profile.budget_microusd < 1 || profile.budget_microusd > 5_000_000 ||
+            delivery.prompt.len() > 32 * 1024 {
+            bail!("invalid v22 one-shot delivery");
+        }
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        v22_sidecar_call(socket, serde_json::json!({
+            "op": "execute", "version": 1,
+            "attemptId": delivery.attempt_id,
+            "worker": delivery.worker,
+            "modelId": profile.model_id,
+            "role": profile.role,
+            "budgetMicrousd": profile.budget_microusd,
+            "prompt": delivery.prompt,
+        }), &delivery.attempt_id).await
+    }
+
+    async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await
+    }
+
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
         if !path.starts_with("/api/sessions/") || !path.ends_with("/send") || path.contains("/api/board") {
             bail!("wsl bridge refused a non-session send");
@@ -1334,6 +1466,11 @@ impl AttemptPrompts for DeliveryPrompts<'_> {
         let prompt = delivery.prompt.clone();
         self.deliveries.push(delivery);
         Ok(Some(prompt))
+    }
+
+    fn v22_delivery(&self, attempt_id: &str) -> Option<&PulledDelivery> {
+        self.deliveries.iter().find(|delivery| delivery.attempt_id == attempt_id
+            && delivery.assignment_id.is_some())
     }
 }
 
@@ -1441,6 +1578,7 @@ pub async fn run_from_env() -> i32 {
     let mut local = HttpLocal {
         client: client.clone(),
         base: base.clone(),
+        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
     };
     let mut reserved = Vec::new();
     let mut pending: Vec<PendingExecution> = Vec::new();
@@ -1636,7 +1774,27 @@ pub async fn run_from_env() -> i32 {
             let mut board: Option<Vec<LocalCardSummary>> = None;
             let mut still_running = Vec::new();
             for mut entry in pending.drain(..) {
-                match local_completion(&client, &base, &mut board, &mut entry, now).await {
+                let completion = if entry.delivery.assignment_id.is_some() {
+                    match local.readback_v22(&entry.delivery.attempt_id).await {
+                        Ok(V22SidecarState::InProgress) => LocalCompletion::Running,
+                        Ok(V22SidecarState::Succeeded | V22SidecarState::Failed |
+                            V22SidecarState::OutcomeUnknown) => LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_usage_receipt_missing",
+                                review_pr_number: None,
+                            },
+                        _ if now.saturating_sub(entry.sent_at) >= 15 * 60 =>
+                            LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_sidecar_outcome_unknown",
+                                review_pr_number: None,
+                            },
+                        _ => LocalCompletion::LookupFailed,
+                    }
+                } else {
+                    local_completion(&client, &base, &mut board, &mut entry, now).await
+                };
+                match completion {
                     LocalCompletion::Running | LocalCompletion::LookupFailed => {
                         still_running.push(entry)
                     }
@@ -2829,6 +2987,64 @@ mod tests {
             receipt_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d".into(),
             lease_expires_at: "2026-09-30T00:01:30.000Z".into(),
         }
+    }
+
+    struct SidecarOnlyLocal {
+        sidecar_sends: usize,
+    }
+
+    impl LocalAmux for SidecarOnlyLocal {
+        async fn send(&mut self, _path: &str, _body: &LocalDispatchBody) -> Result<SendReply> {
+            bail!("v22 must never reach the interactive session")
+        }
+
+        async fn read_back(&mut self, _session_name: &str, _attempt_id: &str) -> Result<ReadBack> {
+            bail!("v22 must never read an interactive card")
+        }
+
+        async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+            self.sidecar_sends += 1;
+            Ok(V22SidecarState::InProgress)
+        }
+    }
+
+    #[tokio::test]
+    async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
+        let mut local = SidecarOnlyLocal { sidecar_sends: 0 };
+        let mut delivery = pulled_delivery();
+        delivery.assignment_id = Some(Uuid::new_v4().to_string());
+        delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
+            model_id: "claude-opus-5-5".into(), role: "design".into(),
+            budget_microusd: 1_000_000,
+        });
+        assert!(matches!(dispatch_v22(&delivery, &mut local).await,
+            BridgeTickResult::Pending { .. }));
+        assert_eq!(local.sidecar_sends, 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn v22_socket_exchanges_one_bounded_request_and_result() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let socket_path = root.path().join("worker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let response_attempt = ATTEMPT_ID.to_owned();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            socket.read_to_end(&mut request).await.unwrap();
+            let wire: serde_json::Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(wire["op"], "readback");
+            assert_eq!(wire["attemptId"], response_attempt);
+            socket.write_all(format!("{{\"kind\":\"in_progress\",\"attemptId\":\"{}\"}}\n",
+                response_attempt).as_bytes()).await.unwrap();
+        });
+        let result = v22_sidecar_call(socket_path.to_str().unwrap(),
+            serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
+            ATTEMPT_ID).await.unwrap();
+        assert_eq!(result, V22SidecarState::InProgress);
+        server.await.unwrap();
     }
 
     #[tokio::test]
