@@ -2,8 +2,10 @@ export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
 import { AdminAgentDigestsPanel } from "@/components/admin/AdminAgentDigestsPanel";
+import { AdminBillingFinanceOpsDigestsPanel } from "@/components/admin/AdminBillingFinanceOpsDigestsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { readAgentDigestConsole } from "@/lib/agentDigestConsoleRead";
+import { readBillingFinanceOpsConsole } from "@/lib/billingFinanceOpsConsoleRead";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -21,9 +23,10 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
-  // Whether this viewer may record a revision travels with the payload, so a
-  // reader is not offered a form that can only refuse; the route checks again.
-  const initial = await readAgentDigestConsole(hasAdminPermission(session, "ops:write"));
+  // Whether this viewer may write travels with the payload, so a reader is not
+  // offered a form that can only refuse; the routes check again. Only the open
+  // tab's data is loaded.
+  const canWrite = hasAdminPermission(session, "ops:write");
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -34,7 +37,11 @@ export default async function AdminAgentDigestsPage({ searchParams }: PageProps<
         label="Agent digest sections"
         query={query}
       />
-      <AdminAgentDigestsPanel key={tab.id} initial={initial} />
+      {tab.id === "billing-finance-ops" ? (
+        <AdminBillingFinanceOpsDigestsPanel key={tab.id} initial={await readBillingFinanceOpsConsole(canWrite)} />
+      ) : (
+        <AdminAgentDigestsPanel key={tab.id} initial={await readAgentDigestConsole(canWrite)} />
+      )}
     </div>
   );
 }

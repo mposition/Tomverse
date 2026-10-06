@@ -257,6 +257,9 @@ run(
     // Its silence check (signal 2): today's digest, an incident when it is
     // missing, and an unreadable switch reported as itself, never as off.
     "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // Its two operator writes (W2): the switch and the monitor check, each with
+    // its administrator audit entry in one transaction.
+    "tests/integration/billing-finance-ops-control.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",
