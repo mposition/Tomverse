@@ -19,6 +19,7 @@ import { deleteSupportTriageDataForAccount } from "@/lib/supportTriageAccountDel
 const reset = async () => {
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageSuggestion"`);
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
+  await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageDecisionRecord"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-del-" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: "@support-triage-deletion.test" } } });
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
@@ -77,7 +78,7 @@ test("deleting an account deletes the triage rows derived from its reports, and 
   assert.equal(audits.length, 1);
   assert.equal(audits[0].action, "support_triage.account_data_deleted");
   assert.equal(audits[0].actorUserId, null);
-  assert.deepEqual(audits[0].metadata, { suggestions: 2, groups: 0, systemActor: "support-triage-account-deletion" });
+  assert.deepEqual(audits[0].metadata, { suggestions: 2, groups: 0, decisionRecords: 0, systemActor: "support-triage-account-deletion" });
   assert.equal(audits[0].targetId, null);
 });
 
@@ -202,7 +203,7 @@ test("a suggestion inserted after the anonymisation waits for it and is refused"
     // The insert is waiting on the anonymised report, not already decided.
     await untilBlocked(otherPid);
     release();
-    assert.deepEqual(await deletion, { suggestions: 2, groups: 0 });
+    assert.deepEqual(await deletion, { suggestions: 2, groups: 0, decisionRecords: 0 });
     assert.match(await outcome, /deleted account/);
   } finally {
     await other.end();
@@ -265,7 +266,7 @@ test("deleting an account deletes every group its reports are or were in, and on
   );
   assert.equal(await prisma.supportTriageGroupSignal.count(), 0);
   const [audit] = await prisma.adminAuditLog.findMany({ where: { targetType: "SupportTriageAccountData" } });
-  assert.deepEqual(audit.metadata, { suggestions: 2, groups: 2, systemActor: "support-triage-account-deletion" });
+  assert.deepEqual(audit.metadata, { suggestions: 2, groups: 2, decisionRecords: 0, systemActor: "support-triage-account-deletion" });
   await prisma.feedback.deleteMany({ where: { id: { in: ["fb-del-other-2", "fb-del-other-3"] } } });
 });
 
@@ -281,4 +282,31 @@ test("after the deletion no membership is created for those reports", async () =
     }),
     /deleted account/
   );
+});
+
+// Decision records (docs/policy/support-triage.md §5): a record bound to any
+// of the account's reports goes whole, other accounts' links included.
+
+const record = (id: string, feedbackIds: string[]) =>
+  prisma.$transaction(async (tx) => {
+    await tx.supportTriageDecisionRecord.create({
+      data: { id, decisionKind: "group_confirmed", decisionEnvelopeDigest: "f".repeat(64), digestVersion: 1 },
+    });
+    for (const [i, feedbackId] of feedbackIds.entries()) {
+      await tx.supportTriageDecisionRecordLink.create({ data: { id: `${id}-l${i}`, recordId: id, feedbackId } });
+    }
+  });
+
+test("deleting an account deletes every decision record bound to its reports, whole", async () => {
+  const { user } = await seed();
+  await record("dr-shared", ["fb-del-mine-1", "fb-del-other"]);
+  await record("dr-other", ["fb-del-other"]);
+  await deleteTomverseAccount(user.id, { cancelSubscription: false });
+  assert.deepEqual((await prisma.supportTriageDecisionRecord.findMany({ select: { id: true } })).map((r) => r.id), ["dr-other"]);
+  assert.deepEqual(
+    (await prisma.supportTriageDecisionRecordLink.findMany({ select: { feedbackId: true } })).map((l) => l.feedbackId),
+    ["fb-del-other"]
+  );
+  const [audit] = await prisma.adminAuditLog.findMany({ where: { targetType: "SupportTriageAccountData" } });
+  assert.deepEqual(audit.metadata, { suggestions: 2, groups: 0, decisionRecords: 1, systemActor: "support-triage-account-deletion" });
 });

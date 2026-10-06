@@ -1,7 +1,12 @@
 import "server-only";
 
-import { previewPromptRefinerVnextOneShotCandidateSourcePin } from
+import { verifyPromptRefinerVnextOneShotCandidateSourceAtRoot } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { prisma } from "@/lib/prisma";
+import { PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY } from
+  "@/lib/promptRefinerVnextOneShotSlotConsumption";
+import { promptRefinerVnextOneShotShadowPublicKeyDigest } from
+  "@/lib/promptRefinerVnextOneShotShadowProof";
 import { observePromptRefinerVnextOneShotDeployment } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
@@ -14,7 +19,8 @@ import {
 import type { PromptRefinerVnextOneShotAuditBinding } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
@@ -49,13 +55,46 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
       pinnedRoot !== expected.manifestRoot || pinnedRunner !== expected.runnerDigest) {
     throw new Error("vnext_one_shot_stage_custody_pin_mismatch");
   }
-  const source = await previewPromptRefinerVnextOneShotCandidateSourcePin();
+  const shadowPublicKey =
+    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 ?? "";
+  const shadowPublicKeyDigest =
+    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST ?? "";
+  const runnerToken = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN ?? "";
+  let signerPinValid = false;
+  try {
+    signerPinValid = SHA256.test(shadowPublicKeyDigest) &&
+      promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey) ===
+        shadowPublicKeyDigest;
+  } catch {
+    signerPinValid = false;
+  }
+  if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v4-paid-terminal-guard-v1" ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED !== "1" ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED !== "1" ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1" ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1" ||
+      !signerPinValid || runnerToken.length < 32 || runnerToken.length > 256 ||
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY) {
+    throw new Error("vnext_one_shot_recovery_capability_unavailable");
+  }
   const deployment = await observePromptRefinerVnextOneShotDeployment();
+  const previous = await prisma.promptRefinerVnextOneShotStage.findUnique({
+    where: { id: PREVIOUS_STAGE_ID },
+    select: { sourceCommitSha: true, sourceManifestDigest: true },
+  });
+  if (!previous || !deployment.commitSha) {
+    throw new Error("vnext_one_shot_recovery_source_unavailable");
+  }
+  const source = await verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(
+    process.cwd(), deployment.commitSha, previous,
+  );
   if (!deployment.runtimeAndRailwayAgree ||
       !deployment.activeDeploymentConfirmed ||
       !deployment.deploymentId || !deployment.commitSha ||
-      source.sourceCommitSha !== deployment.commitSha ||
+      source.sourceCommitSha !== previous.sourceCommitSha ||
       !COMMIT.test(expected.sourceCommitSha) ||
+      expected.sourceCommitSha !== previous.sourceCommitSha ||
       expected.sourceManifestDigest !== source.sourceManifestDigest ||
       expected.runtimeDeploymentId !== deployment.deploymentId ||
       expected.runtimeCommitSha !== deployment.commitSha ||

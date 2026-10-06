@@ -163,6 +163,10 @@ jobs:
         timeout-minutes: 5
         run: npm run security:regression
 
+      - name: One-shot gate source closure
+        timeout-minutes: 2
+        run: npm run verify:prompt-refiner-vnext-one-shot-gate-source
+
       # Its own process, not part of test:unit, because it needs
       # --experimental-test-module-mocks and module mocks are process-global
       # (see scripts/run-server-contract-tests.mjs). That separation is why it
