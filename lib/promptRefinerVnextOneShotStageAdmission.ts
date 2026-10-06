@@ -21,6 +21,8 @@ import type { PromptRefinerVnextOneShotAuditBinding } from
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const V5_STAGE_ID = "prompt-refiner-vnext-one-shot-v5";
+const V5_PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
@@ -43,6 +45,7 @@ export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
  */
 export async function preparePromptRefinerVnextOneShotStageBinding(
   expected: PromptRefinerVnextOneShotStageRequestPins,
+  successor: "v4" | "v5" = "v4",
 ): Promise<PromptRefinerVnextOneShotAuditBinding & Readonly<{
   sourceCommitPreregistrationVerified: false;
   dispatchAuthorized: false;
@@ -79,8 +82,9 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     throw new Error("vnext_one_shot_recovery_capability_unavailable");
   }
   const deployment = await observePromptRefinerVnextOneShotDeployment();
+  const previousId = successor === "v5" ? V5_PREVIOUS_STAGE_ID : PREVIOUS_STAGE_ID;
   const previous = await prisma.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: PREVIOUS_STAGE_ID },
+    where: { id: previousId },
     select: { sourceCommitSha: true, sourceManifestDigest: true },
   });
   if (!previous || !deployment.commitSha) {
@@ -102,7 +106,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     throw new Error("vnext_one_shot_stage_observation_mismatch");
   }
   return Object.freeze({
-    id: STAGE_ID,
+    id: successor === "v5" ? V5_STAGE_ID : STAGE_ID,
     // The transaction-level signed preregistration must confirm this source
     // commit; current checkout bytes are independently rehashed above.
     sourceCommitSha: expected.sourceCommitSha,

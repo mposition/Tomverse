@@ -13,6 +13,10 @@ import {
   PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { promptRefinerVnextV5RecoveryMetadata,
+  V4_COMMIT_SHA, V4_DEPLOYMENT_ID, V4_STAGE_ID, V5_RECOVERY_ACTION,
+  V5_RECOVERY_SUMMARY, V5_STAGE_ID } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const THIRD_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
@@ -59,6 +63,54 @@ async function replacementAuditIsValid(
   stage: PromptRefinerVnextOneShotStage,
 ): Promise<boolean> {
   if (stage.id === FIRST_STAGE_ID) return true;
+  if (stage.id === V5_STAGE_ID) {
+    const previous = await tx.promptRefinerVnextOneShotStage.findUnique({
+      where: { id: V4_STAGE_ID },
+    });
+    if (!previous || previous.status !== "closed" ||
+        previous.runtimeDeploymentId !== V4_DEPLOYMENT_ID ||
+        previous.runtimeCommitSha !== V4_COMMIT_SHA ||
+        previous.approvedBy !== stage.approvedBy ||
+        previous.sourceCommitSha !== stage.sourceCommitSha ||
+        previous.sourceManifestDigest !== stage.sourceManifestDigest ||
+        previous.manifestRoot === stage.manifestRoot ||
+        previous.runnerDigest === stage.runnerDigest ||
+        previous.pricePinDigest !== stage.pricePinDigest ||
+        previous.runtimeDeploymentId === stage.runtimeDeploymentId ||
+        previous.runtimeCommitSha === stage.runtimeCommitSha ||
+        !previous.runApprovalAuditLogId ||
+        !(await readPromptRefinerVnextOneShotStage(tx, V4_STAGE_ID)).approvalAuditsValid) {
+      return false;
+    }
+    const recovery = await tx.adminAuditLog.findMany({ where: {
+      action: V5_RECOVERY_ACTION,
+      targetType: "PromptRefinerVnextOneShotStage", targetId: V4_STAGE_ID,
+    } });
+    if (recovery.length !== 1 ||
+        recovery[0].actorUserId !== stage.approvedBy ||
+        recovery[0].summary !== V5_RECOVERY_SUMMARY ||
+        !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, recovery[0])) {
+      return false;
+    }
+    const metadata = recovery[0].metadata;
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
+        typeof metadata.predecessorStopAuditLogId !== "string") return false;
+    const stop = await tx.adminAuditLog.findUnique({
+      where: { id: metadata.predecessorStopAuditLogId },
+    });
+    if (!stop || stop.action !== "prompt_refiner.vnext_one_shot.outcome_unknown" ||
+        stop.targetType !== "PromptRefinerVnextOneShotStage" ||
+        stop.targetId !== V4_STAGE_ID ||
+        !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, stop)) return false;
+    const expected = promptRefinerVnextV5RecoveryMetadata({
+      stopAuditLogId: stop.id,
+      v4StageApprovalAuditLogId: previous.stageApprovalAuditLogId,
+      v4RunApprovalAuditLogId: previous.runApprovalAuditLogId,
+      v5StageApprovalAuditLogId: stage.stageApprovalAuditLogId,
+    });
+    return Object.keys(metadata).length === Object.keys(expected).length &&
+      Object.entries(expected).every(([key, value]) => metadata[key] === value);
+  }
   const previousId = stage.id === STAGE_ID ? THIRD_STAGE_ID :
     stage.id === THIRD_STAGE_ID ? LEGACY_STAGE_ID :
     stage.id === LEGACY_STAGE_ID ? FIRST_STAGE_ID : null;
