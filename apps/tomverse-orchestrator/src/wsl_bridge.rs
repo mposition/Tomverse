@@ -1414,7 +1414,8 @@ async fn v22_sidecar_call(
             publish_files.is_some_and(|files| patch_body.is_none() ||
                 files.as_array().is_none_or(|rows| rows.is_empty() ||
                     rows.len() > 5)) ||
-            publish_files.is_some() != publish_files_digest.is_some() ||
+            publish_files.is_some() && publish_files_digest.is_none() ||
+            publish_files_digest.is_some() && patch_digest.is_none() ||
             publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
                 !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
             bail!("invalid v22 sidecar patch envelope");
@@ -3261,6 +3262,33 @@ mod tests {
         assert_eq!(result.state, V22SidecarState::Succeeded);
         assert_eq!(result.usage_receipt.unwrap()["invocationId"], ATTEMPT_ID);
         assert_eq!(result.usage_receipt_digest.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        server.await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn v22_readback_accepts_durable_files_digest_without_volatile_bytes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let socket_path = root.path().join("worker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            socket.read_to_end(&mut request).await.unwrap();
+            let response = serde_json::json!({
+                "kind": "succeeded", "attemptId": ATTEMPT_ID,
+                "patchBaseSha": "a".repeat(40),
+                "patchDigest": "b".repeat(64),
+                "publishFilesDigest": "c".repeat(64),
+            });
+            socket.write_all(format!("{response}\n").as_bytes()).await.unwrap();
+        });
+        let result = v22_sidecar_call(socket_path.to_str().unwrap(),
+            serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
+            ATTEMPT_ID).await.unwrap();
+        assert_eq!(result.publish_files, None);
+        assert_eq!(result.publish_files_digest.as_deref(), Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"));
         server.await.unwrap();
     }
 

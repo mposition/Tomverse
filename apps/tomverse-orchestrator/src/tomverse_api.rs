@@ -937,8 +937,8 @@ impl TomverseApi {
             body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
             body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
             match expected_patch {
-                Some((digest, base)) => body.pointer("/patch/sha256")
-                    .and_then(Value::as_str) == Some(digest) &&
+                Some((digest, base)) => body.get("patch").is_some_and(Value::is_null) ||
+                    body.pointer("/patch/sha256").and_then(Value::as_str) == Some(digest) &&
                     body.pointer("/patch/baseSha").and_then(Value::as_str) == Some(base) &&
                     body.pointer("/patch/bodyAvailable").and_then(Value::as_bool) == Some(true) &&
                     body.pointer("/patch/filesDigest").and_then(Value::as_str) ==
@@ -1009,12 +1009,17 @@ impl TomverseApi {
             if status == StatusCode::OK {
                 let answer = read_raw_answer(response, 4096).await?;
                 let body: Value = serde_json::from_slice(&answer.body)?;
+                let accepted_patch = body.get("patchSha256").and_then(Value::as_str) ==
+                    patch.map(|(_, digest, _)| digest) &&
+                    body.get("filesDigest").and_then(Value::as_str) ==
+                        publish_files_digest;
+                let private_only = patch.is_some() &&
+                    body.get("patchRejected").and_then(Value::as_bool) == Some(true) &&
+                    body.get("patchSha256").is_some_and(Value::is_null) &&
+                    body.get("filesDigest").is_some_and(Value::is_null);
                 if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
                     body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
-                    body.get("patchSha256").and_then(Value::as_str) ==
-                        patch.map(|(_, digest, _)| digest) &&
-                    body.get("filesDigest").and_then(Value::as_str) ==
-                        publish_files_digest {
+                    (accepted_patch || private_only) {
                     return Ok(V22UsageRecord::Recorded);
                 }
                 bail!("v22 result write response mismatch");
@@ -1255,6 +1260,26 @@ mod tests {
         thread,
     };
 
+    fn answer_once(status: &'static str, body: String) -> (TomverseApi, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0_u8; 4096];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+            }
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()).unwrap();
+        });
+        (TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+            Duration::from_secs(1), Duration::from_secs(3)), server)
+    }
+
     #[test]
     fn internal_deadlines_outlast_their_route_budgets() {
         // Claim runs inside the app's bounded admission budget and lifecycle
@@ -1358,6 +1383,35 @@ mod tests {
             "binding":{"kind":"task_attempt","attemptId":"attempt-1"}});
         let recorded = api.v22_cli_usage_record_once("attempt-1", &receipt,
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_rejected_optional_patch_still_records_the_private_result() {
+        let patch = "diff --git a/a b/a\n";
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+                "attemptId": "attempt-1", "sourceSha256": "a".repeat(64),
+                "patchSha256": null, "filesDigest": null, "patchRejected": true,
+            }).to_string());
+        let recorded = api.v22_task_result_record_once("attempt-1", "worker",
+            "private result", &"a".repeat(64),
+            Some((patch, &"b".repeat(64), &"c".repeat(40))), None, None)
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_lost_response_readback_accepts_a_private_only_result() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+                "status": "recorded", "attemptId": "attempt-1",
+                "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+                "patch": null,
+            }).to_string());
+        let recorded = api.v22_task_result_readback("attempt-1",
+            &"a".repeat(64), Some((&"b".repeat(64), &"c".repeat(40))), None)
             .await.unwrap();
         assert_eq!(recorded, V22UsageRecord::Recorded);
         server.join().unwrap();

@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { GET, POST } from
   "../app/api/internal/amux/v22/execution/result/route.ts";
+import { normalizeV22OptionalPatch } from
+  "../lib/amux/v22OptionalPatch.ts";
 
 const secret = "synthetic-sync-secret-0123456789abcdef";
 const endpoint = "https://tomverse.test/api/internal/amux/v22/execution/result";
@@ -25,28 +27,29 @@ test("v22 result write remains env-closed and validates body before DB access", 
     process.env.TOMVERSE_AMUX_V22_TASK_RESULT_WRITE = "enabled";
     assert.equal((await POST(request({ prompt: "private" }))).status, 400);
     const patchText = "diff --git a/components/chat/X.tsx b/components/chat/X.tsx\n";
-    const invalidEvidence = await POST(request({
-      attemptId: "00000000-0000-4000-8000-000000000001",
-      worker: "synthetic-worker", resultText: "synthetic result",
-      sourceSha256: createHash("sha256").update("synthetic result")
-        .digest("hex"),
-      patch: { text: patchText,
+    const invalidEvidence = normalizeV22OptionalPatch({ text: patchText,
         sha256: createHash("sha256").update(patchText).digest("hex"),
         baseSha: "a".repeat(40), files: [{ path: "../escape",
-          mode: "100644", bytesBase64: "YQ==" }] },
-    }));
-    assert.equal(invalidEvidence.status, 400);
-    const unboundFiles = await POST(request({
-      attemptId: "00000000-0000-4000-8000-000000000001",
-      worker: "synthetic-worker", resultText: "synthetic result",
-      sourceSha256: createHash("sha256").update("synthetic result")
-        .digest("hex"),
-      patch: { text: patchText,
+          mode: "100644", bytesBase64: "YQ==" }] });
+    assert.equal(invalidEvidence.patch, undefined);
+    assert.equal(invalidEvidence.patchRejected, true);
+    const unboundFiles = normalizeV22OptionalPatch({ text: patchText,
         sha256: createHash("sha256").update(patchText).digest("hex"),
         baseSha: "a".repeat(40), files: [{ path: "tests/example.test.mjs",
-          mode: "100644", bytesBase64: "YQ==" }] },
-    }));
-    assert.equal(unboundFiles.status, 400);
+          mode: "100644", bytesBase64: "YQ==" }] });
+    assert.equal(unboundFiles.patch, undefined);
+    assert.equal(unboundFiles.patchRejected, true);
+    const secretPatch = normalizeV22OptionalPatch({ text: patchText +
+      "ghp_" + "A".repeat(40), sha256: createHash("sha256")
+        .update(patchText + "ghp_" + "A".repeat(40)).digest("hex"),
+      baseSha: "a".repeat(40) });
+    assert.equal(secretPatch.patch, undefined);
+    assert.equal(secretPatch.patchRejected, true);
+    const valid = normalizeV22OptionalPatch({ text: patchText,
+      sha256: createHash("sha256").update(patchText).digest("hex"),
+      baseSha: "a".repeat(40) });
+    assert.equal(valid.patch?.text, patchText);
+    assert.equal(valid.patchRejected, false);
     assert.equal((await GET(new Request(`${endpoint}?attemptId=x&extra=y`, {
       headers: { authorization: `Bearer ${secret}` },
     }))).status, 400);

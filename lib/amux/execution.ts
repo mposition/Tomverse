@@ -1052,13 +1052,19 @@ export const heartbeatAmuxV22TaskExecution = (
       where: { amuxAttemptId: fact.attemptId },
       select: { id: true, status: true },
     });
-    if (run) {
-      if (run.status !== "active") throw new Error("v22 publication run ended early");
-      await heartbeatEngineeringAgentRun(
-        engineeringAgentTransactionInAmux(lent), {
-          runId: run.id, amuxAttemptId: fact.attemptId,
-          leaseMs: fact.leaseExpiresAt.getTime() - context.dbNow.getTime(),
-        });
+    if (run?.status === "active") {
+      try {
+        await heartbeatEngineeringAgentRun(
+          engineeringAgentTransactionInAmux(lent), {
+            runId: run.id, amuxAttemptId: fact.attemptId,
+            leaseMs: fact.leaseExpiresAt.getTime() - context.dbNow.getTime(),
+          });
+      } catch (error) {
+        if (!(error instanceof EngineeringAgentStoreRefusedError &&
+            error.code === "run_lease_not_live")) throw error;
+        // Publication is optional. Its expired lease cannot fence the private
+        // Task heartbeat; the Publisher must still reject the stale run.
+      }
     }
   },
 }, true);
@@ -1165,9 +1171,7 @@ export async function settleAmuxV22TaskExecution(input: {
         where: { amuxAttemptId: attempt.id },
         select: { id: true, status: true },
       });
-      if (run) {
-        if (run.status !== "active")
-          throw new Error("v22 publication run ended before Task settlement");
+      if (run?.status === "active") {
         const product = await tx.engineeringAgentWorkItem.findFirst({
           where: { runId: run.id, kind: "publish" },
           select: { id: true },
@@ -1178,7 +1182,7 @@ export async function settleAmuxV22TaskExecution(input: {
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
             runId: run.id, amuxAttemptId: attempt.id,
             outcome: product ? "t1_queued" : input.outcome === "succeeded" ?
-              "scope_violation" : "agent_failed",
+              "t2_draft" : "agent_failed",
             halt: "none",
           });
       }
