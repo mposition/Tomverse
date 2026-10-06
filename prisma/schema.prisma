@@ -1977,6 +1977,7 @@ model Feedback {
   autoFixCase              FeedbackAutoFixCase?
   supportTriageSuggestions SupportTriageSuggestion[]
   supportTriageMemberships SupportTriageGroupMember[]
+  supportTriageDecisionLinks SupportTriageDecisionRecordLink[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -5938,6 +5939,7 @@ model PromptRefinerVnextOneShotStage {
   approvedAt                 DateTime
   stageApprovalAuditLogId    String   @unique
   runApprovalAuditLogId      String?  @unique
+  supersededAuditLogId       String?  @unique
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -9273,4 +9275,36 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
+/// A person's support-triage decision (docs/policy/support-triage.md §5, §6):
+/// its kind, when, and a keyed digest of what it was bound to. Kept twelve
+/// months, and deleted whole the moment any linked report's account is.
+/// Migration 20261005010000_support_triage_decision_record holds the rules.
+model SupportTriageDecisionRecord {
+  id                     String   @id
+  decisionKind           String
+  decidedAt              DateTime @default(now())
+  decisionEnvelopeDigest String
+  digestVersion          Int
+  retentionUntil         DateTime @default(now())
+
+  links SupportTriageDecisionRecordLink[]
+
+  @@index([retentionUntil])
+  @@index([digestVersion])
+}
+
+/// One report a decision was bound to. Inserted and deleted, never updated;
+/// deleting any link deletes its record and every other link.
+model SupportTriageDecisionRecordLink {
+  id         String @id
+  recordId   String
+  feedbackId String
+
+  record   SupportTriageDecisionRecord @relation(fields: [recordId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  feedback Feedback                    @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([recordId, feedbackId])
+  @@index([feedbackId])
 }

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { adminAuditEntryHashVariants } from "../lib/adminAuditIntegrityCore.ts";
+import { PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES,
+  promptRefinerVnextOneShotApprovalAuditMetadata } from
+  "../lib/promptRefinerVnextOneShotAuditReadback.ts";
 import { lockAndReadPromptRefinerVnextOneShotStage,
   readPromptRefinerVnextOneShotStage } from
   "../lib/promptRefinerVnextOneShotStageReadback.ts";
@@ -9,7 +13,7 @@ import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
 import { staticModelRegistrySeedRows } from "../lib/modelRegistryShared.ts";
 
 const stage = {
-  id: "prompt-refiner-vnext-one-shot-v1",
+  id: "prompt-refiner-vnext-one-shot-v4",
   status: "staged",
   slotCount: 80,
   sourceCommitSha: "a".repeat(40),
@@ -36,12 +40,12 @@ const txFor = (row, items) => {
     calls,
     tx: {
       promptRefinerVnextOneShotStage: { async findUnique({ where }) {
-        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v1" });
+        assert.deepEqual(where, { id: "prompt-refiner-vnext-one-shot-v4" });
         calls.stages++;
         return row;
       } },
       promptRefinerVnextOneShotSlot: { async findMany({ where }) {
-        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v1" });
+        assert.deepEqual(where, { stageId: "prompt-refiner-vnext-one-shot-v4" });
         calls.slots++;
         return items;
       } },
@@ -54,14 +58,17 @@ test("missing stage is content-free and cannot dispatch", async () => {
   const { tx, calls } = txFor(null, []);
   const result = await readPromptRefinerVnextOneShotStage(tx);
   assert.deepEqual(result, {
-    stagePresent: false, stageStatus: null, slotCount: 0,
+    stagePresent: false, stageId: null, stageStatus: null,
+    runtimeDeploymentId: null, runtimeCommitSha: null,
+    stageApprovalAuditLogId: null, runApprovalAuditLogId: null,
+    slotCount: 0,
     reservedSlots: 0, consumedSlots: 0, reservationShapeValid: false,
     approvalAuditsValid: false, dispatchAuthorized: false,
   });
   assert.deepEqual(calls, { stages: 1, slots: 0 });
 });
 
-test("exact 80-slot shape is observed without returning root or identifiers", async () => {
+test("exact 80-slot shape returns approval IDs without root or request IDs", async () => {
   const items = slots();
   items[0] = { ...items[0], status: "consumed", requestId: "synthetic-request",
     consumedAt: new Date("2026-10-03T00:01:00.000Z") };
@@ -69,6 +76,11 @@ test("exact 80-slot shape is observed without returning root or identifiers", as
   const result = await readPromptRefinerVnextOneShotStage(tx);
   assert.equal(result.reservationShapeValid, true);
   assert.equal(result.slotCount, 80);
+  assert.equal(result.stageId, stage.id);
+  assert.equal(result.runtimeDeploymentId, stage.runtimeDeploymentId);
+  assert.equal(result.runtimeCommitSha, stage.runtimeCommitSha);
+  assert.equal(result.stageApprovalAuditLogId, stage.stageApprovalAuditLogId);
+  assert.equal(result.runApprovalAuditLogId, null);
   assert.equal(result.reservedSlots, 79);
   assert.equal(result.consumedSlots, 1);
   assert.equal(result.approvalAuditsValid, false);
@@ -96,13 +108,77 @@ test("duplicate, missing or malformed reservations fail closed", async () => {
     .reservationShapeValid, false);
 });
 
+test("replacement readback refuses missing legacy close and broken audit links", async () => {
+  const key = "synthetic-replacement-readback-key";
+  const previousKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = key;
+  const replacement = { ...stage, id: "prompt-refiner-vnext-one-shot-v3",
+    supersededAuditLogId: null };
+  const legacy = { ...replacement, id: "prompt-refiner-vnext-one-shot-v2",
+    status: "closed", stageApprovalAuditLogId: "legacy-stage-audit",
+    runApprovalAuditLogId: "legacy-run-audit",
+    supersededAuditLogId: "legacy-close-audit",
+    runtimeDeploymentId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" };
+  const signed = (entry) => {
+    const hashInput = { ...entry, createdAt: entry.createdAt.toISOString() };
+    delete hashInput.id;
+    delete hashInput.entryHash;
+    return { ...entry,
+      entryHash: adminAuditEntryHashVariants(hashInput, key).codepoint };
+  };
+  const commonAudit = { actorUserId: stage.approvedBy, actorEmail: null,
+    targetType: "PromptRefinerVnextOneShotStage", ipAddress: null,
+    userAgent: null, entryHash: null };
+  const stageAudit = signed({ ...commonAudit, id: replacement.stageApprovalAuditLogId,
+    action: "prompt_refiner.vnext_one_shot.stage_approved", targetId: replacement.id,
+    summary: PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES.stage,
+    metadata: promptRefinerVnextOneShotApprovalAuditMetadata(replacement, "stage"),
+    previousHash: null, createdAt: replacement.approvedAt });
+  const closeAudit = signed({ ...commonAudit, id: legacy.supersededAuditLogId,
+    action: "prompt_refiner.vnext_one_shot.stage_superseded", targetId: legacy.id,
+    summary: "Closed an unrun one-shot stage for exact-deployment replacement.",
+    metadata: { replacementStageId: replacement.id,
+      previousStageApprovalAuditLogId: legacy.stageApprovalAuditLogId,
+      previousRunApprovalAuditLogId: legacy.runApprovalAuditLogId,
+      replacementStageApprovalAuditLogId: replacement.stageApprovalAuditLogId },
+    previousHash: stageAudit.entryHash,
+    createdAt: new Date(stage.approvedAt.getTime() + 1000) });
+  const read = (oldStage = legacy, closure = closeAudit) => {
+    const byId = new Map([[stageAudit.id, stageAudit], [closure.id, closure]]);
+    const tx = {
+      promptRefinerVnextOneShotStage: { async findUnique({ where }) {
+        return where.id === replacement.id ? replacement : oldStage;
+      } },
+      promptRefinerVnextOneShotSlot: { async findMany() { return slots(); } },
+      adminAuditLog: { async findUnique({ where }) {
+        if (where.id) return byId.get(where.id) ?? null;
+        return [stageAudit, closure].find((entry) =>
+          entry.entryHash === where.entryHash) ?? null;
+      } },
+    };
+    return readPromptRefinerVnextOneShotStage(tx, replacement.id);
+  };
+  try {
+    assert.equal((await read()).approvalAuditsValid, true);
+    assert.equal((await read({ ...legacy, status: "staged" })).approvalAuditsValid, false);
+    assert.equal((await read(legacy, { ...closeAudit, entryHash: "0".repeat(64) }))
+      .approvalAuditsValid, false);
+    assert.equal((await read(legacy, { ...closeAudit,
+      metadata: { ...closeAudit.metadata, replacementStageApprovalAuditLogId: "other" } }))
+      .approvalAuditsValid, false);
+  } finally {
+    if (previousKey === undefined) delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+    else process.env.ADMIN_AUDIT_INTEGRITY_KEY = previousKey;
+  }
+});
+
 test("transactional read locks the stage before reading reservations", async () => {
   const { tx, calls } = txFor(stage, slots());
   let locks = 0;
   tx.$queryRaw = async (strings, id) => {
     const sql = strings.join("?");
     assert.match(sql, /FOR NO KEY UPDATE NOWAIT/);
-    assert.equal(id, "prompt-refiner-vnext-one-shot-v1");
+    assert.equal(id, "prompt-refiner-vnext-one-shot-v4");
     locks++;
     if (!sql.includes('"status"')) {
       if (locks === 1) assert.deepEqual(calls, { stages: 0, slots: 0 });

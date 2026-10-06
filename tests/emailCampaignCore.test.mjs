@@ -144,3 +144,24 @@ test("locales read defensively", () => {
   assert.deepEqual(readLocales("en"), []);
   assert.deepEqual(readLocales(null), []);
 });
+
+test("a notice wave is refused while the active policy version has no profiles", () => {
+  const base = {
+    status: "approved",
+    locales: ["en"],
+    pinned: [{ language: "en", templateVersionId: "tv", contentHash: "h" }],
+    currentHashes: { en: "h" },
+  };
+  assert.equal(
+    campaignRunRefusal({ ...base, activePolicyProfileCount: 0 })?.refusal,
+    "policy_without_profiles"
+  );
+  assert.equal(campaignRunRefusal({ ...base, activePolicyProfileCount: 9 }), null);
+  // Not asked (every other campaign): unchanged.
+  assert.equal(campaignRunRefusal(base), null);
+  // A cancelled campaign still says it was cancelled.
+  assert.equal(
+    campaignRunRefusal({ ...base, status: "cancelled", activePolicyProfileCount: 0 })?.refusal,
+    "cancelled"
+  );
+});
