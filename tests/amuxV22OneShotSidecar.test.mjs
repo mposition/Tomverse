@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { createConnection } from "node:net";
 import { PassThrough } from "node:stream";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -180,6 +180,33 @@ test("a crash after the claim is unknown, never a second invocation", async () =
   } finally { await rm(stateDir, { recursive: true, force: true }); }
 });
 
+test("Ubuntu runs one synthetic CLI process and replays its durable result",
+  { skip: process.platform !== "linux" }, async () => {
+    const root = await mkdtemp(join(tmpdir(), "amux-v22-process-"));
+    const stateDir = join(root, "state");
+    const binaryPath = join(root, "synthetic-claude");
+    const callsPath = join(root, "calls");
+    try {
+      await mkdir(stateDir, { mode: 0o700 });
+      await writeFile(binaryPath, `#!/bin/sh\nprintf x >> '${callsPath}'\nprintf '%s\\n' '{"type":"result","subtype":"success","is_error":false}'\n`);
+      await chmod(binaryPath, 0o700);
+      const handler = createAmuxV22SidecarHandler({ worker: "worker-a",
+        stateDir, run: (input) => runAmuxV22OneShot(input, {
+          ...config, binaryPath, worktreePath: root, homePath: root,
+          claudeConfigDir: root,
+        }) });
+      const execute = { op: "execute", ...request };
+      assert.equal((await handler(execute)).kind, "in_progress");
+      const finished = await readFinished(handler);
+      assert.equal(finished.kind, "succeeded");
+      assert.match(finished.outputDigest, /^[0-9a-f]{64}$/);
+      const restarted = createAmuxV22SidecarHandler({ worker: "worker-a",
+        stateDir, run: () => { throw new Error("duplicate CLI invocation"); } });
+      assert.deepEqual(await restarted(execute), finished);
+      assert.equal(await readFile(callsPath, "utf8"), "x");
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
 test("Ubuntu socket carries only one bounded request and supports readback",
   { skip: process.platform !== "linux" }, async () => {
     const root = await mkdtemp(join(tmpdir(), "amux-v22-socket-"));
@@ -228,6 +255,11 @@ test("Ubuntu socket parent must be private",
     const { chmod } = await import("node:fs/promises");
     try {
       await chmod(root, 0o755);
+      await assert.rejects(checkAmuxV22SidecarSocketDir(
+        join(root, "worker.sock")), /unsafe/);
+      await chmod(root, 0o750);
+      await checkAmuxV22SidecarSocketDir(join(root, "worker.sock"));
+      await chmod(root, 0o770);
       await assert.rejects(checkAmuxV22SidecarSocketDir(
         join(root, "worker.sock")), /unsafe/);
     } finally { await rm(root, { recursive: true, force: true }); }
