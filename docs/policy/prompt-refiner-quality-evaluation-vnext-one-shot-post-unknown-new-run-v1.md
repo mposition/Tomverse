@@ -1,11 +1,11 @@
 ---
-status: draft
+status: approved
 policyVersion: 1
 workId: CHAT-01
 scope: B07_POST_UNKNOWN_NEW_INDEPENDENT_RUN
-implementationBlockedUntilApproved: true
-approvedBy: null
-approvedAt: null
+implementationBlockedUntilApproved: false
+approvedBy: mposition
+approvedAt: 2026-10-06
 ---
 
 # Prompt Refiner vNext: new independent one-shot after v4 safe stop
