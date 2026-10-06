@@ -204,6 +204,22 @@ async function claimCandidate(taskId: string, assignmentId: string,
         priorAuthorWorkers: authorWorkers, priorAuthorProviders: authorProviders,
         isReview: card.taskRole === "review" });
       if (!route) throw new BoardImportError("worker_unavailable", 409);
+      // Never treat a prior v4 worker's absent/partial CLI observation as a
+      // zero-cost run when admitting another cost-bound assignment. A15 owns
+      // the audited owner-release and reservation-occupancy recovery path.
+      const usageUnknown = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT a."id" FROM "AmuxExecutionAttempt" a
+        JOIN "AmuxWorkItem" w ON w."id" = a."taskId"
+        WHERE a."worker" = ${route.workerName}
+          AND a."endedAt" IS NOT NULL
+          AND w."sourceSystem" = 'admin-idea-v4'
+          AND (NOT EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
+               WHERE u."attemptId" = a."id")
+            OR EXISTS (SELECT 1 FROM "AmuxCliUsageEvent" u
+               WHERE u."attemptId" = a."id"
+                 AND u."completeness" <> 'reported_complete'))
+        LIMIT 1`;
+      if (usageUnknown.length) throw new BoardImportError("usage_unverified", 409);
       const runtime = liveByName.get(route.workerName)!;
       const pinnedRuntime = await tx.$queryRaw<Array<{
         workerName: string; instanceId: string; generation: number;

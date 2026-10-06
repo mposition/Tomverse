@@ -7237,6 +7237,7 @@ model AmuxExecutionAttempt {
   delivery          AmuxWorkDelivery?
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
+  cliUsageEvents    AmuxCliUsageEvent[]
 
   @@unique([id, taskId])
   @@unique([taskId, attemptNumber])
@@ -7264,6 +7265,90 @@ model AmuxCostLedgerEntry {
   @@unique([attemptId, scope, resourceKey, kind])
   @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
   @@index([taskId, createdAt])
+}
+
+/// Content-free per-invocation CLI usage, not a bill or a user-credit entry.
+/// Missing observations remain NULL; no caller may turn them into zero.
+model AmuxCliUsageEvent {
+  id                         String   @id @default(cuid())
+  invocationId               String   @unique
+  receiptDigest              String
+  bindingKind                String
+  attemptId                  String?
+  analysisHoldId             String?
+  taskId                     String?
+  worker                     String
+  cli                        String
+  provider                   String
+  selectedModelId            String
+  actualModelId              String?
+  cliVersion                 String?
+  authentication             String
+  startedAt                  DateTime
+  endedAt                    DateTime
+  status                     String
+  completeness               String
+  source                     String
+  inputTokens                BigInt?
+  outputTokens               BigInt?
+  cacheReadInputTokens       BigInt?
+  cacheCreationInputTokens   BigInt?
+  reasoningOutputTokens      BigInt?
+  inputTokensIncludeCacheRead  Boolean
+  inputTokensIncludeCacheWrite Boolean?
+  reasoningOutputIncludedInOutput Boolean?
+  completedTurns             Int
+  pricingVersion             String?
+  projectedApiCostMicrousd   BigInt?
+  actualApiCostMicrousd      BigInt?
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  attempt      AmuxExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  analysisHold AmuxIdeaAnalysisBudgetHold? @relation(fields: [analysisHoldId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([worker, createdAt])
+  @@index([actualModelId, createdAt])
+  @@index([retentionUntil])
+}
+
+/// One immutable finalization witness for a closed UTC calendar year.
+/// It can contain zero published cells when all provider cohorts have <5 calls.
+model AmuxCliUsageAggregateCohort {
+  cohortYear     Int      @id
+  publishedCells Int
+  createdAt      DateTime @default(now())
+  retentionUntil DateTime
+  cells          AmuxCliUsageAggregate[]
+
+  @@index([retentionUntil])
+}
+
+/// A non-overlapping, k>=5 long-term cell. No card, task, run, attempt,
+/// worker identity, invocation ID, prompt, or secret is retained here.
+model AmuxCliUsageAggregate {
+  id                         String   @id
+  cohortYear                 Int
+  provider                   String
+  grain                      String
+  periodStart                DateTime @db.Date
+  model                      String?
+  role                       String?
+  calls                      Int
+  reportedCalls              Int
+  inputTokens                BigInt
+  outputTokens               BigInt
+  cacheReadInputTokens       BigInt
+  cacheCreationInputTokens   BigInt
+  projectedApiCostMicrousd   BigInt
+  projectedCalls             Int
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([retentionUntil])
 }
 
 model AmuxHumanEscalation {
@@ -9117,6 +9202,7 @@ model AmuxIdeaAnalysisBudgetHold {
   window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_window_fkey")
   preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_preview_fkey")
   priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_priceVersion_fkey")
+  cliUsageEvents AmuxCliUsageEvent[]
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaAnalysisBudgetHold_window_status_idx")
   @@index([priceVersionId])
