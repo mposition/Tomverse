@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import { GET, POST } from
@@ -12,6 +14,17 @@ const endpoint = "https://tomverse.test/api/internal/amux/v22/execution/result";
 const request = (body, key = secret) => new Request(endpoint, {
   method: "POST", headers: { authorization: `Bearer ${key}`,
     "content-type": "application/json" }, body: JSON.stringify(body),
+});
+
+test("POST preserves a private result when publication evidence is rejected", () => {
+  const child = spawnSync(process.execPath, [
+    "--experimental-test-module-mocks", "--conditions=react-server",
+    "--import", "tsx",
+    resolve("tests/support/amuxV22TaskResultRoutePostHarness.mjs"),
+  ], { cwd: process.cwd(), encoding: "utf8",
+    env: { ...process.env, NODE_NO_WARNINGS: "1" } });
+  assert.equal(child.status, 0, `stdout:\n${child.stdout}\nstderr:\n${child.stderr}`);
+  assert.match(child.stdout, /AMUX_V22_RESULT_ROUTE_POST_OK/);
 });
 
 test("v22 result write remains env-closed and validates body before DB access", async () => {
