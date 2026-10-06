@@ -72,3 +72,21 @@ test("unknown receipt halts result use; no CLI means no fabricated zero", async 
   });
   assert.equal(absent.kind, "not_started");
 });
+
+test("v22 one-shot caller binds its CLI receipt to the attempt ID", async () => {
+  let receipt;
+  const result = await executeAmuxCliWithUsageReceipt({ ...base,
+    invocationId: "attempt-1",
+    record: async (value) => { receipt = value;
+      return { invocationId: value.invocationId,
+        receiptDigest: amuxCliUsageReceiptDigest(value) }; },
+    readBack: async () => { throw new Error("unexpected readback"); },
+  });
+  assert.equal(result.kind, "recorded");
+  assert.equal(receipt.invocationId, "attempt-1");
+  await assert.rejects(() => executeAmuxCliWithUsageReceipt({ ...base,
+    invocationId: "other",
+    record: async () => { throw new Error("should not write"); },
+    readBack: async () => { throw new Error("should not read"); },
+  }), /task invocation must equal attempt ID/);
+});

@@ -40,7 +40,8 @@ import { calculateCurrentApprovedAmuxV4TaskCost } from
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
 import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22TaskExecutionEnabled,
-  v22ExecutionCostWithinAssignment } from "@/lib/amux/v22TaskExecutionCore";
+  v22ExecutionCostWithinAssignment,
+  v22ExecutionReceiptVerified } from "@/lib/amux/v22TaskExecutionCore";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -1044,19 +1045,12 @@ export async function settleAmuxV22TaskExecution(input: {
         select: { invocationId: true, status: true, completeness: true,
           projectedApiCostMicrousd: true },
       });
-      const expectedIds = [...new Set(input.invocationIds)].sort();
-      const recordedIds = events.map((event) => event.invocationId).sort();
-      const receiptsComplete = expectedIds.length > 0 &&
-        expectedIds.length === input.invocationIds.length &&
-        expectedIds.length === recordedIds.length &&
-        expectedIds.every((id, index) => id === recordedIds[index]) &&
-        events.every((event) => event.completeness === "reported_complete" &&
-          event.projectedApiCostMicrousd !== null &&
-          (input.outcome === "succeeded" ? event.status === "succeeded" :
-            event.status === "failed" || event.status === "succeeded")) &&
-        events.reduce((sum, event) => sum +
-          (event.projectedApiCostMicrousd ?? BigInt(0)), BigInt(0)) <=
-          attempt.reservedCostMicrousd;
+      const expectedIds = input.invocationIds;
+      const receiptsComplete = v22ExecutionReceiptVerified({
+        attemptId: attempt.id, invocationIds: expectedIds, events,
+        outcome: input.outcome,
+        reservedCostMicrousd: attempt.reservedCostMicrousd,
+      });
       if (input.outcome !== "blocked" && !receiptsComplete)
         return { settled: false as const, reason: "usage_unverified" as const };
       const budget = settlementDestinationForBudget({

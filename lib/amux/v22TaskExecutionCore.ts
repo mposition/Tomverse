@@ -22,3 +22,27 @@ export function v22ExecutionCostWithinAssignment(input: {
     input.priorReservedMicroUsd + input.assignedMicroUsd <=
       input.approvedCeilingMicroUsd;
 }
+
+/** One supervised CLI process is the whole v22 attempt. Its invocation ID is
+ * the durable attempt ID, allocated before dispatch. A caller-supplied subset
+ * of receipts cannot turn an unobserved second call into a successful run. */
+export function v22ExecutionReceiptVerified(input: {
+  attemptId: string;
+  invocationIds: string[];
+  events: Array<{ invocationId: string; status: string;
+    completeness: string; projectedApiCostMicrousd: bigint | null }>;
+  outcome: "succeeded" | "failed" | "blocked";
+  reservedCostMicrousd: bigint;
+}) {
+  if (input.invocationIds.length !== 1 ||
+      input.invocationIds[0] !== input.attemptId ||
+      input.events.length !== 1 ||
+      input.reservedCostMicrousd <= BigInt(0)) return false;
+  const event = input.events[0];
+  return event.invocationId === input.attemptId &&
+    event.completeness === "reported_complete" &&
+    event.projectedApiCostMicrousd !== null &&
+    event.projectedApiCostMicrousd <= input.reservedCostMicrousd &&
+    (input.outcome === "succeeded" ? event.status === "succeeded" :
+      event.status === "succeeded" || event.status === "failed");
+}

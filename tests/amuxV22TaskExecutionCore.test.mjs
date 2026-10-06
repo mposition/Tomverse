@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { amuxV22TaskExecutionEnabled,
-  v22ExecutionCostWithinAssignment } from
+  v22ExecutionCostWithinAssignment,
+  v22ExecutionReceiptVerified } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
 test("v22 execution stays dark even with an enabled environment value", () => {
@@ -20,4 +21,29 @@ test("each attempt fits the assigned route and cumulative owner ceiling", () => 
     priorReservedMicroUsd: 4_001n }), false);
   assert.equal(v22ExecutionCostWithinAssignment({ ...base,
     assignedMicroUsd: 0n }), false);
+});
+
+test("v22 settlement accepts only its one preallocated invocation receipt", () => {
+  const base = { attemptId: "attempt-1", invocationIds: ["attempt-1"],
+    outcome: "succeeded", reservedCostMicrousd: 1_000n,
+    events: [{ invocationId: "attempt-1", status: "succeeded",
+      completeness: "reported_complete", projectedApiCostMicrousd: 700n }],
+  };
+  assert.equal(v22ExecutionReceiptVerified(base), true);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, outcome: "failed",
+    events: [{ ...base.events[0], status: "failed" }] }), true);
+  assert.equal(v22ExecutionReceiptVerified({ ...base, outcome: "succeeded",
+    events: [{ ...base.events[0], status: "failed" }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    invocationIds: ["other"] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    invocationIds: ["attempt-1", "other"] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], invocationId: "other" }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [...base.events, base.events[0]] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], completeness: "unknown" }] }), false);
+  assert.equal(v22ExecutionReceiptVerified({ ...base,
+    events: [{ ...base.events[0], projectedApiCostMicrousd: 1_001n }] }), false);
 });
