@@ -245,10 +245,12 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
   } catch {
     outcome = { status: "outcome_unknown", reason: "response_unverified" };
   }
-  if (outcome.status === "bounded_response") {
-    return Object.freeze({ status: "bounded_response", requestId, slotIndex,
+  if (outcome.status === "bounded_response" ||
+      outcome.status === "confirmed_failure") {
+    return Object.freeze({ status: outcome.status, requestId, slotIndex,
       slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
-      output: outcome.output,
+      ...(outcome.status === "bounded_response"
+        ? { output: outcome.output } : { failureCode: outcome.failureCode }),
       costUpperBoundMicroUsd: outcome.costUpperBoundMicroUsd,
       usage: outcome.usage,
       intentToTerminalLatencyMs: outcome.intentToTerminalLatencyMs,
@@ -259,6 +261,7 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
     slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
     reason: outcome.reason });
   return Object.freeze({ status: "outcome_unknown", reason: outcome.reason,
+    ...(outcome.diagnosticCode ? { diagnosticCode: outcome.diagnosticCode } : {}),
     requestId, slotIndex, slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
     stopRecorded, humanReviewRequired: true, retryAuthorized: false,
     dispatchAuthorized: false });
@@ -272,7 +275,7 @@ export async function recordPromptRefinerVnextOneShotTerminalReceipt(result, inp
   if (!origin || typeof token !== "string" || token.length < 32 ||
       token.length > 256 || typeof runApprovalAuditLogId !== "string" ||
       runApprovalAuditLogId.length < 1 || runApprovalAuditLogId.length > 128 ||
-      result?.status !== "bounded_response") return false;
+      !["bounded_response", "confirmed_failure"].includes(result?.status)) return false;
   try {
     const response = await globalThis.fetch(
       `${origin}/api/internal/prompt-refiner/vnext-one-shot-terminal`, {
@@ -282,7 +285,10 @@ export async function recordPromptRefinerVnextOneShotTerminalReceipt(result, inp
         body: JSON.stringify({ requestId: result.requestId,
           slotIndex: result.slotIndex, runApprovalAuditLogId,
           slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
-          resultKind: result.output.outcome,
+          resultKind: result.status === "confirmed_failure"
+            ? "failed" : result.output.outcome,
+          ...(result.status === "confirmed_failure"
+            ? { failureCode: result.failureCode } : {}),
           usage: result.usage,
           observedCostMicroUsd: result.costUpperBoundMicroUsd,
           intentToTerminalLatencyMs: result.intentToTerminalLatencyMs }),
@@ -333,14 +339,17 @@ async function main(args) {
           slotIndex: Number(args[8]), runApprovalAuditLogId: args[10],
           ownerKeyHex: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_OWNER_SEAL_KEY_HEX,
         });
-        if (result.status !== "bounded_response") {
+        if (result.status !== "bounded_response" &&
+            result.status !== "confirmed_failure") {
           process.stdout.write(JSON.stringify(result) + "\n");
           return 1;
         }
         try {
           writeFileSync(descriptor, JSON.stringify({ requestId: result.requestId,
             slotIndex: result.slotIndex,
-            output: result.output }) + "\n", { encoding: "utf8" });
+            ...(result.status === "confirmed_failure"
+              ? { resultKind: "failed", failureCode: result.failureCode }
+              : { output: result.output }) }) + "\n", { encoding: "utf8" });
           fsyncSync(descriptor);
         } catch {
           const stopRecorded = await recordUnknownStop({

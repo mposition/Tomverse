@@ -17,6 +17,10 @@ import { verifyPromptRefinerVnextOneShotConsumedRequest } from
   "@/lib/promptRefinerVnextOneShotOutcomeRecovery";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
+import {
+  isPromptRefinerVnextConfirmedFailureCode,
+  type PromptRefinerVnextConfirmedFailureCode,
+} from "@/lib/promptRefinerVnextOneShotFailureCodes";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { prisma } from "@/lib/prisma";
@@ -35,7 +39,8 @@ export type PromptRefinerVnextTerminalInput = Readonly<{
   slotIndex: number;
   runApprovalAuditLogId: string;
   slotConsumptionAuditLogId: string;
-  resultKind: "suggested" | "abstained";
+  resultKind: "suggested" | "abstained" | "failed";
+  failureCode?: PromptRefinerVnextConfirmedFailureCode;
   usage: Readonly<{
     inputTokens: number;
     outputTokens: number;
@@ -57,7 +62,10 @@ function checkedInput(input: PromptRefinerVnextTerminalInput): boolean {
       typeof input.slotConsumptionAuditLogId !== "string" ||
       input.slotConsumptionAuditLogId.length < 1 ||
       input.slotConsumptionAuditLogId.length > 128 ||
-      !["suggested", "abstained"].includes(input.resultKind) ||
+      !["suggested", "abstained", "failed"].includes(input.resultKind) ||
+      (input.resultKind === "failed"
+        ? !isPromptRefinerVnextConfirmedFailureCode(input.failureCode)
+        : input.failureCode !== undefined) ||
       !Number.isSafeInteger(input.observedCostMicroUsd) ||
       input.observedCostMicroUsd < 0 || input.observedCostMicroUsd > MAX_COST ||
       !Number.isSafeInteger(input.intentToTerminalLatencyMs) ||
@@ -71,13 +79,16 @@ function checkedInput(input: PromptRefinerVnextTerminalInput): boolean {
 }
 
 const receiptMetadata = (input: PromptRefinerVnextTerminalInput) => ({
-  version: "prompt-refiner-vnext-one-shot-terminal-v1",
+  version: input.resultKind === "failed"
+    ? "prompt-refiner-vnext-one-shot-terminal-v2"
+    : "prompt-refiner-vnext-one-shot-terminal-v1",
   stageId: STAGE_ID,
   requestId: input.requestId,
   slotIndex: input.slotIndex,
   runApprovalAuditLogId: input.runApprovalAuditLogId,
   slotConsumptionAuditLogId: input.slotConsumptionAuditLogId,
   resultKind: input.resultKind,
+  ...(input.resultKind === "failed" ? { failureCode: input.failureCode } : {}),
   usage: input.usage,
   observedCostMicroUsd: input.observedCostMicroUsd,
   reservedCostMicroUsd: MAX_COST,
@@ -103,7 +114,8 @@ async function validatedTerminal(
     slotIndex: data.slotIndex as number,
     runApprovalAuditLogId: data.runApprovalAuditLogId as string,
     slotConsumptionAuditLogId: data.slotConsumptionAuditLogId as string,
-    resultKind: data.resultKind as "suggested" | "abstained",
+    resultKind: data.resultKind as "suggested" | "abstained" | "failed",
+    failureCode: data.failureCode as PromptRefinerVnextConfirmedFailureCode | undefined,
     usage: data.usage as PromptRefinerVnextTerminalInput["usage"],
     observedCostMicroUsd: data.observedCostMicroUsd as number,
     intentToTerminalLatencyMs: data.intentToTerminalLatencyMs as number,
@@ -250,6 +262,8 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
       rows.push({ slotIndex: slot.slotIndex, state: "terminal",
         requestId: slot.requestId, terminalAuditLogId: terminal.auditLogId,
         resultKind: terminal.input.resultKind, usage: terminal.input.usage,
+        ...(terminal.input.resultKind === "failed"
+          ? { failureCode: terminal.input.failureCode } : {}),
         intentToTerminalLatencyMs: terminal.input.intentToTerminalLatencyMs,
         observedCostMicroUsd: terminal.input.observedCostMicroUsd,
         costUpperBoundMicroUsd: terminal.input.observedCostMicroUsd });

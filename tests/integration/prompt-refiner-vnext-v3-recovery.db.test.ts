@@ -783,9 +783,46 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
         runApprovalAuditLogId: run.runApprovalAuditLogId,
       }), /prior_terminal_unverified/);
 
-      const uncertain = { requestId: secondRequestId, slotIndex: 1,
+      const failedInput = { ...terminalInput, requestId: secondRequestId,
+        slotIndex: 1, slotConsumptionAuditLogId: second.value.slotConsumptionAuditLogId,
+        resultKind: "failed", failureCode: "vnext_strict_parse_failure" };
+      assert.equal((await recordTerminalRoute(terminalRequest({
+        ...failedInput, failureCode: undefined,
+      }))).status, 409);
+      assert.equal((await recordTerminalRoute(terminalRequest(failedInput))).status, 201);
+      const failedReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotTerminalReceipts(tx));
+      assert.equal(failedReadback.valid, true);
+      assert.equal(failedReadback.terminalReceipts, 2);
+      const oldTerminal = failedReadback.slots[0];
+      const failedTerminal = failedReadback.slots[1];
+      assert.ok("resultKind" in oldTerminal);
+      assert.ok("resultKind" in failedTerminal);
+      assert.ok("failureCode" in failedTerminal);
+      assert.equal(oldTerminal.resultKind, "abstained");
+      assert.equal(failedTerminal.resultKind, "failed");
+      assert.equal(failedTerminal.failureCode,
+        "vnext_strict_parse_failure");
+      const failedAudit = (await prisma.adminAuditLog.findMany({ where: {
+        action: "prompt_refiner.vnext_one_shot.terminal_recorded",
+      } })).find((entry) => (entry.metadata as Record<string, unknown>)
+        ?.resultKind === "failed");
+      assert.ok(failedAudit);
+      assert.equal((failedAudit.metadata as Record<string, unknown>).version,
+        "prompt-refiner-vnext-one-shot-terminal-v2");
+      assert.equal(JSON.stringify(failedAudit.metadata).includes("not JSON"), false);
+
+      const third = await consumePromptRefinerVnextOneShotSlot({
+        requestId: randomUUID(), slotIndex: 2,
         runApprovalAuditLogId: run.runApprovalAuditLogId,
-        slotConsumptionAuditLogId: second.value.slotConsumptionAuditLogId,
+      });
+      const thirdRequestId = (await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
+        where: { stageId_slotIndex: { stageId: V4, slotIndex: 2 } },
+      })).requestId!;
+
+      const uncertain = { requestId: thirdRequestId, slotIndex: 2,
+        runApprovalAuditLogId: run.runApprovalAuditLogId,
+        slotConsumptionAuditLogId: third.slotConsumptionAuditLogId,
         reason: "timeout" as const };
       await assert.rejects(stopPromptRefinerVnextOneShotUnknown({
         ...uncertain, requestId: firstRequestId, slotIndex: 0,
@@ -841,17 +878,17 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       const stoppedReadback = await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotTerminalReceipts(tx));
       assert.equal(stoppedReadback.valid, true);
-      assert.equal(stoppedReadback.terminalReceipts, 1);
+      assert.equal(stoppedReadback.terminalReceipts, 2);
       assert.equal(stoppedReadback.unknownReceipts, 1);
       assert.equal(stoppedReadback.consumedWithoutReceipt, 0);
-      assert.equal(stoppedReadback.observedCostMicroUsd, cost);
+      assert.equal(stoppedReadback.observedCostMicroUsd, cost * 2);
       assert.equal(stoppedReadback.unresolvedCostUpperBoundMicroUsd, 29_918);
-      assert.equal(stoppedReadback.slots[1].state, "outcome_unknown");
+      assert.equal(stoppedReadback.slots[2].state, "outcome_unknown");
       assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: V4 },
       })).status, "closed");
       await assert.rejects(consumePromptRefinerVnextOneShotSlot({
-        requestId: randomUUID(), slotIndex: 2,
+        requestId: randomUUID(), slotIndex: 3,
         runApprovalAuditLogId: run.runApprovalAuditLogId,
       }), /approved_stage_inactive/);
     } finally {

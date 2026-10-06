@@ -112,6 +112,47 @@ test("terminal settlement sends only telemetry once and never retries a lost res
   } finally { globalThis.fetch = previous; }
 });
 
+test("confirmed parser failure settles once as a content-free failed terminal", async (t) => {
+  const input = fixture(t);
+  let generated = 0;
+  const response = boundedResponse();
+  response.text = "not JSON";
+  const failed = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      assert.ok(url.endsWith("-slot"));
+      return grantFor(JSON.parse(options.body));
+    },
+    generate: async () => { generated++; return response; },
+  });
+  assert.equal(generated, 1);
+  assert.equal(failed.status, "confirmed_failure");
+  assert.equal(failed.failureCode, "vnext_strict_parse_failure");
+  assert.equal(failed.output, undefined);
+  const prior = globalThis.fetch;
+  let terminalCalls = 0;
+  try {
+    globalThis.fetch = async (url, options) => {
+      terminalCalls++;
+      assert.ok(url.endsWith("-terminal"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.resultKind, "failed");
+      assert.equal(body.failureCode, "vnext_strict_parse_failure");
+      assert.equal(JSON.stringify(body).includes("not JSON"), false);
+      assert.equal(body.observedCostMicroUsd, failed.costUpperBoundMicroUsd);
+      return Response.json({ terminalAuditLogId: "synthetic-terminal-audit",
+        requestId: failed.requestId, slotIndex: failed.slotIndex,
+        observedCostMicroUsd: failed.costUpperBoundMicroUsd,
+        dispatchAuthorized: false }, { status: 201 });
+    };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(failed, {
+      origin: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
+      token: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
+      runApprovalAuditLogId: input.runApprovalAuditLogId,
+    }), true);
+    assert.equal(terminalCalls, 1);
+  } finally { globalThis.fetch = prior; }
+});
+
 test("default-off runner never asks the app or reaches a provider transport", async (t) => {
   const input = fixture(t);
   delete input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED;
