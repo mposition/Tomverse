@@ -23,10 +23,20 @@
  * running, and only that class's window is skipped.
  *
  * A suggestion is kept 30 days after it became terminal or after its report
- * closed, whichever is earlier. The report has no closure timestamp, so the
- * batch makes the two the same moment: before deleting, it moves every open
- * suggestion of a closed report to `invalidated`, so its terminal time is at
- * most one retention interval after the closure.
+ * closed, whichever is earlier. The report keeps no closure timestamp (a
+ * closure without a notification writes no lifecycle event), so two rules
+ * stand in for it:
+ *
+ *   * each batch first moves open suggestions of closed reports to
+ *     `invalidated`, so a suggestion's terminal time is at most one
+ *     retention interval after its report closed;
+ *   * a terminal suggestion is also due once its closed report's updatedAt
+ *     is 30 days old. updatedAt is never earlier than the closure, so this
+ *     never deletes early, and it bounds a backlog: a report closed long ago
+ *     does not restart its suggestion's 30 days at the invalidation.
+ *
+ * What remains is the gap between a closure and the next successful retention
+ * run, which the liveness heartbeat bounds.
  *
  * A class whose statement was cancelled is quarantined for the rest of the
  * run: later batches carry the other classes without it, so their deletes
@@ -90,12 +100,16 @@ const OPEN_SUGGESTION_STATES = SUGGESTION_STATES.filter((state) => !SUGGESTION_T
  * Moves up to `size` open suggestions of closed reports to invalidated. The
  * report is read, not locked: this write locks only suggestion rows, so an
  * account deletion holding the report waits here and never the other way.
+ * The open-state condition is repeated on the updated row: a second run that
+ * waited for the first one's lock re-reads the row and skips it, instead of
+ * updating a terminal row the guard trigger refuses.
  */
-const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
+export const invalidateClosedReportSuggestions = (tx: Tx, size: number) =>
   tx.$executeRaw`
     UPDATE "SupportTriageSuggestion" s
        SET "state" = 'invalidated'
-     WHERE s."id" IN (
+     WHERE s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+       AND s."id" IN (
        SELECT o."id"
          FROM "SupportTriageSuggestion" o
          JOIN "Feedback" f ON f."id" = o."feedbackId"
@@ -121,8 +135,11 @@ const readWindow = (tx: Tx, cls: RetentionClass, after: Cursor, size: number) =>
       return tx.$queryRaw<WindowRow[]>`
         SELECT s."id", s."updatedAt" AS "at"
           FROM "SupportTriageSuggestion" s
+          JOIN "Feedback" f ON f."id" = s."feedbackId"
          WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
-           AND s."updatedAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
+           AND (s."updatedAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
+                OR (f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
+                    AND f."updatedAt" <= (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)))
            AND (${afterAt}::timestamp(3) IS NULL OR (s."updatedAt", s."id") > (${afterAt}::timestamp(3), ${afterId}::text))
          ORDER BY s."updatedAt", s."id"
          LIMIT ${size}::integer`;
@@ -267,16 +284,16 @@ const overdueState = async () => {
       SELECT r."createdAt" + make_interval(days => ${SUPPORT_TRIAGE_RUN_RETENTION_DAYS}::integer) AS "dueAt"
         FROM "SupportTriageRun" r
       UNION ALL
-      SELECT s."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
-        FROM "SupportTriageSuggestion" s WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
-      UNION ALL
-      -- An open suggestion of a closed report not yet invalidated. The report's
-      -- updatedAt is no earlier than its closure, so this can only under-state
-      -- how long the row has been due, never report one that is not.
-      SELECT f."updatedAt" + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
+      -- The earlier of: terminal for 30 days, or its report closed for 30
+      -- days. The report's updatedAt is no earlier than its closure, so the
+      -- second arm can only under-state how long a row has been due.
+      SELECT LEAST(
+               CASE WHEN s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[]) THEN s."updatedAt" END,
+               CASE WHEN f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[]) THEN f."updatedAt" END
+             ) + make_interval(days => ${TERMINAL_SUGGESTION_RETENTION_DAYS}::integer)
         FROM "SupportTriageSuggestion" s JOIN "Feedback" f ON f."id" = s."feedbackId"
-       WHERE f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
-         AND s."state" = ANY(${OPEN_SUGGESTION_STATES}::text[])
+       WHERE s."state" = ANY(${[...SUGGESTION_TERMINAL_STATES]}::text[])
+          OR f."status" = ANY(${CLOSED_REPORT_STATUSES}::text[])
       UNION ALL
       SELECT g."keyRetiredAt" + make_interval(days => ${TERMINAL_GROUP_RETENTION_DAYS}::integer)
         FROM "SupportTriageGroup" g WHERE g."state" = ANY(${GROUP_TERMINAL_STATES}::text[])

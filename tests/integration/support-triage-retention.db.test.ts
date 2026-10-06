@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
-import { runSupportTriageRetention } from "@/lib/supportTriageRetention";
+import { invalidateClosedReportSuggestions, runSupportTriageRetention } from "@/lib/supportTriageRetention";
 
 // One retention run (docs/policy/support-triage.md §5).
 //
@@ -424,4 +424,75 @@ test("toxic rows in three classes cannot keep the fourth from committing", async
       await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "test_toxic_${table}"()`);
     }
   }
+});
+
+test("a suggestion of a report closed 40 days ago is deleted now, not 30 days after its invalidation", async () => {
+  await prisma.feedback.create({ data: { id: "fb-ret-long-closed", type: "bug", message: "closed", status: "closed" } });
+  await prisma.supportTriageSuggestion.create({ data: { id: "s-long", feedbackId: "fb-ret-long-closed", inputDigest: "3".repeat(64) } });
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Feedback" SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC') - interval '40 days' WHERE "id" = 'fb-ret-long-closed'`
+  );
+  // Before the run the row already counts as overdue.
+  const result = await runSupportTriageRetention();
+  assert.equal(await prisma.supportTriageSuggestion.count({ where: { id: "s-long" } }), 0);
+  assert.equal(result.overdueRemaining, 0);
+  const [batch] = await prisma.adminAuditLog.findMany({ where: { action: "support_triage.retention_batch" } });
+  assert.equal((batch.metadata as Record<string, unknown>).invalidated, 1);
+  assert.equal((batch.metadata as Record<string, unknown>).suggestions, 1);
+});
+
+test("an open suggestion of a report closed 40 days ago is overdue until a run deletes it", async () => {
+  await prisma.feedback.create({ data: { id: "fb-ret-stuck", type: "bug", message: "closed", status: "resolved" } });
+  await prisma.supportTriageSuggestion.create({ data: { id: "s-stuck", feedbackId: "fb-ret-stuck", inputDigest: "4".repeat(64) } });
+  await prisma.$executeRawUnsafe(
+    `UPDATE "Feedback" SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC') - interval '40 days' WHERE "id" = 'fb-ret-stuck'`
+  );
+  // Every invalidation sleeps past statement_timeout, so the run cannot touch it.
+  await prisma.$executeRawUnsafe(`CREATE FUNCTION test_slow_invalidate() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN PERFORM pg_sleep(1); RETURN NEW; END $$`);
+  await prisma.$executeRawUnsafe(`CREATE TRIGGER "test_slow_invalidate" BEFORE UPDATE ON "SupportTriageSuggestion"
+    FOR EACH ROW EXECUTE FUNCTION test_slow_invalidate()`);
+  try {
+    const result = await runSupportTriageRetention();
+    assert.equal(result.overdueRemaining, 1);
+    assert.ok(result.oldestOverdueAgeSeconds >= 9 * 86_400, String(result.oldestOverdueAgeSeconds));
+  } finally {
+    await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_invalidate" ON "SupportTriageSuggestion"`);
+    await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_slow_invalidate()`);
+  }
+});
+
+test("two overlapping invalidations of the same row: the second skips it instead of failing", async () => {
+  await prisma.feedback.create({ data: { id: "fb-ret-race", type: "bug", message: "closed", status: "closed" } });
+  await prisma.supportTriageSuggestion.create({ data: { id: "s-race", feedbackId: "fb-ret-race", inputDigest: "5".repeat(64) } });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held!: () => void;
+  const holding = new Promise<void>((resolve) => (held = resolve));
+  const first = prisma.$transaction(async (tx) => {
+    const count = await invalidateClosedReportSuggestions(tx, 500);
+    held();
+    await gate;
+    return count;
+  }, { timeout: 15_000 });
+  await holding;
+  let secondPid = 0;
+  const second = prisma.$transaction(async (tx) => {
+    const [row] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_catalog.pg_backend_pid() AS pid`;
+    secondPid = row.pid;
+    return invalidateClosedReportSuggestions(tx, 500);
+  }, { timeout: 15_000 });
+  for (let i = 0; ; i += 1) {
+    if (secondPid !== 0) {
+      const [row] = await prisma.$queryRaw<{ n: number }[]>`
+        SELECT pg_catalog.cardinality(pg_catalog.pg_blocking_pids(${secondPid}::int))::int AS n`;
+      if (row.n > 0) break;
+    }
+    assert.ok(i < 100, "the second invalidation never waited on the first");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  release();
+  assert.equal(await first, 1);
+  assert.equal(await second, 0);
+  assert.equal((await prisma.supportTriageSuggestion.findUniqueOrThrow({ where: { id: "s-race" } })).state, "invalidated");
 });
