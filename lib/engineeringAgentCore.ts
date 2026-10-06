@@ -431,6 +431,22 @@ export const RUNNER_REPORTABLE_OUTCOMES = RUN_OUTCOMES.filter(
 ) as [Exclude<RunOutcome, "abandoned" | "private_result">,
   ...Exclude<RunOutcome, "abandoned" | "private_result">[]];
 
+/** A v22 Task has at most one publication product. A private result is not
+ * misreported as a draft, and an owner draft is not misreported as a PR. */
+export const v22RunOutcomeForProduct = (input: {
+  taskOutcome: "succeeded" | "failed" | "blocked";
+  productKind: string | null;
+}): RunOutcome => {
+  if (input.productKind !== null && input.productKind !== "publish" &&
+      input.productKind !== "t2_draft")
+    throw new Error("v22 publication product kind invalid");
+  if (input.productKind && input.taskOutcome !== "succeeded")
+    throw new Error("v22 publication product without successful result");
+  if (input.productKind === "publish") return "t1_queued";
+  if (input.productKind === "t2_draft") return "t2_draft";
+  return input.taskOutcome === "succeeded" ? "private_result" : "agent_failed";
+};
+
 /** How a run's outcome settles the AMUX attempt it is bound to. */
 export const AMUX_SETTLEMENT_FOR_OUTCOME: Readonly<
   Record<RunOutcome, "review" | "retry" | "blocked" | null>

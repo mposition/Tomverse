@@ -38,6 +38,7 @@ import {
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
+import { v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
@@ -1177,16 +1178,14 @@ export async function settleAmuxV22TaskExecution(input: {
       });
       if (run?.status === "active") {
         const product = await tx.engineeringAgentWorkItem.findFirst({
-          where: { runId: run.id, kind: "publish" },
-          select: { id: true },
+          where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
+          select: { id: true, kind: true },
         });
-        if (product && input.outcome !== "succeeded")
-          throw new Error("v22 publication product without successful result");
         await endEngineeringAgentRun(
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
             runId: run.id, amuxAttemptId: attempt.id,
-            outcome: product ? "t1_queued" : input.outcome === "succeeded" ?
-              "private_result" : "agent_failed",
+            outcome: v22RunOutcomeForProduct({ taskOutcome: input.outcome,
+              productKind: product?.kind ?? null }),
             halt: "none",
           });
       }
