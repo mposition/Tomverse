@@ -1913,9 +1913,15 @@ pub struct ExecutionSettleResponse {
 #[serde(deny_unknown_fields)]
 pub struct AutoPromotionTickResponse {
     pub promoted: bool,
+    pub claimed: Option<bool>,
     pub reason: Option<String>,
     pub consumption_id: Option<String>,
     pub expired: Option<i64>,
+    pub policy_version: Option<i64>,
+    pub receipt_id: Option<String>,
+    pub task_id: Option<String>,
+    pub assignment_id: Option<String>,
+    pub worker_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2490,6 +2496,38 @@ pub(crate) fn recovery_answer_is_valid(
 /// the route sends, whatever its reason, and the 409 `apply_disabled`.
 pub(crate) fn tick_answer_is_valid(status: StatusCode, body: &AutoPromotionTickResponse) -> bool {
     let expired = body.expired.is_none_or(|value| value >= 0);
+    if body.policy_version == Some(22) {
+        return match status {
+            StatusCode::OK if body.promoted => {
+                body.claimed.is_none() && body.reason.is_none() && body.consumption_id.is_none()
+                    && body.expired.is_none()
+                    && body.receipt_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.task_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.assignment_id.is_none() && body.worker_name.is_none()
+            }
+            StatusCode::OK if body.claimed == Some(true) => {
+                !body.promoted && body.reason.is_none() && body.consumption_id.is_none()
+                    && body.expired.is_none() && body.receipt_id.is_none()
+                    && body.task_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.assignment_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.worker_name.as_deref().is_some_and(|value| !value.is_empty())
+            }
+            StatusCode::OK if !body.promoted => {
+                body.claimed.is_none() &&
+                body.reason.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.reason.as_deref() != Some("outcome_unknown")
+                    && body.consumption_id.is_none() && body.expired.is_none()
+                    && body.receipt_id.is_none() && body.task_id.is_none()
+                    && body.assignment_id.is_none() && body.worker_name.is_none()
+            }
+            _ => false,
+        };
+    }
+    if body.policy_version.is_some() || body.claimed.is_some() ||
+        body.receipt_id.is_some() || body.task_id.is_some() ||
+        body.assignment_id.is_some() || body.worker_name.is_some() {
+        return false;
+    }
     match status {
         StatusCode::OK => {
             expired

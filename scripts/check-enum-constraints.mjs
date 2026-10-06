@@ -746,6 +746,13 @@ const REGISTRY = {
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
   },
+  AmuxV22LaneDecision_lane_check: {
+    owner: "list",
+    module: "lib/amux/v22WorkerClaimCore.ts",
+    list: "AMUX_V22_CLAIM_LANES",
+    reason:
+      "The owner-declared normal, parallel and SEV1 worker-assignment lanes are a closed v22 capacity contract. A fourth value must update the guard and owner route together.",
+  },
   AmuxWorkItem_kind_check: {
     owner: "database",
     reason:

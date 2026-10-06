@@ -750,6 +750,7 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           owner: {
             not: null,
           },
+          ...legacyDispatchSourceFilter(),
           archivedAt: null,
           dependencies: runnableDependencyFilter(),
         },

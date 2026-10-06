@@ -292,6 +292,53 @@ test("portfolio evidence and score history are audited, path-bound and append-on
     await rejects(`UPDATE public."AmuxWorkItem"
       SET "v4BriefDigest" = $2 WHERE "id" = $1`,
     [ids.task, "e".repeat(64)], "AmuxV4TaskDag_binding_check");
+
+    // A13: owner lane evidence and a system assignment receipt are separate
+    // from promotion. The accepted card stays Todo; it cannot execute here.
+    const laneSeq = (await client.query(`SELECT nextval(pg_get_serial_sequence(
+      'public."AmuxV22LaneDecision"', 'sequence')) AS sequence`)).rows[0].sequence;
+    const laneAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: "synthetic-owner", action: "amux.v22.lane.declared",
+      targetType: "AmuxV22LaneDecision", targetId: String(laneSeq),
+      summary: "synthetic SEV1 declaration",
+      metadata: { taskId: ids.task, lane: "sev1" },
+    });
+    await client.query(`INSERT INTO public."AmuxV22LaneDecision"
+      ("sequence", "workItemId", "lane", "approvedByUserId",
+       "authorizationAuditLogId", "decidedAt")
+      VALUES ($1, $2, 'sev1', 'synthetic-owner', $3, CURRENT_TIMESTAMP)`,
+    [laneSeq, ids.task, laneAudit]);
+    await client.query("SET CONSTRAINTS amux_v22_lane_guard_trigger IMMEDIATE");
+    const assignmentId = randomUUID();
+    const assignmentAudit = await appendSyntheticAdminAudit(client, {
+      actorUserId: null, action: "amux.v22.worker.assigned",
+      targetType: "AmuxV22WorkerAssignment", targetId: assignmentId,
+      summary: "synthetic v22 assignment", metadata: {
+        systemActor: "amux-v22-worker-claim", taskId: ids.task,
+        workerName: "worker-one", lane: "sev1" },
+    });
+    await client.query(`INSERT INTO public."AmuxV22WorkerAssignment"
+      ("id", "workItemId", "promotionReceiptId", "laneDecisionSequence",
+       "lane", "taskRevision", "workerName", "workerInstanceId",
+       "workerGeneration", "provider", "modelId", "role", "grade",
+       "routeId", "routePolicyDigest", "catalogApprovalId",
+       "catalogVersion", "costReceiptDigest", "perAttemptMicroUsd",
+       "authorizationAuditLogId", "assignedAt") VALUES
+      ($1, $2, $3, $4, 'sev1', 1, 'worker-one', 'instance-one',
+       1, 'openai', 'model-one', 'implement', 'medium', 'route-one', $5,
+       'catalog-one', 'v1', $5, 1000, $6, CURRENT_TIMESTAMP)`,
+    [assignmentId, ids.task, receiptId, laneSeq, digest, assignmentAudit]);
+    await client.query(`UPDATE public."AmuxWorkItem"
+      SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP,
+        "v22AssignmentId" = $2, "revision" = 2
+      WHERE "id" = $1`, [ids.task, assignmentId]);
+    await client.query(`SET CONSTRAINTS amux_v22_assignment_guard_trigger,
+      amux_v22_assignment_row_guard_trigger IMMEDIATE`);
+    const assigned = await client.query(`SELECT "status", "owner",
+      "v22AssignmentId" FROM public."AmuxWorkItem" WHERE "id" = $1`,
+    [ids.task]);
+    assert.deepEqual(assigned.rows[0], { status: "todo", owner: "worker-one",
+      v22AssignmentId: assignmentId });
   } finally {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.end();

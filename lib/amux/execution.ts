@@ -111,6 +111,7 @@ type AttemptLockRow = {
 
 type TaskLockRow = {
   id: string;
+  sourceSystem: string | null;
   owner: string | null;
   status: string;
   revision: number;
@@ -179,6 +180,7 @@ const lockTask = async (
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
+      "sourceSystem",
       "owner",
       "status",
       "revision",
@@ -299,13 +301,14 @@ export async function startAmuxExecution(
       const planning = await tx.amuxWorkItem.findUnique({
         where: { id: input.taskId },
         select: {
+          sourceSystem: true,
           projectKey: true,
           teamKey: true,
           effortPoints: true,
           estimatedCostMicrousd: true,
         },
       });
-      if (!planning) {
+      if (!planning || planning.sourceSystem === "admin-idea-v4") {
         return {
           started: false as const,
           reason: "task_not_startable" as const,
@@ -333,6 +336,7 @@ export async function startAmuxExecution(
       const lockedTask = await lockTask(tx, input.taskId);
       if (
         !lockedTask ||
+        lockedTask.sourceSystem === "admin-idea-v4" ||
         lockedTask.owner !== input.worker ||
         lockedTask.status !== "todo" ||
         lockedTask.archivedAt !== null ||

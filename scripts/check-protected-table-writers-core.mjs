@@ -554,6 +554,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The v22 evidence tables hold restrictive audit foreign keys and the receipt guard reads the exact canonical system audit row and its hash before accepting a Task pointer. The migration does not insert, update or delete AdminAuditLog; the application writes it through lib/adminAudit.ts in the promotion transaction.",
   },
   {
+    path: "prisma/migrations/20261006110000_amux_v22_worker_assignment/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 32,
+    reason:
+      "The A13 lane and assignment tables hold restrictive audit foreign keys. Deferred guards only read the canonical human or system audit row and its hash before accepting a lane or worker pointer. This migration never inserts, updates or deletes AdminAuditLog; its only audit writers use lib/adminAudit.ts in the same transaction.",
+  },
+  {
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,
@@ -656,7 +664,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 19,
+    writeVerbs: 20,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },

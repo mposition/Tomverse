@@ -2279,6 +2279,8 @@ model AdminAuditLog {
   amuxV22PromotionControls AmuxV22PromotionControl[] @relation("AmuxV22PromotionControlAudit")
   amuxV22PromotionReceipts AmuxV22PromotionReceipt[] @relation("AmuxV22PromotionReceiptAudit")
   amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
+  amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
+  amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -7133,6 +7135,7 @@ model AmuxWorkItem {
   v4TerminalAt          DateTime?
   v4SourceApprovalId    String?
   v22ReceiptId          String?   @unique @db.Uuid
+  v22AssignmentId       String?   @unique @db.Uuid
   taskRole              String?
   executionGrade        String?
   createdAt             DateTime  @default(now())
@@ -7169,6 +7172,9 @@ model AmuxWorkItem {
   portfolioScoreSnapshots AmuxPortfolioScoreSnapshot[]
   v22PromotionReceipt AmuxV22PromotionReceipt? @relation("AmuxV22PromotionCard")
   v22AcceptedReceipt AmuxV22PromotionReceipt? @relation("AmuxV22AcceptedReceipt", fields: [v22ReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22Assignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentCard")
+  v22AcceptedAssignment AmuxV22WorkerAssignment? @relation("AmuxV22AcceptedAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22LaneDecisions AmuxV22LaneDecision[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -9503,6 +9509,7 @@ model AmuxV22PromotionReceipt {
   acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedReceipt")
   scoreSnapshot AmuxPortfolioScoreSnapshot @relation(fields: [scoreSnapshotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionReceiptAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
 }
 
 /// A lost result is never blindly retried. The shared v8 halt still applies.
@@ -9516,6 +9523,57 @@ model AmuxV22PromotionUnknown {
   authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionUnknownAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([recordedAt])
+}
+
+/// Owner decisions are append-only. The latest sequence is the effective lane;
+/// normal clears a prior SEV1 or parallel declaration without rewriting it.
+model AmuxV22LaneDecision {
+  sequence                BigInt   @id @default(autoincrement())
+  workItemId              String
+  lane                    String
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  decidedAt               DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22LaneAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
+
+  @@index([workItemId, sequence])
+}
+
+/// A Todo assignment, not execution authority. A15 must establish its own
+/// attempt and execution-cost fence before any v4 Task can enter doing.
+model AmuxV22WorkerAssignment {
+  id                      String   @id @db.Uuid
+  workItemId              String
+  promotionReceiptId      String   @db.Uuid
+  laneDecisionSequence    BigInt?
+  lane                    String
+  taskRevision            Int
+  workerName              String
+  workerInstanceId        String
+  workerGeneration        Int
+  provider                String
+  modelId                 String
+  role                    String
+  grade                   String
+  routeId                 String
+  routePolicyDigest       String
+  catalogApprovalId       String
+  catalogVersion          String
+  costReceiptDigest       String
+  perAttemptMicroUsd      BigInt
+  authorizationAuditLogId String   @unique
+  assignedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22AssignmentCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedAssignment")
+  promotionReceipt AmuxV22PromotionReceipt @relation(fields: [promotionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  laneDecision AmuxV22LaneDecision? @relation(fields: [laneDecisionSequence], references: [sequence], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22AssignmentAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([workItemId, assignedAt])
 }
 
 /// Owner-approved, versioned Agent worker/model ceiling inputs. These are
