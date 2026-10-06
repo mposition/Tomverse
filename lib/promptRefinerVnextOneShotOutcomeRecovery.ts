@@ -13,7 +13,7 @@ import {
 } from
   "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const STOP_ACTION = "prompt_refiner.vnext_one_shot.outcome_unknown";
 const STOP_SUMMARY = "Stopped the one-shot run after an uncertain request outcome.";

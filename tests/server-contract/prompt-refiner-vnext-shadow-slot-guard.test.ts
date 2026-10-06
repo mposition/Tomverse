@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-let stageId = "prompt-refiner-vnext-one-shot-v3";
+let stageId = "prompt-refiner-vnext-one-shot-v4";
 const requestId = "11111111-1111-4111-8111-111111111111";
 const input = { requestId, slotIndex: 0,
   runApprovalAuditLogId: "synthetic-run-audit" };
@@ -108,7 +108,7 @@ test("closed legacy reservations cannot be consumed for the replacement run", as
 });
 
 test("both enabled switches and valid runner request still refuse only missing paid audit", async () => {
-  stageId = "prompt-refiner-vnext-one-shot-v3";
+  stageId = "prompt-refiner-vnext-one-shot-v4";
   shadowValid = true;
   paidValid = false;
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED = "1";

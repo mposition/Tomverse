@@ -9,7 +9,7 @@ let authenticated = false;
 let role = "owner";
 let recent = true;
 let reads = 0;
-const result = { stageId: "prompt-refiner-vnext-one-shot-v3",
+const result = { stageId: "prompt-refiner-vnext-one-shot-v4",
   stageStatus: "run_approved", valid: true, reservedSlots: 80,
   terminalReceipts: 0, unknownReceipts: 0, consumedWithoutReceipt: 0,
   observedCostMicroUsd: 0, unresolvedCostUpperBoundMicroUsd: 0, slots: [] };

@@ -19,8 +19,8 @@ import {
 import type { PromptRefinerVnextOneShotAuditBinding } from
   "@/lib/promptRefinerVnextOneShotAuditReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
-const PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v2";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
@@ -68,7 +68,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
   } catch {
     signerPinValid = false;
   }
-  if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v3-paid-audit-guard-v1" ||
+  if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v4-paid-terminal-guard-v1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED !== "1" ||

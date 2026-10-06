@@ -10,7 +10,7 @@ import { promptRefinerVnextOneShotGatePublicKeyDigest,
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v3";
+const stageId = "prompt-refiner-vnext-one-shot-v4";
 const target = { stageApprovalAuditLogId: "synthetic-stage-audit",
   runApprovalAuditLogId: "synthetic-run-audit",
   shadowAuditLogId: "synthetic-shadow-audit",

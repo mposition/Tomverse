@@ -100,7 +100,7 @@ async function loadRoute() {
         assert.deepEqual(input.proof, proof);
         if (unknown) throw new Error("private transaction failure");
         readbackValid = true;
-        return { stageId: "prompt-refiner-vnext-one-shot-v3",
+        return { stageId: "prompt-refiner-vnext-one-shot-v4",
           shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false };
       },
       readPromptRefinerVnextOneShotOperationalShadow: async () => ({
@@ -149,11 +149,11 @@ test("write and readback are content-free; unknown outcome requests human readba
   assert.equal((await route.POST(request({ ...body, sourceText: "never accepted" }))).status, 400);
   const written = await route.POST(request());
   assert.equal(written.status, 201);
-  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v3",
+  assert.deepEqual(await written.json(), { stageId: "prompt-refiner-vnext-one-shot-v4",
     shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false });
   const readback = await route.GET(readRequest());
   assert.equal(readback.status, 200);
-  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v3"]);
+  assert.deepEqual(stageReadIds, ["prompt-refiner-vnext-one-shot-v4"]);
   const observed = (await readback.json()).readback;
   assert.equal(observed.evidence.valid, true);
   assert.equal(observed.evidence.cacheWriteInputTokens, 0);

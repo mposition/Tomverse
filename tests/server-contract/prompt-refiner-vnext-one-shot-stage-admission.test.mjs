@@ -26,7 +26,7 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
 });
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   promptRefinerVnextOneShotStage: { findUnique: async ({ where }) => {
-    assert.equal(where.id, "prompt-refiner-vnext-one-shot-v2");
+    assert.equal(where.id, "prompt-refiner-vnext-one-shot-v3");
     return { sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64) };
   } },
 } } });
@@ -72,7 +72,7 @@ test.after(() => {
 test("stage binding comes from fresh app and Railway observations", async () => {
   const binding = await preparePromptRefinerVnextOneShotStageBinding(expected);
   assert.deepEqual(binding, {
-    id: "prompt-refiner-vnext-one-shot-v3", ...expected,
+    id: "prompt-refiner-vnext-one-shot-v4", ...expected,
     perRequestCostMicroUsd: 29_918n, slotCount: 80,
     costCeilingMicroUsd: 2_393_440n,
     sourceCommitPreregistrationVerified: false,
@@ -129,7 +129,7 @@ test("missing or different server custody pins refuse before external observatio
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT = expected.manifestRoot;
 });
 
-test("v3 stage refuses missing future-route pins and an app-held provider key", async () => {
+test("v4 stage refuses missing future-route pins and an app-held provider key", async () => {
   const token = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
   delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
   await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(expected),

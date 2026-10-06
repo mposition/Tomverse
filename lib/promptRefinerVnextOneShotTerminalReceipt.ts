@@ -22,7 +22,7 @@ import { readPromptRefinerVnextOneShotStage } from
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const ACTION = "prompt_refiner.vnext_one_shot.terminal_recorded";
 const STOP_ACTION = "prompt_refiner.vnext_one_shot.outcome_unknown";
 const SUMMARY = "Recorded one content-free one-shot terminal result and billed usage.";

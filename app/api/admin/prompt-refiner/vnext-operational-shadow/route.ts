@@ -108,7 +108,7 @@ export async function GET(request: Request) {
     if ("response" in access) return access.response;
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v3" },
+        where: { id: "prompt-refiner-vnext-one-shot-v4" },
       });
       const snapshot = await readPromptRefinerVnextOneShotStage(tx);
       const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
