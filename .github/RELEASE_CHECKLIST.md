@@ -320,6 +320,9 @@ Date / timezone:    ____________________
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run verify:prompt-refiner-vnext-one-shot-gate-source` — proves the
+      pinned deterministic one-shot gate source still matches its approved
+      closure before any signed owner result is accepted
 - [ ] `npm run check:doc-references` — proves AGENTS.md and every contract and
       policy document under it, and every source comment that names a path,
       still point at files that exist. A comment naming a test file is a claim

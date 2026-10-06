@@ -876,6 +876,24 @@ test.describe("Zoom and orientation", { tag: "@ui-risk" }, () => {
     });
   }
 
+  test("300% zoom without history keeps the menu and model on one row", async ({ page }) => {
+    await enterMobileChat(page, {
+      selectedModels: [MODEL_A],
+      viewport: { width: 137, height: 247 },
+    });
+
+    const controls = await readHeaderControls(page);
+    expect(controls.newChat).toBeNull();
+    expect(controls.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+    for (const name of ["menu", "model"] as const) {
+      const control = controls[name];
+      expect(control).not.toBeNull();
+      expect(control!.width).toBeGreaterThanOrEqual(TOUCH_MIN);
+      expect(control!.right).toBeLessThanOrEqual(controls.contentRight + 0.5);
+      expect(control!.centreHits).toBe(true);
+    }
+  });
+
   // The same squeeze at 200% zoom: the menu and new-chat buttons were 29-32px
   // wide at 195-206px. Here the model button shrinks instead and the row stays
   // one line, so the header keeps its usual height.
@@ -895,6 +913,39 @@ test.describe("Zoom and orientation", { tag: "@ui-risk" }, () => {
       expect(controls.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
     });
   }
+
+  for (const width of [182, 188]) {
+    test(`narrow header at ${width}px keeps the model glyph inside its button`, async ({ page }) => {
+      await enterMobileChat(page, {
+        existingConversation: true,
+        selectedModels: THREE_MODELS,
+        messages: HISTORY,
+        viewport: { width, height: 422 },
+      });
+
+      expectControlsReachable(await readHeaderControls(page), `${width}px`);
+      const chevronFits = await summary(page).evaluate((button) => {
+        const chevron = button.querySelector("svg:last-of-type");
+        if (!chevron || getComputedStyle(chevron).display === "none") return true;
+        return chevron.getBoundingClientRect().right <= button.getBoundingClientRect().right - 1;
+      });
+      expect(chevronFits, `${width}px: the chevron paints beyond the model button`).toBe(true);
+    });
+  }
+
+  test("200% text scaling keeps all three header controls reachable", async ({ page }) => {
+    await enterMobileChat(page, {
+      existingConversation: true,
+      selectedModels: THREE_MODELS,
+      messages: HISTORY,
+      viewport: { width: 320, height: 568 },
+    });
+
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "32px";
+    });
+    expectControlsReachable(await readHeaderControls(page), "320px at 200% text size");
+  });
 
   // Landscape widths that still mount the mobile shell: past 768px the
   // desktop shell takes over, so a 390x844 phone rotated is no longer this
