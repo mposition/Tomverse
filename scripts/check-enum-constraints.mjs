@@ -1072,6 +1072,13 @@ const REGISTRY = {
     reason:
       "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
   },
+  SupportTriageDecisionRecord_decisionKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "DECISION_KINDS",
+    reason:
+      "What a person decided: a suggestion accepted or rejected, a group confirmed or dismissed, a sample judged. One record per decision; the record itself is never changed.",
+  },
   SupportTriageGroup_state_check: {
     owner: "list",
     module: "lib/supportTriageCore.ts",
