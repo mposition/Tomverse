@@ -4,6 +4,8 @@ import { PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
 
 export const V4_STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 export const V5_STAGE_ID = "prompt-refiner-vnext-one-shot-v5";
+export type PromptRefinerRunnableStageId =
+  typeof V4_STAGE_ID | typeof V5_STAGE_ID;
 export const V4_DEPLOYMENT_ID = "35787baf-2329-4002-b837-182ae9f51d13";
 export const V4_COMMIT_SHA = "e3ecfcdc5eee9cbce8f79fda39eb76a87c445819";
 export const V4_OBSERVED_COST_MICRO_USD = 7_624;

@@ -347,3 +347,63 @@ test("source drift after consumption prevents a provider call", async (t) => {
   assert.equal(result.stopRecorded, false);
   assert.equal(result.humanReviewRequired, true);
 });
+
+test("v5 owner slot binds admission and terminal telemetry to v5", async (t) => {
+  const input = { ...fixture(t), stageId: "prompt-refiner-vnext-one-shot-v5" };
+  let calls = 0;
+  const result = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      calls++;
+      assert.ok(url.endsWith("-slot"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      return grantFor(body);
+    },
+    generate: async () => boundedResponse(),
+  });
+  assert.equal(result.status, "bounded_response");
+  assert.equal(calls, 1);
+  const prior = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, options) => {
+      calls++;
+      assert.ok(url.endsWith("-terminal"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      assert.equal(JSON.stringify(body).includes("refinedPrompt"), false);
+      return Response.json({ terminalAuditLogId: "synthetic-v5-terminal-audit",
+        requestId: result.requestId, slotIndex: result.slotIndex,
+        observedCostMicroUsd: result.costUpperBoundMicroUsd,
+        dispatchAuthorized: false }, { status: 201 });
+    };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(result, {
+      origin: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
+      token: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
+      runApprovalAuditLogId: input.runApprovalAuditLogId,
+      stageId: input.stageId,
+    }), true);
+  } finally { globalThis.fetch = prior; }
+  assert.equal(calls, 2);
+});
+
+test("v5 owner transport unknown sends one v5 stop", async (t) => {
+  const input = { ...fixture(t), stageId: "prompt-refiner-vnext-one-shot-v5" };
+  let stops = 0;
+  const result = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      if (url.endsWith("-slot")) return grantFor(body);
+      assert.ok(url.endsWith("-stop"));
+      stops++;
+      return Response.json({ stopAuditLogId: "synthetic-v5-stop-audit",
+        reservationHeld: true, humanReviewRequired: true,
+        retryAuthorized: false, dispatchAuthorized: false }, { status: 201 });
+    },
+    generate: async () => { throw new Error("synthetic transport failure"); },
+  });
+  assert.equal(result.status, "outcome_unknown");
+  assert.equal(result.retryAuthorized, false);
+  assert.equal(result.stopRecorded, true);
+  assert.equal(stops, 1);
+});

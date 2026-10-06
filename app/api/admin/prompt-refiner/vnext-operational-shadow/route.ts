@@ -21,14 +21,25 @@ import { readPromptRefinerVnextOneShotPaidAuthorization } from
   "@/lib/promptRefinerVnextOneShotPaidAuthorization";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { readPromptRefinerVnextOneShotTerminalReceipts } from
+  "@/lib/promptRefinerVnextOneShotTerminalReceipt";
+import { V4_HELD_COST_MICRO_USD, V4_OBSERVED_COST_MICRO_USD } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
+const V4 = "prompt-refiner-vnext-one-shot-v4";
+const V5 = "prompt-refiner-vnext-one-shot-v5";
+const V4_CONFIRMATION = "RECORD_VNEXT_ONE_SHOT_OPERATIONAL_SHADOW_80_SLOTS";
+const V5_CONFIRMATION = "RECORD_VNEXT_ONE_SHOT_NEW_V5_OPERATIONAL_SHADOW_80_SLOTS";
 const requestSchema = z.object({
+  stageId: z.literal(V5).optional(),
   proof: promptRefinerVnextOneShotShadowProofSchema,
-  confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_OPERATIONAL_SHADOW_80_SLOTS"),
-}).strict();
+  confirmation: z.enum([V4_CONFIRMATION, V5_CONFIRMATION]),
+}).strict().refine((value) => value.stageId === V5
+  ? value.confirmation === V5_CONFIRMATION
+  : value.confirmation === V4_CONFIRMATION);
 const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_shadow_context_invalid",
   "vnext_one_shot_shadow_proof_invalid",
@@ -83,6 +94,7 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 4 * 1024, requestSchema);
     const result = await recordPromptRefinerVnextOneShotOperationalShadow({
       session: access.session, request, proof: body.proof,
+      stageId: body.stageId,
     });
     return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
@@ -106,15 +118,31 @@ export async function GET(request: Request) {
   try {
     const access = await owner(request, false);
     if ("response" in access) return access.response;
+    const requested = new URL(request.url).searchParams.get("stageId");
+    if (requested !== null && requested !== V5) {
+      return NextResponse.json({ code: "SHADOW_READBACK_STAGE_INVALID" },
+        { status: 400, headers });
+    }
+    const stageId = requested === V5 ? V5 : V4;
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v4" },
+        where: { id: stageId },
       });
-      const snapshot = await readPromptRefinerVnextOneShotStage(tx);
+      const snapshot = await readPromptRefinerVnextOneShotStage(tx, stageId);
       const evidence = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
       const paidAuthorization = stage && await readPromptRefinerVnextOneShotPaidAuthorization(
         tx, stage, evidence.shadowAuditLogId ?? "",
       );
+      const predecessor = stageId === V5
+        ? await readPromptRefinerVnextOneShotTerminalReceipts(tx, V4)
+        : null;
+      const predecessorCostValid = Boolean(predecessor?.valid &&
+        predecessor.stageStatus === "closed" &&
+        predecessor.terminalReceipts === 33 &&
+        predecessor.unknownReceipts === 1 &&
+        predecessor.consumedWithoutReceipt === 0 &&
+        predecessor.observedCostMicroUsd === V4_OBSERVED_COST_MICRO_USD &&
+        predecessor.unresolvedCostUpperBoundMicroUsd === V4_HELD_COST_MICRO_USD);
       return { stageStatus: snapshot.stageStatus,
         slotCount: snapshot.slotCount, reservedSlots: snapshot.reservedSlots,
         consumedSlots: snapshot.consumedSlots,
@@ -127,6 +155,15 @@ export async function GET(request: Request) {
           snapshot.consumedSlots === 0
           ? promptRefinerVnextOneShotShadowTarget(stage) : null,
         evidence,
+        ...(stageId === V5 ? { crossRunCostReadback: predecessorCostValid && stage
+          ? { v4ObservedCostMicroUsd: predecessor!.observedCostMicroUsd,
+              v4HeldCostUpperBoundMicroUsd:
+                predecessor!.unresolvedCostUpperBoundMicroUsd,
+              v5RunCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
+              crossRunWorstCaseMicroUsd: predecessor!.observedCostMicroUsd +
+                predecessor!.unresolvedCostUpperBoundMicroUsd +
+                Number(stage.costCeilingMicroUsd) }
+          : null } : {}),
         paidAuthorizationAuditPresent: paidAuthorization?.present ?? false,
         paidAuthorizationAuditValid: paidAuthorization?.valid ?? false };
     }, { maxWait: 5_000, timeout: 10_000 });

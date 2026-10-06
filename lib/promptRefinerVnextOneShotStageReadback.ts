@@ -14,6 +14,7 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 import { promptRefinerVnextV5RecoveryMetadata,
+  type PromptRefinerRunnableStageId,
   V4_COMMIT_SHA, V4_DEPLOYMENT_ID, V4_STAGE_ID, V5_RECOVERY_ACTION,
   V5_RECOVERY_SUMMARY, V5_STAGE_ID } from
   "@/lib/promptRefinerVnextOneShotV5Recovery";
@@ -171,24 +172,25 @@ export async function lockAndReadPromptRefinerVnextOneShotStage(
   tx: Prisma.TransactionClient,
   deploymentOptions: Parameters<
     typeof assertPromptRefinerVnextOneShotActiveDeploymentForAdmission
-  >[1] = {}
+  >[1] = {},
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<PromptRefinerVnextOneShotStageReadback> {
   const rows = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "PromptRefinerVnextOneShotStage"
-    WHERE "id" = ${STAGE_ID} FOR NO KEY UPDATE NOWAIT
+    WHERE "id" = ${stageId} FOR NO KEY UPDATE NOWAIT
   `;
   if (rows.length === 0) return ABSENT_STAGE;
-  if (rows.length !== 1 || rows[0]?.id !== STAGE_ID) {
+  if (rows.length !== 1 || rows[0]?.id !== stageId) {
     throw new Error("vnext_one_shot_stage_lock_mismatch");
   }
-  const snapshot = await readPromptRefinerVnextOneShotStage(tx);
+  const snapshot = await readPromptRefinerVnextOneShotStage(tx, stageId);
   if (!snapshot.stagePresent) {
     throw new Error("vnext_one_shot_stage_changed_after_lock");
   }
   await assertPromptRefinerVnextOneShotActiveDeploymentForAdmission(
-    tx, deploymentOptions
+    tx, deploymentOptions, stageId
   );
-  await assertPromptRefinerVnextOneShotPriceForAdmission(tx);
+  await assertPromptRefinerVnextOneShotPriceForAdmission(tx, stageId);
   return snapshot;
 }
 

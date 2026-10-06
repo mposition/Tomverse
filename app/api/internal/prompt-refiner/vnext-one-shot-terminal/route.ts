@@ -13,6 +13,7 @@ import { PROMPT_REFINER_VNEXT_CONFIRMED_FAILURE_CODES } from
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().min(1).max(128);
 const bodySchema = z.object({
+  stageId: z.literal("prompt-refiner-vnext-one-shot-v5").optional(),
   requestId: z.string().uuid(),
   slotIndex: z.number().int().min(0).max(79),
   runApprovalAuditLogId: id,
