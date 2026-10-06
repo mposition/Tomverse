@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
@@ -38,6 +38,15 @@ import {
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
+import {
+  EngineeringAgentStoreRefusedError,
+  endEngineeringAgentRun,
+  engineeringAgentTransactionInAmux,
+  heartbeatEngineeringAgentRun,
+  readEngineeringAgentSwitches,
+  recordEngineeringAgentRunStart,
+  requireEngineeringAgentRunAdmission,
+} from "@/lib/engineeringAgentStore";
 import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
@@ -245,10 +254,17 @@ export async function startAmuxV22TaskExecution(input: {
   instanceId: string;
   generation: number;
   expectedRevision: number;
+  /** App-read develop head, supplied only after exact owner disclosure check. */
+  publicationBaseSha?: string | null;
 }) {
   if (!amuxV22TaskExecutionEnabled(process.env[AMUX_V22_TASK_EXECUTION_ENV]))
     return { started: false as const, reason: "v22_execution_disabled" as const };
-  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionStart,
+  const publicationBaseSha = input.publicationBaseSha &&
+    /^[0-9a-f]{40}$/.test(input.publicationBaseSha)
+    ? input.publicationBaseSha : null;
+  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
+      (publicationBaseSha ? 24 : 0) },
     async (tx, context) => {
       const now = context.dbNow;
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
@@ -267,7 +283,7 @@ export async function startAmuxV22TaskExecution(input: {
       const task = await lockTask(tx, input.taskId);
       const card = task && await tx.amuxWorkItem.findUnique({
         where: { id: input.taskId },
-        select: { cardType: true, taskRole: true, executionGrade: true,
+        select: { kind: true, cardType: true, taskRole: true, executionGrade: true,
           v22AssignmentId: true, v4SourceApprovalId: true,
           v4BriefDigest: true, v22ReceiptId: true,
           reviewPrNumber: true },
@@ -353,6 +369,20 @@ export async function startAmuxV22TaskExecution(input: {
           })) {
         return { started: false as const, reason: "cost_unverified" as const };
       }
+      let publicationRunId: string | null = null;
+      if (publicationBaseSha && card.taskRole === "implement" &&
+          (await readEngineeringAgentSwitches(tx)).publishAllowed) {
+        try {
+          // The engineering row is optional for Task execution. A full owner
+          // queue or halted Publisher leaves the Task's result private.
+          await requireEngineeringAgentRunAdmission(
+            engineeringAgentTransactionInAmux(context.attachedTransaction));
+          publicationRunId = String(randomInt(100_000_000_000,
+            1_000_000_000_000));
+        } catch (error) {
+          if (!(error instanceof EngineeringAgentStoreRefusedError)) throw error;
+        }
+      }
       const changed = await tx.amuxWorkItem.updateMany({ where: {
         id: input.taskId, status: "todo", owner: input.worker,
         v22AssignmentId: input.assignmentId, revision: input.expectedRevision,
@@ -377,6 +407,15 @@ export async function startAmuxV22TaskExecution(input: {
         heartbeatAt: now, leaseExpiresAt, startedAt: now,
         v22AssignmentId: input.assignmentId,
       } });
+      if (publicationRunId && publicationBaseSha) {
+        await recordEngineeringAgentRunStart(
+          engineeringAgentTransactionInAmux(context.attachedTransaction), {
+            runId: publicationRunId, amuxAttemptId: attemptId,
+            cardId: task.id, cardKind: card.kind,
+            baseSha: publicationBaseSha,
+            leaseMs: leaseExpiresAt.getTime() - now.getTime(),
+          });
+      }
       await tx.amuxWorkDelivery.create({ data: {
         attemptId, taskId: input.taskId, worker: input.worker,
         workerInstanceId: input.instanceId,
@@ -1006,7 +1045,23 @@ export const heartbeatAmuxExecution = (
 
 export const heartbeatAmuxV22TaskExecution = (
   input: Parameters<typeof heartbeatAmuxExecutionBound>[0],
-) => heartbeatAmuxExecutionBound(input, undefined, true);
+) => heartbeatAmuxExecutionBound(input, {
+  prismaCalls: 4,
+  work: async (lent, fact, context) => {
+    const run = await lent.engineeringAgentRun.findUnique({
+      where: { amuxAttemptId: fact.attemptId },
+      select: { id: true, status: true },
+    });
+    if (run) {
+      if (run.status !== "active") throw new Error("v22 publication run ended early");
+      await heartbeatEngineeringAgentRun(
+        engineeringAgentTransactionInAmux(lent), {
+          runId: run.id, amuxAttemptId: fact.attemptId,
+          leaseMs: fact.leaseExpiresAt.getTime() - context.dbNow.getTime(),
+        });
+    }
+  },
+}, true);
 
 /** A reported result is not a cost observation. Only exact, recorded A14
  * invocation receipts allow success or automatic requeue after a failure. */
@@ -1016,7 +1071,8 @@ export async function settleAmuxV22TaskExecution(input: {
   outcome: "succeeded" | "failed" | "blocked";
   invocationIds: string[];
 }) {
-  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionSettle,
+  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 14 },
     async (tx, context) => {
       const now = context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
@@ -1105,6 +1161,27 @@ export async function settleAmuxV22TaskExecution(input: {
           receiptsComplete, reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString() },
       });
+      const run = await tx.engineeringAgentRun.findUnique({
+        where: { amuxAttemptId: attempt.id },
+        select: { id: true, status: true },
+      });
+      if (run) {
+        if (run.status !== "active")
+          throw new Error("v22 publication run ended before Task settlement");
+        const product = await tx.engineeringAgentWorkItem.findFirst({
+          where: { runId: run.id, kind: "publish" },
+          select: { id: true },
+        });
+        if (product && input.outcome !== "succeeded")
+          throw new Error("v22 publication product without successful result");
+        await endEngineeringAgentRun(
+          engineeringAgentTransactionInAmux(context.attachedTransaction), {
+            runId: run.id, amuxAttemptId: attempt.id,
+            outcome: product ? "t1_queued" : input.outcome === "succeeded" ?
+              "scope_violation" : "agent_failed",
+            halt: "none",
+          });
+      }
       context.requireLeaseAt(runtime.leaseExpiresAt);
       context.requireLeaseAt(attempt.leaseExpiresAt);
       return { settled: true as const, taskRevision: task.revision + 1 };
@@ -1125,7 +1202,9 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
   let quarantined = 0;
   for (const candidate of candidates) {
     const changed = await withAmuxDbBoundary(
-      AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+      { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        prismaCallCeiling:
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 10 },
       async (tx, context) => {
         const now = context.dbNow;
         const runtime = await lockRuntime(tx, candidate.worker);
@@ -1169,6 +1248,17 @@ export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
             reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
             outcome: "unknown" },
         });
+        const run = await tx.engineeringAgentRun.findUnique({
+          where: { amuxAttemptId: attempt.id },
+          select: { id: true, status: true },
+        });
+        if (run?.status === "active") {
+          await endEngineeringAgentRun(
+            engineeringAgentTransactionInAmux(context.attachedTransaction), {
+              runId: run.id, amuxAttemptId: attempt.id,
+              outcome: "abandoned", halt: "none",
+            });
+        }
         context.recordReceipt("work_item", task.id, 1);
         context.recordReceipt("execution_attempt", attempt.id, 1);
         return true;

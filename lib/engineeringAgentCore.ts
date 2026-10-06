@@ -504,7 +504,7 @@ export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[]
  * is still current; tests/engineeringAgentStore.test.mjs compares it with the
  * policy header, so a new policy version cannot go unnoticed.
  */
-export const ENGINEERING_AGENT_POLICY_VERSION = 1;
+export const ENGINEERING_AGENT_POLICY_VERSION = 3;
 
 /**
  * Why an approval observation is not an approval (§9-10). The binding's JSON

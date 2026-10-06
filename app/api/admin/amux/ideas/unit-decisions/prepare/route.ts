@@ -25,6 +25,7 @@ const body = z.object({ ideaId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   featureNodeId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   prepareRequestId: z.uuid().regex(/^[a-f0-9-]+$/),
   cardType: z.enum(["story", "task"]).optional(),
+  publicPrDisclosureApproved: z.boolean().optional().default(false),
   decisionReason: z.string().min(3).max(500).nullable() }).strict();
 
 /** One owner-confirmed Story or Task; the shared write latch remains dark. */

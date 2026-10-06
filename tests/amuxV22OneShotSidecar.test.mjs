@@ -107,6 +107,55 @@ test("one child returns a reviewable result and a content-free receipt", async (
     undefined);
 });
 
+test("implement refuses a dirty baseline before CLI and holds a patch only in memory", async () => {
+  const refused = fakeSpawn(JSON.stringify(usage));
+  const blocked = await runAmuxV22OneShot(request, config, {
+    syntheticPlatform: true, spawnChild: refused.spawnChild,
+    captureBaseline: async () => ({ ok: false, reason: "dirty_worktree" }),
+  });
+  assert.deepEqual({ kind: blocked.kind, failure: blocked.failure,
+    cliStarted: blocked.cliStarted },
+  { kind: "failed", failure: "patch_baseline_dirty_worktree",
+    cliStarted: false });
+  assert.equal(refused.calls.length, 0);
+
+  const stateDir = await mkdtemp(join(tmpdir(), "amux-v22-patch-"));
+  const patchBody = "diff --git a/example b/example\n";
+  const patchDigest = (await import("node:crypto")).createHash("sha256")
+    .update(patchBody).digest("hex");
+  const publishFiles = [{ path: "tests/example.test.mjs", mode: "100644",
+    bytesBase64: "YQ==" }];
+  const filesDigest = (await import("node:crypto")).createHash("sha256")
+    .update(JSON.stringify(publishFiles)).digest("hex");
+  try {
+    const fake = fakeSpawn(JSON.stringify(usage));
+    const handler = createAmuxV22SidecarHandler({ worker: "worker-a",
+      stateDir, run: (input) => runAmuxV22OneShot(input, config, {
+        syntheticPlatform: true, spawnChild: fake.spawnChild,
+        captureBaseline: async () => ({ ok: true, baseSha: "a".repeat(40) }),
+        capturePatch: async () => ({ ok: true, baseSha: "a".repeat(40),
+          patchBody, patchDigest, publishFiles }),
+      }) });
+    assert.equal((await handler({ op: "execute", ...request })).kind,
+      "in_progress");
+    const result = await readFinished(handler);
+    assert.equal(result.patchBody, patchBody);
+    assert.equal(result.patchDigest, patchDigest);
+    assert.deepEqual(result.publishFiles, publishFiles);
+    assert.equal(result.publishFilesDigest, filesDigest);
+    assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
+      "utf8")).includes(patchBody), false);
+    assert.equal((await readFile(join(stateDir, `${attemptId}.result`),
+      "utf8")).includes(filesDigest), true);
+    assert.equal((await handler({ op: "confirm_patch", attemptId,
+      patchDigest })).kind, "confirmed");
+    assert.equal((await handler({ op: "readback", attemptId })).patchBody,
+      undefined);
+    assert.equal((await handler({ op: "readback", attemptId }))
+      .publishFilesDigest, filesDigest);
+  } finally { await rm(stateDir, { recursive: true, force: true }); }
+});
+
 test("unknown output and deadline never become success or retry", async () => {
   const malformed = fakeSpawn("not-json");
   const malformedResult = await runAmuxV22OneShot(request, config, {

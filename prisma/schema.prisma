@@ -7149,6 +7149,7 @@ model AmuxWorkItem {
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedCard")
   executionAttempts AmuxExecutionAttempt[]
   v22TaskResults    AmuxV22TaskResult[]
+  v22TaskPatches    AmuxV22TaskPatch[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -7240,6 +7241,7 @@ model AmuxExecutionAttempt {
   reviewProposals   AmuxReviewProposal[]
   cliUsageEvents    AmuxCliUsageEvent[]
   v22TaskResult     AmuxV22TaskResult?
+  v22TaskPatch      AmuxV22TaskPatch?
   v22AssignmentId   String? @unique @db.Uuid
   v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
@@ -7267,7 +7269,35 @@ model AmuxV22TaskResult {
   byteLength      Int
   createdAt       DateTime @default(now())
   bodyPurgedAt    DateTime?
+  patch           AmuxV22TaskPatch?
 
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
+}
+
+/// A bounded patch candidate, not a publication grant. The Publisher may
+/// consume it only after independent app-side T1 verification.
+model AmuxV22TaskPatch {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  patchSha256     String
+  baseSha         String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+
+  result  AmuxV22TaskResult @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22TaskPatch_result_fkey")
   attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
   task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -8966,6 +8996,7 @@ model AmuxIdeaSubmission {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   v22TaskResults      AmuxV22TaskResult[]
+  v22TaskPatches      AmuxV22TaskPatch[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")

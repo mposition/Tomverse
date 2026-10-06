@@ -918,6 +918,8 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 impl TomverseApi {
     pub async fn v22_task_result_readback(
         &self, attempt_id: &str, expected_digest: &str,
+        expected_patch: Option<(&str, &str)>,
+        expected_files_digest: Option<&str>,
     ) -> Result<V22UsageRecord> {
         let response = self.client
             .get(format!("{}/api/internal/amux/v22/execution/result", self.base_url))
@@ -933,7 +935,16 @@ impl TomverseApi {
         if body.get("status").and_then(Value::as_str) == Some("recorded") &&
             body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
             body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
-            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) {
+            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+            match expected_patch {
+                Some((digest, base)) => body.pointer("/patch/sha256")
+                    .and_then(Value::as_str) == Some(digest) &&
+                    body.pointer("/patch/baseSha").and_then(Value::as_str) == Some(base) &&
+                    body.pointer("/patch/bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+                    body.pointer("/patch/filesDigest").and_then(Value::as_str) ==
+                        expected_files_digest,
+                None => body.get("patch").is_some_and(Value::is_null),
+            } {
             return Ok(V22UsageRecord::Recorded);
         }
         if body.get("status").and_then(Value::as_str) == Some("absent") {
@@ -950,20 +961,48 @@ impl TomverseApi {
         worker: &str,
         result_text: &str,
         expected_digest: &str,
+        patch: Option<(&str, &str, &str)>,
+        publish_files: Option<&Value>,
+        publish_files_digest: Option<&str>,
     ) -> Result<V22UsageRecord> {
         if result_text.is_empty() || result_text.len() > 65_536 ||
             result_text.contains('\0') || expected_digest.len() != 64 ||
             !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             bail!("invalid v22 result envelope");
         }
+        if let Some((body, digest, base)) = patch {
+            if body.is_empty() || body.len() > 65_536 ||
+                !body.starts_with("diff --git ") || body.contains('\0') ||
+                digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) ||
+                base.len() != 40 || !base.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("invalid v22 patch envelope");
+            }
+        }
+        if publish_files.is_some() != publish_files_digest.is_some() ||
+            publish_files.is_some() && patch.is_none() ||
+            publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+            bail!("v22 publish files without patch");
+        }
         let path = format!("{}/api/internal/amux/v22/execution/result", self.base_url);
+        let mut payload = serde_json::json!({
+            "attemptId": attempt_id, "worker": worker,
+            "resultText": result_text, "sourceSha256": expected_digest,
+        });
+        if let Some((text, sha256, base_sha)) = patch {
+            payload["patch"] = serde_json::json!({
+                "text": text, "sha256": sha256, "baseSha": base_sha,
+            });
+            if let Some(files) = publish_files {
+                payload["patch"]["files"] = files.clone();
+                payload["patch"]["filesDigest"] =
+                    serde_json::json!(publish_files_digest);
+            }
+        }
         let response = self.client.post(&path)
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
-            .json(&serde_json::json!({
-                "attemptId": attempt_id, "worker": worker,
-                "resultText": result_text, "sourceSha256": expected_digest,
-            })).send().await;
+            .json(&payload).send().await;
         let mut definitely_rejected = false;
         if let Ok(response) = response {
             let status = response.status();
@@ -971,7 +1010,11 @@ impl TomverseApi {
                 let answer = read_raw_answer(response, 4096).await?;
                 let body: Value = serde_json::from_slice(&answer.body)?;
                 if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
-                    body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) {
+                    body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+                    body.get("patchSha256").and_then(Value::as_str) ==
+                        patch.map(|(_, digest, _)| digest) &&
+                    body.get("filesDigest").and_then(Value::as_str) ==
+                        publish_files_digest {
                     return Ok(V22UsageRecord::Recorded);
                 }
                 bail!("v22 result write response mismatch");
@@ -979,7 +1022,9 @@ impl TomverseApi {
             definitely_rejected = status == StatusCode::CONFLICT ||
                 status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED;
         }
-        match self.v22_task_result_readback(attempt_id, expected_digest).await? {
+        match self.v22_task_result_readback(attempt_id, expected_digest,
+            patch.map(|(_, digest, base)| (digest, base)),
+            publish_files_digest).await? {
             V22UsageRecord::Recorded => Ok(V22UsageRecord::Recorded),
             V22UsageRecord::Rejected if definitely_rejected => Ok(V22UsageRecord::Rejected),
             V22UsageRecord::Rejected =>

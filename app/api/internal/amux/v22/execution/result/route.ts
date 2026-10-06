@@ -6,8 +6,13 @@ import { readLimitedJson } from "@/lib/apiSecurity";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { createAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
+import { loadAmuxContentUnitKeys } from "@/lib/amux/ideaKeyStore";
+import { amuxContentDigest } from "@/lib/amux/ideaCrypto";
+import { encodeV22PatchEvidence, v22PublishFilesSha256 } from
+  "@/lib/amux/v22PatchEvidence";
 import { AmuxV22TaskResultError, recordAmuxV22TaskResult,
-  v22TaskResultIdeaId, v22TaskResultSha256 } from
+  readAmuxV22TaskPatchEvidence, v22TaskResultIdeaId,
+  v22TaskResultSha256 } from
   "@/lib/amux/v22TaskResultStore";
 import { prisma } from "@/lib/prisma";
 
@@ -18,6 +23,17 @@ const bodySchema = z.object({
   attemptId: id, worker: z.string().regex(/^[A-Za-z0-9._:-]{1,120}$/),
   resultText: z.string().min(1).max(65_536),
   sourceSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  patch: z.object({
+    text: z.string().min(1).max(65_536),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    baseSha: z.string().regex(/^[0-9a-f]{40}$/),
+    filesDigest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    files: z.array(z.object({
+      path: z.string().min(1).max(400),
+      mode: z.literal("100644"),
+      bytesBase64: z.string().min(4).max(65_536),
+    }).strict()).min(1).max(5).optional(),
+  }).strict().optional(),
 }).strict();
 
 export async function GET(request: Request): Promise<Response> {
@@ -33,9 +49,23 @@ export async function GET(request: Request): Promise<Response> {
       where: { attemptId: attemptId.data },
       select: { sourceSha256: true, bodyPurgedAt: true },
     });
+    const patch = result ? await prisma.amuxV22TaskPatch.findUnique({
+      where: { attemptId: attemptId.data },
+      select: { patchSha256: true, baseSha: true,
+        bodyPurgedAt: true, taskId: true },
+    }) : null;
+    const evidence = patch && patch.bodyPurgedAt === null ?
+      await readAmuxV22TaskPatchEvidence(attemptId.data, patch.taskId) : null;
+    if (patch && patch.bodyPurgedAt === null && !evidence)
+      return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
     return amuxJsonNoStore(result ? { status: "recorded",
       attemptId: attemptId.data, sourceSha256: result.sourceSha256,
-      bodyAvailable: result.bodyPurgedAt === null } : { status: "absent" });
+      bodyAvailable: result.bodyPurgedAt === null,
+      patch: patch ? { sha256: patch.patchSha256, baseSha: patch.baseSha,
+        bodyAvailable: patch.bodyPurgedAt === null,
+        filesDigest: evidence?.files ?
+          v22PublishFilesSha256(evidence.files) : null } : null } :
+      { status: "absent" });
   } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
 }
 
@@ -53,6 +83,17 @@ export async function POST(request: Request): Promise<Response> {
     body = await readLimitedJson(request, 327_680, bodySchema);
     if (v22TaskResultSha256(body.resultText) !== body.sourceSha256)
       return amuxJsonNoStore({ error: "Invalid request." }, 400);
+    if (body.patch && (v22TaskResultSha256(body.patch.text) !==
+        body.patch.sha256 || !body.patch.text.startsWith("diff --git ")))
+      return amuxJsonNoStore({ error: "Invalid request." }, 400);
+    if (body.patch) {
+      if (body.patch.filesDigest !== (body.patch.files ?
+          v22PublishFilesSha256(body.patch.files) : undefined))
+        return amuxJsonNoStore({ error: "Invalid request." }, 400);
+      const evidence = encodeV22PatchEvidence(body.patch.text,
+        body.patch.files);
+      evidence.fill(0);
+    }
   } catch { return amuxJsonNoStore({ error: "Invalid request." }, 400); }
   try {
     const prior = await prisma.amuxV22TaskResult.findUnique({
@@ -60,9 +101,37 @@ export async function POST(request: Request): Promise<Response> {
       select: { sourceSha256: true, bodyPurgedAt: true },
     });
     if (prior?.bodyPurgedAt) return amuxJsonNoStore({ error: "result_expired" }, 409);
-    if (prior) return prior.sourceSha256 === body.sourceSha256 ?
+    const priorPatch = prior ? await prisma.amuxV22TaskPatch.findUnique({
+      where: { attemptId: body.attemptId },
+      select: { patchSha256: true, baseSha: true,
+        bodyPurgedAt: true, digest: true, digestKeyId: true,
+        byteLength: true, ideaId: true },
+    }) : null;
+    if (priorPatch?.bodyPurgedAt)
+      return amuxJsonNoStore({ error: "result_expired" }, 409);
+    let sameEvidence = body.patch ? false : priorPatch === null;
+    if (body.patch && priorPatch && !priorPatch.bodyPurgedAt &&
+        priorPatch.patchSha256 === body.patch.sha256 &&
+        priorPatch.baseSha === body.patch.baseSha) {
+      const keys = await loadAmuxContentUnitKeys({ ideaId: priorPatch.ideaId,
+        purpose: "task_patch", subjectId: body.attemptId });
+      const evidence = encodeV22PatchEvidence(body.patch.text,
+        body.patch.files);
+      try {
+        const digest = amuxContentDigest(evidence, "task_patch",
+          body.attemptId, keys);
+        sameEvidence = digest.digest === priorPatch.digest &&
+          digest.digestKeyId === priorPatch.digestKeyId &&
+          evidence.length === priorPatch.byteLength;
+      } finally { evidence.fill(0); keys.masterKey.fill(0); }
+    }
+    if (prior) return prior.sourceSha256 === body.sourceSha256 &&
+      sameEvidence ?
       amuxJsonNoStore({ attemptId: body.attemptId,
-        sourceSha256: body.sourceSha256, duplicate: true }) :
+        sourceSha256: body.sourceSha256,
+        patchSha256: body.patch?.sha256 ?? null,
+        filesDigest: body.patch?.filesDigest ?? null,
+        duplicate: true }) :
       amuxJsonNoStore({ error: "result_conflict" }, 409);
     const attempt = await prisma.amuxExecutionAttempt.findUnique({
       where: { id: body.attemptId }, select: { worker: true, endedAt: true,
@@ -79,19 +148,24 @@ export async function POST(request: Request): Promise<Response> {
       return amuxJsonNoStore({ error: "binding_mismatch" }, 409);
     const keys = await createAmuxContentUnitKeys({ ideaId,
       purpose: "task_result", subjectId: body.attemptId });
+    const patchKeys = body.patch ? await createAmuxContentUnitKeys({ ideaId,
+      purpose: "task_patch", subjectId: body.attemptId }) : null;
     let callbackReturned = false;
     try {
       const result = await prisma.$transaction(async (tx) => {
         const value = await recordAmuxV22TaskResult(tx, { ...body, ideaId, keys,
-          text: body.resultText });
+          text: body.resultText, patch: body.patch && patchKeys ? {
+            ...body.patch, keys: patchKeys,
+          } : undefined });
         callbackReturned = true;
         return value;
       }, { maxWait: 5_000, timeout: 10_000 });
-      return amuxJsonNoStore(result);
+      return amuxJsonNoStore({ ...result,
+        filesDigest: body.patch?.filesDigest ?? null });
     } catch (error) {
       if (!callbackReturned && error instanceof AmuxV22TaskResultError)
         return amuxJsonNoStore({ error: error.code }, 409);
       return amuxJsonNoStore({ error: "outcome_unknown" }, 503);
-    } finally { keys.masterKey.fill(0); }
+    } finally { keys.masterKey.fill(0); patchKeys?.masterKey.fill(0); }
   } catch { return amuxJsonNoStore({ error: "outcome_unknown" }, 503); }
 }

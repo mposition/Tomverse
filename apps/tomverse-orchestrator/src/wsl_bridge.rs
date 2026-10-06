@@ -292,6 +292,11 @@ pub struct V22SidecarResult {
     pub usage_receipt_digest: Option<String>,
     pub result_text: Option<String>,
     pub result_sha256: Option<String>,
+    pub patch_body: Option<String>,
+    pub patch_base_sha: Option<String>,
+    pub patch_digest: Option<String>,
+    pub publish_files: Option<serde_json::Value>,
+    pub publish_files_digest: Option<String>,
 }
 
 #[allow(async_fn_in_trait)]
@@ -310,10 +315,16 @@ pub trait LocalAmux {
     async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
         Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
             usage_receipt: None, usage_receipt_digest: None,
-            result_text: None, result_sha256: None })
+            result_text: None, result_sha256: None,
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None })
     }
 
     async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn confirm_v22_patch(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
         Ok(())
     }
 }
@@ -1369,6 +1380,12 @@ async fn v22_sidecar_call(
         let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
         let result_text = value.get("resultText").and_then(|v| v.as_str());
         let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
+        let patch_body = value.get("patchBody").and_then(|v| v.as_str());
+        let patch_base_sha = value.get("patchBaseSha").and_then(|v| v.as_str());
+        let patch_digest = value.get("patchDigest").and_then(|v| v.as_str());
+        let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
+        let publish_files_digest = value.get("publishFilesDigest")
+            .and_then(|v| v.as_str());
         if receipt.is_some() != digest.is_some() ||
             digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
                 b.is_ascii_hexdigit())) ||
@@ -1384,10 +1401,33 @@ async fn v22_sidecar_call(
             result_text.is_some() && state != V22SidecarState::Succeeded {
             bail!("invalid v22 sidecar result envelope");
         }
+        if patch_body.is_some_and(|body| body.is_empty() ||
+            body.len() > 65_536 || body.contains('\0') ||
+            !body.starts_with("diff --git ")) ||
+            patch_base_sha.is_some_and(|sha| sha.len() != 40 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            patch_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            patch_base_sha.is_some() != patch_digest.is_some() ||
+            patch_body.is_some() && patch_digest.is_none() ||
+            patch_digest.is_some() && state != V22SidecarState::Succeeded ||
+            publish_files.is_some_and(|files| patch_body.is_none() ||
+                files.as_array().is_none_or(|rows| rows.is_empty() ||
+                    rows.len() > 5)) ||
+            publish_files.is_some() != publish_files_digest.is_some() ||
+            publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+            bail!("invalid v22 sidecar patch envelope");
+        }
         Ok(V22SidecarResult { state, usage_receipt: receipt,
             usage_receipt_digest: digest.map(str::to_owned),
             result_text: result_text.map(str::to_owned),
-            result_sha256: result_sha256.map(str::to_owned) })
+            result_sha256: result_sha256.map(str::to_owned),
+            patch_body: patch_body.map(str::to_owned),
+            patch_base_sha: patch_base_sha.map(str::to_owned),
+            patch_digest: patch_digest.map(str::to_owned),
+            publish_files: publish_files.cloned(),
+            publish_files_digest: publish_files_digest.map(str::to_owned) })
     };
     tokio::time::timeout(Duration::from_secs(5), operation)
         .await.context("v22 sidecar transport timed out")?
@@ -1414,6 +1454,21 @@ impl LocalAmux for HttpLocal {
         }), attempt_id).await?;
         if answer.state != V22SidecarState::Confirmed {
             bail!("v22 sidecar result not confirmed");
+        }
+        Ok(())
+    }
+
+    async fn confirm_v22_patch(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid v22 patch digest");
+        }
+        let answer = v22_sidecar_call(socket, serde_json::json!({
+            "op": "confirm_patch", "attemptId": attempt_id,
+            "patchDigest": sha256,
+        }), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar patch not confirmed");
         }
         Ok(())
     }
@@ -1891,15 +1946,37 @@ pub async fn run_from_env() -> i32 {
                             });
                             if let Some((receipt, digest, outcome)) = verified {
                                 let result_record = if outcome == "succeeded" {
+                                    let patch_binding = v22_result.as_ref().and_then(|result|
+                                        result.patch_digest.as_deref().zip(
+                                            result.patch_base_sha.as_deref()));
+                                    let patch_transfer = v22_result.as_ref().and_then(|result|
+                                        result.patch_body.as_deref().zip(
+                                            result.patch_digest.as_deref()).zip(
+                                            result.patch_base_sha.as_deref())).map(
+                                                |((body, digest), base)| (body, digest, base));
                                     match v22_result.as_ref().and_then(|result|
                                         result.result_sha256.as_deref()) {
                                         Some(sha256) => match v22_result.as_ref().and_then(
                                             |result| result.result_text.as_deref()) {
-                                            Some(text) => api.v22_task_result_record_once(
-                                                &entry.delivery.attempt_id,
-                                                &entry.delivery.worker, text, sha256).await,
+                                            Some(text) if patch_binding.is_none() ||
+                                                patch_transfer.is_some() =>
+                                                api.v22_task_result_record_once(
+                                                    &entry.delivery.attempt_id,
+                                                    &entry.delivery.worker, text, sha256,
+                                                    patch_transfer,
+                                                    v22_result.as_ref().and_then(
+                                                        |result| result.publish_files.as_ref()),
+                                                    v22_result.as_ref().and_then(
+                                                        |result| result.publish_files_digest.as_deref()),
+                                                ).await,
+                                            Some(_) => api.v22_task_result_readback(
+                                                &entry.delivery.attempt_id, sha256,
+                                                patch_binding, v22_result.as_ref().and_then(
+                                                    |result| result.publish_files_digest.as_deref())).await,
                                             None => api.v22_task_result_readback(
-                                                &entry.delivery.attempt_id, sha256).await,
+                                                &entry.delivery.attempt_id, sha256,
+                                                patch_binding, v22_result.as_ref().and_then(
+                                                    |result| result.publish_files_digest.as_deref())).await,
                                         },
                                         None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
                                     }
@@ -1913,6 +1990,11 @@ pub async fn run_from_env() -> i32 {
                                                 |result| result.result_sha256.as_deref()) {
                                                 let _ = local.confirm_v22_result(
                                                     &entry.delivery.attempt_id, sha256).await;
+                                            }
+                                            if let Some(digest) = v22_result.as_ref().and_then(
+                                                |result| result.patch_digest.as_deref()) {
+                                                let _ = local.confirm_v22_patch(
+                                                    &entry.delivery.attempt_id, digest).await;
                                             }
                                         }
                                         match api.v22_cli_usage_record_once(

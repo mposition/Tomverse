@@ -10,6 +10,12 @@ import { amuxInternalErrorResponse, amuxJsonNoStore,
   isAmuxInputError } from "@/lib/amux/internalRoute";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import { startAmuxV22TaskExecution } from "@/lib/amux/execution";
+import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
+import { readEngineeringAgentDevelopHead } from
+  "@/lib/engineeringAgentGitHubRead";
+import { readEngineeringAgentSwitches } from
+  "@/lib/engineeringAgentStore";
+import { prisma } from "@/lib/prisma";
 import { AMUX_V22_TASK_EXECUTION_ENV,
   amuxV22TaskExecutionEnabled } from "@/lib/amux/v22TaskExecutionCore";
 
@@ -31,11 +37,22 @@ export async function POST(request: Request) {
   return withAmuxRouteBudget(async () => {
     try {
       const body = await readLimitedJson(request, 4 * 1_024, requestSchema);
+      let publicationBaseSha: string | null = null;
+      try {
+        if ((await readEngineeringAgentSwitches(prisma)).publishAllowed &&
+            await readAmuxV22PublicPrConsent(body.task_id)) {
+          publicationBaseSha = await readEngineeringAgentDevelopHead();
+        }
+      } catch {
+        // Publication is optional. A missing consent key or read-only GitHub
+        // outage cannot confer authority or prevent private Task execution.
+      }
       const result = await startAmuxV22TaskExecution({
         taskId: body.task_id, assignmentId: body.assignment_id,
         worker: body.worker, instanceId: body.instance_id,
         generation: body.generation,
         expectedRevision: body.expected_revision,
+        publicationBaseSha,
       });
       if (!result.started) return amuxJsonNoStore(result, 409);
       return amuxJsonNoStore({ started: true,
