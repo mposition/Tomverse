@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
-const stageId = "prompt-refiner-vnext-one-shot-v3";
+const stageId = "prompt-refiner-vnext-one-shot-v4";
 const stageReadIds: string[] = [];
 
 mock.module(mod("lib/apiSecurity.ts"), {

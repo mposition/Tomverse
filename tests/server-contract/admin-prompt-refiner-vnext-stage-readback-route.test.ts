@@ -56,9 +56,10 @@ async function loadRoute() {
   mock.module(mod("lib/promptRefinerVnextOneShotStageReadback.ts"), { namedExports: {
     readPromptRefinerVnextOneShotStage: async (_tx: object, stageId?: string) => {
       reads++;
-      assert.equal(stageId, reads % 3 === 2 ?
-        "prompt-refiner-vnext-one-shot-v2" :
-        reads % 3 === 0 ? "prompt-refiner-vnext-one-shot-v1" : undefined);
+      assert.equal(stageId, reads % 4 === 2 ?
+        "prompt-refiner-vnext-one-shot-v3" :
+        reads % 4 === 3 ? "prompt-refiner-vnext-one-shot-v2" :
+        reads % 4 === 0 ? "prompt-refiner-vnext-one-shot-v1" : undefined);
       return { stagePresent: false, stageId: null, stageStatus: null,
         runtimeDeploymentId: null, runtimeCommitSha: null,
         stageApprovalAuditLogId: null, runApprovalAuditLogId: null,
@@ -105,7 +106,7 @@ test("response is content-free; database failure does not leak details", async (
   assert.equal(response.status, 200);
   noStore(response);
   assert.equal(rateLimits, 1);
-  assert.equal(reads, 3);
+  assert.equal(reads, 4);
   const absent = {
     stagePresent: false, stageId: null, stageStatus: null,
     runtimeDeploymentId: null, runtimeCommitSha: null,
@@ -115,7 +116,7 @@ test("response is content-free; database failure does not leak details", async (
     approvalAuditsValid: false, dispatchAuthorized: false,
   };
   assert.deepEqual(await response.json(), {
-    readback: absent, previousStage: absent, firstStage: absent,
+    readback: absent, thirdStage: absent, previousStage: absent, firstStage: absent,
   });
   readError = true;
   const log = mock.method(console, "error", () => {});
@@ -124,5 +125,5 @@ test("response is content-free; database failure does not leak details", async (
   assert.equal(unavailable.status, 503);
   noStore(unavailable);
   assert.deepEqual(await unavailable.json(), { error: "Read-back unavailable." });
-  assert.equal(reads, 3);
+  assert.equal(reads, 4);
 });

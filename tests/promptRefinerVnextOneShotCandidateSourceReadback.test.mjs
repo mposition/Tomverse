@@ -100,7 +100,7 @@ test("A02 server entrypoint cannot use request-supplied pin without a stage", as
   const tx = {
     promptRefinerVnextOneShotStage: {
       findUnique: async ({ where, select }) => {
-        assert.equal(where.id, "prompt-refiner-vnext-one-shot-v3");
+        assert.equal(where.id, "prompt-refiner-vnext-one-shot-v4");
         assert.deepEqual(select, { sourceCommitSha: true, sourceManifestDigest: true });
         return null;
       },

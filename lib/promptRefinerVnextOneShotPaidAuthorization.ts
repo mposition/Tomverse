@@ -22,7 +22,7 @@ export const PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_ACTION =
   "prompt_refiner.vnext_one_shot.paid_dispatch_authorized";
 export const PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_SUMMARY =
   "Separately authorized the bounded Prompt Refiner vNext one-shot paid dispatch.";
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 
 export function promptRefinerVnextOneShotPaidAuthorizationMetadata(
   stage: PromptRefinerVnextOneShotStage,

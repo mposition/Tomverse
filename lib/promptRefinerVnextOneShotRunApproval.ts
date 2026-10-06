@@ -16,7 +16,7 @@ import { assertPromptRefinerVnextOneShotCurrentPrice } from
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export type PromptRefinerVnextOneShotRunApprovalPins = Readonly<{

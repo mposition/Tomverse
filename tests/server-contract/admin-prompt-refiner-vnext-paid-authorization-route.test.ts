@@ -63,7 +63,7 @@ mock.module(mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"), {
     writes++;
     assert.deepEqual(input.expected, pins);
     if (failure) throw new Error(failure);
-    return { stageId: "prompt-refiner-vnext-one-shot-v3",
+    return { stageId: "prompt-refiner-vnext-one-shot-v4",
       paidAuthorizationAuditLogId: "synthetic-paid-audit",
       dispatchAuthorized: false };
   } },
@@ -101,7 +101,7 @@ test("paid approval requires exact confirmation and maps definite and unknown ou
   assert.equal(rateLimits, 0);
   const accepted = await route.POST(request());
   assert.equal(accepted.status, 201);
-  assert.deepEqual(await accepted.json(), { stageId: "prompt-refiner-vnext-one-shot-v3",
+  assert.deepEqual(await accepted.json(), { stageId: "prompt-refiner-vnext-one-shot-v4",
     paidAuthorizationAuditLogId: "synthetic-paid-audit", dispatchAuthorized: false });
   failure = "vnext_one_shot_paid_approval_shadow_unavailable";
   const refused = await route.POST(request());

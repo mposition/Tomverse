@@ -39,9 +39,12 @@ export async function GET(request: Request) {
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-prompt-refiner-vnext-stage-readback", { minute: 3, day: 30 });
-    const { readback, previousStage, firstStage } = await readOnlySnapshotTransaction(
+    const { readback, thirdStage, previousStage, firstStage } = await readOnlySnapshotTransaction(
       async (tx) => ({
         readback: await readPromptRefinerVnextOneShotStage(tx),
+        thirdStage: await readPromptRefinerVnextOneShotStage(
+          tx, "prompt-refiner-vnext-one-shot-v3"
+        ),
         previousStage: await readPromptRefinerVnextOneShotStage(
           tx, "prompt-refiner-vnext-one-shot-v2"
         ),
@@ -51,7 +54,7 @@ export async function GET(request: Request) {
       }),
       { maxWait: 5_000, timeout: 10_000 }
     );
-    return NextResponse.json({ readback, previousStage, firstStage }, { headers });
+    return NextResponse.json({ readback, thirdStage, previousStage, firstStage }, { headers });
   } catch (error) {
     const response = apiSecurityResponse(error);
     if (response) {
