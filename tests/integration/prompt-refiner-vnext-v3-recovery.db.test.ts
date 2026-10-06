@@ -45,7 +45,8 @@ import { POST as recordTerminalRoute } from
 import { guardPromptRefinerVnextBilledUsage,
   PROMPT_REFINER_VNEXT_PRICE_PIN } from
   "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
-import { readPromptRefinerVnextOneShotTerminalReceipts } from
+import { assertPromptRefinerVnextOneShotTerminalsComplete,
+  readPromptRefinerVnextOneShotTerminalReceipts } from
   "@/lib/promptRefinerVnextOneShotTerminalReceipt";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -151,7 +152,7 @@ async function supersede(client: Client, previous: typeof runtime[number],
   [previous.id, auditId]);
 }
 
-test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
+test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receipts",
   { skip: !testUrl, timeout: 120_000 }, async () => {
     assert.equal(process.env.DATABASE_URL, testUrl);
     const url = new URL(testUrl!);
@@ -374,10 +375,34 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       assert.equal((await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotOperationalShadow(tx, historicalStage)))
         .shadowAuditLogId, historicalShadowAudit);
-      const v4Winner = await createPromptRefinerVnextOneShotV4Stage({
-        session, request, binding: v4Binding,
-      });
+      const v4AuditCount = await prisma.adminAuditLog.count();
+      for (const drift of [
+        { runnerDigest: binding.runnerDigest },
+        { runtimeDeploymentId: runtime[2].runtimeDeploymentId },
+        { runtimeCommitSha: runtime[2].runtimeCommitSha },
+      ]) {
+        await assert.rejects(createPromptRefinerVnextOneShotV4Stage({
+          session, request, binding: { ...v4Binding, ...drift },
+        }), /source_not_replaceable/);
+        assert.equal(await prisma.adminAuditLog.count(), v4AuditCount,
+          "a rejected v4 binding must not leave an approval audit");
+        assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+          where: { id: V3 },
+        })).status, "run_approved");
+      }
+      const v4Competing = await Promise.allSettled([1, 2].map(() =>
+        createPromptRefinerVnextOneShotV4Stage({
+          session, request, binding: v4Binding,
+        })));
+      assert.equal(v4Competing.filter((outcome) => outcome.status === "fulfilled").length, 1);
+      assert.equal(v4Competing.filter((outcome) => outcome.status === "rejected").length, 1);
+      const v4Success = v4Competing.find((outcome) => outcome.status === "fulfilled");
+      assert.ok(v4Success && v4Success.status === "fulfilled");
+      const v4Winner = v4Success.value;
       assert.equal(v4Winner.stageId, V4);
+      assert.equal(await prisma.adminAuditLog.count({ where: {
+        action: "prompt_refiner.vnext_one_shot.stage_approved", targetId: V4,
+      } }), 1);
       await assert.rejects(createPromptRefinerVnextOneShotV4Stage({
         session, request, binding: v4Binding,
       }), /source_not_replaceable|source_unavailable/);
@@ -448,11 +473,11 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN = runnerToken;
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED = "1";
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED = "1";
-      const slotRequest = () => new Request(
+      const slotRequest = (slotIndex = 0) => new Request(
         "https://example.test/api/internal/prompt-refiner/vnext-one-shot-slot", {
           method: "POST", headers: { authorization: `Bearer ${runnerToken}`,
             "content-type": "application/json" },
-          body: JSON.stringify({ requestId: randomUUID(), slotIndex: 0,
+          body: JSON.stringify({ requestId: randomUUID(), slotIndex,
             runApprovalAuditLogId: run.runApprovalAuditLogId,
             manifestRoot: base.manifestRoot, runnerDigest: v4Binding.runnerDigest }),
         });
@@ -606,6 +631,11 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
         requestId: randomUUID(), slotIndex: 1,
         runApprovalAuditLogId: run.runApprovalAuditLogId,
       }), /prior_terminal_unverified/);
+      const prematureNextSlot = await consumeSlotRoute(slotRequest(1));
+      assert.equal(prematureNextSlot.status, 409);
+      assert.deepEqual(await prematureNextSlot.json(), {
+        code: "SLOT_CONSUMPTION_REFUSED", retryAuthorized: false,
+      });
       const usage = { inputTokens: 1, outputTokens: 1,
         cachedInputTokens: 0, cacheWriteInputTokens: 0, reasoningTokens: 0 };
       const cost = guardPromptRefinerVnextBilledUsage({ usage,
@@ -649,6 +679,36 @@ test("PG17 permits only atomic zero-consumption v2 to v3 recovery",
       assert.equal(terminalReadback.observedCostMicroUsd, cost);
       assert.equal(terminalReadback.slots[0].state, "terminal");
       assert.equal(terminalReadback.slots[1].state, "not_attempted");
+      for (const corruption of ["metadata", "hash"] as const) {
+        const tampered = await prisma.$transaction(async (tx) => {
+          const auditLog = new Proxy(tx.adminAuditLog, {
+            get(delegate, key) {
+              if (key !== "findMany") return Reflect.get(delegate, key);
+              return async (args: Parameters<typeof delegate.findMany>[0]) => {
+                const rows = await delegate.findMany(args);
+                if (args?.where?.action !==
+                    "prompt_refiner.vnext_one_shot.terminal_recorded") return rows;
+                return rows.map((row) => corruption === "metadata" ? {
+                  ...row, metadata: { ...(row.metadata as Record<string, unknown>),
+                    observedCostMicroUsd: cost + 1 },
+                } : { ...row, entryHash: "0".repeat(64) });
+              };
+            },
+          });
+          const view = new Proxy(tx, {
+            get(target, key) {
+              return key === "adminAuditLog" ? auditLog : Reflect.get(target, key);
+            },
+          });
+          const readback = await readPromptRefinerVnextOneShotTerminalReceipts(view);
+          await assert.rejects(assertPromptRefinerVnextOneShotTerminalsComplete(view),
+            /prior_terminal_unverified/);
+          return readback;
+        });
+        assert.equal(tampered.valid, false);
+        assert.equal(tampered.slots[0].state, "receipt_missing_or_invalid");
+        assert.equal(tampered.consumedWithoutReceipt, 1);
+      }
       await assert.rejects(consumePromptRefinerVnextOneShotSlot({
         requestId: firstRequestId, slotIndex: 1,
         runApprovalAuditLogId: run.runApprovalAuditLogId,

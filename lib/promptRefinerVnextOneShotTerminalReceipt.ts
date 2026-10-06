@@ -157,6 +157,8 @@ export async function recordPromptRefinerVnextOneShotTerminal(
         !snapshot.reservationShapeValid || !snapshot.approvalAuditsValid) {
       throw new Error("vnext_one_shot_terminal_binding_mismatch");
     }
+    // Settlement records an already-consumed request. A later deployment or
+    // registry price change must not prevent its bounded usage/cost receipt.
     const { slotId } = await verifyPromptRefinerVnextOneShotConsumedRequest(tx, {
       requestId: input.requestId, slotIndex: input.slotIndex,
       runApprovalAuditLogId: input.runApprovalAuditLogId,
