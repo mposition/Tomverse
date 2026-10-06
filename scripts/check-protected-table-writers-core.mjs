@@ -970,6 +970,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the closed EngineeringAgentRun outcome CHECK to admit private_result. It does not write rows or change guard triggers; the exact SQL counts remain pinned.",
+  },
+  {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
     table: "EngineeringAgentWorkItem",
     tableMentions: 48,

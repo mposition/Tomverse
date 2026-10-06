@@ -414,6 +414,7 @@ export const RUN_TRANSITIONS: readonly Transition<RunStatus>[] = [
 export const RUN_OUTCOMES = [
   "t1_queued",
   "t2_draft",
+  "private_result",
   "no_change",
   "agent_failed",
   "schema_invalid",
@@ -429,6 +430,7 @@ export const AMUX_SETTLEMENT_FOR_OUTCOME: Readonly<
 > = {
   t1_queued: "review",
   t2_draft: "review",
+  private_result: "review",
   no_change: "blocked",
   agent_failed: "retry",
   schema_invalid: "blocked",

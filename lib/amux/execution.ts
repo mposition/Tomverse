@@ -1186,7 +1186,7 @@ export async function settleAmuxV22TaskExecution(input: {
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
             runId: run.id, amuxAttemptId: attempt.id,
             outcome: product ? "t1_queued" : input.outcome === "succeeded" ?
-              "t2_draft" : "agent_failed",
+              "private_result" : "agent_failed",
             halt: "none",
           });
       }

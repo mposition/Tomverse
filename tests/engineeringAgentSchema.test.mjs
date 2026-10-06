@@ -38,6 +38,10 @@ const sql = readFileSync(
   new URL("../prisma/migrations/20260928120000_engineering_agent_state/migration.sql", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
+const outcomeSql = readFileSync(
+  new URL("../prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql", import.meta.url),
+  "utf8",
+).replace(/\r\n/g, "\n");
 
 const pairs = (text) => [...text.matchAll(/\('([a-z_0-9]+)',\s*'([a-z_0-9]+)'\)/g)].map((m) => `${m[1]}->${m[2]}`);
 const quoted = (text) => [...text.matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]);
@@ -56,10 +60,10 @@ const transitionBlocks = () => {
 };
 
 /** The text of one named CHECK constraint, up to the next constraint or statement end. */
-const check = (name) => {
-  const start = sql.indexOf(`"${name}"`);
+const check = (name, source = sql) => {
+  const start = source.lastIndexOf(`"${name}"`);
   assert.ok(start >= 0, `${name} exists`);
-  const rest = sql.slice(start + name.length + 2);
+  const rest = source.slice(start + name.length + 2);
   const end = rest.search(/\n\s*ADD CONSTRAINT|;\n/);
   return rest.slice(0, end);
 };
@@ -82,7 +86,7 @@ test("every transition trigger allows exactly the core table's transitions", () 
 
 test("every state and value list in a CHECK is exactly the core list", () => {
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_status_check"))), sorted(RUN_STATUSES));
-  assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_outcome_check"))), sorted(RUN_OUTCOMES));
+  assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_outcome_check", outcomeSql))), sorted(RUN_OUTCOMES));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_halt_check"))), sorted(HALT_VALUES));
   assert.deepEqual(sorted(quoted(check("EngineeringAgentRun_modeAtStart_check"))), sorted(ENGINEERING_AGENT_MODES));
   // The trigger reads the mode as the core does: anything but a known on-mode is off.

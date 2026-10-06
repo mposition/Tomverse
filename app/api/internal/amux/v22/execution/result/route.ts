@@ -80,11 +80,17 @@ export async function POST(request: Request): Promise<Response> {
   let { patch, patchRejected } = normalizeV22OptionalPatch(body.patch);
   try {
     if (patch) {
-      const run = await prisma.engineeringAgentRun.findUnique({
-        where: { amuxAttemptId: body.attemptId },
-        select: { status: true, baseSha: true },
-      });
-      if (run?.status !== "active" || run.baseSha !== patch.baseSha) {
+      try {
+        const run = await prisma.engineeringAgentRun.findUnique({
+          where: { amuxAttemptId: body.attemptId },
+          select: { status: true, baseSha: true },
+        });
+        if (run?.status !== "active" || run.baseSha !== patch.baseSha) {
+          patch = undefined;
+          patchRejected = true;
+        }
+      } catch {
+        // Optional publication state cannot prevent a private result write.
         patch = undefined;
         patchRejected = true;
       }
@@ -142,8 +148,16 @@ export async function POST(request: Request): Promise<Response> {
       return amuxJsonNoStore({ error: "binding_mismatch" }, 409);
     const keys = await createAmuxContentUnitKeys({ ideaId,
       purpose: "task_result", subjectId: body.attemptId });
-    const patchKeys = patch ? await createAmuxContentUnitKeys({ ideaId,
-      purpose: "task_patch", subjectId: body.attemptId }) : null;
+    let patchKeys: Awaited<ReturnType<typeof createAmuxContentUnitKeys>> | null = null;
+    if (patch) {
+      try {
+        patchKeys = await createAmuxContentUnitKeys({ ideaId,
+          purpose: "task_patch", subjectId: body.attemptId });
+      } catch {
+        patch = undefined;
+        patchRejected = true;
+      }
+    }
     let callbackReturned = false;
     try {
       const result = await prisma.$transaction(async (tx) => {
