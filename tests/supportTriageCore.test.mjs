@@ -341,3 +341,13 @@ test("no transition leaves a terminal group state, and every kind has one proven
   assert.equal(core.isGroupTransitionAllowed("candidate", "confirmed"), true);
   assert.equal(core.isGroupTransitionAllowed("dismissed", "candidate"), false);
 });
+
+test("a retention batch over every class stays inside the lane's round-trip budget", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  // BEGIN, arm, two per class (window read, delete), the system audit entry
+  // (chain lock, clock, chain head, insert), the deadline check, COMMIT.
+  const AUDIT_ROUND_TRIPS = 4;
+  const roundTrips = 1 + 1 + 2 * core.RETENTION_CLASSES.length + AUDIT_ROUND_TRIPS + 1 + 1;
+  assert.ok(roundTrips <= core.RETENTION_BATCH_ROUND_TRIPS, String(roundTrips));
+  assert.equal(core.LANE_TIMEOUTS.retention.maxRoundTrips, core.RETENTION_BATCH_ROUND_TRIPS);
+});
