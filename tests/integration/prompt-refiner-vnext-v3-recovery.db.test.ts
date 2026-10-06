@@ -915,6 +915,9 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       const v4Before = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: V4 },
       });
+      const v4SlotsBefore = await prisma.promptRefinerVnextOneShotSlot.findMany({
+        where: { stageId: V4 }, orderBy: { slotIndex: "asc" },
+      });
       const v5Binding = { ...v4Binding, id: V5,
         runnerDigest: "b".repeat(64), manifestRoot: "f".repeat(64),
         runtimeDeploymentId: "55555555-5555-4555-8555-555555555555",
@@ -983,6 +986,10 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       const v5Stage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: V5 },
       });
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /shadow_evidence_unavailable/);
       const v5Target = promptRefinerVnextOneShotShadowTarget(v5Stage);
       assert.ok(v5Target);
       const v5Proof = signPromptRefinerVnextOneShotShadowProof({
@@ -999,6 +1006,10 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       assert.equal(v5Shadow.dispatchAuthorized, false);
       assert.equal((await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotOperationalShadow(tx, v5Stage))).valid, true);
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /paid_authorization_unavailable/);
       const v5Paid = await approvePromptRefinerVnextOneShotPaidDispatch({
         session, request, stageId: V5,
         expected: { ...v5Binding,
@@ -1070,6 +1081,9 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: V4 },
       })).status, "closed");
+      assert.deepEqual(await prisma.promptRefinerVnextOneShotSlot.findMany({
+        where: { stageId: V4 }, orderBy: { slotIndex: "asc" },
+      }), v4SlotsBefore, "v5 run and safe stop must not rewrite v4 slots");
     } finally {
       await client.query("ROLLBACK").catch(() => {});
       await prisma.$disconnect();
