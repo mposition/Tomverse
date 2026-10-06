@@ -68,6 +68,7 @@ let terminalReadback = {
 };
 let writes = 0;
 const stageReadIds: string[] = [];
+const candidateStageIds: string[] = [];
 const slotRows = Array.from({ length: 80 }, (_, slotIndex) => ({
   id: `slot-${slotIndex}`, slotIndex,
   requestId: `11111111-1111-4111-8111-${String(slotIndex).padStart(12, "0")}`,
@@ -117,7 +118,10 @@ mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), {
     async () => receiptValid },
 });
 mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotCandidateSource: async () => {} },
+  namedExports: { readPromptRefinerVnextOneShotCandidateSource:
+    async (_tx: unknown, requestedStageId: string) => {
+      candidateStageIds.push(requestedStageId);
+    } },
 });
 mock.module(mod("lib/promptRefinerVnextOneShotOperationalShadow.ts"), {
   namedExports: { readPromptRefinerVnextOneShotOperationalShadow: async () => {
@@ -165,6 +169,7 @@ const reset = () => {
   rows = []; shadowValid = true; shadowReadError = false;
   receiptValid = true; writes = 0;
   stageReadIds.length = 0;
+  candidateStageIds.length = 0;
   terminalReadback = {
     valid: true, terminalReceipts: 80, unknownReceipts: 0,
     consumedWithoutReceipt: 0, reservedSlots: 0, observedCostMicroUsd: 80,
@@ -227,12 +232,22 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
 test("v5 gate requires its own 80 terminal receipts and records only v5 audits", async () => {
   const gate = await load(); reset();
   stage = { ...baseStage, id: v5StageId };
-  terminalReadback = { ...terminalReadback, observedCostMicroUsd: 81 };
-  await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
-    session, request, attestation: await attestation(), stageId: v5StageId,
-  }), /gate_slot_evidence_mismatch/);
+  const complete = terminalReadback;
+  for (const invalid of [
+    { ...complete, observedCostMicroUsd: 81 },
+    { ...complete, terminalReceipts: 79 },
+    { ...complete, unknownReceipts: 1 },
+    { ...complete, reservedSlots: 1 },
+    { ...complete, slots: complete.slots.map((slot, index) =>
+      index === 0 ? { ...slot, resultKind: "failed" } : slot) },
+  ]) {
+    terminalReadback = invalid;
+    await assert.rejects(gate.recordPromptRefinerVnextOneShotGateEvidence({
+      session, request, attestation: await attestation(), stageId: v5StageId,
+    }), /gate_slot_evidence_mismatch/);
+  }
   assert.equal(writes, 0);
-  terminalReadback = { ...terminalReadback, observedCostMicroUsd: 80 };
+  terminalReadback = complete;
   const recorded = await gate.recordPromptRefinerVnextOneShotGateEvidence({
     session, request, attestation: await attestation(), stageId: v5StageId,
   });
@@ -251,6 +266,8 @@ test("v5 gate requires its own 80 terminal receipts and records only v5 audits",
     tx as never, stage as never, v5StageId)).valid, true);
   assert.ok(stageReadIds.length > 0);
   assert.ok(stageReadIds.every((id) => id === v5StageId));
+  assert.ok(candidateStageIds.length > 0);
+  assert.ok(candidateStageIds.every((id) => id === v5StageId));
 });
 
 test("the closed legacy stage cannot receive new gate evidence", async () => {

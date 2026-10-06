@@ -1,3 +1,4 @@
+-- baseline-check: present-if-function "prompt_refiner_vnext_one_shot_v5_guard"
 -- A new independent v5 stage may follow only the signed v4 safe stop.
 -- No historical row is rewritten, deleted, retried or relabelled.
 ALTER TABLE "PromptRefinerVnextOneShotStage"

@@ -277,7 +277,7 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
         snapshot.slotCount !== PROMPT_REFINER_VNEXT_SLOT_COUNT) {
       throw new Error("vnext_one_shot_gate_stage_unavailable");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
       where: { id: stageId },
     });
@@ -391,7 +391,7 @@ export async function recordPromptRefinerVnextOneShotDisposition(input: {
         !targetMatches(stage, input.target)) {
       throw new Error("vnext_one_shot_disposition_binding_mismatch");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
     if (!shadow.valid || shadow.shadowAuditLogId !== input.target.shadowAuditLogId) {
       throw new Error("vnext_one_shot_disposition_binding_mismatch");

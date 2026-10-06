@@ -197,6 +197,13 @@ test("v5 stage uses v4 predecessor and rejects new pin and capability drift", as
     } finally {
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST = gateDigest;
     }
+    delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED;
+    try {
+      await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(
+        expected, "v5"), /recovery_capability_unavailable/);
+    } finally {
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED = "1";
+    }
     delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPOSITION_WRITE_ENABLED;
     try {
       await assert.rejects(preparePromptRefinerVnextOneShotStageBinding(
