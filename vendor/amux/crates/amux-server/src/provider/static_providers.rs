@@ -441,6 +441,65 @@ fn parse_cursor_models(stdout: &str) -> Vec<String> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// GitHub Copilot CLI
+// ---------------------------------------------------------------------------
+
+/// GitHub Copilot CLI (`copilot`, npm `@github/copilot`). The flags were
+/// checked against `copilot --help` of 1.0.91 installed on the server
+/// (2026-10-05). No prompt was sent, so the argv is verified and only the
+/// folder-trust screen is observed (see `backend::adapter::scan_copilot`);
+/// each claim below says which kind it is.
+///
+/// - `structured_events: false` — Copilot does have JSONL (`--output-format
+///   json`, "one JSON object per line"), but only in `-p, --prompt <text>`
+///   mode, which takes the prompt as an argument. amux's headless protocol
+///   delivers the prompt over stdin and appends nothing to the argv, so it
+///   cannot drive that mode, and advertising it would be a capability the
+///   protocol cannot use. HeadlessStructured therefore returns the same argv
+///   as Interactive, as DevinAdapter does.
+/// - `hooks: false` — not verified either way; the conservative default.
+/// - `reports_usage: false` — no machine-readable quota API is documented;
+///   `usage()` is honestly unknown, as for every other static adapter here.
+/// - `hot_model_switch: false` — `/model` exists in the TUI, but nothing here
+///   drives it; conservative default.
+/// - `models()` returns the shared catalog's worker ids, which is empty until
+///   someone verifies them: the CLI has no documented listing command, and a
+///   guessed list would be worse than none (`--model` stays an open string).
+pub struct CopilotAdapter;
+
+#[async_trait]
+impl ProviderAdapter for CopilotAdapter {
+    fn id(&self) -> ProviderId {
+        ProviderId::new("copilot")
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            hot_model_switch: false,
+            reports_usage: false,
+            structured_events: false,
+            hooks: false,
+        }
+    }
+
+    async fn usage(&self) -> ProviderUsage {
+        ProviderUsage::unknown(self.id())
+    }
+
+    async fn models(&self) -> Vec<String> {
+        crate::provider::model_catalog::worker_model_ids("copilot")
+    }
+
+    fn build_command(&self, _prompt_mode: PromptMode) -> Vec<String> {
+        // The interactive TUI in both modes (see `structured_events` above).
+        // Model, `--yolo` and `--add-dir` belong to the launch arm in
+        // session_verbs.rs, which reads the worker's CC_FLAGS that this adapter
+        // cannot see (same split as CursorAdapter's `--trust`).
+        vec!["copilot".into()]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,6 +605,18 @@ mod tests {
             CodexAdapter.build_command(PromptMode::HeadlessStructured),
             vec!["codex", "exec", "--json"]
         );
+    }
+
+    #[test]
+    fn copilot_commands_follow_the_cli_reference() {
+        assert_eq!(CopilotAdapter.build_command(PromptMode::Interactive), vec!["copilot"]);
+        // No headless argv: copilot's JSONL mode needs the prompt as an
+        // argument, which amux's stdin-driven headless protocol cannot supply.
+        assert_eq!(CopilotAdapter.build_command(PromptMode::HeadlessStructured), vec!["copilot"]);
+        let caps = CopilotAdapter.capabilities();
+        assert!(!caps.structured_events);
+        assert!(!caps.hooks, "hooks are unverified for copilot; claiming them would be invented");
+        assert!(!caps.reports_usage);
     }
 
     #[test]
