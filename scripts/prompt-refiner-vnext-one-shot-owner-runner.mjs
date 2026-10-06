@@ -250,6 +250,8 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
       slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
       output: outcome.output,
       costUpperBoundMicroUsd: outcome.costUpperBoundMicroUsd,
+      usage: outcome.usage,
+      intentToTerminalLatencyMs: outcome.intentToTerminalLatencyMs,
       dispatchAuthorized: false });
   }
   const stopRecorded = await recordUnknownStop({ origin, headers,
@@ -260,6 +262,43 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
     requestId, slotIndex, slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
     stopRecorded, humanReviewRequired: true, retryAuthorized: false,
     dispatchAuthorized: false });
+}
+
+/** One content-free settlement attempt. A lost response is never retried. */
+export async function recordPromptRefinerVnextOneShotTerminalReceipt(result, input) {
+  const origin = appOrigin(input?.origin);
+  const token = input?.token;
+  const runApprovalAuditLogId = input?.runApprovalAuditLogId;
+  if (!origin || typeof token !== "string" || token.length < 32 ||
+      token.length > 256 || typeof runApprovalAuditLogId !== "string" ||
+      runApprovalAuditLogId.length < 1 || runApprovalAuditLogId.length > 128 ||
+      result?.status !== "bounded_response") return false;
+  try {
+    const response = await globalThis.fetch(
+      `${origin}/api/internal/prompt-refiner/vnext-one-shot-terminal`, {
+        method: "POST", redirect: "error", cache: "no-store",
+        headers: { authorization: `Bearer ${token}`,
+          "content-type": "application/json" },
+        body: JSON.stringify({ requestId: result.requestId,
+          slotIndex: result.slotIndex, runApprovalAuditLogId,
+          slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+          resultKind: result.output.outcome,
+          usage: result.usage,
+          observedCostMicroUsd: result.costUpperBoundMicroUsd,
+          intentToTerminalLatencyMs: result.intentToTerminalLatencyMs }),
+      });
+    const receipt = response.status === 201 ? await readSmallJson(response) : null;
+    return Boolean(receipt &&
+      Object.keys(receipt).sort().join(",") ===
+        "dispatchAuthorized,observedCostMicroUsd,requestId,slotIndex,terminalAuditLogId" &&
+      receipt.requestId === result.requestId &&
+      receipt.slotIndex === result.slotIndex &&
+      receipt.observedCostMicroUsd === result.costUpperBoundMicroUsd &&
+      typeof receipt.terminalAuditLogId === "string" &&
+      receipt.terminalAuditLogId.length > 0 &&
+      receipt.terminalAuditLogId.length <= 128 &&
+      receipt.dispatchAuthorized === false);
+  } catch { return false; }
 }
 
 async function main(args) {
@@ -299,7 +338,8 @@ async function main(args) {
           return 1;
         }
         try {
-          writeFileSync(descriptor, JSON.stringify({ slotIndex: result.slotIndex,
+          writeFileSync(descriptor, JSON.stringify({ requestId: result.requestId,
+            slotIndex: result.slotIndex,
             output: result.output }) + "\n", { encoding: "utf8" });
           fsyncSync(descriptor);
         } catch {
@@ -320,10 +360,24 @@ async function main(args) {
           return 1;
         }
         keepResult = true;
+        const terminalRecorded = await recordPromptRefinerVnextOneShotTerminalReceipt(
+          result, { origin: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
+            token: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
+            runApprovalAuditLogId: args[10] });
+        if (!terminalRecorded) {
+          process.stdout.write(JSON.stringify({ status: "terminal_receipt_outcome_unknown",
+            requestId: result.requestId, slotIndex: result.slotIndex,
+            slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+            costUpperBoundMicroUsd: result.costUpperBoundMicroUsd,
+            humanReviewRequired: true, retryAuthorized: false,
+            dispatchAuthorized: false }) + "\n");
+          return 1;
+        }
         process.stdout.write(JSON.stringify({ status: result.status,
           requestId: result.requestId, slotIndex: result.slotIndex,
           slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
           costUpperBoundMicroUsd: result.costUpperBoundMicroUsd,
+          terminalRecorded: true,
           dispatchAuthorized: false }) + "\n");
         return 0;
       } finally {
