@@ -227,6 +227,7 @@
     "report:memory-eval-failure-diagnosis": "node --import tsx scripts/report-memory-eval-failure-diagnosis.mjs",
     "report:memory-eval-near-duplicates": "node --import tsx scripts/report-memory-eval-near-duplicates.mjs",
     "report:agent-policy-approval": "node --experimental-strip-types scripts/report-agent-policy-approval.mjs",
+    "report:qa-release-protection": "node --experimental-strip-types scripts/qa-release-protection-snapshot.mjs",
     "report:back-merge-divergence": "node scripts/report-back-merge-divergence.mjs",
     "report:check-script-inventory": "node scripts/report-check-script-inventory.mjs",
     "report:issue-backlog": "node --import tsx scripts/report-issue-backlog.mjs",
