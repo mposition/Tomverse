@@ -11,11 +11,14 @@ import { authOptions } from "@/lib/auth";
 import {
   readAmuxExecutionBoard, readAmuxExecutionBoardSnapshot,
   readAmuxExecutionHierarchy,
+  readAmuxExecutionFeedback,
   readAmuxExecutionTaskDetail,
 } from "@/lib/amux/adminExecutionRead";
 import {
   parseAmuxExecutionLane, parseAmuxExecutionPage,
 } from "@/lib/amux/adminExecutionViewCore";
+import { readAmuxV22ActivationStatus } from
+  "@/lib/amux/v22ActivationReadiness";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const json = (body: object, status = 200) =>
@@ -35,13 +38,16 @@ export async function GET(request: Request) {
     const params = new URL(request.url).searchParams;
     const view = params.get("view");
     const allowed = view === "board_snapshot" ? ["view"] :
+      view === "activation" ? ["view"] :
       view === "board" ? ["view", "lane", "page"] :
       view === "hierarchy" ? ["view", "parentKind", "parentId", "page"] :
+      view === "feedback" ? ["view", "parentKind", "parentId"] :
       view === "detail" ? ["view", "taskId"] : null;
     if (!allowed || [...params.keys()].some((key) => !allowed.includes(key) ||
         params.getAll(key).length !== 1)) return json({ error: "invalid_request" }, 400);
 
     if (view === "board_snapshot") return json(await readAmuxExecutionBoardSnapshot());
+    if (view === "activation") return json(readAmuxV22ActivationStatus());
     if (view === "board") {
       const lane = parseAmuxExecutionLane(params.get("lane"));
       const page = parseAmuxExecutionPage(params.get("page"));
@@ -59,6 +65,14 @@ export async function GET(request: Request) {
         parentKind === "unassigned" ? { kind: "unassigned" as const } :
         { kind: parentKind as "node" | "story", id: parentId! };
       const result = await readAmuxExecutionHierarchy(parent, page);
+      return result ? json(result) : json({ error: "not_found" }, 404);
+    }
+    if (view === "feedback") {
+      const kind = params.get("parentKind");
+      const id = params.get("parentId");
+      if ((kind !== "node" && kind !== "story") || !id || !ID.test(id))
+        return json({ error: "invalid_request" }, 400);
+      const result = await readAmuxExecutionFeedback({ kind, id });
       return result ? json(result) : json({ error: "not_found" }, 404);
     }
     const taskId = params.get("taskId");

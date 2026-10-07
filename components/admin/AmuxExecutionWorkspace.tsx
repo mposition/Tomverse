@@ -7,12 +7,14 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
+import { AmuxOutcomeObservationForm } from "./AmuxOutcomeObservationForm";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
   amuxVisibleInspectionText,
   amuxVisibleUntrustedText,
   type AmuxExecutionLane,
 } from "@/lib/amux/adminExecutionViewCore";
+import type { AmuxTaskFeedbackProjection } from "@/lib/amux/v22TaskFeedbackCore";
 
 type Card = {
   id: string; title: string | null; sourceKey: string | null;
@@ -28,14 +30,28 @@ type Card = {
 type BoardSnapshot = { pageSize: number;
   counts: Record<AmuxExecutionLane, number>;
   lanes: Array<{ lane: AmuxExecutionLane; cards: Card[] }> };
+type ActivationSnapshot = { asOf: string; activationAuthorized: false;
+  stages: Array<{ id: string; status: "closed" | "unverified" |
+    "owner_evidence_required"; gates: Array<{ id: string;
+      codeLatch: boolean | null; environmentEnabled: boolean | null }> }> };
 type HierarchyItem = ({ type: "node"; id: string; title: string | null;
   level: string; parentId: string | null; state: string;
   assessment: unknown; progress: { done: number; total: number } } |
   { type: "card" } & Card);
 type HierarchyPage = { page: number; pageSize: number; total: number;
   items: HierarchyItem[] };
+type FeedbackRollup = { complete: boolean; reason: string | null;
+  rollup: { taskCount: number; doneCount: number; attemptCount: number;
+    executionMs: number | null; cycleMs: number | null;
+    estimatedCostMicrousd: string | null;
+    approvedCeilingMicrousd: string | null;
+    settledCostMicrousd: string | null; incompleteUsageCount: number;
+    checkFindings: number | null; independentReviewFindings: number | null;
+    subjectiveOutcomeMissingCount: number } | null };
 type Detail = Card & { revision: number; body: string | null;
   brief: string | null;
+  feedback: AmuxTaskFeedbackProjection | null;
+  outcomeWriteEnabled: boolean;
   result: { attemptId: string; state: "available" | "purged";
     createdAt: string; text: string | null; sha256: string | null;
     patch: { state: "available"; baseSha: string; sha256: string } |
@@ -106,10 +122,13 @@ export function AmuxExecutionWorkspace() {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const [view, setView] = useState<"board" | "hierarchy">("board");
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
+  const [activation, setActivation] = useState<ActivationSnapshot | null>(null);
   const [boardPages, setBoardPages] = useState<Partial<Record<AmuxExecutionLane, number>>>({});
   const [boardBusy, setBoardBusy] = useState<AmuxExecutionLane | null>(null);
   const [archive, setArchive] = useState<Card[]>([]);
   const [tree, setTree] = useState<Record<string, HierarchyPage>>({});
+  const [feedbackByParent, setFeedbackByParent] = useState<Record<string, FeedbackRollup>>({});
+  const [feedbackBusy, setFeedbackBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({ root: true });
   const [treeBusy, setTreeBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Detail | null>(null);
@@ -124,6 +143,13 @@ export function AmuxExecutionWorkspace() {
     let cancelled = false;
     void getJson<BoardSnapshot>("/api/admin/amux/execution-view?view=board_snapshot")
       .then((result) => { if (!cancelled) setBoard(result); })
+      .catch((reason) => { if (!cancelled) showError(reason); });
+    return () => { cancelled = true; };
+  }, [showError]);
+  useEffect(() => {
+    let cancelled = false;
+    void getJson<ActivationSnapshot>("/api/admin/amux/execution-view?view=activation")
+      .then((result) => { if (!cancelled) setActivation(result); })
       .catch((reason) => { if (!cancelled) showError(reason); });
     return () => { cancelled = true; };
   }, [showError]);
@@ -148,6 +174,18 @@ export function AmuxExecutionWorkspace() {
   const openHierarchy = () => {
     setView("hierarchy");
     if (!tree.root) void loadHierarchy({ kind: "root" });
+  };
+  const loadFeedback = async (parent: { kind: "node" | "story"; id: string }) => {
+    const key = keyOf(parent);
+    setFeedbackBusy(key); setError(null);
+    try {
+      const params = new URLSearchParams({ view: "feedback",
+        parentKind: parent.kind, parentId: parent.id });
+      const result = await getJson<FeedbackRollup>(
+        `/api/admin/amux/execution-view?${params}`);
+      setFeedbackByParent((current) => ({ ...current, [key]: result }));
+    } catch (reason) { showError(reason); }
+    finally { setFeedbackBusy(null); }
   };
   const toggle = (parent: Parent) => {
     const key = keyOf(parent);
@@ -218,7 +256,21 @@ export function AmuxExecutionWorkspace() {
                 {assessmentValue(item.assessment) !== null ?
                   ` · ${m.strategicValue} ${assessmentValue(item.assessment)}` : ""}
               </span>}
+            {canExpand && <button type="button" className="text-xs underline"
+              disabled={feedbackBusy !== null}
+              onClick={() => void loadFeedback(child)}>{m.feedback}</button>}
           </div>
+          {feedbackByParent[keyOf(child)] && <p className="ml-8 text-xs text-zinc-600 dark:text-zinc-300">
+            {feedbackByParent[keyOf(child)].rollup ? (() => {
+              const summary = feedbackByParent[keyOf(child)].rollup!;
+              return `${m.progress(summary.doneCount, summary.taskCount)} · ${m.attempts} ${summary.attemptCount} · ` +
+                `${m.approvedCeiling} ${summary.approvedCeilingMicrousd === null ? m.unknown : `$${USD(summary.approvedCeilingMicrousd)}`} · ` +
+                `${m.internalCost} ${summary.settledCostMicrousd === null ? m.unknown : `$${USD(summary.settledCostMicrousd)}`} · ` +
+                `${m.incompleteUsage} ${summary.incompleteUsageCount} · ` +
+                `${m.checkFindings} ${summary.checkFindings ?? m.unknown} · ` +
+                `${m.reviewFindings} ${summary.independentReviewFindings ?? m.unknown}`;
+            })() : m.feedbackTooLarge}
+          </p>}
           {canExpand && renderTree(child, depth + 1)}
         </li>;
       })}
@@ -249,6 +301,19 @@ export function AmuxExecutionWorkspace() {
     </div>
     <p className="text-xs text-zinc-500">{m.globalAttention} <Link
       href="/admin/amux-execution?tab=halts" className="underline">{m.haltsLink}</Link></p>
+    {activation && <details data-testid="amux-v22-activation-diagnostic"
+      className="rounded border border-zinc-300 p-3 text-sm dark:border-zinc-700">
+      <summary className="cursor-pointer font-semibold">{m.activationReadout}</summary>
+      <p className="text-xs text-zinc-500">{m.activationCaveat}</p>
+      <ul className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {activation.stages.map((stage) => <li key={stage.id} className="rounded border p-2">
+          <strong>{stage.id}</strong> · {m.activationStatus[stage.status]}
+          <ul className="text-xs text-zinc-500">{stage.gates.map((gate) =>
+            <li key={gate.id}>{gate.id}: {gate.codeLatch === false ? m.codeClosed :
+              gate.environmentEnabled === false ? m.environmentClosed : m.unknown}</li>)}</ul>
+        </li>)}
+      </ul>
+    </details>}
     {error && <p role="alert" className="rounded border border-red-500 p-2 text-sm">
       {error === "reauth" ? <Link className="underline"
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>{m.reauth}</Link> :
@@ -327,6 +392,54 @@ export function AmuxExecutionWorkspace() {
           onClick={() => { detailRequest.current += 1; setSelected(null); }}>{m.close}</button>
       </div>
       <p className="text-xs text-zinc-500">{m.readOnly}</p>
+      {selected.feedback && <section aria-label={m.feedback}>
+        <h4 className="font-semibold">{m.feedback}</h4>
+        <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+          <div><dt className="inline">{m.estimatedCost}: </dt><dd className="inline">
+            {selected.feedback.expected.estimatedCostMicrousd === null ? m.unknown :
+              `$${USD(selected.feedback.expected.estimatedCostMicrousd)}`}</dd></div>
+          <div><dt className="inline">{m.approvedCeiling}: </dt><dd className="inline">
+            {selected.feedback.expected.approvedCeilingMicrousd === null ? m.unknown :
+              `$${USD(selected.feedback.expected.approvedCeilingMicrousd)}`}</dd></div>
+          <div><dt className="inline">{m.estimateRevision}: </dt><dd className="inline">
+            {selected.feedback.observed.estimateRevision ?
+              `${selected.feedback.observed.estimateRevision.revisedEffortPoints} · ` +
+              `$${USD(selected.feedback.observed.estimateRevision.revisedCostMicrousd!)}` +
+              ` · ${selected.feedback.observed.estimateRevision.reasonCode}` : m.unknown}</dd></div>
+          <div><dt className="inline">{m.internalCost}: </dt><dd className="inline">
+            {selected.feedback.observed.settledCostMicrousd === null ? m.unknown :
+              `$${USD(selected.feedback.observed.settledCostMicrousd)}`}</dd></div>
+          <div><dt className="inline">{m.attempts}: </dt><dd className="inline">
+            {selected.feedback.observed.attemptCount}</dd></div>
+          <div><dt className="inline">{m.executionTime}: </dt><dd className="inline">
+            {selected.feedback.observed.executionMs === null ? m.unknown :
+              m.minutes(selected.feedback.observed.executionMs)}</dd></div>
+          <div><dt className="inline">{m.decisionTime}: </dt><dd className="inline">
+            {selected.feedback.observed.cycleMs === null ? m.unknown :
+              m.minutes(selected.feedback.observed.cycleMs)}</dd></div>
+          <div><dt className="inline">{m.projected}: </dt><dd className="inline">
+            {selected.feedback.observed.projectedApiCostMicrousd === null ? m.unknown :
+              `$${USD(selected.feedback.observed.projectedApiCostMicrousd)}`}</dd></div>
+          <div><dt className="inline">{m.usage}: </dt><dd className="inline">
+            {selected.feedback.observed.usage ? m.tokens(
+              selected.feedback.observed.usage.inputTokens,
+              selected.feedback.observed.usage.outputTokens) : m.unknown}</dd></div>
+        </dl>
+        <p className="text-xs text-zinc-500">{m.feedbackCaveat}</p>
+        <p className="text-xs text-zinc-500">{m.revisionCaveat}</p>
+        {selected.feedback.ownerDecisions.length > 0 && <p className="text-sm">
+          {m.ownerDecision}: {selected.feedback.ownerDecisions.map((decision) =>
+            `${decision.outcome} (${date(decision.decidedAt)})`).join(" · ")}
+        </p>}
+        <p className="text-sm">{m.postDeployRegression}: {selected.feedback.observed.postDeployRegression?.outcome ?? m.unknown}</p>
+        <p className="text-sm">{m.userOutcome}: {selected.feedback.observed.userOutcome?.outcome ?? m.unknown}</p>
+        <p className="text-sm">{m.checkFindings}: {selected.feedback.observed.checks?.findingCount ?? m.unknown}</p>
+        <p className="text-sm">{m.reviewFindings}: {selected.feedback.observed.independentReview?.findingCount ?? m.unknown}</p>
+        {selected.outcomeWriteEnabled && <AmuxOutcomeObservationForm
+          key={selected.id} taskId={selected.id} revision={selected.revision}
+          writeEnabled={selected.outcomeWriteEnabled}
+          onSaved={() => void openCard(selected.id)} />}
+      </section>}
       {selected.body ? <div><h4 className="font-semibold">{m.criteria}</h4>
         {selectedBody ? <div className="space-y-2 text-sm">
           <p>{amuxVisibleInspectionText(selectedBody.problem)}</p>
