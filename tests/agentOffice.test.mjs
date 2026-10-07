@@ -30,11 +30,11 @@ const reaches = (target) => {
   return Boolean(last) && last.x === target.x && last.y === target.y;
 };
 
-test("the office holds the seven agent teams and the digest desk", () => {
-  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 7);
+test("the office holds the eight agent teams and the digest desk", () => {
+  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 8);
   assert.deepEqual(
     [...AGENT_OFFICE_TEAM_IDS].sort(),
-    ["engineering", "finance", "marketing", "qa", "research", "sre", "support"]
+    ["engineering", "finance", "marketing", "qa", "research", "sre", "support", "trust"]
   );
   assert.equal(DEPT_ROOMS.length, AGENT_OFFICE_DEPT_IDS.length);
   assert.ok(AGENT_OFFICE_DEPT_IDS.includes("digest"));

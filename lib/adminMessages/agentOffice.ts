@@ -2,7 +2,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
  * Copy for the Agent office (/admin/office): the pixel office shell for the
- * seven agent teams, after the original AI OFFICE UI by godseng.mom.
+ * eight agent teams, after the original AI OFFICE UI by godseng.mom.
  *
  * Everything the office says is here, including its staff and its demo day,
  * because the console is written in English and Korean and nothing else
@@ -87,6 +87,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         report: "Only the prices with a deadline coming up.",
         blockReason:
           "Billing & finance ops has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
+      },
+      trust: {
+        name: "Trust & safety",
+        task: "Privacy-request (DSR) deadlines, counted",
+        report: "I count deadlines. I never declare compliance or breach.",
+        blockReason:
+          "Trust & safety has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
       },
       research: {
         name: "Product research",
@@ -197,6 +204,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         name: "Taeyang Shin",
         role: "Ledger match",
         thoughts: ["I never invent a number.", "Only what was read gets recorded."],
+      },
+      "trust-lead": {
+        name: "Eunseo Ko",
+        role: "Trust & safety lead",
+        callsign: "Shield",
+        thoughts: ["I never declare compliance or breach.", "Legal holds stay in the count."],
+      },
+      "trust-m1": {
+        name: "Jihu An",
+        role: "DSR deadlines",
+        thoughts: ["Counting requests near their deadline.", "I never open an email address."],
+      },
+      "trust-m2": {
+        name: "Hayoon Oh",
+        role: "Dead-man ping",
+        thoughts: ["Only a successful run pings.", "One signal with no body is enough."],
       },
       "research-lead": {
         name: "Haeun Yoo",
@@ -626,6 +649,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         blockReason:
           "과금·재무 운영팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
       },
+      trust: {
+        name: "신뢰·안전팀",
+        task: "개인정보 요청(DSR) 기한 관측",
+        report: "기한을 셀 뿐, 준수·위반은 판정하지 않아요.",
+        blockReason:
+          "신뢰·안전팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
+      },
       research: {
         name: "제품 리서치팀",
         task: "이슈 판정을 관측 행으로 옮겨 적기",
@@ -735,6 +765,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         name: "신태양",
         role: "원장 대조",
         thoughts: ["숫자는 지어내지 않아요.", "읽은 것만 기록합니다."],
+      },
+      "trust-lead": {
+        name: "고은서",
+        role: "신뢰·안전 리드",
+        callsign: "고실드",
+        thoughts: ["준수·위반은 제가 판정하지 않아요.", "legal hold도 분모에서 빼지 않아요."],
+      },
+      "trust-m1": {
+        name: "안지후",
+        role: "DSR 기한 관측",
+        thoughts: ["기한 임박 건을 세는 중이에요.", "이메일 주소는 열어 보지 않아요."],
+      },
+      "trust-m2": {
+        name: "오하윤",
+        role: "dead-man ping",
+        thoughts: ["성공한 회차만 ping해요.", "본문 없는 신호 하나면 충분해요."],
       },
       "research-lead": {
         name: "유하은",

@@ -100,7 +100,7 @@ records the next operator control revision, offered to owner and ops only;
 its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
-**Agent office** is a shell: a pixel office for the seven agent teams and the
+**Agent office** is a shell: a pixel office for the eight agent teams and the
 digest desk, after the original AI OFFICE UI by godseng.mom. It plays a demo
 day in the browser and reads no agent's state, so under rule 8 everything on
 it that could be read as a fact says it is a demo -- a notice above the

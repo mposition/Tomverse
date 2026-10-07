@@ -69,7 +69,7 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
 }
 
 /**
- * The Agent office: a pixel office for the seven agent teams, after the
+ * The Agent office: a pixel office for the eight agent teams, after the
  * original AI OFFICE UI by godseng.mom.
  *
  * A shell. The day it plays is a demo scenario run in this browser tab; it

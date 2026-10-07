@@ -1,6 +1,6 @@
 // The Agent office's demo engine: agent state machines, A* movement, meetings
 // and one scripted day. Ported from the original AI OFFICE engine; the day is
-// rewritten around the seven agent teams.
+// rewritten around the eight agent teams.
 //
 // Nothing here reads an agent's record. Every status, line and approval is
 // the demo scenario, and the operator's approval only advances the demo.

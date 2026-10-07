@@ -5,7 +5,7 @@ import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 const TABS = adminNavItemTabs("office");
 
 /**
- * The Agent office: a pixel office shell for the seven agent teams.
+ * The Agent office: a pixel office shell for the eight agent teams.
  *
  * It loads nothing. The office plays a demo day in the browser and links each
  * team to the console page that holds its record, so reading it takes
