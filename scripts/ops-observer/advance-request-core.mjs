@@ -21,6 +21,7 @@ import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
 import {
   REQUEST_BODY_MAX_BYTES,
+  isOwnerDate,
   RUN_ID_PATTERN,
   UUID_PATTERN,
   parseRunDeadline,
@@ -37,12 +38,6 @@ const isPlainObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 const hasExactly = (value, keys) =>
   isPlainObject(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-
-function isOwnerDate(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
 
 const refuse = (error) => ({ ok: false, error });
 

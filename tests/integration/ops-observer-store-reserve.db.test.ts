@@ -16,6 +16,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 
 import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore";
 import { S2_PAGE_KEYS, S2_PAGE_SIGNALS, evaluateKey, initialKeyState } from "../../scripts/ops-observer/classify-core.mjs";
+import { admitOwedItems } from "../../scripts/ops-observer/notification-budget-core.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrations = [
@@ -173,6 +174,25 @@ test("the ops-observer advance with a reservation", { skip: !rawUrl }, async (t)
       assert.equal(p3.status, "closed");
       keys = { ...keys, [P3_KEY]: p3 };
       const recovery = { signal: "P3", scope: "credit_reservation_reconciliation", kind: "recovery", origin: "new", openedAt: new Date(now) };
+
+      // The state read names the same budget, so a run predicts the refusal
+      // before it asks: the same admitOwedItems() over the read rows defers it.
+      type Budget = { ownerDate: string; reservedToday: { key: string; kind: string; capped: boolean }[]; channelCheckTaken: boolean };
+      const budgetOf = async (ownerDate: string) =>
+        ((await readOpsObserverState(inSeconds(120), client, ownerDate)) as { budget: Budget }).budget;
+      assert.equal("budget" in (await current()), false);
+      const today = await budgetOf(OWNER_DATE);
+      assert.equal(today.ownerDate, OWNER_DATE);
+      assert.equal(today.channelCheckTaken, true);
+      assert.equal(today.reservedToday.filter((item) => item.capped).length, 6);
+      assert.deepEqual(today.reservedToday.filter((item) => !item.capped).map((item) => [item.key, item.kind]),
+        [[P3_KEY, "new_open"]]);
+      const owed = [{ key: P3_KEY, kind: "recovery" }];
+      assert.equal(admitOwedItems({ reservedToday: today.reservedToday, owed }).deferred.length, 1);
+      const tomorrow = await budgetOf("2026-10-06");
+      assert.deepEqual(tomorrow, { ownerDate: "2026-10-06", reservedToday: [], channelCheckTaken: false });
+      assert.equal(admitOwedItems({ reservedToday: tomorrow.reservedToday, owed }).admitted.length, 1);
+
       const before = await rowCounts();
       assert.deepEqual(await advance(state.generation, keys, { ownerDate: OWNER_DATE, channelCheck: false, items: [recovery] }),
         { result: "rejected", sendPermitted: false });
