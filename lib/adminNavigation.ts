@@ -608,6 +608,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "sre-ops",
+    label: "SRE agent",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
+    group: "Operations",
+    writeRoles: ["owner"],
+    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
+  },
+  {
     id: "agent-digests",
     label: "Agent digests",
     href: "/admin/agent-digests",

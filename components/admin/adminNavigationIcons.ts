@@ -57,6 +57,7 @@ export const ADMIN_NAV_ICONS = {
   "email-campaigns": Megaphone,
   marketing: Share2,
   "engineering-agent": GitPullRequest,
+  "sre-ops": Activity,
   "agent-digests": ClipboardCheck,
   office: Building2,
   platform: Settings2,
