@@ -72,6 +72,9 @@ const amuxSourceScopePreviewService = withoutComments(readFileSync(
 const amuxSourceScopePreviewCore = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
 ));
+const amuxResolutionPreviewCore = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaResolutionChoiceCore.ts"), "utf8"
+));
 const amuxResolutionPreviewService = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
 ));
@@ -115,7 +118,7 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "dcd4d6963ab4d4edb37db9c4f119ca8be00847e2a4952a273cbc060171b6f3c0";
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "201dfd71ee802d44c019749bb252a214d0d211c3e027a4f01e891595d8fbac2f";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
@@ -306,6 +309,8 @@ const isReadOnlyAmuxResolutionPreview = (route,
         JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
       amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES) !==
         RESOLUTION_PREVIEW_REVIEWED_DIGEST ||
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(amuxResolutionPreviewCore) ||
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
       !route.source.includes("const session = await owner();") ||
       !route.source.includes("await consumeApiRateLimit(request, session.user!.id!") ||
       !route.source.includes("await previewAmuxIdeaResolution({ session, ...parsed.data })") ||
@@ -320,7 +325,14 @@ const isReadOnlyAmuxResolutionPreview = (route,
       /\bfetch\s*\(|\bimport\s*\(/.test(`${route.source}\n${service}\n${resultReader}`)) {
     return false;
   }
-  return true;
+  const post = route.source.slice(route.source.indexOf("export async function POST"));
+  const ownerAt = post.indexOf("const session = await owner();");
+  const gateAt = post.indexOf("amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])");
+  const gateReturnsDisabled = /if\s*\(\s*!amuxV4ResolutionPreviewEnabled\(process\.env\[AMUX_V4_RESOLUTION_PREVIEW_ENV\]\)\s*\)\s*\{\s*return\s+NextResponse\.json\(\{\s*error:\s*"resolution_preview_disabled"/.test(post);
+  const rateAt = post.indexOf("await consumeApiRateLimit(request, session.user!.id!");
+  const previewAt = post.indexOf("await previewAmuxIdeaResolution({ session, ...parsed.data })");
+  return ownerAt >= 0 && gateAt > ownerAt && gateReturnsDisabled && rateAt > gateAt &&
+    previewAt > rateAt;
 };
 
 test("the read-only POST audit exception closes when its source boundary changes", () => {
@@ -397,6 +409,10 @@ test("the resolution dry-run audit exception closes when its source boundary cha
   assert.notEqual(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES, new Map([
     [keyStorePath, `${rawKeyStore}\nvoid globalThis.fetch("https://example.invalid");`],
   ])), RESOLUTION_PREVIEW_REVIEWED_DIGEST);
+  assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
+    source: route.source.replaceAll("if (!amuxV4ResolutionPreviewEnabled(",
+      "if (amuxV4ResolutionPreviewEnabled("),
+  }), false);
 });
 const oneShotStageWriter = withoutComments(readFileSync(
   join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
@@ -490,8 +506,9 @@ test("a route that can queue an approval can also answer the step-up refusal", (
         (route.source.includes("runWithAdminApproval") ||
           route.source.includes("assertRecentAdminAuthentication")) &&
         !route.source.includes("adminApprovalErrorResponse") &&
-        !( !route.source.includes("runWithAdminApproval") &&
-          /if\s*\(\s*isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)/.test(route.source) &&
+        !(!route.source.includes("runWithAdminApproval") &&
+          (/if\s*\(\s*isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)/.test(route.source) ||
+            /if\s*\(\s*!isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)\s*throw\s+error/.test(route.source)) &&
           /return\s+[^;]*status:\s*428/.test(route.source))
     )
     .map((route) => route.name);

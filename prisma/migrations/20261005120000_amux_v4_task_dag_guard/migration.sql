@@ -1,5 +1,6 @@
 -- v4 Task edges are the exact owner-confirmed set, not a mutable scheduling
 -- hint. Legacy dependencies retain their existing behavior.
+-- baseline-check: present-if-function "amux_v4_task_dag_check"
 CREATE FUNCTION amux_v4_task_dag_check(p_task_id text)
 RETURNS void LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE

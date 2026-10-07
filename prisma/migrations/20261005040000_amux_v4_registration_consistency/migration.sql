@@ -2,6 +2,7 @@
 -- backlog card or hierarchy node must be complete at COMMIT. The application
 -- intentionally inserts the target before consuming the decision, so this
 -- check is deferred. Historical non-v4 cards are outside its scope.
+-- baseline-check: present-if-function "amux_v4_registration_consistency_guard"
 CREATE FUNCTION amux_v4_registration_consistency_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE

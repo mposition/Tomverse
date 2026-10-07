@@ -1,5 +1,6 @@
 -- Linking a proposed Story/Task does not create or alter an existing card.
 -- The consumed decision and its own approved draft are atomic at COMMIT.
+-- baseline-check: present-if-function "amux_v4_card_link_consistency_guard"
 CREATE FUNCTION amux_v4_card_link_consistency_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE

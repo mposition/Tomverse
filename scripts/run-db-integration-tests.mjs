@@ -392,6 +392,12 @@ run(
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards are
+    // real DB contracts; they must run in the CI agent lane.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
     // seven-year checkpoint-bound deletion, no late COMMIT.

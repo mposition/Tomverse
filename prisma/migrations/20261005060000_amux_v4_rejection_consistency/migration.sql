@@ -1,5 +1,6 @@
 -- A consumed reject decision must finalize only its own draft at COMMIT.
 -- The app updates both rows in one transaction, so the check is deferred.
+-- baseline-check: present-if-function "amux_v4_rejection_consistency_guard"
 CREATE FUNCTION amux_v4_rejection_consistency_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE

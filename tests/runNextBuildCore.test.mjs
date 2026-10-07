@@ -5,7 +5,22 @@ import test from "node:test";
 import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
+  nodeOptionsForBuild,
 } from "../scripts/run-next-build-core.mjs";
+
+test("GitHub build has a bounded larger heap without overriding an explicit operator limit", () => {
+  assert.equal(nodeOptionsForBuild({}), "");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "1" }), "");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true" }),
+    "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true",
+    NODE_OPTIONS: "--trace-warnings" }),
+  "--trace-warnings --max-old-space-size=6144");
+  for (const explicit of ["--max-old-space-size=5120", "--max_old_space_size=5120"]) {
+    assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", NODE_OPTIONS: explicit }),
+      explicit);
+  }
+});
 
 /**
  * The failure this guard exists for, copied from Railway deployment 0d227e99
