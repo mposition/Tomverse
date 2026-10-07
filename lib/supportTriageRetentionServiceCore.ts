@@ -80,7 +80,9 @@ const DATABASE_URL_SHAPE =
 // libpq keyword form. A password or password file is enough on its own:
 // libpq defaults the host, and `service=` reads the rest from pg_service.conf,
 // so no second keyword is needed for the value to connect.
-const CONNINFO_SHAPE = /(?:^|\s)(?:password|passfile|sslpassword)\s*=/i;
+// A word boundary, not whitespace: libpq accepts a keyword right after a
+// quoted value's closing quote (host='db'password=x).
+const CONNINFO_SHAPE = /\b(?:password|passfile|sslpassword)\s*=/i;
 
 export type SupportTriageRetentionRefusalReason =
   | "env_not_allowed"

@@ -96,6 +96,9 @@ test("it refuses to start with any other variable, a short secret, or an unknown
     [{ ...ENV, MISE_DATABASE_URL: "service=tomverse password=secret" }, { reason: "env_holds_connection_string", names: ["MISE_DATABASE_URL"] }],
     [{ ...ENV, RAILPACK_PG: "password=secret" }, { reason: "env_holds_connection_string", names: ["RAILPACK_PG"] }],
     [{ ...ENV, MISE_PG: "passfile=/run/pgpass" }, { reason: "env_holds_connection_string", names: ["MISE_PG"] }],
+    // A keyword may follow a quoted value with no space.
+    [{ ...ENV, MISE_PG: "host='db'password=secret" }, { reason: "env_holds_connection_string", names: ["MISE_PG"] }],
+    [{ ...ENV, MISE_PG: "dbname='x'	passfile=/p" }, { reason: "env_holds_connection_string", names: ["MISE_PG"] }],
     [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: "s".repeat(31) }, { reason: "secret_missing_or_short" }],
     [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: undefined }, { reason: "secret_missing_or_short" }],
   ]) {
