@@ -17,17 +17,20 @@
 import "server-only";
 
 import type {
+  AgentOfficeAmuxState,
   AgentOfficeEngineeringState,
   AgentOfficeLiveRooms,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
+import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
 import {
   AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -164,7 +167,35 @@ async function readEngineering(): Promise<AgentOfficeEngineeringState> {
   }
 }
 
+/**
+ * AMUX workers: the app's worker catalog and each worker's runtime row --
+ * status, whether it can take work, its last heartbeat and its lease. Nothing
+ * about the cards or tasks they work on is selected.
+ */
+async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
+  try {
+    const catalog = getConfiguredAmuxWorkerCatalog();
+    const names = (catalog ?? []).filter((worker) => !worker.archived).map((worker) => worker.worker_name);
+    const runtimes = names.length
+      ? await prisma.amuxWorkerRuntime.findMany({
+          where: { workerName: { in: names } },
+          select: { workerName: true, status: true, dispatchReady: true, heartbeatAt: true, leaseExpiresAt: true },
+        })
+      : [];
+    // Judged after the read: a heartbeat written while it ran is not counted as lost.
+    return agentOfficeAmuxState({ catalog, runtimes, now: new Date() });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "amux_workers" });
+    return { kind: "unread" };
+  }
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, engineering] = await Promise.all([readResearch(now), readQa(), readEngineering()]);
-  return { readAt: now.toISOString(), research, qa, engineering };
+  const [research, qa, engineering, amux] = await Promise.all([
+    readResearch(now),
+    readQa(),
+    readEngineering(),
+    readAmuxWorkers(),
+  ]);
+  return { readAt: now.toISOString(), research, qa, engineering, amux };
 }

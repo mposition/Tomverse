@@ -112,12 +112,36 @@ export type AgentOfficeEngineeringState =
       publisherLastFinishAt: string | null;
     };
 
+/** One AMUX worker's state, from its catalog row and its runtime row. */
+export type AgentOfficeAmuxWorkerState =
+  | "ready"
+  | "idle"
+  | "busy"
+  | "starting"
+  | "error"
+  | "lost"
+  | "stopped"
+  | "not_running"
+  | "paused"
+  | "isolated"
+  | "blocked";
+
+export type AgentOfficeAmuxState =
+  | { kind: "unread" }
+  /** The app has no usable worker catalog: unset, or not in the catalog's form. */
+  | { kind: "no_catalog" }
+  | {
+      kind: "observed";
+      workers: { name: string; provider: string; state: AgentOfficeAmuxWorkerState; heartbeatAt: string | null }[];
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
   engineering: AgentOfficeEngineeringState;
+  amux: AgentOfficeAmuxState;
 };
 
 /** What a live room hands the demo engine: its colour and its lines, already in the console's language. */
@@ -407,4 +431,79 @@ export function engineeringLiveDept(
     read
   );
   return { status, badge, line, detail: facts.join(" · ") };
+}
+
+/**
+ * An AMUX worker's colour. A worker AMUX could hand work to now is done; one
+ * at work is working; an error or a heartbeat that ran out needs a look;
+ * everything the operator or the worker chose -- paused, isolated, blocked,
+ * stopped, not started, starting, idle without being ready -- is waiting.
+ */
+export function amuxWorkerTone(state: AgentOfficeAmuxWorkerState): DeptStatus {
+  if (state === "ready") return "done";
+  if (state === "busy") return "working";
+  if (state === "error" || state === "lost") return "attention";
+  return "waiting";
+}
+
+type AmuxCopy = {
+  states: Record<AgentOfficeAmuxWorkerState, string>;
+  unread: string;
+  noCatalog: string;
+  summary: (connected: number, total: number, busy: number, attention: number) => string;
+  more: (count: number) => string;
+  heartbeat: (time: string) => string;
+  noHeartbeat: string;
+  readAt: (time: string) => string;
+};
+
+export type AgentOfficeAmuxWorkerView = {
+  name: string;
+  state: AgentOfficeAmuxWorkerState;
+  status: DeptStatus;
+  label: string;
+  /** Name, provider, state and last heartbeat, for the sprite's tooltip. */
+  title: string;
+  /** Not running at all: drawn faded. */
+  dim: boolean;
+};
+
+export type AgentOfficeAmuxView = {
+  status: DeptStatus;
+  summary: string;
+  workers: AgentOfficeAmuxWorkerView[];
+};
+
+/** The AMUX room: its colour, its one-line summary and each worker's sprite. */
+export function amuxRoomView(
+  state: AgentOfficeAmuxState,
+  readAt: string,
+  desks: number,
+  copy: AmuxCopy
+): AgentOfficeAmuxView {
+  const read = copy.readAt(utcStamp(readAt));
+  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, workers: [] };
+  if (state.kind === "no_catalog") return { status: "waiting", summary: `${copy.noCatalog} · ${read}`, workers: [] };
+
+  const workers = state.workers.map((worker): AgentOfficeAmuxWorkerView => {
+    const status = amuxWorkerTone(worker.state);
+    const label = copy.states[worker.state];
+    const heartbeat = worker.heartbeatAt ? copy.heartbeat(utcStamp(worker.heartbeatAt)) : copy.noHeartbeat;
+    return {
+      name: worker.name,
+      state: worker.state,
+      status,
+      label,
+      title: [worker.name, worker.provider, label, heartbeat].join(" · "),
+      dim: worker.state === "stopped" || worker.state === "not_running",
+    };
+  });
+  const count = (tone: DeptStatus) => workers.filter((worker) => worker.status === tone).length;
+  const connected = workers.filter((worker) => ["ready", "idle", "busy"].includes(worker.state)).length;
+  const status: DeptStatus =
+    count("attention") > 0 ? "attention" : count("working") > 0 ? "working" : count("done") > 0 ? "done" : "waiting";
+  const parts = [copy.summary(connected, workers.length, count("working"), count("attention"))];
+  if (workers.length > desks) parts.push(copy.more(workers.length - desks));
+  parts.push(read);
+  return { status, summary: parts.join(" · "), workers };
 }
