@@ -167,10 +167,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   if (prepared.decision !== "ready") {
     throw new AmuxFirstAnalysisDraftError("invalid_result");
   }
-  const nextDay = new Date(now.getTime() + DAY_MS);
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
-  const payloadPurgeAfter = new Date(Math.min(nextDay.getTime(),
-    preview.payloadPurgeAfter.getTime()));
+  // Completion makes both transient bodies eligible for the next purge tick.
+  // The separate 30-day proposal units retain only the approved structured draft.
+  const payloadPurgeAfter = now;
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
@@ -198,7 +198,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       freeformCiphertext: Uint8Array.from(prepared.draft.freeform.ciphertext),
       freeformKeyId: prepared.draft.freeform.keyId,
       freeformKeyVersion: prepared.draft.freeform.keyVersion,
-      freeformPurgeAfter: nextDay,
+      freeformPurgeAfter: now,
       coveredStartOrdinal: prepared.coveredStartOrdinal,
       coveredEndOrdinal: prepared.coveredEndOrdinal,
       remainingStartOrdinal: null, remainingEndOrdinal: null },

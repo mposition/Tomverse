@@ -215,7 +215,7 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
       payloadDigestKeyId: sealed.digestKeyId, expiresAt,
-      payloadPurgeAfter: new Date(expiresAt.getTime() + 24 * 60 * 60_000),
+      payloadPurgeAfter: expiresAt,
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
       where: { ideaId: idea.id, chunkIndex: 0, actorUserId,

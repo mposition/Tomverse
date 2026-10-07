@@ -102,9 +102,11 @@ export async function readAmuxFirstIdeaAnalysisResult(
         units.length > 40) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
+    const freeformVisibleUntil = new Date(
+      chunk.analysisCompletedAt.getTime() + 24 * 60 * 60_000);
     if (!chunk.freeformPurgeAfter ||
         (!chunk.freeformCiphertext && chunk.freeformPurgedAt === null &&
-          now < chunk.freeformPurgeAfter)) {
+          now < freeformVisibleUntil)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
     }
     let freeform: Buffer | undefined;
@@ -112,7 +114,7 @@ export async function readAmuxFirstIdeaAnalysisResult(
     try {
       const previewId = chunk.currentPreviewId;
       let freeformValue: Record<string, unknown> | null = null;
-      if (chunk.freeformPurgedAt === null && now < chunk.freeformPurgeAfter) {
+      if (chunk.freeformPurgedAt === null && now < freeformVisibleUntil) {
         if (!chunk.freeformCiphertext || !chunk.freeformKeyId || !chunk.freeformKeyVersion) {
           throw new Error("freeform body missing");
         }
