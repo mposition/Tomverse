@@ -295,3 +295,12 @@ test("a merge refused because someone else merged it meanwhile is followed throu
   await runQaReleaseMergeLaneRound(ENV, merged.ports);
   assert.deepEqual(reports(merged.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
 });
+
+test("a merge refused while the pull request cannot be re-read is unknown, which latches, never refused", async () => {
+  const unread = ports({
+    merge: { result: "refused" },
+    readPull: (n) => (unread.calls.some((c) => c[0] === "merge") ? null : pull(n)),
+  });
+  await runQaReleaseMergeLaneRound(ENV, unread.ports);
+  assert.deepEqual(reports(unread.calls), [{ kind: "merge", result: "unknown" }]);
+});
