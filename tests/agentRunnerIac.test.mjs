@@ -264,7 +264,13 @@ test("services that can only reach staging or production are not declared in dev
   // staging and production only, and billing-finance-ops through a run
   // endpoint table of the same two. In dev each would start and refuse every
   // run, so dev does not get them until their tables name dev.
-  for (const key of ["qa_release_digest", "qa_release_monitor", "billing_finance_ops_deadline", "qa_release_merge_lane"]) {
+  for (const key of [
+    "qa_release_digest",
+    "qa_release_monitor",
+    "billing_finance_ops_deadline",
+    "qa_release_merge_lane",
+    "support_triage_retention",
+  ]) {
     const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
     assert.equal(runner.environments.dev, undefined, key);
   }
@@ -339,4 +345,16 @@ test("the repository the run clones is the one the services deploy from", () => 
   // would answer for a backlog that is not this product's while looking
   // exactly like a correct run, and nothing downstream could tell.
   assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
+});
+
+test("the Support Triage Retention service declares exactly the variable its start check accepts, and starts node directly", async () => {
+  const { SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES } = await import("../lib/supportTriageRetentionServiceCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "support_triage_retention");
+  assert.ok(runner);
+  for (const environment of ["production", "staging"]) {
+    assert.deepEqual([...runner.environments[environment]].sort(), [...SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES].sort(), environment);
+  }
+  // docs/policy/support-triage.md §3: every 30 minutes.
+  assert.equal(runner.cronSchedule, "*/30 * * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/support-triage-retention-service.mjs");
 });
