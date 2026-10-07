@@ -984,6 +984,18 @@ export const ADMIN_DETAIL_ROUTES = [
     group: "Operations" as const,
   },
   {
+    // The ops-observer page message link (docs/policy/sre-ops.md §3 rule 1).
+    // Its path is fixed by scripts/ops-observer/content-guard-core.mjs, so it
+    // lives under /admin/agents rather than beside its parent entry.
+    id: "sre-ops-item",
+    pattern: /^\/admin\/agents\/sre-ops\/items\/[^/]+$/,
+    label: "Ops observer message",
+    description: "What one page message was about: its signals, message kinds and times",
+    parentLabel: "SRE agent",
+    parentHref: "/admin/sre-ops",
+    group: "Operations" as const,
+  },
+  {
     id: "provider-detail",
     pattern: /^\/admin\/providers\/[^/]+$/,
     label: "Provider detail",

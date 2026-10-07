@@ -39,7 +39,7 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     "only a dedicated test database is accepted");
   process.env.DATABASE_URL ||= rawUrl;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = KEY;
-  const { advanceOpsObserverState, confirmOpsObserverDelivery, purgeOpsObserverDeliveries, readOpsObserverState } = await import("@/lib/opsObserverStore");
+  const { advanceOpsObserverState, confirmOpsObserverDelivery, purgeOpsObserverDeliveries, readOpsObserverDelivery, readOpsObserverState } = await import("@/lib/opsObserverStore");
 
   const admin = new pg.Client({ connectionString: rawUrl });
   await admin.connect();
@@ -148,6 +148,25 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     const open = await advance(shadowGenesis, "2026-10-04", null);
     const itemsOf = async (id: string) =>
       (await q(`SELECT count(*)::int AS n FROM "OpsObserverDeliveryItem" WHERE "deliveryId" = $1`, [id])).rows[0].n;
+
+    await t.test("the item screen reads a reservation by its id, and nothing else", async () => {
+      const view = await readOpsObserverDelivery(old1.deliveryId, client);
+      assert.equal(view?.id, old1.deliveryId);
+      assert.deepEqual([view?.status, view?.mode, view?.ownerDate, view?.channelCheck], ["shadowed", "shadow", "2026-10-01", false]);
+      assert.ok(view?.closedAt && Date.parse(view.closedAt) >= Date.parse(view.reservedAt));
+      assert.equal(view?.items.length, 1);
+      assert.deepEqual([view?.items[0].signal, view?.items[0].scope, view?.items[0].kind, view?.items[0].capped],
+        ["P3", "credit_reservation_reconciliation", "new_open", false]);
+      // The first advance opened P3 at the fixture clock's first tick, printed in UTC.
+      assert.equal(view!.items[0].openedAt, "2026-10-01T00:10:00.000Z");
+      const check = await readOpsObserverDelivery(old2.deliveryId, client);
+      assert.deepEqual([check?.channelCheck, check?.items], [true, []]);
+      const reserved = await readOpsObserverDelivery(open.deliveryId, client);
+      assert.deepEqual([reserved?.status, reserved?.closedAt], ["reserved", null]);
+      // An unknown id, or anything that is not a UUID, is no reservation.
+      assert.equal(await readOpsObserverDelivery("00000000-0000-4000-8000-000000000000", client), null);
+      assert.equal(await readOpsObserverDelivery("../etc", client), null);
+    });
 
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
       assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 0 });

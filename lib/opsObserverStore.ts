@@ -877,3 +877,76 @@ export async function purgeOpsObserverDeliveries(
   await assertNotLate(runDeadline, client);
   return result;
 }
+
+/** One reservation as the Admin item screen shows it: the page link's target. */
+export type OpsObserverDeliveryView = {
+  id: string;
+  genesisId: string;
+  mode: string;
+  status: string;
+  ownerDate: string;
+  channelCheck: boolean;
+  reservedAt: string;
+  closedAt: string | null;
+  items: { signal: string; scope: string; kind: string; origin: string; openedAt: string; capped: boolean }[];
+};
+
+/**
+ * The reservation a page message links to (docs/policy/sre-ops.md §3 rule 1,
+ * §4): the link carries only its server-minted id, and this is what the owner
+ * sees behind it -- the keys, message kinds and times the message itself may
+ * not carry. Read-only; `null` for an id that is not (or no longer, after the
+ * ninety days of §10) a reservation. One bounded `state_read` transaction.
+ */
+export async function readOpsObserverDelivery(
+  deliveryId: string,
+  client: PrismaClient = prisma,
+): Promise<OpsObserverDeliveryView | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deliveryId)) return null;
+  const runDeadline = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS);
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx): Promise<OpsObserverDeliveryView | null> => {
+      const [row] = await tx.$queryRaw<
+        {
+          id: string;
+          genesisId: string;
+          mode: string;
+          status: string;
+          ownerDate: string;
+          channelCheck: boolean;
+          reservedAt: Date;
+          closedAt: Date | null;
+          items: OpsObserverDeliveryView["items"] | null;
+        }[]
+      >`
+        SELECT d.id::text AS id, d."genesisId"::text AS "genesisId", d.mode, d.status,
+               to_char(d."ownerDate", 'YYYY-MM-DD') AS "ownerDate",
+               d."channelCheckDate" IS NOT NULL AS "channelCheck",
+               d."reservedAt", coalesce(d."confirmedAt", d."shadowedAt", d."abandonedAt") AS "closedAt",
+               (SELECT json_agg(json_build_object('signal', i.signal, 'scope', i.scope, 'kind', i.kind,
+                         'origin', i.origin,
+                         'openedAt', to_char(i."openedAt" AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+                         'capped', i.capped)
+                       ORDER BY i.signal, i.scope)
+                  FROM "OpsObserverDeliveryItem" i WHERE i."deliveryId" = d.id) AS items
+          FROM "OpsObserverDelivery" d
+         WHERE d.id = ${deliveryId}::uuid`;
+      if (!row) return null;
+      return {
+        id: row.id,
+        genesisId: row.genesisId,
+        mode: row.mode,
+        status: row.status,
+        ownerDate: row.ownerDate,
+        channelCheck: row.channelCheck,
+        reservedAt: row.reservedAt.toISOString(),
+        closedAt: row.closedAt ? row.closedAt.toISOString() : null,
+        items: row.items ?? [],
+      };
+    },
+    client,
+  );
+  return result;
+}
