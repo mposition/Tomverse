@@ -63,6 +63,7 @@ import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
 import { checkBillingFinanceOpsSilence } from "@/lib/billingFinanceOpsSilence";
+import { DELIVERY_RETENTION_BATCH_LIMIT, purgeOpsObserverDeliveries } from "@/lib/opsObserverStore";
 import {
   OBSERVATION_SILENCE_HOURS,
   observationSilenceVerdict,
@@ -1027,6 +1028,21 @@ export async function cleanupExpiredData() {
   // agent's check with it.
   const billingFinanceOpsSilence = await step("billing_finance_ops_silence", () => checkBillingFinanceOpsSilence());
 
+  // The sre-ops reservations past their ninety days (docs/policy/sre-ops.md
+  // §10). Its own step: each batch is its own bounded transaction with its
+  // own deadline checked at COMMIT and its own audit entry, and a step that
+  // stops early once a batch comes back short. The agent writes at most a few
+  // reservations a day, so a backlog cannot build.
+  const opsObserverDeliveriesPurged = await step("ops_observer_delivery_retention", async () => {
+    let purged = 0;
+    for (let batch = 0; batch < AGENT_DIGEST_RETENTION_BATCHES_PER_RUN; batch += 1) {
+      const result = await purgeOpsObserverDeliveries();
+      purged += result.deleted;
+      if (result.deleted < DELIVERY_RETENTION_BATCH_LIMIT) break;
+    }
+    return purged;
+  });
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
@@ -1090,6 +1106,7 @@ export async function cleanupExpiredData() {
     productResearchObservations: productResearchObservations?.removed ?? null,
     productResearchSilence: productResearchSilence?.state ?? null,
     billingFinanceOpsSilence,
+    opsObserverDeliveriesPurged,
     failedSteps: failures,
   };
 }

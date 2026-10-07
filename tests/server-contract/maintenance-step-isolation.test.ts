@@ -214,6 +214,14 @@ mock.module(mod("lib/billingFinanceOpsSilence.ts"), {
     checkBillingFinanceOpsSilence: async () => "recorded",
   },
 });
+// The sre-ops reservation retention (docs/policy/sre-ops.md §10), mocked as
+// its store: one short batch, so the step stops after its first call.
+mock.module(mod("lib/opsObserverStore.ts"), {
+  namedExports: {
+    DELIVERY_RETENTION_BATCH_LIMIT: 500,
+    purgeOpsObserverDeliveries: async () => ({ deleted: 43 }),
+  },
+});
 mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
   namedExports: {
     // On, so the silence step does its reads: off would make it report
@@ -407,6 +415,7 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.agentDigestBodiesExpired, 37);
   assert.equal(result.agentDigestMetaPurged, 41);
   assert.equal(result.billingFinanceOpsSilence, "recorded");
+  assert.equal(result.opsObserverDeliveriesPurged, 43);
 
   // So did everything after it, all the way to the last step.
   assert.equal(result.sessions, 2);
