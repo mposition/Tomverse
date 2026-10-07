@@ -703,6 +703,8 @@ a.integration-row:hover { border-color: var(--accent); }
 .rm-operator { background: var(--room-operator); }
 .rm-meeting { background: var(--room-meeting); }
 .rm-lounge { background: var(--room-lounge); }
+.rm-link { flex: none; color: var(--accent); font-weight: 900; text-decoration: none; }
+.rm-link:hover, .rm-link:focus-visible { text-decoration: underline; }
 .rm.working { background: var(--working-tint); }
 .rm.done { background: var(--done-tint); }
 .rm.approval { background: var(--approval-tint); }
@@ -798,6 +800,9 @@ a.integration-row:hover { border-color: var(--accent); }
 /* ── Staff sprites ─────────────────────────────────────── */
 .ag { position: absolute; left: 0; top: 0; width: 0; height: 0; cursor: pointer; }
 .ag.offstage { opacity: 0; pointer-events: none; }
+/* AMUX workers: drawn from the record, not picked like staff. */
+.ag.wk { cursor: default; }
+.ag.wk-off { opacity: .45; }
 .ag-body {
   position: absolute;
   left: 0;

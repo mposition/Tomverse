@@ -134,6 +134,13 @@ engineering is live the demo plays no draft and no approval: its decisions
 are real and are made on its own screen, so the office's approval windows and
 the end-of-day briefing say so and link there instead of offering a demo
 approval, and the phases it replaces are marked as replaced, never ticked.
+Under the teams, the AMUX execution room is LIVE as a whole: one desk for each
+worker in the app's AMUX worker catalog (archived ones left out), each worker
+drawn seated with its real state -- the operator's exclusions first, then its
+runtime row read the way AMUX reads it when it hands out work (live while the
+lease has not run out and the status is idle or busy) -- and a link to the
+AMUX execution page. Workers are not demo staff: they never walk, meet or
+speak a demo line, and nothing about the cards they work on is read.
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
