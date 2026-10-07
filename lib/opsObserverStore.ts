@@ -37,7 +37,8 @@ import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
 import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
-import { judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
+import { confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
+import { deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 
 type HeadRow = {
   id: string;
@@ -507,5 +508,72 @@ export async function advanceOpsObserverState(
     client,
   );
   if (result.result === "advanced" || result.result === "noop") await assertNotLate(input.runDeadline, client);
+  return result;
+}
+
+export type OpsObserverConfirmInput = { runDeadline: Date; deliveryId: string; runId: string };
+
+export type OpsObserverConfirmResult =
+  | { result: "confirmed" | "shadowed" | "replayed" }
+  | { result: "not_found" | "abandoned" }
+  | { result: "untrusted"; trust: string };
+
+/**
+ * Closes the run's reservation after its send (docs/policy/sre-ops.md §3 rules
+ * 3 and 9, §6). One `confirm` transaction: the trust check again, the
+ * reservation locked by its id and the run that made it, and the close --
+ * `confirmed` under a live genesis, `shadowed` under a shadow one, decided by
+ * the row's mode and never by the request -- with its system audit entry.
+ * A reservation already closed by its own confirm answers `replayed`; one the
+ * next advance closed as abandoned stays abandoned and is refused.
+ */
+export async function confirmOpsObserverDelivery(
+  input: OpsObserverConfirmInput,
+  client: PrismaClient = prisma,
+): Promise<OpsObserverConfirmResult> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  const { result } = await withOpsObserverTransaction(
+    "confirm",
+    input.runDeadline,
+    async (tx): Promise<OpsObserverConfirmResult> => {
+      const gathered = await gatherFacts(tx, integrityKeys);
+      const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
+      if (!verdict.trusted) return { result: "untrusted", trust: verdict.reason ?? "state_missing" };
+
+      // The row and the mode of the genesis that made it. The trust check reads
+      // only the current genesis's open reservation; this one may be older, so
+      // its own stamps are checked here before it is touched -- the close would
+      // otherwise overwrite them with the trigger's.
+      const [row] = await tx.$queryRaw<
+        { genesisId: string; mode: string; status: string; invariantVersion: number; stampStatus: string; genesisMode: string }[]
+      >`
+        SELECT d."genesisId", d.mode, d.status, d."invariantVersion", d."stampStatus", g.mode AS "genesisMode"
+          FROM "OpsObserverDelivery" d
+          JOIN "OpsObserverGenesis" g ON g.id = d."genesisId"
+         WHERE d.id = ${input.deliveryId}::uuid AND d."runId" = ${input.runId}
+         FOR UPDATE OF d`;
+      if (!row) return { result: "not_found" };
+      const stamp = deliveryStampReason([row], row.genesisMode) as string | null;
+      if (stamp) return { result: "untrusted", trust: stamp };
+      if (row.status === "confirmed" || row.status === "shadowed") return { result: "replayed" };
+      if (row.status !== "reserved") return { result: "abandoned" };
+
+      const closed = confirmStatusForMode(row.mode) as "confirmed" | "shadowed";
+      await tx.$executeRaw`
+        UPDATE "OpsObserverDelivery"
+           SET status = ${closed}, "stampStatus" = ${closed}, "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
+         WHERE id = ${input.deliveryId}::uuid AND status = 'reserved'`;
+      await tx.$appendSystemAudit({
+        action: closed === "confirmed" ? "ops_observer.delivery_confirmed" : "ops_observer.delivery_shadowed",
+        targetType: "OpsObserverDelivery",
+        targetId: input.deliveryId,
+        summary: closed === "confirmed" ? "Confirmed an ops-observer page." : "Closed a shadow ops-observer reservation.",
+        metadata: { genesisId: row.genesisId, runId: input.runId, runDeadlineAt: input.runDeadline.toISOString() },
+      });
+      return { result: closed };
+    },
+    client,
+  );
+  if (result.result === "confirmed" || result.result === "shadowed") await assertNotLate(input.runDeadline, client);
   return result;
 }

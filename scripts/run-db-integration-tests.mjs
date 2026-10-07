@@ -385,6 +385,9 @@ run(
     // sre-ops advance with a reservation: owed items only, replay, channel
     // check, the daily cap counted in the store; refusals write nothing.
     "tests/integration/ops-observer-store-reserve.db.test.ts",
+    // sre-ops confirm: the close decided by the genesis mode, replay, abandoned
+    // and untrusted refusals.
+    "tests/integration/ops-observer-store-confirm.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
