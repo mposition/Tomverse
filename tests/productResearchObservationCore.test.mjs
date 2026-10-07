@@ -35,6 +35,7 @@ import {
   observationLabel,
   observationSilenceVerdict,
   observationSlotSeries,
+  observationSummaryView,
   p1WindowJudgement,
   p2WindowJudgement,
   summariseObservation,
@@ -677,4 +678,87 @@ test("a failed or missing slot does not get an earlier success's rows", () => {
   // of is that the stored state is wrong.
   const duplicated = [{ slot: END_SLOT, state: "duplicate" }];
   assert.equal(displayableObservationSlot(duplicated, { everRecorded: true }).slot, null);
+});
+
+test("the slot summary counts every verdict the screen can name, zeroes included", () => {
+  // The number this exists to stop a person computing: the first staging slot
+  // had eleven rows and the only thing separating four from seven was a commit
+  // signal, so the distribution is what says the clone's history was readable.
+  // At the 200-row limit nobody counts that column by eye.
+  const row = (id, verdict) => ({
+    id,
+    title: `issue ${id}`,
+    verdict,
+    resolvedOn: [],
+    missingFrom: [],
+    blockedOnPresent: false,
+    signals: {
+      probe: { develop: "none", main: "none" },
+      pricing: { develop: "none", main: "none" },
+      commits: { develop: false, main: false },
+    },
+  });
+  const issues = [
+    ...Array.from({ length: 4 }, (_unused, i) => row(String(i + 1), "landed_but_unverified")),
+    ...Array.from({ length: 7 }, (_unused, i) => row(String(i + 5), "open_work")),
+  ];
+  const payload = { issues, ...summariseObservation(issues) };
+
+  const view = observationSummaryView(payload);
+  assert.equal(view.issueCount, 11);
+  assert.equal(view.storedCountsAgree, true);
+  assert.deepEqual(
+    view.verdicts.map((entry) => [entry.verdict, entry.count]),
+    Object.keys(OBSERVATION_LABELS.verdict).map((verdict) => [
+      verdict,
+      verdict === "landed_but_unverified" ? 4 : verdict === "open_work" ? 7 : 0,
+    ]),
+  );
+  // Zeroes are kept. A distribution with them dropped cannot be compared with
+  // another one -- "this verdict did not occur" and "this verdict is not in
+  // that build" would look the same, and that comparison is the P2 gate.
+  assert.equal(view.verdicts.length, Object.keys(OBSERVATION_LABELS.verdict).length);
+  // Every row is nameable, so the screen never prints a source enum.
+  assert.equal(view.verdicts.every((entry) => typeof entry.label === "string"), true);
+  assert.deepEqual(view.blindSpots, { noSignalIssues: 11, oneBranchOnly: 0 });
+});
+
+test("stored counts that stopped matching their own rows are reported, not shown", () => {
+  const issues = [
+    {
+      id: "1",
+      title: "one",
+      verdict: "open_work",
+      resolvedOn: [],
+      missingFrom: [],
+      blockedOnPresent: false,
+      signals: {
+        probe: { develop: "none", main: "none" },
+        pricing: { develop: "none", main: "none" },
+        commits: { develop: false, main: false },
+      },
+    },
+  ];
+  const honest = observationSummaryView({ issues, ...summariseObservation(issues) });
+  assert.equal(honest.storedCountsAgree, true);
+
+  // The route refuses a submission whose counts do not rederive, so this is a
+  // stored row that stopped matching -- the figures shown are the recount, and
+  // the disagreement is said rather than hidden behind one of the two.
+  const drifted = observationSummaryView({
+    issues,
+    counts: { byVerdict: { open_work: 99 } },
+    blindSpots: { noSignalIssues: 0, oneBranchOnly: 0 },
+  });
+  assert.equal(drifted.storedCountsAgree, false);
+  assert.equal(drifted.verdicts.find((entry) => entry.verdict === "open_work").count, 1);
+  assert.deepEqual(drifted.blindSpots, { noSignalIssues: 1, oneBranchOnly: 0 });
+});
+
+test("a payload that cannot say is null rather than a screen full of zeroes", () => {
+  // An unknown count is not a zero: six zeroes beside eleven rows would be read
+  // as a measurement.
+  for (const payload of [null, undefined, {}, { issues: "none" }, { issues: [{}] }, 7]) {
+    assert.equal(observationSummaryView(payload), null, JSON.stringify(payload) ?? "undefined");
+  }
 });
