@@ -4,7 +4,7 @@
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
-| 1 | **승인 대기** | 최초 초안. 2026-10-07 운영자가 대화에서 정한 결정(§0)을 담는다. 독립 검토 세 회차 뒤 운영자 결정 10에 따라 **제안 모드 전용**으로 줄였고, 그 뒤 다섯 회차의 지적을 반영한 일곱 번째 초안이다. |
+| 1 | **승인 대기** | 최초 초안. 2026-10-07 운영자가 대화에서 정한 결정(§0)을 담는다. 운영자 결정 10에 따라 **제안 모드 전용**으로 줄였고, 2026-10-07 마지막 검토 회차의 지적까지 반영한 승인 요청본이다. 그 반영분은 다시 검토하지 않았다(운영자 결정 11). |
 
 이 문서는 운영자가 `approvedBy`·`approvedAt`을 기록하기 전까지 구현 근거가 아니다(공통 기반
 원칙 1). 이 정책은 두 개정을 전제로 하며, 각각 운영자가 따로 승인한다.
@@ -35,6 +35,8 @@
     그 의미를 검증하지 못한다(세 번째 검토의 차단 지적). 그래서 결정 2의 졸업, 결정 4, 결정 8은 **v2 정책과
     공통 기반 원칙 3의 별도 개정**으로 넘긴다. v2의 근거는 v1이 기록하는 선언 정확도(§4)다. 졸업 기준이
     이미 제안 50건·30일이므로 이 순서는 자율 시작을 늦추지 않는다.
+11. kill switch 중에도 보존·개인정보 관리 같은 사람 조작과 시스템의 보존 정리는 허용한다(공통 기반 r16 §4의
+    좁은 예외, §6의 표). 마지막 검토 지적을 반영한 판을 추가 검토 없이 승인 결정에 올린다.
 
 ## 1. 목적과 경계
 
@@ -66,13 +68,13 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.**
 3. DM 배정이 오면 로컬 AMUX는 **한 번의 비교·교체**로 카드에 DM 대기 표시를 붙인다(상태는 바꾸지 않는다).
    카드가 아직 같은 질문 revision의 `needsyou`이고 운영자 답이 없을 때만 붙이며, 아니면 배정을 버리고 그
    사실을 route에 보고해 요청을 닫는다.
-4. 로컬 AMUX는 §5의 입력(카드와 스냅샷)을 DM 계정의 작업 디렉터리에 **먼저 다 만들고**, 그 바이트의 payload
-   digest와 스냅샷 manifest digest를 계산한다. 그 두 digest를 담아 §10의 전송 의도를 route에 기록하고, 응답을
-   받은 뒤에만 그 바이트 그대로 DM 프로세스를 시작한다. 만든 뒤 바뀐 입력은 보내지 않는다.
-5. DM의 구조화된 출력을 bridge가 route로 보낸다. route가 §6으로 검증하고, 통과하면 제안으로 저장한다.
-   종결 결과가 무엇이든(제안·이관·검증 실패·시간 초과·DM 불가) 로컬 AMUX는 **같은 방식으로** 표시만 떼고
-   카드에 아무것도 쓰지 않는다. 결과의 종류와 사유는 앱 DB와 Admin에만 있다. 확정 전 카드는 DM 출력에
-   따라 달라지지 않는다.
+4. DM broker(§5)가 §5의 입력(카드와 스냅샷)을 요청 디렉터리에 **먼저 다 만들고**, 그 바이트의 payload digest와
+   스냅샷 manifest digest를 계산한다. 그 두 digest를 담아 §10의 전송 의도를 route에 기록하고, 응답을 받은 뒤에만
+   그 바이트 그대로 DM 프로세스를 시작한다. 만든 뒤 바뀐 입력은 보내지 않는다.
+5. DM의 구조화된 출력을 broker가 bridge 경로로 route에 보낸다(§9의 제출 규칙). route가 §6으로 검증하고, 통과하면
+   제안으로 저장한다. 종결 결과가 무엇이든(제안·이관·검증 실패·시간 초과·DM 불가) 로컬 AMUX는 **같은 방식으로**
+   표시만 떼고 카드에 아무것도 쓰지 않는다. 결과의 종류와 사유는 앱 DB와 Admin에만 있다. 확정 전 카드는 DM
+   출력에 따라 달라지지 않는다.
 6. 운영자는 Admin에서 제안을 그대로 확정·고쳐서 확정·거절한다. 권한은 `ops:write`와 최근 step-up이고
    판정은 사람 감사로 남는다(승인 계약 §2와 같은 조건). 같은 화면에서 선언 정확도(§4)를 기록할 수 있다.
 7. 운영자가 확정한 답만 bridge가 가져가고, 로컬 AMUX가 기존 운영자 답변 경로(worker 세션 메시지 + 카드
@@ -136,17 +138,19 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
 - **카드:** 질문 카드의 구조화된 필드(유형·질문·선택지·효과 등급·경로·`resolution`·해제 조건·worker가 적은
   맥락)만. 상위·의존 카드는 넣지 않는다. 카드 텍스트는 합계 16 KiB 이하. 카드의 URL을 가져오지 않는다.
 - **저장소 스냅샷 — 공개된 내용만:** 스냅샷은 GitHub의 공개 저장소 `github.com/mposition/Tomverse`에 이미
-  있는 commit의 파일만이다. 대상은 묻는 worker의 HEAD SHA가 공개 경로로 받아지면 그 SHA, GitHub가 그 SHA에
-  대해 확정적으로 404를 답하면 앱이 기록한 최신 `develop` SHA다. 그 밖의 오류(네트워크·5xx·rate limit)면
-  스냅샷 없이 카드만 보내고 그 사실을 기록한다. 대상 full SHA는 **한 번** 정하고 다시 해석하지 않는다.
-  **로컬 Git 메타데이터(remote·graft·replace·shallow·commit-graph)는 저장소 판정에도 파일 읽기에도 쓰지 않는다.**
-  worker가 push하지 않은 변경은 스냅샷에 없고, worker가 카드에 적은 맥락으로만 간다. GitHub는 같은 network의
-  fork commit도 상위 저장소 경로로 내주지만, 그 내용도 이미 공개된 것이다.
-- **가져오는 방식:** 별도의 가져오기 프로세스가 자격증명 없이 받는다. `gh`·`git`·netrc·credential helper·
-  환경의 token을 쓰지 않고, 빈 환경의 HTTPS client로 GitHub의 공개 tree 조회 1회와 공개 raw 경로만 부르며,
-  인증해서 다시 시도하지 않는다. tree 조회로 각 경로의 mode와 blob id를 얻고, symlink(`120000`)·submodule
-  (`160000`)은 바이트를 받기 전에 뺀다. 받은 바이트로 계산한 Git blob id가 tree의 blob id와 다르면 그 파일을
-  뺀다.
+  있는 commit의 파일만이다. 대상 SHA는 다음 순서로 **한 번** 정하고 다시 해석하지 않는다. (1) 묻는 worker의
+  HEAD가 소문자 16진수 40자이고, 공개 commit 조회가 200을 주며 응답의 commit id가 그 값과 같으면 그 SHA.
+  (2) 그 조회가 404나 422를 주면 앱이 기록한 최신 `develop` SHA(같은 검사를 거친다). (3) 그 밖의
+  결과(네트워크·5xx·rate limit·형식 불일치)면 스냅샷 없음, 카드만. 스냅샷 상태는 `none`·`worker_head`·
+  `develop` 중 하나로 기록한다. **로컬 Git 메타데이터(remote·graft·replace·shallow·commit-graph)는 저장소
+  판정에도 파일 읽기에도 쓰지 않는다.** worker가 push하지 않은 변경은 스냅샷에 없고, worker가 카드에 적은
+  맥락으로만 간다. GitHub는 같은 network의 fork commit도 상위 저장소 경로로 내주지만, 그 내용도 이미 공개된 것이다.
+- **가져오는 방식:** broker의 가져오기 단계가 자격증명 없이 받는다. `gh`·`git`·netrc·credential helper·
+  환경의 token을 쓰지 않고, 빈 환경의 HTTPS client로 공개 commit 조회 1회, 그 commit의 recursive tree 조회
+  1회, 파일별 공개 raw 경로만 부르며, 인증해서 다시 시도하지 않는다. tree가 `truncated`면 스냅샷 없음이다.
+  파일은 tree에 **mode `100644`·`100755`의 blob 항목으로 있을 때만** 받는다. tree에 없거나 디렉터리
+  (`040000`)·symlink(`120000`)·submodule(`160000`)이면 받지 않는다. 받은 바이트로 계산한 Git blob id가 tree의
+  blob id와 다르거나 raw 조회가 실패하면 그 파일만 뺀다. 파일 단위 실패는 대상 SHA를 바꾸지 않는다.
 - **스냅샷의 파일:** worker가 typed ask에 적은 맥락 경로(최대 64개)와 변경 선택지가 선언한 경로 가운데 대상
   SHA에 있는 파일이다. 경로 문법은 `docs/policy/amux-intake.md`의 `repositoryPaths`와 같다(저장소 루트 기준
   상대 경로, 항목 200바이트, `..`와 절대 경로 거절). 여기에 더해 `.` 구간, 빈 구간, 역슬래시, `%`·`?`·`#`,
@@ -157,22 +161,34 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   무엇을 뺐는지는 건수와 사유만 기록한다. manifest는 경로와 blob id다.
 - **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드는 공개되지 않은 텍스트이고, DM 공급사로 가는 회수할
   수 없는 새 전송이다(§11). 그 승인 전에는 DM 프로세스를 시작하지 않는다.
-- **실행 계정과 격리(양방향):** 공급사마다 별도의 권한 없는 Linux 계정을 둔다. 각 계정에는 **자기 공급사 CLI의
-  인증 하나만** 있고, GitHub 로그인·git credential helper·SSH 키·제품 DB·배포 자격증명·bridge 환경 파일은
-  없다. worker 홈, 저장소 clone, 다른 DM 계정, AMUX 상태 파일은 이 계정이 읽을 수 없어야 한다. 그 계정의
-  네트워크는 host 방화벽으로 자기 공급사 API host만 허용한다. **반대 방향도 막는다.** DM 실행과 출력 전달은
-  worker 계정과 다른 UID의 broker가 맡고, 요청마다 `0700` 디렉터리와 `0600` 파일을 쓰며, worker 계정은 그
-  디렉터리·DM 프로세스를 읽거나 ptrace할 수 없고 sudo도 없다. DM의 stdout은 broker가 pipe로 받아 bridge
-  경로로 앱에 보내며, 로컬 AMUX DB·로그·카드·worker가 읽는 어떤 파일에도 쓰지 않는다. CLI의 기록·transcript는
-  끄거나 요청 디렉터리 안에 두고 프로세스가 끝나면 지운다. `codex`의 read-only sandbox는 파일 읽기와 명령
-  실행을 막지 않으므로, **DM이 읽을 수 있는 범위는 sandbox가 아니라 이 계정 경계가 정한다.**
+- **실행 주체와 격리(양방향):** 네 주체를 서로 다른 UID로 둔다.
+
+  | 주체 | 읽고 쓰는 것 | 네트워크 |
+  |---|---|---|
+  | worker | 자기 worktree와 홈. 요청 디렉터리·DM 프로세스·broker를 읽거나 ptrace할 수 없고 sudo 없음 | 기존 그대로 |
+  | DM broker | 요청 디렉터리를 만들고 지움, 스냅샷 가져오기, DM 프로세스 시작, DM stdout을 pipe로 받아 bridge의 로컬 소켓으로 넘김. 공급사 CLI 인증·bridge 자격증명 없음 | GitHub 공개 host와 bridge 로컬 소켓만 |
+  | DM 공급사 계정(공급사마다 하나) | 자기 공급사 CLI의 인증 하나, 요청 디렉터리 읽기만, 자기 임시 디렉터리 | 자기 공급사 API host만 |
+  | bridge | 기존 bridge 자격증명. 요청 디렉터리 접근 없음 | 앱 route만 |
+
+  DM 공급사 계정과 broker에는 GitHub 로그인·git credential helper·SSH 키·제품 DB·배포 자격증명·bridge 환경 파일이
+  없고, worker 홈·저장소 clone·다른 공급사 계정·AMUX 상태 파일을 읽을 수 없다. 요청 디렉터리는 broker 소유, 그
+  공급사 계정 그룹만 읽는 `0750`(파일 `0640`)이고 worker는 그 그룹이 아니다. DM
+  stdout은 broker를 거쳐 bridge로만 가며, 로컬 AMUX DB·로그·카드·worker가 읽는 어떤 파일에도 쓰지 않는다. CLI의
+  기록·transcript는 끄거나 공급사 계정의 요청별 임시 디렉터리에 두고 함께 지운다. `codex`의 read-only
+  sandbox는 파일 읽기와 명령 실행을 막지 않으므로, **DM이 읽을 수 있는 범위는 sandbox가 아니라 이 계정 경계가
+  정한다.** 정확한 배치 방식(서비스 단위, 소켓 위치)은 S0이 실측해 기록한다.
+- **요청 디렉터리 삭제:** 종결 결과가 무엇이든, 강제 종료를 포함한 모든 종료 경로에서 broker가 요청 디렉터리와
+  공급사 계정의 요청별 임시 디렉터리(카드·스냅샷·prompt·임시 출력)를 지운다. 지웠는지 확인하지 못하면
+  `cleanup_unknown`으로 두고 그 인스턴스를 `off`로 latch한다. broker는 다음 요청을 시작하기 전에 남은 요청
+  디렉터리가 없음을 확인한다. 이 로컬 파일은 §10의 본문 저장소가 아니며 요청 시간 동안만 존재한다.
 - **실행 방식:** DM은 일반 worker launcher를 쓰지 않는다. 지금의 launcher는 `codex`에
   `--dangerously-bypass-approvals-and-sandbox`나 `--sandbox workspace-write`와 `--add-dir`을, `claude`에
-  `--dangerously-skip-permissions`를 붙이기 때문이다. broker가 질문마다 비대화형 프로세스 하나를 **고정 argv**로
-  시작한다. CLI의 설정 디렉터리는 DM 계정이 쓸 수 없고(인증과 고정 설정만 있음), broker는 시작 전에 그 설정의
-  digest를 정책 버전에 기록된 값과 대조한다. 명령 실행을 끌 수 있는 모드가 있으면 그 모드를 쓴다. 정확한 CLI
-  버전, argv, 설정 digest, 임시 세션 조건은 S0이 실측해 정책 버전에 기록한다. argv에 위의 플래그나 쓰기·명령
-  실행을 허용하는 플래그가 있거나 설정 digest가 다르면 시작을 거부한다.
+  `--dangerously-skip-permissions`를 붙이기 때문이다. broker가 질문마다 비대화형 프로세스 하나를 **고정 argv와
+  고정 환경**으로 시작한다. 환경은 허용 목록(고정 `HOME`·`PATH`·locale)만 두고, proxy 변수·`LD_PRELOAD`·공급사
+  설정 경로를 바꾸는 변수는 넣지 않는다. CLI의 설정 디렉터리는 공급사 계정이 쓸 수 없고(인증과 고정 설정만
+  있음), broker는 시작 전에 그 설정의 digest를 정책 버전에 기록된 값과 대조한다. 명령 실행을 끌 수 있는 모드가
+  있으면 그 모드를 쓴다. 정확한 CLI 버전, argv, 환경 허용 목록, 설정 digest, 임시 세션 조건은 S0이 실측해 정책
+  버전에 기록한다. argv·환경·설정 digest 가운데 하나라도 기록과 다르면 시작을 거부한다.
 - **hard timeout:** 질문당 30분이 지나면 DM 프로세스를 강제 종료한다. 늦은 결과는 §9가 거절한다.
 - **외부 텍스트:** worker가 카드에 인용한 로그·이슈 발췌는 데이터다. DM 지시문은 그 안의 지시를 따르지
   말라고 명시한다(원칙 3의 둘째 문장).
@@ -193,12 +209,12 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 - 스키마 위반, 없는 선택지 id, secret 검사 실패만 **검증 실패**다. 제안을 저장하지 않고 §8의 latch에 센다.
 - **종결 결과는 하나:** 제안, 이관, 검증 실패, 시간 초과, DM 불가 가운데 요청마다 **먼저 기록된 하나**만
   남는다(DB 유일 제약). 그 뒤에 온 출력은 늦은 결과로 거절한다.
-- **확정 시점 확인:** Admin은 제안과 함께 스냅샷 대상 SHA, 그 출처(worker HEAD 또는 `develop` 대체), 스냅샷
-  경로 목록 또는 "카드만"을 보인다. 운영자의 확정은 요청이 열려 있고 §9의 결속 값이 그대로이며, Admin이 보여
+- **확정 시점 확인:** Admin은 제안과 함께 스냅샷 상태(`none`·`worker_head`·`develop`), 대상 SHA, 스냅샷 경로
+  목록을 보인다. 상태가 `none`이면 "카드만"이라고 보인다. 운영자의 확정은 요청이 열려 있고 §9의 결속 값이 그대로이며, Admin이 보여
   준 제안 본문과 스냅샷 정보의 digest가 저장된 값과 같을 때만 그 본문을 답으로 만든다. 본문 행은 고칠 수
   없다(§10). 운영자가 고친 답은 새 본문 행이 되고 그 digest가 판정에 기록된다. 결속 값이 바뀌었으면 Admin은
   제안을 낡은 것으로 보이고 그대로 확정할 수 없게 한다. 운영자는 직접 답한다.
-- **kill switch는 DM 경로를 끈다**(공통 기반의 kill switch 규칙). 동작마다 다음과 같다.
+- **kill switch는 DM 경로를 끈다**(공통 기반의 kill switch 규칙과 r16 §4의 좁은 예외). 동작마다 다음과 같다.
 
   | 동작 | kill switch 중 |
   |---|---|
@@ -231,7 +247,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 ## 8. 스위치와 정지
 
 - 인스턴스별 스위치는 `off`·`proposal` 둘뿐이다. 기본 `off`, 읽기 실패 `off`. 저장소의 CHECK 제약이 다른
-  값을 거부한다. 전체 kill switch는 DM 경로 전체를 끈다(§6). 스위치 변경과 latch 해제는 `ops:write`와
+  값을 거부한다. 전체 kill switch의 동작별 허용·거부는 §6의 표가 정한다. 스위치 변경과 latch 해제는 `ops:write`와
   최근 step-up을 요구하고 사람 감사로 남는다.
 - 검증 실패(§6)가 연속 3건이면 그 인스턴스를 `off`로 latch한다. 해제는 운영자만.
 - §4의 보고가 결정 2의 기준을 넘어도 이 정책 안에서는 아무것도 바뀌지 않는다.
@@ -240,7 +256,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 
 - 요청은 (카드 id, 질문 revision)당 하나다. 같은 질문이 다시 와도 새 요청을 만들지 않는다.
 - **결속 값:** 카드 id와 질문 revision, 묻는 worker id, AMUX 세션 id와 그 세션의 시도 번호, 스냅샷
-  대상 commit SHA와 그 출처(worker HEAD 또는 `develop`), 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
+  상태(`none`·`worker_head`·`develop`)와 대상 SHA(`none`이면 없음), 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
   용어 목록·경로 분류·scanner 버전. 요청이 닫혔거나 결속 값이 하나라도 바뀐 요청에 도착한 결과는 거절을
   기록한다.
 - **DB 시계 마감:** 요청 행은 DB 시계로 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)을 갖는다. 배정과
@@ -252,6 +268,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   이 장치 밖이며 commit 예비시간이 그 구간을 위해 있다. 이 정책은 durable 완료 시각을 보장한다고 쓰지
   않는다. 운영자 확정은 결과 마감에 묶이지 않고 요청의 열림 상태와 결속 값에만 묶인다.
 - **한 번만 소비:** 요청마다 종결 결과 행과 전달 결정 행은 각각 하나뿐이다(DB 유일 제약).
+- **결과 제출의 결과를 모를 때:** broker는 DM 출력을 (요청 키, 결과 digest)와 함께 제출한다. route는 같은 쌍을
+  다시 받으면 기존 행을 돌려주고, 같은 요청 키의 다른 digest는 거절한다. 응답을 잃으면 다시 제출하지 않고 그
+  쌍으로 조회해서만 확정한다. 조회로도 확정하지 못하면 `result_unknown`으로 두고 그 요청은 운영자에게 간다.
 - **timeout 층:** route 트랜잭션은 기존 AMUX DB 경계(`lib/amux/dbBoundary.ts`)를 그대로 쓴다.
   `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms다. **문장 수는 코드
   구조로 정한다.** DM store의 각 연산은 반복 없는 문장열이고, 설정문·fence·`writeSystemAuditLog()`의 문장을
@@ -288,22 +307,23 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   요청 단위 advisory lock으로 직렬화한다. UPDATE·DELETE는 trigger가 막는다. 열린 요청은 생성 30일 뒤 `stale`로
   닫으므로, hold가 없으면 본문은 길어야 120일 남고 hold가 있으면 풀릴 때까지 남는다. hold 걸기·풀기는
   `ops:write`와 최근 step-up의 사람 조작이고 사람 감사로 남는다. 본문 표의 DELETE는 (1) `retentionUntil`이
-  지났고 (2) 열린 hold가 없는 요청의 행에만 trigger가 허락한다. 예외는 하나다. 개인정보 삭제 요청이 확인되면
+  지났고 (2) 열린 hold가 없는 요청의 행에만 trigger가 허락한다. 기한 삭제는 시스템 정리 작업이 요청 단위 잠금
+  아래 삭제와 `.body_purge` 감사를 한 트랜잭션으로 하며, 결과를 모르면 다시 읽어 행이 남았는지로 확정한다. 예외는 하나다. 개인정보 삭제 요청이 확인되면
   운영자가 해당 행을 `ops:write`와 최근 step-up으로 지우며, 그 삭제는 사람 감사로 남고 열린 hold가 있으면
   먼저 풀어야 한다. 백업은 플랫폼의 백업 보존 기간을 따른다. 본문은 감사 metadata·로그·알림에 넣지 않는다.
   저장소 스냅샷은 앱으로 보내지 않는다.
 - **데이터 등록부:** 본문 표(worker가 쓴 자유 텍스트에 개인정보가 섞일 수 있다)와 사람의 id를 가진 원장
   행을 공개 data-domain registry에 운영 기록으로 등록한다. 본문 표에는 사용자 계정 키가 없으므로 계정 단위
   고객 export에 넣지 않으며, 열람·삭제 요청은 운영자가 본문을 검색해 처리한다.
-- **전송 기록:** 카드와 스냅샷을 DM 공급사로 보내는 일은 회수할 수 없으므로, 로컬 AMUX는 입력을 다 만든
+- **전송 기록:** 카드와 스냅샷을 DM 공급사로 보내는 일은 회수할 수 없으므로, broker는 입력을 다 만든
   뒤(§2-4) DM 프로세스를 시작하기 전에 route에 전송 의도(인스턴스, 공급사, 입력 payload digest, 스냅샷
   manifest digest)를 기록하고 그 응답을 받은 뒤에만 시작한다. 프로세스가 끝나면 전송 영수증을 보낸다.
   의도만 있고 영수증이 없으면 `transmit_unknown`으로 두고 보낸 것으로 친다. 그 요청은 다시 보내지 않는다.
 - **감사 action**은 다음으로 닫는다. 시스템: `amux.decision.route`, `.assign`, `.assign_discarded`,
   `.transmit_intent`, `.transmit_receipt`, `.transmit_unknown`, `.result`, `.result_rejected`, `.deliver`,
-  `.delivery_unknown`, `.latch`, `.digest_key_rotate`, `.digest_key_destroy`. 사람: `.confirm`, `.edit_confirm`,
-  `.reject`, `.mode`, `.latch_release`, `.legal_hold`, `.delivery_unknown_resolve`, `.body_erase`. 시스템의
-  `.stale_close`도 여기에 든다.
+  `.delivery_unknown`, `.result_unknown`, `.cleanup_unknown`, `.latch`, `.digest_key_rotate`, `.digest_key_destroy`,
+  `.stale_close`, `.body_purge`. 사람: `.confirm`, `.edit_confirm`,
+  `.reject`, `.mode`, `.latch_release`, `.legal_hold`, `.delivery_unknown_resolve`, `.body_erase`.
 - **actor:** `amux-decision-router`, `amux-decision-maker-openai`, `amux-decision-maker-anthropic`을 닫힌
   시스템 actor 목록에 리뷰로 추가한다. 모든 쓰기는 `writeSystemAuditLog()` 또는 사람 감사와 같은 트랜잭션이다.
 - 단일 writer 모듈이 위 표들에 쓴다.
@@ -347,8 +367,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 append 포함, 12 이하)를 고정하는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
 금지 플래그를 거부한다는 테스트, 양방향 계정 격리의 S0 증거, 스냅샷이 자격증명 없이 GitHub 공개 경로의 고정 SHA에서만
 받고, 404만 `develop`로 대체하며, symlink·submodule을 받지 않고, blob id가 tree와 다른 파일을 빼며, 경로 문법
-위반을 거절한다는 테스트, 비밀 경로 제외 테스트, kill switch 중 확정·전달
-거부 테스트, 보존 사건 표의 삽입 조건(`retention_set` 하나, hold 전이 순서)과 본문 삭제 조건 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
+위반을 거절한다는 테스트, 비밀 경로 제외 테스트, kill switch 표의 동작별 허용·거부 테스트, 요청 디렉터리가 모든 종료 경로에서 지워지고
+확인 실패 시 latch되는 테스트, 결과 제출 응답 유실 시 재제출 없이 조회로만 확정하는 테스트, 대상 SHA 형식·
+commit id 대조와 tree 항목 없는 파일·비 blob mode를 받지 않는 테스트, 고정 환경과 다른 환경의 시작 거부 테스트, 보존 사건 표의 삽입 조건(`retention_set` 하나, hold 전이 순서)과 본문 삭제 조건 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
 
 ## 13. 이 정책이 하지 않는 것
 
