@@ -12,7 +12,10 @@
  * exist in the route table today.
  */
 
-/** Room order: four columns, two rows. Seven teams and the digest desk. */
+/**
+ * Room order. The eight teams fill the two rows of team rooms in this order; the
+ * digest desk sits in the top row beside the operator's office.
+ */
 export const AGENT_OFFICE_DEPT_IDS = [
   "engineering",
   "qa",
@@ -20,13 +23,14 @@ export const AGENT_OFFICE_DEPT_IDS = [
   "support",
   "marketing",
   "finance",
+  "trust",
   "research",
   "digest",
 ] as const;
 
 export type AgentOfficeDeptId = (typeof AGENT_OFFICE_DEPT_IDS)[number];
 
-/** The seven agent teams. The digest desk is where their digests are read, not a team. */
+/** The eight agent teams. The digest desk is where their digests are read, not a team. */
 export const AGENT_OFFICE_TEAM_IDS = AGENT_OFFICE_DEPT_IDS.filter(
   (id): id is Exclude<AgentOfficeDeptId, "digest"> => id !== "digest"
 );
@@ -66,6 +70,8 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     recordHref: "/admin/marketing",
   },
   { id: "finance", icon: "🧾", policy: "docs/policy/billing-finance-ops.md", recordHref: null },
+  // Its policy is not on develop yet, so there is no path to name.
+  { id: "trust", icon: "🛡️", policy: null, recordHref: null },
   {
     id: "research",
     icon: "🔭",
@@ -119,6 +125,10 @@ export const AGENT_OFFICE_STAFF: readonly AgentOfficeStaffMeta[] = [
   { id: "finance-m1", dept: "finance", rank: "member", colors: ["#4b3b2c", "#b8f0dd", "#c9b8ff"] },
   { id: "finance-m2", dept: "finance", rank: "member", colors: ["#3c3a4f", "#ffe6f2", "#c9b8ff"] },
 
+  { id: "trust-lead", dept: "trust", rank: "lead", colors: ["#2d4b46", "#e7ddff", "#c9b8ff"] },
+  { id: "trust-m1", dept: "trust", rank: "member", colors: ["#6b4a2f", "#b8f0dd", "#fff3b0"] },
+  { id: "trust-m2", dept: "trust", rank: "member", colors: ["#452d3f", "#fff3b0", "#b8f0dd"] },
+
   { id: "research-lead", dept: "research", rank: "lead", colors: ["#6b3d34", "#fff3b0", "#ff8fc0"] },
   { id: "research-m1", dept: "research", rank: "member", colors: ["#2f2a3d", "#c9b8ff", "#b8f0dd"] },
   { id: "research-m2", dept: "research", rank: "member", colors: ["#5a3450", "#fff3b0", "#ff8fc0"] },
@@ -152,5 +162,6 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
   ["support", ["고객지원", "support", "신고", "triage", "답변 초안"]],
   ["marketing", ["마케팅", "marketing", "guard", "게시", "소셜", "social", "seo"]],
   ["finance", ["재무", "과금", "finance", "billing", "가격", "price", "정산", "ledger"]],
+  ["trust", ["신뢰", "안전", "trust", "safety", "컴플라이언스", "compliance", "dsr", "개인정보 요청"]],
   ["digest", ["다이제스트", "digest", "비서"]],
 ];
