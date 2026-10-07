@@ -368,9 +368,13 @@ const report = judgeTrustSafetyPolicyApproval({
 
 // --- print --------------------------------------------------------------
 
+// The exit code exists so a verdict cannot be missed from a shell, and --json
+// is the form somebody scripts, so the rule cannot live on one path only.
+const exitCode = report.verdict === "approved" ? 0 : 1;
+
 if (asJson) {
   console.log(JSON.stringify(report, null, 2));
-  process.exit(0);
+  process.exit(exitCode);
 }
 
 const mark = (met) => (met === true ? "pass" : met === false ? "FAIL" : met === "skipped" ? "skip" : "????");
@@ -415,4 +419,4 @@ console.log("\nA person runs this and signs the verdict (§12 (4)). Nothing here
 // A non-zero exit so a verdict that is not an approval cannot be missed by
 // someone running this from a shell. It remains a report: no workflow consumes
 // this code, and §12 (4) is where the signature happens.
-if (report.verdict !== "approved") process.exit(1);
+process.exit(exitCode);
