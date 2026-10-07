@@ -262,6 +262,13 @@ const holdsUserData = new Set(
 // workflows -- which is exactly what the registry exists to prevent.
 userLinked.add("User");
 holdsUserData.add("User");
+// The key-retirement ledger contains only ideaId and audit IDs, but ideaId is
+// a restrictive FK to the operator's submission. Excluding that indirect
+// identifier would silently drop its deletion/export classification.
+if (/\bidea\s+AmuxIdeaSubmission\s+@relation\(fields:\s*\[ideaId\]/.test(
+  modelBodies.get("AmuxIdeaContentKeyRetirement") ?? "")) {
+  holdsUserData.add("AmuxIdeaContentKeyRetirement");
+}
 
 // Scalar columns and their nullability, so an anonymisation can be checked
 // against the table it claims to scrub. Relation fields are skipped: they are

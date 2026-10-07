@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
@@ -23,16 +23,20 @@ export function AmuxCardListPanel({
   const [resultText, setResultText] = useState<string | null>(null);
   const [resultState, setResultState] = useState<"loading" | "missing" |
     "purged" | "unavailable" | "available" | null>(null);
+  const resultRequestId = useRef(0);
   async function showResult(taskId: string) {
+    const requestId = ++resultRequestId.current;
     setSelectedTaskId(taskId);
     setResultText(null);
     setResultState("loading");
     try {
       const response = await adminFetch(`/api/admin/amux/v22-task-result?taskId=${encodeURIComponent(taskId)}`,
         { cache: "no-store" });
+      if (requestId !== resultRequestId.current) return;
       if (response.status === 404) { setResultState("missing"); return; }
       if (!response.ok) { setResultState("unavailable"); return; }
       const body = await response.json();
+      if (requestId !== resultRequestId.current) return;
       if (body?.result?.state === "purged") { setResultState("purged"); return; }
       if (body?.result?.state !== "available" ||
           typeof body.result.text !== "string") {
@@ -40,7 +44,9 @@ export function AmuxCardListPanel({
       }
       setResultText(body.result.text);
       setResultState("available");
-    } catch { setResultState("unavailable"); }
+    } catch {
+      if (requestId === resultRequestId.current) setResultState("unavailable");
+    }
   }
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-card-list-panel">

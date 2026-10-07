@@ -431,12 +431,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-07, AMUX v22 worker claim: one named system actor shifts positions
 // in the already-reviewed audit module. The 228-entry count and position-free
 // inventory still match; this repins positions only.
+// 2026-10-07, AMUX v22 integration: the webhook pipeline fingerprint note in
+// marketingAutomationAccess.ts shifts positions of its existing computed
+// accesses. The count and position-free digest remain unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "d96644cde50218ceba7768236f2375cc",
-  "f5653447511afe770147e7a54c4da04d",
+  "a014d0b5f0c9227a068e67d64dc5fba4",
+  "97c70d138db4a017009bc211ad42d737",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

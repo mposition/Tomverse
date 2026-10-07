@@ -52,5 +52,7 @@ test("the panel states how many rows it shows out of how many", async () => {
   const panel = await read("components/admin/AmuxCardListPanel.tsx");
   assert.match(panel, /messages\.shown\(rows\.length, total, limit\)/);
   assert.match(panel, /adminFetch\(`\/api\/admin\/amux\/v22-task-result/);
+  assert.match(panel, /const requestId = \+\+resultRequestId\.current/);
+  assert.equal((panel.match(/if \(requestId !== resultRequestId\.current\) return;/g) ?? []).length, 2);
   assert.doesNotMatch(panel, /\bfetch\s*\(/);
 });

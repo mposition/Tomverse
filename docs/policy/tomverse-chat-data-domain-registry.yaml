@@ -1685,6 +1685,25 @@ domains:
       Its restrictive idea reference and hold precedence require a separate
       account-deletion and export decision.
 
+  - domain: amuxIdeaContentKeyRetirement
+    prismaModel: AmuxIdeaContentKeyRetirement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, key-retirement account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row holds an idea identifier through a restrictive parent relation
+      and retains purge and key-deletion audit references. It has no content
+      body, but its account-deletion and export treatment is unverified.
+
   - domain: amuxIdeaDerivationGroup
     prismaModel: AmuxIdeaDerivationGroup
     userLinkageRole: actor
@@ -1735,7 +1754,7 @@ domains:
       The immutable snapshot links operator-approved assessments and a task.
       Its account-deletion and export paths remain unverified.
 
-  - domain: amuxV22PromotionControl
+  - domain: amuxPromotionControl
     prismaModel: AmuxV22PromotionControl
     userLinkageRole: actor
     owner: security-privacy
@@ -1751,7 +1770,7 @@ domains:
       The control records the approving operator and audit reference, without
       idea text. Account-deletion and export handling are not yet verified.
 
-  - domain: amuxV22LaneDecision
+  - domain: amuxWorkerLaneDecision
     prismaModel: AmuxV22LaneDecision
     userLinkageRole: actor
     owner: security-privacy
@@ -1767,7 +1786,7 @@ domains:
       The append-only decision links a task to an approving operator and audit
       entry. Account-deletion and export treatment remain unverified.
 
-  - domain: amuxV4TaskCostCatalogApproval
+  - domain: amuxTaskCostCatalogApproval
     prismaModel: AmuxV4TaskCostCatalogApproval
     userLinkageRole: actor
     owner: security-privacy
