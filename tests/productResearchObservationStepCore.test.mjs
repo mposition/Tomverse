@@ -348,3 +348,46 @@ test("a body past its allowance is refused before it is parsed", async () => {
   assert.match((await readLimitedBody({ body: null }, 1024)).problem, /no body/);
   assert.match((await readLimitedBody(undefined, 1024)).problem, /no body/);
 });
+
+test("a body stream that fails mid-read answers instead of throwing", async () => {
+  // The regression this holds shut: `response.json()` was inside a try/catch
+  // and the chunked reader that replaced it was not. A connection that drops
+  // after the headers arrived, or a request timeout firing mid-body, would then
+  // travel past every failure stage and end the process with no row at all --
+  // the one outcome a nameable failure may not have.
+  const failing = new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('[{"number":1}'));
+        controller.error(new Error("https://api.github.com/... with a header on it"));
+      },
+    }),
+  );
+  const read = await readLimitedBody(failing, 1024);
+  assert.match(read.problem, /could not be read to the end/);
+  assert.equal(read.text, undefined);
+  // And the reason does not come out: a stream error's message can name the
+  // request, and the request carries the token's header.
+  assert.equal(/api\.github\.com/.test(read.problem), false);
+
+  // An aborted request is the same answer rather than a rejection.
+  const controller = new AbortController();
+  controller.abort();
+  let aborted;
+  try {
+    aborted = await readLimitedBody(
+      new Response(
+        new ReadableStream({
+          start(stream) {
+            stream.enqueue(new TextEncoder().encode("["));
+            stream.error(controller.signal.reason);
+          },
+        }),
+      ),
+      1024,
+    );
+  } catch (error) {
+    assert.fail(`readLimitedBody threw: ${error?.name}`);
+  }
+  assert.ok(aborted.problem);
+});
