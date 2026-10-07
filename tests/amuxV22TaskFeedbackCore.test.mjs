@@ -8,7 +8,7 @@ const start = new Date("2026-10-01T00:00:00.000Z");
 const end = new Date("2026-10-01T00:03:00.000Z");
 const decidedAt = new Date("2026-10-01T00:05:00.000Z");
 const task = (overrides = {}) => ({
-  id: "task-1", status: "done", createdAt: start,
+  id: "task-1", revision: 4, status: "done", createdAt: start,
   effortPoints: 3, estimatedCostMicrousd: 500000n,
   attempts: [{ id: "attempt-1", startedAt: start, endedAt: end,
     outcome: "succeeded", settledCostMicrousd: 200000n, costConfirmed: true }],
@@ -97,9 +97,11 @@ test("the approved v4 maximum comes from the unit receipt, not the legacy estima
 test("check and independent review findings stay separate from owner outcomes", () => {
   const feedback = projectAmuxTaskFeedback(task({ observations: [
     { kind: "checks", outcome: "failed", findingCount: 2,
-      evidenceDigest: "a".repeat(64), observedAt: end.toISOString() },
+      evidenceDigest: "a".repeat(64), observedAt: end.toISOString(),
+      taskRevision: 4 },
     { kind: "independent_review", outcome: "passed", findingCount: 0,
-      evidenceDigest: "b".repeat(64), observedAt: decidedAt.toISOString() },
+      evidenceDigest: "b".repeat(64), observedAt: decidedAt.toISOString(),
+      taskRevision: 4 },
   ] }));
   assert.equal(feedback.observed.checks.findingCount, 2);
   assert.equal(feedback.observed.independentReview.findingCount, 0);
@@ -113,8 +115,19 @@ test("latest revised forecast remains separate from immutable approved ceiling",
     observations: [{ kind: "estimate_revision", outcome: "revised",
       evidenceDigest: "a".repeat(64), findingCount: null,
       revisedEffortPoints: 5, revisedCostMicrousd: "600000",
-      reasonCode: "scope_changed", observedAt: end.toISOString() }],
+      reasonCode: "scope_changed", observedAt: end.toISOString(),
+      taskRevision: 4 }],
   }));
   assert.equal(feedback.expected.approvedCeilingMicrousd, "500000");
   assert.equal(feedback.observed.estimateRevision.revisedCostMicrousd, "600000");
+});
+
+test("an earlier attempt's observation is not reported as current", () => {
+  const feedback = projectAmuxTaskFeedback(task({ observations: [
+    { kind: "user_outcome", outcome: "met", evidenceDigest: null,
+      findingCount: null, revisedEffortPoints: null,
+      revisedCostMicrousd: null, reasonCode: null,
+      observedAt: end.toISOString(), taskRevision: 3 },
+  ] }));
+  assert.equal(feedback.observed.userOutcome, null);
 });

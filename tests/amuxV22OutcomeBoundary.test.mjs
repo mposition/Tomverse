@@ -3,12 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("owner outcome write stays separate from the read-only execution board", async () => {
-  const [route, service, board, form, activation] = await Promise.all([
+  const [route, service, board, form, activation, read] = await Promise.all([
     readFile(new URL("../app/api/admin/amux/v22-outcome/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/amux/v22OutcomeObservationService.ts", import.meta.url), "utf8"),
     readFile(new URL("../components/admin/AmuxExecutionWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../components/admin/AmuxOutcomeObservationForm.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/amux/v22ActivationReadiness.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/amux/adminExecutionRead.ts", import.meta.url), "utf8"),
   ]);
   assert.match(route, /getAdminRole\(session\) !== "owner"/);
   assert.match(route, /assertRecentAdminAuthentication\(session\)/);
@@ -25,4 +26,6 @@ test("owner outcome write stays separate from the read-only execution board", as
   assert.match(form, /outcome_unknown/);
   assert.doesNotMatch(form, /method: "(PUT|PATCH|DELETE)"/);
   assert.match(activation, /activationAuthorized: false/);
+  assert.match(read, /parentStoryCardId: parent\.id, archivedAt: null/);
+  assert.match(read, /const currentDecision = feedbackDecisions\.find/);
 });

@@ -301,7 +301,7 @@ export async function readAmuxExecutionHierarchy(parent: AmuxHierarchyParent,
   if (parent.kind === "story") {
     const story = await prisma.amuxWorkItem.findUnique({ where: { id: parent.id },
       select: { id: true, cardType: true, archivedAt: true } });
-    if (!story || story.cardType !== "story") return null;
+    if (!story || story.cardType !== "story" || story.archivedAt) return null;
     const where = { parentStoryCardId: parent.id, archivedAt: null };
     const [total, cards] = await Promise.all([
       prisma.amuxWorkItem.count({ where }),
@@ -415,6 +415,7 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     card.cardType === "task" ? prisma.amuxReviewDecision.findMany({
       where: { proposal: { taskId } }, select: { id: true, outcome: true,
         decidedAt: true, proposal: { select: { taskRevision: true } } },
+      orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
     }) : [],
     card.cardType === "task" ? prisma.adminAuditLog.findMany({ where: {
       action: AMUX_V22_OUTCOME_ACTION, targetType: AMUX_V22_OUTCOME_TARGET,
@@ -456,17 +457,18 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         card.v4BriefKeyVersion, card.v4BriefDigest, card.v4BriefDigestKeyId),
     ]);
   }
+  const currentDecision = feedbackDecisions.find((decision) =>
+    decision.proposal.taskRevision + 1 === card.revision);
   return { ...summary, revision: card.revision, body, brief,
     outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
       process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
       card.sourceSystem === "admin-idea-v4" &&
-      feedbackDecisions.some((decision) =>
-        decision.proposal.taskRevision + 1 === card.revision &&
-        ((decision.outcome === "approve" && card.status === "done") ||
-          (decision.outcome === "retry" && card.status === "todo") ||
-          (decision.outcome === "block" && card.status === "blocked"))),
+      ((currentDecision?.outcome === "approve" && card.status === "done") ||
+        (currentDecision?.outcome === "retry" && card.status === "todo") ||
+        (currentDecision?.outcome === "block" && card.status === "blocked")),
     feedback: card.cardType === "task" ? projectAmuxTaskFeedback({
-      id: card.id, status: card.status, createdAt: card.createdAt,
+      id: card.id, revision: card.revision, status: card.status,
+      createdAt: card.createdAt,
       effortPoints: card.effortPoints,
       estimatedCostMicrousd: card.estimatedCostMicrousd,
       approvedCeilingMicrousd: sourceApproval?.state === "consumed" &&
@@ -561,11 +563,13 @@ export async function readAmuxExecutionFeedback(parent: {
     if (!story || story.cardType !== "story" || story.archivedAt) return null;
   }
   const where = parent.kind === "story" ? { cardType: "task",
-    parentStoryCardId: parent.id } : {
+    parentStoryCardId: parent.id, archivedAt: null } : {
     cardType: "task", parentFeatureNodeId: { in: featureIds },
+    archivedAt: null,
   };
   const cards = await prisma.amuxWorkItem.findMany({ where,
-    take: 501, orderBy: { id: "asc" }, select: { id: true, status: true,
+    take: 501, orderBy: { id: "asc" }, select: { id: true, revision: true,
+      status: true,
       createdAt: true, effortPoints: true, estimatedCostMicrousd: true,
       v4SourceApprovalId: true } });
   if (cards.length > 500) return { parent, complete: false,

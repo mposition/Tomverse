@@ -29,6 +29,7 @@ export type AmuxFeedbackDecision = {
 
 export type AmuxFeedbackTask = {
   id: string;
+  revision: number;
   status: string;
   createdAt: Date;
   effortPoints: number;
@@ -37,7 +38,7 @@ export type AmuxFeedbackTask = {
   attempts: AmuxFeedbackAttempt[];
   usage: AmuxFeedbackUsage[];
   decisions: AmuxFeedbackDecision[];
-  observations?: AmuxV22Observation[];
+  observations?: Array<AmuxV22Observation & { taskRevision: number }>;
 };
 
 const sumKnown = (values: Array<bigint | null>): string | null =>
@@ -49,7 +50,8 @@ export function projectAmuxTaskFeedback(task: AmuxFeedbackTask) {
     a.startedAt.getTime() - b.startedAt.getTime());
   const decisions = [...task.decisions].sort((a, b) =>
     a.decidedAt.getTime() - b.decidedAt.getTime());
-  const observations = [...(task.observations ?? [])].sort((a, b) =>
+  const observations = (task.observations ?? []).filter((item) =>
+    item.taskRevision === task.revision).sort((a, b) =>
     Date.parse(a.observedAt) - Date.parse(b.observedAt));
   const checks = observations.filter((item) =>
     item.kind === "checks").at(-1) ?? null;

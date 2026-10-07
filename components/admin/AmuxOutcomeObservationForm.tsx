@@ -21,7 +21,7 @@ export function AmuxOutcomeObservationForm(props: { taskId: string;
   const [revisedEffortPoints, setRevisedEffortPoints] = useState("");
   const [revisedCostMicrousd, setRevisedCostMicrousd] = useState("");
   const [reasonCode, setReasonCode] = useState("scope_changed");
-  const [error, setError] = useState<"reauth" | "unknown" |
+  const [error, setError] = useState<"reauth" | "unknown" | "stale" |
     "unavailable" | null>(null);
   if (!props.writeEnabled) return <p className="text-xs text-zinc-500">
     {m.outcomeWriteNotActive}</p>;
@@ -51,7 +51,9 @@ export function AmuxOutcomeObservationForm(props: { taskId: string;
         if (response.ok) { props.onSaved(); return; }
         const result = await response.json() as { error?: string };
         if (result.error !== "outcome_unknown") {
-          setError("unavailable"); return;
+          setError(["task_state_changed", "owner_decision_missing",
+            "request_id_conflict"].includes(result.error ?? "") ?
+            "stale" : "unavailable"); return;
         }
         needsReadback = true;
       } catch { needsReadback = true; }
@@ -143,7 +145,9 @@ export function AmuxOutcomeObservationForm(props: { taskId: string;
     {error && <p role="alert" className="w-full text-red-700 dark:text-red-400">
       {error === "reauth" ? <Link className="underline"
         href={adminRecentAuthenticationHref("/admin/amux-execution?tab=cards")}>
-        {m.reauth}</Link> : error === "unknown" ? m.unknownOutcome : m.unavailable}
+        {m.reauth}</Link> : error === "unknown" ? m.unknownOutcome :
+        error === "stale" ? <button type="button" className="underline"
+          onClick={props.onSaved}>{m.reloadChangedTask}</button> : m.unavailable}
     </p>}
   </div>;
 }

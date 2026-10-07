@@ -78,7 +78,7 @@ export async function recordAmuxV22Outcome(input: {
       proposal: { taskId: parsed.taskId,
         taskRevision: parsed.revision - 1 },
     }, select: { id: true, outcome: true },
-    orderBy: { decidedAt: "desc" } });
+    orderBy: [{ decidedAt: "desc" }, { id: "desc" }] });
     const expectedStatus = decision?.outcome === "approve" ? "done" :
       decision?.outcome === "retry" ? "todo" :
       decision?.outcome === "block" ? "blocked" : null;
