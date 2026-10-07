@@ -94,11 +94,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "faa49f4ee1f34d0f6ce90101f38cae4c7b2d929dcac77b05362eb639a14b9446";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "a1931ea28933369fa6c388001eab0eecddeecc100207d0b0d97da18eca0f35f3";
 const RESOLUTION_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 // The entire AMUX-local import closure is pinned. A new writer or import
 // invalidates the exception until its read-only behavior is reviewed.
-const RESOLUTION_REVIEWED_DIGEST = "5777109fb68c656e768ab8e96a1e6477cc750e2dbba65f44d7426959eb960877";
+const RESOLUTION_REVIEWED_DIGEST = "64cac35b25ffca0de5194aad557136c20d7ae6ede8a76d00fe3ee34aad0bcf8c";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

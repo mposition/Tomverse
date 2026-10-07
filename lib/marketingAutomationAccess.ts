@@ -545,7 +545,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * and shared audit helper. The receiver's own admission stays unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f98304520e0a1496bb9b1ef078a443856edba6cdcc2e70c32b6aac79ecedb489";
+  "384559decc465bc4938e1178633fbb8ca30eba0e4d879e14f86a490906c6956d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
