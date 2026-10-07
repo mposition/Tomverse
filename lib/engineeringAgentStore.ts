@@ -157,6 +157,21 @@ export function engineeringAgentTransactionInAmux(tx: AmuxAttachedTransaction): 
   return tx as unknown as EngineeringAgentTransaction;
 }
 
+/** Read-lock the run while a v22 Task chooses its one private/public product.
+ * AMUX attempt and card locks must already be held in the cross lock order. */
+export async function lockEngineeringAgentV22Run(
+  tx: EngineeringAgentTransaction, attemptId: string,
+): Promise<{ id: string; cardId: string; baseSha: string;
+  status: string; modeAtStart: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; cardId: string;
+    baseSha: string; status: string; modeAtStart: string }>>`
+    SELECT "id", "cardId", "baseSha", "status", "modeAtStart"
+    FROM "EngineeringAgentRun" WHERE "amuxAttemptId" = ${attemptId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
+}
+
 /** A write refused before it reached the database. The code is an enum, never text from outside. */
 export class EngineeringAgentStoreRefusedError extends Error {
   readonly code: string;

@@ -44,6 +44,8 @@ import {
   endEngineeringAgentRun,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
+  lockEngineeringAgentV22Run,
+  openEngineeringAgentWorkItem,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
   requireEngineeringAgentRunAdmission,
@@ -54,6 +56,8 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
   v22ExecutionReceiptVerified } from "@/lib/amux/v22TaskExecutionCore";
+import { loadEngineeringAgentV22SettlementPatch } from
+  "@/lib/engineeringAgentV22SettlementPatch";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -1082,8 +1086,10 @@ export async function settleAmuxV22TaskExecution(input: {
   outcome: "succeeded" | "failed" | "blocked";
   invocationIds: string[];
 }) {
+  const patch = input.outcome === "succeeded" ?
+    await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 14 },
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 20 },
     async (tx, context) => {
       const now = context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
@@ -1134,6 +1140,42 @@ export async function settleAmuxV22TaskExecution(input: {
         return { settled: false as const, reason: "result_unverified" as const };
       if (input.outcome !== "blocked" && !receiptsComplete)
         return { settled: false as const, reason: "usage_unverified" as const };
+      const run = await lockEngineeringAgentV22Run(
+        engineeringAgentTransactionInAmux(context.attachedTransaction),
+        attempt.id);
+      let product = run ? await tx.engineeringAgentWorkItem.findFirst({
+        where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
+        select: { id: true, kind: true, patchDigest: true, baseSha: true },
+      }) : null;
+      if (patch) {
+        const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+          where: { id: attempt.v22AssignmentId },
+          select: { role: true, workItemId: true },
+        });
+        if (!run || run.status !== "active" ||
+            !["shadow", "t1"].includes(run.modeAtStart) ||
+            run.cardId !== task.id || run.baseSha !== patch.baseSha ||
+            patch.taskId !== task.id ||
+            assignment?.role !== "implement" ||
+            assignment.workItemId !== task.id)
+          return { settled: false as const,
+            reason: "publication_state_changed" as const };
+        if (product && (product.patchDigest !== patch.sha256 ||
+            product.baseSha !== patch.baseSha))
+          return { settled: false as const,
+            reason: "publication_product_conflict" as const };
+        if (!product) {
+          const opened = await openEngineeringAgentWorkItem(
+            engineeringAgentTransactionInAmux(context.attachedTransaction), {
+              kind: "t2_draft", causeKey: `t2_draft:${run.id}`,
+              runId: run.id, patchBody: patch.text,
+              patchDigest: patch.sha256, baseSha: patch.baseSha,
+              reason: "t1_evidence_unavailable",
+            });
+          product = { id: opened.workItemId, kind: "t2_draft",
+            patchDigest: patch.sha256, baseSha: patch.baseSha };
+        }
+      }
       const budget = settlementDestinationForBudget({
         requested_status: input.outcome === "succeeded" ? "review" :
           input.outcome === "failed" ? "todo" : "blocked",
@@ -1172,15 +1214,7 @@ export async function settleAmuxV22TaskExecution(input: {
           receiptsComplete, reservedCostMicrousd:
             attempt.reservedCostMicrousd.toString() },
       });
-      const run = await tx.engineeringAgentRun.findUnique({
-        where: { amuxAttemptId: attempt.id },
-        select: { id: true, status: true },
-      });
       if (run?.status === "active") {
-        const product = await tx.engineeringAgentWorkItem.findFirst({
-          where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
-          select: { id: true, kind: true },
-        });
         await endEngineeringAgentRun(
           engineeringAgentTransactionInAmux(context.attachedTransaction), {
             runId: run.id, amuxAttemptId: attempt.id,
