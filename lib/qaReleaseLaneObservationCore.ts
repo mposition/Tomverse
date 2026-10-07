@@ -21,8 +21,9 @@ export const QA_RELEASE_TEST_BRANCHES = Object.freeze({
   otherBase: "qa-lane-test/other-base",
   /** Copies develop's protection; the develop ruleset applies. */
   developMirror: "qa-lane-test/develop-mirror",
-  /** The head of the observation pull requests; no ruleset. */
+  /** Heads of the observation pull requests (GitHub allows one open pull request per head and base); no ruleset. */
   head: "qa-lane-test/head",
+  headReviewed: "qa-lane-test/head-reviewed",
 });
 
 export type QaReleaseObservationId =

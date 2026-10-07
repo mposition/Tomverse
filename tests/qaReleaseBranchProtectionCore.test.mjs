@@ -86,3 +86,36 @@ test("an answer of the wrong shape is an error, not a guess", () => {
   assert.throws(() => qaReleaseRulesetRules([{ type: "update" }]), /protection_shape/);
   assert.deepEqual(qaReleaseClassicProtection(null), { present: false });
 });
+
+test("a test branch gets the recorded classic protection back in GitHub's PUT shape", async () => {
+  const { qaReleaseClassicProtectionBody } = await import("../lib/qaReleaseBranchProtectionCore.ts");
+  const body = qaReleaseClassicProtectionBody(qaReleaseClassicProtection(DEVELOP_RAW));
+  assert.deepEqual(body, {
+    required_status_checks: {
+      strict: false,
+      contexts: ["Admin Console E2E (PostgreSQL)", "Build and test the Rust workspace", "Security, unit, build, and Chromium smoke tests"],
+    },
+    enforce_admins: false,
+    required_pull_request_reviews: {
+      dismiss_stale_reviews: false,
+      require_code_owner_reviews: false,
+      required_approving_review_count: 0,
+      require_last_push_approval: false,
+    },
+    restrictions: null,
+    allow_force_pushes: false,
+    allow_deletions: false,
+    required_linear_history: false,
+  });
+  // Read back, the copy is the same protection.
+  const roundTrip = {
+    ...body,
+    required_status_checks: { ...body.required_status_checks, checks: body.required_status_checks.contexts.map((context) => ({ context })) },
+    enforce_admins: { enabled: false },
+    allow_force_pushes: { enabled: false },
+    allow_deletions: { enabled: false },
+    required_linear_history: { enabled: false },
+  };
+  assert.deepEqual(qaReleaseClassicProtection(roundTrip), qaReleaseClassicProtection(DEVELOP_RAW));
+  assert.equal(qaReleaseClassicProtectionBody({ present: false }), null);
+});

@@ -148,3 +148,30 @@ export const QA_RELEASE_DEVELOP_PROTECTION_RECORDED: QaReleaseBranchProtection =
   }) as QaReleaseClassicProtection,
   rules: [],
 }) as QaReleaseBranchProtection;
+
+/**
+ * The `PUT /repos/{o}/{r}/branches/{b}/protection` body that gives a test
+ * branch exactly the classic protection recorded for a real one (section 8
+ * item 10: the test branch copies the real branch's protection). Null when
+ * the real branch has none, so the test branch gets none either.
+ */
+export function qaReleaseClassicProtectionBody(classic: QaReleaseClassicProtection): Record<string, unknown> | null {
+  if (!classic.present) return null;
+  return {
+    required_status_checks:
+      classic.requiredChecks === null ? null : { strict: classic.strict === true, contexts: [...classic.requiredChecks] },
+    enforce_admins: classic.enforceAdmins,
+    required_pull_request_reviews: classic.pullRequestRequired
+      ? {
+          dismiss_stale_reviews: classic.dismissStaleReviews === true,
+          require_code_owner_reviews: classic.requireCodeOwnerReviews === true,
+          required_approving_review_count: classic.requiredApprovals ?? 0,
+          require_last_push_approval: classic.requireLastPushApproval === true,
+        }
+      : null,
+    restrictions: null,
+    allow_force_pushes: classic.allowForcePushes,
+    allow_deletions: classic.allowDeletions,
+    required_linear_history: classic.requiredLinearHistory,
+  };
+}
