@@ -11,12 +11,13 @@
  * one, which only puts a person on it sooner.
  *
  * Matching: the text is NFKC-normalised and lower-cased. A term in a script
- * that separates words with spaces matches from a word start, as itself or
- * with one English inflection (s, es, d, ed, ing), so "sue" matches "sued"
- * but not "issue" and "court" does not match "courtesy"; German compounds are
- * listed as such. A Hangul or Han term matches as a substring with all
- * whitespace removed from both sides, because spacing in those scripts is
- * optional ("죽고 싶" and "죽고싶" are the same words).
+ * that separates words with spaces matches only as a whole word or phrase,
+ * so "sue" does not match "issue" and "court" does not match "courtesy" or
+ * "courted"; the inflected forms that matter are listed as terms. A Hangul or
+ * Han term matches as a substring of the text as written. Only a space the
+ * term itself contains is optional ("죽고 싶" also matches "죽고싶"): the
+ * text's own spaces are never removed, so separate words cannot fuse into a
+ * term ("혼자 살아요" does not contain "자살").
  *
  * Known limit (design T13): a phrasing not on these lists is not flagged. The
  * lists are measured against tests/fixtures/supportTriageKeywords/.
@@ -33,12 +34,12 @@ export type KeywordLocale = (typeof KEYWORD_LOCALES)[number];
 export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Record<KeywordLocale, readonly string[]>>>> =
   Object.freeze({
     money: Object.freeze({
-      en: ["refund", "charged", "overcharged", "double charged", "billing", "billed", "invoice", "payment", "payments", "subscription", "credits", "credit card", "chargeback", "money back", "compensation", "cancel my plan"],
+      en: ["refund", "refunds", "refunded", "refunding", "charged", "charges", "overcharged", "double charge", "double charged", "unexpected charge", "billing", "billed", "invoice", "invoices", "payment", "payments", "subscription", "subscriptions", "credits", "credit card", "chargeback", "chargebacks", "money back", "compensation", "cancel my plan"],
       ko: ["환불", "결제", "청구", "요금", "구독", "크레딧", "이중 결제", "카드 결제", "보상", "돈을 돌려"],
       de: ["rückerstattung", "erstattung", "abbuchung", "abgebucht", "rechnung", "zahlung", "abonnement", "abo", "guthaben", "geld zurück"],
-      es: ["reembolso", "cobro", "cobrado", "cobraron", "factura", "pago", "suscripción", "créditos", "devolución", "compensación"],
+      es: ["reembolso", "reembolsos", "cobro", "cobros", "cobrado", "cobraron", "factura", "facturas", "pago", "pagos", "suscripción", "créditos", "devolución", "compensación"],
       fr: ["remboursement", "rembourser", "prélèvement", "prélevé", "facture", "paiement", "abonnement", "crédits", "débité"],
-      pt: ["reembolso", "cobrança", "cobrado", "fatura", "pagamento", "assinatura", "créditos", "estorno", "devolução"],
+      pt: ["reembolso", "cobrança", "cobranças", "cobrado", "fatura", "faturas", "pagamento", "pagamentos", "assinatura", "créditos", "estorno", "devolução"],
       zh: ["退款", "扣费", "扣費", "付款", "支付", "订阅", "訂閱", "发票", "發票", "额度", "額度", "退钱", "退錢"],
     }),
     account_privacy: Object.freeze({
@@ -48,7 +49,7 @@ export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Reco
       es: ["eliminar mi cuenta", "borrar mi cuenta", "datos personales", "privacidad", "mis datos"],
       fr: ["supprimer mon compte", "suppression de compte", "données personnelles", "confidentialité", "rgpd", "mes données"],
       pt: ["excluir minha conta", "apagar minha conta", "dados pessoais", "privacidade", "lgpd", "meus dados"],
-      zh: ["删除账号", "刪除帳號", "删除我的账号", "刪除我的帳號", "删除账户", "刪除帳戶", "注销账号", "註銷帳號", "注销我的账号", "註銷我的帳號", "个人信息", "個人資料", "隐私", "隱私"],
+      zh: ["删除账号", "刪除帳號", "删除我的账号", "刪除我的帳號", "删除账户", "刪除帳戶", "删除我的账户", "刪除我的帳戶", "注销账号", "註銷帳號", "注销我的账号", "註銷我的帳號", "注销账户", "註銷帳戶", "注销我的账户", "註銷我的帳戶", "个人信息", "個人資料", "隐私", "隱私"],
     }),
     security: Object.freeze({
       en: ["hacked", "security", "vulnerability", "phishing", "unauthorized login", "unauthorised login", "breach", "exploit", "someone logged into my account", "password leak", "account takeover"],
@@ -60,7 +61,7 @@ export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Reco
       zh: ["被盗", "被盜", "黑客", "駭客", "漏洞", "钓鱼", "釣魚", "安全", "泄露", "洩露"],
     }),
     legal: Object.freeze({
-      en: ["lawsuit", "lawyer", "attorney", "legal action", "sue", "suing", "copyright", "dmca", "court", "subpoena", "press charges"],
+      en: ["lawsuit", "lawsuits", "lawyer", "lawyers", "attorney", "attorneys", "legal action", "sue", "sued", "suing", "copyright", "copyrighted", "dmca", "court", "subpoena", "press charges", "pressing charges", "pressed charges"],
       ko: ["소송", "변호사", "법적", "고소", "저작권", "법원"],
       de: ["klage", "anwalt", "anwältin", "rechtsanwalt", "rechtsanwältin", "rechtliche schritte", "urheberrecht", "gericht"],
       es: ["demanda", "abogado", "acciones legales", "derechos de autor", "tribunal"],
@@ -80,9 +81,8 @@ export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Reco
   });
 
 const normalise = (text: string) => text.normalize("NFKC").toLowerCase();
-const unspaced = (text: string) => text.replace(/\s+/gu, "");
 
-/** Hangul or Han anywhere in the term: matched as a substring. */
+/** Hangul or Han anywhere in the term: matched as a substring, its own spaces optional. */
 const UNSPACED_SCRIPT = /[\p{Script=Hangul}\p{Script=Han}]/u;
 
 const escape = (term: string) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -91,18 +91,19 @@ type Matcher = { readonly flag: KeywordFlag; readonly test: (text: string) => bo
 
 const MATCHERS: readonly Matcher[] = KEYWORD_FLAGS.map((flag) => {
   const terms = KEYWORD_LOCALES.flatMap((locale) => SUPPORT_TRIAGE_KEYWORDS[flag][locale]).map(normalise);
-  const substrings = terms.filter((term) => UNSPACED_SCRIPT.test(term)).map(unspaced);
+  const unspacedTerms = terms.filter((term) => UNSPACED_SCRIPT.test(term));
   const words = terms.filter((term) => !UNSPACED_SCRIPT.test(term));
+  const substringPattern =
+    unspacedTerms.length === 0
+      ? null
+      : new RegExp(unspacedTerms.map((term) => term.split(/\s+/u).map(escape).join("\\s*")).join("|"), "u");
   const wordPattern =
     words.length === 0
       ? null
-      : new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.map(escape).join("|")})(?:s|es|d|ed|ing)?(?![\\p{L}\\p{N}])`, "u");
+      : new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.map(escape).join("|")})(?![\\p{L}\\p{N}])`, "u");
   return {
     flag,
-    test: (text: string) => {
-      const compact = unspaced(text);
-      return substrings.some((term) => compact.includes(term)) || (wordPattern?.test(text) ?? false);
-    },
+    test: (text: string) => (substringPattern?.test(text) ?? false) || (wordPattern?.test(text) ?? false),
   };
 });
 
