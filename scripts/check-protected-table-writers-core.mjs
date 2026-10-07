@@ -1634,6 +1634,18 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Eight dynamic SELECTs in the B06 recovery guards use TG_TABLE_SCHEMA quoted with %I: two linked AdminAuditLog reads, one forbidden-audit count, two stage locks, two historical-slot counts, and one deferred replacement count. IDs are fixed or bound with USING, search_path is pinned to pg_catalog and pg_temp, and none writes a protected table.",
   },
   {
+    path: "prisma/migrations/20261006151000_prompt_refiner_one_shot_terminal_recovery/migration.sql",
+    count: 12,
+    reason:
+      "Twelve dynamic SELECTs in the v4 recovery guards read fixed historical stages, slots and audit rows through TG_TABLE_SCHEMA quoted with %I. The linked audit IDs are bound with USING; the functions pin search_path to pg_catalog and pg_temp. All statements only read or lock, and none writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
+    count: 6,
+    reason:
+      "Six dynamic SELECTs in the v5 stage guard lock or read the fixed v4 stage, count its slots and terminal/recovery audits, and read the linked recovery and stop audit rows. Each uses TG_TABLE_SCHEMA quoted with %I, the variable stop ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:

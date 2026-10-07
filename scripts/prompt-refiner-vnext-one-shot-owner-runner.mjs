@@ -11,6 +11,7 @@ import { readVerifiedPromptRefinerVnextOneShotOwnerCase } from
   "./prompt-refiner-vnext-one-shot-owner-case.mjs";
 
 const SLOT_COUNT = 80;
+const V5_STAGE_ID = "prompt-refiner-vnext-one-shot-v5";
 const CODE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OWNER_KEY = /^(?:[0-9a-f]{2}){32,64}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -128,12 +129,13 @@ const admissionUnknown = (requestId, slotIndex) => Object.freeze({
 });
 
 async function recordUnknownStop({ origin, headers, requestId, slotIndex,
-  runApprovalAuditLogId, slotConsumptionAuditLogId, reason }) {
+  runApprovalAuditLogId, slotConsumptionAuditLogId, reason, stageId }) {
   try {
     const stopped = await globalThis.fetch(
       `${origin}/api/internal/prompt-refiner/vnext-one-shot-stop`, {
         method: "POST", headers, redirect: "error", cache: "no-store",
-        body: JSON.stringify({ requestId, slotIndex, runApprovalAuditLogId,
+        body: JSON.stringify({ ...(stageId ? { stageId } : {}),
+          requestId, slotIndex, runApprovalAuditLogId,
           slotConsumptionAuditLogId, reason }),
       });
     const receipt = stopped.status === 201 ? await readSmallJson(stopped) : null;
@@ -159,7 +161,7 @@ async function recordUnknownStop({ origin, headers, requestId, slotIndex,
  */
 export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies = {}) {
   const { manifestPath, bindingPath, sealPath, ownerKeyHex, slotIndex,
-    runApprovalAuditLogId, now, env = process.env } = input ?? {};
+    runApprovalAuditLogId, stageId, now, env = process.env } = input ?? {};
   const origin = appOrigin(env?.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN);
   const token = env?.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN;
   const providerKey = env?.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY;
@@ -168,6 +170,7 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
       !origin || typeof token !== "string" || token.length < 32 ||
       token.length > 256 || typeof providerKey !== "string" ||
       providerKey.length < 32 || !SHA256.test(runnerDigest ?? "") ||
+      (stageId !== undefined && stageId !== V5_STAGE_ID) ||
       !OWNER_KEY.test(ownerKeyHex ?? "") || !Number.isInteger(slotIndex) ||
       slotIndex < 0 || slotIndex >= SLOT_COUNT ||
       typeof runApprovalAuditLogId !== "string" ||
@@ -207,7 +210,8 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
   try {
     const response = await fetchImpl(`${origin}/api/internal/prompt-refiner/vnext-one-shot-slot`, {
       method: "POST", headers, redirect: "error", cache: "no-store",
-      body: JSON.stringify({ requestId, slotIndex, runApprovalAuditLogId,
+      body: JSON.stringify({ ...(stageId ? { stageId } : {}),
+        requestId, slotIndex, runApprovalAuditLogId,
         manifestRoot: selected.manifestRoot, runnerDigest }),
     });
     if (response.status === 409 || response.status === 400 ||
@@ -240,25 +244,31 @@ export async function runPromptRefinerVnextOneShotOwnerSlot(input, dependencies 
     });
     if (current.caseId !== selected.caseId ||
         current.sourceText !== selected.sourceText ||
-        current.manifestRoot !== selected.manifestRoot) return refuse();
+        current.manifestRoot !== selected.manifestRoot) {
+      throw new Error("owner_source_changed_after_admission");
+    }
     outcome = await adapter({ requestId, sourceText: current.sourceText });
   } catch {
     outcome = { status: "outcome_unknown", reason: "response_unverified" };
   }
-  if (outcome.status === "bounded_response") {
-    return Object.freeze({ status: "bounded_response", requestId, slotIndex,
+  if (outcome.status === "bounded_response" ||
+      outcome.status === "confirmed_failure") {
+    return Object.freeze({ status: outcome.status, requestId, slotIndex,
       slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
-      output: outcome.output,
+      ...(outcome.status === "bounded_response"
+        ? { output: outcome.output } : { failureCode: outcome.failureCode }),
       costUpperBoundMicroUsd: outcome.costUpperBoundMicroUsd,
       usage: outcome.usage,
       intentToTerminalLatencyMs: outcome.intentToTerminalLatencyMs,
       dispatchAuthorized: false });
   }
   const stopRecorded = await recordUnknownStop({ origin, headers,
+    stageId,
     requestId, slotIndex, runApprovalAuditLogId,
     slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
     reason: outcome.reason });
   return Object.freeze({ status: "outcome_unknown", reason: outcome.reason,
+    ...(outcome.diagnosticCode ? { diagnosticCode: outcome.diagnosticCode } : {}),
     requestId, slotIndex, slotConsumptionAuditLogId: grant.slotConsumptionAuditLogId,
     stopRecorded, humanReviewRequired: true, retryAuthorized: false,
     dispatchAuthorized: false });
@@ -269,20 +279,26 @@ export async function recordPromptRefinerVnextOneShotTerminalReceipt(result, inp
   const origin = appOrigin(input?.origin);
   const token = input?.token;
   const runApprovalAuditLogId = input?.runApprovalAuditLogId;
+  const stageId = input?.stageId;
   if (!origin || typeof token !== "string" || token.length < 32 ||
+      (stageId !== undefined && stageId !== V5_STAGE_ID) ||
       token.length > 256 || typeof runApprovalAuditLogId !== "string" ||
       runApprovalAuditLogId.length < 1 || runApprovalAuditLogId.length > 128 ||
-      result?.status !== "bounded_response") return false;
+      !["bounded_response", "confirmed_failure"].includes(result?.status)) return false;
   try {
     const response = await globalThis.fetch(
       `${origin}/api/internal/prompt-refiner/vnext-one-shot-terminal`, {
         method: "POST", redirect: "error", cache: "no-store",
         headers: { authorization: `Bearer ${token}`,
           "content-type": "application/json" },
-        body: JSON.stringify({ requestId: result.requestId,
+        body: JSON.stringify({ ...(stageId ? { stageId } : {}),
+          requestId: result.requestId,
           slotIndex: result.slotIndex, runApprovalAuditLogId,
           slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
-          resultKind: result.output.outcome,
+          resultKind: result.status === "confirmed_failure"
+            ? "failed" : result.output.outcome,
+          ...(result.status === "confirmed_failure"
+            ? { failureCode: result.failureCode } : {}),
           usage: result.usage,
           observedCostMicroUsd: result.costUpperBoundMicroUsd,
           intentToTerminalLatencyMs: result.intentToTerminalLatencyMs }),
@@ -331,19 +347,24 @@ async function main(args) {
         const result = await runPromptRefinerVnextOneShotOwnerSlot({
           manifestPath: args[2], bindingPath: args[4], sealPath: args[6],
           slotIndex: Number(args[8]), runApprovalAuditLogId: args[10],
+          stageId: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_STAGE_ID,
           ownerKeyHex: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_OWNER_SEAL_KEY_HEX,
         });
-        if (result.status !== "bounded_response") {
+        if (result.status !== "bounded_response" &&
+            result.status !== "confirmed_failure") {
           process.stdout.write(JSON.stringify(result) + "\n");
           return 1;
         }
         try {
           writeFileSync(descriptor, JSON.stringify({ requestId: result.requestId,
             slotIndex: result.slotIndex,
-            output: result.output }) + "\n", { encoding: "utf8" });
+            ...(result.status === "confirmed_failure"
+              ? { resultKind: "failed", failureCode: result.failureCode }
+              : { output: result.output }) }) + "\n", { encoding: "utf8" });
           fsyncSync(descriptor);
         } catch {
           const stopRecorded = await recordUnknownStop({
+            stageId: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_STAGE_ID,
             origin: appOrigin(process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN),
             headers: { authorization:
               `Bearer ${process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN}`,
@@ -363,7 +384,8 @@ async function main(args) {
         const terminalRecorded = await recordPromptRefinerVnextOneShotTerminalReceipt(
           result, { origin: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
             token: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
-            runApprovalAuditLogId: args[10] });
+            runApprovalAuditLogId: args[10],
+            stageId: process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_STAGE_ID });
         if (!terminalRecorded) {
           process.stdout.write(JSON.stringify({ status: "terminal_receipt_outcome_unknown",
             requestId: result.requestId, slotIndex: result.slotIndex,

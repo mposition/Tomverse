@@ -35,8 +35,15 @@ export async function GET(request: Request) {
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-prompt-refiner-vnext-terminal-readback", { minute: 3, day: 30 });
+    const requested = new URL(request.url).searchParams.get("stageId");
+    if (requested !== null &&
+        requested !== "prompt-refiner-vnext-one-shot-v5") {
+      return NextResponse.json({ code: "ONE_SHOT_STAGE_INVALID" },
+        { status: 400, headers });
+    }
     const readback = await readOnlySnapshotTransaction(
-      readPromptRefinerVnextOneShotTerminalReceipts,
+      (tx) => readPromptRefinerVnextOneShotTerminalReceipts(tx,
+        requested ?? "prompt-refiner-vnext-one-shot-v4"),
       { maxWait: 5_000, timeout: 15_000 },
     );
     return NextResponse.json({ readback }, { headers });

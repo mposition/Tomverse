@@ -20,8 +20,11 @@ import {
   PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD,
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { V4_STAGE_ID, V5_STAGE_ID,
+  type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const STAGE_ID = V4_STAGE_ID;
 export const PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY =
   "v4-paid-terminal-guard-v1" as const;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -35,6 +38,7 @@ const TOTAL = BigInt(PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD);
  * An uncertain result must be inspected by the owner, never blindly retried.
  */
 export async function consumePromptRefinerVnextOneShotSlot(input: {
+  stageId?: PromptRefinerRunnableStageId;
   requestId: string;
   slotIndex: number;
   runApprovalAuditLogId: string;
@@ -45,7 +49,9 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
   reservationConsumed: true;
   dispatchAuthorized: false;
 }>> {
+  const stageId = input.stageId ?? STAGE_ID;
   if (!UUID.test(input.requestId) ||
+      (stageId !== STAGE_ID && stageId !== V5_STAGE_ID) ||
       !Number.isInteger(input.slotIndex) || input.slotIndex < 0 ||
       input.slotIndex >= PROMPT_REFINER_VNEXT_SLOT_COUNT ||
       typeof input.runApprovalAuditLogId !== "string" ||
@@ -64,20 +70,21 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
   return prisma.$transaction(async (tx) => {
     // Match the established audit -> stage -> registry -> slot lock order.
     await takeAuditChainLock(tx);
-    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!snapshot.stagePresent || snapshot.stageStatus !== "run_approved" ||
         !snapshot.reservationShapeValid || !snapshot.approvalAuditsValid ||
         snapshot.slotCount !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
         snapshot.reservedSlots < 1 ||
         snapshot.consumedSlots >= PROMPT_REFINER_VNEXT_SLOT_COUNT ||
+        (stageId === V5_STAGE_ID && input.slotIndex !== snapshot.consumedSlots) ||
         snapshot.reservedSlots + snapshot.consumedSlots !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
         BigInt(snapshot.consumedSlots + 1) * COST > TOTAL) {
       throw new Error("vnext_one_shot_slot_reservation_unavailable");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.status !== "run_approved" ||
         stage.runApprovalAuditLogId !== input.runApprovalAuditLogId ||
@@ -100,9 +107,9 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
     if (!paid.valid) {
       throw new Error("vnext_one_shot_paid_authorization_unavailable");
     }
-    await assertPromptRefinerVnextOneShotTerminalsComplete(tx);
+    await assertPromptRefinerVnextOneShotTerminalsComplete(tx, stageId);
     const slot = await tx.promptRefinerVnextOneShotSlot.findUnique({
-      where: { stageId_slotIndex: { stageId: STAGE_ID, slotIndex: input.slotIndex } },
+      where: { stageId_slotIndex: { stageId, slotIndex: input.slotIndex } },
     });
     if (!slot || slot.status !== "reserved" || slot.requestId !== null ||
         slot.consumedAt !== null || slot.reservedCostMicroUsd !== COST) {
@@ -125,7 +132,7 @@ export async function consumePromptRefinerVnextOneShotSlot(input: {
       },
     });
     const updated = await tx.promptRefinerVnextOneShotSlot.updateMany({
-      where: { id: slot.id, stageId: STAGE_ID, slotIndex: input.slotIndex,
+      where: { id: slot.id, stageId, slotIndex: input.slotIndex,
         status: "reserved", requestId: null, consumedAt: null },
       data: { status: "consumed", requestId: input.requestId },
     });

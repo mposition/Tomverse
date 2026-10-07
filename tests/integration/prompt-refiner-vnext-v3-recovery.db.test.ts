@@ -16,6 +16,8 @@ import { createPromptRefinerVnextOneShotStageWithSlots } from
   "@/lib/promptRefinerVnextOneShotStageWriter";
 import { createPromptRefinerVnextOneShotV4Stage } from
   "@/lib/promptRefinerVnextOneShotV4StageWriter";
+import { createPromptRefinerVnextOneShotV5Stage } from
+  "@/lib/promptRefinerVnextOneShotV5StageWriter";
 import { recordPromptRefinerVnextOneShotPreregistration } from
   "@/lib/promptRefinerVnextOneShotPreregistration";
 import { readPromptRefinerVnextOneShotStage } from
@@ -55,6 +57,7 @@ const V1 = "prompt-refiner-vnext-one-shot-v1";
 const V2 = "prompt-refiner-vnext-one-shot-v2";
 const V3 = "prompt-refiner-vnext-one-shot-v3";
 const V4 = "prompt-refiner-vnext-one-shot-v4";
+const V5 = "prompt-refiner-vnext-one-shot-v5";
 const owner = "synthetic-owner";
 const auditKey = "synthetic-chat01-b06-audit-integrity-key";
 const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -75,8 +78,8 @@ const runtime = [
     runtimeCommitSha: "291e6d07f284e6333c34a3061dd94da77752aad9" },
   { id: V3, runtimeDeploymentId: "5e2245d9-17a8-46fe-b967-1ebd86806649",
     runtimeCommitSha: "73e60ebd79869f16d82d914103122a0c3eaf0ad7" },
-  { id: V4, runtimeDeploymentId: "44444444-4444-4444-8444-444444444444",
-    runtimeCommitSha: "4".repeat(40) },
+  { id: V4, runtimeDeploymentId: "35787baf-2329-4002-b837-182ae9f51d13",
+    runtimeCommitSha: "e3ecfcdc5eee9cbce8f79fda39eb76a87c445819" },
 ];
 type Client = pg.Client;
 async function audit(client: Client, action: string, targetId: string,
@@ -193,6 +196,7 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
         "20261005140000_prompt_refiner_one_shot_unrun_replacement",
         "20261005210000_prompt_refiner_one_shot_run_approved_recovery",
         "20261006151000_prompt_refiner_one_shot_terminal_recovery",
+        "20261006160000_prompt_refiner_one_shot_post_unknown_v5",
       ]) {
         await client.query(await readFileAsync(resolve(migrationRoot, folder, "migration.sql"), "utf8"));
       }
@@ -783,9 +787,63 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
         runApprovalAuditLogId: run.runApprovalAuditLogId,
       }), /prior_terminal_unverified/);
 
-      const uncertain = { requestId: secondRequestId, slotIndex: 1,
+      const failedInput = { ...terminalInput, requestId: secondRequestId,
+        slotIndex: 1, slotConsumptionAuditLogId: second.value.slotConsumptionAuditLogId,
+        resultKind: "failed", failureCode: "vnext_strict_parse_failure" };
+      assert.equal((await recordTerminalRoute(terminalRequest({
+        ...failedInput, failureCode: undefined,
+      }))).status, 409);
+      assert.equal((await recordTerminalRoute(terminalRequest(failedInput))).status, 201);
+      const failedReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotTerminalReceipts(tx));
+      assert.equal(failedReadback.valid, true);
+      assert.equal(failedReadback.terminalReceipts, 2);
+      const oldTerminal = failedReadback.slots[0];
+      const failedTerminal = failedReadback.slots[1];
+      assert.ok("resultKind" in oldTerminal);
+      assert.ok("resultKind" in failedTerminal);
+      assert.ok("failureCode" in failedTerminal);
+      assert.equal(oldTerminal.resultKind, "abstained");
+      assert.equal(failedTerminal.resultKind, "failed");
+      assert.equal(failedTerminal.failureCode,
+        "vnext_strict_parse_failure");
+      const failedAudit = (await prisma.adminAuditLog.findMany({ where: {
+        action: "prompt_refiner.vnext_one_shot.terminal_recorded",
+      } })).find((entry) => (entry.metadata as Record<string, unknown>)
+        ?.resultKind === "failed");
+      assert.ok(failedAudit);
+      assert.equal((failedAudit.metadata as Record<string, unknown>).version,
+        "prompt-refiner-vnext-one-shot-terminal-v2");
+      assert.equal(JSON.stringify(failedAudit.metadata).includes("not JSON"), false);
+
+      const highUsage = { ...usage, inputTokens: 13_060, outputTokens: 4_096 };
+      const highCost = guardPromptRefinerVnextBilledUsage({ usage: highUsage,
+        effectivePricePin: PROMPT_REFINER_VNEXT_PRICE_PIN }).costUpperBoundMicroUsd;
+      assert.equal(highCost, 7_528);
+      for (let slotIndex = 2; slotIndex <= 32; slotIndex++) {
+        const requestId = randomUUID();
+        const consumed = await consumePromptRefinerVnextOneShotSlot({
+          requestId, slotIndex, runApprovalAuditLogId: run.runApprovalAuditLogId,
+        });
+        const isLast = slotIndex === 32;
+        assert.equal((await recordTerminalRoute(terminalRequest({
+          ...terminalInput, requestId, slotIndex,
+          slotConsumptionAuditLogId: consumed.slotConsumptionAuditLogId,
+          usage: isLast ? highUsage : usage,
+          observedCostMicroUsd: isLast ? highCost : cost,
+        }))).status, 201);
+      }
+      const third = await consumePromptRefinerVnextOneShotSlot({
+        requestId: randomUUID(), slotIndex: 33,
         runApprovalAuditLogId: run.runApprovalAuditLogId,
-        slotConsumptionAuditLogId: second.value.slotConsumptionAuditLogId,
+      });
+      const thirdRequestId = (await prisma.promptRefinerVnextOneShotSlot.findUniqueOrThrow({
+        where: { stageId_slotIndex: { stageId: V4, slotIndex: 33 } },
+      })).requestId!;
+
+      const uncertain = { requestId: thirdRequestId, slotIndex: 33,
+        runApprovalAuditLogId: run.runApprovalAuditLogId,
+        slotConsumptionAuditLogId: third.slotConsumptionAuditLogId,
         reason: "timeout" as const };
       await assert.rejects(stopPromptRefinerVnextOneShotUnknown({
         ...uncertain, requestId: firstRequestId, slotIndex: 0,
@@ -841,19 +899,196 @@ test("PG17 permits atomic zero-consumption v2 to v4 recovery and terminal receip
       const stoppedReadback = await prisma.$transaction((tx) =>
         readPromptRefinerVnextOneShotTerminalReceipts(tx));
       assert.equal(stoppedReadback.valid, true);
-      assert.equal(stoppedReadback.terminalReceipts, 1);
+      assert.equal(stoppedReadback.terminalReceipts, 33);
       assert.equal(stoppedReadback.unknownReceipts, 1);
       assert.equal(stoppedReadback.consumedWithoutReceipt, 0);
-      assert.equal(stoppedReadback.observedCostMicroUsd, cost);
+      assert.equal(stoppedReadback.observedCostMicroUsd, 7_624);
       assert.equal(stoppedReadback.unresolvedCostUpperBoundMicroUsd, 29_918);
-      assert.equal(stoppedReadback.slots[1].state, "outcome_unknown");
+      assert.equal(stoppedReadback.slots[33].state, "outcome_unknown");
       assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
         where: { id: V4 },
       })).status, "closed");
       await assert.rejects(consumePromptRefinerVnextOneShotSlot({
-        requestId: randomUUID(), slotIndex: 2,
+        requestId: randomUUID(), slotIndex: 34,
         runApprovalAuditLogId: run.runApprovalAuditLogId,
       }), /approved_stage_inactive/);
+      const v4Before = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: V4 },
+      });
+      const v4SlotsBefore = await prisma.promptRefinerVnextOneShotSlot.findMany({
+        where: { stageId: V4 }, orderBy: { slotIndex: "asc" },
+      });
+      const v5Binding = { ...v4Binding, id: V5,
+        runnerDigest: "b".repeat(64), manifestRoot: "f".repeat(64),
+        runtimeDeploymentId: "55555555-5555-4555-8555-555555555555",
+        runtimeCommitSha: "5".repeat(40) };
+      const priorAuditCount = await prisma.adminAuditLog.count();
+      for (const drift of [
+        { runnerDigest: v4Binding.runnerDigest },
+        { manifestRoot: v4Binding.manifestRoot },
+        { runtimeDeploymentId: v4Binding.runtimeDeploymentId },
+        { runtimeCommitSha: v4Binding.runtimeCommitSha },
+      ]) {
+        await assert.rejects(createPromptRefinerVnextOneShotV5Stage({
+          session, request, binding: { ...v5Binding, ...drift },
+        }), /predecessor_invalid/);
+        assert.equal(await prisma.adminAuditLog.count(), priorAuditCount);
+      }
+      await assert.rejects(createPromptRefinerVnextOneShotV5Stage({
+        session, request, binding: { ...v5Binding,
+          pricePinDigest: "1".repeat(64) },
+      }), /v5_price_mismatch/);
+      assert.equal(await prisma.adminAuditLog.count(), priorAuditCount);
+      const v5Competing = await Promise.allSettled([1, 2].map(() =>
+        createPromptRefinerVnextOneShotV5Stage({
+          session, request, binding: v5Binding,
+        })));
+      assert.equal(v5Competing.filter((outcome) => outcome.status === "fulfilled").length, 1,
+        v5Competing.map((outcome) => outcome.status === "rejected" ?
+          String((outcome.reason as Error).message).slice(0, 240) : "fulfilled").join(" | "));
+      assert.equal(v5Competing.filter((outcome) => outcome.status === "rejected").length, 1);
+      const v5Success = v5Competing.find((outcome) => outcome.status === "fulfilled");
+      assert.ok(v5Success && v5Success.status === "fulfilled");
+      assert.deepEqual(await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: V4 },
+      }), v4Before, "v5 must not modify the closed v4 stage");
+      const v5Readback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, V5));
+      assert.equal(v5Readback.stageStatus, "staged");
+      assert.equal(v5Readback.reservedSlots, 80);
+      assert.equal(v5Readback.consumedSlots, 0);
+      assert.equal(v5Readback.approvalAuditsValid, true);
+      assert.equal(v5Readback.dispatchAuthorized, false);
+      assert.equal(await prisma.adminAuditLog.count({ where: {
+        action: "prompt_refiner.vnext_one_shot.post_unknown_new_run_approved",
+      } }), 1);
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotTerminalReceipts(tx))).valid, true,
+      "v4 terminal readback remains valid after v5 stage");
+      process.env.RAILWAY_DEPLOYMENT_ID = v5Binding.runtimeDeploymentId;
+      process.env.RAILWAY_GIT_COMMIT_SHA = v5Binding.runtimeCommitSha;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT =
+        v5Binding.manifestRoot;
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST =
+        v5Binding.runnerDigest;
+      globalThis.fetch = async () => Response.json({ data: {
+        deployment: { id: v5Binding.runtimeDeploymentId, status: "SUCCESS",
+          meta: { commitHash: v5Binding.runtimeCommitSha } },
+        deployments: { edges: [{ node: {
+          id: v5Binding.runtimeDeploymentId, status: "SUCCESS",
+        } }] },
+      } });
+      const v5Run = await approvePromptRefinerVnextOneShotRun({
+        session, request, stageId: V5,
+        expected: { ...v5Binding,
+          stageApprovalAuditLogId: v5Success.value.stageApprovalAuditLogId },
+      });
+      assert.equal(v5Run.stageId, V5);
+      assert.equal(v5Run.dispatchAuthorized, false);
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotStage(tx, V5))).stageStatus,
+      "run_approved");
+      const v5Stage = await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: V5 },
+      });
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /shadow_evidence_unavailable/);
+      const v5Target = promptRefinerVnextOneShotShadowTarget(v5Stage);
+      assert.ok(v5Target);
+      const v5Proof = signPromptRefinerVnextOneShotShadowProof({
+        version: "prompt-refiner-vnext-one-shot-shadow-proof-v1",
+        ...v5Target, manifestRoot: v5Binding.manifestRoot,
+        runnerPreflightDigest: PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_PREFLIGHT_DIGEST,
+        cacheWriteInputTokens: 0, providerCalls: 0, slotConsumeCalls: 0,
+        signedAt: new Date().toISOString(),
+      }, privateKey);
+      const v5Shadow = await recordPromptRefinerVnextOneShotOperationalShadow({
+        session, request, proof: v5Proof, stageId: V5,
+      });
+      assert.equal(v5Shadow.stageId, V5);
+      assert.equal(v5Shadow.dispatchAuthorized, false);
+      assert.equal((await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotOperationalShadow(tx, v5Stage))).valid, true);
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /paid_authorization_unavailable/);
+      const v5Paid = await approvePromptRefinerVnextOneShotPaidDispatch({
+        session, request, stageId: V5,
+        expected: { ...v5Binding,
+          stageApprovalAuditLogId: v5Success.value.stageApprovalAuditLogId,
+          runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+          shadowAuditLogId: v5Shadow.shadowAuditLogId },
+      });
+      assert.equal(v5Paid.stageId, V5);
+      assert.equal(v5Paid.dispatchAuthorized, false);
+      const v5PaidReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotPaidAuthorization(tx, v5Stage,
+          v5Shadow.shadowAuditLogId));
+      assert.equal(v5PaidReadback.valid, true);
+      const v5PaidAudit = await prisma.adminAuditLog.findUniqueOrThrow({
+        where: { id: v5Paid.paidAuthorizationAuditLogId },
+      });
+      assert.equal((v5PaidAudit.metadata as Record<string, unknown>)
+        .crossRunWorstCaseMicroUsd, 2_430_982);
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 1,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /reservation_unavailable/);
+      const v5RequestId = randomUUID();
+      const v5First = await consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: v5RequestId, slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      });
+      assert.equal(v5First.reservationConsumed, true);
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 1,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /prior_terminal_unverified/);
+      assert.equal((await recordTerminalRoute(terminalRequest({
+        stageId: V5, requestId: v5RequestId, slotIndex: 0,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+        slotConsumptionAuditLogId: v5First.slotConsumptionAuditLogId,
+        resultKind: "failed", failureCode: "vnext_strict_parse_failure",
+        usage, observedCostMicroUsd: cost,
+        intentToTerminalLatencyMs: 10,
+      }))).status, 201);
+      const v5FirstReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotTerminalReceipts(tx, V5));
+      assert.equal(v5FirstReadback.valid, true);
+      assert.equal(v5FirstReadback.terminalReceipts, 1);
+      assert.equal(v5FirstReadback.observedCostMicroUsd, cost);
+      assert.equal(v5FirstReadback.slots[0].state, "terminal");
+      const v5SecondRequestId = randomUUID();
+      const v5Second = await consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: v5SecondRequestId, slotIndex: 1,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      });
+      const v5Stopped = await stopPromptRefinerVnextOneShotUnknown({
+        stageId: V5, requestId: v5SecondRequestId, slotIndex: 1,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+        slotConsumptionAuditLogId: v5Second.slotConsumptionAuditLogId,
+        reason: "response_unverified",
+      });
+      assert.equal(v5Stopped.retryAuthorized, false);
+      const v5StoppedReadback = await prisma.$transaction((tx) =>
+        readPromptRefinerVnextOneShotTerminalReceipts(tx, V5));
+      assert.equal(v5StoppedReadback.valid, true);
+      assert.equal(v5StoppedReadback.terminalReceipts, 1);
+      assert.equal(v5StoppedReadback.unknownReceipts, 1);
+      assert.equal(v5StoppedReadback.slots[1].state, "outcome_unknown");
+      await assert.rejects(consumePromptRefinerVnextOneShotSlot({
+        stageId: V5, requestId: randomUUID(), slotIndex: 2,
+        runApprovalAuditLogId: v5Run.runApprovalAuditLogId,
+      }), /approved_stage_inactive/);
+      assert.equal((await prisma.promptRefinerVnextOneShotStage.findUniqueOrThrow({
+        where: { id: V4 },
+      })).status, "closed");
+      assert.deepEqual(await prisma.promptRefinerVnextOneShotSlot.findMany({
+        where: { stageId: V4 }, orderBy: { slotIndex: "asc" },
+      }), v4SlotsBefore, "v5 run and safe stop must not rewrite v4 slots");
     } finally {
       await client.query("ROLLBACK").catch(() => {});
       await prisma.$disconnect();

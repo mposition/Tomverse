@@ -7,15 +7,19 @@ import { z } from "zod";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { recordPromptRefinerVnextOneShotTerminal } from
   "@/lib/promptRefinerVnextOneShotTerminalReceipt";
+import { PROMPT_REFINER_VNEXT_CONFIRMED_FAILURE_CODES } from
+  "@/lib/promptRefinerVnextOneShotFailureCodes";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().min(1).max(128);
 const bodySchema = z.object({
+  stageId: z.literal("prompt-refiner-vnext-one-shot-v5").optional(),
   requestId: z.string().uuid(),
   slotIndex: z.number().int().min(0).max(79),
   runApprovalAuditLogId: id,
   slotConsumptionAuditLogId: id,
-  resultKind: z.enum(["suggested", "abstained"]),
+  resultKind: z.enum(["suggested", "abstained", "failed"]),
+  failureCode: z.enum(PROMPT_REFINER_VNEXT_CONFIRMED_FAILURE_CODES).optional(),
   usage: z.object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),

@@ -112,6 +112,47 @@ test("terminal settlement sends only telemetry once and never retries a lost res
   } finally { globalThis.fetch = previous; }
 });
 
+test("confirmed parser failure settles once as a content-free failed terminal", async (t) => {
+  const input = fixture(t);
+  let generated = 0;
+  const response = boundedResponse();
+  response.text = "not JSON";
+  const failed = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      assert.ok(url.endsWith("-slot"));
+      return grantFor(JSON.parse(options.body));
+    },
+    generate: async () => { generated++; return response; },
+  });
+  assert.equal(generated, 1);
+  assert.equal(failed.status, "confirmed_failure");
+  assert.equal(failed.failureCode, "vnext_strict_parse_failure");
+  assert.equal(failed.output, undefined);
+  const prior = globalThis.fetch;
+  let terminalCalls = 0;
+  try {
+    globalThis.fetch = async (url, options) => {
+      terminalCalls++;
+      assert.ok(url.endsWith("-terminal"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.resultKind, "failed");
+      assert.equal(body.failureCode, "vnext_strict_parse_failure");
+      assert.equal(JSON.stringify(body).includes("not JSON"), false);
+      assert.equal(body.observedCostMicroUsd, failed.costUpperBoundMicroUsd);
+      return Response.json({ terminalAuditLogId: "synthetic-terminal-audit",
+        requestId: failed.requestId, slotIndex: failed.slotIndex,
+        observedCostMicroUsd: failed.costUpperBoundMicroUsd,
+        dispatchAuthorized: false }, { status: 201 });
+    };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(failed, {
+      origin: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
+      token: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
+      runApprovalAuditLogId: input.runApprovalAuditLogId,
+    }), true);
+    assert.equal(terminalCalls, 1);
+  } finally { globalThis.fetch = prior; }
+});
+
 test("default-off runner never asks the app or reaches a provider transport", async (t) => {
   const input = fixture(t);
   delete input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED;
@@ -293,16 +334,85 @@ test("unpriced cache-write telemetry stops after one mock call", async (t) => {
 test("source drift after consumption prevents a provider call", async (t) => {
   const input = fixture(t);
   let generated = 0;
+  let stops = 0;
   const result = await invokeWithMockFetch(input, {
-    fetch: async (_url, options) => {
-      writeFileSync(input.manifestPath,
-        input.synthetic.manifestText.replace("synthetic ko source", "changed ko source"));
-      return grantFor(JSON.parse(options.body));
+    fetch: async (url, options) => {
+      if (url.endsWith("-slot")) {
+        writeFileSync(input.manifestPath,
+          input.synthetic.manifestText.replace("synthetic ko source", "changed ko source"));
+        return grantFor(JSON.parse(options.body));
+      }
+      stops++;
+      assert.equal(JSON.parse(options.body).reason, "response_unverified");
+      return Response.json({ stopAuditLogId: "synthetic-stop-audit",
+        reservationHeld: true, humanReviewRequired: true,
+        retryAuthorized: false, dispatchAuthorized: false }, { status: 201 });
     },
     generate: async () => { generated++; return boundedResponse(); },
   });
   assert.equal(generated, 0);
+  assert.equal(stops, 1);
   assert.equal(result.status, "outcome_unknown");
-  assert.equal(result.stopRecorded, false);
+  assert.equal(result.stopRecorded, true);
   assert.equal(result.humanReviewRequired, true);
+});
+
+test("v5 owner slot binds admission and terminal telemetry to v5", async (t) => {
+  const input = { ...fixture(t), stageId: "prompt-refiner-vnext-one-shot-v5" };
+  let calls = 0;
+  const result = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      calls++;
+      assert.ok(url.endsWith("-slot"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      return grantFor(body);
+    },
+    generate: async () => boundedResponse(),
+  });
+  assert.equal(result.status, "bounded_response");
+  assert.equal(calls, 1);
+  const prior = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, options) => {
+      calls++;
+      assert.ok(url.endsWith("-terminal"));
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      assert.equal(JSON.stringify(body).includes("refinedPrompt"), false);
+      return Response.json({ terminalAuditLogId: "synthetic-v5-terminal-audit",
+        requestId: result.requestId, slotIndex: result.slotIndex,
+        observedCostMicroUsd: result.costUpperBoundMicroUsd,
+        dispatchAuthorized: false }, { status: 201 });
+    };
+    assert.equal(await recordPromptRefinerVnextOneShotTerminalReceipt(result, {
+      origin: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_APP_ORIGIN,
+      token: input.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN,
+      runApprovalAuditLogId: input.runApprovalAuditLogId,
+      stageId: input.stageId,
+    }), true);
+  } finally { globalThis.fetch = prior; }
+  assert.equal(calls, 2);
+});
+
+test("v5 owner transport unknown sends one v5 stop", async (t) => {
+  const input = { ...fixture(t), stageId: "prompt-refiner-vnext-one-shot-v5" };
+  let stops = 0;
+  const result = await invokeWithMockFetch(input, {
+    fetch: async (url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.stageId, input.stageId);
+      if (url.endsWith("-slot")) return grantFor(body);
+      assert.ok(url.endsWith("-stop"));
+      stops++;
+      return Response.json({ stopAuditLogId: "synthetic-v5-stop-audit",
+        reservationHeld: true, humanReviewRequired: true,
+        retryAuthorized: false, dispatchAuthorized: false }, { status: 201 });
+    },
+    generate: async () => { throw new Error("synthetic transport failure"); },
+  });
+  assert.equal(result.status, "outcome_unknown");
+  assert.equal(result.retryAuthorized, false);
+  assert.equal(result.stopRecorded, true);
+  assert.equal(stops, 1);
 });

@@ -46,7 +46,8 @@ let writeFailure = false;
 let runCreatedAt = new Date();
 const tx = {
   adminAuditLog: {
-    findMany: async () => evidenceRows,
+    findMany: async ({ where }: { where: { targetId: string } }) =>
+      evidenceRows.filter((row) => row.targetId === where.targetId),
     findUnique: async () => ({ createdAt: runCreatedAt }),
   },
   promptRefinerVnextOneShotStage: { findUnique: async ({ where }: {
@@ -124,6 +125,15 @@ const reset = () => {
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST =
     promptRefinerVnextOneShotShadowPublicKeyDigest(publicKey);
 };
+
+test("absent v5 readback does not report historical v4 shadow as present", async () => {
+  const shadow = await load(); reset();
+  evidenceRows = [{ targetId: stageId }];
+  const result = await shadow.readPromptRefinerVnextOneShotOperationalShadow(
+    tx as never, null, "prompt-refiner-vnext-one-shot-v5");
+  assert.equal(result.present, false);
+  assert.equal(result.valid, false);
+});
 
 test("app records one content-free shadow for the exact synthetic stage/run/80 slots", async () => {
   const { readPromptRefinerVnextOneShotOperationalShadow,

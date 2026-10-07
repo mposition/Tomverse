@@ -95,12 +95,13 @@ async function loadRoute() {
     namedExports: {
       recordPromptRefinerVnextOneShotOperationalShadow: async (input: {
         proof: Record<string, unknown>;
+        stageId?: string;
       }) => {
         writes++;
         assert.deepEqual(input.proof, proof);
         if (unknown) throw new Error("private transaction failure");
         readbackValid = true;
-        return { stageId: "prompt-refiner-vnext-one-shot-v4",
+        return { stageId: input.stageId ?? "prompt-refiner-vnext-one-shot-v4",
           shadowAuditLogId: "synthetic-shadow-audit", dispatchAuthorized: false };
       },
       readPromptRefinerVnextOneShotOperationalShadow: async () => ({
@@ -164,4 +165,22 @@ test("write and readback are content-free; unknown outcome requests human readba
   assert.deepEqual(await failed.json(), { code: "SHADOW_EVIDENCE_OUTCOME_UNKNOWN",
     retryAuthorized: false, humanReviewRequired: true });
   assert.equal(writes, 2);
+});
+
+test("v5 shadow requires a separate stage-specific confirmation", async () => {
+  const route = await loadRoute();
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED = "1";
+  unknown = false;
+  const before = writes;
+  const stageId = "prompt-refiner-vnext-one-shot-v5";
+  assert.equal((await route.POST(request({ ...body, stageId }))).status, 400);
+  assert.equal((await route.POST(request({ ...body,
+    confirmation: "RECORD_VNEXT_ONE_SHOT_NEW_V5_OPERATIONAL_SHADOW_80_SLOTS" }))).status, 400);
+  assert.equal(writes, before);
+  const accepted = await route.POST(request({ ...body, stageId,
+    confirmation: "RECORD_VNEXT_ONE_SHOT_NEW_V5_OPERATIONAL_SHADOW_80_SLOTS" }));
+  assert.equal(accepted.status, 201);
+  assert.equal((await accepted.json()).stageId, stageId);
+  assert.equal(writes, before + 1);
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED;
 });

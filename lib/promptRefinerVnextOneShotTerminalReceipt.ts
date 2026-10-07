@@ -17,12 +17,19 @@ import { verifyPromptRefinerVnextOneShotConsumedRequest } from
   "@/lib/promptRefinerVnextOneShotOutcomeRecovery";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
   "@/lib/promptRefinerVnextOneShotPriceBinding";
+import {
+  isPromptRefinerVnextConfirmedFailureCode,
+  type PromptRefinerVnextConfirmedFailureCode,
+} from "@/lib/promptRefinerVnextOneShotFailureCodes";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import { V4_STAGE_ID, V5_STAGE_ID,
+  type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const STAGE_ID = V4_STAGE_ID;
 const ACTION = "prompt_refiner.vnext_one_shot.terminal_recorded";
 const STOP_ACTION = "prompt_refiner.vnext_one_shot.outcome_unknown";
 const SUMMARY = "Recorded one content-free one-shot terminal result and billed usage.";
@@ -31,11 +38,13 @@ const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const MAX_COST = PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD;
 
 export type PromptRefinerVnextTerminalInput = Readonly<{
+  stageId?: PromptRefinerRunnableStageId;
   requestId: string;
   slotIndex: number;
   runApprovalAuditLogId: string;
   slotConsumptionAuditLogId: string;
-  resultKind: "suggested" | "abstained";
+  resultKind: "suggested" | "abstained" | "failed";
+  failureCode?: PromptRefinerVnextConfirmedFailureCode;
   usage: Readonly<{
     inputTokens: number;
     outputTokens: number;
@@ -49,6 +58,8 @@ export type PromptRefinerVnextTerminalInput = Readonly<{
 
 function checkedInput(input: PromptRefinerVnextTerminalInput): boolean {
   if (!UUID.test(input?.requestId ?? "") ||
+      (input.stageId !== undefined && input.stageId !== STAGE_ID &&
+        input.stageId !== V5_STAGE_ID) ||
       !Number.isInteger(input.slotIndex) || input.slotIndex < 0 ||
       input.slotIndex >= PROMPT_REFINER_VNEXT_SLOT_COUNT ||
       typeof input.runApprovalAuditLogId !== "string" ||
@@ -57,7 +68,10 @@ function checkedInput(input: PromptRefinerVnextTerminalInput): boolean {
       typeof input.slotConsumptionAuditLogId !== "string" ||
       input.slotConsumptionAuditLogId.length < 1 ||
       input.slotConsumptionAuditLogId.length > 128 ||
-      !["suggested", "abstained"].includes(input.resultKind) ||
+      !["suggested", "abstained", "failed"].includes(input.resultKind) ||
+      (input.resultKind === "failed"
+        ? !isPromptRefinerVnextConfirmedFailureCode(input.failureCode)
+        : input.failureCode !== undefined) ||
       !Number.isSafeInteger(input.observedCostMicroUsd) ||
       input.observedCostMicroUsd < 0 || input.observedCostMicroUsd > MAX_COST ||
       !Number.isSafeInteger(input.intentToTerminalLatencyMs) ||
@@ -71,13 +85,16 @@ function checkedInput(input: PromptRefinerVnextTerminalInput): boolean {
 }
 
 const receiptMetadata = (input: PromptRefinerVnextTerminalInput) => ({
-  version: "prompt-refiner-vnext-one-shot-terminal-v1",
-  stageId: STAGE_ID,
+  version: input.resultKind === "failed"
+    ? "prompt-refiner-vnext-one-shot-terminal-v2"
+    : "prompt-refiner-vnext-one-shot-terminal-v1",
+  stageId: input.stageId ?? STAGE_ID,
   requestId: input.requestId,
   slotIndex: input.slotIndex,
   runApprovalAuditLogId: input.runApprovalAuditLogId,
   slotConsumptionAuditLogId: input.slotConsumptionAuditLogId,
   resultKind: input.resultKind,
+  ...(input.resultKind === "failed" ? { failureCode: input.failureCode } : {}),
   usage: input.usage,
   observedCostMicroUsd: input.observedCostMicroUsd,
   reservedCostMicroUsd: MAX_COST,
@@ -92,18 +109,20 @@ type Slot = { id: string; slotIndex: number; status: string;
 
 async function validatedTerminal(
   tx: Tx, slot: Slot, audits: Awaited<ReturnType<Tx["adminAuditLog"]["findMany"]>>,
-  runApprovalAuditLogId: string,
+  runApprovalAuditLogId: string, stageId: PromptRefinerRunnableStageId,
 ) {
   if (audits.length !== 1 || !slot.requestId) return null;
   const audit = audits[0];
   const data = audit.metadata;
   if (!data || typeof data !== "object" || Array.isArray(data)) return null;
   const input: PromptRefinerVnextTerminalInput = {
+    stageId,
     requestId: data.requestId as string,
     slotIndex: data.slotIndex as number,
     runApprovalAuditLogId: data.runApprovalAuditLogId as string,
     slotConsumptionAuditLogId: data.slotConsumptionAuditLogId as string,
-    resultKind: data.resultKind as "suggested" | "abstained",
+    resultKind: data.resultKind as "suggested" | "abstained" | "failed",
+    failureCode: data.failureCode as PromptRefinerVnextConfirmedFailureCode | undefined,
     usage: data.usage as PromptRefinerVnextTerminalInput["usage"],
     observedCostMicroUsd: data.observedCostMicroUsd as number,
     intentToTerminalLatencyMs: data.intentToTerminalLatencyMs as number,
@@ -119,6 +138,7 @@ async function validatedTerminal(
       !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, audit)) return null;
   try {
     await verifyPromptRefinerVnextOneShotConsumedRequest(tx, {
+      stageId,
       requestId: input.requestId, slotIndex: input.slotIndex,
       runApprovalAuditLogId: input.runApprovalAuditLogId,
       slotConsumptionAuditLogId: input.slotConsumptionAuditLogId,
@@ -135,19 +155,20 @@ export async function recordPromptRefinerVnextOneShotTerminal(
   if (!checkedInput(input) || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_terminal_input_invalid");
   }
+  const stageId = input.stageId ?? STAGE_ID;
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "PromptRefinerVnextOneShotStage"
-      WHERE "id" = ${STAGE_ID} FOR NO KEY UPDATE NOWAIT
+      WHERE "id" = ${stageId} FOR NO KEY UPDATE NOWAIT
     `;
-    if (rows.length !== 1 || rows[0]?.id !== STAGE_ID) {
+    if (rows.length !== 1 || rows[0]?.id !== stageId) {
       throw new Error("vnext_one_shot_terminal_stage_unavailable");
     }
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
-    const snapshot = await readPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await readPromptRefinerVnextOneShotStage(tx, stageId);
     if (!stage || stage.status !== "run_approved" ||
         stage.runApprovalAuditLogId !== input.runApprovalAuditLogId ||
         stage.pricePinDigest !== PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST ||
@@ -160,6 +181,7 @@ export async function recordPromptRefinerVnextOneShotTerminal(
     // Settlement records an already-consumed request. A later deployment or
     // registry price change must not prevent its bounded usage/cost receipt.
     const { slotId } = await verifyPromptRefinerVnextOneShotConsumedRequest(tx, {
+      stageId,
       requestId: input.requestId, slotIndex: input.slotIndex,
       runApprovalAuditLogId: input.runApprovalAuditLogId,
       slotConsumptionAuditLogId: input.slotConsumptionAuditLogId,
@@ -187,7 +209,7 @@ export async function recordPromptRefinerVnextOneShotTerminal(
     const valid = audit && await validatedTerminal(tx, {
       id: slotId, slotIndex: input.slotIndex, status: "consumed",
       requestId: input.requestId, reservedCostMicroUsd: BigInt(MAX_COST),
-    }, [audit], stage.runApprovalAuditLogId);
+    }, [audit], stage.runApprovalAuditLogId, stageId);
     if (!valid || valid.auditLogId !== terminalAuditLogId) {
       throw new Error("vnext_one_shot_terminal_readback_invalid");
     }
@@ -199,19 +221,21 @@ export async function recordPromptRefinerVnextOneShotTerminal(
 }
 
 /** All 80 slots are classified without exposing restricted content or root. */
-export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
+export async function readPromptRefinerVnextOneShotTerminalReceipts(
+  tx: Tx, stageId: PromptRefinerRunnableStageId = STAGE_ID,
+) {
   const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: STAGE_ID },
+    where: { id: stageId },
   });
-  const snapshot = await readPromptRefinerVnextOneShotStage(tx);
+  const snapshot = await readPromptRefinerVnextOneShotStage(tx, stageId);
   if (!stage || !snapshot.stagePresent) return Object.freeze({
-    stageId: STAGE_ID, stageStatus: null, valid: false,
+    stageId, stageStatus: null, valid: false,
     reservedSlots: 0, terminalReceipts: 0, unknownReceipts: 0,
     consumedWithoutReceipt: 0, observedCostMicroUsd: 0,
     unresolvedCostUpperBoundMicroUsd: 0, slots: [],
   });
   const slots = await tx.promptRefinerVnextOneShotSlot.findMany({
-    where: { stageId: STAGE_ID }, orderBy: { slotIndex: "asc" },
+    where: { stageId }, orderBy: { slotIndex: "asc" },
     select: { id: true, slotIndex: true, status: true, requestId: true,
       reservedCostMicroUsd: true },
   });
@@ -222,7 +246,7 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
   }) : [];
   const unknownAudits = await tx.adminAuditLog.findMany({
     where: { action: STOP_ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID },
+      targetId: stageId },
   });
   const bySlot = new Map<string, typeof terminalAudits>();
   for (const audit of terminalAudits) {
@@ -243,13 +267,15 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
       continue;
     }
     const terminal = await validatedTerminal(tx, slot,
-      bySlot.get(slot.id) ?? [], stage.runApprovalAuditLogId ?? "");
+      bySlot.get(slot.id) ?? [], stage.runApprovalAuditLogId ?? "", stageId);
     if (terminal) {
       terminalReceipts++;
       observedCostMicroUsd += terminal.input.observedCostMicroUsd;
       rows.push({ slotIndex: slot.slotIndex, state: "terminal",
         requestId: slot.requestId, terminalAuditLogId: terminal.auditLogId,
         resultKind: terminal.input.resultKind, usage: terminal.input.usage,
+        ...(terminal.input.resultKind === "failed"
+          ? { failureCode: terminal.input.failureCode } : {}),
         intentToTerminalLatencyMs: terminal.input.intentToTerminalLatencyMs,
         observedCostMicroUsd: terminal.input.observedCostMicroUsd,
         costUpperBoundMicroUsd: terminal.input.observedCostMicroUsd });
@@ -266,7 +292,7 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
       !Array.isArray(data) && stage.status === "closed" &&
       stop.action === STOP_ACTION &&
       stop.targetType === "PromptRefinerVnextOneShotStage" &&
-      stop.targetId === STAGE_ID &&
+      stop.targetId === stageId &&
       stop.summary === "Stopped the one-shot run after an uncertain request outcome." &&
       stop.actorUserId === null &&
       data.runApprovalAuditLogId === stage.runApprovalAuditLogId &&
@@ -279,6 +305,7 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
         "reason,requestId,reservedCostMicroUsd,runApprovalAuditLogId,slotConsumptionAuditLogId,slotIndex,systemActor" &&
       await (async () => { try {
         await verifyPromptRefinerVnextOneShotConsumedRequest(tx, {
+          stageId,
           requestId: slot.requestId!, slotIndex: slot.slotIndex,
           runApprovalAuditLogId: stage.runApprovalAuditLogId!,
           slotConsumptionAuditLogId: data.slotConsumptionAuditLogId as string,
@@ -305,15 +332,17 @@ export async function readPromptRefinerVnextOneShotTerminalReceipts(tx: Tx) {
     consumedWithoutReceipt === 0 &&
     observedCostMicroUsd + unresolvedCostUpperBoundMicroUsd <=
       PROMPT_REFINER_VNEXT_RUN_CEILING_MICRO_USD;
-  return Object.freeze({ stageId: STAGE_ID, stageStatus: stage.status,
+  return Object.freeze({ stageId, stageStatus: stage.status,
     valid, reservedSlots: snapshot.reservedSlots, terminalReceipts,
     unknownReceipts, consumedWithoutReceipt, observedCostMicroUsd,
     unresolvedCostUpperBoundMicroUsd, slots: rows });
 }
 
 /** No new dispatch while any consumed slot lacks a verified terminal receipt. */
-export async function assertPromptRefinerVnextOneShotTerminalsComplete(tx: Tx) {
-  const readback = await readPromptRefinerVnextOneShotTerminalReceipts(tx);
+export async function assertPromptRefinerVnextOneShotTerminalsComplete(
+  tx: Tx, stageId: PromptRefinerRunnableStageId = STAGE_ID,
+) {
+  const readback = await readPromptRefinerVnextOneShotTerminalReceipts(tx, stageId);
   if (!readback.valid || readback.consumedWithoutReceipt !== 0 ||
       readback.unknownReceipts !== 0 ||
       readback.terminalReceipts +

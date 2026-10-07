@@ -10,6 +10,8 @@ import {
   PROMPT_REFINER_RUNTIME_SOURCE_TOTAL_MAX_BYTES,
 } from "@/lib/promptRefinerStageAdmissionCore";
 import { parseBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import type { PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const MANIFEST_PATH =
@@ -148,10 +150,11 @@ export async function previewPromptRefinerVnextOneShotCandidateSourcePin() {
 
 /** The pin comes from the immutable stage row, never from a request field. */
 export async function readPromptRefinerVnextOneShotCandidateSource(
-  tx: Prisma.TransactionClient
+  tx: Prisma.TransactionClient,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ) {
   const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: STAGE_ID },
+    where: { id: stageId },
     select: { sourceCommitSha: true, sourceManifestDigest: true },
   });
   if (!stage) return refuse("vnext_one_shot_candidate_stage_absent");

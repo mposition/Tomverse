@@ -12,12 +12,20 @@ import { promptRefinerVnextOneShotGateAttestationSchema } from
 import { promptRefinerVnextOneShotGateOwner } from
   "@/lib/promptRefinerVnextOneShotGateRouteAccess";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
+import { V4_STAGE_ID, V5_STAGE_ID } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
-const bodySchema = z.object({
+const v4BodySchema = z.object({
   attestation: promptRefinerVnextOneShotGateAttestationSchema,
   confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_DETERMINISTIC_GATE"),
 }).strict();
+const v5BodySchema = z.object({
+  stageId: z.literal(V5_STAGE_ID),
+  attestation: promptRefinerVnextOneShotGateAttestationSchema,
+  confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_V5_DETERMINISTIC_GATE"),
+}).strict();
+const bodySchema = z.union([v4BodySchema, v5BodySchema]);
 const DEFINITE = new Set([
   "vnext_one_shot_gate_attestation_invalid",
   "vnext_one_shot_gate_summary_invalid",
@@ -40,8 +48,9 @@ export async function POST(request: Request) {
         { status: 409, headers });
     }
     const body = await readLimitedJson(request, 32 * 1024, bodySchema);
+    const stageId = "stageId" in body ? body.stageId : V4_STAGE_ID;
     const result = await recordPromptRefinerVnextOneShotGateEvidence({
-      session: access.session, request, attestation: body.attestation,
+      session: access.session, request, attestation: body.attestation, stageId,
     });
     return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
@@ -70,11 +79,16 @@ export async function GET(request: Request) {
   try {
     const access = await promptRefinerVnextOneShotGateOwner(request, false, "gate");
     if ("response" in access) return access.response;
+    const stageId = new URL(request.url).searchParams.get("stageId") ?? V4_STAGE_ID;
+    if (stageId !== V4_STAGE_ID && stageId !== V5_STAGE_ID) {
+      return NextResponse.json({ code: "GATE_STAGE_ID_INVALID" },
+        { status: 400, headers });
+    }
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v4" },
+        where: { id: stageId },
       });
-      return readPromptRefinerVnextOneShotGateEvidence(tx, stage);
+      return readPromptRefinerVnextOneShotGateEvidence(tx, stage, stageId);
     }, { maxWait: 5_000, timeout: 15_000 });
     return NextResponse.json({ readback }, { headers });
   } catch (error) {
