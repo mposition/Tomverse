@@ -34,8 +34,12 @@ const reset = async () => {
   await resetTestFixture(prisma, `TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
 };
 
-/** Inserts finished worker rows aged past the 30-day boundary by `extra`. */
-const seedExpired = async (count: number, extra = "1 hour") => {
+/**
+ * Inserts finished worker rows aged past the 30-day boundary by `extra`.
+ * `insertOrder` orders the INSERT over `g`: it decides where rows land in the
+ * heap, and so which one a sequential scan meets first, never their createdAt.
+ */
+const seedExpired = async (count: number, extra = "1 hour", insertOrder = "g") => {
   await disableTrigger("SupportTriageRun_before_insert");
   try {
     await prisma.$executeRawUnsafe(`
@@ -45,7 +49,8 @@ const seedExpired = async (count: number, extra = "1 hour") => {
              t.base, t.base
         FROM generate_series(1, ${count}) g,
              -- One clock read, so finishedAt never trails deadlineAt.
-             (SELECT (clock_timestamp() AT TIME ZONE 'UTC') - interval '30 days' AS base) t`);
+             (SELECT (clock_timestamp() AT TIME ZONE 'UTC') - interval '30 days' AS base) t
+       ORDER BY ${insertOrder}`);
   } finally {
     await enableTrigger("SupportTriageRun_before_insert");
   }
@@ -179,28 +184,50 @@ test("a row past its grace makes the run not progressing even when batches compl
 
 test("a successful batch clears a floor cancellation, so a new window needs two of its own", async () => {
   // Sequences are not transactional, so they count tries across the
-  // cancelled, rolled-back batches. old-00001 cancels its first three tries
-  // (500, 250, 125) and deletes on the fourth; old-00126 cancels only its
-  // first try at the floor. With the strike cleared by the committed batch in
+  // cancelled, rolled-back batches. The window holding old-00001 cancels its
+  // first three tries (500, 250, 125) and deletes on the fourth; the next
+  // window, which holds old-00126 and not old-00001, cancels only its first
+  // try at the floor. With the strike cleared by the committed batch in
   // between, that one cancellation is not enough to skip its window.
-  await seedExpired(260);
+  //
+  // The trigger runs once per DELETE statement and reads the whole window from
+  // its transition table; it still runs inside that statement, so the lane's
+  // real statement_timeout is what cancels it. A row trigger depended on which
+  // row the delete's sequential scan met first: old-00126 is in the 500- and
+  // 250-row windows too, and when the free space earlier tests left put it
+  // ahead of old-00001 in the heap, its one cancellation went to the 500-row
+  // window, old-00001's third cancellation became a second strike at the
+  // floor, and 125 rows were skipped. The seed inserts old-00126 onward first,
+  // so that heap order is the one this test sees.
+  await seedExpired(260, "1 hour", "g >= 126 DESC, g");
   await prisma.$executeRawUnsafe(`CREATE SEQUENCE test_first_tries`);
   await prisma.$executeRawUnsafe(`CREATE SEQUENCE test_second_tries`);
   try {
     await prisma.$executeRawUnsafe(`
       CREATE FUNCTION test_slow_delete() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
-        IF OLD."id" = 'old-00001' AND nextval('test_first_tries') <= 3 THEN PERFORM pg_sleep(1); END IF;
-        IF OLD."id" = 'old-00126' AND nextval('test_second_tries') <= 1 THEN PERFORM pg_sleep(1); END IF;
-        RETURN OLD;
+        IF EXISTS (SELECT 1 FROM gone WHERE "id" = 'old-00001') THEN
+          IF nextval('test_first_tries') <= 3 THEN PERFORM pg_sleep(1); END IF;
+        ELSIF EXISTS (SELECT 1 FROM gone WHERE "id" = 'old-00126') THEN
+          IF nextval('test_second_tries') <= 1 THEN PERFORM pg_sleep(1); END IF;
+        END IF;
+        RETURN NULL;
       END $$`);
     await prisma.$executeRawUnsafe(`
-      CREATE TRIGGER "test_slow_delete" BEFORE DELETE ON "SupportTriageRun"
-        FOR EACH ROW EXECUTE FUNCTION test_slow_delete()`);
+      CREATE TRIGGER "test_slow_delete" AFTER DELETE ON "SupportTriageRun"
+        REFERENCING OLD TABLE AS gone
+        FOR EACH STATEMENT EXECUTE FUNCTION test_slow_delete()`);
     const result = await runSupportTriageRetention();
     assert.equal(result.blocked, 0);
     assert.equal(result.deleted, 260);
     assert.equal(result.outcome, "success");
+    // The planned cancellations happened: four tries of the first window,
+    // two of the second.
+    const [tries] = await prisma.$queryRawUnsafe<{ first: number; second: number }[]>(
+      `SELECT (SELECT last_value FROM test_first_tries)::integer AS first,
+              (SELECT last_value FROM test_second_tries)::integer AS second`
+    );
+    assert.deepEqual(tries, { first: 4, second: 2 });
   } finally {
     await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "test_slow_delete" ON "SupportTriageRun"`);
     await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS test_slow_delete()`);
