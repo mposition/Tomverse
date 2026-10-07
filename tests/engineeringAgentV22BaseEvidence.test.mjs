@@ -52,3 +52,20 @@ test("missing source or mismatched bytes fail closed", async () => {
       Buffer.from("altered") : ports.read(path),
   }), null);
 });
+
+test("vendored AMUX control-plane assets do not exhaust source-reading limits", async () => {
+  const vendorPath = "vendor/amux/crates/amux-dashboard/static/app.js";
+  const result = await loadEngineeringAgentV22BaseEvidence({
+    ...ports,
+    tree: [...tree, { path: vendorPath, mode: "100644", type: "blob",
+      oid: "a".repeat(40) }],
+    excludedPrefixes: ["tests"],
+    read: async (path) => {
+      if (path.endsWith("app.js")) throw new Error("vendor_not_read");
+      return ports.read(path);
+    },
+  });
+  assert.ok(result);
+  assert.deepEqual(result.baseFiles.find((file) =>
+    file.path === vendorPath), { path: vendorPath, text: "" });
+});

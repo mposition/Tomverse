@@ -53,6 +53,13 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       baseFiles.push({ path: entry.path, text: "" });
       continue;
     }
+    // The entire vendored AMUX tree is control-plane by the authority
+    // manifest. Its paths remain in the resolver/slice, but reading and
+    // decoding multi-megabyte generated vendor assets cannot make them T1.
+    if (entry.path.startsWith("vendor/amux/")) {
+      baseFiles.push({ path: entry.path, text: "" });
+      continue;
+    }
     // Non-analysis blobs still need their image presence checked by the
     // complete image manifest, not re-read here. Source text is read only for
     // the analyser's known extensions and policy inputs.
