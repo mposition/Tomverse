@@ -46,10 +46,14 @@ export const DM_RESOLUTIONS = [
 ] as const;
 
 /** Section 7: the DM serves the vendor that is not the asking worker's. */
-export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = {
+export const DM_INSTANCE_FOR_PROVIDER: Readonly<Record<string, string>> = Object.freeze({
   claude: "decision-maker-openai",
   codex: "decision-maker-anthropic",
-};
+});
+
+/** Own keys only: an inherited name such as `toString` is not a provider. */
+export const dmInstanceForProvider = (provider: string): string | null =>
+  Object.hasOwn(DM_INSTANCE_FOR_PROVIDER, provider) ? DM_INSTANCE_FOR_PROVIDER[provider] : null;
 
 /** Section 3-6. */
 export const DM_THROUGHPUT_PER_HOUR = 20;
@@ -119,7 +123,7 @@ export type DmCard = {
 
 const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
 
-/** Every card string a DM would receive, in a fixed order. */
+/** Every card string a DM would receive, context paths included, in a fixed order. */
 const cardTextFields = (card: DmCard): Record<string, string> => {
   const fields: Record<string, string> = {
     type: card.type,
@@ -134,6 +138,9 @@ const cardTextFields = (card: DmCard): Record<string, string> => {
   card.options.forEach((option, index) => {
     fields[`option.${index}.id`] = option.id;
     fields[`option.${index}.label`] = option.label;
+  });
+  card.contextPaths.forEach((path, index) => {
+    fields[`contextPath.${index}`] = path;
   });
   return fields;
 };
@@ -176,7 +183,7 @@ export type DmRoutingDecision =
  */
 export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   const refusals: DmRoutingRefusal[] = [];
-  const instance = DM_INSTANCE_FOR_PROVIDER[input.askingProvider] ?? null;
+  const instance = dmInstanceForProvider(input.askingProvider);
   const { card } = input;
 
   if (input.killSwitch === null || (instance !== null && input.instanceMode === null)) {

@@ -60,10 +60,11 @@ test("an ordinary decision from a claude worker goes to the openai DM as a propo
 test("the DM is always the other vendor, and other providers go to the operator", () => {
   assert.equal(routeDmQuestion(input({ askingProvider: "codex" })).instance, "decision-maker-anthropic");
   assert.deepEqual(Object.keys(DM_INSTANCE_FOR_PROVIDER).sort(), ["claude", "codex"]);
-  for (const provider of ["gemini", "ollama", "cursor", "copilot", "devin", ""]) {
+  for (const provider of ["gemini", "ollama", "cursor", "copilot", "devin", "", "Claude", "toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
     const decision = routeDmQuestion(input({ askingProvider: provider }));
     assert.equal(decision.route, "operator", provider);
     assert.ok(decision.refusals.includes("provider_unverified"), provider);
+    assert.equal(decision.instance, null, provider);
   }
 });
 
@@ -168,11 +169,15 @@ test("input limits: card bytes, context path count and path grammar", () => {
   assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: paths }) })).refusals, ["input_limit_exceeded"]);
   assert.equal(routeDmQuestion(input({ card: card({ contextPaths: paths.slice(1) }) })).route, "dm_proposal");
   assert.deepEqual(routeDmQuestion(input({ card: card({ contextPaths: ["../etc/passwd"] }) })).refusals, ["input_limit_exceeded"]);
+  // Context paths count towards the 16 KiB card total.
+  const longPaths = Array.from({ length: DM_CONTEXT_PATHS_MAX }, (_, i) => `${"d".repeat(190)}/${i}`);
+  const nearlyFull = "x".repeat(DM_CARD_TEXT_MAX_BYTES - 64 * 190);
+  assert.deepEqual(routeDmQuestion(input({ card: card({ context: nearlyFull, contextPaths: longPaths }) })).refusals, ["input_limit_exceeded"]);
 });
 
 test("a secret in the card is never sent", () => {
   const key = `ghp_${"a".repeat(36)}`;
-  for (const field of [{ context: `token ${key}` }, { question: key }, { options: [{ id: "a", label: key }] }]) {
+  for (const field of [{ context: `token ${key}` }, { question: key }, { options: [{ id: "a", label: key }] }, { contextPaths: [`lib/${key}.ts`] }]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
   }
