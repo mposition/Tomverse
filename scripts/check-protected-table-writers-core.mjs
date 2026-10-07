@@ -298,6 +298,12 @@ export const PROTECTED_TABLES = [
     writers: ["lib/engineeringAgentStore.ts"],
     contract: "docs/policy/engineering-agent.md §11",
   },
+  {
+    table: "AmuxDecisionMakerSwitchEvent",
+    delegate: "amuxDecisionMakerSwitchEvent",
+    writers: ["lib/amux/decisionMakerSwitchStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -410,6 +416,12 @@ export const DELEGATE_NAME_ALLOWLIST = [
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
   },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxDecisionMakerSwitchEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
 ];
 
 /**
@@ -504,6 +516,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 3,
     reason:
       "The data-domain registry names the decision model as prismaModel and in its exclusion reason. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the Decision Maker switch model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
   },
   {
     path: "lib/promptRefinerShadowRunStore.ts",
@@ -1034,6 +1054,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261007130000_amux_decision_maker_switch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 8,
+    reason:
+      "The Decision Maker switch migration (docs/policy/amux-decision-maker.md §8, §10). Its three AdminAuditLog mentions are the restrictive foreign key from auditLogId and the two SELECT EXISTS reads in the switch event guard, one for a person's event and one for a latch, which refuse an event whose audit row of the same transaction, actor and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE adding that key with its ON DELETE / ON UPDATE RESTRICT, the trigger events, and one word of a comment inside the function body.",
+  },
+  {
+    path: "prisma/migrations/20261007130000_amux_decision_maker_switch/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "Creates the switch event table, its indexes, its foreign key to the audit log and the guard trigger that binds an insert to its audit row and refuses every update and delete. It names those verbs to constrain or refuse them, reads the scope's newest event in the guard, and writes no row.",
+  },
+  {
+    path: "lib/amux/decisionMakerSwitchStore.ts",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 4,
+    writeVerbs: 3,
+    reason:
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is two constant SELECTs (the newest event of every scope, and of one scope) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+  },
+  {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
     table: "QaReleaseOperatorControl",
     tableMentions: 11,
@@ -1218,6 +1262,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 7,
     reason:
       "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261007130000_amux_decision_maker_switch/migration.sql",
+    count: 3,
+    reason:
+      "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",

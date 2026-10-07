@@ -435,12 +435,18 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
 // accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
 // added; count 228 and the position-free inventory are unchanged.
+// 2026-10-07, AMUX Decision Maker switch store (S1b): three actor names join
+// the existing line of `SYSTEM_AUDIT_ACTORS` in `lib/adminAuditSystemActors.ts`
+// and their array is declared at the end of that file, so none of its
+// accesses moves; the fingerprint record in `lib/marketingAutomationAccess.ts`
+// gains a note above that file's seven accesses, which moves them. No access
+// is added; count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ef6e125184dd36d197eeefa807da0bbd",
-  "19e3b603036ec6d2a22e78534b3f4dd3",
+  "a13e5ce9d1d41d0af5ef233edb05ff0a",
+  "bc475816e144d8909910d12a8e4db128",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

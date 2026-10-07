@@ -84,6 +84,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261004190000_amux_v4_content_key_retirement",
   "20261004190100_amux_v4_retention_hold",
   "20261004190200_amux_v4_content_no_resurrection",
+  // AMUX Decision Maker policy version 1, S1b: the append-only switch events.
+  "20261007130000_amux_decision_maker_switch",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

@@ -1005,6 +1005,34 @@ const REGISTRY = {
     reason:
       "The six halt reasons of policy version 20, section 2. The first four carry the write's request id as the halt key; contract_violation and selection_read_failures carry none. The orchestrator's Rust list is pinned to the same six by tests/amuxOrchestratorHaltCore.test.mjs.",
   },
+  AmuxDecisionMakerSwitchEvent_scope_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_SCOPES",
+    reason:
+      "The Decision Maker kill switch and the two DM instances (docs/policy/amux-decision-maker.md sections 7 and 8). The instances are the S1a router's own, pinned to it by tests/amuxDecisionMakerSwitch.test.mjs; a third vendor is a policy version.",
+  },
+  AmuxDecisionMakerSwitchEvent_value_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_VALUES",
+    reason:
+      "on, off and proposal, and a second CHECK pairs them with the scope: the kill switch takes on or off, an instance off or proposal (section 8). There is no autonomous value; version 1 is proposal-only, and an autonomous mode is a v2 policy and a schema change, never a stored string.",
+  },
+  AmuxDecisionMakerSwitchEvent_reason_code_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_REASON_CODES",
+    reason:
+      "operator for a person's change; validation_latch (three consecutive DM validation failures, section 8) and cleanup_latch (a request directory whose removal could not be confirmed, section 5) for the system, which may only turn an instance off.",
+  },
+  AmuxDecisionMakerSwitchEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_ACTOR_KINDS",
+    reason:
+      "human or system. The guard trigger binds each to its own audit entry of the same transaction: a person's under amux.decision.mode or amux.decision.latch_release, a latch under amux.decision.latch by the instance's own system actor.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",

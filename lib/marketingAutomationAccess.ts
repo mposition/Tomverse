@@ -539,9 +539,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * receiver's staging test still needs both signals to say staging, and dev
  * resolves to dev, so dev never reaches the shadow writer; descriptor and
  * admission decisions are unchanged. Prior evidence is stale.
+ * 2026-10-07: the AMUX Decision Maker switch store, per
+ * docs/policy/amux-decision-maker.md §10, adds three system actors to
+ * `lib/adminAuditSystemActors.ts` and its switch events' back relation to
+ * `AdminAuditLog` in the watched schema. The receiver's calls, descriptor and
+ * admission decisions are unchanged; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4bf726b34d1ac8147ff57678b77338c770ba2309dbe20290e32424cdd9b19ddc";
+  "b35c61b92e0fe65796665fbf284e7931af7cfbdd9da99056529b09aa8db78f51";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
