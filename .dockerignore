@@ -1,0 +1,4 @@
+# Test sources are checked before deployment, not needed by the running app.
+# Keep docs in the image: the marketing webhook verification route reads
+# committed records under docs/ops at runtime.
+tests/
