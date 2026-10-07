@@ -188,6 +188,27 @@ test("an in-flight payload waits for its live analysis, then purges after cancel
     commitAmuxDueTransferPayloadPurge(tx, previewId)), "purged");
 });
 
+test("an unused preview purges at expiry without waiting for the analysis deadline", async () => {
+  const ideaId = await idea({ due: false, submittedAgeDays: 1 });
+  const previewId = randomUUID();
+  const actorUserId = `synthetic-retention-${ideaId}`;
+  await prisma.amuxIdeaAnalysisChunk.create({ data: { ideaId, actorUserId,
+    chunkIndex: 0, state: "pending", attempt: 0, leaseGeneration: 0 } });
+  await prisma.amuxIdeaTransferPreview.create({ data: {
+    id: previewId, ideaId, chunkIndex: 0, attempt: 1, state: "prepared",
+    modelId: "synthetic-model", templateVersion: "synthetic-template",
+    payloadCiphertext: Buffer.from("synthetic encrypted payload"),
+    payloadKeyId: amuxContentUnitKeyId({ ideaId,
+      purpose: "transfer_payload", subjectId: previewId }),
+    payloadKeyVersion: 1, payloadDigest: "b".repeat(64),
+    payloadDigestKeyId: "synthetic-digest",
+    expiresAt: new Date(Date.now() - 60_000),
+    payloadPurgeAfter: new Date(Date.now() + 24 * 60 * 60_000),
+  } });
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueTransferPayloadPurge(tx, previewId)), "purged");
+});
+
 test("an expired proposal unit purges only its own body and key", async () => {
   const ideaId = await idea({ submittedAgeDays: 32, completedAgeDays: 31 });
   const actorUserId = `synthetic-retention-${ideaId}`;
@@ -207,6 +228,7 @@ test("an expired proposal unit purges only its own body and key", async () => {
   // restore it before exercising the real expiry/purge trigger.
   await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaDraftUnit" DISABLE TRIGGER "AmuxIdeaDraftUnit_guard"');
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaDraftUnit" DISABLE TRIGGER "AmuxIdeaDraftUnit_z_first_expiry_guard"');
     await tx.amuxIdeaDraftUnit.create({ data: { id: unitId, ideaId,
       actorUserId, chunkIndex: 0, unitIndex: 0, localRef: "c0:card-0",
       unitKind: "card", state: "proposed",
@@ -215,6 +237,7 @@ test("an expired proposal unit purges only its own body and key", async () => {
       bodyKeyId: amuxContentUnitKeyId(target), bodyKeyVersion: 1,
       bodyDigest: "c".repeat(64), bodyDigestKeyId: "synthetic-digest" } });
     await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaDraftUnit" ENABLE TRIGGER "AmuxIdeaDraftUnit_guard"');
+    await tx.$executeRawUnsafe('ALTER TABLE "AmuxIdeaDraftUnit" ENABLE TRIGGER "AmuxIdeaDraftUnit_z_first_expiry_guard"');
   });
   assert.equal(await prisma.$transaction((tx) =>
     commitAmuxDueDraftUnitPurge(tx, unitId)), "purged");

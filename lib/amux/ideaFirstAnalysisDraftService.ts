@@ -214,7 +214,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
   const finishesAnalysis = nextCursor === null && !needsOwnerInput;
   const activeAnalysisPurgeAfter = new Date(idea.analysisDeadlineAt.getTime() + DAY_MS);
-  const payloadPurgeAfter = new Date(Math.min(now.getTime(),
+  // The next page needs both the preceding freeform and transfer text.
+  // Completion advances all page bodies to the next purge tick.
+  const payloadPurgeAfter = new Date(Math.min(
+    (finishesAnalysis ? now : activeAnalysisPurgeAfter).getTime(),
     preview.payloadPurgeAfter.getTime()));
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
