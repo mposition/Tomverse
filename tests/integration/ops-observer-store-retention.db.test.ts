@@ -168,6 +168,28 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       assert.equal(await readOpsObserverDelivery("../etc", client), null);
       // A read without the time left to finish returns nothing at all.
       await assert.rejects(readOpsObserverDelivery(old1.deliveryId, client, inSeconds(5)));
+      // A read that succeeded still answers only after its own deadline check
+      // (policy §6 item 5): the separate short transaction runs, and when that
+      // check refuses, the read returns nothing. Counted on the client, since a
+      // read that finishes well inside its deadline cannot be made late here.
+      const kinds: string[] = [];
+      let refuseCheck = false;
+      const spied = new Proxy(client, {
+        get(target, property, receiver) {
+          if (property !== "$transaction") return Reflect.get(target, property, receiver);
+          return (...args: unknown[]) => {
+            kinds.push(kinds.length === 0 ? "read" : "check");
+            if (kinds.length > 1 && refuseCheck) return Promise.reject(new Error("ops_observer_late_commit"));
+            return (target.$transaction as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        },
+      });
+      assert.equal((await readOpsObserverDelivery(old1.deliveryId, spied))?.id, old1.deliveryId);
+      assert.deepEqual(kinds, ["read", "check"]);
+      kinds.length = 0;
+      refuseCheck = true;
+      await assert.rejects(readOpsObserverDelivery(old1.deliveryId, spied), /ops_observer_late_commit/);
+      assert.deepEqual(kinds, ["read", "check"]);
     });
 
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
