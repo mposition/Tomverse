@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { decideEngineeringAgentV22ImageExclusion,
@@ -49,6 +50,22 @@ test("only the exact owner-attested image can exclude tests", () => {
 test("no environment proof leaves the image exclusion closed", async () => {
   assert.deepEqual(await readEngineeringAgentV22ImageExclusion(baseSha, {}),
     { excludedPrefixes: [], proofDigest: null });
+});
+
+test("runtime manifest and proof digest are bound on the success path", async () => {
+  const raw = JSON.stringify(proof);
+  const env = { ENGINEERING_AGENT_V22_IMAGE_PROOF: raw,
+    RAILWAY_GIT_COMMIT_SHA: baseSha,
+    RAILWAY_DEPLOYMENT_ID: deploymentId };
+  const runtime = { cwd: () => "/app", exists: async () => false,
+    imageManifest: async () => input().runtimeManifest };
+  assert.deepEqual(await readEngineeringAgentV22ImageExclusion(baseSha,
+    env, runtime), { excludedPrefixes: ["tests"],
+    proofDigest: createHash("sha256").update(raw).digest("hex") });
+  assert.deepEqual(await readEngineeringAgentV22ImageExclusion(baseSha,
+    env, { ...runtime, imageManifest: async () => ({
+      ...input().runtimeManifest, completePathCount: 4 }) }),
+  { excludedPrefixes: [], proofDigest: null });
 });
 
 test("proof digest changes when its environment value changes", () => {

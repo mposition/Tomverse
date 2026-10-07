@@ -54,8 +54,9 @@ export async function loadEngineeringAgentV22BaseEvidence(input: {
       continue;
     }
     // The entire vendored AMUX tree is control-plane by the authority
-    // manifest. Its paths remain in the resolver/slice, but reading and
-    // decoding multi-megabyte generated vendor assets cannot make them T1.
+    // manifest. Its paths remain in the resolver/slice, but it is not app
+    // runtime code and cannot feed appRuntimeSlice or environment-name
+    // harvesting. Decoding its generated assets would only exhaust limits.
     if (entry.path.startsWith("vendor/amux/")) {
       baseFiles.push({ path: entry.path, text: "" });
       continue;

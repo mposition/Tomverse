@@ -89,15 +89,18 @@ const runtimeImageManifest = () => {
     .then(summarizeEngineeringAgentImagePaths);
   return imageManifestPromise;
 };
+const liveRuntime = { cwd: () => process.cwd(), exists,
+  imageManifest: runtimeImageManifest };
 
 /** An absent or malformed proof is T2, never a guessed exclusion. */
 export async function readEngineeringAgentV22ImageExclusion(
   baseSha: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  runtime: typeof liveRuntime = liveRuntime,
 ): Promise<{ excludedPrefixes: readonly string[];
   proofDigest: string | null }> {
   const refused = { excludedPrefixes: [], proofDigest: null } as const;
-  if (process.cwd() !== "/app") return refused;
+  if (runtime.cwd() !== "/app") return refused;
   const raw = env[ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV];
   if (!raw || Buffer.byteLength(raw, "utf8") > 2_048) return refused;
   let proof: unknown;
@@ -106,9 +109,9 @@ export async function readEngineeringAgentV22ImageExclusion(
   try {
     const [testsExist, adminPlaywrightConfigExists, runtimeManifest] =
       await Promise.all([
-      exists("/app/tests"),
-      exists("/app/playwright.admin.config.ts"),
-      runtimeImageManifest(),
+      runtime.exists("/app/tests"),
+      runtime.exists("/app/playwright.admin.config.ts"),
+      runtime.imageManifest(),
     ]);
     const excludedPrefixes = decideEngineeringAgentV22ImageExclusion({ proof, baseSha,
       runtimeSourceSha: env.RAILWAY_GIT_COMMIT_SHA,
