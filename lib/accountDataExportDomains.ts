@@ -722,12 +722,6 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
-    domain: "amuxIdeaDerivationGroup",
-    publicName: "amux_idea_derivation_groups",
-    prismaModel: "AmuxIdeaDerivationGroup",
-    state: "unverified",
-  },
-  {
     domain: "amuxPortfolioAssessment",
     publicName: "amux_portfolio_assessments",
     prismaModel: "AmuxPortfolioAssessment",
@@ -749,12 +743,6 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxWorkerLaneDecision",
     publicName: "amux_v22_lane_decisions",
     prismaModel: "AmuxV22LaneDecision",
-    state: "unverified",
-  },
-  {
-    domain: "amuxTaskCostCatalogApproval",
-    publicName: "amux_v4_task_cost_catalog_approvals",
-    prismaModel: "AmuxV4TaskCostCatalogApproval",
     state: "unverified",
   },
   {
