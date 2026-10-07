@@ -75,6 +75,9 @@ const amuxSourceScopePreviewCore = withoutComments(readFileSync(
 const amuxResolutionPreviewCore = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaResolutionChoiceCore.ts"), "utf8"
 ));
+const amuxResolutionPreviewService = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
+));
 const SOURCE_SCOPE_ROUTE = "app/api/admin/amux/ideas/source-scope-preview/route.ts";
 const SOURCE_SCOPE_SERVICE = "lib/amux/ideaSourceScopePreviewService.ts";
 const SOURCE_SCOPE_CORE = "lib/amux/ideaSourceScopePreviewCore.ts";
@@ -283,15 +286,17 @@ const isDarkReadOnlyAmuxResolutionPreview = (route) => {
   if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
       amuxResolutionReviewedDigest() !== RESOLUTION_REVIEWED_DIGEST ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(amuxResolutionPreviewCore) ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore)) {
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
+      /\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(|\$(?:queryRaw|executeRaw)\b|\bfetch\s*\(|\bimport\s*\(/.test(amuxResolutionPreviewService)) {
     return false;
   }
   const post = route.source.slice(route.source.indexOf("export async function POST"));
   const ownerAt = post.indexOf("const session = await owner();");
   const gateAt = post.indexOf("amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])");
+  const gateReturnsDisabled = /if\s*\(\s*!amuxV4ResolutionPreviewEnabled\(process\.env\[AMUX_V4_RESOLUTION_PREVIEW_ENV\]\)\s*\)\s*\{\s*return\s+NextResponse\.json\(\{\s*error:\s*"resolution_preview_disabled"/.test(post);
   const rateAt = post.indexOf("await consumeApiRateLimit(request, session.user!.id!");
   const previewAt = post.indexOf("await previewAmuxIdeaResolution({ session, ...parsed.data })");
-  return ownerAt >= 0 && gateAt > ownerAt && rateAt > gateAt &&
+  return ownerAt >= 0 && gateAt > ownerAt && gateReturnsDisabled && rateAt > gateAt &&
     previewAt > rateAt && !/\b(?:prisma|tx)\.|\bfetch\s*\(|\bimport\s*\(/.test(post);
 };
 
