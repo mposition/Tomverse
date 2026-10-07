@@ -385,15 +385,16 @@ const compilerOptions = parsedConfig.options;
 // positions only. Count 228 and the position-free inventory are unchanged.
 //
 // 2026-10-07, QA-release merge lane selective release merged over that: two
-// QA-release system actors in `lib/adminAuditSystemActors.ts` and the
+// QA-release system actors and the shared agent-digest retention actor in
+// `lib/adminAuditSystemActors.ts` and the
 // marketing pipeline fingerprint repin move source positions only. Count and
 // position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c496c701bd454b13043677034c9f17e9",
-  "6a9d4f40c004dca7db9e66328f48c570",
+  "958f053e86c94c6f7fa813a73f8ef5b9",
+  "0c096082e9afc3bb75be1ebfa98ee7f7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

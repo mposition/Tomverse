@@ -512,10 +512,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-07: the QA-release merge lane selective release adds the shared
  * AgentDigestItem table and the three QA-release tables to the watched Prisma
  * schema. None is a marketing model or a webhook input; descriptor and
- * admission decisions are unchanged.
+ * admission decisions are unchanged. The same release adds the
+ * agent-digest-retention system actor to lib/adminAuditSystemActors.ts, a
+ * watched file; no marketing actor changes.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "3e0fbbc474b6e61bd77b8b72c1d1198d32f4ae0d39559dcf600b0572c22d5183";
+  "3270010d1d8818cdcdce1b605bbddc87921932c62b49069c19855a494311db4c";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
