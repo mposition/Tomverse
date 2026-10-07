@@ -246,17 +246,36 @@ async function setup() {
   }
 
   const mainHead = await headSha("main");
-  const developHead = await headSha("develop");
-  const developParent = (await operator("GET", `/commits/${developHead}`)).parents?.[0]?.sha;
-  if (!SHA.test(mainHead ?? "") || !SHA.test(developHead ?? "") || !SHA.test(developParent ?? "")) fail("could not read the branch heads.");
+  if (!SHA.test(mainHead ?? "")) fail("could not read main's head.");
 
-  // Item 9 needs a commit whose required checks passed: develop's head, one
-  // fast-forward ahead of the develop mirror -- from the App each check names.
+  // Item 9 needs a commit whose required checks passed, one fast-forward
+  // ahead of the develop mirror. Not develop's own head: its required checks
+  // run on pull requests, not on the merge commit develop is pushed to. So
+  // the head of a recently merged develop pull request, each required check
+  // passed from the App it names, with the mirror at that commit's parent.
   const required = protection.develop.classic.present ? protection.develop.classic.requiredChecks ?? [] : [];
-  const runs = await operator("GET", `/commits/${developHead}/check-runs?per_page=100`);
-  const green = runs.check_runs.filter((run) => run.conclusion === "success");
-  const missing = required.filter((check) => !green.some((run) => run.name === check.context && (check.appId === null || run.app?.id === check.appId)));
-  if (missing.length > 0) fail(`develop's head has not passed every required check yet (${missing.map((c) => c.context).join(", ")}); try again later.`);
+  const passed = async (sha) => {
+    for (const check of required) {
+      const runs = await operator("GET", `/commits/${sha}/check-runs?check_name=${encodeURIComponent(check.context)}&per_page=100`);
+      const ok = runs.check_runs.some((run) => run.conclusion === "success" && (check.appId === null || run.app?.id === check.appId));
+      if (!ok) return false;
+    }
+    return true;
+  };
+  let green = null;
+  const merged = await operator("GET", "/pulls?state=closed&base=develop&sort=updated&direction=desc&per_page=30");
+  for (const pull of merged) {
+    if (!pull.merged_at || !SHA.test(pull.head?.sha ?? "")) continue;
+    if (!(await passed(pull.head.sha))) continue;
+    const parent = (await operator("GET", `/commits/${pull.head.sha}`)).parents?.[0]?.sha;
+    if (SHA.test(parent ?? "")) {
+      green = { sha: pull.head.sha, parent, pullRequest: pull.number };
+      break;
+    }
+  }
+  if (!green) fail("no recently merged develop pull request has a head commit with every required check passed; nothing was changed.");
+  const developHead = green.sha;
+  const developParent = green.parent;
 
   const create = (name, sha) => operator("POST", "/git/refs", { ref: `refs/heads/${name}`, sha });
   await create(T.mainMirror, mainHead);
@@ -275,7 +294,7 @@ async function setup() {
   // Read back: a copy that GitHub stored differently is not a copy.
   const problems = await verifyTestProtection(protection);
   if (problems.length > 0) fail(`the test protection is not an exact copy (${problems.join("; ")}); run teardown.`);
-  console.log(JSON.stringify({ setup: "done", mainHead, developHead, developMirrorAt: developParent }, null, 2));
+  console.log(JSON.stringify({ setup: "done", mainHead, greenCommit: developHead, greenCommitPullRequest: green.pullRequest, developMirrorAt: developParent }, null, 2));
   console.log("Next: make each bypass App update one of its branches (docs/ops/qa-release-merge-lane-s-m1.md 2-2), then automation-status.");
 }
 
