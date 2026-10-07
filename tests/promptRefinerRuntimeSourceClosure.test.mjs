@@ -380,16 +380,20 @@ const compilerOptions = parsedConfig.options;
 // coexist in the fixed closure. Count and position-free inventory remain
 // unchanged; the digest below is repinned for source positions only.
 //
-// 2026-10-07, QA-release merge lane selective release: two QA-release system
-// actors are added to `lib/adminAuditSystemActors.ts`, already listed. Count and
-// position-free inventory are unchanged; only source positions moved (the
-// marketing pipeline fingerprint repin moved them too).
+// 2026-10-07, selective release of marketing S2e onto main: the S2e
+// pipeline additions in `lib/marketingAutomationAccess.ts` move source
+// positions only. Count 228 and the position-free inventory are unchanged.
+//
+// 2026-10-07, QA-release merge lane selective release merged over that: two
+// QA-release system actors in `lib/adminAuditSystemActors.ts` and the
+// marketing pipeline fingerprint repin move source positions only. Count and
+// position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "eb0ff046f9ca088c033ce89f3b3b2ccc",
-  "1ef4ecd679e6bcaeadf50175ab49dceb",
+  "c496c701bd454b13043677034c9f17e9",
+  "6a9d4f40c004dca7db9e66328f48c570",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

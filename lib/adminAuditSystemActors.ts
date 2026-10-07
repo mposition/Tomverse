@@ -66,7 +66,7 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
   "marketing-retention",
-  "marketing-guard",
+  "marketing-guard", "marketing-webhook",
   "prompt-refiner-shadow-runner",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
