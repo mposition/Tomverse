@@ -27,6 +27,7 @@ import {
   loadApprovedTemplate,
 } from "@/lib/marketingTemplates";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 // Proving a template, against a real audit chain.
 //
@@ -51,7 +52,7 @@ const operator = {
 } as Session;
 
 const reset = () =>
-  prisma.$executeRawUnsafe(
+  resetTestFixture(prisma,
     `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "AdminAuditLog" RESTART IDENTITY CASCADE`,
   );
 
