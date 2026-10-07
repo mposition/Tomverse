@@ -211,13 +211,12 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     outputPending: false,
   };
   const nextCursor = prepared.decision === "ready" ? prepared.nextCursor : null;
-  const nextDay = new Date(now.getTime() + DAY_MS);
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
   const finishesAnalysis = nextCursor === null && !needsOwnerInput;
   const activeAnalysisPurgeAfter = new Date(idea.analysisDeadlineAt.getTime() + DAY_MS);
-  const payloadPurgeAfter = new Date(Math.min(
-    (finishesAnalysis ? nextDay : activeAnalysisPurgeAfter).getTime(),
-    preview.payloadPurgeAfter.getTime()));
+  // A finished page no longer needs its transfer text. An unfinished output
+  // continuation still needs the preceding freeform text until it completes.
+  const payloadPurgeAfter = now;
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
@@ -257,7 +256,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       freeformCiphertext: Uint8Array.from(prepared.draft.freeform.ciphertext),
       freeformKeyId: prepared.draft.freeform.keyId,
       freeformKeyVersion: prepared.draft.freeform.keyVersion,
-      freeformPurgeAfter: finishesAnalysis ? nextDay : activeAnalysisPurgeAfter,
+      freeformPurgeAfter: finishesAnalysis ? now : activeAnalysisPurgeAfter,
       coveredStartOrdinal: page.coveredStartOrdinal,
       coveredEndOrdinal: page.coveredEndOrdinal,
       remainingStartOrdinal: page.remainingStartOrdinal,
@@ -319,12 +318,12 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     // The database allows deadlines to move earlier, never later.
     await tx.amuxIdeaAnalysisChunk.updateMany({ where: { ideaId: idea.id,
       chunkIndex: { lt: chunkIndex }, freeformCiphertext: { not: null },
-      freeformPurgeAfter: { gt: nextDay } },
-    data: { freeformPurgeAfter: nextDay } });
+      freeformPurgeAfter: { gt: now } },
+    data: { freeformPurgeAfter: now } });
     await tx.amuxIdeaTransferPreview.updateMany({ where: { ideaId: idea.id,
       payloadCiphertext: { not: null },
-      payloadPurgeAfter: { gt: nextDay } },
-    data: { payloadPurgeAfter: nextDay } });
+      payloadPurgeAfter: { gt: now } },
+    data: { payloadPurgeAfter: now } });
   }
   return { ideaId: idea.id, previewId: preview.id,
     unitCount: prepared.draft.units.length,

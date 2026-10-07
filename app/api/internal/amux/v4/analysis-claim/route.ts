@@ -3,12 +3,10 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { takeAuditChainLock } from "@/lib/adminAudit";
 import { amuxJsonNoStore } from "@/lib/amux/internalRoute";
 import { AMUX_V4_ANALYSIS_AGENT_SECRET_ENV,
   isAmuxV4AnalysisAgentAuthorized } from "@/lib/amux/ideaAnalysisQueueCore";
 import { commitAmuxIdeaOnlyAnalysisClaim,
-  enforceAmuxV4DailyClaimLimit,
   readAmuxIdeaAnalysisClaimReceipt,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
@@ -60,11 +58,8 @@ export async function POST(request: Request): Promise<Response> {
         SELECT set_config('statement_timeout', '5000', true) AS statement_limit,
                set_config('idle_in_transaction_session_timeout', '10000', true) AS idle_limit
       `;
-      await takeAuditChainLock(tx);
-      const expectedClaimDayUtc = await enforceAmuxV4DailyClaimLimit(tx);
       const claimed = await commitAmuxIdeaOnlyAnalysisClaim(tx,
-        { requestId: choice.requestId, previewId: choice.previewId,
-          expectedClaimDayUtc, keys });
+        { requestId: choice.requestId, previewId: choice.previewId, keys });
       callbackReturned = true;
       return claimed;
     }, { maxWait: 5_000, timeout: 15_000 });

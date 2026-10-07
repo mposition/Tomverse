@@ -56,7 +56,11 @@ test("only the guarded claim route calls the production claim service", async ()
   ]);
   const route = await readFile(join(root,
     "app/api/internal/amux/v4/analysis-claim/route.ts"), "utf8");
-  assert.match(route, /await takeAuditChainLock\(tx\);[\s\S]*?await enforceAmuxV4DailyClaimLimit\(tx\);[\s\S]*?commitAmuxIdeaOnlyAnalysisClaim\(tx,/);
+  const service = await readFile(join(root,
+    "lib/amux/ideaAnalysisClaimService.ts"), "utf8");
+  assert.match(route, /commitAmuxIdeaOnlyAnalysisClaim\(tx,/);
+  assert.match(service, /await takeAuditChainLock\(tx\);[\s\S]*?await enforceAmuxV4DailyClaimLimit\(tx\);[\s\S]*?writeSystemAuditLog\(/);
+  assert.match(service, /to_char\(clock_timestamp\(\) AT TIME ZONE 'UTC', 'YYYY-MM-DD'\)/);
   assert.match(route, /const CLAIM_CODE_LATCH = false/);
 });
 const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
