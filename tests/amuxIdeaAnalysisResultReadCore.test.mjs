@@ -62,6 +62,15 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
         scopeIn: ["Show the proposal"], scopeOut: [],
         completionCriteria: ["Owner can inspect the unit"] } }] };
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, result, ideaId), result);
+  const partial = { ...result, state: "partial", remainingScope: "One more Task",
+    nextChunkIndex: 1 };
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, partial, ideaId), partial);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, {
+    ...partial, remainingScope: "",
+  }, ideaId), null);
+  assert.equal(parseAmuxIdeaAnalysisResultView(200, {
+    ...partial, nextChunkIndex: -1,
+  }, ideaId), null);
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, { state: "pending" }, ideaId),
     { state: "pending" });
   assert.equal(parseAmuxIdeaAnalysisResultView(503, result, ideaId), null);

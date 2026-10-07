@@ -54,10 +54,16 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     FOR UPDATE
   `;
   if (owned.length !== 1) throw new IdeaTransferConfirmationError("not_found");
+  const identity = await tx.amuxIdeaTransferPreview.findUnique({
+    where: { id: choice.previewId }, select: { ideaId: true, chunkIndex: true },
+  });
+  if (!identity || identity.ideaId !== choice.ideaId) {
+    throw new IdeaTransferConfirmationError("not_found");
+  }
   const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
     WHERE "ideaId" = ${choice.ideaId} AND "actorUserId" = ${actorUserId}
-      AND "chunkIndex" = 0 FOR UPDATE
+      AND "chunkIndex" = ${identity.chunkIndex} FOR UPDATE
   `;
   if (chunkLock.length !== 1) throw new IdeaTransferConfirmationError("not_ready");
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
@@ -76,7 +82,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
   const [idea, chunk, row] = await Promise.all([
     tx.amuxIdeaSubmission.findUnique({ where: { id: choice.ideaId } }),
     tx.amuxIdeaAnalysisChunk.findUnique({
-      where: { ideaId_chunkIndex: { ideaId: choice.ideaId, chunkIndex: 0 } },
+      where: { ideaId_chunkIndex: { ideaId: choice.ideaId,
+        chunkIndex: identity.chunkIndex } },
     }),
     tx.amuxIdeaTransferPreview.findUnique({ where: { id: choice.previewId } }),
   ]);
@@ -84,10 +91,12 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
       row.ideaId !== idea.id || row.sourceScopeApprovalId !== null ||
       !row.sourcePlanRevisionId || !row.payloadCiphertext || !row.payloadKeyId ||
       !row.payloadKeyVersion || row.payloadPurgedAt !== null ||
-      idea.state !== "submitted" || now >= idea.analysisDeadlineAt ||
+      idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
+      now >= idea.analysisDeadlineAt ||
       idea.currentSourcePlanRevisionId !== row.sourcePlanRevisionId ||
       chunk.actorUserId !== actorUserId || chunk.state !== "awaiting_preview" ||
       chunk.currentPreviewId !== row.id || chunk.attempt !== row.attempt ||
+      chunk.chunkIndex !== row.chunkIndex ||
       chunk.sourcePlanRevisionId !== row.sourcePlanRevisionId ||
       row.state !== "prepared" || row.confirmedAt !== null ||
       row.consumedAt !== null) {
@@ -147,7 +156,9 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     }
     const parsed = payload as Record<string, unknown>;
     const selection = parsed.selection;
-    if (parsed.version !== 1 || parsed.previewId !== row.id ||
+    if (parsed.version !== (row.chunkIndex === 0 ? 1 : 2) ||
+        (row.chunkIndex > 0 && parsed.chunkIndex !== row.chunkIndex) ||
+        parsed.previewId !== row.id ||
         parsed.ideaId !== row.ideaId || parsed.templateVersion !== row.templateVersion ||
         typeof parsed.prompt !== "string" ||
         !parsed.prompt.includes(`"previewId":"${row.id}"`) ||
@@ -161,7 +172,8 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
     request: input.request, action: "amux.v4.transfer_preview.confirmed",
     targetType: "AmuxIdeaTransferPreview", targetId: row.id,
     summary: "Owner confirmed one exact AMUX v4 idea-only model input; no model was called.",
-    metadata: { ideaId: idea.id, sourcePlanRevisionId: row.sourcePlanRevisionId,
+    metadata: { ideaId: idea.id, chunkIndex: row.chunkIndex,
+      sourcePlanRevisionId: row.sourcePlanRevisionId,
       payloadDigest: row.payloadDigest, payloadDigestKeyId: row.payloadDigestKeyId,
       modelId: row.modelId, modelCallStarted: false },
   });

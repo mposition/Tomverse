@@ -25,10 +25,27 @@ test("an exact owner choice is admitted without enabling a live transfer", () =>
       provider: input.provider, modelId: input.modelId,
       reasoningEffort: input.reasoningEffort,
       approvalId: input.approvalId, approvalVersion: input.approvalVersion,
+      chunkIndex: 0,
     },
   });
   assert.equal(transferPreviewWritePermitted("enabled"), false);
   assert.equal(transferPreviewReadPermitted("enabled"), false);
+});
+
+test("a later output page requires an exact positive chunk identity", () => {
+  const later = { ...input, version: 2, chunkIndex: 1 };
+  assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(JSON.stringify(later)), {
+    ok: true, request: { previewId: input.previewId, ideaId: input.ideaId,
+      provider: input.provider, modelId: input.modelId,
+      reasoningEffort: input.reasoningEffort,
+      approvalId: input.approvalId, approvalVersion: 1, chunkIndex: 1 },
+  });
+  for (const changed of [{ chunkIndex: 0 }, { chunkIndex: -1 },
+    { chunkIndex: 1.5 }, { chunkIndex: 2_147_483_647 }, { extra: true }]) {
+    assert.deepEqual(inspectIdeaOnlyTransferPreviewRequest(
+      JSON.stringify({ ...later, ...changed })),
+    { ok: false, code: "schema_rejected" });
+  }
 });
 
 test("model substitutions and malformed request metadata fail closed", () => {

@@ -72,6 +72,12 @@ const amuxSourceScopePreviewService = withoutComments(readFileSync(
 const amuxSourceScopePreviewCore = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
 ));
+const amuxResolutionPreviewCore = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaResolutionChoiceCore.ts"), "utf8"
+));
+const amuxResolutionPreviewService = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
+));
 const SOURCE_SCOPE_ROUTE = "app/api/admin/amux/ideas/source-scope-preview/route.ts";
 const SOURCE_SCOPE_SERVICE = "lib/amux/ideaSourceScopePreviewService.ts";
 const SOURCE_SCOPE_CORE = "lib/amux/ideaSourceScopePreviewCore.ts";
@@ -83,6 +89,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaInputCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRequestIdCore.ts",
   "lib/amux/ideaSourceScopeCore.ts",
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
@@ -90,10 +97,14 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "14fe6b44afea195aeba17384235f1208a1e67a3d3d608aad67e3b532172ed217";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "716c784e6c5da262bd672eb30644727f74227028a2872d0d038b2a5130989757";
+const RESOLUTION_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
+// The entire AMUX-local import closure is pinned. A new writer or import
+// invalidates the exception until its read-only behavior is reviewed.
+const RESOLUTION_REVIEWED_DIGEST = "7206aaae6fa654dcafd3033625a13648a4355047e7f72107eb905778a52f4978";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
-const amuxBusinessClosure = (overrides = new Map()) => {
+const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
   const seen = new Set();
   const visit = (path) => {
     if (seen.has(path)) return;
@@ -116,13 +127,13 @@ const amuxBusinessClosure = (overrides = new Map()) => {
       visit(relativePath);
     }
   };
-  visit(SOURCE_SCOPE_ROUTE);
+  visit(root);
   return [...seen].sort();
 };
 
-const amuxSourceScopeReviewedDigest = (overrides = new Map()) => {
+const amuxReviewedDigest = (paths, overrides = new Map()) => {
   const hash = createHash("sha256");
-  for (const path of SOURCE_SCOPE_REVIEWED_FILES) {
+  for (const path of paths) {
     const source = overrides.has(path)
       ? overrides.get(path)
       : readFileSync(join(REPOSITORY_ROOT, ...path.split("/")), "utf8");
@@ -130,6 +141,10 @@ const amuxSourceScopeReviewedDigest = (overrides = new Map()) => {
   }
   return hash.digest("hex");
 };
+const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
+  amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
+const amuxResolutionReviewedDigest = (overrides = new Map()) =>
+  amuxReviewedDigest(amuxBusinessClosure(overrides, RESOLUTION_ROUTE), overrides);
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -267,6 +282,24 @@ const isDarkReadOnlyAmuxSourceScopePreview = (
   ]);
 };
 
+const isDarkReadOnlyAmuxResolutionPreview = (route) => {
+  if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
+      amuxResolutionReviewedDigest() !== RESOLUTION_REVIEWED_DIGEST ||
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(amuxResolutionPreviewCore) ||
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
+      /\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(|\$(?:queryRaw|executeRaw)(?:Unsafe)?\b|\bfetch\s*\(|\bimport\s*\(/.test(amuxResolutionPreviewService)) {
+    return false;
+  }
+  const post = route.source.slice(route.source.indexOf("export async function POST"));
+  const ownerAt = post.indexOf("const session = await owner();");
+  const gateAt = post.indexOf("amuxV4ResolutionPreviewEnabled(process.env[AMUX_V4_RESOLUTION_PREVIEW_ENV])");
+  const gateReturnsDisabled = /if\s*\(\s*!amuxV4ResolutionPreviewEnabled\(process\.env\[AMUX_V4_RESOLUTION_PREVIEW_ENV\]\)\s*\)\s*\{\s*return\s+NextResponse\.json\(\{\s*error:\s*"resolution_preview_disabled"/.test(post);
+  const rateAt = post.indexOf("await consumeApiRateLimit(request, session.user!.id!");
+  const previewAt = post.indexOf("await previewAmuxIdeaResolution({ session, ...parsed.data })");
+  return ownerAt >= 0 && gateAt > ownerAt && gateReturnsDisabled && rateAt > gateAt &&
+    previewAt > rateAt && !/\b(?:prisma|tx)\.|\bfetch\s*\(|\bimport\s*\(/.test(post);
+};
+
 test("the read-only POST audit exception closes when its source boundary changes", () => {
   const route = routes.find((candidate) =>
     candidate.name === "amux/ideas/source-scope-preview/route.ts");
@@ -316,6 +349,22 @@ test("the read-only POST audit exception closes when its source boundary changes
   assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
     amuxSourceScopePreviewService,
     amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
+});
+
+test("resolution preview audit exception is pinned to its dark read-only closure", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "amux/ideas/resolution-preview/route.ts");
+  assert.ok(route);
+  assert.equal(amuxResolutionReviewedDigest(), RESOLUTION_REVIEWED_DIGEST);
+  assert.equal(isDarkReadOnlyAmuxResolutionPreview(route), true);
+  assert.equal(isDarkReadOnlyAmuxResolutionPreview({ ...route,
+    source: `${route.source}\nawait prisma.amuxIdeaUnitDecision.create({});`,
+  }), false);
+  const servicePath = "lib/amux/ideaResolutionPreviewService.ts";
+  const service = readFileSync(join(REPOSITORY_ROOT, ...servicePath.split("/")), "utf8");
+  assert.notEqual(amuxResolutionReviewedDigest(new Map([
+    [servicePath, `${service}\nvoid fetch("https://example.invalid");`],
+  ])), RESOLUTION_REVIEWED_DIGEST);
 });
 const oneShotStageWriter = withoutComments(readFileSync(
   join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
@@ -386,6 +435,7 @@ test("every admin write route writes an audit entry", () => {
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
       !isDarkReadOnlyAmuxSourceScopePreview(route) &&
+      !isDarkReadOnlyAmuxResolutionPreview(route) &&
       !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 
