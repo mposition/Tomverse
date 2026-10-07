@@ -244,6 +244,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision"],
     tabs: {
       "qa-release": { label: "QA·릴리스", description: "일일 릴리스 준비 digest와 운영자 제어 revision" },
+      "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
     },
   },
   office: {

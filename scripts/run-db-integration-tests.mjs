@@ -252,6 +252,9 @@ run(
     // Its silence check (signal 2): today's digest, an incident when it is
     // missing, and an unreadable switch reported as itself, never as off.
     "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // Its two operator writes (W2): the switch and the monitor check, each with
+    // its administrator audit entry in one transaction.
+    "tests/integration/billing-finance-ops-control.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",
@@ -385,6 +388,9 @@ run(
     // sre-ops state read: the trust facts gathered in one bounded transaction,
     // trusted with the state or the reason only (own throwaway schema).
     "tests/integration/ops-observer-store-read.db.test.ts",
+    // sre-ops advance: state, checkpoint, audit entry and ledger row in one
+    // transaction; stale base, untrusted chain and unchanged keys write nothing.
+    "tests/integration/ops-observer-store-advance.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

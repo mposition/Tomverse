@@ -21,7 +21,7 @@ test("deploy source exclusion remains narrow and grants no T1 before image proof
   const patterns = readFileSync(join(root, ".dockerignore"), "utf8")
     .split(/\r?\n/).map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
-  assert.deepEqual(patterns, ["tests/"]);
+  assert.deepEqual(patterns, ["tests/", "playwright.admin.config.ts"]);
   assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
   // This live route reads committed verification records by path.
   assert.match(readFileSync(join(root,
