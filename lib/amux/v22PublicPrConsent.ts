@@ -29,11 +29,18 @@ export async function readAmuxV22PublicPrConsent(cardId: string,
       targetType: true, targetId: true, entryHash: true, metadata: true },
   });
   if (!audit) return false;
-  const keys = loadCurrentAmuxContentKeys(process.env);
   try {
-    return amuxV22PublicPrConsentAllowed({ cardId: card.id,
-      sourceSystem: card.sourceSystem, cardType: card.cardType,
-      taskRole: card.taskRole, sourceApprovalId: card.v4SourceApprovalId,
-      decision, audit, digestKey: keys });
-  } finally { keys.masterKey.fill(0); keys.digestKey.fill(0); }
+    const keys = loadCurrentAmuxContentKeys(process.env);
+    try {
+      return amuxV22PublicPrConsentAllowed({ cardId: card.id,
+        sourceSystem: card.sourceSystem, cardType: card.cardType,
+        taskRole: card.taskRole, sourceApprovalId: card.v4SourceApprovalId,
+        decision, audit, digestKey: keys });
+    } finally { keys.masterKey.fill(0); keys.digestKey.fill(0); }
+  } catch {
+    // Optional publication degrades to a private result if key material or
+    // the historical snapshot cannot be verified. Database failures above
+    // still abort the transaction instead of being disguised as a refusal.
+    return false;
+  }
 }

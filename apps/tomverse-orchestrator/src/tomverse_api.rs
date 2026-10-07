@@ -70,6 +70,7 @@ pub struct TomverseApi {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum V22UsageRecord {
     Recorded,
+    PrivateOnly,
     Rejected,
 }
 
@@ -937,7 +938,7 @@ impl TomverseApi {
             body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
             body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
             match expected_patch {
-                Some((digest, base)) => body.get("patch").is_some_and(Value::is_null) ||
+                Some((digest, base)) =>
                     body.pointer("/patch/sha256").and_then(Value::as_str) == Some(digest) &&
                     body.pointer("/patch/baseSha").and_then(Value::as_str) == Some(base) &&
                     body.pointer("/patch/bodyAvailable").and_then(Value::as_bool) == Some(true) &&
@@ -946,6 +947,14 @@ impl TomverseApi {
                 None => body.get("patch").is_some_and(Value::is_null),
             } {
             return Ok(V22UsageRecord::Recorded);
+        }
+        if expected_patch.is_some() &&
+            body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+            body.get("patch").is_some_and(Value::is_null) {
+            return Ok(V22UsageRecord::PrivateOnly);
         }
         if body.get("status").and_then(Value::as_str) == Some("absent") {
             return Ok(V22UsageRecord::Rejected);
@@ -1020,7 +1029,8 @@ impl TomverseApi {
                 if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
                     body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
                     (accepted_patch || private_only) {
-                    return Ok(V22UsageRecord::Recorded);
+                    return Ok(if private_only { V22UsageRecord::PrivateOnly }
+                        else { V22UsageRecord::Recorded });
                 }
                 bail!("v22 result write response mismatch");
             }
@@ -1031,6 +1041,7 @@ impl TomverseApi {
             patch.map(|(_, digest, base)| (digest, base)),
             publish_files_digest).await? {
             V22UsageRecord::Recorded => Ok(V22UsageRecord::Recorded),
+            V22UsageRecord::PrivateOnly => Ok(V22UsageRecord::PrivateOnly),
             V22UsageRecord::Rejected if definitely_rejected => Ok(V22UsageRecord::Rejected),
             V22UsageRecord::Rejected =>
                 bail!("v22 result write outcome unknown; read-back absent"),
@@ -1389,7 +1400,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn v22_rejected_optional_patch_still_records_the_private_result() {
+    async fn v22_rejected_optional_patch_does_not_confirm_the_patch() {
         let patch = "diff --git a/a b/a\n";
         let (api, server) = answer_once("200 OK", serde_json::json!({
                 "attemptId": "attempt-1", "sourceSha256": "a".repeat(64),
@@ -1399,12 +1410,12 @@ mod tests {
             "private result", &"a".repeat(64),
             Some((patch, &"b".repeat(64), &"c".repeat(40))), None, None)
             .await.unwrap();
-        assert_eq!(recorded, V22UsageRecord::Recorded);
+        assert_eq!(recorded, V22UsageRecord::PrivateOnly);
         server.join().unwrap();
     }
 
     #[tokio::test]
-    async fn v22_lost_response_readback_accepts_a_private_only_result() {
+    async fn v22_lost_response_readback_marks_a_missing_patch_private_only() {
         let (api, server) = answer_once("200 OK", serde_json::json!({
                 "status": "recorded", "attemptId": "attempt-1",
                 "sourceSha256": "a".repeat(64), "bodyAvailable": true,
@@ -1413,7 +1424,33 @@ mod tests {
         let recorded = api.v22_task_result_readback("attempt-1",
             &"a".repeat(64), Some((&"b".repeat(64), &"c".repeat(40))), None)
             .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::PrivateOnly);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_patch_readback_requires_exact_digest_base_and_files() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+            "patch": { "sha256": "b".repeat(64), "baseSha": "c".repeat(40),
+                "bodyAvailable": true, "filesDigest": "d".repeat(64) },
+        }).to_string());
+        let recorded = api.v22_task_result_readback("attempt-1", &"a".repeat(64),
+            Some((&"b".repeat(64), &"c".repeat(40))), Some(&"d".repeat(64)))
+            .await.unwrap();
         assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
+
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+            "patch": { "sha256": "b".repeat(64), "baseSha": "c".repeat(40),
+                "bodyAvailable": true, "filesDigest": "d".repeat(64) },
+        }).to_string());
+        assert!(api.v22_task_result_readback("attempt-1", &"a".repeat(64),
+            Some((&"b".repeat(64), &"e".repeat(40))), Some(&"d".repeat(64)))
+            .await.is_err());
         server.join().unwrap();
     }
 

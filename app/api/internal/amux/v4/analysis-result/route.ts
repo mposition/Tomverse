@@ -69,17 +69,28 @@ export async function POST(request: Request): Promise<Response> {
     if (!preview || preview.ideaId !== body.ideaId) {
       return amuxJsonNoStore({ error: "not_ready" }, 409);
     }
-    const preceding = preview.chunkIndex > 0
-      ? await prisma.amuxIdeaAnalysisChunk.findUnique({ where: {
-        ideaId_chunkIndex: { ideaId: body.ideaId,
-          chunkIndex: preview.chunkIndex - 1 },
-      }, select: { currentPreviewId: true } }) : null;
+    let preceding: { currentPreviewId: string | null } | null = null;
+    let previousUnits: Array<{ id: string }> = [];
+    try {
+      if (preview.chunkIndex > 0) {
+        preceding = await prisma.amuxIdeaAnalysisChunk.findUnique({ where: {
+          ideaId_chunkIndex: { ideaId: body.ideaId,
+            chunkIndex: preview.chunkIndex - 1 },
+        }, select: { currentPreviewId: true } });
+        previousUnits = await prisma.amuxIdeaDraftUnit.findMany({ where: {
+          ideaId: body.ideaId, chunkIndex: preview.chunkIndex - 1,
+          derivationGroupId: null,
+        }, select: { id: true }, take: 41 });
+      }
+    } catch {
+      return amuxJsonNoStore({ error: "key_preflight_unavailable" }, 503);
+    }
     if (preview.chunkIndex > 0 && !preceding?.currentPreviewId) {
       return amuxJsonNoStore({ error: "not_ready" }, 409);
     }
-    const previousUnits = preview.chunkIndex > 0
-      ? await prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: body.ideaId,
-        chunkIndex: preview.chunkIndex - 1 }, select: { id: true } }) : [];
+    if (previousUnits.length > 40) {
+      return amuxJsonNoStore({ error: "integrity_unavailable" }, 409);
+    }
     let count = 0;
     try {
       const parsed: unknown = JSON.parse(body.rawModelOutput);

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import test from "node:test";
 
-test("the locked result transaction keeps private output when patch binding changes", () => {
+test("the locked result transaction stores private patches without a publication run", () => {
   const child = spawnSync(process.execPath, [
     "--experimental-test-module-mocks", "--conditions=react-server",
     "--import", "tsx",

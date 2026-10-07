@@ -65,8 +65,9 @@ async function recordWith(run, assignmentRole = "implement") {
 
 for (const [name, run, role, expectedPatch] of [
   ["matching active run", { status: "active", baseSha }, "implement", true],
-  ["ended run", { status: "finished", baseSha }, "implement", false],
-  ["changed base", { status: "active", baseSha: "b".repeat(40) }, "implement", false],
+  ["no publication run", null, "implement", true],
+  ["ended run", { status: "finished", baseSha }, "implement", true],
+  ["changed base", { status: "active", baseSha: "b".repeat(40) }, "implement", true],
   ["wrong role", { status: "active", baseSha }, "review", false],
 ]) {
   const { result, saved } = await recordWith(run, role);
@@ -81,7 +82,7 @@ endedAfterWrite.status = "finished";
 const replay = await recordAmuxV22TaskResult(duplicate.tx, duplicate.payload);
 assert.equal(replay.duplicate, true);
 assert.equal(replay.patchSha256, duplicate.result.patchSha256);
-assert.equal(duplicate.runReads(), 1,
-  "an identical replay does not reinterpret the run's later status");
+assert.equal(duplicate.runReads(), 0,
+  "private patch storage does not depend on the publication run");
 
 console.log("AMUX_V22_RESULT_STORE_OK");

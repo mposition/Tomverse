@@ -117,17 +117,9 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
     });
     if (assignment?.role !== "implement" || assignment.workItemId !== task.id)
       patch = undefined;
-    else {
-      // Settlement and quarantine lock this attempt before ending its run.
-      // Recheck after our attempt/task locks, in the result transaction, so a
-      // run that ended after the route's early check cannot retain a new patch.
-      const run = await tx.engineeringAgentRun.findUnique({
-        where: { amuxAttemptId: input.attemptId },
-        select: { status: true, baseSha: true },
-      });
-      if (run?.status !== "active" || run.baseSha !== patch.baseSha)
-        patch = undefined;
-    }
+    // A patch is a private Task result first. A missing, finished or
+    // base-mismatched Engineering run must not erase it; the Publisher
+    // verifies the current run and base separately before exposing bytes.
   }
   const bytes = Buffer.from(input.text, "utf8");
   const sealed = sealAmuxContent(bytes, "task_result", input.attemptId,

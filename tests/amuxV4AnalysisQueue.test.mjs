@@ -219,6 +219,15 @@ test("AMUX v4 analysis queue returns candidate IDs, never transfer text", async 
   assert.doesNotMatch(route, /codex|claude|spawn\(/);
 });
 
+test("analysis result key preflight bounds the previous raw page and maps DB failure", async () => {
+  const route = await readFile(new URL(
+    "../app/api/internal/amux/v4/analysis-result/route.ts", import.meta.url), "utf8");
+  assert.match(route, /derivationGroupId: null/);
+  assert.match(route, /select: \{ id: true \}, take: 41/);
+  assert.match(route, /previousUnits\.length > 40/);
+  assert.match(route, /catch \{\s*return amuxJsonNoStore\(\{ error: "key_preflight_unavailable" \}, 503\);/);
+});
+
 test("AMUX v4 analysis writes require their independent read-back switches", async () => {
   for (const [name, readEnv] of [
     ["analysis-claim", "CLAIM_RECEIPT_READ_ENV"],

@@ -1955,7 +1955,15 @@ pub async fn run_from_env() -> i32 {
                                             result.patch_digest.as_deref()).zip(
                                             result.patch_base_sha.as_deref())).map(
                                                 |((body, digest), base)| (body, digest, base));
-                                    match v22_result.as_ref().and_then(|result|
+                                    let incomplete_patch_binding = v22_result.as_ref().is_some_and(
+                                        |result| result.patch_digest.is_some() !=
+                                            result.patch_base_sha.is_some() ||
+                                            result.patch_body.is_some() && patch_binding.is_none() ||
+                                            result.publish_files.is_some() !=
+                                                result.publish_files_digest.is_some());
+                                    if incomplete_patch_binding {
+                                        Ok(crate::tomverse_api::V22UsageRecord::Rejected)
+                                    } else { match v22_result.as_ref().and_then(|result|
                                         result.result_sha256.as_deref()) {
                                         Some(sha256) => match v22_result.as_ref().and_then(
                                             |result| result.result_text.as_deref()) {
@@ -1980,9 +1988,30 @@ pub async fn run_from_env() -> i32 {
                                                     |result| result.publish_files_digest.as_deref())).await,
                                         },
                                         None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
-                                    }
+                                    } }
                                 } else {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                };
+                                // A write acknowledgement is not proof that the patch is
+                                // durably stored with the expected base and file digest.
+                                // Read it back before deleting the sidecar's only copy.
+                                let result_record = match result_record {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                        if outcome == "succeeded" => {
+                                        match v22_result.as_ref().and_then(|result|
+                                            result.result_sha256.as_deref()) {
+                                            Some(sha256) => api.v22_task_result_readback(
+                                                &entry.delivery.attempt_id, sha256,
+                                                v22_result.as_ref().and_then(|result|
+                                                    result.patch_digest.as_deref().zip(
+                                                        result.patch_base_sha.as_deref())),
+                                                v22_result.as_ref().and_then(|result|
+                                                    result.publish_files_digest.as_deref()),
+                                            ).await,
+                                            None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                        }
+                                    },
+                                    other => other,
                                 };
                                 match result_record {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
@@ -2018,10 +2047,18 @@ pub async fn run_from_env() -> i32 {
                                                 api.v22_execution_settle_unverified(
                                                     &entry.delivery, &session.instance_id,
                                                     session.generation).await,
+                                            Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
+                                                api.v22_execution_settle_unverified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation).await,
                                             Err(error) => Err(error),
                                         }
                                     },
                                     Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                        api.v22_execution_settle_unverified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation).await,
+                                    Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
                                         api.v22_execution_settle_unverified(
                                             &entry.delivery, &session.instance_id,
                                             session.generation).await,

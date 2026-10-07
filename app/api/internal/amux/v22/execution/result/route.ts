@@ -24,8 +24,8 @@ const bodySchema = z.object({
   attemptId: id, worker: z.string().regex(/^[A-Za-z0-9._:-]{1,120}$/),
   resultText: z.string().min(1).max(65_536),
   sourceSha256: z.string().regex(/^[0-9a-f]{64}$/),
-  // Patch evidence is optional publication input. A malformed or unsafe patch
-  // must not discard the already-paid private Task result.
+  // Patch evidence is an optional private result. A malformed or unsafe patch
+  // must not discard the already-paid Task response.
   patch: z.unknown().optional(),
 }).strict();
 
@@ -117,22 +117,9 @@ export async function POST(request: Request): Promise<Response> {
         patchRejected,
         duplicate: true }) :
       amuxJsonNoStore({ error: "result_conflict" }, 409);
-    if (patch) {
-      try {
-        const run = await prisma.engineeringAgentRun.findUnique({
-          where: { amuxAttemptId: body.attemptId },
-          select: { status: true, baseSha: true },
-        });
-        if (run?.status !== "active" || run.baseSha !== patch.baseSha) {
-          patch = undefined;
-          patchRejected = true;
-        }
-      } catch {
-        // Optional publication state cannot prevent a private result write.
-        patch = undefined;
-        patchRejected = true;
-      }
-    }
+    // Persist valid private patch evidence independently of the optional
+    // Engineering run. Publication eligibility is checked when a candidate
+    // is loaded; the publication switch may be off when this result arrives.
     const attempt = await prisma.amuxExecutionAttempt.findUnique({
       where: { id: body.attemptId }, select: { worker: true, endedAt: true,
         v22AssignmentId: true, task: { select: { sourceSystem: true,

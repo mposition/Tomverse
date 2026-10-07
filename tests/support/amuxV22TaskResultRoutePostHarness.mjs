@@ -17,7 +17,6 @@ const received = [];
 let savedPatch = false;
 let priorResult = null;
 let priorPatch = null;
-const run = { status: "active", baseSha };
 const keys = () => ({ masterKeyId: "synthetic", masterKeyVersion: 1,
   masterKey: Buffer.alloc(32, 3), digestKeyId: "synthetic-digest",
   digestKey: Buffer.alloc(32, 4) });
@@ -47,7 +46,9 @@ mock.module(mod("lib/amux/v22TaskResultStore.ts"), {
 });
 mock.module(mod("lib/prisma.ts"), {
   namedExports: { prisma: {
-    engineeringAgentRun: { findUnique: async () => run },
+    engineeringAgentRun: { findUnique: async () => {
+      throw new Error("private patch storage must not read the publication run");
+    } },
     amuxV22TaskResult: { findUnique: async () => priorResult },
     amuxV22TaskPatch: { findUnique: async () => priorPatch },
     amuxExecutionAttempt: { findUnique: async () => ({ worker: "worker-1",
@@ -94,7 +95,6 @@ priorPatch = { patchSha256: patch.sha256, baseSha, bodyPurgedAt: null,
   digest: digest.digest, digestKeyId: digest.digestKeyId,
   byteLength: evidence.length, ideaId };
 evidence.fill(0);
-run.status = "finished";
 const duplicateResponse = await post(patch);
 assert.equal(duplicateResponse.status, 200);
 const duplicateBody = await duplicateResponse.json();
