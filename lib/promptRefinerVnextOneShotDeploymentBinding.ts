@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 
 import { observePromptRefinerVnextOneShotDeployment } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback";
+import type { PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const SHA = /^[0-9a-f]{40}$/;
@@ -24,15 +26,16 @@ type ApprovedDeploymentRow = {
 export async function assertPromptRefinerVnextOneShotActiveDeploymentForAdmission(
   tx: Prisma.TransactionClient,
   options: Parameters<typeof observePromptRefinerVnextOneShotDeployment>[0] = {},
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<void> {
   const rows = await tx.$queryRaw<ApprovedDeploymentRow[]>`
     SELECT "id", "status", "runtimeDeploymentId", "runtimeCommitSha"
     FROM "PromptRefinerVnextOneShotStage"
-    WHERE "id" = ${STAGE_ID}
+    WHERE "id" = ${stageId}
     FOR NO KEY UPDATE NOWAIT
   `;
   const stage = rows.length === 1 ? rows[0] : null;
-  if (!stage || stage.id !== STAGE_ID) {
+  if (!stage || stage.id !== stageId) {
     throw new Error("vnext_one_shot_approved_stage_unavailable");
   }
   if (stage.status !== "staged" && stage.status !== "run_approved") {

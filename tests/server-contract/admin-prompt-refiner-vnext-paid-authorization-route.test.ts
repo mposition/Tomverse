@@ -59,11 +59,12 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 mock.module(mod("lib/promptRefinerVnextOneShotPaidAuthorization.ts"), {
   namedExports: { approvePromptRefinerVnextOneShotPaidDispatch: async (input: {
     expected: Record<string, unknown>;
+    stageId?: string;
   }) => {
     writes++;
     assert.deepEqual(input.expected, pins);
     if (failure) throw new Error(failure);
-    return { stageId: "prompt-refiner-vnext-one-shot-v4",
+    return { stageId: input.stageId ?? "prompt-refiner-vnext-one-shot-v4",
       paidAuthorizationAuditLogId: "synthetic-paid-audit",
       dispatchAuthorized: false };
   } },
@@ -114,4 +115,22 @@ test("paid approval requires exact confirmation and maps definite and unknown ou
     retryAuthorized: false, humanReviewRequired: true });
   assert.equal(writes, 3);
   assert.equal(rateLimits, 3);
+});
+
+test("v5 paid approval cannot reuse the v4 confirmation", async () => {
+  const route = await loadRoute();
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED = "1";
+  failure = null;
+  const before = writes;
+  const stageId = "prompt-refiner-vnext-one-shot-v5";
+  assert.equal((await route.POST(request({ ...body, stageId }))).status, 400);
+  assert.equal((await route.POST(request({ ...body,
+    confirmation: "AUTHORIZE_VNEXT_ONE_SHOT_NEW_V5_PAID_DISPATCH_80_SLOTS" }))).status, 400);
+  assert.equal(writes, before);
+  const approved = await route.POST(request({ ...body, stageId,
+    confirmation: "AUTHORIZE_VNEXT_ONE_SHOT_NEW_V5_PAID_DISPATCH_80_SLOTS" }));
+  assert.equal(approved.status, 201);
+  assert.equal((await approved.json()).stageId, stageId);
+  assert.equal(writes, before + 1);
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED;
 });

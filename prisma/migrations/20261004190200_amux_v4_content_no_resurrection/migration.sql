@@ -2,6 +2,7 @@
 -- external key. Once purged, no ordinary writer may restore that body or
 -- move its original deadline forward. These guards are independent of the
 -- worker and remain in force after a DB restore.
+-- baseline-check: present-if-function "amux_v4_raw_no_resurrection_guard"
 BEGIN;
 
 CREATE FUNCTION amux_v4_raw_no_resurrection_guard()
