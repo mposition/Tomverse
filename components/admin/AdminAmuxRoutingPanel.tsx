@@ -159,6 +159,7 @@ type ReviewDetail = {
   review_context: {
     title: string | null;
     description: string | null;
+    result_sha256: string | null;
     escalation_reason: string;
     last_attempt_reason: string | null;
     previous_block_reason: string | null;
@@ -238,7 +239,9 @@ const readable = (value: string) => value.replaceAll("_", " ");
 const pct = (numerator: number, denominator: number) =>
   denominator === 0 ? "—" : `${((numerator / denominator) * 100).toFixed(1)}%`;
 
-export function AdminAmuxRoutingPanel() {
+export function AdminAmuxRoutingPanel({ focusEscalationId = null }: {
+  focusEscalationId?: string | null;
+} = {}) {
   const m = useAdminMessages(adminAmuxRoutingMessages);
   const { locale } = useAdminLocale();
   const number = useCallback(
@@ -272,6 +275,7 @@ export function AdminAmuxRoutingPanel() {
   const [decisionStatusChecking, setDecisionStatusChecking] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<PendingDecision | null>(null);
   const reviewRequestId = useRef(0);
+  const openedFocus = useRef<string | null>(null);
 
   const closeReview = useCallback(() => {
     reviewRequestId.current += 1;
@@ -335,7 +339,7 @@ export function AdminAmuxRoutingPanel() {
     setDecisionStatusUnknown(false);
   };
 
-  const openReview = async (escalationId: string) => {
+  const openReview = useCallback(async (escalationId: string) => {
     if (pendingDecision) return;
     const requestId = ++reviewRequestId.current;
     setSelectedEscalationId(escalationId);
@@ -382,7 +386,14 @@ export function AdminAmuxRoutingPanel() {
     } finally {
       if (requestId === reviewRequestId.current) setReviewLoading(false);
     }
-  };
+  }, [pendingDecision, m.reviewLoadFailed]);
+
+  useEffect(() => {
+    if (!report || !focusEscalationId || pendingDecision ||
+        openedFocus.current === focusEscalationId) return;
+    openedFocus.current = focusEscalationId;
+    queueMicrotask(() => void openReview(focusEscalationId));
+  }, [report, focusEscalationId, pendingDecision, openReview]);
 
   const prepareProposal = async () => {
     if (!review || !selectedOutcome || reviewBusy || pendingDecision || !review.allowed_outcomes.includes(selectedOutcome)) return;
@@ -857,6 +868,10 @@ export function AdminAmuxRoutingPanel() {
                               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-zinc-300">{review.review_context.description}</pre>
                             </div>
                           )}
+                          {review.review_context.result_sha256 &&
+                            <p className="break-all font-mono text-xs text-zinc-400">
+                              {m.reviewResultSha256}: {review.review_context.result_sha256}
+                            </p>}
                           {review.review_content?.truncated && (
                             <p className="text-sm font-bold text-amber-200">{m.reviewContentTruncated}</p>
                           )}

@@ -57,6 +57,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
     reviewDiffDigest: "Diff SHA-256",
+    reviewResultSha256: "Worker result SHA-256",
     reviewContentMissing:
       "No review subject with a verifiable digest is available. Decision proposals are unavailable.",
     reviewContentTruncated:
@@ -193,6 +194,7 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
     reviewDiffDigest: "Diff SHA-256",
+    reviewResultSha256: "Worker 결과 SHA-256",
     reviewContentMissing:
       "검증 가능한 digest를 가진 검토 대상이 없습니다. 결정 제안을 만들 수 없습니다.",
     reviewContentTruncated:

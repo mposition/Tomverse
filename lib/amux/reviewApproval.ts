@@ -7,11 +7,13 @@ import type { Session } from "next-auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
   AMUX_REVIEW_DISPLAY_MAX_BYTES,
+  amuxReviewApprovalHasEvidence,
   amuxReviewTextExceedsDisplay,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
   amuxV22ReviewRetryHasVerifiedOutcome,
+  amuxV4ReviewEvidenceMatches,
   sha256Hex,
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
@@ -19,6 +21,7 @@ import {
 import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
+import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
 import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { prisma } from "@/lib/prisma";
@@ -31,6 +34,40 @@ export class AmuxReviewRefusal extends Error {
 }
 
 type Client = Prisma.TransactionClient;
+type V4ReviewEvidence = {
+  taskId: string; revision: number; title: string; description: string;
+  titleDigest: string | null; bodyDigest: string | null;
+  briefDigest: string | null; resultAttemptId: string;
+  resultSha256: string;
+};
+
+/** Verified private content is read outside the row-lock transaction. The
+ * transaction checks its revision, keyed digests and result SHA again. */
+async function v4EvidenceForEscalation(escalationId: string):
+  Promise<V4ReviewEvidence | null> {
+  const escalation = await prisma.amuxHumanEscalation.findUnique({
+    where: { id: escalationId },
+    select: { task: { select: { id: true, sourceSystem: true } } },
+  });
+  if (!escalation || escalation.task.sourceSystem !== "admin-idea-v4") return null;
+  try {
+    const detail = await readAmuxExecutionTaskDetail(escalation.task.id);
+    if (!detail?.title || !detail.body || !detail.brief ||
+        detail.result?.state !== "available" || !detail.result.text ||
+        !detail.v4EvidenceDigests?.title || !detail.v4EvidenceDigests.body ||
+        !detail.v4EvidenceDigests.brief) return null;
+    return {
+      taskId: escalation.task.id, revision: detail.revision,
+      title: detail.title,
+      description: `Scope and completion criteria:\n${detail.body}\n\nApproved brief:\n${detail.brief}\n\nVerified worker result:\n${detail.result.text}`,
+      titleDigest: detail.v4EvidenceDigests.title,
+      bodyDigest: detail.v4EvidenceDigests.body,
+      briefDigest: detail.v4EvidenceDigests.brief,
+      resultAttemptId: detail.result.attemptId,
+      resultSha256: detail.result.sha256 ?? sha256Hex(detail.result.text),
+    };
+  } catch { return null; }
+}
 
 const refuse = (code: string, status = 409): never => {
   throw new AmuxReviewRefusal(code, status);
@@ -105,6 +142,7 @@ async function snapshot(
   tx: Client,
   escalationId: string,
   fetchedArtifact: AmuxReviewPullRequest | null,
+  fetchedV4: V4ReviewEvidence | null,
 ) {
   const escalation = await tx.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
@@ -114,7 +152,7 @@ async function snapshot(
   const task = escalation.task;
   const artifact = task.status === "review" &&
     task.reviewPrNumber === fetchedArtifact?.prNumber ? fetchedArtifact : null;
-  const [lastAttempt, attemptCount, activeDelivery, previousBlock] = await Promise.all([
+  const [lastAttempt, attemptCount, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
     tx.amuxExecutionAttempt.findFirst({
       where: { taskId: task.id },
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
@@ -133,6 +171,11 @@ async function snapshot(
       orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
       select: { resolution: true },
     }),
+    task.sourceSystem === "admin-idea-v4" ?
+      tx.amuxV22TaskResult.findFirst({ where: { taskId: task.id },
+        orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
+        select: { attemptId: true, sourceSha256: true, bodyPurgedAt: true } }) :
+      Promise.resolve(null),
   ]);
   const budget = decideAmuxAttemptBudget({
     historical_rows: attemptCount._count._all,
@@ -148,7 +191,13 @@ async function snapshot(
     ? escalation.openedTaskRevision !== null &&
       task.revision > escalation.openedTaskRevision && task.dueParseState === "valid"
     : task.dueParseState === "valid" || task.dueParseState === "none";
-  const description = task.description;
+  const v4Valid = amuxV4ReviewEvidenceMatches({
+    task: { id: task.id, sourceSystem: task.sourceSystem,
+      revision: task.revision, titleDigest: task.v4TitleDigest,
+      bodyDigest: task.v4BodyDigest, briefDigest: task.v4BriefDigest },
+    evidence: fetchedV4, result: latestV4Result, attempt: lastAttempt,
+  });
+  const description = v4Valid && fetchedV4 ? fetchedV4.description : task.description;
   // Ingress allows 50,000 Unicode characters, not 50,000 UTF-8 bytes. The
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
@@ -159,7 +208,9 @@ async function snapshot(
     lastTerminal && activeDelivery === null;
   const outcomes: AmuxReviewOutcome[] = [];
   if (baseEligible && task.status === "review" && reviewAttempt) {
-    if (artifact && !displayTruncated) outcomes.push("approve");
+    if (amuxReviewApprovalHasEvidence({ sourceSystem: task.sourceSystem,
+      taskRole: task.taskRole, artifactAvailable: artifact !== null,
+      v4EvidenceVerified: v4Valid, displayTruncated })) outcomes.push("approve");
     outcomes.push("block");
   }
   if (baseEligible && task.status === "blocked") {
@@ -182,7 +233,7 @@ async function snapshot(
     task_id: task.id,
     task_revision: task.revision,
     task_status: task.status === "review" ? "review" : "blocked",
-    title: task.title,
+    title: v4Valid && fetchedV4 ? fetchedV4.title : task.title,
     description,
     due_parse_state: task.dueParseState,
     due_at: task.dueAt?.toISOString() ?? null,
@@ -198,12 +249,20 @@ async function snapshot(
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
     review_diff_digest: artifact?.diffDigest ?? null,
+    ...(task.sourceSystem === "admin-idea-v4" ? { v4_evidence: {
+      title_digest: task.v4TitleDigest,
+      body_digest: task.v4BodyDigest,
+      brief_digest: task.v4BriefDigest,
+      result_attempt_id: v4Valid && fetchedV4 ? fetchedV4.resultAttemptId : null,
+      result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
+    } } : {}),
   };
   const digest = amuxReviewSubjectDigest(subject);
   const text = `Task ID: ${task.id}\nRevision: ${task.revision}\nEscalation ID: ${escalation.id}`;
   const context = {
-    title: safeReviewDisplayText(task.title),
+    title: safeReviewDisplayText(v4Valid && fetchedV4 ? fetchedV4.title : task.title),
     description: safeReviewDisplayText(description),
+    result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
     escalation_reason: reason,
     last_attempt_reason: attemptReason,
     previous_block_reason: previousBlockReason,
@@ -212,8 +271,10 @@ async function snapshot(
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
-  const fetchedArtifact = await artifactForEscalation(escalationId);
-  const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact));
+  const [fetchedArtifact, fetchedV4] = await Promise.all([
+    artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
+  ]);
+  const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
   const { escalation, task, lastAttempt, used, digest, text, context, displayTruncated, outcomes, artifact } = state;
   return {
     available: true,
@@ -226,7 +287,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     },
     task: {
       id: task.id,
-      title: task.title,
+      title: context.title ?? task.title,
       status: task.status,
       revision: task.revision,
       due_parse_state: task.dueParseState,
@@ -264,10 +325,13 @@ export async function createAmuxReviewProposal(input: {
   session: Session;
   request: Request;
 }) {
-  const artifact = await artifactForEscalation(input.escalationId, input.outcome === "approve");
+  const [artifact, v4Evidence] = await Promise.all([
+    artifactForEscalation(input.escalationId, input.outcome === "approve"),
+    v4EvidenceForEscalation(input.escalationId),
+  ]);
   return prisma.$transaction(async (tx) => {
     await lockTaskAndEscalation(tx, input.escalationId);
-    const state = await snapshot(tx, input.escalationId, artifact);
+    const state = await snapshot(tx, input.escalationId, artifact, v4Evidence);
     if (!state.outcomes.includes(input.outcome)) return refuse("AMUX_REVIEW_OUTCOME_UNAVAILABLE");
     if (state.digest !== input.expectedSubjectDigest) return refuse("AMUX_REVIEW_SUBJECT_CHANGED");
     const target = amuxReviewTargetStatus(
@@ -407,7 +471,10 @@ export async function resolveAmuxReview(input: {
       } },
     },
   });
-  const artifact = await artifactForEscalation(input.escalationId, retryPlanning?.outcome === "approve");
+  const [artifact, v4Evidence] = await Promise.all([
+    artifactForEscalation(input.escalationId, retryPlanning?.outcome === "approve"),
+    v4EvidenceForEscalation(input.escalationId),
+  ]);
   return prisma.$transaction(async (tx) => {
     const costPolicies = retryPlanning?.outcome === "retry"
       ? await lockAmuxResourcePolicies(tx, amuxResourceRefs(retryPlanning.task))
@@ -431,7 +498,7 @@ export async function resolveAmuxReview(input: {
         task_revision: proposal.taskRevision + 1,
       };
     }
-    const state = await snapshot(tx, input.escalationId, artifact);
+    const state = await snapshot(tx, input.escalationId, artifact, v4Evidence);
     const now = await dbNow(tx);
     if (proposal.outcome === "retry") {
       if (!retryPlanning || !costPolicies ||
@@ -454,10 +521,10 @@ export async function resolveAmuxReview(input: {
       return refuse("AMUX_REVIEW_PROPOSAL_CHANGED");
     }
     if (proposal.outcome === "approve" &&
-        (proposal.reviewPrNumber !== state.artifact?.prNumber ||
-         proposal.reviewBaseSha !== state.artifact?.baseSha ||
-         proposal.reviewHeadSha !== state.artifact?.headSha ||
-         proposal.reviewDiffDigest !== state.artifact?.diffDigest)) {
+        (proposal.reviewPrNumber !== (state.artifact?.prNumber ?? null) ||
+         proposal.reviewBaseSha !== (state.artifact?.baseSha ?? null) ||
+         proposal.reviewHeadSha !== (state.artifact?.headSha ?? null) ||
+         proposal.reviewDiffDigest !== (state.artifact?.diffDigest ?? null))) {
       return refuse("AMUX_REVIEW_SOURCE_CHANGED");
     }
     const target = amuxReviewTargetStatus(

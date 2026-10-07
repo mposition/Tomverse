@@ -5,12 +5,14 @@ import {
   AMUX_REVIEW_DISPLAY_MAX_BYTES,
   AMUX_REVIEW_PROPOSAL_TTL_MS,
   amuxReviewApprovalReadiness,
+  amuxReviewApprovalHasEvidence,
   amuxReviewTextExceedsDisplay,
   amuxReviewProposalExpiry,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
   amuxV22ReviewRetryHasVerifiedOutcome,
+  amuxV4ReviewEvidenceMatches,
   isAmuxAgentApprovalEnabled,
 } from "../lib/amux/reviewApprovalCore.ts";
 
@@ -128,6 +130,54 @@ test("subject digest binds content and does not depend on caller key insertion o
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_base_sha: "c".repeat(40) }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_head_sha: "a".repeat(40) }));
   assert.notEqual(digest, amuxReviewSubjectDigest({ ...subject, review_diff_digest: "b".repeat(64) }));
+});
+
+test("v4 review digest binds private evidence without changing legacy review digests", () => {
+  const evidence = { title_digest: "a".repeat(64), body_digest: "b".repeat(64),
+    brief_digest: "c".repeat(64), result_attempt_id: "attempt-2",
+    result_sha256: "d".repeat(64) };
+  const legacy = amuxReviewSubjectDigest(subject);
+  const v4 = amuxReviewSubjectDigest({ ...subject, v4_evidence: evidence });
+  assert.notEqual(v4, legacy);
+  assert.equal(amuxReviewSubjectDigest(subject), legacy);
+  assert.notEqual(v4, amuxReviewSubjectDigest({ ...subject,
+    v4_evidence: { ...evidence, result_sha256: "e".repeat(64) } }));
+});
+
+test("a PR-less v4 non-code result may be approved only with verified full evidence", () => {
+  const base = { sourceSystem: "admin-idea-v4", taskRole: "design",
+    artifactAvailable: false, v4EvidenceVerified: true, displayTruncated: false };
+  assert.equal(amuxReviewApprovalHasEvidence(base), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, v4EvidenceVerified: false }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayTruncated: true }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement" }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement",
+    artifactAvailable: true }), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: null }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy" }), false);
+});
+
+test("v4 completion evidence is tied to the exact card revision and latest retained attempt", () => {
+  const input = {
+    task: { id: "card", sourceSystem: "admin-idea-v4", revision: 4,
+      titleDigest: "a", bodyDigest: "b", briefDigest: "c" },
+    evidence: { taskId: "card", revision: 4, titleDigest: "a",
+      bodyDigest: "b", briefDigest: "c", resultAttemptId: "attempt",
+      resultSha256: "d" },
+    result: { attemptId: "attempt", sourceSha256: "d", bodyPurgedAt: null },
+    attempt: { id: "attempt", v22AssignmentId: "assignment" },
+  };
+  assert.equal(amuxV4ReviewEvidenceMatches(input), true);
+  assert.equal(amuxV4ReviewEvidenceMatches({ ...input,
+    evidence: { ...input.evidence, bodyDigest: "changed" } }), false);
+  assert.equal(amuxV4ReviewEvidenceMatches({ ...input,
+    result: { ...input.result, sourceSha256: "changed" } }), false);
+  assert.equal(amuxV4ReviewEvidenceMatches({ ...input,
+    result: { ...input.result, bodyPurgedAt: new Date() } }), false);
+  assert.equal(amuxV4ReviewEvidenceMatches({ ...input,
+    attempt: { ...input.attempt, v22AssignmentId: null } }), false);
+  assert.equal(amuxV4ReviewEvidenceMatches({ ...input,
+    task: { ...input.task, revision: 5 } }), false);
 });
 
 test("request digest binds proposal, key, and resolution", () => {
