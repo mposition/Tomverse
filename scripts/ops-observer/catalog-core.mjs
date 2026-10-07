@@ -10,9 +10,13 @@
 // deadline check was meant to refuse. Shared tables have no expected set of
 // their own here, but none of their triggers or constraints may be deferrable.
 
-/** The one deferred trigger per own table that checks the run deadline at COMMIT. */
+/**
+ * The deferred triggers that check the run deadline at COMMIT: one per own
+ * table for its rows, and the reservations' retention deadline on delete.
+ */
 export const OPS_OBSERVER_DEFERRED_DEADLINE_TRIGGERS = Object.freeze([
   "ops_observer_delivery_deadline_check",
+  "ops_observer_delivery_retention_deadline_check",
   "ops_observer_genesis_deadline_check",
   "ops_observer_state_deadline_check",
   "ops_observer_transition_deadline_check",
@@ -27,7 +31,11 @@ const deferred = (name) => OPS_OBSERVER_DEFERRED_DEADLINE_TRIGGERS.includes(name
 export const EXPECTED_TRIGGERS = Object.freeze({
   OpsObserverGenesis: ["OpsObserverGenesis_guard", "ops_observer_genesis_deadline_check"],
   OpsObserverState: ["OpsObserverState_guard", "ops_observer_state_deadline_check"],
-  OpsObserverDelivery: ["OpsObserverDelivery_guard", "ops_observer_delivery_deadline_check"],
+  OpsObserverDelivery: [
+    "OpsObserverDelivery_guard",
+    "ops_observer_delivery_deadline_check",
+    "ops_observer_delivery_retention_deadline_check",
+  ],
   OpsObserverDeliveryItem: ["OpsObserverDeliveryItem_guard"],
   OpsObserverTransition: [
     "OpsObserverTransition_guard",
@@ -50,6 +58,7 @@ export const EXPECTED_TRIGGER_FUNCTIONS = Object.freeze({
   ops_observer_genesis_deadline_check: "ops_observer_deadline_check",
   ops_observer_state_deadline_check: "ops_observer_deadline_check",
   ops_observer_delivery_deadline_check: "ops_observer_deadline_check",
+  ops_observer_delivery_retention_deadline_check: "ops_observer_retention_deadline_check",
   ops_observer_transition_deadline_check: "ops_observer_deadline_check",
 });
 
@@ -88,6 +97,7 @@ export const EXPECTED_CONSTRAINTS = Object.freeze({
     OpsObserverDelivery_lifecycle_check: "c",
     OpsObserverDelivery_stampStatus_check: "c",
     ops_observer_delivery_deadline_check: "t",
+    ops_observer_delivery_retention_deadline_check: "t",
   },
   OpsObserverDeliveryItem: {
     OpsObserverDeliveryItem_pkey: "p",
