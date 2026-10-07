@@ -613,18 +613,51 @@ ${step}`;
   );
 });
 
-test("on this repository every credentialed job restores only a verified cache", () => {
-  // The separation the cache audit found by reading, as a checked fact. If this
-  // fails, an unverified cache has reached a job holding a write permission or
-  // an external secret, and npm run check:credential-cache-separation fails
-  // with it. .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4.
+test("on this repository no credentialed job restores a cache at all", () => {
+  // Stronger than what the audit found by reading, and it got there in two
+  // steps: P7 took the npm cache off the one job an agent-raised event could
+  // reach, and the owner's §16 decision took it off the other ten. So the
+  // separation this used to measure -- credentialed jobs restoring only a
+  // verified cache -- is now the empty case.
+  // .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4, 4.3, 10.
   const result = analyse(committedWorkflows());
   assert.equal(result.status, "analysed");
   const cacheReasons = result.reasons.filter((reason) => reason.reason === "credential_job_restores_cache");
-  assert.ok(cacheReasons.length > 0, "expected the rule to be exercised");
-  for (const reason of cacheReasons) {
-    assert.deepEqual(reason.cacheKinds, ["verified_package_manager"]);
-  }
+  assert.deepEqual(cacheReasons, []);
+});
+
+test("the verified-kind rule still has teeth, on a workflow built to trip it", () => {
+  // The test above used to assert `cacheReasons.length > 0` so its per-reason
+  // assertion could not pass vacuously. At zero that guard fires on a posture
+  // that improved, so the exercise moves here rather than being deleted: an
+  // unverified cache in a credentialed job must still be reported as such, and
+  // a package manager's own cache must still be read as verified.
+  const credentialed = READ_ONLY_PR.replace("  contents: read", "  contents: write");
+  // Appended to the fixture's existing `steps:` list, which already has one
+  // step -- the string ends after it, so these lines continue the sequence.
+  const withStep = (step) => `${credentialed}${step.map((line) => `      ${line}`).join("\n")}\n`;
+
+  const unverified = analyse([
+    wf(
+      "ci",
+      withStep([
+        "- uses: actions/cache/restore@v5",
+        "  with:",
+        "    path: .next/cache",
+        "    key: ${{ runner.os }}-next-v2-x-abc",
+      ]),
+    ),
+  ]);
+  const unverifiedReasons = unverified.reasons.filter((r) => r.reason === "credential_job_restores_cache");
+  assert.equal(unverifiedReasons.length, 1);
+  assert.deepEqual(unverifiedReasons[0].cacheKinds, ["unverified"]);
+
+  const verified = analyse([
+    wf("ci", withStep(["- uses: actions/setup-node@v6", "  with:", "    node-version: 22", "    cache: npm"])),
+  ]);
+  const verifiedReasons = verified.reasons.filter((r) => r.reason === "credential_job_restores_cache");
+  assert.equal(verifiedReasons.length, 1);
+  assert.deepEqual(verifiedReasons[0].cacheKinds, ["verified_package_manager"]);
 });
 
 test("an ignore list's negation puts back what it ignored, and an unknown one might", () => {
@@ -713,7 +746,39 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // path rule are unchanged. All 11 remaining read `verified_package_manager`,
 // which `npm run check:credential-cache-separation` now holds.
 // .github/audits/actions-cache-poisoning-audit-2026-10-03.md P3 and 4.2.
-const POSTURE_DIGEST = "977c24f3e564";
+//
+// ccf1976a16e4 (2026-10-03): one credentialed job gives up its npm cache, and
+// the posture improved by exactly that one fact. Cache reasons 11 -> 10 and
+// total reasons 14 -> 13; 22 credentialed jobs, 1 path rule, 8 reached
+// workflows and forbidsAll are all unchanged -- the job still holds its
+// credential, it just restores nothing now.
+//
+// It was the only credentialed cache-restoring job in a workflow an event the
+// agent raises reaches, which is the condition docs/policy/engineering-agent.md
+// §5's cache isolation record rests on and which nothing was keeping. Its own
+// `if:` already kept it off an `agent/engineering/` head, but §5 forbids the
+// analyser from reading a job condition to narrow a result, and reading a
+// trigger without its condition is the mistake the audit's F5 made twice. So
+// the owner's decision was to hold the condition as a fact rather than as an
+// exemption. `npm run check:agent-pr-cache-isolation` now keeps it, and this
+// digest is what makes the job taking a cache back visible here as well.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md P7.
+// 5f27d8ac775e (2026-10-04): the remaining ten credentialed jobs give up their
+// npm cache, so cache reasons go 10 -> 0 and total reasons 13 -> 3. The 22
+// credentialed jobs, the 1 path rule, the 8 reached workflows and forbidsAll
+// are all unchanged -- each job still holds its credential and still restores
+// nothing.
+//
+// This is the owner's §16 decision rather than a performance change. The list
+// published by this audit's own first two revisions said which credentialed
+// jobs restore caches; it cannot be recalled, so it is being made stale
+// instead. The cost was measured at zero before the edit: nothing can write a
+// cache in those workflows' scope since `cache-mode: read`, so the restore was
+// already a certain miss -- daily-security-audit run 37162314395 logged "npm
+// cache is not found" and "cache write denied: token has no writable scopes"
+// in one job.
+// .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and 10.
+const POSTURE_DIGEST = "5f27d8ac775e";
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({
@@ -724,8 +789,11 @@ test("on this repository's committed workflows the credential posture is the rev
   assert.equal(result.status, "analysed", JSON.stringify(result.problems ?? []));
   assert.equal(result.forbidsAll, true);
   const reasons = new Set(result.reasons.map((r) => r.reason));
-  assert.ok(reasons.has("credential_job_restores_cache"));
-  assert.ok([...reasons].some((reason) => reason !== "credential_job_restores_cache"));
+  // No longer present, and asserted as absent rather than dropped: the ten
+  // credentialed jobs that asked for an npm cache gave it up (10 below), so a
+  // reason of this kind reappearing means a credentialed job took a cache back.
+  assert.ok(!reasons.has("credential_job_restores_cache"));
+  assert.ok(reasons.size > 0, "the digest must not be computed over no reasons at all");
   assert.ok(result.pathRules.length > 0);
 
   const summary = [

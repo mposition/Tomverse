@@ -640,6 +640,15 @@ fn shape_all_providers(
             "summary": "Cursor account usage is not yet probed by this server",
             "windows": [],
         }),
+        // GitHub Copilot CLI: same shape as Cursor. A Copilot plan is metered
+        // (premium requests), and CopilotAdapter::usage() is honestly Unknown
+        // because no machine-readable quota API is documented for the CLI.
+        json!({
+            "id": "copilot", "label": "GitHub Copilot", "available": true,
+            "measured": false, "n_considered": 0, "metered": true,
+            "summary": "GitHub Copilot usage is not yet probed by this server",
+            "windows": [],
+        }),
     ];
     if let Some(obj) = body.as_object_mut() {
         let measured = providers.iter()
@@ -1869,6 +1878,8 @@ mod tests {
         assert_eq!(provider("devin")["measured"], false);
         assert_eq!(provider("cursor")["metered"], true);
         assert_eq!(provider("cursor")["measured"], false);
+        assert_eq!(provider("copilot")["metered"], true);
+        assert_eq!(provider("copilot")["measured"], false);
         assert_eq!(body["n_considered"], 9);
         let wire = serde_json::to_string(&body).unwrap();
         assert!(!wire.contains("must-never-reach-settings"), "account identity leaked: {wire}");
@@ -1889,7 +1900,7 @@ mod tests {
             },
         );
         let providers = body["providers"].as_array().unwrap();
-        assert_eq!(providers.len(), 6, "claude, codex, gemini, devin, ollama, cursor");
+        assert_eq!(providers.len(), 7, "claude, codex, gemini, devin, ollama, cursor, copilot");
         assert_eq!(providers.iter().filter(|p| p["available"] == false).count(), 3);
         assert_eq!(
             providers.iter().find(|p| p["id"] == "ollama").unwrap()["available"],
