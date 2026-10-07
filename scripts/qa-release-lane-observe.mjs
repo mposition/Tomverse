@@ -95,10 +95,23 @@ const call = async (token, method, path, body) => {
   }
   return { status: response.status, json };
 };
+/**
+ * GitHub's own explanation of a refusal: its message and, for a 422, the
+ * `errors` list naming what it rejected. Strings only, cut short; never a
+ * header or a token.
+ */
+const explain = (json) => {
+  const parts = [typeof json?.message === "string" ? json.message : ""];
+  for (const error of Array.isArray(json?.errors) ? json.errors.slice(0, 5) : []) {
+    parts.push(typeof error === "string" ? error : [error?.resource, error?.field, error?.code, error?.message].filter((v) => typeof v === "string").join(" "));
+  }
+  return parts.filter(Boolean).join(" | ").slice(0, 600);
+};
+
 /** A call that must succeed for the harness itself (not an observation). */
 const must = async (token, method, path, body, ok = [200, 201, 204]) => {
   const answer = await call(token, method, path, body);
-  if (!ok.includes(answer.status)) throw new Error(`${method} ${path} answered ${answer.status}: ${answer.json?.message ?? ""}`);
+  if (!ok.includes(answer.status)) throw new Error(`${method} ${path} answered ${answer.status}: ${explain(answer.json)}`);
   return answer.json;
 };
 const operator = (method, path, body, ok) => must(operatorToken, method, path, body, ok);
@@ -341,7 +354,7 @@ async function observe() {
     results.push({ id, status: answer?.status ?? null, message: typeof answer?.json?.message === "string" ? answer.json.message.slice(0, 200) : null });
   const openPull = async (token, head, base, title) => {
     const answer = await call(token, "POST", "/pulls", { head, base, title, body: "QA-release merge lane S-M0 observation (docs/policy/qa-release-agent.md section 8). Closed by teardown." });
-    if (answer.status !== 201) throw new Error(`opening ${head} -> ${base} answered ${answer.status}: ${answer.json?.message ?? ""}`);
+    if (answer.status !== 201) throw new Error(`opening ${head} -> ${base} answered ${answer.status}: ${explain(answer.json)}`);
     return answer.json;
   };
   const merge = (token, pull) => call(token, "PUT", `/pulls/${pull.number}/merge`, { sha: pull.head.sha, merge_method: "merge" });
