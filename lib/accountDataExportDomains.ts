@@ -632,6 +632,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one orchestrator halt, not customer data. The cleared-by id is the administrator who cleared the halt and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed reason code and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxDecisionMakerSwitchEvent",
+    publicName: "amux_decision_maker_switch_events",
+    prismaModel: "AmuxDecisionMakerSwitchEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker switch change or latch, not customer data. The actor id is the administrator who set the switch and is intentionally not a User foreign key, so account deletion cannot rewrite it; a latch carries no person. The row stores a closed scope, value and reason code and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIdeaFrontierModelApproval",
     publicName: "amux_idea_frontier_model_approvals",
     prismaModel: "AmuxIdeaFrontierModelApproval",

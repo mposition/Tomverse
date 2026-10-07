@@ -310,6 +310,11 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // AMUX Decision Maker switches (docs/policy/amux-decision-maker.md §8,
+    // §10): only off/proposal for an instance and on/off for the kill switch,
+    // each event bound to its own transaction's audit by the right actor and
+    // action, the newest event wins, and nothing is changed or removed.
+    "tests/integration/amux-decision-maker-switch.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

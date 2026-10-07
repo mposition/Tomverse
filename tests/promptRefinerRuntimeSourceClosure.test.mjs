@@ -445,12 +445,18 @@ const compilerOptions = parsedConfig.options;
 // move source positions only; count 228 and position-free digest stay fixed.
 // 2026-10-07, A15 merge: the same 228 computed accesses retain their
 // position-free digest; A13-A15 additions move reviewed source positions.
+// 2026-10-07, AMUX Decision Maker switch store (S1b): three actor names join
+// the existing line of `SYSTEM_AUDIT_ACTORS` in `lib/adminAuditSystemActors.ts`
+// and their array is declared at the end of that file, so none of its
+// accesses moves; the fingerprint record in `lib/marketingAutomationAccess.ts`
+// gains a note above that file's seven accesses, which moves them. No access
+// is added; count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "4949127bfa8cec476f72454d7f1cac71",
-  "2652c8fc9833e5876ff4d8ade648f465",
+  "c2722e4fbc2a062b36d807ccc0a770be",
+  "62cb36833e62ba24ca774b0358040e7f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

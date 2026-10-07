@@ -1299,6 +1299,17 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   단계의 PR이 이 절에 추가합니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
+- **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
+  `lib/amux/decisionMakerSwitchSystemAudit.ts`,
+  `prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql`,
+  `tests/amuxDecisionMakerSwitch.test.mjs`, `tests/integration/amux-decision-maker-switch.db.test.ts`.
+  스위치는 append-only 사건 표이고 scope마다 가장 새 사건이 상태입니다. **값은 DB CHECK가 닫습니다** —
+  인스턴스는 `off`·`proposal`, kill switch는 `on`·`off`뿐이고, 시스템은 인스턴스를 `off`로 latch만
+  합니다. 사건마다 같은 트랜잭션의 감사 행을 trigger가 요구하며, latch 뒤 사람의 첫 변경은
+  `amux.decision.latch_release`입니다. 읽기 실패나 목록 밖의 행은 전부 `null`(fail-closed)이고,
+  `routeDmQuestion()`이 `settings_unreadable`로 운영자에게 보냅니다. 표를 읽고 쓰는 곳은 store
+  하나이며, 시스템 감사는 별도 모듈이 씁니다(한 파일이 두 writer를 부르지 않습니다). route·Admin
+  화면·DM 호출은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

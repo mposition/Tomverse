@@ -545,9 +545,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * The receiver's admission and write path are unchanged.
  * 2026-10-07: A12 portfolio and promotion work extends the watched schema
  * and shared audit helper. The receiver's own admission stays unchanged.
+ * 2026-10-07: the AMUX Decision Maker switch store, per
+ * docs/policy/amux-decision-maker.md §10, adds three system actors to
+ * `lib/adminAuditSystemActors.ts` and its switch events' back relation to
+ * `AdminAuditLog` in the watched schema. The receiver's calls, descriptor and
+ * admission decisions are unchanged; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "1a289ed4ae74b45dc4ad6a07bfe76939d3119db72c7174343cd8d41f462c7044";
+  "890d60ed716ff7cce5f60efa065c4422e13c49479267e38fd54bf7ddb7391ef2";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
