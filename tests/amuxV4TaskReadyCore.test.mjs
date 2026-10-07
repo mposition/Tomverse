@@ -24,6 +24,13 @@ test("a complete approved v4 Task is only observed as ready", () => {
   assert.equal(result.claimAuthorized, false);
 });
 
+test("claim qualification requires unassigned Todo, not a backlog card", () => {
+  const todo = { ...base(), card: { ...base().card, status: "todo" } };
+  assert.equal(evaluateAmuxV4TaskReady(todo, "todo").ready, true);
+  assert.equal(evaluateAmuxV4TaskReady(todo).ready, false);
+  assert.equal(evaluateAmuxV4TaskReady(base(), "todo").ready, false);
+});
+
 test("a Story and a legacy stage-cycle card cannot become ready", () => {
   for (const card of [{ cardType: "story" },
     { sourceSystem: "board-import", cardType: "task" }]) {

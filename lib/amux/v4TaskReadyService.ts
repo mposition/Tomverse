@@ -177,6 +177,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
   tx: Prisma.TransactionClient, taskId: string,
   context: Awaited<ReturnType<typeof loadAmuxV4TaskReadyContext>>,
   expectedActorUserId: string | null,
+  expectedStatus: "backlog" | "todo" = "backlog",
 ) {
     const { ideaId, keys } = context;
     const card = await tx.amuxWorkItem.findUnique({ where: { id: taskId },
@@ -332,7 +333,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
       briefDigest: card.v4BriefDigest,
       parentFeatureNodeId: card.parentFeatureNodeId,
       parentStoryCardId: card.parentStoryCardId,
-      ...evaluateAmuxV4TaskReady(facts) };
+      ...evaluateAmuxV4TaskReady(facts, expectedStatus) };
 }
 
 /** Admin-only, repeatable-read observation. This response is not promotion

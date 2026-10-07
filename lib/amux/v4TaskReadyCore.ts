@@ -25,13 +25,14 @@ export type AmuxV4TaskReadyFacts = {
   orchestratorHalted: boolean;
 };
 
-export function evaluateAmuxV4TaskReady(facts: AmuxV4TaskReadyFacts) {
+export function evaluateAmuxV4TaskReady(facts: AmuxV4TaskReadyFacts,
+  expectedStatus: "backlog" | "todo" = "backlog") {
   const reasons: AmuxV4TaskReadyReason[] = [];
   const { card } = facts;
   if (card.sourceSystem !== "admin-idea-v4" || card.cardType !== "task") {
     reasons.push("not_v4_task");
   }
-  if (card.status !== "backlog" || card.archived) reasons.push("not_backlog");
+  if (card.status !== expectedStatus || card.archived) reasons.push("not_backlog");
   if (card.owner !== null || card.claimed) reasons.push("already_assigned");
   if (!facts.sourceApprovalValid) reasons.push("source_approval_invalid");
   if (!card.briefAndScopeVerified) reasons.push("brief_or_scope_missing");

@@ -46,6 +46,7 @@ const ESCALATION_REASON_CODES = new Set([
   "execution_blocked",
   "attempt_budget_exhausted",
   "execution_lease_expired",
+  "usage_outcome_unknown",
   "operational_cost_blocked",
   "canonical_deadline_review_required",
   // Policy version 15: why the WSL runner blocked an attempt.

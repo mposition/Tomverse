@@ -781,6 +781,9 @@ mod tests {
             r#"{"promoted":false,"reason":"route_budget_exhausted","expired":1}"#,
             r#"{"promoted":false,"reason":"auto_halted","expired":0}"#,
             r#"{"promoted":true,"consumption_id":"7b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","expired":0}"#,
+            r#"{"promoted":true,"policy_version":22,"receipt_id":"7b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","task_id":"TASK-1"}"#,
+            r#"{"promoted":false,"policy_version":22,"reason":"no_candidate"}"#,
+            r#"{"promoted":false,"claimed":true,"policy_version":22,"assignment_id":"7b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d","task_id":"TASK-1","worker_name":"worker-one"}"#,
         ] {
             assert!(matches!(classify_tick(&raw(200, body)), WriteAnswer::Definite(_)), "{body}");
         }
@@ -795,6 +798,9 @@ mod tests {
             (503, r#"{"promoted":false,"reason":"audit_key_missing","expired":0}"#),
             (200, r#"{"promoted":true,"expired":0}"#),
             (200, r#"{"promoted":false,"reason":"no_grant","expired":-1}"#),
+            (200, r#"{"promoted":true,"policy_version":22,"consumption_id":"legacy"}"#),
+            (200, r#"{"promoted":false,"claimed":true,"policy_version":22,"task_id":"TASK-1"}"#),
+            (409, r#"{"promoted":false,"policy_version":22,"reason":"outcome_unknown"}"#),
         ] {
             assert!(
                 matches!(classify_tick(&raw(status, body)), WriteAnswer::Unknown(_)),

@@ -39,6 +39,7 @@ export const AMUX_ORCHESTRATOR_RECEIPT_TARGET_KINDS = [
   "v22_promotion_receipt",
   "v22_promotion_unknown",
   "v22_promotion_halt",
+  "v22_worker_assignment",
   "quota_observation_batch",
 ] as const;
 export type AmuxOrchestratorReceiptTargetKind =
@@ -344,5 +345,6 @@ export const AMUX_ORCHESTRATOR_RECEIPT_TARGET_HREFS: Record<
   v22_promotion_receipt: "/admin/amux-promotion?tab=auto-promotion",
   v22_promotion_unknown: "/admin/amux-promotion?tab=auto-promotion",
   v22_promotion_halt: "/admin/amux-promotion?tab=auto-promotion",
+  v22_worker_assignment: "/admin/amux-execution?tab=assignment",
   quota_observation_batch: null,
 };

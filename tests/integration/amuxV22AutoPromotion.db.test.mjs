@@ -72,7 +72,7 @@ test("v22 Task Todo needs a bound receipt while the legacy lane is unchanged", {
     await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
       SET "status" = 'todo' WHERE "id" = $1`, [taskId]),
     ["AmuxWorkItem_sourced_todo_has_brief_check",
-      "AmuxWorkItem_v4_phase_b_inert_check"]);
+      "AmuxWorkItem_v4_execution_shape_check"]);
 
     await rejects(async () => {
       await db.query(`UPDATE public."AmuxWorkItem"
@@ -81,6 +81,17 @@ test("v22 Task Todo needs a bound receipt while the legacy lane is unchanged", {
       await db.query("SET CONSTRAINTS amux_v22_card_receipt_guard_trigger IMMEDIATE");
     }, ["AmuxV22PromotionReceipt_binding_check",
       "AmuxWorkItem_v22ReceiptId_fkey"]);
+
+    await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
+      SET "owner" = 'worker-one', "claimedAt" = CURRENT_TIMESTAMP
+      WHERE "id" = $1`, [taskId]),
+    ["AmuxWorkItem_v4_execution_shape_check",
+      "AmuxWorkItem_backlog_unowned_check"]);
+    await rejects(() => db.query(`UPDATE public."AmuxWorkItem"
+      SET "status" = 'todo', "owner" = 'worker-one',
+        "claimedAt" = CURRENT_TIMESTAMP, "v22ReceiptId" = $2
+      WHERE "id" = $1`, [taskId, randomUUID()]),
+    ["AmuxWorkItem_v4_execution_shape_check"]);
 
     await db.query(`INSERT INTO public."AmuxWorkItem"
       ("id", "title", "status", "updatedAt")
@@ -91,6 +102,11 @@ test("v22 Task Todo needs a bound receipt while the legacy lane is unchanged", {
     ["AmuxV22Promotion_append_only_check"]);
     await rejects(() => db.query(`DELETE FROM public."AmuxV22PromotionUnknown"
       WHERE false`), ["AmuxV22Promotion_append_only_check"]);
+    await rejects(() => db.query(`UPDATE public."AmuxV22WorkerAssignment"
+      SET "lane" = 'sev1' WHERE false`),
+    ["AmuxV22Assignment_append_only_check"]);
+    await rejects(() => db.query(`DELETE FROM public."AmuxV22LaneDecision"
+      WHERE false`), ["AmuxV22Assignment_append_only_check"]);
   } finally {
     await db.query("ROLLBACK").catch(() => undefined);
     await db.end();

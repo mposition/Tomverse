@@ -56,7 +56,7 @@ test("a score must bind exact version, revision, approval and both freshness clo
   }
 });
 
-test("the legacy scheduler cannot claim a v22 Todo before worker routing ships", () => {
+test("the legacy scheduler never claims a v22 Todo", () => {
   const store = readFileSync("lib/amux/store.ts", "utf8");
   const filter = store.slice(store.indexOf("const legacyDispatchSourceFilter"),
     store.indexOf("/**\n * The global scheduler"));

@@ -11,6 +11,8 @@
  * the local board (`GET` only), links the card whose own message carries the
  * attempt marker, and settles the attempt from that card's terminal status:
  * review or blocked, never done and never back to todo.
+ * v22 assignment-bound deliveries instead use the local one-shot sidecar;
+ * without an exact A14 usage receipt their result is only blocked.
  */
 
 use std::collections::{BTreeMap, HashSet};
@@ -266,12 +268,54 @@ impl LocalExchange {
 #[allow(async_fn_in_trait)]
 pub trait AttemptPrompts {
     async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>>;
+
+    fn v22_delivery(&self, _attempt_id: &str) -> Option<&PulledDelivery> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22SidecarState {
+    InProgress,
+    Succeeded,
+    Failed,
+    OutcomeUnknown,
+    Busy,
+    NotFound,
+    Confirmed,
+}
+
+#[derive(Debug, Clone)]
+pub struct V22SidecarResult {
+    pub state: V22SidecarState,
+    pub usage_receipt: Option<serde_json::Value>,
+    pub usage_receipt_digest: Option<String>,
+    pub result_text: Option<String>,
+    pub result_sha256: Option<String>,
 }
 
 #[allow(async_fn_in_trait)]
 pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
     async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
+
+    async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22(&mut self, _attempt_id: &str) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
+        Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: None, result_sha256: None })
+    }
+
+    async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl AttemptPrompts for BTreeMap<String, String> {
@@ -1056,6 +1100,14 @@ where
         Err(error) => return Err(error),
     };
     let presence = snapshot.presence(worker);
+    if let Some(delivery) = prompts.v22_delivery(attempt_id) {
+        if !presence.is_some_and(|session| session.running) {
+            return Ok(BridgeTickResult::Halted {
+                attempt_id: attempt_id.to_owned(),
+            });
+        }
+        return Ok(dispatch_v22(delivery, local).await);
+    }
     Ok(dispatch_started(
         input,
         presence.map(|_| worker),
@@ -1065,6 +1117,26 @@ where
         local,
     )
     .await)
+}
+
+async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) -> BridgeTickResult {
+    let reply = match local.send_v22(delivery).await {
+        Ok(reply) => reply,
+        Err(_) => match local.readback_v22(&delivery.attempt_id).await {
+            Ok(reply) => reply,
+            Err(_) => return BridgeTickResult::Halted {
+                attempt_id: delivery.attempt_id.clone(),
+            },
+        },
+    };
+    match reply {
+        V22SidecarState::InProgress | V22SidecarState::Succeeded |
+        V22SidecarState::Failed | V22SidecarState::OutcomeUnknown =>
+            BridgeTickResult::Pending { attempt_id: delivery.attempt_id.clone() },
+        V22SidecarState::Busy | V22SidecarState::NotFound |
+        V22SidecarState::Confirmed =>
+            BridgeTickResult::Halted { attempt_id: delivery.attempt_id.clone() },
+    }
 }
 
 async fn dispatch_started<L>(
@@ -1250,9 +1322,136 @@ pub fn interpret_read_back_body(status: u16, body: &serde_json::Value) -> ReadBa
 struct HttpLocal {
     client: reqwest::Client,
     base: String,
+    v22_socket: Option<String>,
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_call(
+    socket_path: &str,
+    payload: serde_json::Value,
+    attempt_id: &str,
+) -> Result<V22SidecarResult> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_attempt_id(attempt_id) {
+        bail!("invalid v22 sidecar endpoint");
+    }
+    let mut request = serde_json::to_vec(&payload)?;
+    request.push(b'\n');
+    if request.len() > 64 * 1024 {
+        bail!("v22 sidecar request exceeds limit");
+    }
+    let operation = async {
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?;
+        stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(327681).read_to_end(&mut response).await?;
+        if response.len() > 327680 {
+            bail!("v22 sidecar response exceeds limit");
+        }
+        let value: serde_json::Value = serde_json::from_slice(&response)?;
+        if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
+            bail!("v22 sidecar attempt mismatch");
+        }
+        let state = match value.get("kind").and_then(|item| item.as_str()) {
+            Some("in_progress") => V22SidecarState::InProgress,
+            Some("succeeded") => V22SidecarState::Succeeded,
+            Some("failed") => V22SidecarState::Failed,
+            Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
+            Some("busy") => V22SidecarState::Busy,
+            Some("not_found") => V22SidecarState::NotFound,
+            Some("confirmed") => V22SidecarState::Confirmed,
+            _ => bail!("invalid v22 sidecar result"),
+        };
+        let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
+        let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+        let result_text = value.get("resultText").and_then(|v| v.as_str());
+        let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
+        if receipt.is_some() != digest.is_some() ||
+            digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
+                b.is_ascii_hexdigit())) ||
+            receipt.is_some() && !matches!(state,
+                V22SidecarState::Succeeded | V22SidecarState::Failed) {
+            bail!("invalid v22 sidecar usage receipt envelope");
+        }
+        if result_text.is_some_and(|text| text.is_empty() ||
+            text.len() > 65_536 || text.contains('\0')) ||
+            result_sha256.is_some_and(|digest| digest.len() != 64 ||
+                !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            result_text.is_some() && result_sha256.is_none() ||
+            result_text.is_some() && state != V22SidecarState::Succeeded {
+            bail!("invalid v22 sidecar result envelope");
+        }
+        Ok(V22SidecarResult { state, usage_receipt: receipt,
+            usage_receipt_digest: digest.map(str::to_owned),
+            result_text: result_text.map(str::to_owned),
+            result_sha256: result_sha256.map(str::to_owned) })
+    };
+    tokio::time::timeout(Duration::from_secs(5), operation)
+        .await.context("v22 sidecar transport timed out")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_call(
+    _socket_path: &str,
+    _payload: serde_json::Value,
+    _attempt_id: &str,
+) -> Result<V22SidecarResult> {
+    bail!("v22 sidecar requires Ubuntu")
 }
 
 impl LocalAmux for HttpLocal {
+    async fn confirm_v22_result(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid v22 result digest");
+        }
+        let answer = v22_sidecar_call(socket, serde_json::json!({
+            "op": "confirm_result", "attemptId": attempt_id,
+            "sourceSha256": sha256,
+        }), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar result not confirmed");
+        }
+        Ok(())
+    }
+
+    async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
+        if delivery.assignment_id.is_none() ||
+            !profile.model_id.starts_with("claude-") ||
+            profile.budget_microusd < 1 || profile.budget_microusd > 5_000_000 ||
+            delivery.prompt.len() > 32 * 1024 {
+            bail!("invalid v22 one-shot delivery");
+        }
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        Ok(v22_sidecar_call(socket, serde_json::json!({
+            "op": "execute", "version": 1,
+            "attemptId": delivery.attempt_id,
+            "worker": delivery.worker,
+            "modelId": profile.model_id,
+            "role": profile.role,
+            "budgetMicrousd": profile.budget_microusd,
+            "prompt": delivery.prompt,
+        }), &delivery.attempt_id).await?.state)
+    }
+
+    async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        Ok(v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await?.state)
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await
+    }
+
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
         if !path.starts_with("/api/sessions/") || !path.ends_with("/send") || path.contains("/api/board") {
             bail!("wsl bridge refused a non-session send");
@@ -1334,6 +1533,11 @@ impl AttemptPrompts for DeliveryPrompts<'_> {
         let prompt = delivery.prompt.clone();
         self.deliveries.push(delivery);
         Ok(Some(prompt))
+    }
+
+    fn v22_delivery(&self, attempt_id: &str) -> Option<&PulledDelivery> {
+        self.deliveries.iter().find(|delivery| delivery.attempt_id == attempt_id
+            && delivery.assignment_id.is_some())
     }
 }
 
@@ -1441,6 +1645,7 @@ pub async fn run_from_env() -> i32 {
     let mut local = HttpLocal {
         client: client.clone(),
         base: base.clone(),
+        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
     };
     let mut reserved = Vec::new();
     let mut pending: Vec<PendingExecution> = Vec::new();
@@ -1636,7 +1841,30 @@ pub async fn run_from_env() -> i32 {
             let mut board: Option<Vec<LocalCardSummary>> = None;
             let mut still_running = Vec::new();
             for mut entry in pending.drain(..) {
-                match local_completion(&client, &base, &mut board, &mut entry, now).await {
+                let v22_result = if entry.delivery.assignment_id.is_some() {
+                    local.readback_v22_result(&entry.delivery.attempt_id).await.ok()
+                } else { None };
+                let completion = if entry.delivery.assignment_id.is_some() {
+                    match v22_result.as_ref().map(|result| result.state) {
+                        Some(V22SidecarState::InProgress) => LocalCompletion::Running,
+                        Some(V22SidecarState::Succeeded | V22SidecarState::Failed |
+                            V22SidecarState::OutcomeUnknown) => LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_usage_receipt_missing",
+                                review_pr_number: None,
+                            },
+                        _ if now.saturating_sub(entry.sent_at) >= 15 * 60 =>
+                            LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_sidecar_outcome_unknown",
+                                review_pr_number: None,
+                            },
+                        _ => LocalCompletion::LookupFailed,
+                    }
+                } else {
+                    local_completion(&client, &base, &mut board, &mut entry, now).await
+                };
+                match completion {
                     LocalCompletion::Running | LocalCompletion::LookupFailed => {
                         still_running.push(entry)
                     }
@@ -1651,8 +1879,77 @@ pub async fn run_from_env() -> i32 {
                             still_running.push(entry);
                             continue;
                         };
-                        let settled = api
-                            .execution_settle_with_review_pr(
+                        let settled = if entry.delivery.assignment_id.is_some() {
+                            let verified = v22_result.as_ref().and_then(|result| {
+                                let outcome = match result.state {
+                                    V22SidecarState::Succeeded => "succeeded",
+                                    V22SidecarState::Failed => "failed",
+                                    _ => return None,
+                                };
+                                Some((result.usage_receipt.as_ref()?,
+                                    result.usage_receipt_digest.as_deref()?, outcome))
+                            });
+                            if let Some((receipt, digest, outcome)) = verified {
+                                let result_record = if outcome == "succeeded" {
+                                    match v22_result.as_ref().and_then(|result|
+                                        result.result_sha256.as_deref()) {
+                                        Some(sha256) => match v22_result.as_ref().and_then(
+                                            |result| result.result_text.as_deref()) {
+                                            Some(text) => api.v22_task_result_record_once(
+                                                &entry.delivery.attempt_id,
+                                                &entry.delivery.worker, text, sha256).await,
+                                            None => api.v22_task_result_readback(
+                                                &entry.delivery.attempt_id, sha256).await,
+                                        },
+                                        None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                    }
+                                } else {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                };
+                                match result_record {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                        if outcome == "succeeded" {
+                                            if let Some(sha256) = v22_result.as_ref().and_then(
+                                                |result| result.result_sha256.as_deref()) {
+                                                let _ = local.confirm_v22_result(
+                                                    &entry.delivery.attempt_id, sha256).await;
+                                            }
+                                        }
+                                        match api.v22_cli_usage_record_once(
+                                            &entry.delivery.attempt_id, receipt, digest).await {
+                                            Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                                let answer = api.v22_execution_settle_verified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation, outcome).await;
+                                                match answer {
+                                                    Ok(ref refused) if !refused.settled &&
+                                                        matches!(refused.reason.as_deref(),
+                                                            Some("usage_unverified" | "result_unverified")) =>
+                                                        api.v22_execution_settle_unverified(
+                                                            &entry.delivery, &session.instance_id,
+                                                            session.generation).await,
+                                                    other => other,
+                                                }
+                                            }
+                                            Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                                api.v22_execution_settle_unverified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation).await,
+                                            Err(error) => Err(error),
+                                        }
+                                    },
+                                    Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                        api.v22_execution_settle_unverified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation).await,
+                                    Err(error) => Err(error),
+                                }
+                            } else {
+                                api.v22_execution_settle_unverified(&entry.delivery,
+                                    &session.instance_id, session.generation).await
+                            }
+                        } else {
+                            api.execution_settle_with_review_pr(
                                 &entry.delivery.attempt_id,
                                 &entry.delivery.worker,
                                 &session.instance_id,
@@ -1664,9 +1961,8 @@ pub async fn run_from_env() -> i32 {
                                 // A review always names the field, null when the
                                 // card cites no PR, so an earlier PR is cleared.
                                 (to_status == "review").then_some(review_pr_number),
-                            )
-                            .await
-                            .map(|response| response.settled);
+                            ).await
+                        }.map(|response| response.settled);
                         let result = plan_settle_answer(&settled);
                         if result == SettleResult::HaltForReadBack {
                             eprintln!(
@@ -2811,6 +3107,8 @@ mod tests {
     fn pulled_delivery() -> PulledDelivery {
         PulledDelivery {
             attempt_id: ATTEMPT_ID.into(),
+            assignment_id: None,
+            v22_execution: None,
             task_id: "TASK-1".into(),
             worker: "claude-impl".into(),
             task_revision: 3,
@@ -2818,6 +3116,70 @@ mod tests {
             receipt_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d".into(),
             lease_expires_at: "2026-09-30T00:01:30.000Z".into(),
         }
+    }
+
+    struct SidecarOnlyLocal {
+        sidecar_sends: usize,
+    }
+
+    impl LocalAmux for SidecarOnlyLocal {
+        async fn send(&mut self, _path: &str, _body: &LocalDispatchBody) -> Result<SendReply> {
+            bail!("v22 must never reach the interactive session")
+        }
+
+        async fn read_back(&mut self, _session_name: &str, _attempt_id: &str) -> Result<ReadBack> {
+            bail!("v22 must never read an interactive card")
+        }
+
+        async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+            self.sidecar_sends += 1;
+            Ok(V22SidecarState::InProgress)
+        }
+    }
+
+    #[tokio::test]
+    async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
+        let mut local = SidecarOnlyLocal { sidecar_sends: 0 };
+        let mut delivery = pulled_delivery();
+        delivery.assignment_id = Some(Uuid::new_v4().to_string());
+        delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
+            model_id: "claude-opus-5-5".into(), role: "design".into(),
+            budget_microusd: 1_000_000,
+        });
+        assert!(matches!(dispatch_v22(&delivery, &mut local).await,
+            BridgeTickResult::Pending { .. }));
+        assert_eq!(local.sidecar_sends, 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn v22_socket_exchanges_one_bounded_request_and_result() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let socket_path = root.path().join("worker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let response_attempt = ATTEMPT_ID.to_owned();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            socket.read_to_end(&mut request).await.unwrap();
+            let wire: serde_json::Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(wire["op"], "readback");
+            assert_eq!(wire["attemptId"], response_attempt);
+            let response = serde_json::json!({
+                "kind": "succeeded", "attemptId": response_attempt,
+                "usageReceipt": {"invocationId": response_attempt},
+                "usageReceiptDigest": "a".repeat(64),
+            });
+            socket.write_all(format!("{response}\n").as_bytes()).await.unwrap();
+        });
+        let result = v22_sidecar_call(socket_path.to_str().unwrap(),
+            serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
+            ATTEMPT_ID).await.unwrap();
+        assert_eq!(result.state, V22SidecarState::Succeeded);
+        assert_eq!(result.usage_receipt.unwrap()["invocationId"], ATTEMPT_ID);
+        assert_eq!(result.usage_receipt_digest.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        server.await.unwrap();
     }
 
     #[tokio::test]
