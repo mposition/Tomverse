@@ -625,9 +625,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
   },
   {
     // A shell: a pixel office for the eight agent teams that plays a demo day
-    // and links each team to the page that holds its record. It reads no
-    // agent state and writes nothing, so it carries no badge and no
-    // writeRoles.
+    // and links each team to the page that holds its record. A LIVE room reads
+    // that team's operating state, read only; nothing on the page writes, so
+    // it carries no badge and no writeRoles.
     id: "office",
     label: "Agent office",
     href: "/admin/office",

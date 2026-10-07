@@ -414,6 +414,7 @@ function LiveView({
           <span className={cx("lc on-duty")}>{m.live.onDuty(onDuty)}</span>
           <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
           <span className={cx("lc working")}>{m.live.working(snap.stats.working)}</span>
+          <span className={cx("lc attention")}>{m.live.attention(snap.stats.attention)}</span>
           <span className={cx("lc blocked")}>{m.live.blocked(snap.stats.blocked)}</span>
         </div>
       </section>
@@ -690,7 +691,7 @@ function ProfileModal({
           </div>
           <div className={cx("report-box")}>
             <span className={cx("tiny-label")}>{m.profile.lastWord}</span>
-            <strong>{agent.speech ?? agent.thoughts[0]}</strong>
+            <strong>{agent.speech ?? live?.line ?? agent.thoughts[0]}</strong>
           </div>
           {live ? (
             <div className={cx("live-box")} data-testid="agent-office-profile-live">
@@ -771,6 +772,12 @@ function BriefingModal({
               <li>
                 <span className={cx("dot green")} />
                 {m.briefing.approved}
+              </li>
+            ) : null}
+            {snap.stats.attention > 0 ? (
+              <li>
+                <span className={cx("dot yellow")} />
+                {m.briefing.attention(snap.stats.attention)}
               </li>
             ) : null}
             <li>
@@ -873,8 +880,13 @@ function DashboardView({
         </article>
         <article className={cx("metric lav")}>
           <span>{m.dashboard.metricApproval}</span>
-          <strong>{snap.stats.approval + snap.stats.attention}</strong>
+          <strong>{snap.stats.approval}</strong>
           <small>{m.dashboard.stampApproval}</small>
+        </article>
+        <article className={cx("metric pink")}>
+          <span>{m.dashboard.metricAttention}</span>
+          <strong>{snap.stats.attention}</strong>
+          <small>{m.dashboard.stampAttention}</small>
         </article>
         <article className={cx("metric white")}>
           <span>{m.dashboard.metricBlocked}</span>
@@ -1056,6 +1068,12 @@ function DashboardView({
                     <span className={cx("dot", snap.approvalPending ? "yellow" : "green")} />
                     {snap.approvalPending ? m.dashboard.briefApprovalNeeded : m.dashboard.briefNoApproval}
                   </li>
+                  {snap.stats.attention > 0 ? (
+                    <li>
+                      <span className={cx("dot yellow")} />
+                      {m.dashboard.briefAttention(snap.stats.attention)}
+                    </li>
+                  ) : null}
                   <li>
                     <span className={cx("dot gray")} />
                     {m.dashboard.briefBlocked}

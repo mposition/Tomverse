@@ -110,9 +110,10 @@ The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record, and a team with no such page
 is drawn as waiting on a link instead of being given a status. A LIVE room
 reads that team's operating state on the server and the demo leaves it
-alone: for product research, the app switch, today's slot (recorded, failed,
-or not yet, and whether its window is open), the newest success and the
-agent's own silence verdict, all in UTC -- never its observations, which
+alone: for product research, the app switch, the latest scheduled slot
+(recorded, failed, or not yet, and whether its window is open), the newest
+success and the agent's own silence verdict, all in UTC -- never its
+observations, which
 `docs/policy/product-research-agent.md §4` and
 `docs/policy/product-research-agent.md §8` keep to its own section.
 That read is read-only (it looks the silence anchor up rather than creating

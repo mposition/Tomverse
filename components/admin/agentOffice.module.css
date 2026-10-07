@@ -112,7 +112,7 @@
 .text-button { min-height: 42px; border: 0; background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .trust-copy { color: var(--ink-faint); font-size: 11px; line-height: 1.5; text-align: center; }
 
-.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
+.summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
 .metric {
   position: relative;
   display: grid;
@@ -456,6 +456,7 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .lc.on-duty { background: var(--yellow); }
 .lc.done { background: var(--mint); }
 .lc.working { background: var(--pink); color: #fff; }
+.lc.attention { background: #ffd1e5; }
 .lc.blocked { background: var(--lav); }
 
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
@@ -924,7 +925,6 @@ a.integration-row:hover { border-color: var(--pink-deep); }
   .office-title { font-size: 27px; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .metric { min-height: 88px; }
-  .metric:last-child { grid-column: 1 / -1; }
   .side-stack { grid-template-columns: 1fr; }
   .team-grid { grid-template-columns: 1fr; }
   .section-heading { display: grid; }
