@@ -8,6 +8,7 @@ import { amuxV22ClaimCapacity, amuxV22RequiredTool, amuxV22WorkerClaimEnabled,
   "../lib/amux/v22WorkerClaimCore.ts";
 import { v22PromotionTickWire, v22WorkerClaimTickWire } from
   "../lib/amux/v22TickWire.ts";
+import { autoTickHttpStatus } from "../lib/amux/autoPromotionCore.ts";
 import { parseAmuxV22OneShotRequest } from
   "../lib/amux/v22OneShotSidecar.mjs";
 
@@ -103,6 +104,13 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
   assert.match(route, /status: result\.promoted \? 200 : autoTickHttpStatus\(result\.reason\)/);
   assert.match(route, /reason: "apply_disabled", expired: 0/);
   assert.doesNotMatch(route, /orchestrator_identity_required/);
+  for (const [reason, status] of [
+    ["no_candidate", 200], ["auto_halted", 200],
+    ["apply_disabled", 409], ["outcome_unknown", 409],
+    ["audit_key_missing", 503], ["audit_unbound", 500],
+  ]) {
+    assert.equal(autoTickHttpStatus(reason), status, reason);
+  }
 });
 
 test("assigned v4 Todo stays out of the legacy owned queue and execution start", () => {
