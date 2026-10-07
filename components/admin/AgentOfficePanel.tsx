@@ -310,7 +310,13 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
         />
       ) : null}
       {briefing ? (
-        <BriefingModal m={m} narrator={engine.deptLead.digest} snap={snap} onClose={() => setBriefing(false)} />
+        <BriefingModal
+          m={m}
+          narrator={engine.deptLead.digest}
+          snap={snap}
+          engineeringLive={engine.liveDept("engineering") !== null}
+          onClose={() => setBriefing(false)}
+        />
       ) : null}
       <div className={cx("toast", toast && "show")} role="status">
         {toast}
@@ -418,9 +424,9 @@ function LiveView({
               className={cx("skip", snap.turbo && "on")}
               onClick={() => engine.skipToDecision()}
               disabled={!snap.running || snap.approvalPending}
-              title={m.live.skipHint}
+              title={engineeringLive ? m.live.skipToEndHint : m.live.skipHint}
             >
-              {snap.turbo ? m.live.skipping : m.live.skip}
+              {snap.turbo ? m.live.skipping : engineeringLive ? m.live.skipToEnd : m.live.skip}
             </button>
           </div>
         </div>
@@ -768,11 +774,14 @@ function BriefingModal({
   m,
   narrator,
   snap,
+  engineeringLive,
   onClose,
 }: {
   m: OfficeCopy;
   narrator: StaffSeed | undefined;
   snap: Snapshot;
+  /** Engineering reads its real record: its decisions are made on its own screen. */
+  engineeringLive: boolean;
   onClose: () => void;
 }) {
   const okRef = useRef<HTMLButtonElement | null>(null);
@@ -820,7 +829,12 @@ function BriefingModal({
           </ul>
           <div className={cx("decision-box")}>
             <span className={cx("tiny-label")}>{m.briefing.decisionLabel}</span>
-            <strong>{m.briefing.decisionNone}</strong>
+            <strong>{engineeringLive ? m.dashboard.decisionLive : m.briefing.decisionNone}</strong>
+            {engineeringLive && ENGINEERING_RECORD_HREF ? (
+              <Link href={ENGINEERING_RECORD_HREF} onClick={onClose}>
+                {m.approval.liveLink}
+              </Link>
+            ) : null}
           </div>
           <button ref={okRef} type="button" className={cx("btn btn-primary")} onClick={onClose}>
             {m.briefing.ok}
@@ -950,11 +964,18 @@ function DashboardView({
               <div className={cx("flow-list")}>
                 {m.phases.slice(PHASE.arrival, PHASE.dayOver).map((item, index) => {
                   const phase = index + PHASE.arrival;
+                  // A phase a live room replaces is not played, so it is never ticked.
+                  const skipped = snap.skippedPhases.includes(phase);
                   return (
-                    <div className={cx("flow-row", snap.phaseIndex > phase && "past")} key={item}>
+                    <div className={cx("flow-row", snap.phaseIndex > phase && !skipped && "past")} key={item}>
                       <span>{String(index + 1).padStart(2, "0")}</span>
-                      <b>{item}</b>
-                      <i aria-hidden="true">{snap.phaseIndex === phase ? "●" : snap.phaseIndex > phase ? "✓" : "·"}</i>
+                      <b>
+                        {item}
+                        {skipped ? <em className={cx("live-chip")}>{m.dashboard.phaseSkipped}</em> : null}
+                      </b>
+                      <i aria-hidden="true">
+                        {skipped ? "–" : snap.phaseIndex === phase ? "●" : snap.phaseIndex > phase ? "✓" : "·"}
+                      </i>
                     </div>
                   );
                 })}

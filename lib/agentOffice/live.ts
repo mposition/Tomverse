@@ -94,8 +94,20 @@ export type AgentOfficeEngineeringState =
       /** Open items waiting for a person (policy §12). */
       pending: { t2Draft: number; decision: number; stateMismatch: number };
       activeRuns: number;
-      /** The newest run, by start: its status and outcome enums and its times (UTC ISO). */
-      lastRun: { status: string; outcome: string | null; startedAt: string; endedAt: string | null } | null;
+      /** When the earliest run still in progress started (UTC ISO), or null when none is. */
+      activeSince: string | null;
+      /**
+       * The newest run that ended, by its end: status and outcome enums, its
+       * times (UTC ISO), and whether it needs a look -- anything the agent's
+       * own settlement did not hand to a person as a result.
+       */
+      lastRun: {
+        status: string;
+        outcome: string | null;
+        startedAt: string;
+        endedAt: string;
+        needsLook: boolean;
+      } | null;
       runnerLastFinishAt: string | null;
       publisherLastFinishAt: string | null;
     };
@@ -298,14 +310,15 @@ const pendingTotal = (pending: { t2Draft: number; decision: number; stateMismatc
   pending.t2Draft + pending.decision + pending.stateMismatch;
 
 /**
- * The engineering room's colour, from the agent's own verdicts. A halt and a
- * decision waiting for a person need a look -- and come first, because a
- * switched-off agent can still hold both; an agent switched off, killed or
- * frozen is waiting; a run in progress is working; otherwise the room is clear.
+ * The engineering room's colour, from the agent's own verdicts. A halt, a
+ * decision waiting for a person and a latest run that needs a look come
+ * first, because a switched-off agent can still hold all three; an agent
+ * switched off, killed or frozen is waiting; a run in progress is working;
+ * otherwise the room is clear.
  */
 export function engineeringTone(state: AgentOfficeEngineeringState): DeptStatus {
   if (state.kind === "unread") return "attention";
-  if (state.halt !== "none" || pendingTotal(state.pending) > 0) return "attention";
+  if (state.halt !== "none" || pendingTotal(state.pending) > 0 || state.lastRun?.needsLook) return "attention";
   if (state.killSwitch || state.mode === "off" || state.frozen) return "waiting";
   if (state.activeRuns > 0) return "working";
   return state.lastRun ? "done" : "waiting";
@@ -315,6 +328,7 @@ type EngineeringCopy = {
   badges: {
     halted: string;
     decisions: string;
+    lastRunLook: string;
     killSwitch: string;
     off: string;
     frozen: string;
@@ -331,6 +345,7 @@ type EngineeringCopy = {
   off: string;
   frozen: string;
   running: (time: string) => string;
+  runningMany: (count: number, time: string) => string;
   lastRun: (result: string, time: string) => string;
   noRun: string;
   mode: (mode: string) => string;
@@ -354,32 +369,37 @@ export function engineeringLiveDept(
 
   const waiting = pendingTotal(state.pending);
   const last = state.lastRun;
-  const lastLine = last
-    ? copy.lastRun(last.outcome ?? last.status, utcStamp(last.endedAt ?? last.startedAt))
-    : copy.noRun;
+  const lastLine = last ? copy.lastRun(last.outcome ?? last.status, utcStamp(last.endedAt)) : copy.noRun;
+  const since = state.activeSince ? utcStamp(state.activeSince) : "—";
 
   const [badge, line]: [string, string] =
     state.halt !== "none"
       ? [copy.badges.halted, copy.halt(copy.halts[state.halt])]
       : waiting > 0
         ? [copy.badges.decisions, copy.decisions(waiting)]
-        : state.killSwitch
-          ? [copy.badges.killSwitch, copy.killSwitch]
-          : state.mode === "off"
-            ? [copy.badges.off, copy.off]
-            : state.frozen
-              ? [copy.badges.frozen, copy.frozen]
-              : state.activeRuns > 0
-                ? [copy.badges.running, last ? copy.running(utcStamp(last.startedAt)) : lastLine]
-                : last
-                  ? [copy.badges.clear, lastLine]
-                  : [copy.badges.noRun, copy.noRun];
+        : last?.needsLook
+          ? [copy.badges.lastRunLook, lastLine]
+          : state.killSwitch
+            ? [copy.badges.killSwitch, copy.killSwitch]
+            : state.mode === "off"
+              ? [copy.badges.off, copy.off]
+              : state.frozen
+                ? [copy.badges.frozen, copy.frozen]
+                : state.activeRuns > 0
+                  ? [
+                      copy.badges.running,
+                      state.activeRuns === 1 ? copy.running(since) : copy.runningMany(state.activeRuns, since),
+                    ]
+                  : last
+                    ? [copy.badges.clear, lastLine]
+                    : [copy.badges.noRun, copy.noRun];
 
   const facts = [copy.mode(state.mode)];
   if (waiting > 0) facts.push(copy.pending(state.pending.t2Draft, state.pending.decision, state.pending.stateMismatch));
-  // The newest run is named once: in the line when the room is clear or
-  // running, otherwise here.
-  if (line !== lastLine && badge !== copy.badges.running) facts.push(lastLine);
+  // The latest ended run is named once: in the line when the room is clear or
+  // it needs a look, otherwise here -- including beside runs in progress,
+  // which are other runs than it.
+  if (last && line !== lastLine) facts.push(lastLine);
   facts.push(
     state.runnerLastFinishAt ? copy.runnerFinish(utcStamp(state.runnerLastFinishAt)) : copy.runnerNever,
     state.publisherLastFinishAt ? copy.publisherFinish(utcStamp(state.publisherLastFinishAt)) : copy.publisherNever,

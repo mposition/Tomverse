@@ -120,13 +120,13 @@ async function readQa(): Promise<AgentOfficeQaState> {
 
 /**
  * Engineering: the switch settings, the agent's own halt reading, open owner
- * items counted by kind, active runs, and the newest run's status, outcome and
- * times. No patch body, reason, cause key or card is selected: the office says
+ * items counted by kind, how many runs are in progress and since when, and the
+ * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
  * how the agent stands, never what it worked on (docs/policy/engineering-agent.md §11).
  */
 async function readEngineering(): Promise<AgentOfficeEngineeringState> {
   try {
-    const [settings, haltState, owner, activeRuns, lastRun] = await Promise.all([
+    const [settings, haltState, owner, active, lastRun] = await Promise.all([
       prisma.appSetting.findMany({
         where: { key: { in: AGENT_OFFICE_ENGINEERING_SETTING_KEYS } },
         select: { key: true, value: true },
@@ -137,9 +137,16 @@ async function readEngineering(): Promise<AgentOfficeEngineeringState> {
         where: { kind: { in: [...OWNER_ITEM_KINDS] }, state: "open" },
         _count: { _all: true },
       }),
-      prisma.engineeringAgentRun.count({ where: { status: "active" } }),
+      prisma.engineeringAgentRun.aggregate({
+        where: { status: "active" },
+        _count: { _all: true },
+        _min: { startedAt: true },
+      }),
+      // Ended runs only, by their end: with two runs at once, the newest to
+      // start is not the one that last finished.
       prisma.engineeringAgentRun.findFirst({
-        orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+        where: { status: { in: ["finished", "abandoned"] }, endedAt: { not: null } },
+        orderBy: [{ endedAt: "desc" }, { id: "desc" }],
         select: { status: true, outcome: true, startedAt: true, endedAt: true },
       }),
     ]);
@@ -148,7 +155,7 @@ async function readEngineering(): Promise<AgentOfficeEngineeringState> {
       killSwitch: process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV],
       halt: currentEngineeringAgentHalt(haltState),
       openOwnerItems: owner.map((row) => ({ kind: row.kind, count: row._count._all })),
-      activeRuns,
+      active: { count: active._count._all, since: active._min.startedAt },
       lastRun,
     });
   } catch {

@@ -175,6 +175,8 @@ export type Snapshot = {
   dayComplete: boolean;
   phase: string;
   phaseIndex: number;
+  /** Phases a live room replaces; they are neither played nor shown as done. */
+  skippedPhases: number[];
   approvalPending: boolean;
   approved: boolean;
   briefingReady: boolean;
@@ -594,7 +596,7 @@ export class AgentOffice {
     this.goto(narrator, OPERATOR_REPORT_SPOT, "reporting");
     this.enqueue(narrator, { k: "face", dir: "up" });
     yield this.allFree([narrator]);
-    this.say(narrator, s.briefSay, 3.2);
+    this.say(narrator, this.isLive("engineering") ? s.briefSayLive : s.briefSay, 3.2);
     this.say(operator, s.briefOperator, 2.6);
     this.briefingReady = true;
     this.onBriefing?.();
@@ -701,6 +703,11 @@ export class AgentOffice {
     this.startDept("qa", s.ciLabel, 7);
     yield () => this.deptStatus.engineering === "done" && (qaLive || this.deptStatus.qa === "done");
     this.pushLog("🧪", s.prLog, "mint");
+  }
+
+  /** The demo phases a live room replaces: engineering's draft, approval and PR scenes. */
+  skippedPhases(): number[] {
+    return this.isLive("engineering") ? [PHASE.draftSummary, PHASE.approval, PHASE.prPrep] : [];
   }
 
   private isLive(deptId: string) {
@@ -929,7 +936,8 @@ export class AgentOffice {
       this.pushChat("staff", this.narratorName(), s.notStarted);
       return;
     }
-    const working = this.workingDepts();
+    // A live room's work is its record's, not a demo progress figure.
+    const working = this.workingDepts().filter((dept) => !this.isLive(dept));
     const lines: string[] = [s.statusPhase(this.clockText(), this.phaseName(this.phaseIndex))];
 
     if (working.length) {
@@ -947,10 +955,17 @@ export class AgentOffice {
     } else {
       lines.push(s.statusGap);
     }
+    for (const dept of this.workingDepts()) {
+      const live = this.live[dept];
+      if (live) lines.push(`${this.roomName(dept)}: ${live.line}`);
+    }
 
     const stats = this.snapshot().stats;
     lines.push(s.statusCounts(stats.done, stats.attention, stats.blocked, this.onDutyCount()));
-    const next = this.copy.phases[this.phaseIndex + 1];
+    const skipped = this.skippedPhases();
+    let nextIndex = this.phaseIndex + 1;
+    while (skipped.includes(nextIndex)) nextIndex += 1;
+    const next = this.copy.phases[nextIndex];
     if (next && !this.dayComplete) lines.push(s.statusNext(next));
 
     this.pushChat("staff", this.narratorName(), lines.join("\n"));
@@ -1257,7 +1272,7 @@ export class AgentOffice {
     if (!this.running || this.approvalPending || this.dayComplete) return;
     this.turbo = true;
     this.paused = false;
-    this.pushLog("⏭", this.copy.sim.skipLog, "yellow");
+    this.pushLog("⏭", this.isLive("engineering") ? this.copy.sim.skipLogDayEnd : this.copy.sim.skipLog, "yellow");
   }
 
   // ── Tick ───────────────────────────────────────────────────
@@ -1492,6 +1507,7 @@ export class AgentOffice {
           ? this.copy.phaseApproved
           : this.phaseName(this.phaseIndex),
       phaseIndex: this.phaseIndex,
+      skippedPhases: this.skippedPhases(),
       approvalPending: this.approvalPending,
       approved: this.approved,
       briefingReady: this.briefingReady,
