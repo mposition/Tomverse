@@ -6,6 +6,12 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
+import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
+  rollupAmuxTaskFeedback } from
+  "./v22TaskFeedbackCore.ts";
+import { AMUX_V22_OUTCOME_ACTION, AMUX_V22_OUTCOME_TARGET,
+  AMUX_V22_OUTCOME_WRITE_ENV, amuxV22OutcomeWriteEnabled,
+  readAmuxV22ObservationMetadata } from "./v22OutcomeObservationCore.ts";
 import { normalizeAmuxUntrustedReason,
   storedAmuxEscalationReasonCode } from "./escalation.ts";
 import {
@@ -24,6 +30,7 @@ const cardSelect = {
   v22AssignmentId: true, executionBriefDigest: true, v4BriefDigest: true,
   v4TitleCiphertext: true, v4TitleKeyId: true, v4TitleKeyVersion: true,
   v4TitleDigest: true, v4TitleDigestKeyId: true, updatedAt: true,
+  v4SourceApprovalId: true,
   archivedAt: true, revision: true,
   v22AcceptedAssignment: { select: { workerName: true, lane: true,
     assignedAt: true } },
@@ -85,7 +92,8 @@ async function cardSummaries(rows: CardRow[]) {
     ` : [],
     storyIds.length ? prisma.amuxWorkItem.groupBy({
       by: ["parentStoryCardId", "status"],
-      where: { parentStoryCardId: { in: storyIds }, cardType: "task" },
+      where: { parentStoryCardId: { in: storyIds }, cardType: "task",
+        archivedAt: null },
       _count: { _all: true },
     }) : [],
   ]);
@@ -259,6 +267,7 @@ async function nodeIndicators(rows: NodeRow[]) {
       FROM descendants d
       LEFT JOIN "AmuxWorkItem" card ON card."parentFeatureNodeId" = d."id"
         AND card."cardType" = 'task'
+        AND card."archivedAt" IS NULL
       GROUP BY d."rootId"
     `,
   ]);
@@ -346,6 +355,7 @@ export async function readAmuxExecutionHierarchy(parent: AmuxHierarchyParent,
 export async function readAmuxExecutionTaskDetail(taskId: string) {
   const card = await prisma.amuxWorkItem.findUnique({ where: { id: taskId },
     select: { ...cardSelect, description: true, executionBrief: true,
+      createdAt: true, effortPoints: true, estimatedCostMicrousd: true,
       v4BodyCiphertext: true, v4BodyKeyId: true, v4BodyKeyVersion: true,
       v4BodyDigest: true, v4BodyDigestKeyId: true,
       v4BriefCiphertext: true, v4BriefKeyId: true, v4BriefKeyVersion: true,
@@ -377,7 +387,8 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     } });
   if (!card) return null;
   const [summary] = await cardSummaries([card]);
-  const [usage, reviews, result] = await Promise.all([
+  const [usage, reviews, result, feedbackAttempts, feedbackUsage, feedbackDecisions,
+    feedbackObservations, sourceApproval] = await Promise.all([
     prisma.amuxCliUsageEvent.findMany({ where: { taskId },
       orderBy: { createdAt: "desc" }, take: 20,
       select: { id: true, attemptId: true, provider: true,
@@ -392,6 +403,30 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         reviewDiffDigest: true, issuedAt: true } }),
     card.sourceSystem === "admin-idea-v4" ?
       readAmuxV22TaskResultForOwner(taskId).catch(() => null) :
+      Promise.resolve(null),
+    card.cardType === "task" ? prisma.amuxExecutionAttempt.findMany({
+      where: { taskId }, select: { id: true, startedAt: true, endedAt: true,
+        outcome: true, settledCostMicrousd: true, costConfirmed: true },
+    }) : [],
+    card.cardType === "task" ? prisma.amuxCliUsageEvent.findMany({
+      where: { taskId }, select: { attemptId: true, completeness: true,
+        inputTokens: true, outputTokens: true, cacheReadInputTokens: true,
+        cacheCreationInputTokens: true, projectedApiCostMicrousd: true,
+        actualApiCostMicrousd: true },
+    }) : [],
+    card.cardType === "task" ? prisma.amuxReviewDecision.findMany({
+      where: { proposal: { taskId } }, select: { id: true, outcome: true,
+        decidedAt: true, proposal: { select: { taskRevision: true } } },
+      orderBy: [{ decidedAt: "desc" }, { id: "desc" }],
+    }) : [],
+    card.cardType === "task" ? prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_V22_OUTCOME_ACTION, targetType: AMUX_V22_OUTCOME_TARGET,
+      targetId: taskId, actorUserId: { not: null },
+    }, select: { metadata: true } }) : [],
+    card.cardType === "task" && card.v4SourceApprovalId ?
+      prisma.amuxIdeaUnitDecision.findUnique({ where: {
+        id: card.v4SourceApprovalId }, select: { state: true, action: true,
+        registeredWorkItemId: true, confirmationSnapshot: true } }) :
       Promise.resolve(null),
   ]);
   let body: string | null = card.description;
@@ -424,7 +459,32 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         card.v4BriefKeyVersion, card.v4BriefDigest, card.v4BriefDigestKeyId),
     ]);
   }
+  const currentDecision = feedbackDecisions.find((decision) =>
+    decision.proposal.taskRevision + 1 === card.revision);
   return { ...summary, revision: card.revision, body, brief,
+    outcomeWriteEnabled: amuxV22OutcomeWriteEnabled(
+      process.env[AMUX_V22_OUTCOME_WRITE_ENV]) &&
+      card.sourceSystem === "admin-idea-v4" &&
+      ((currentDecision?.outcome === "approve" && card.status === "done") ||
+        (currentDecision?.outcome === "retry" && card.status === "todo") ||
+        (currentDecision?.outcome === "block" && card.status === "blocked")),
+    feedback: card.cardType === "task" ? projectAmuxTaskFeedback({
+      id: card.id, revision: card.revision, status: card.status,
+      createdAt: card.createdAt,
+      effortPoints: card.effortPoints,
+      estimatedCostMicrousd: card.estimatedCostMicrousd,
+      approvedCeilingMicrousd: sourceApproval?.state === "consumed" &&
+        sourceApproval.action === "register_card" &&
+        sourceApproval.registeredWorkItemId === card.id ?
+        readAmuxV4ApprovedCeiling(sourceApproval.confirmationSnapshot) : null,
+      attempts: feedbackAttempts, usage: feedbackUsage,
+      decisions: feedbackDecisions.map((decision) => ({ id: decision.id,
+        outcome: decision.outcome, decidedAt: decision.decidedAt })),
+      observations: feedbackObservations.flatMap((row) => {
+        const item = readAmuxV22ObservationMetadata(row.metadata);
+        return item ? [item] : [];
+      }),
+    }) : null,
     v4EvidenceDigests: card.sourceSystem === "admin-idea-v4" ? {
       title: card.v4TitleDigest, body: card.v4BodyDigest,
       brief: card.v4BriefDigest } : null,
@@ -475,4 +535,80 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         createdAt: binding.createdAt.toISOString() })),
     })),
   };
+}
+
+/** Owner-only, on-demand hierarchy rollup. A large result is explicitly
+ * incomplete instead of silently summing a page of children. */
+export async function readAmuxExecutionFeedback(parent: {
+  kind: "node" | "story"; id: string;
+}) {
+  let featureIds: string[] = [];
+  if (parent.kind === "node") {
+    const node = await prisma.amuxPortfolioNode.findUnique({ where: { id: parent.id },
+      select: { state: true } });
+    if (!node || node.state !== "active") return null;
+    const descendants = await prisma.$queryRaw<Array<{ id: string }>>`
+      WITH RECURSIVE descendants("id", "level", "depth") AS (
+        SELECT "id", "level", 0 FROM "AmuxPortfolioNode"
+        WHERE "id" = ${parent.id} AND "state" = 'active'
+        UNION ALL
+        SELECT child."id", child."level", d."depth" + 1
+        FROM descendants d JOIN "AmuxPortfolioNode" child
+          ON child."parentId" = d."id"
+        WHERE child."state" = 'active' AND d."depth" < 2
+      ) SELECT "id" FROM descendants WHERE "level" = 'feature'
+    `;
+    featureIds = descendants.map((row) => row.id);
+  } else {
+    const story = await prisma.amuxWorkItem.findUnique({ where: { id: parent.id },
+      select: { cardType: true, archivedAt: true } });
+    if (!story || story.cardType !== "story" || story.archivedAt) return null;
+  }
+  const where = amuxFeedbackTaskWhere(parent, featureIds);
+  const cards = await prisma.amuxWorkItem.findMany({ where,
+    take: 501, orderBy: { id: "asc" }, select: { id: true, revision: true,
+      status: true,
+      createdAt: true, effortPoints: true, estimatedCostMicrousd: true,
+      v4SourceApprovalId: true } });
+  if (cards.length > 500) return { parent, complete: false,
+    reason: "task_limit", rollup: null };
+  const ids = cards.map((card) => card.id);
+  const [attempts, usage, decisions, observations, approvals] = ids.length ? await Promise.all([
+    prisma.amuxExecutionAttempt.findMany({ where: { taskId: { in: ids } },
+      select: { taskId: true, id: true, startedAt: true, endedAt: true,
+        outcome: true, settledCostMicrousd: true, costConfirmed: true } }),
+    prisma.amuxCliUsageEvent.findMany({ where: { taskId: { in: ids } },
+      select: { taskId: true, attemptId: true, completeness: true,
+        inputTokens: true, outputTokens: true, cacheReadInputTokens: true,
+        cacheCreationInputTokens: true, projectedApiCostMicrousd: true,
+        actualApiCostMicrousd: true } }),
+    prisma.amuxReviewDecision.findMany({ where: { proposal: { taskId: { in: ids } } },
+      select: { id: true, outcome: true, decidedAt: true,
+        proposal: { select: { taskId: true } } } }),
+    prisma.adminAuditLog.findMany({ where: {
+      action: AMUX_V22_OUTCOME_ACTION, targetType: AMUX_V22_OUTCOME_TARGET,
+      targetId: { in: ids }, actorUserId: { not: null },
+    }, select: { targetId: true, metadata: true } }),
+    prisma.amuxIdeaUnitDecision.findMany({ where: {
+      id: { in: cards.flatMap((card) => card.v4SourceApprovalId ?
+        [card.v4SourceApprovalId] : []) }, state: "consumed",
+      action: "register_card",
+    }, select: { id: true, registeredWorkItemId: true,
+      confirmationSnapshot: true } }),
+  ]) : [[], [], [], [], []];
+  const feedback = cards.map((card) => projectAmuxTaskFeedback({
+    ...card, approvedCeilingMicrousd: readAmuxV4ApprovedCeiling(
+      approvals.find((row) => row.id === card.v4SourceApprovalId &&
+        row.registeredWorkItemId === card.id)?.confirmationSnapshot),
+    attempts: attempts.filter((row) => row.taskId === card.id),
+    usage: usage.filter((row) => row.taskId === card.id),
+    decisions: decisions.filter((row) => row.proposal.taskId === card.id),
+    observations: observations.filter((row) => row.targetId === card.id)
+      .flatMap((row) => {
+        const item = readAmuxV22ObservationMetadata(row.metadata);
+        return item ? [item] : [];
+      }),
+  }));
+  return { parent, complete: true, reason: null,
+    rollup: rollupAmuxTaskFeedback(feedback) };
 }
