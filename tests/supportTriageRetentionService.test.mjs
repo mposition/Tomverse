@@ -92,6 +92,10 @@ test("it refuses to start with any other variable, a short secret, or an unknown
     // An allowed name holding a connection string.
     [{ ...ENV, RAILPACK_SOMETHING: "postgresql://u:p@h/db" }, { reason: "env_holds_connection_string", names: ["RAILPACK_SOMETHING"] }],
     [{ ...ENV, CI: "host=db port=5432 password=x" }, { reason: "env_holds_connection_string", names: ["CI"] }],
+    // libpq needs no host: a service name or a password alone connects.
+    [{ ...ENV, MISE_DATABASE_URL: "service=tomverse password=secret" }, { reason: "env_holds_connection_string", names: ["MISE_DATABASE_URL"] }],
+    [{ ...ENV, RAILPACK_PG: "password=secret" }, { reason: "env_holds_connection_string", names: ["RAILPACK_PG"] }],
+    [{ ...ENV, MISE_PG: "passfile=/run/pgpass" }, { reason: "env_holds_connection_string", names: ["MISE_PG"] }],
     [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: "s".repeat(31) }, { reason: "secret_missing_or_short" }],
     [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: undefined }, { reason: "secret_missing_or_short" }],
   ]) {

@@ -74,11 +74,13 @@ const WINDOWS_PROCESS_VARIABLES = [
   "WINDIR",
 ];
 
-/** A value that is a database connection string, in URL or libpq keyword form. */
+/** A value that is a database connection string or carries a database password. */
 const DATABASE_URL_SHAPE =
   /^(postgres(ql)?|mysql|mariadb|mongodb(\+srv)?|redis(s)?|prisma(\+postgres)?|jdbc|libsql):/i;
-const CONNINFO_SHAPE =
-  /(?=[\s\S]*\b(?:password|passfile)\s*=)(?=[\s\S]*\b(?:host|hostaddr|port|dbname|user)\s*=)/i;
+// libpq keyword form. A password or password file is enough on its own:
+// libpq defaults the host, and `service=` reads the rest from pg_service.conf,
+// so no second keyword is needed for the value to connect.
+const CONNINFO_SHAPE = /(?:^|\s)(?:password|passfile|sslpassword)\s*=/i;
 
 export type SupportTriageRetentionRefusalReason =
   | "env_not_allowed"
