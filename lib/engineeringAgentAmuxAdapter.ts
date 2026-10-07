@@ -12,8 +12,8 @@
  * exactly as they do for `/api/internal/amux/*`, and a settlement can only go
  * to `review`, `todo` or `blocked` -- never `done`.
  *
- * Nothing here runs unless the code latch is on, and version 12 ships it off.
- * The AMUX execution API gate still applies on top of it.
+ * Nothing here reaches AMUX unless the code latch is on (version 25), the
+ * AMUX execution API gate is open and the engineering mode is not off.
  */
 
 import "server-only";
@@ -92,10 +92,7 @@ export const engineeringAgentAmuxAdapterPermitted = (input: {
   mode: EngineeringAgentMode;
 }): boolean => input.codeLatch === true && input.executionApiEnabled === true && input.mode !== "off";
 
-/**
- * The half of that gate that needs no database read. Routes check it before
- * anything else; every adapter operation then checks the whole gate.
- */
+/** The half of that gate that needs no database read. */
 export const isEngineeringAgentAmuxAdapterOpen = (): boolean =>
   ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH && isAmuxExecutionApiEnabled();
 
@@ -269,8 +266,12 @@ export const engineeringPublishResultAttachment = (input: {
 /** The worker lease a runner request carries; the worker name is never among it. */
 export type EngineeringAgentWorkerLease = { instanceId: string; generation: number };
 
-/** Whether a call may reach AMUX now: the latch, the execution API and the effective mode. */
-const adapterPermittedNow = async (): Promise<boolean> => {
+/**
+ * Whether a call may reach AMUX now: the latch, the execution API and the
+ * effective mode. Routes ask this before they record anything, so a closed
+ * gate leaves no request row behind; every adapter operation asks it again.
+ */
+export const engineeringAgentAmuxAdapterPermittedNow = async (): Promise<boolean> => {
   if (!isEngineeringAgentAmuxAdapterOpen()) return false;
   const { mode } = await readEngineeringAgentSwitches(prisma);
   return engineeringAgentAmuxAdapterPermitted({
@@ -281,7 +282,7 @@ const adapterPermittedNow = async (): Promise<boolean> => {
 };
 
 const requireOpen = async () => {
-  if (!(await adapterPermittedNow())) throw new EngineeringAgentStoreRefusedError("adapter_closed");
+  if (!(await engineeringAgentAmuxAdapterPermittedNow())) throw new EngineeringAgentStoreRefusedError("adapter_closed");
 };
 
 /**
@@ -561,7 +562,7 @@ export async function recordEngineeringAgentPublisherResult(input: {
       await input.markCommitted?.(tx, input.workItemId);
       return { recorded: false as const, reason: refusal, ...settled };
     });
-  if (!(await adapterPermittedNow())) return settleWithoutCard("adapter_closed");
+  if (!(await engineeringAgentAmuxAdapterPermittedNow())) return settleWithoutCard("adapter_closed");
   const item = await prisma.engineeringAgentWorkItem.findUnique({
     where: { id: input.workItemId },
     select: { run: { select: { cardId: true, amuxAttemptId: true } } },
