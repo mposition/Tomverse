@@ -277,7 +277,7 @@ test("Ubuntu runs one synthetic CLI process and replays its durable result",
           ...config, binaryPath, worktreePath: root, homePath: root,
           claudeConfigDir: root,
         }) });
-      const execute = { op: "execute", ...request };
+      const execute = { op: "execute", ...request, role: "review" };
       assert.equal((await handler(execute)).kind, "in_progress");
       const finished = await readFinished(handler);
       assert.equal(finished.kind, "succeeded");
