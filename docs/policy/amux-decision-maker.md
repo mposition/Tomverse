@@ -69,8 +69,9 @@ DM은 **제안을 쓰는 worker이지 승인자가 아니다.**
    digest와 스냅샷 manifest digest를 계산한다. 그 두 digest를 담아 §10의 전송 의도를 route에 기록하고, 응답을
    받은 뒤에만 그 바이트 그대로 DM 프로세스를 시작한다. 만든 뒤 바뀐 입력은 보내지 않는다.
 5. DM의 구조화된 출력을 bridge가 route로 보낸다. route가 §6으로 검증하고, 통과하면 제안으로 저장한다.
-   시간 초과·검증 실패·이관이면 로컬 AMUX가 표시를 떼고 카드에는 **닫힌 사유 코드**(`dm_timeout`,
-   `dm_invalid`, `dm_escalated`, `dm_unavailable`)만 남긴다. 모델이 쓴 문장은 카드에 쓰지 않는다.
+   종결 결과가 무엇이든(제안·이관·검증 실패·시간 초과·DM 불가) 로컬 AMUX는 **같은 방식으로** 표시만 떼고
+   카드에 아무것도 쓰지 않는다. 결과의 종류와 사유는 앱 DB와 Admin에만 있다. 확정 전 카드는 DM 출력에
+   따라 달라지지 않는다.
 6. 운영자는 Admin에서 제안을 그대로 확정·고쳐서 확정·거절한다. 권한은 `ops:write`와 최근 step-up이고
    판정은 사람 감사로 남는다(승인 계약 §2와 같은 조건). 같은 화면에서 선언 정확도(§4)를 기록할 수 있다.
 7. 운영자가 확정한 답만 bridge가 가져가고, 로컬 AMUX가 기존 운영자 답변 경로(worker 세션 메시지 + 카드
@@ -143,7 +144,8 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
 - **허용 저장소:** v1 허용 목록은 `github.com/mposition/Tomverse` 하나다. worker는 같은 계정에서 `origin`
   같은 로컬 Git 설정을 바꿀 수 있으므로, 저장소 판정에 remote 설정이나 worker가 적은 값을 쓰지 않는다. 판정은
   **내용**으로 한다. HEAD 이력의 root commit이 정확히 하나이고, 그것이 정책 버전에 고정한 이 저장소의 root
-  commit SHA와 같아야 한다. 이 검사와 스냅샷 읽기는 replace 객체·graft를 끈 Git(`GIT_NO_REPLACE_OBJECTS=1`)으로
+  commit SHA와 같아야 한다(v1 값
+  `6fa9c86772361fb54d60408735e289e4bef3cb83`). 이 검사와 스냅샷 읽기는 replace 객체·graft를 끈 Git(`GIT_NO_REPLACE_OBJECTS=1`)으로
   하며, shallow 이력은 root를 증명하지 못하므로 거절이다. 통과하지 못한 질문은 카드만 보낸다. 통과한 저장소의
   파일은 공개 저장소의 commit에서 온 것이거나 그 worker가 자기 브랜치에 쓴 것이다.
 - **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드도 스냅샷도 DM 공급사로 가는 회수할 수 없는 새
@@ -228,10 +230,11 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   않는다. 운영자 확정은 결과 마감에 묶이지 않고 요청의 열림 상태와 결속 값에만 묶인다.
 - **한 번만 소비:** 요청마다 종결 결과 행과 전달 결정 행은 각각 하나뿐이다(DB 유일 제약).
 - **timeout 층:** route 트랜잭션은 기존 AMUX DB 경계(`lib/amux/dbBoundary.ts`)를 그대로 쓴다.
-  `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms이고, DM
-  연산마다 Prisma 호출 상한을 12 이하로 둔다. 트랜잭션당 최대 시간은 그 셋에서 유도한
-  12 × (200 + 100) + 200 = 3,800 ms이며, 앱이 유도한 값이고 DB 상한이 아니다(Prisma 호출 상한은 SQL 문장
-  카운터가 아니다). `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL 16이 있고 16에는 그 설정이 없으며,
+  `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms다. DM store는
+  트랜잭션 안에서 호출 하나가 SQL 문장 하나인 raw SQL(`$queryRaw`·`$executeRaw`)만 쓰고, 설정문과 fence를
+  포함해 트랜잭션당 **SQL 문장 12개 이하**로 둔다. 문장 수는 store의 wrapper가 세고 넘으면 트랜잭션을
+  실패시킨다. 트랜잭션당 최대 시간은 그 셋에서 유도한 12 × (200 + 100) + 200 = 3,800 ms이며, 앱이 유도한
+  값이고 DB 상한이 아니다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL 16이 있고 16에는 그 설정이 없으며,
   기존 경계도 같은 이유로 걸지 않는다. route 예산은 `AMUX_ROUTE_BUDGET_MS`(15초)이고, 남은 route 시간이
   트랜잭션 최대 시간보다 짧으면 트랜잭션을 시작하지 않는다(`amuxRouteHasBudgetForMs`). 연결 대기도 남은
   시간에서 그 최대 시간을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). 묶이지 않고 남는 구간은 첫 문장
@@ -294,7 +297,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 2. **S1:** 앱 DB(원장·본문 표·trigger·단일 writer), 라우팅 route, 시스템 actor, 스위치(기본 `off`, 값은
    `off`·`proposal`뿐), 선언 정확도 기록과 보고, 용어 목록의 테스트. DM 호출 없음.
 3. **S2:** 로컬 AMUX(typed ask의 선택지·효과 등급·경로·맥락 경로·`resolution` 필드, DM 대기 표시의 비교·
-   교체, (카드 id, 질문 revision) 유일 키의 답변 기록, 닫힌 사유 코드), bridge 경로, DM 계정과 전용
+   교체와 결과와 무관한 해제, (카드 id, 질문 revision) 유일 키의 답변 기록), bridge 경로, DM 계정과 전용
    launcher, Admin 제안 화면. 카드 입력만. 선행 조건은 오케스트레이션 정책의 새 버전, r16 원칙 11·§3·§4
    승인, 그리고 S0의 쓰기·명령 실행 차단 실측 증거다. 서버 반영은 운영자 승인.
 4. **S2b:** 저장소 스냅샷. S2가 선행 조건이다.
@@ -305,8 +308,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 차단 기준(되돌릴 수 없는 것): DM이 승인 게이트에서 사람으로 인정되지 않는다는 테스트, **운영자 확정 없이는
 어떤 DM 출력도 worker에게 전달되지 않는다는 테스트**, 스위치가 `off`·`proposal` 밖의 값을 거부한다는 DB
 테스트, 용어 목록·`resolution`·카드 secret 검사 라우팅 테스트, 검사 시점에 마감을 넘긴 COMMIT 거부 DB
-테스트, 요청당 종결 결과 1개 테스트, 직접 답과 확정 답이 함께 와도 하나만 전달된다는 로컬 테스트, 모델이 쓴
-문장이 카드에 가지 않는다는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
+테스트, 요청당 종결 결과 1개 테스트, 직접 답과 확정 답이 함께 와도 하나만 전달된다는 로컬 테스트, 확정 전
+카드 상태가 DM 출력 종류(`select`·`free_text`·`escalate`·실패)와 무관하다는 테스트, 트랜잭션당 SQL 문장 12개
+초과를 거부하는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
 금지 플래그를 거부한다는 테스트, 읽기 전용 모드·DM 계정 격리의 S0 증거, 스냅샷의 허용 저장소(root commit 불일치·replace 객체·shallow 이력 거절)·비밀 제외
 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
 
