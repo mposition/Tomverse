@@ -33,6 +33,9 @@ import { prisma } from "@/lib/prisma";
 const INTAKE_ACTOR: Readonly<Record<AgentDigestAgentKey, SystemAuditActor>> = Object.freeze({
   "qa-release": "qa-release-intake",
   "billing-finance-ops": "billing-finance-ops-intake",
+  // The agent's one listed actor; its digest intake is a different action from
+  // the state advance the trust check binds (docs/policy/sre-ops.md §3 rule 10).
+  "sre-ops": "ops-observer",
 });
 
 export type AgentDigestRecordResult =
