@@ -302,7 +302,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       skipping: "Skipping…",
       skipHint: "Fast-forward until there is something for you to decide",
       skipToEnd: "⏭ To the end of the day",
-      skipToEndHint: "Nothing comes to you for a decision today, so this runs the day to its end",
+      skipToEndHint:
+        "The demo has no decision scene today, so this runs the demo day to its end. Engineering's real decisions are on its own screen.",
       follow: (on: boolean) => `🎥 Follow ${on ? "ON" : "OFF"}`,
       publish: "📤 Publish report · not linked",
       publishHint: "This shell has no publishing link. A report would be sent nowhere.",
@@ -976,7 +977,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       skipping: "건너뛰는 중…",
       skipHint: "운영자님이 결정할 일이 생길 때까지 단숨에 건너뜁니다",
       skipToEnd: "⏭ 하루 끝까지",
-      skipToEndHint: "오늘은 결정할 일이 올라오지 않으니 하루 끝까지 건너뜁니다",
+      skipToEndHint: "오늘 데모에는 결정 장면이 없으니 하루 끝까지 건너뜁니다. 엔지니어링의 실제 결정은 그 화면에 있어요.",
       follow: (on: boolean) => `🎥 자동 추적 ${on ? "ON" : "OFF"}`,
       publish: "📤 보고 발행 · 미연결",
       publishHint: "이 껍데기 화면에는 발행 연동이 없어요. 보고서를 보낼 곳이 없습니다.",

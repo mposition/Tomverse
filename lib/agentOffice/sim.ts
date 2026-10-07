@@ -938,6 +938,7 @@ export class AgentOffice {
     }
     // A live room's work is its record's, not a demo progress figure.
     const working = this.workingDepts().filter((dept) => !this.isLive(dept));
+    const liveWorking = this.workingDepts().filter((dept) => this.isLive(dept));
     const lines: string[] = [s.statusPhase(this.clockText(), this.phaseName(this.phaseIndex))];
 
     if (working.length) {
@@ -948,14 +949,17 @@ export class AgentOffice {
       );
     } else if (this.approvalPending) {
       lines.push(s.statusApproval);
-    } else if (this.dayComplete) {
-      lines.push(s.statusDayDone);
     } else if (this.meetingTitle) {
       lines.push(s.statusMeeting(this.meetingTitle));
+    } else if (liveWorking.length) {
+      // Only a live room is at work: it is named below, and "all done" or
+      // "a hand-off between steps" would contradict its record.
+    } else if (this.dayComplete) {
+      lines.push(s.statusDayDone);
     } else {
       lines.push(s.statusGap);
     }
-    for (const dept of this.workingDepts()) {
+    for (const dept of liveWorking) {
       const live = this.live[dept];
       if (live) lines.push(`${this.roomName(dept)}: ${live.line}`);
     }
