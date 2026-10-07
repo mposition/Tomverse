@@ -8,6 +8,7 @@ import {
   STATEMENT_TIMEOUT_MS,
   checkBounds,
   checkDerivations,
+  checkOrderings,
   checkTaTrSeparate,
   parsePolicyNumbers,
 } from "../scripts/trust-safety-numbers-core.mjs";
@@ -130,4 +131,61 @@ test("this test changes nothing: it only reads the document", () => {
   checkDerivations(parsePolicyNumbers(before));
   checkBounds(parsePolicyNumbers(before));
   assert.equal(policyText(), before);
+});
+
+test("every ordering §12 states as a contract holds", () => {
+  const orderings = checkOrderings(parsePolicyNumbers(policyText()));
+  assert.ok(orderings.length >= 11, `expected at least 11 orderings, checked ${orderings.length}`);
+  assert.deepEqual(
+    orderings.filter((entry) => !entry.ok).map((entry) => `${entry.name}: ${entry.because}`),
+    [],
+  );
+});
+
+test("a consistent table whose supervisor outlives P is still refused", () => {
+  // The counterexample a review supplied. Scale P to 5 minutes and the round
+  // window, B, the child timeout and the supervisor kill with it, and every
+  // derivation and bound still holds -- nothing was made unequal. Two runs then
+  // overlap, and §8's dead-man reasoning rests on them not doing so.
+  const text = policyText()
+    .replace(/\| 선언 주기 `P` \| \*\*30분\*\*/, "| 선언 주기 `P` | **5분**")
+    .replace(/\(`\*\/30 \* \* \* \*`\)/, "(`*/5 * * * *`)")
+    .replace(/= \*\*120분\*\*/, "= **20분**")
+    .replace(/\| 회차 창\(`pingPermitted`\) \| \*\*47초\*\*/, "| 회차 창(`pingPermitted`) | **300초**")
+    .replace(/\| route 예산 `B` \| \*\*59초\*\*/, "| route 예산 `B` | **312초**")
+    .replace(/\| ping 신선도 예산 \| \*\*51초\*\*/, "| ping 신선도 예산 | **304초**")
+    .replace(/\| child 요청 timeout \| \*\*69초\*\*/, "| child 요청 timeout | **322초**")
+    .replace(/\| supervisor 강제 종료 \| \*\*99초\*\*/, "| supervisor 강제 종료 | **352초**");
+
+  const parsed = parsePolicyNumbers(text);
+  assert.equal(parsed.tableA.declarationPeriodMinutes, 5, "the counterexample must parse");
+  assert.equal(parsed.tableC.supervisorKillSeconds, 352);
+
+  // Every equality and range still holds, which is the point.
+  assert.deepEqual(checkDerivations(parsed).filter((entry) => !entry.ok), []);
+  assert.deepEqual(checkBounds(parsed).filter((entry) => !entry.ok), []);
+
+  // The ordering is what catches it.
+  const broken = checkOrderings(parsed).filter((entry) => !entry.ok);
+  assert.ok(broken.length > 0, "the supervisor outliving P must be reported");
+  assert.ok(
+    broken.some((entry) => /outer budgets in order/.test(entry.name)),
+    "the outer chain must be the finding",
+  );
+});
+
+test("a transaction_timeout at the statement guard is refused on its own", () => {
+  // §12 asks for this assertion separately: at or below the statement guard,
+  // PostgreSQL 17 ends the transaction before any statement can be cut off.
+  const text = policyText().replace(
+    /\| \*\*Ta\*\* DSR count 읽기 \| 3 \| 5 \| \*\*9초\*\* \| \*\*12초\*\*/,
+    "| **Ta** DSR count 읽기 | 3 | 5 | **9초** | **2초**",
+  );
+  const parsed = parsePolicyNumbers(text);
+  assert.equal(parsed.tableB.find((row) => /^Ta/.test(row.kind)).transactionTimeoutSeconds, 2);
+  const broken = checkOrderings(parsed).filter((entry) => !entry.ok);
+  assert.ok(
+    broken.some((entry) => /transaction_timeout above statement_timeout/.test(entry.name)),
+    "the separate assertion must name itself",
+  );
 });

@@ -240,6 +240,93 @@ export const checkDerivations = (parsed) => {
 };
 
 /**
+ * The orderings §12 states as a contract in its own right, beside the
+ * equalities.
+ *
+ * A review found this absent and gave the counterexample: move `P` to 5
+ * minutes and scale the round window, `B`, the child timeout and the
+ * supervisor kill consistently, and **every derivation and bound still holds
+ * while the supervisor outlives the declaration period** -- two runs overlap,
+ * and §8's dead-man reasoning rests on them not doing so. An equality check
+ * cannot see that, because nothing was made unequal.
+ *
+ * §12 states three things here:
+ *
+ *  - per row, `Prisma timeout` > `transaction_timeout` > `C_guarded` >
+ *    `statement_timeout` > `idle`;
+ *  - outside, guarded total < route budget < child < supervisor < `P`, with
+ *    the outer two gaps being 10s and 30s;
+ *  - and `transaction_timeout` > `statement_timeout` **asserted separately**,
+ *    because at or below it PostgreSQL 17 never reaches the statement guard.
+ */
+export const checkOrderings = (parsed) => {
+  const { tableA, tableB, tableC } = parsed ?? {};
+  const orderings = [];
+  const chain = (name, steps) => {
+    const values = steps.map((step) => step.value);
+    const readable = values.every((value) => typeof value === "number");
+    orderings.push({
+      name,
+      ok: readable ? values.every((value, i) => i === 0 || values[i - 1] > value) : undefined,
+      because: readable
+        ? steps.map((step) => `${step.label} ${step.value}`).join(" > ")
+        : "a value in this chain could not be read",
+    });
+  };
+
+  for (const row of tableB ?? []) {
+    chain(`${row.kind}: the five values in order`, [
+      { label: "Prisma", value: row.prismaTimeoutMs },
+      { label: "transaction_timeout", value: row.transactionTimeoutSeconds * 1000 },
+      { label: "C_guarded", value: row.guardedSeconds * 1000 },
+      { label: "statement_timeout", value: STATEMENT_TIMEOUT_MS },
+      { label: "idle_in_transaction", value: IDLE_IN_TRANSACTION_TIMEOUT_MS },
+    ]);
+    // §12 asks for this one on its own: at or below the statement guard,
+    // PostgreSQL 17 ends the transaction before any statement can be cut off.
+    orderings.push({
+      name: `${row.kind}: transaction_timeout above statement_timeout`,
+      ok:
+        typeof row.transactionTimeoutSeconds === "number"
+          ? row.transactionTimeoutSeconds * 1000 > STATEMENT_TIMEOUT_MS
+          : undefined,
+      because:
+        typeof row.transactionTimeoutSeconds === "number"
+          ? `${row.transactionTimeoutSeconds * 1000}ms against ${STATEMENT_TIMEOUT_MS}ms`
+          : "transaction_timeout could not be read",
+    });
+  }
+
+  if (tableC && tableA) {
+    // Outermost: the supervisor must die before the next declaration starts,
+    // or two runs overlap.
+    chain("the outer budgets in order", [
+      { label: "P", value: tableA.declarationPeriodMinutes * 60 },
+      { label: "supervisor", value: tableC.supervisorKillSeconds },
+      { label: "child", value: tableC.childTimeoutSeconds },
+      { label: "route budget B", value: tableC.routeBudgetSeconds },
+      { label: "guarded total", value: tableC.guardedTotalSeconds },
+    ]);
+    const gap = (name, larger, smaller, expected) =>
+      orderings.push({
+        name,
+        ok:
+          typeof larger === "number" && typeof smaller === "number"
+            ? larger - smaller === expected
+            : undefined,
+        because:
+          typeof larger === "number" && typeof smaller === "number"
+            ? `${larger} - ${smaller} = ${larger - smaller}, stated ${expected}`
+            : "a value in this gap could not be read",
+      });
+    gap("the child gap is 10s", tableC.childTimeoutSeconds, tableC.routeBudgetSeconds, 10);
+    gap("the supervisor gap is 30s", tableC.supervisorKillSeconds, tableC.childTimeoutSeconds, 30);
+  }
+
+  return orderings;
+};
+
+/**
  * The bounds §12 states as ranges rather than equalities. A bound that holds is
  * not a derivation, so these are reported apart from the equalities above.
  */

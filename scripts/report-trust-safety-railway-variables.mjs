@@ -20,6 +20,8 @@
 // consumes it and it gates nothing.
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -29,14 +31,58 @@ import {
 /** §4 fixes one declaration site, and this is the key within it. */
 const RUNNER_KEY = "trust_safety_observer";
 const ENVIRONMENTS = ["production", "staging"];
+const RUNNER_SERVICE = "Trust Safety Observer";
 const APP_SERVICE = "Tomverse";
+/**
+ * The runner and the app are in **different Railway projects** -- §4 puts agent
+ * runners in "Tomverse Agents" and the app lives in "Tomverse". A review found
+ * every lookup here using whichever project happened to be linked, which no
+ * single link can satisfy: one of the two would always be wrong. Each lookup
+ * now names its project, and the manifest records which.
+ */
+const APP_PROJECT = "Tomverse";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
 
-const run = (command, commandArgs) => {
-  const result = spawnSync(command, commandArgs, {
+/**
+ * The Railway CLI's executable, not the shim beside it.
+ *
+ * On Windows an npm global install puts `railway.cmd` on PATH and the binary
+ * next to it, and `spawnSync` without a shell cannot run a `.cmd`. A review
+ * found this version reporting a correctly installed, logged-in CLI as
+ * unreadable for exactly that reason -- the same shape as an earlier attempt in
+ * this repository to make `gh` fail, where the stub was ignored because node
+ * resolves `gh.cmd` through PATHEXT.
+ *
+ * `.railway/run.mjs` already solves this for the IaC commands, including the
+ * `RAILWAY_CLI_BIN` override, and this follows it rather than inventing a
+ * second rule.
+ */
+const railwayCli = () => {
+  if (process.env.RAILWAY_CLI_BIN) return process.env.RAILWAY_CLI_BIN;
+  const windows = process.platform === "win32";
+  const binary = windows ? "railway.exe" : "railway";
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    const native = join(directory, binary);
+    if (existsSync(native)) return native;
+    // An npm global install leaves the shim on PATH with the binary in the
+    // package beside it.
+    const packaged = join(directory, "node_modules", "@railway", "cli", "bin", binary);
+    if (windows && existsSync(join(directory, "railway.cmd")) && existsSync(packaged)) {
+      return packaged;
+    }
+  }
+  return undefined;
+};
+
+const CLI = railwayCli();
+
+const run = (commandArgs) => {
+  if (CLI === undefined) return undefined;
+  const result = spawnSync(CLI, commandArgs, {
     cwd: root,
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
@@ -76,9 +122,12 @@ const declaredNames = async () => {
  * and are dropped here, before anything else sees them: O3 says to discard
  * them, and §4 forbids the ping URL's value in a manifest or a log.
  */
-const effectiveNames = (service, environment) => {
-  const stdout = run("railway", [
+const effectiveNames = (project, service, environment) => {
+  if (project === undefined) return undefined;
+  const stdout = run([
     "variables",
+    "--project",
+    project,
     "--service",
     service,
     "--environment",
@@ -95,7 +144,34 @@ const effectiveNames = (service, environment) => {
   }
 };
 
+/**
+ * A project's id from its name. `--project` takes an id, and the names are what
+ * §4 and `.railway/agent-runners.ts` state, so the two are joined here rather
+ * than by pinning ids in source -- an id pinned in a file is a fact nobody
+ * rechecks.
+ */
+const projectIds = () => {
+  const stdout = run(["list", "--json"]);
+  if (stdout === undefined) return undefined;
+  try {
+    const parsed = JSON.parse(stdout);
+    const rows = Array.isArray(parsed) ? parsed : (parsed?.projects ?? []);
+    const byName = new Map();
+    for (const row of rows) {
+      if (typeof row?.name === "string" && typeof row?.id === "string") byName.set(row.name, row.id);
+    }
+    return byName;
+  } catch {
+    return undefined;
+  }
+};
+
 const declared = await declaredNames();
+const projects = projectIds();
+const agentProjectName = (await import("../.railway/agent-runners.ts").catch(() => ({})))
+  .AGENT_RAILWAY_PROJECT;
+const agentProjectId = projects?.get(agentProjectName);
+const appProjectId = projects?.get(APP_PROJECT);
 
 const manifest = buildVariableManifest({
   environments: ENVIRONMENTS.map((environment) => ({
@@ -106,15 +182,22 @@ const manifest = buildVariableManifest({
         : declared.absent
           ? []
           : declared.byEnvironment[environment],
-    effective: effectiveNames("Trust Safety Observer", environment),
+    effective: effectiveNames(agentProjectId, RUNNER_SERVICE, environment),
   })),
-  appVariableNames: effectiveNames(APP_SERVICE, "production"),
+  appVariableNames: effectiveNames(appProjectId, APP_SERVICE, "production"),
 });
 
 const report = {
   ...manifest,
   declarationSite: ".railway/agent-runners.ts",
   runnerKey: RUNNER_KEY,
+  // Which project each lookup asked, so a verdict cannot be read as being
+  // about the wrong one.
+  projects: {
+    runner: { name: agentProjectName ?? null, id: agentProjectId ?? null, service: RUNNER_SERVICE },
+    app: { name: APP_PROJECT, id: appProjectId ?? null, service: APP_SERVICE },
+  },
+  railwayCli: CLI ?? null,
   runnerDeclared: declared === undefined ? "unreadable" : !declared.absent,
 };
 
@@ -129,6 +212,19 @@ const mark = (ok) => (ok === true ? "pass" : ok === false ? "FAIL" : "????");
 
 console.log("§12 (3) O3: variable names for the trust-safety observer");
 console.log(`declaration site: ${report.declarationSite} (key ${RUNNER_KEY})`);
+console.log(
+  `runner project: ${report.projects.runner.name ?? "(unreadable)"} ` +
+    `(${report.projects.runner.id ?? "id unreadable"}), service ${RUNNER_SERVICE}`,
+);
+console.log(
+  `app project: ${report.projects.app.name} (${report.projects.app.id ?? "id unreadable"}), ` +
+    `service ${APP_SERVICE}`,
+);
+if (CLI === undefined) {
+  console.log(
+    "the Railway CLI executable was not found. Install it, or set RAILWAY_CLI_BIN to the executable (not a .cmd shim).",
+  );
+}
 if (report.runnerDeclared === false) {
   console.log("the runner is not declared there yet, so there is nothing to compare against\n");
 } else if (report.runnerDeclared === "unreadable") {
