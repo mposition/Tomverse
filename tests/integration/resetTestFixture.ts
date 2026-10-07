@@ -29,8 +29,9 @@ export async function resetTestFixture(
   }
   try {
     await prisma.$transaction(async (tx) => {
-      // Verify the backend on this exact connection. URL query overrides and a
-      // separately configured Prisma client must never bypass the test guard.
+      // Verify the database name on this exact connection. The URL guard
+      // excludes connection overrides, while this catches a client configured
+      // for a differently named database.
       const [backend] = await tx.$queryRawUnsafe<Array<{ database: string }>>(
         'SELECT current_database() AS "database"',
       );
