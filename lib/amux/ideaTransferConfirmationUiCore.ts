@@ -1,4 +1,4 @@
-import { isAmuxIdeaRequestId } from "./ideaSubmissionCore.ts";
+import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
 export type ConfirmedIdeaTransfer = {
   previewId: string;

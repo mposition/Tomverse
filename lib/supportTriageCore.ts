@@ -473,3 +473,15 @@ export const DECISION_RECORD_RETENTION_MONTHS = 12;
 
 /** Reports one decision can be bound to: a group's members at most. */
 export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
+
+/**
+ * Retention of the other deletable classes (policy section 5). A terminal
+ * suggestion and a terminal group are kept 30 days after they became
+ * terminal; a decision record carries its own `retentionUntil`.
+ */
+export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
+export const TERMINAL_GROUP_RETENTION_DAYS = 30;
+
+/** The classes one retention batch deletes, one statement pair each, in this order. */
+export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
+export type RetentionClass = (typeof RETENTION_CLASSES)[number];

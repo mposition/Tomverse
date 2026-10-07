@@ -434,6 +434,9 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-07, AMUX v22 integration: the webhook pipeline fingerprint note in
 // marketingAutomationAccess.ts shifts positions of its existing computed
 // accesses. The count and position-free digest remain unchanged.
+// 2026-10-07, A06 analysis claim, result and retention actions extend that
+// helper again. The position-free 228-entry inventory is unchanged; only
+// source line positions in the reviewed closure move.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";

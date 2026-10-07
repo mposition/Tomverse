@@ -357,6 +357,17 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
+  // The analysis routes keep their writes dark and bound both write and
+  // receipt-read transactions independently of execution commit deadlines.
+  const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
+  const result = "app/api/internal/amux/v4/analysis-result/route.ts";
+  for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
+    const source = withoutComments(read(path));
+    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));
+    assert.match(source, /maxWait: 5_000, timeout: 15_000/);
+    assert.match(source, /maxWait: 5_000, timeout: 10_000/);
+    assert.match(source, /callbackReturned = true/);
+  }
 });
 
 test("the push harnesses install the migration's own function and trigger, idempotently", () => {

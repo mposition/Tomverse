@@ -238,6 +238,11 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
     },
   },
+  "sre-ops": {
+    label: "SRE 에이전트",
+    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
+    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
+  },
   "agent-digests": {
     label: "Agent digest",
     description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
@@ -249,7 +254,7 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   office: {
     label: "에이전트 오피스",
-    description: "7개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
+    description: "8개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
     aliases: ["오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황"],
     tabs: {
       live: { label: "라이브 오피스", description: "오피스 바닥, 운영자 지시창, 데모 결재와 피드" },

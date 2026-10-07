@@ -41,7 +41,7 @@ import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
 import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
-import { confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
+import { DELIVERY_RETENTION_DAYS, confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
 import { GENESIS_MIN_INTERVAL_MS, deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
 import { OPS_OBSERVER_INVARIANT_VERSION, genesisRefusal } from "@/scripts/ops-observer/genesis-core.mjs";
 import { S2_PAGE_KEYS, initialKeyState } from "@/scripts/ops-observer/classify-core.mjs";
@@ -291,6 +291,57 @@ export async function readOpsObserverState(
     },
     client,
   );
+  await assertNotLate(runDeadline, client);
+  return result;
+}
+
+/** What the Admin genesis screen shows, and what an approval there binds. */
+export type OpsObserverAdminView = {
+  head: { genesisId: string; generation: number | null; mode: string; createdAt: string } | null;
+  trustReason: string;
+  /** When a genesis may next replace this head (the seven-day rule); null with no head. */
+  nextGenesisAt: string | null;
+  /** Whether the seven-day rule allows a genesis at the time of this read. */
+  genesisAllowedNow: boolean;
+};
+
+/**
+ * The owner's view of the chain (docs/policy/sre-ops.md §8): the head, with
+ * or without its state row, and the trust verdict -- exactly the values a
+ * genesis request must name back. Unlike the services' read it reports the
+ * head of an untrusted chain, because that is what a recovery replaces; it
+ * carries no keys. One bounded `state_read` transaction, and the deadline is
+ * checked again before the view is returned, so a late read shows nothing
+ * rather than a head the owner would then bind.
+ */
+export async function readOpsObserverAdminView(client: PrismaClient = prisma): Promise<OpsObserverAdminView> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  const runDeadline = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS);
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx): Promise<OpsObserverAdminView> => {
+      const gathered = await gatherFacts(tx, integrityKeys);
+      const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
+      const head = gathered.chainHead;
+      return {
+        head: head
+          ? {
+              genesisId: head.id,
+              generation: (head.generation as number | null) ?? null,
+              mode: head.mode,
+              createdAt: head.createdAt.toISOString(),
+            }
+          : null,
+        trustReason: verdict.trusted ? "trusted" : (verdict.reason ?? "state_missing"),
+        nextGenesisAt: head ? new Date(head.createdAt.getTime() + GENESIS_MIN_INTERVAL_MS).toISOString() : null,
+        genesisAllowedNow: !head || Date.now() - head.createdAt.getTime() >= GENESIS_MIN_INTERVAL_MS,
+      };
+    },
+    client,
+  );
+  // Like the services' read (policy §6): a late read is not returned as the
+  // head and verdict the owner will bind.
   await assertNotLate(runDeadline, client);
   return result;
 }
@@ -761,5 +812,68 @@ export async function createOpsObserverGenesis(
     throw error;
   }
   if (result.result === "created") await assertNotLate(runDeadline, client);
+  return result;
+}
+
+/** The most reservations one retention batch deletes. */
+export const DELIVERY_RETENTION_BATCH_LIMIT = 500;
+
+/** How far ahead a retention batch sets its own deadline (inside its 30 s Prisma timeout). */
+const RETENTION_DEADLINE_MS = 25_000;
+
+/**
+ * One retention batch for the reservations (docs/policy/sre-ops.md §10): up
+ * to `limit` closed reservations whose close is at least
+ * DELIVERY_RETENTION_DAYS old, oldest first, with their items (the foreign
+ * key cascades). A `reserved` row is never selected and the delete trigger
+ * refuses one anyway, as it refuses anything closed more recently. Rows
+ * another transaction holds are skipped, not waited on. A batch that deleted
+ * anything leaves one system audit entry with the count, in the same
+ * transaction; an empty batch writes nothing. The batch names its deadline in
+ * the transaction-local setting the retention trigger reads at COMMIT, so a
+ * late batch rolls back whole, deletes included.
+ */
+export async function purgeOpsObserverDeliveries(
+  limit: number = DELIVERY_RETENTION_BATCH_LIMIT,
+  client: PrismaClient = prisma,
+): Promise<{ deleted: number }> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > DELIVERY_RETENTION_BATCH_LIMIT) {
+    throw new Error("ops_observer_retention_limit_invalid");
+  }
+  const runDeadline = new Date(Date.now() + RETENTION_DEADLINE_MS);
+  const { result } = await withOpsObserverTransaction(
+    "retention_batch",
+    runDeadline,
+    async (tx) => {
+      // The deferred retention trigger checks this at COMMIT (policy §6 item
+      // 5): a delete has no row deadline, so the batch names its own, and a
+      // batch past it does not commit.
+      await tx.$queryRaw`
+        SELECT set_config('ops_observer.retention_deadline', ${runDeadline.toISOString()}, true)`;
+      const deleted = await tx.$queryRaw<{ id: string }[]>`
+        DELETE FROM "OpsObserverDelivery"
+         WHERE id IN (
+           SELECT id FROM "OpsObserverDelivery"
+            WHERE status <> 'reserved'
+              AND coalesce("confirmedAt", "shadowedAt", "abandonedAt")
+                  <= clock_timestamp() - make_interval(days => ${DELIVERY_RETENTION_DAYS})
+            ORDER BY coalesce("confirmedAt", "shadowedAt", "abandonedAt"), id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED)
+        RETURNING id`;
+      if (deleted.length > 0) {
+        await tx.$appendSystemAudit({
+          action: "ops_observer.deliveries_purged",
+          targetType: "OpsObserverDelivery",
+          targetId: null,
+          summary: "Deleted closed ops-observer reservations past their retention.",
+          metadata: { count: deleted.length, retentionDays: DELIVERY_RETENTION_DAYS },
+        });
+      }
+      return { deleted: deleted.length };
+    },
+    client,
+  );
+  await assertNotLate(runDeadline, client);
   return result;
 }

@@ -10,10 +10,12 @@ import { readPromptRefinerVnextOneShotDisposition,
 import { promptRefinerVnextOneShotGateOwner } from
   "@/lib/promptRefinerVnextOneShotGateRouteAccess";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
+import { V4_STAGE_ID, V5_STAGE_ID } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().min(1).max(128);
-const bodySchema = z.object({
+const targetShape = {
   stageApprovalAuditLogId: id,
   runApprovalAuditLogId: id,
   shadowAuditLogId: id,
@@ -21,8 +23,17 @@ const bodySchema = z.object({
   runtimeDeploymentId: z.string().regex(
     /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/),
   decision: z.enum(["pass", "fail", "insufficient_evidence"]),
+};
+const v4BodySchema = z.object({
+  ...targetShape,
   confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_OWNER_DISPOSITION"),
 }).strict();
+const v5BodySchema = z.object({
+  ...targetShape,
+  stageId: z.literal(V5_STAGE_ID),
+  confirmation: z.literal("RECORD_VNEXT_ONE_SHOT_V5_OWNER_DISPOSITION"),
+}).strict();
+const bodySchema = z.union([v4BodySchema, v5BodySchema]);
 const DEFINITE = new Set([
   "vnext_one_shot_disposition_context_invalid",
   "vnext_one_shot_disposition_stage_unavailable",
@@ -42,8 +53,10 @@ export async function POST(request: Request) {
         { status: 409, headers });
     }
     const body = await readLimitedJson(request, 2 * 1024, bodySchema);
+    const stageId = "stageId" in body ? body.stageId : V4_STAGE_ID;
     const result = await recordPromptRefinerVnextOneShotDisposition({
       session: access.session, request,
+      stageId,
       target: { stageApprovalAuditLogId: body.stageApprovalAuditLogId,
         runApprovalAuditLogId: body.runApprovalAuditLogId,
         shadowAuditLogId: body.shadowAuditLogId,
@@ -73,11 +86,16 @@ export async function GET(request: Request) {
     const access = await promptRefinerVnextOneShotGateOwner(
       request, false, "disposition");
     if ("response" in access) return access.response;
+    const stageId = new URL(request.url).searchParams.get("stageId") ?? V4_STAGE_ID;
+    if (stageId !== V4_STAGE_ID && stageId !== V5_STAGE_ID) {
+      return NextResponse.json({ code: "DISPOSITION_STAGE_ID_INVALID" },
+        { status: 400, headers });
+    }
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v4" },
+        where: { id: stageId },
       });
-      return readPromptRefinerVnextOneShotDisposition(tx, stage);
+      return readPromptRefinerVnextOneShotDisposition(tx, stage, stageId);
     }, { maxWait: 5_000, timeout: 15_000 });
     return NextResponse.json({ readback }, { headers });
   } catch (error) {
