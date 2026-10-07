@@ -89,8 +89,8 @@ APP 8(국외 이전): 고객 개인정보가 가지 않으므로 해당 없음. 
 
 | 환경 | check 이름 | 첫 신호 수신(UTC) | 일부러 멈춘 날 | down 알림 수신(UTC, 채널) | 확인자 |
 |---|---|---|---|---|---|
-| staging | | | | | |
-| production | | | | | |
+| staging | `billing-finance-ops-staging` | 2026-10-07 약 08:37 (운영자 보고, 브라우저로 수동 1회) | 첫 신호 뒤 추가 신호 없음 | (대기 — 예상 2026-10-08 약 09:37) | |
+| production | `billing-finance-ops-production` | 2026-10-07 약 08:37 (운영자 보고, 브라우저로 수동 1회) | 첫 신호 뒤 추가 신호 없음 | (대기 — 예상 2026-10-08 약 09:37) | |
 
 위 "켜기 전 남은 조건"이 모두 해소되고 운영자가 확인하면, Admin `/admin/agent-digests?tab=billing-finance-ops`에서 "Monitor 확인
 기록"을 남긴 뒤 스위치를 켤 수 있습니다(7일 안의 확인이 필요합니다).
