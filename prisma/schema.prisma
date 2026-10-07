@@ -8377,7 +8377,7 @@ model AmuxOrchestratorHalt {
 /// AMUX Decision Maker switch events (docs/policy/amux-decision-maker.md §8,
 /// §10): append-only, and a scope's state is its newest event. Single writer:
 /// lib/amux/decisionMakerSwitchStore.ts. Migration
-/// 20261007130000_amux_decision_maker_switch holds the CHECKs (kill switch
+/// 20261008030000_amux_decision_maker_switch holds the CHECKs (kill switch
 /// `on`/`off`, an instance `off`/`proposal`, a person only as `operator`, the
 /// system only latching an instance `off`) and the trigger that binds each
 /// event to an audit row of its own transaction, keeps a scope's sequence

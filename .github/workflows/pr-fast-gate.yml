@@ -33,8 +33,8 @@ name: PR Fast Gate
 # A release PR's head is develop's head, so every merge into develop also synchronizes
 # it, and its whole pull-request tier ran a second time on each develop
 # commit -- beside the push runs of Credit Finance, Admin Console E2E and
-# Rust on the same SHA. Railway's Wait for CI holds the staging deployment for
-# every suite on the commit, and the doubled demand queued jobs for up to 22
+# Rust on the same SHA. Railway's Wait for CI holds develop's deployment (on
+# staging then, on dev since 2026-10-07) for every suite on the commit, and the doubled demand queued jobs for up to 22
 # minutes: #1902's merge took ~40 minutes to reach staging on 2026-10-02.
 # develop carries main through the back-merge, so the release PR's merge ref
 # is develop's tree, which the push runs already verify.

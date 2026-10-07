@@ -13,7 +13,7 @@ import {
 /**
  * The system audit of a Decision Maker latch (docs/policy/amux-decision-maker.md
  * §8, §10): `amux.decision.latch`, recorded by the latched instance's own
- * actor, which migration 20261007130000_amux_decision_maker_switch requires.
+ * actor, which migration 20261008030000_amux_decision_maker_switch requires.
  *
  * Kept apart from lib/amux/decisionMakerSwitchStore.ts, which also writes a
  * person's switch change through the administrator writer, so no file calls

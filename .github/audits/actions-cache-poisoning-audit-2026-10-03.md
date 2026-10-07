@@ -1,11 +1,21 @@
 # GitHub Actions 캐시 오염 경로 감사 (2026-10-03)
 
-> **줄 번호는 조사 시점의 것입니다.** `path:line` 인용은 2026-10-03의 트리를
-> 가리키며, 그 뒤 여러 변경이 workflow를 편집해 일부가 밀렸습니다. 2026-10-04에
-> 두 건이 실제로 틀린 곳을 가리키는 것이 독립 검토에서 발견돼 고쳤고(§6의 sha512
-> 핀 둘), 그 자리에는 **step 이름을 함께** 적었습니다 — 이름은 밀리지 않으므로,
-> 번호와 이름이 어긋나면 번호가 낡은 것입니다. 나머지 인용은 전수 재검증하지
-> 않았습니다.
+> **인용은 번호가 아니라 anchor로 적습니다**(2026-10-07 전수 재검증).
+> 조사 시점의 `path:line`은 그 뒤 여러 세션이 workflow를 편집하면서 밀렸습니다.
+> 63건을 트리에서 되읽어 본 결과 약 40건이 빈 줄이나 무관한 키를 가리켰고, 그중
+> 둘은 **의도와 반대되는 곳**을 가리켰습니다 — §6의 sha512 핀 인용이
+> `FEEDBACK_AUTOFIX_SYNC_SECRET`를 든 heartbeat 단계를 가리키고 있었습니다.
+>
+> 주장 자체는 대체로 맞았습니다. 예를 들어 3.4의 "열여섯 곳"은 지금도 정확합니다
+> (`actions/cache*` 단계 17개 중 16개). 틀린 것은 번호뿐이었으므로, 번호를 다시
+> 맞추는 대신 **밀리지 않는 것**으로 바꿨습니다 — step 이름, 상수 이름, 명령
+> 문자열, 그리고 개수 주장은 개수와 다시 세는 방법. 남은 20건은 전부 자기가
+> 주장하는 자리를 가리키는 것을 확인했고, 그중 workflow 줄 번호를 가진 것은
+> **step 이름이나 action 이름을 함께** 들고 있습니다. 번호와 이름이 어긋나면
+> 낡은 쪽은 번호입니다.
+>
+> 다른 감사 문서(`pr-fast-gate-performance-audit.md`)로의 인용은 번호를
+> 유지합니다 — 그쪽은 날짜가 박힌 기록이고 움직이지 않습니다.
 >
 > **상태: 조사 완료, 독립 검토 1회 반영(rev 2), 조치 없음.** 이 감사는
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
@@ -108,7 +118,7 @@ run의 저장은 자기 merge-ref scope로 가므로 그것을 밀어내지 못�
 
 공격자 모델은 **침해된 제3자 의존성 하나**입니다. `npm ci`는
 `--ignore-scripts` 없이는 의존성의 install script를 실행합니다. 이 저장소에서
-`--ignore-scripts`를 쓰는 곳은 `pr-fast-gate.yml:684`(`vendor/amux`) **한
+`--ignore-scripts`를 쓰는 곳은 `pr-fast-gate.yml`의 `npm ci --prefix vendor/amux --ignore-scripts` **한
 곳뿐**이고, 현재 lockfile에서 `hasInstallScript`인 패키지는 **10개**입니다
 (`@prisma/engines`, `prisma`, `esbuild`, `@sentry/cli`, `tesseract.js`,
 `unrs-resolver`, `fsevents` 3경로). 그 코드는 그 job의 Actions runtime token에
@@ -194,7 +204,7 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 퇴출·cache version 변경 — 이고, lockfile이 그대로인 동안 적중이 이어졌다는
 사실은 **그 항목이 길게 산다**는 것까지만 말합니다.
 
-**Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml:47-54`가
+**Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml`의 step `Restore the downloaded crates`가
 `~/.cargo/registry`, `~/.cargo/git`, `target`, `vendor/amux/target`을 한 항목에
 담습니다. restore-keys가 없는 것(:54, primary key 하나뿐)은 올바른 선택이지만,
 `target/` 안의 build script 바이너리에는 검증이 없습니다. `push: main`과
@@ -222,7 +232,7 @@ nightly-visual-regression.yml:88   review-parity-shadow.yml:128
 
 그리고 **모두** restore-keys `${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-`
 를 갖습니다(:180, :217, :90, :843, :1035, :130). 이 prefix는
-`daily-security-audit.yml:151`·`:297`의 `-chromium-webkit` 항목에도 맞으므로
+`daily-security-audit.yml`의 `-chromium-webkit`로 끝나는 키 두 개에도 맞으므로
 사실 B가 성립합니다.
 
 `main` scope writer는 이렇게 갈립니다.
@@ -285,12 +295,14 @@ review-parity-shadow.yml:103
 
 ### 3.4 Next·Playwright 복원 단계는 `continue-on-error: true`, Rust는 아닙니다
 
-`admin-console-e2e.yml:156`·`:174`, `daily-security-audit.yml:72`·`:147`·
-`:274`·`:293`, `e2e.yml:192`·`:211`, `nightly-visual-regression.yml:68`·`:84`,
-`pr-fast-gate.yml:801`·`:837`·`:1006`·`:1029`,
-`review-parity-shadow.yml:96`·`:124` — 열여섯 곳입니다.
+`actions/cache*` 단계 **17개 중 16개**가 그렇습니다 —
+`admin-console-e2e`·`e2e`·`nightly-visual-regression`·`review-parity-shadow`가
+각 2개, `daily-security-audit`·`pr-fast-gate`가 각 4개입니다. 세는 명령은
+`npm run -s check:ci-cache-keys`가 읽는 것과 같은 트리이고, 손으로 다시 셀 때는
+`grep -c 'continue-on-error: true'`가 아니라 `actions/cache*` 단계만 보아야
+합니다(그 문자열은 캐시와 무관한 단계에도 쓰입니다).
 
-**`orchestrator-rust.yml:47`에는 없습니다** — 그 단계는 실패하면 job을
+**`orchestrator-rust.yml`의 step `Restore the downloaded crates`에는 없습니다** — 그 단계는 실패하면 job을
 실패시킵니다. 그래서 "복원 단계가 모두 조용하다"는 틀리고, 범위는 위
 Next·Playwright 열여섯 곳입니다.
 
@@ -304,7 +316,7 @@ Next·Playwright 열여섯 곳입니다.
 ### 4.1 저장소 자신의 분석기가 이미 이 규칙을 갖고 있습니다
 
 `lib/agentCredentialReachability.ts`는 `credential_job_restores_cache`라는
-판정을 갖습니다(:61). 계약은 `docs/policy/engineering-agent.md:198-201`입니다.
+판정을 갖습니다(:61). 계약은 `docs/policy/engineering-agent.md` §5의 캐시 경로 항목입니다.
 
 > **cache 경로**: 자격증명을 가진 job이 Actions cache를 복원하면, 그 job은
 > trigger·path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push
@@ -445,9 +457,11 @@ repository write 자격증명도 없기 때문입니다(4.3). 차단 사유가 �
 
 ### F2 — `.next/cache`의 broad restore-key가 workflow 경계를 지웁니다
 
-근거: `admin-console-e2e.yml:163`, `daily-security-audit.yml:79`·`:281`,
-`e2e.yml:199`, `nightly-visual-regression.yml:75`,
-`review-parity-shadow.yml:103`. 반례이자 증거: `pr-fast-gate.yml:806-810`.
+근거: 3.4의 열여섯 단계가 `continue-on-error: true`이므로 복원 실패가 job을
+멈추지 않습니다. 반례이자 증거: `pr-fast-gate.yml`의 두 `restore-keys` — 그
+주석이 16.3.4 캐시가 16.3.5 Turbopack font 빌드를 깨뜨린 기록을 담고 있고,
+같은 기록이 `admin-console-e2e.yml`·`daily-security-audit.yml`의 restore-key
+주석에도 있습니다.
 
 결과: PR workflow(`review-parity-shadow`)가 `main` scope의 schedule job이 쓴
 `.next/cache`를 복원해 빌드하고 실행합니다. **F1과 달리 이 채널이 실제로
@@ -457,7 +471,7 @@ repository write 자격증명도 없기 때문입니다(4.3). 차단 사유가 �
 
 ### F3 — `main`·`develop` scope writer가 제3자 install script를 실행합니다
 
-근거: 2장의 모든 `npm ci`, `--ignore-scripts`는 `pr-fast-gate.yml:684` 한 곳뿐.
+근거: 2장의 모든 `npm ci`, `--ignore-scripts`는 `pr-fast-gate.yml`의 `npm ci --prefix vendor/amux --ignore-scripts` 한 곳뿐.
 
 이것은 발견이라기보다 **F1·F2의 전제**입니다 — 침해된 의존성 하나가 `main`
 scope 캐시 쓰기를 얻는 경로. 따로 분류하지 않고 7장 P6의 조사 항목으로
@@ -485,11 +499,11 @@ provider key, 이메일 발송 key — 이 오염된 코드와 같은 job에 놓
 
 ### F5 — `cacheIsolationRecorded` 기록은 쓸 수 있고, 문구만 한정하면 됩니다 (초안 판정 철회)
 
-근거: `lib/agentCredentialReachability.ts:369-370`이 그 설정을 "a dated record
+근거: `lib/agentCredentialReachability.ts`의 `cacheIsolationRecorded` 주석이 그 설정을 "a dated record
 that **pull_request-run caches never reach other refs' runs**"로 정의합니다.
-`docs/policy/engineering-agent.md:198-201`이 계약입니다. 호출자는 둘이고 **둘
-다 `false`로 고정**돼 있습니다(`tests/agentCredentialReachability.test.mjs:13`·
-`:561`, `scripts/report-engineering-agent-tiers.mjs:144`) — 즉 기록은 아직
+`docs/policy/engineering-agent.md` §5의 캐시 경로 항목이 계약입니다. 호출자는 둘이고 **둘
+다 `false`로 고정**돼 있습니다(`tests/agentCredentialReachability.test.mjs`와
+`scripts/report-engineering-agent-tiers.mjs`의 `cacheIsolationRecorded: false`) — 즉 기록은 아직
 존재하지 않습니다.
 
 1장의 공식 규칙은 **그 방향이 이미 닫혀 있음을 확인합니다** — PR 캐시는
@@ -524,8 +538,8 @@ job이 있는가"입니다.
 **rev 2는 하나 있다고 적었고, 그것이 틀렸습니다.** 지목한 job은 `pull_request:
 types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref가
 `feedback-autofix/`로 시작할 것을 요구합니다
-(`.github/workflows/feedback-autofix-promotion-pr.yml:49-53`). 에이전트 브랜치는
-`agent/engineering/` namespace이므로(`lib/agentCredentialReachability.ts:30`)
+(`feedback-autofix-promotion-pr.yml`의 job 조건 `startsWith(github.event.pull_request.head.ref, 'feedback-autofix/')`). 에이전트 브랜치는
+`agent/engineering/` namespace이므로(`lib/agentCredentialReachability.ts`의 `AGENT_BRANCH_PREFIX`)
 **절대 걸리지 않습니다.** rev 2는 workflow의 trigger만 보고 job의 조건을 읽지
 않았습니다.
 
@@ -564,16 +578,16 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 
 | 결정 | 위치 |
 |---|---|
-| 자격증명 job이 Playwright 캐시를 복원하지 않고 매번 새로 내려받음 | `cron-auto-fix.yml:320`, `visual-baseline-record.yml:74` |
+| 자격증명 job이 Playwright 캐시를 복원하지 않고 매번 새로 내려받음 | `cron-auto-fix.yml`·`visual-baseline-record.yml`의 `scripts/ci/install-playwright.sh chromium`(캐시 단계가 없습니다) |
 | lockfile 밖 설치에 명시적 sha512 핀 | `cron-auto-fix.yml:235-247`, `feedback-autofix.yml:160-172` (step `Install Claude Code CLI`) |
 | 가장 위험한 두 job의 action SHA 핀 | `cron-auto-fix.yml:189`·`:217`, `feedback-autofix.yml:115`·`:123` (`checkout`·`setup-node`) |
-| `--ignore-scripts` | `pr-fast-gate.yml:684` |
-| `Linux-next-` fallback 제거 | `pr-fast-gate.yml:809-810`, `:1014-1015` |
-| 이미지 빌드에 secret·캐시 없음 | `engineering-agent-image.yml:4`, `:46-48` |
-| `npm ci`를 일부러 하지 않음 | `deployed-commit-drift.yml:114-116` |
+| `--ignore-scripts` | `pr-fast-gate.yml`의 `npm ci --prefix vendor/amux --ignore-scripts` |
+| `Linux-next-` fallback 제거 | `pr-fast-gate.yml`의 두 `restore-keys` — 이제 그 접두사를 담지 않고, 주석만 왜 지웠는지 적습니다 |
+| 이미지 빌드에 secret·캐시 없음 | `engineering-agent-image.yml`의 `docker build --pull --no-cache` |
+| `npm ci`를 일부러 하지 않음 | `deployed-commit-drift.yml`의 "No `npm ci`" 주석 |
 | 캐시 표면 0 | `secret-history-scan.yml`, `back-merge-main-to-develop.yml`, `codeql.yml` |
 | secret을 한 step으로 좁힘 | `feedback-autofix.yml:174` (step `Attempt the fix (LLM key only in this step)`) |
-| Rust 캐시에 restore-keys 없음 | `orchestrator-rust.yml:54` |
+| Rust 캐시에 restore-keys 없음 | `orchestrator-rust.yml`의 step `Restore the downloaded crates` |
 
 ## 7. 권고 — 우선순위 순
 
@@ -762,8 +776,12 @@ miss입니다.** 비용은 측정 가능한 것으로만 적습니다 — Next b
 > 읽습니다(이 모듈의 머리 주석이 그 한계를 적고 있습니다). 즉 F3이 말한 모양이
 > 서드파티 action 안에 한 건 남아 있습니다.
 >
-> 일회성 삭제는 운영자 행위입니다. 삭제 후 그 scope에는 아무도 쓸 수 없으므로
-> 항목은 다시 생기지 않고, 비용은 daily audit run마다 5 MB 재다운로드입니다.
+> **삭제했습니다**(2026-10-07, 소유자 지시). 삭제 뒤 다시 읽은 결과 널리 읽히는
+> scope의 항목은 **0개**이고, 저장소 전체는 20개 10,167 MB에서 19개 9,776 MB가
+> 됐습니다. 그 scope에는 아무도 쓸 수 없으므로 항목은 다시 생기지 않고, 비용은
+> daily audit run마다 gitleaks 5 MB 재다운로드(로그상 약 1초)입니다. 이로써
+> P1의 3번("기존 항목은 전환만으로 사라지지 않습니다")이 지적한 잔존이 닫혔고,
+> 그것은 이 감사가 적어 두고 실행하지 않았던 유일한 항목이었습니다.
 
 1. **writer 하나, reader 여럿** — 캐시 scope는 **ref 단위이고 workflow 단위가
    아니므로**, PR 전용 writer가 쓴 항목은 같은 PR ref에서 도는 다른 workflow가
@@ -901,7 +919,7 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
    npm을 지정하면 `cache:` 없이도 캐시합니다. `cache:` 유무만 보는 검사는 그
    변경을 통과시킵니다.
 2. **`POSTURE_DIGEST`에 캐시 **종류**가 들어가야 합니다.**
-   `tests/agentCredentialReachability.test.mjs:555`의 digest는 reason 이름
+   `tests/agentCredentialReachability.test.mjs`의 `POSTURE_DIGEST`는 reason 이름
    (`credential_job_restores_cache`)만 담습니다. 그래서 **이미 npm 캐시를
    복원하는 자격증명 job에 `.next/cache`를 더하면 reason이 그대로고 digest가
    움직이지 않습니다** — 4.3의 열한 job 전부가 그 상태이므로, 이 감사가 가장
@@ -945,7 +963,7 @@ AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint �
   읽어야 성립합니다(F5가 rev 2에서 틀린 지점이 바로 그것입니다). 대상 이름은
   §16에 따라 비공개 기록에 둡니다.
 
-`docs/policy/engineering-agent.md:198-201` 변경이므로 역할은 `contract`이고
+`docs/policy/engineering-agent.md` §5의 캐시 경로 항목 변경이므로 역할은 `contract`이고
 **소유자 승인이 필요합니다.** P3과의 순서 의존은 없지만, 세 번째 항목의 근거가
 "오늘 없다"이므로 **P3이 그 상태를 유지해 주어야 기록이 계속 참입니다.**
 
@@ -1034,7 +1052,8 @@ workflow의 자격증명 job은 어떤 cache도 복원하지 않는다.** 그것
 3. **`.next/cache` 오염으로 번들에 코드를 넣을 수 있다는 것.** webpack/Turbopack
    의 파일시스템 캐시에 모듈 단위 무결성이 없다는 구조 판정이고, 이 저장소의
    Next 버전에서 실증한 것은 아닙니다. 실증된 것은 **버전이 다른 캐시가 빌드를
-   깨뜨렸다**는 것뿐입니다(`pr-fast-gate.yml:806-808`).
+   깨뜨렸다**는 것뿐입니다(`admin-console-e2e.yml`·`daily-security-audit.yml`의
+   restore-key 주석이 그 기록입니다).
 4. **자격증명 판정 22건의 전수 근거.** 0장 4번에 적었습니다. `pr-fast-gate #
    fast-gate`가 왜 자격증명 보유로 판정되는지는 추적하지 않았습니다 — 그 job은
    캐시를 복원하지 않으므로 세 축에 영향이 없습니다.
@@ -1085,7 +1104,7 @@ slice 하나에 대한 것이었습니다.**
 
 | 심각도 | 지적 | 조치 |
 |---|---|---|
-| major | 같은 PR 방향의 사례로 지목한 job은 head ref가 `feedback-autofix/`일 때만 도는 조건이 있어 에이전트 PR에 걸리지 않는다 | 확인함(`feedback-autofix-promotion-pr.yml:49-53`). F5·P4를 고쳐 **오늘 사례가 없다**로 바꿨습니다 |
+| major | 같은 PR 방향의 사례로 지목한 job은 head ref가 `feedback-autofix/`일 때만 도는 조건이 있어 에이전트 PR에 걸리지 않는다 | 확인함(`feedback-autofix-promotion-pr.yml`의 job 조건 `startsWith(github.event.pull_request.head.ref, 'feedback-autofix/')`). F5·P4를 고쳐 **오늘 사례가 없다**로 바꿨습니다 |
 | major | 미해소 자격증명 도달 대상을 이름과 줄 번호로 공개 저장소에 나열했다 — §16 위반 | 확인함. 목록을 두 문서에서 제거했고, 경위를 **10장**에 적습니다 |
 | minor | "복원 단계가 모두 `continue-on-error`"가 Rust 단계와 모순된다 | 확인함. 3.4·F6의 범위를 Next·Playwright 열여섯 곳으로 한정했습니다 |
 
@@ -1169,7 +1188,7 @@ secret **값**은 공개되지 않았습니다. 공개된 것은 어느 job이 �
 
 "이 문서와 저장소 기록"이므로 `docs/policy/engineering-agent.md`만이 아니라
 `.github/audits/` 같은 저장소 기록 전체가 대상입니다.
-`tests/agentCredentialReachability.test.mjs:540-555`가 같은 이유로 posture를
+`tests/agentCredentialReachability.test.mjs`의 `POSTURE_DIGEST` 비교가 같은 이유로 posture를
 12자 digest로만 고정하며, 그 주석이 §16을 인용합니다.
 
 ### 되돌릴 수 없습니다

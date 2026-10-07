@@ -256,6 +256,20 @@ gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지
 - 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
   job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
 
+## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
+
+2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
+staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
+사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
+
+- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
+  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
+- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
+- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
+  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
@@ -1287,7 +1301,7 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
 - **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
   `lib/amux/decisionMakerSwitchSystemAudit.ts`,
-  `prisma/migrations/20261007130000_amux_decision_maker_switch/migration.sql`,
+  `prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql`,
   `tests/amuxDecisionMakerSwitch.test.mjs`, `tests/integration/amux-decision-maker-switch.db.test.ts`.
   스위치는 append-only 사건 표이고 scope마다 가장 새 사건이 상태입니다. **값은 DB CHECK가 닫습니다** —
   인스턴스는 `off`·`proposal`, kill switch는 `on`·`off`뿐이고, 시스템은 인스턴스를 `off`로 latch만

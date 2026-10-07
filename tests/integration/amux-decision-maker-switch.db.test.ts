@@ -14,7 +14,7 @@ import { prisma } from "@/lib/prisma";
 
 // AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
 // stage S1b, against PostgreSQL through the migration history
-// (20261007130000_amux_decision_maker_switch), in the agents lane of the DB
+// (20261008030000_amux_decision_maker_switch), in the agents lane of the DB
 // integration suite.
 //
 // §12's blocking test "스위치가 off·proposal 밖의 값을 거부한다는 DB 테스트" is

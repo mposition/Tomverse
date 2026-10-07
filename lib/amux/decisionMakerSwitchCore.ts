@@ -3,7 +3,7 @@
  * (docs/policy/amux-decision-maker.md §8, §10), stage S1b.
  *
  * Pure: the closed vocabularies that the CHECKs of migration
- * 20261007130000_amux_decision_maker_switch hold, the mapping from the newest
+ * 20261008030000_amux_decision_maker_switch hold, the mapping from the newest
  * stored event of each scope to the switch state `routeDmQuestion()` reads,
  * and the input and audit shapes of the one writer,
  * lib/amux/decisionMakerSwitchStore.ts. No I/O.

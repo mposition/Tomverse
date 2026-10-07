@@ -115,7 +115,7 @@ test("the observation runner's declared variables are the ones the run checks fo
 
 test("the probe holds no means of submitting, and never runs in production", () => {
   const probe = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_probe");
-  // It goes where develop lands: staging until the lane switch, and dev.
+  // dev, where develop lands, and staging, which runs the release candidate.
   assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "staging"]);
   assert.deepEqual([...probe.environments.dev].sort(), [...probe.environments.staging].sort());
   // S0 measures what the image can do. Nothing about that needs the ability to
@@ -131,6 +131,15 @@ test("the probe holds no means of submitting, and never runs in production", () 
   // have to be the same list: a name declared here and not there stops the
   // probe, and a name there and not here is deleted by the next apply.
   assert.deepEqual([...variables].sort(), [...PROBE_SERVICE_VARIABLES].sort());
+});
+
+test("both projects deploy the same branch per environment", async () => {
+  // The Agent project's staging observes the release candidate the app's
+  // staging serves; a project left on develop would compare one build with
+  // another.
+  const { RAILWAY_ENVIRONMENT_BRANCHES } = await import("../.railway/scheduled-jobs.ts");
+  assert.deepEqual(AGENT_ENVIRONMENT_BRANCHES, RAILWAY_ENVIRONMENT_BRANCHES);
+  assert.equal(AGENT_ENVIRONMENT_BRANCHES.staging, "test");
 });
 
 test("the resource list is exactly the table for that environment, and refuses the unknown", () => {

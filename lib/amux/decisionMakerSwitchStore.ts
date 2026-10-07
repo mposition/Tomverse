@@ -30,7 +30,7 @@ import { writeDecisionMakerLatchAudit } from "@/lib/amux/decisionMakerSwitchSyst
  * route transactions that will call them have a statement budget (§9).
  *
  * The rules a stored event must satisfy are the database's (migration
- * 20261007130000_amux_decision_maker_switch): this module only builds events
+ * 20261008030000_amux_decision_maker_switch): this module only builds events
  * that pass them. Permission is the caller's: a person's change needs
  * `ops:write` and a recent step-up (§8), checked before this is called.
  *

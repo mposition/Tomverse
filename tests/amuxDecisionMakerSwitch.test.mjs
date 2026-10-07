@@ -52,7 +52,7 @@ import {
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/decisionMakerSwitchStore.ts";
-const MIGRATION = "prisma/migrations/20261007130000_amux_decision_maker_switch/migration.sql";
+const MIGRATION = "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql";
 
 const withoutSqlComments = (sql) =>
   sql
