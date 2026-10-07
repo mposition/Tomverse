@@ -433,35 +433,65 @@ const PRESENCE_SWEEP_EXEMPT = new Set([
 const PRESENCE_SWEEP_EXEMPT_BEFORE = "20261003130000";
 
 /**
- * The statements, with everything that only looks like one removed.
+ * The statements, with everything that only looks like one removed -- and a
+ * verdict on whether the scan is trustworthy.
  *
- * This has to know SQL quoting, and two drafts that did not were each wrong in
- * a different way. The first handled only standalone `--` lines, so DDL quoted
- * in a block comment counted as a statement. The second dropped `--` to end of
- * line unconditionally, which truncated
- * `CREATE INDEX idx ON t ((replace(c, '--', '')));` at the literal and took the
- * `;` with it: no index was found, and an expression-index-only migration
- * passed undeclared -- the class the sweep exists to catch.
+ * Three drafts of this were wrong, each in a different place, and the third is
+ * why it now reports uncertainty instead of only answering. The first handled
+ * only standalone `--` lines, so DDL quoted in a block comment counted as a
+ * statement. The second dropped `--` to end of line unconditionally, which
+ * truncated `CREATE INDEX idx ON t ((replace(c, '--', '')));` at the literal
+ * and took the `;` with it: no index was found, and an expression-index-only
+ * migration passed undeclared. The third mishandled `E'it\'s --'` and read the
+ * identifier `idx$tag$` as the start of a function body, each with the same
+ * consequence.
  *
- * So, in one pass: comments go, and block comments nest as PostgreSQL allows;
- * a string literal keeps its quotes and loses its contents; a dollar-quoted
- * body keeps its delimiters and loses its contents, because DDL written inside
- * a function body is not applied by the migration and the diff cannot see it
- * either; a quoted identifier is kept verbatim, because the index key list test
- * reads those. Newlines survive everywhere, so a line-oriented reading of the
- * result still lines up with the file.
+ * Reading SQL with one pass will keep having corners, so the pass says when it
+ * has met one and `needsDeclaration` treats that as "declare it". Being wrong
+ * in that direction costs a comment line; being wrong the other way costs a
+ * blocked deploy.
+ *
+ * What it does know:
+ *
+ *  - Comments go, and block comments nest, as PostgreSQL allows.
+ *  - A string literal keeps its quotes and loses its contents, so a literal
+ *    naming described DDL cannot make a migration look described.
+ *  - In `E'...'` a backslash escapes the next character; everywhere else it is
+ *    ordinary, because standard_conforming_strings has been on by default since
+ *    PostgreSQL 9.1 and these migrations run with the server's defaults. Real
+ *    migrations here use `E'[^ \t\n\r\f\v]'`, so this is not a hypothetical.
+ *  - A dollar-quoted body keeps its delimiters and loses its contents: DDL
+ *    written inside a function body is not applied by the migration, so the
+ *    diff cannot see it either.
+ *  - A dollar-quote tag cannot follow an identifier character, which is how
+ *    `idx$tag$` is told from a body: it is one identifier, and it is emitted
+ *    as one.
+ *  - A quoted identifier is kept verbatim, because the index key list test
+ *    reads those.
+ *  - Newlines survive everywhere, so a line-oriented reading of the result
+ *    still lines up with the file.
+ *
+ * What makes it uncertain: a literal, a quoted identifier, a block comment or
+ * a dollar-quoted body that never closes. Today no migration in the tree
+ * reaches that branch.
  */
-const statementsOf = (sql) => {
+const SINGLE_QUOTE = String.fromCharCode(39);
+
+const scanStatements = (sql) => {
   let out = "";
+  let certain = true;
   let i = 0;
   const end = sql.length;
+
   while (i < end) {
     const char = sql[i];
+
     if (char === "-" && sql[i + 1] === "-") {
       while (i < end && sql[i] !== "\n") i += 1;
       out += " ";
       continue;
     }
+
     if (char === "/" && sql[i + 1] === "*") {
       let depth = 1;
       i += 2;
@@ -479,29 +509,43 @@ const statementsOf = (sql) => {
         if (sql[i] === "\n") out += "\n";
         i += 1;
       }
+      if (depth > 0) certain = false;
       out += " ";
       continue;
     }
-    if (char === "'") {
+
+    if (char === SINGLE_QUOTE) {
+      const escaping = /(?:^|[^A-Za-z0-9_$])[Ee]$/.test(
+        " " + sql.slice(Math.max(0, i - 2), i),
+      );
       i += 1;
+      let closed = false;
       while (i < end) {
-        if (sql[i] === "'" && sql[i + 1] === "'") {
+        if (escaping && sql[i] === "\\") {
           i += 2;
           continue;
         }
-        if (sql[i] === "'") {
+        if (sql[i] === SINGLE_QUOTE && sql[i + 1] === SINGLE_QUOTE) {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === SINGLE_QUOTE) {
           i += 1;
+          closed = true;
           break;
         }
         if (sql[i] === "\n") out += "\n";
         i += 1;
       }
-      out += "''";
+      if (!closed) certain = false;
+      out += SINGLE_QUOTE + SINGLE_QUOTE;
       continue;
     }
+
     if (char === '"') {
       out += char;
       i += 1;
+      let closed = false;
       while (i < end) {
         if (sql[i] === '"' && sql[i + 1] === '"') {
           out += '""';
@@ -511,28 +555,39 @@ const statementsOf = (sql) => {
         if (sql[i] === '"') {
           out += '"';
           i += 1;
+          closed = true;
           break;
         }
         out += sql[i];
         i += 1;
       }
+      if (!closed) certain = false;
       continue;
     }
+
     const dollarTag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
     if (dollarTag) {
+      const previous = sql[i - 1];
+      if (previous !== undefined && /[A-Za-z0-9_$]/.test(previous)) {
+        out += dollarTag[0];
+        i += dollarTag[0].length;
+        continue;
+      }
       const tag = dollarTag[0];
       i += tag.length;
       const close = sql.indexOf(tag, i);
+      if (close < 0) certain = false;
       const body = close < 0 ? sql.slice(i) : sql.slice(i, close);
       for (const bodyChar of body) if (bodyChar === "\n") out += "\n";
       i = close < 0 ? end : close + tag.length;
       out += tag + tag;
       continue;
     }
+
     out += char;
     i += 1;
   }
-  return out;
+  return { statements: out, certain };
 };
 
 const indexStatementsIn = (statements) =>
@@ -579,12 +634,21 @@ const DIFF_VISIBLE = [
   /CREATE\s+(?:OR\s+REPLACE\s+)?VIEW/i,
 ];
 
+/** The objects a declaration can name, looked for in the raw text. */
+const PROBEABLE_MENTION =
+  /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION|CREATE\s+(?:CONSTRAINT\s+)?TRIGGER|CREATE\s+(?:UNIQUE\s+)?INDEX/i;
+
 /**
  * Whether this migration needs a declaration: it creates something a
  * declaration can probe, and nothing the diff would notice.
+ *
+ * A scan the reader could not trust answers "yes" whenever the file mentions an
+ * object a probe could name. That reads the raw text, comments included, which
+ * is the fail-closed side of both choices.
  */
 const needsDeclaration = (sql) => {
-  const statements = statementsOf(sql);
+  const { statements, certain } = scanStatements(sql);
+  if (!certain) return PROBEABLE_MENTION.test(sql);
   const indexes = indexStatementsIn(statements);
   const visible =
     DIFF_VISIBLE.some((pattern) => pattern.test(statements)) ||
@@ -720,4 +784,70 @@ test("the classes no declaration could answer for stay out of scope", () => {
     needsDeclaration(`ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" <> '');\n`),
     false,
   );
+});
+
+test("a backslash escape only escapes inside E'...'", () => {
+  // Round 3's first case. The scanner read the backslash as ordinary, so the
+  // escaped quote closed the literal, the `--` after it became a comment, and
+  // the `;` went with it -- no index found, no declaration asked for.
+  const escaped = `CREATE INDEX idx ON t ((replace(c, E'it\\'s --', '')));\n`;
+  // The fixture is only the case if the backslash survived into it. Writing
+  // these through a shell once collapsed it and quietly tested other SQL.
+  assert.ok(escaped.includes("\\'"), "the fixture must contain a real backslash");
+  assert.equal(needsDeclaration(escaped), true);
+  // Without the E prefix the backslash is ordinary, which is what
+  // standard_conforming_strings means, so the literal runs to the next quote.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, '\\', '')));\n`),
+    true,
+  );
+  // The form real migrations here use.
+  assert.equal(
+    needsDeclaration(
+      `ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" ~ E'[^ \\t\\n]');\n`,
+    ),
+    false,
+  );
+});
+
+test("a dollar-quote tag cannot follow an identifier character", () => {
+  // Round 3's second case: `idx$tag$` is one identifier, and reading it as the
+  // start of a body swallowed the rest of the statement.
+  assert.equal(needsDeclaration(`CREATE INDEX idx$tag$ ON t ((lower(c)));\n`), true);
+  // With the boundary present it is a body, and its contents are not statements.
+  assert.equal(
+    needsDeclaration(
+      `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $tag$ BEGIN RETURN NULL; END $tag$;\n`,
+    ),
+    true,
+  );
+});
+
+test("a scan it cannot trust asks for the declaration", () => {
+  // The valve that bounds this detector: three drafts were each wrong about
+  // some corner of SQL, so an unclosed construct answers "declare it" rather
+  // than guessing. Being wrong here costs a comment line.
+  const unterminated = `CREATE INDEX idx ON t ((lower(c))); -- note\nSELECT 'oops\n`;
+  assert.equal(scanStatements(unterminated).certain, false);
+  assert.equal(needsDeclaration(unterminated), true);
+  // An unclosed body is the same answer.
+  assert.equal(
+    needsDeclaration(`CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN RETURN NULL;\n`),
+    true,
+  );
+  // But an untrustworthy scan of a file that names nothing a probe could
+  // answer for is still out of scope, not a demand nobody can meet.
+  assert.equal(needsDeclaration(`UPDATE "T" SET "c" = 'oops\n`), false);
+});
+
+test("no migration in the tree needs the untrusted-scan valve", () => {
+  // The valve is for a corner nobody has written yet. If this starts failing,
+  // the named migration is not wrong -- it just has to declare, and the sweep
+  // will say so.
+  const untrusted = migrationNames().filter(
+    (name) =>
+      !scanStatements(readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8"))
+        .certain,
+  );
+  assert.deepEqual(untrusted, []);
 });
