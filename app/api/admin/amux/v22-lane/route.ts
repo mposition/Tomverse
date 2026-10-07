@@ -49,11 +49,11 @@ export async function POST(request: Request) {
       { error: "Forbidden." }, { status: 403, headers: noStore });
     try { await assertRecentAdminAuthentication(session); }
     catch (error) {
-      if (!isAdminReauthenticationError(error)) throw error;
-      return Response.json({ error:
+      if (isAdminReauthenticationError(error)) return Response.json({ error:
         "Recent administrator authentication is required.",
         code: "ADMIN_REAUTHENTICATION_REQUIRED" },
       { status: 428, headers: noStore });
+      throw error;
     }
     await consumeApiRateLimit(request, session.user.id,
       "admin-amux-v22-lane", { minute: 5, day: 20 });

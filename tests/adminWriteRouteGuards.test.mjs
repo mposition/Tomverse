@@ -72,6 +72,12 @@ const amuxSourceScopePreviewService = withoutComments(readFileSync(
 const amuxSourceScopePreviewCore = withoutComments(readFileSync(
   join(LIB_DIR, "amux/ideaSourceScopePreviewCore.ts"), "utf8"
 ));
+const amuxResolutionPreviewService = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaResolutionPreviewService.ts"), "utf8"
+));
+const amuxResolutionResultReadService = withoutComments(readFileSync(
+  join(LIB_DIR, "amux/ideaAnalysisResultReadService.ts"), "utf8"
+));
 const SOURCE_SCOPE_ROUTE = "app/api/admin/amux/ideas/source-scope-preview/route.ts";
 const SOURCE_SCOPE_SERVICE = "lib/amux/ideaSourceScopePreviewService.ts";
 const SOURCE_SCOPE_CORE = "lib/amux/ideaSourceScopePreviewCore.ts";
@@ -82,6 +88,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaCrypto.ts",
   "lib/amux/ideaInputCore.ts",
   "lib/amux/ideaKeyConfig.ts",
+  "lib/amux/ideaKeyStore.ts",
   "lib/amux/ideaSourceScopeCore.ts",
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
@@ -89,10 +96,28 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "0889238334dbed4afd78dde96f3205c82c1c5bd290726aab0899ff5e9353c37a";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "8680a50971ef3f7dfe63f4e4bb9a40b3f66f1eeed38bf262abbacad98d68dc6d";
+const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
+const RESOLUTION_PREVIEW_REVIEWED_FILES = [
+  RESOLUTION_PREVIEW_ROUTE,
+  "lib/adminAuditIntegrityCore.ts",
+  "lib/amux/boardImportCore.ts",
+  "lib/amux/ideaAnalysisChunkCore.ts",
+  "lib/amux/ideaAnalysisDraftSealCore.ts",
+  "lib/amux/ideaAnalysisResultReadCore.ts",
+  "lib/amux/ideaAnalysisResultReadService.ts",
+  "lib/amux/ideaCrypto.ts",
+  "lib/amux/ideaHierarchyDecisionCore.ts",
+  "lib/amux/ideaKeyConfig.ts",
+  "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaResolutionChoiceCore.ts",
+  "lib/amux/ideaResolutionPreviewService.ts",
+  "lib/amux/localIntakeCore.ts",
+].sort();
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "66febcf1f93bbe104207fb276022b9b29240be642d2c9f40d27c098755163943";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
-const amuxBusinessClosure = (overrides = new Map()) => {
+const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
   const seen = new Set();
   const visit = (path) => {
     if (seen.has(path)) return;
@@ -109,19 +134,20 @@ const amuxBusinessClosure = (overrides = new Map()) => {
       const withExtension = extname(target) ? target : `${target}.ts`;
       const relativePath = relative(REPOSITORY_ROOT, withExtension).split(sep).join("/");
       if (!relativePath.startsWith("lib/amux/") &&
-          relativePath !== "lib/adminAuditIntegrityCore.ts") {
+          relativePath !== "lib/adminAuditIntegrityCore.ts" &&
+          relativePath !== "lib/adminAuditSystemActors.ts") {
         throw new Error("AMUX preview import escaped its closure");
       }
       visit(relativePath);
     }
   };
-  visit(SOURCE_SCOPE_ROUTE);
+  visit(root);
   return [...seen].sort();
 };
 
-const amuxSourceScopeReviewedDigest = (overrides = new Map()) => {
+const amuxReviewedDigest = (files, overrides = new Map()) => {
   const hash = createHash("sha256");
-  for (const path of SOURCE_SCOPE_REVIEWED_FILES) {
+  for (const path of files) {
     const source = overrides.has(path)
       ? overrides.get(path)
       : readFileSync(join(REPOSITORY_ROOT, ...path.split("/")), "utf8");
@@ -129,6 +155,8 @@ const amuxSourceScopeReviewedDigest = (overrides = new Map()) => {
   }
   return hash.digest("hex");
 };
+const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
+  amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -264,6 +292,34 @@ const isDarkReadOnlyAmuxSourceScopePreview = (
   ]);
 };
 
+/** This POST computes a dry-run from already stored proposals. Its closed
+ * import graph is pinned below: adding a writer, outbound call, or new import
+ * reopens the audit decision instead of silently inheriting this exception. */
+const isReadOnlyAmuxResolutionPreview = (route,
+  service = amuxResolutionPreviewService,
+  resultReader = amuxResolutionResultReadService) => {
+  if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
+      JSON.stringify(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE)) !==
+        JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
+      amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES) !==
+        RESOLUTION_PREVIEW_REVIEWED_DIGEST ||
+      !route.source.includes("const session = await owner();") ||
+      !route.source.includes("await consumeApiRateLimit(request, session.user!.id!") ||
+      !route.source.includes("await previewAmuxIdeaResolution({ session, ...parsed.data })") ||
+      !service.includes("await readAmuxIdeaResolutionCatalog(input.session, input.ideaId)") ||
+      !service.includes("await loadAmuxContentKeyRing(identities)") ||
+      !service.includes("await readAmuxFirstIdeaAnalysisResult(input.session,") ||
+      !resultReader.includes("return prisma.$transaction(async (tx) => {") ||
+      /\b(?:prisma|tx)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/.test(
+        `${route.source}\n${service}\n${resultReader}`) ||
+      /\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(
+        `${route.source}\n${service}\n${resultReader}`) ||
+      /\bfetch\s*\(|\bimport\s*\(/.test(`${route.source}\n${service}\n${resultReader}`)) {
+    return false;
+  }
+  return true;
+};
+
 test("the read-only POST audit exception closes when its source boundary changes", () => {
   const route = routes.find((candidate) =>
     candidate.name === "amux/ideas/source-scope-preview/route.ts");
@@ -310,6 +366,31 @@ test("the read-only POST audit exception closes when its source boundary changes
   assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
     amuxSourceScopePreviewService,
     amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
+});
+
+test("the resolution dry-run audit exception closes when its source boundary changes", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "amux/ideas/resolution-preview/route.ts");
+  assert.ok(route);
+  assert.deepEqual(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE),
+    RESOLUTION_PREVIEW_REVIEWED_FILES);
+  assert.equal(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES),
+    RESOLUTION_PREVIEW_REVIEWED_DIGEST);
+  assert.equal(isReadOnlyAmuxResolutionPreview(route), true);
+  assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
+    source: route.source.replace("await previewAmuxIdeaResolution({ session, ...parsed.data })",
+      "await publishAmuxIdeaResolution({ session, ...parsed.data })"),
+  }), false);
+  assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
+    source: `${route.source}\nawait prisma.amuxWorkItem.create({});`,
+  }), false);
+  assert.equal(isReadOnlyAmuxResolutionPreview(route,
+    `${amuxResolutionPreviewService}\nawait prisma.amuxWorkItem.create({});`), false);
+  const keyStorePath = "lib/amux/ideaKeyStore.ts";
+  const rawKeyStore = readFileSync(join(REPOSITORY_ROOT, ...keyStorePath.split("/")), "utf8");
+  assert.notEqual(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES, new Map([
+    [keyStorePath, `${rawKeyStore}\nvoid globalThis.fetch("https://example.invalid");`],
+  ])), RESOLUTION_PREVIEW_REVIEWED_DIGEST);
 });
 const oneShotStageWriter = withoutComments(readFileSync(
   join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
@@ -380,6 +461,7 @@ test("every admin write route writes an audit entry", () => {
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
       !isDarkReadOnlyAmuxSourceScopePreview(route) &&
+      !isReadOnlyAmuxResolutionPreview(route) &&
       !reachesCanonicalOneShotStageAudit(route))
     .map((route) => route.name);
 

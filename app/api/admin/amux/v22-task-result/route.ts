@@ -4,7 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { readAmuxV22TaskResultForOwner } from
   "@/lib/amux/v22TaskResultStore";
 import { authOptions } from "@/lib/auth";
@@ -15,7 +15,8 @@ const json = (body: object, status = 200) => NextResponse.json(body, {
 
 export async function GET(request: Request): Promise<Response> {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner")
+  if (!session?.user?.id || !isAdminSession(session) ||
+      getAdminRole(session) !== "owner")
     return json({ error: "Not found." }, 404);
   const params = new URL(request.url).searchParams;
   if ([...params.keys()].length !== 1 || !params.has("taskId"))

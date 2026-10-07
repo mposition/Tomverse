@@ -31,11 +31,13 @@ async function requireOwner(stepUp: boolean) {
   if (stepUp) {
     try { await assertRecentAdminAuthentication(session); }
     catch (error) {
-      if (!isAdminReauthenticationError(error)) throw error;
-      return { response: Response.json({ error:
-        "Recent administrator authentication is required.",
-        code: "ADMIN_REAUTHENTICATION_REQUIRED" },
-      { status: 428, headers: noStore }) } as const;
+      if (isAdminReauthenticationError(error)) return {
+        response: Response.json({ error:
+          "Recent administrator authentication is required.",
+          code: "ADMIN_REAUTHENTICATION_REQUIRED" },
+        { status: 428, headers: noStore }),
+      } as const;
+      throw error;
     }
   }
   return { session } as const;

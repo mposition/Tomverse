@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { consumeApiRateLimit, apiSecurityResponse } from "@/lib/apiSecurity";
 import { decideAmuxV22ExternalAuthority } from
   "@/lib/amux/v22ExternalAuthorityCore";
@@ -18,7 +18,8 @@ const json = (body: object, status = 200) => NextResponse.json(body, {
 /** Readback cannot unhalt an attempt or grant deployment authority. */
 export async function GET(request: Request): Promise<Response> {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id || getAdminRole(session) !== "owner")
+  if (!session?.user?.id || !isAdminSession(session) ||
+      getAdminRole(session) !== "owner")
     return json({ error: "Not found." }, 404);
   if (!decideAmuxV22ExternalAuthority({ actor: "amux_app",
     action: "observe_deployment" }).allowed)
