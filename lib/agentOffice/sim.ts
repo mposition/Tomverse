@@ -7,6 +7,7 @@
 
 import type { AdminMessageShape } from "@/lib/adminLocale";
 import type { AgentOfficeCopy } from "@/lib/adminMessages/agentOffice";
+import type { AgentOfficeLiveDept } from "@/lib/agentOffice/live";
 import { findPath } from "@/lib/agentOffice/pathfinding";
 import {
   AGENT_OFFICE_BLOCKED_DEPTS,
@@ -32,7 +33,12 @@ import {
 
 export type OfficeCopy = AdminMessageShape<AgentOfficeCopy>;
 
-export type DeptStatus = "done" | "working" | "approval" | "blocked" | "waiting";
+/**
+ * A room's colour. `attention` is only ever a real record's: a run that
+ * failed or an agent gone silent, which is neither waiting on a link nor a
+ * decision waiting for the operator.
+ */
+export type DeptStatus = "done" | "working" | "approval" | "attention" | "blocked" | "waiting";
 export type AgentStatus =
   | "offDuty"
   | "commuting"
@@ -173,7 +179,7 @@ export type Snapshot = {
   approved: boolean;
   briefingReady: boolean;
   deptStatus: Record<string, DeptStatus>;
-  stats: { done: number; working: number; approval: number; blocked: number };
+  stats: { done: number; working: number; approval: number; attention: number; blocked: number };
   log: LogEntry[];
   meetingTitle: string | null;
   chat: ChatEntry[];
@@ -266,9 +272,16 @@ export class AgentOffice {
   private pendingWork = new Map<string, Set<string>>();
   /** Agents in a scene: their own idle behaviour (coffee, chat) cannot cut in. */
   private locked = new Set<string>();
+  /**
+   * Rooms that show a real record. The demo never simulates them: their
+   * status is the record's, nobody in them is given scripted work, and what
+   * their lead says is the record's line.
+   */
+  private live: Readonly<Record<string, AgentOfficeLiveDept>>;
 
-  constructor(copy: OfficeCopy) {
+  constructor(copy: OfficeCopy, live: Readonly<Record<string, AgentOfficeLiveDept>> = {}) {
     this.copy = copy;
+    this.live = live;
     const { staff, operator } = buildStaff(copy);
     this.staff = staff;
     this.operatorSeed = operator;
@@ -320,7 +333,8 @@ export class AgentOffice {
     operator.facing = "down";
 
     for (const room of DEPT_ROOMS) {
-      this.deptStatus[room.id] = AGENT_OFFICE_BLOCKED_DEPTS.has(room.id) ? "blocked" : "waiting";
+      this.deptStatus[room.id] =
+        this.live[room.id]?.status ?? (AGENT_OFFICE_BLOCKED_DEPTS.has(room.id) ? "blocked" : "waiting");
     }
     this.pushLog("🎛️", this.copy.sim.ready, "lav");
     this.pushChat("staff", this.narratorName(), this.copy.sim.welcome(this.narratorName()));
@@ -525,16 +539,33 @@ export class AgentOffice {
     }
     yield 1.2;
 
-    // ④ Product research observation
+    // ④ Product research observation -- or, when its room reads the real
+    // record, its lead says what the record says and nobody plays at work.
     this.phaseIndex = PHASE.research;
-    yield* this.runDept("research", s.researchLabel, 6, s.researchDone);
+    const research = this.live.research;
+    if (research) {
+      const scout = this.leadOf("research");
+      this.stand(scout);
+      this.say(scout, research.line, 3.4);
+      this.pushLog(roomOf("research").icon, this.copy.real.log(this.roomName("research"), research.line), "mint");
+      yield 2.2;
+      this.sitAtDesk(scout);
+    } else {
+      yield* this.runDept("research", s.researchLabel, 6, s.researchDone);
+    }
 
-    // Hand-off meeting: research → engineering → QA
-    yield* this.meeting(s.handoverTitle, ["research-lead", "engineering-lead", "qa-lead"], [
-      ["research-lead", s.handoverResearch],
+    // Hand-off meeting: research → engineering → QA. A live research room
+    // has no scripted observation to hand over, so it is not at the table.
+    const handover: [string, string][] = [
+      ...(research ? [] : [["research-lead", s.handoverResearch] as [string, string]]),
       ["engineering-lead", s.handoverEngineering],
       ["qa-lead", s.handoverQa],
-    ]);
+    ];
+    yield* this.meeting(
+      s.handoverTitle,
+      handover.map(([id]) => id),
+      handover
+    );
 
     // ⑤ Engineering T2 draft
     this.phaseIndex = PHASE.engineering;
@@ -664,6 +695,8 @@ export class AgentOffice {
 
   /** Start a team's work without waiting for it. `skip` keeps named agents out of it. */
   private startDept(deptId: string, label: string, dur: number, skip: readonly string[] = []) {
+    // A room showing its real record is never given scripted work.
+    if (this.live[deptId]) return;
     this.deptStatus[deptId] = "working";
     const crew = this.deptAgents(deptId).filter((agent) => !skip.includes(agent.id));
     this.pendingWork.set(deptId, new Set(crew.map((agent) => agent.id)));
@@ -894,6 +927,12 @@ export class AgentOffice {
       lines.push(s.delayWorking(this.roomName(dept), this.deptTaskLabel(dept), this.deptProgress(dept)));
     }
 
+    // A real record that needs a look is named in its own words.
+    for (const [dept, status] of Object.entries(this.deptStatus)) {
+      const live = this.live[dept];
+      if (status === "attention" && live) lines.push(`${this.roomName(dept)}: ${live.line}`);
+    }
+
     const blocked = Object.entries(this.deptStatus)
       .filter(([, status]) => status === "blocked")
       .map(([dept]) => dept);
@@ -903,7 +942,7 @@ export class AgentOffice {
         lines.push(s.delayBlockedSummary(blocked.length, blocked.map((d) => this.roomName(d)).join(" · ")));
       } else {
         for (const dept of blocked) {
-          lines.push(`${this.roomName(dept)}: ${this.deptCopy(dept).blockReason}`);
+          lines.push(`${this.roomName(dept)}: ${this.live[dept]?.line ?? this.deptCopy(dept).blockReason}`);
         }
       }
     }
@@ -921,8 +960,11 @@ export class AgentOffice {
     const lead = this.leadOf(deptId);
     const status = this.deptStatus[deptId];
     const lines: string[] = [];
+    const live = this.live[deptId];
 
-    if (status === "working") {
+    if (live) {
+      lines.push(this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
+    } else if (status === "working") {
       lines.push(s.deptWorking(this.deptTaskLabel(deptId), this.deptProgress(deptId)));
     } else if (status === "done") {
       lines.push(s.deptReportDone(this.deptCopy(deptId).report));
@@ -940,7 +982,7 @@ export class AgentOffice {
           .join(" · ")
       )
     );
-    if (ORDER.late.test(question) && status === "waiting") lines.push(s.deptNotLate);
+    if (ORDER.late.test(question) && status === "waiting" && !live) lines.push(s.deptNotLate);
 
     this.pushChat("staff", s.speaker(lead.name, this.roomName(deptId)), lines.join("\n"));
     this.say(lead, s.reportHere, 3);
@@ -1031,8 +1073,10 @@ export class AgentOffice {
     const lines = ids.map((id): [string, string] => {
       const agent = this.agentById.get(id)!;
       const status = this.deptStatus[agent.deptId];
-      const text =
-        status === "working"
+      const live = this.live[agent.deptId];
+      const text = live
+        ? live.line
+        : status === "working"
           ? s.conveneWorking(this.deptTaskLabel(agent.deptId), this.deptProgress(agent.deptId))
           : status === "done"
             ? s.conveneDone
@@ -1130,6 +1174,22 @@ export class AgentOffice {
   approve() {
     if (!this.approvalPending) return;
     this.approved = true;
+  }
+
+  /**
+   * Takes a fresh reading of the live rooms. Their status follows the record;
+   * no other room moves.
+   */
+  setLive(live: Readonly<Record<string, AgentOfficeLiveDept>>) {
+    this.live = live;
+    for (const [deptId, room] of Object.entries(live)) {
+      if (deptId in this.deptStatus) this.deptStatus[deptId] = room.status;
+    }
+  }
+
+  /** The live reading for a room, or null for a demo room. */
+  liveDept(deptId: string): AgentOfficeLiveDept | null {
+    return this.live[deptId] ?? null;
   }
 
   setBriefingHandler(handler: (() => void) | null) {
@@ -1390,6 +1450,7 @@ export class AgentOffice {
         done: values.filter((v) => v === "done").length,
         working: values.filter((v) => v === "working").length,
         approval: values.filter((v) => v === "approval").length,
+        attention: values.filter((v) => v === "attention").length,
         blocked: values.filter((v) => v === "blocked").length,
       },
       log: this.log.slice(0, 24),

@@ -14,6 +14,8 @@ import {
   AGENT_OFFICE_TEAM_IDS,
 } from "../lib/agentOffice/roster.ts";
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
+import { researchLiveDept, researchTone } from "../lib/agentOffice/live.ts";
+import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
   DEPT_ROOMS,
   ENTRANCE,
@@ -242,4 +244,178 @@ test("the office's two sections are addresses, not component state", () => {
   assert.doesNotMatch(panel, /useState<View>/);
   // Both dialogs keep the shared focus contract.
   assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, 2);
+});
+
+// ── Live rooms ────────────────────────────────────────────────────────────
+
+const at = (iso) => new Date(iso);
+const okRow = (slot) => ({ slot: at(slot), outcome: "ok", failureStage: null });
+
+test("the research room's state comes from the agent's own slot and silence judgements", () => {
+  assert.deepEqual(
+    agentOfficeResearchState({ enabled: false, rows: [], lastSuccessAt: null, enabledSince: null, now: at("2026-10-07T22:00:00Z") }),
+    { kind: "disabled" }
+  );
+
+  // 21:30 UTC is the slot; at 22:00 its window is still open.
+  const ok = agentOfficeResearchState({
+    enabled: true,
+    rows: [okRow("2026-10-07T21:30:00Z")],
+    lastSuccessAt: at("2026-10-07T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T22:00:00Z"),
+  });
+  assert.equal(ok.kind, "observed");
+  assert.equal(ok.slot, "2026-10-07T21:30:00.000Z");
+  assert.equal(ok.slotState, "ok");
+  assert.equal(ok.windowOpen, true);
+  assert.equal(ok.silence, "recent");
+  assert.equal(researchTone(ok), "done");
+
+  // An hour after the slot its window is closed; a day-old success is not yet silence.
+  const late = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T23:10:00Z"),
+  });
+  assert.equal(late.slotState, "missing");
+  assert.equal(late.windowOpen, false);
+  assert.equal(late.silence, "recent");
+  assert.equal(researchTone(late), "waiting");
+
+  // Before 21:30 a moment still answers for yesterday's slot -- and by then a
+  // missed run has made the agent silent (26 hours).
+  const nextMorning = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-08T00:10:00Z"),
+  });
+  assert.equal(nextMorning.slot, "2026-10-07T21:30:00.000Z");
+  assert.equal(nextMorning.silence, "silent");
+
+  const silent = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-04T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T22:00:00Z"),
+  });
+  assert.equal(silent.silence, "silent");
+  assert.equal(researchTone(silent), "attention");
+
+  const failed = agentOfficeResearchState({
+    enabled: true,
+    rows: [{ slot: at("2026-10-07T21:30:00Z"), outcome: "failed", failureStage: "clone" }],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T21:50:00Z"),
+  });
+  assert.equal(failed.slotState, "failed");
+  assert.equal(failed.failureStage, "clone");
+  assert.equal(researchTone(failed), "attention");
+});
+
+test("a live room's line says what the record says, in UTC, and an unread record is not a state", () => {
+  const copy = adminAgentOfficeMessages.ko.real.research;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const ok = researchLiveDept(
+    {
+      kind: "observed",
+      slot: "2026-10-07T21:30:00.000Z",
+      slotState: "ok",
+      failureStage: null,
+      windowOpen: true,
+      lastSuccessAt: "2026-10-07T21:30:00.000Z",
+      silence: "recent",
+      silenceHours: 0.6,
+    },
+    readAt,
+    copy
+  );
+  assert.equal(ok.status, "done");
+  assert.equal(ok.line, "오늘 회차 기록됨 · 10-07 21:30 UTC");
+  assert.match(ok.detail, /마지막 성공 10-07 21:30 UTC/);
+  assert.match(ok.detail, /읽은 시각 10-07 22:05 UTC/);
+
+  assert.equal(ok.badge, "기록됨");
+
+  // A read that failed needs a look; it is not "waiting on a link" and not done.
+  const unread = researchLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+  assert.equal(unread.line, copy.unread);
+
+  // A switched-off agent waits; it is not a failure.
+  assert.equal(researchLiveDept({ kind: "disabled" }, readAt, copy).status, "waiting");
+});
+
+test("a live room is never simulated: no scripted work, and its status is the record's", () => {
+  const live = {
+    research: {
+      status: "done",
+      badge: "Recorded",
+      line: "Today's run recorded · 10-07 21:30 UTC",
+      detail: "read 10-07 22:05 UTC",
+    },
+  };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  office.speed = 10;
+  office.start();
+  let worked = false;
+  let meetingWithResearch = false;
+  const watch = () => {
+    for (const agent of office.agents) {
+      if (agent.deptId === "research" && (agent.status === "working" || agent.progress > 0)) worked = true;
+      if (agent.id === "research-lead" && agent.status === "meeting" && !office.approvalPending) {
+        meetingWithResearch = true;
+      }
+    }
+    return office.approvalPending;
+  };
+  runUntil(office, watch);
+  assert.equal(office.deptStatus.research, "done");
+  office.approve();
+  runUntil(office, () => {
+    watch();
+    return office.dayComplete;
+  });
+  assert.equal(worked, false, "the research room was given scripted work");
+  assert.equal(meetingWithResearch, false, "the research lead sat in the scripted hand-off");
+  assert.equal(office.deptStatus.research, "done");
+  assert.ok(office.log.some((entry) => entry.text.includes("(real record): Today's run recorded")));
+
+  // The console answers about it with the record, not with a demo line.
+  office.command("What is research doing?");
+  assert.match(office.chat.at(-1).text, /real record/);
+
+  // A fresh reading moves the room and nothing else.
+  const before = { ...office.deptStatus };
+  office.setLive({ research: { status: "attention", badge: "Unread", line: "Could not read its record", detail: "" } });
+  assert.equal(office.deptStatus.research, "attention");
+  assert.equal(office.snapshot().stats.attention, 1);
+  // ...and the delay report names it in its own words.
+  office.command("Why is it slow?");
+  assert.match(office.chat.at(-1).text, /Product research: Could not read its record/);
+  for (const id of Object.keys(before)) {
+    if (id !== "research") assert.equal(office.deptStatus[id], before[id], id);
+  }
+});
+
+test("the office reads the research agent's state, never its content, and writes nothing", () => {
+  // Code only: the module's comments name the writer it avoids.
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.match(source, /^import "server-only";/m);
+  // No write of any kind, and not the anchor writer the agent's own section uses.
+  assert.doesNotMatch(source, /\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/);
+  assert.doesNotMatch(source, /\$executeRaw|\$queryRaw/);
+  assert.doesNotMatch(source, /readProductResearchEnabledSince\(/);
+  // The observation row is selected for its slot, outcome and failure stage only.
+  assert.match(source, /select: \{ slot: true, outcome: true, failureStage: true \}/);
+  assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
 });

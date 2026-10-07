@@ -10,6 +10,11 @@ import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
+import {
+  researchLiveDept,
+  type AgentOfficeLiveDept,
+  type AgentOfficeLiveRooms,
+} from "@/lib/agentOffice/live";
 import { AGENT_OFFICE_DEPTS, AGENT_OFFICE_TEAM_IDS, agentOfficeDept } from "@/lib/agentOffice/roster";
 import {
   AgentOffice,
@@ -31,7 +36,7 @@ const OFFICE_PATH = "/admin/office";
 /** A section is an address (docs/ui-contracts/admin-console-ia.md, rule 2). */
 const viewHref = (view: View) => `${OFFICE_PATH}?tab=${view}`;
 
-const FILTERS: readonly Filter[] = ["all", "working", "done", "approval", "blocked"];
+const FILTERS: readonly Filter[] = ["all", "working", "done", "approval", "attention", "blocked"];
 
 /** The colour a person's status pill takes, from the same five tones as a room. */
 const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
@@ -77,10 +82,16 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
  * nothing else. The only facts on the screen are the record links, which
  * point at the console pages each team already has.
  */
-export function AgentOfficePanel({ view }: { view: View }) {
+export function AgentOfficePanel({ view, live }: { view: View; live: AgentOfficeLiveRooms }) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const router = useRouter();
-  const [engine] = useState(() => new AgentOffice(m));
+  // The rooms that read a real record, in the console's language. Each
+  // navigation brings a fresh server reading, and the engine takes it.
+  const liveDepts = useMemo<Record<string, AgentOfficeLiveDept>>(
+    () => ({ research: researchLiveDept(live.research, live.readAt, m.real.research) }),
+    [live, m]
+  );
+  const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
@@ -107,6 +118,11 @@ export function AgentOfficePanel({ view }: { view: View }) {
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [engine]);
+
+  // The paint loop picks the new statuses up on its next snapshot.
+  useEffect(() => {
+    engine.setLive(liveDepts);
+  }, [engine, liveDepts]);
 
   useEffect(() => {
     engine.setBriefingHandler(() => setBriefing(true));
@@ -186,8 +202,9 @@ export function AgentOfficePanel({ view }: { view: View }) {
         lead: engine.deptLead[room.id],
         status: snap.deptStatus[room.id] ?? "waiting",
         task: engine.deptCopy(room.id).task,
+        live: liveDepts[room.id] ?? null,
       })),
-    [engine, snap.deptStatus]
+    [engine, snap.deptStatus, liveDepts]
   );
 
   const filteredTeams = filter === "all" ? teams : teams.filter((team) => team.status === filter);
@@ -494,7 +511,10 @@ function LiveView({
                       <b>
                         {room.icon} {engine.roomName(room.id)}
                       </b>
-                      <i className={cx("rm-dot", status)} title={m.deptStatus[status]} />
+                      <i
+                        className={cx("rm-dot", status)}
+                        title={engine.liveDept(room.id)?.badge ?? m.deptStatus[status]}
+                      />
                     </p>
                     <div className={cx("roster-chips")}>
                       {engine.staff
@@ -626,6 +646,7 @@ function ProfileModal({
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useOfficeDialog(onClose, closeRef);
   const dept = agentOfficeDept(agent.deptId);
+  const live = engine.liveDept(agent.deptId);
   return (
     <div className={cx("modal-backdrop")} onClick={onClose}>
       <section
@@ -671,6 +692,16 @@ function ProfileModal({
             <span className={cx("tiny-label")}>{m.profile.lastWord}</span>
             <strong>{agent.speech ?? agent.thoughts[0]}</strong>
           </div>
+          {live ? (
+            <div className={cx("live-box")} data-testid="agent-office-profile-live">
+              <span className={cx("tiny-label")}>
+                <em className={cx("live-chip")}>{m.real.chip}</em> {m.real.boxLabel}
+              </span>
+              <strong>{live.line}</strong>
+              <small>{live.detail}</small>
+              <small>{m.real.contentElsewhere}</small>
+            </div>
+          ) : null}
           {dept ? (
             <div className={cx("profile-record")} data-testid="agent-office-profile-record">
               {dept.recordHref ? (
@@ -767,6 +798,8 @@ type TeamRow = {
   lead: StaffSeed;
   status: DeptStatus;
   task: string;
+  /** The room's real reading, or null for a demo room. */
+  live: AgentOfficeLiveDept | null;
 };
 
 function DashboardView({
@@ -793,6 +826,7 @@ function DashboardView({
   onSelect: (id: string) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
+  const liveCount = teams.filter((team) => team.live !== null).length;
 
   return (
     <>
@@ -839,7 +873,7 @@ function DashboardView({
         </article>
         <article className={cx("metric lav")}>
           <span>{m.dashboard.metricApproval}</span>
-          <strong>{snap.stats.approval}</strong>
+          <strong>{snap.stats.approval + snap.stats.attention}</strong>
           <small>{m.dashboard.stampApproval}</small>
         </article>
         <article className={cx("metric white")}>
@@ -892,7 +926,9 @@ function DashboardView({
             <div className={cx("win-body integration-list")} data-testid="agent-office-records">
               <div className={cx("integration-row")}>
                 <b>{m.dashboard.liveLink}</b>
-                <span className={cx("mini-badge lav")}>{m.dashboard.liveLinkStatus}</span>
+                <span className={cx("mini-badge", liveCount > 0 ? "mint" : "lav")}>
+                  {m.dashboard.liveLinkStatus(liveCount)}
+                </span>
               </div>
               {AGENT_OFFICE_DEPTS.map((dept) =>
                 dept.recordHref ? (
@@ -900,7 +936,9 @@ function DashboardView({
                     <b>
                       {dept.icon} {engine.roomName(dept.id)}
                     </b>
-                    <span className={cx("mini-badge mint")}>{m.dashboard.recordOpen}</span>
+                    <span className={cx("mini-badge", engine.liveDept(dept.id) ? "live" : "mint")}>
+                      {engine.liveDept(dept.id) ? m.dashboard.recordLive : m.dashboard.recordOpen}
+                    </span>
                   </Link>
                 ) : (
                   <div key={dept.id} className={cx("integration-row")}>
@@ -953,10 +991,13 @@ function DashboardView({
                     <span className={cx("team-copy")}>
                       <b>
                         {team.lead.name} · {team.icon} {team.name}
+                        {team.live ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                       </b>
-                      <small>{team.task}</small>
+                      <small>{team.live ? team.live.line : team.task}</small>
                     </span>
-                    <span className={cx("status-pill", team.status)}>{m.deptStatus[team.status]}</span>
+                    <span className={cx("status-pill", team.status)}>
+                      {team.live ? team.live.badge : m.deptStatus[team.status]}
+                    </span>
                   </button>
                 ))}
               </div>
