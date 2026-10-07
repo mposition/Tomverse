@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -48,7 +47,6 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
 }) {
   const m = useAdminMessages(adminAmuxPortfolioMessages);
   const common = useAdminMessages(adminCommonMessages);
-  const pathname = usePathname();
   const [kind, setKind] = useState<Kind>("initiative");
   const [subjectId, setSubjectId] = useState("");
   const [taskId, setTaskId] = useState("");
@@ -322,7 +320,8 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
     </div> : null}
     {result ? <p role="status">{result}</p> : null}
     {error ? <div role="alert"><p>{error}</p>
-      {error === m.reauth ? <Link href={adminRecentAuthenticationHref(pathname)}
+      {error === m.reauth ? <Link href={adminRecentAuthenticationHref(
+        "/admin/amux-backlog?tab=ideas")}
         className="inline-flex min-h-11 items-center underline">
         {common.apiFailure.reauthenticate}
       </Link> : null}
