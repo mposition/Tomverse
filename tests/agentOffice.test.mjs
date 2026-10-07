@@ -15,7 +15,8 @@ import {
   AGENT_OFFICE_TEAM_IDS,
 } from "../lib/agentOffice/roster.ts";
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
-import { researchLiveDept, researchTone } from "../lib/agentOffice/live.ts";
+import { qaLiveDept, qaTone, researchLiveDept, researchTone } from "../lib/agentOffice/live.ts";
+import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
   DEPT_ROOMS,
@@ -147,9 +148,16 @@ test("the demo day stops at the operator's decision and only goes on after it", 
   assert.equal(snap.phaseIndex, PHASE.dayOver);
   assert.equal(snap.briefingReady, true);
   assert.equal(snap.stats.blocked, AGENT_OFFICE_BLOCKED_DEPTS.size);
-  assert.equal(snap.stats.done, AGENT_OFFICE_DEPT_IDS.length - AGENT_OFFICE_BLOCKED_DEPTS.size);
   for (const id of AGENT_OFFICE_BLOCKED_DEPTS) {
     assert.equal(snap.deptStatus[id], "blocked", `${id} was reported as something it did not do`);
+  }
+  // Only the rooms the demo day gives work to finish it. A linked team the day
+  // has no script for stays waiting rather than being reported as done.
+  const scripted = ["qa", "research", "engineering", "marketing", "digest"];
+  assert.equal(snap.stats.done, scripted.length);
+  for (const id of AGENT_OFFICE_DEPT_IDS) {
+    const expected = scripted.includes(id) ? "done" : AGENT_OFFICE_BLOCKED_DEPTS.has(id) ? "blocked" : "waiting";
+    assert.equal(snap.deptStatus[id], expected, id);
   }
 });
 
@@ -466,6 +474,153 @@ test("the office reads the research agent's state, never its content, and writes
   // The observation row is selected for its slot, outcome and failure stage only.
   assert.match(source, /select: \{ slot: true, outcome: true, failureStage: true \}/);
   assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
+});
+
+// ── QA and release ────────────────────────────────────────────────────────
+
+const qaInput = (overrides = {}) => ({
+  digestSecretConfigured: true,
+  control: { revision: 4, digestEnabled: true },
+  latestDigestAt: at("2026-10-07T06:00:00Z"),
+  mergeLaneLatched: false,
+  now: at("2026-10-07T22:00:00Z"),
+  ...overrides,
+});
+
+test("the QA room's verdict is the agent's own freshness judgement", () => {
+  const fresh = agentOfficeQaState(qaInput());
+  assert.deepEqual(fresh, {
+    kind: "observed",
+    verdict: "fresh",
+    latestDigestAt: "2026-10-07T06:00:00.000Z",
+    controlRevision: 4,
+    mergeLaneLatched: false,
+  });
+  // 28 hours is the line, as the monitor draws it.
+  const verdictAt = (iso) => agentOfficeQaState(qaInput({ now: at(iso) })).verdict;
+  assert.equal(verdictAt("2026-10-08T09:59:59Z"), "fresh");
+  assert.equal(verdictAt("2026-10-08T10:00:00Z"), "stale");
+  // A digest dated after the clock is not healthy.
+  assert.equal(verdictAt("2026-10-07T05:00:00Z"), "stale");
+  // A secret and no digest ever stored: nothing to be fresh against.
+  assert.equal(agentOfficeQaState(qaInput({ latestDigestAt: null })).verdict, "stale");
+  // Recorded off is quiet whatever else is true.
+  assert.equal(
+    agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false }, digestSecretConfigured: false })).verdict,
+    "operator_disabled"
+  );
+  // No secret: quiet if never recorded as on, a mismatch if it was.
+  assert.equal(agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false })).verdict, "dark_not_configured");
+  assert.equal(agentOfficeQaState(qaInput({ digestSecretConfigured: false })).verdict, "control_mismatch");
+});
+
+test("the QA room says whether a digest arrived, in UTC, and a latched lane needs a look", () => {
+  const copy = adminAgentOfficeMessages.ko.real.qa;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const fresh = qaLiveDept(agentOfficeQaState(qaInput()), readAt, copy);
+  assert.equal(fresh.status, "done");
+  assert.equal(fresh.badge, "수신됨");
+  assert.equal(fresh.line, "최근 digest 수신 · 10-07 06:00 UTC");
+  assert.equal(fresh.detail, "제어 기록 4번 · 읽은 시각 10-07 22:05 UTC");
+
+  const silent = qaLiveDept(agentOfficeQaState(qaInput({ now: at("2026-10-08T12:00:00Z") })), readAt, copy);
+  assert.equal(silent.status, "attention");
+  assert.equal(silent.line, "digest 침묵 · 마지막 수신 10-07 06:00 UTC");
+  assert.equal(qaLiveDept(agentOfficeQaState(qaInput({ latestDigestAt: null })), readAt, copy).line, copy.staleNever);
+
+  const latched = qaLiveDept(agentOfficeQaState(qaInput({ mergeLaneLatched: true })), readAt, copy);
+  assert.equal(latched.status, "attention");
+  assert.equal(latched.badge, "레인 잠김");
+  assert.match(latched.detail, /병합 레인 잠김/);
+
+  const mismatch = qaLiveDept(agentOfficeQaState(qaInput({ digestSecretConfigured: false })), readAt, copy);
+  assert.equal(mismatch.status, "attention");
+  assert.equal(mismatch.line, copy.mismatch);
+
+  // Switched off, or never configured here: waiting, not a failure.
+  const off = agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false } }));
+  assert.equal(qaTone(off), "waiting");
+  assert.equal(qaLiveDept(off, readAt, copy).line, copy.disabled);
+  const dark = agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false }));
+  assert.equal(qaTone(dark), "waiting");
+  assert.equal(qaLiveDept(dark, readAt, copy).detail, "제어 기록 없음 · 읽은 시각 10-07 22:05 UTC");
+
+  // A read that failed is not a state.
+  const unread = qaLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.qa;
+    assert.match(words.fresh("x"), /x/);
+    assert.match(words.stale("x"), /x/);
+    // The room says nothing about what a digest contains.
+    for (const value of Object.values(words).filter((v) => typeof v === "string")) {
+      assert.doesNotMatch(value, /pass|fail|gate|통과|실패|게이트/i, `${locale}: "${value}"`);
+    }
+  }
+});
+
+test("with research and QA both live the demo day still reaches its end, and QA is never handed work", () => {
+  const live = {
+    research: { status: "done", badge: "Recorded", line: "Latest run recorded · 10-07 21:30 UTC", detail: "" },
+    qa: { status: "attention", badge: "Silent", line: "Digest silent · last received 10-06 06:00 UTC", detail: "" },
+  };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  office.speed = 10;
+  office.start();
+  let qaWorked = false;
+  let qaInMeeting = false;
+  const spoken = new Set();
+  const watch = () => {
+    for (const agent of office.agents) {
+      if (agent.deptId !== "qa") continue;
+      if (agent.speech) spoken.add(agent.speech);
+      if (agent.status === "working" || agent.progress > 0) qaWorked = true;
+      if (agent.status === "meeting") qaInMeeting = true;
+    }
+  };
+  runUntil(office, () => {
+    watch();
+    return office.approvalPending;
+  });
+  // The approval card names only the people who are actually in the room.
+  assert.ok(!office.approverNames().includes(office.deptLead.qa.name));
+  assert.ok(office.approverNames().includes(office.deptLead.engineering.name));
+  office.approve();
+  runUntil(office, () => {
+    watch();
+    return office.dayComplete;
+  });
+  assert.equal(qaWorked, false, "the QA room was given scripted work");
+  assert.equal(qaInMeeting, false, "the QA lead sat in a scripted meeting");
+  assert.deepEqual([...spoken].filter((line) => line !== live.qa.line), []);
+  assert.equal(office.deptStatus.qa, "attention");
+  assert.ok(office.log.some((entry) => entry.text.includes("(real record): Digest silent")));
+  // The PR log no longer claims QA classified CI.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].sim.prLog, /CI/);
+  }
+});
+
+test("the office reads the QA agent's state, never a digest's content", () => {
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const start = source.indexOf("async function readQa");
+  const end = source.indexOf("export async function readAgentOfficeLiveRooms");
+  assert.ok(start >= 0 && end > start, "readQa not found");
+  const qa = source.slice(start, end);
+  // The digest row is read for when it was stored, nothing else.
+  assert.match(qa, /agentDigestItem\.findFirst\(\{[\s\S]*?select: \{ createdAt: true \}/);
+  assert.doesNotMatch(qa, /payload|sizeBytes|kind: true|idempotencyKey/);
+  assert.match(qa, /select: \{ revision: true, digestEnabled: true \}/);
+  assert.match(qa, /select: \{ latched: true \}/);
+  assert.doesNotMatch(qa, /reason: true|attemptId: true/);
+  // The secret is seen only as a length, never passed on.
+  assert.match(qa, /\(process\.env\[QA_RELEASE_ROUTE_SECRET_ENV\.digest\] \?\? ""\)\.length >= 32/);
+  assert.equal((qa.match(/process\.env/g) || []).length, 1);
+  assert.match(qa, /read: "qa_release"/);
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {

@@ -544,28 +544,19 @@ export class AgentOffice {
     }
     yield 1.2;
 
-    // ④ Product research observation -- or, when its room reads the real
-    // record, its lead says what the record says and nobody plays at work.
+    // ④ Product research observation (a live room says its record instead).
     this.phaseIndex = PHASE.research;
-    const research = this.live.research;
-    if (research) {
-      const scout = this.leadOf("research");
-      this.stand(scout);
-      this.say(scout, research.line, 3.4);
-      this.pushLog(roomOf("research").icon, this.copy.real.log(this.roomName("research"), research.line), "mint");
-      yield 2.2;
-      this.sitAtDesk(scout);
-    } else {
-      yield* this.runDept("research", s.researchLabel, 6, s.researchDone);
-    }
+    yield* this.runDept("research", s.researchLabel, 6, s.researchDone);
 
-    // Hand-off meeting: research → engineering → QA. A live research room
-    // has no scripted observation to hand over, so it is not at the table.
-    const handover: [string, string][] = [
-      ...(research ? [] : [["research-lead", s.handoverResearch] as [string, string]]),
-      ["engineering-lead", s.handoverEngineering],
-      ["qa-lead", s.handoverQa],
-    ];
+    // Hand-off meeting: research → engineering → QA. A live room has no
+    // scripted work to hand over, so its lead is not at the table.
+    const handover = (
+      [
+        ["research-lead", s.handoverResearch],
+        ["engineering-lead", s.handoverEngineering],
+        ["qa-lead", s.handoverQa],
+      ] as [string, string][]
+    ).filter(([id]) => !this.agentIsLive(id));
     yield* this.meeting(
       s.handoverTitle,
       handover.map(([id]) => id),
@@ -593,9 +584,7 @@ export class AgentOffice {
     this.beginMeeting(s.approvalMeeting);
     this.pushLog("📋", s.approvalLog, "yellow");
 
-    const approvers = ["engineering-lead", "qa-lead", AGENT_OFFICE_NARRATOR_ID].map(
-      (id) => this.agentById.get(id)!
-    );
+    const approvers = this.approverIds().map((id) => this.agentById.get(id)!);
     const operator = this.operator();
     this.lock([...approvers, operator]);
     approvers.forEach((agent, i) => {
@@ -615,9 +604,9 @@ export class AgentOffice {
     );
     yield this.allFree([...approvers, operator]);
 
-    this.say(approvers[0], s.approvalPitch, 3.4);
+    this.say(engineer, s.approvalPitch, 3.4);
     yield 2.4;
-    this.say(approvers[2], s.approvalNarrator, 3.2);
+    this.say(narrator, s.approvalNarrator, 3.2);
     yield 2.2;
     this.say(operator, s.approvalOperator, 2.4);
 
@@ -649,10 +638,11 @@ export class AgentOffice {
 
     // ⑧ PR preparation: engineering hands the PR to QA, then both work at once.
     this.phaseIndex = PHASE.prPrep;
-    yield* this.deliver("engineering-lead", "qa", s.deliverLine, s.deliverReply);
+    const qaLive = this.isLive("qa");
+    if (!qaLive) yield* this.deliver("engineering-lead", "qa", s.deliverLine, s.deliverReply);
     this.startDept("engineering", s.prLabel, 7);
     this.startDept("qa", s.ciLabel, 7);
-    yield () => this.deptStatus.engineering === "done" && this.deptStatus.qa === "done";
+    yield () => this.deptStatus.engineering === "done" && (qaLive || this.deptStatus.qa === "done");
     this.pushLog("🧪", s.prLog, "mint");
 
     // ⑨ Marketing drafts and the Guard
@@ -698,6 +688,40 @@ export class AgentOffice {
         this.goto(agent, rand(LOUNGE_ROOM.loiter), "onBreak");
       }
     }
+  }
+
+  private isLive(deptId: string) {
+    return this.live[deptId] !== undefined;
+  }
+
+  private agentIsLive(agentId: string) {
+    const agent = this.agentById.get(agentId);
+    return agent !== undefined && this.isLive(agent.deptId);
+  }
+
+  /** Who sits in the approval meeting: engineering, QA and the digest chief, less any live room. */
+  private approverIds() {
+    return ["engineering-lead", "qa-lead", AGENT_OFFICE_NARRATOR_ID].filter((id) => !this.agentIsLive(id));
+  }
+
+  /** The names of the people who sit in the approval meeting, for the approval card and the delay report. */
+  approverNames() {
+    return this.approverIds()
+      .map((id) => this.agentById.get(id)?.name)
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  /** A live room's turn in the day: its lead says the record's line, and nobody plays at work. */
+  private *announceLive(deptId: string): Script {
+    const live = this.live[deptId];
+    if (!live) return;
+    const lead = this.leadOf(deptId);
+    this.stand(lead);
+    this.say(lead, live.line, 3.4);
+    this.pushLog(roomOf(deptId).icon, this.copy.real.log(this.roomName(deptId), live.line), "mint");
+    yield 2.2;
+    this.sitAtDesk(lead);
   }
 
   /** Start a team's work without waiting for it. `skip` keeps named agents out of it. */
@@ -747,6 +771,10 @@ export class AgentOffice {
   }
 
   private *runDept(deptId: string, label: string, dur: number, report: string): Script {
+    if (this.isLive(deptId)) {
+      yield* this.announceLive(deptId);
+      return;
+    }
     this.startDept(deptId, label, dur);
     yield () => this.deptStatus[deptId] === "done";
     this.say(this.leadOf(deptId), report, 3.2);
@@ -922,11 +950,7 @@ export class AgentOffice {
 
     if (this.approvalPending) {
       const waited = Math.max(1, Math.round(this.elapsed - (this.approvalSince ?? this.elapsed)));
-      const names = ["engineering-lead", "qa-lead", AGENT_OFFICE_NARRATOR_ID]
-        .map((id) => this.agentById.get(id)?.name)
-        .filter(Boolean)
-        .join(" · ");
-      lines.push(s.delayApproval(names, waited));
+      lines.push(s.delayApproval(this.approverNames(), waited));
       lines.push(s.delayApprovalHint);
     }
 
