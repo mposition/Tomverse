@@ -14,11 +14,18 @@ const call = (route, bearer, environment = env) =>
   opsObserverCaller({ route, authorization: bearer === undefined ? undefined : `Bearer ${bearer}`, env: environment });
 
 test("each service reaches its own routes", () => {
-  for (const route of Object.keys(ROUTE_SERVICES)) {
+  for (const route of Object.keys(ROUTE_SERVICES).filter((name) => name !== "digest")) {
     assert.deepEqual(call(route, PAGE), { service: "page" }, route);
   }
   assert.deepEqual(call("state", DIGEST), { service: "digest" });
   assert.deepEqual(call("ops-snapshot", DIGEST), { service: "digest" });
+  assert.deepEqual(call("digest", DIGEST), { service: "digest" });
+});
+
+test("the page service is refused the digest submission", () => {
+  // The page service holds the page webhook from S2 (decision D5a); it does
+  // not also write the owner's daily record.
+  assert.deepEqual(call("digest", PAGE), { status: 403 });
 });
 
 test("the digest service is refused advance and confirm", () => {

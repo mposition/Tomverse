@@ -21,7 +21,7 @@ import { OpsObserverLateError, isBudgetInsufficient } from "@/lib/opsObserverTra
 import { REQUEST_BODY_MAX_BYTES } from "@/scripts/ops-observer/request-schema-core.mjs";
 import { opsObserverCaller } from "@/scripts/ops-observer/route-auth-core.mjs";
 
-export type OpsObserverRouteName = "state" | "advance" | "confirm";
+export type OpsObserverRouteName = "state" | "advance" | "confirm" | "digest";
 
 const NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
