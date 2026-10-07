@@ -16,15 +16,23 @@ export async function resetTestFixture(
   }
   const target = new URL(raw);
   const name = decodeURIComponent(target.pathname.replace(/^\//, ""));
-  if (!['localhost', '127.0.0.1'].includes(target.hostname) ||
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
       !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name) ||
+      statement.includes(";") ||
       !/^TRUNCATE TABLE [\s\S]+ CASCADE\s*$/i.test(statement.trim())) {
     throw new Error("Fixture reset is limited to loopback test databases and TRUNCATE CASCADE");
   }
-  await prisma.$transaction(async (tx) => {
-    // SET LOCAL reverts automatically at COMMIT/ROLLBACK. It is not inherited
-    // by any later assertion, including tests of the append-only guards.
-    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
-    await tx.$executeRawUnsafe(statement);
-  }, { timeout: 30_000 });
+  try {
+    await prisma.$transaction(async (tx) => {
+      // SET LOCAL reverts automatically at COMMIT/ROLLBACK. It is not inherited
+      // by any later assertion, including tests of the append-only guards.
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
+      await tx.$executeRawUnsafe(statement);
+    }, { timeout: 30_000 });
+  } catch (error) {
+    if (error instanceof Error && /permission denied.*session_replication_role/i.test(error.message)) {
+      throw new Error("Fixture reset requires a superuser on the disposable test database", { cause: error });
+    }
+    throw error;
+  }
 }

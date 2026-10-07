@@ -45,5 +45,6 @@ test("fixture reset scopes trigger bypass to one transaction and one truncate", 
       'TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE',
     ]);
     await assert.rejects(resetTestFixture(prisma, "DELETE FROM x CASCADE"), /TRUNCATE CASCADE/);
+    await assert.rejects(resetTestFixture(prisma, "TRUNCATE TABLE x; SELECT 1 CASCADE"), /TRUNCATE CASCADE/);
   } finally { restore(); }
 });
