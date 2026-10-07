@@ -76,8 +76,9 @@ export const amuxReviewApprovalHasEvidence = (input: {
   taskRole: string | null; reviewPrNumber: number | null;
   artifactAvailable: boolean; v4EvidenceVerified: boolean;
   displayTruncated: boolean; displayExact: boolean;
-}) => !input.displayTruncated && (input.sourceSystem === "admin-idea-v4" ?
-  input.cardType === "task" && input.displayExact &&
+}) => !input.displayTruncated && input.displayExact &&
+  (input.sourceSystem === "admin-idea-v4" ?
+  input.cardType === "task" &&
     (input.reviewPrNumber !== null ?
     input.artifactAvailable :
     input.v4EvidenceVerified &&

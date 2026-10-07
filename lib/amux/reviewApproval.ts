@@ -198,7 +198,7 @@ async function snapshot(
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
   const displayTruncated = amuxReviewTextExceedsDisplay(description);
-  // A v4 approval must bind exactly the text the owner can inspect. A control
+  // Every approval must bind exactly the text the owner can inspect. A control
   // character, bidi override, or normalization change is not silently hidden.
   const displayExact = amuxReviewDisplayIsExact(reviewTitle) &&
     amuxReviewDisplayIsExact(description);
@@ -307,7 +307,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
       ended_at: lastAttempt.endedAt?.toISOString() ?? null,
     } : null,
     review_content: { text, digest, truncated: displayTruncated,
-      display_mismatch: task.sourceSystem === "admin-idea-v4" && !displayExact },
+      display_mismatch: !displayExact },
     review_context: context,
     review_artifact: artifact ? {
       pr_number: artifact.prNumber,

@@ -5,7 +5,8 @@ import test from "node:test";
 import {
   AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
   amuxExecutionLaneWhere, parseAmuxExecutionLane,
-  parseAmuxExecutionPage, amuxVisibleUntrustedText,
+  parseAmuxExecutionPage, amuxVisibleInspectionText,
+  amuxVisibleUntrustedText,
 } from "../lib/amux/adminExecutionViewCore.ts";
 
 test("six board lanes and archive are separate projections", () => {
@@ -33,6 +34,12 @@ test("worker text renders controls visibly without conflating literal escapes", 
     amuxVisibleUntrustedText("x\\u202ey"));
   assert.match(amuxVisibleUntrustedText("x\u202ey"), /\\u202e/);
   assert.match(amuxVisibleUntrustedText("x\u0001y"), /\\u0001/);
+  assert.equal(amuxVisibleInspectionText("plain\n한국어"), "plain\n한국어");
+  assert.equal(amuxVisibleInspectionText("x\u202ey"), "x\\u{202E}y");
+  assert.equal(amuxVisibleInspectionText("x\ud800y"), "x\\u{D800}y");
+  assert.equal(amuxVisibleInspectionText("x\u{E0001}2"), "x\\u{E0001}2");
+  assert.equal(amuxVisibleUntrustedText("x\u{E0001}2"),
+    '"x\\udb40\\udc012"');
 });
 
 test("execution UI reads the same DB through bounded owner-only read routes", async () => {
@@ -51,6 +58,8 @@ test("execution UI reads the same DB through bounded owner-only read routes", as
   assert.match(ui, /selected\.reviews/);
   assert.match(ui, /selected\.result\.text/);
   assert.match(ui, /selected\.result\.sha256/);
+  assert.match(ui, /amuxVisibleInspectionText\(selectedBody\.problem\)/);
+  assert.match(ui, /amuxVisibleInspectionText\(selected\.brief\)/);
   assert.match(ui, /currentRevision/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/);
   assert.doesNotMatch(ui, /method: "(POST|PUT|PATCH|DELETE)"/);

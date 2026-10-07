@@ -162,9 +162,13 @@ test("a PR-less v4 non-code result may be approved only with verified full evide
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, cardType: "story" }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: null }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy" }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy",
+    artifactAvailable: true, displayExact: true }), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy",
+    artifactAvailable: true, displayExact: false }), false);
 });
 
-test("v4 approval is closed when the owner display would hide source characters", () => {
+test("approval is closed when the owner display would hide source characters", () => {
   assert.equal(amuxReviewDisplayIsExact("plain Korean 한국어"), true);
   for (const hidden of ["x\u202ey", "x\u200by", "x\u0001y", "x\r\ny",
     "e\u0301", "x\ud800y"]) {

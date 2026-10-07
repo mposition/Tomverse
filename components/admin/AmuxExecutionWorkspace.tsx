@@ -9,6 +9,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
+  amuxVisibleInspectionText,
   amuxVisibleUntrustedText,
   type AmuxExecutionLane,
 } from "@/lib/amux/adminExecutionViewCore";
@@ -193,15 +194,15 @@ export function AmuxExecutionWorkspace() {
         return <li key={item.id} className="py-1">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {canExpand ? <button type="button" aria-expanded={Boolean(expanded[keyOf(child)])}
-              aria-label={m.expand(item.title ?? item.id)}
+              aria-label={m.expand(amuxVisibleInspectionText(item.title ?? item.id))}
               onClick={() => toggle(child)} className="rounded border px-2 py-0.5">
               {expanded[keyOf(child)] ? "−" : "+"}
             </button> : <span className="w-7" aria-hidden="true" />}
             <span className="text-xs uppercase text-zinc-500">{item.type === "node" ?
               item.level : item.storyKind === "bug" ? "Bug" : item.cardType ?? "Task"}</span>
             {item.type === "card" ? <button type="button" className="text-left underline"
-              onClick={() => void openCard(item.id)}>{item.title ?? m.protectedTitle}</button> :
-              <span>{item.title ?? m.protectedTitle}</span>}
+              onClick={() => void openCard(item.id)}>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</button> :
+              <span>{amuxVisibleInspectionText(item.title ?? m.protectedTitle)}</span>}
             {item.type === "card" && <span className="text-xs text-zinc-500">
               {item.status} · {item.taskRole ?? m.noRole} · {item.executionGrade ?? m.noGrade}
               {item.worker ? ` · ${item.worker}` : ""}
@@ -268,7 +269,7 @@ export function AmuxExecutionWorkspace() {
                 <li key={card.id} className="rounded border border-zinc-200 bg-white p-2 text-sm dark:border-zinc-700 dark:bg-zinc-950">
                   <button type="button" className="w-full text-left font-medium underline"
                     onClick={() => void openCard(card.id)}>
-                    {card.title ?? m.protectedTitle}
+                    {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}
                   </button>
                   <p className="break-all font-mono text-xs text-zinc-500">{card.sourceKey ?? card.id}</p>
                   <p className="text-xs text-zinc-600 dark:text-zinc-300">
@@ -292,7 +293,7 @@ export function AmuxExecutionWorkspace() {
           {board ? ` (${board.counts.archive})` : ""}</summary>
         <ul className="mt-3 space-y-2 text-sm">{archive.map((card) => <li key={card.id}>
           <button type="button" className="underline" onClick={() => void openCard(card.id)}>
-            {card.title ?? m.protectedTitle}</button> · {card.status}
+            {amuxVisibleInspectionText(card.title ?? m.protectedTitle)}</button> · {card.status}
         </li>)}</ul>
         {board && archive.length < board.counts.archive && <button type="button"
           disabled={boardBusy !== null} className="mt-2 text-sm underline"
@@ -318,7 +319,7 @@ export function AmuxExecutionWorkspace() {
       className="space-y-4 rounded-lg border border-zinc-300 p-4 dark:border-zinc-700"
       data-testid="amux-execution-detail">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div><h3 className="text-lg font-semibold">{selected.title ?? m.protectedTitle}</h3>
+        <div><h3 className="text-lg font-semibold">{amuxVisibleInspectionText(selected.title ?? m.protectedTitle)}</h3>
           <p className="font-mono text-xs">{selected.sourceKey ?? selected.id} · r{selected.revision}</p>
           <p className="text-sm">{selected.status} · {selected.taskRole ?? m.noRole} ·
             {selected.executionGrade ?? m.noGrade} · {selected.worker ?? m.noWorker}</p></div>
@@ -328,21 +329,21 @@ export function AmuxExecutionWorkspace() {
       <p className="text-xs text-zinc-500">{m.readOnly}</p>
       {selected.body ? <div><h4 className="font-semibold">{m.criteria}</h4>
         {selectedBody ? <div className="space-y-2 text-sm">
-          <p>{selectedBody.problem}</p>
+          <p>{amuxVisibleInspectionText(selectedBody.problem)}</p>
           <p className="font-medium">{m.scopeIn}</p>
           <ul className="list-disc pl-5">{selectedBody.scopeIn.map((item, index) =>
-            <li key={index}>{item}</li>)}</ul>
+            <li key={index}>{amuxVisibleInspectionText(item)}</li>)}</ul>
           <p className="font-medium">{m.scopeOut}</p>
           <ul className="list-disc pl-5">{selectedBody.scopeOut.map((item, index) =>
-            <li key={index}>{item}</li>)}</ul>
+            <li key={index}>{amuxVisibleInspectionText(item)}</li>)}</ul>
           <p className="font-medium">{m.completionCriteria}</p>
           <ol className="list-decimal pl-5">{selectedBody.completionCriteria.map((item, index) =>
-            <li key={index}>{item}</li>)}</ol>
+            <li key={index}>{amuxVisibleInspectionText(item)}</li>)}</ol>
         </div> : <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-sm">
-          {selected.body}</pre>}
+          {amuxVisibleInspectionText(selected.body)}</pre>}
       </div> : <p className="text-sm">{m.bodyUnavailable}</p>}
       {selected.brief && <div><h4 className="font-semibold">{m.brief}</h4>
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm">{selected.brief}</pre></div>}
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm">{amuxVisibleInspectionText(selected.brief)}</pre></div>}
       <section><h4 className="font-semibold">{m.result}</h4>
         {selected.result?.state === "available" && selected.result.text ?
           <div className="space-y-1 text-sm">
@@ -350,7 +351,7 @@ export function AmuxExecutionWorkspace() {
             {selected.result.sha256 && <p className="break-all font-mono text-xs">
               SHA-256: {selected.result.sha256}</p>}
             <p className="text-xs text-zinc-500">{m.resultEncoding}</p>
-            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border p-2">
+            <pre dir="ltr" className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border p-2">
               {amuxVisibleUntrustedText(selected.result.text)}</pre>
             {selected.result.patch?.state === "available" && <p className="break-all font-mono text-xs">
               {m.patchEvidence}: {selected.result.patch.baseSha} · {selected.result.patch.sha256}
@@ -373,7 +374,7 @@ export function AmuxExecutionWorkspace() {
           {selected.score.activeFresh ? m.current : m.stale}</p>
         <details><summary className="cursor-pointer underline">{m.scoreBreakdown}</summary>
           <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">
-            {JSON.stringify(selected.score.components, null, 2)}</pre>
+            {amuxVisibleInspectionText(JSON.stringify(selected.score.components, null, 2))}</pre>
         </details>
       </div>}
       <section><h4 className="font-semibold">{m.attempts}</h4>

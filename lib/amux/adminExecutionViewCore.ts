@@ -8,14 +8,30 @@ export type AmuxExecutionLane = (typeof AMUX_EXECUTION_LANES)[number];
 export const AMUX_EXECUTION_PAGE_SIZE = 8;
 export const AMUX_EXECUTION_MAX_PAGE = 10_000;
 
+const hiddenCharacter = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu;
+const visibleCodePoint = (character: string) => {
+  const codePoint = character.codePointAt(0)!;
+  return `\\u{${codePoint.toString(16).toUpperCase()}}`;
+};
+
+/** Preserve ordinary line breaks for inspection while making hidden characters
+ * explicit and unambiguous, including non-BMP format characters. */
+export const amuxVisibleInspectionText = (value: string) =>
+  value.replace(hiddenCharacter, visibleCodePoint);
+
 /** A read-only rendering of worker text must expose invisible code points;
  * JSON escaping also distinguishes an actual control from a literal `\\u`.
  */
 export const amuxVisibleUntrustedText = (value: string) =>
-  JSON.stringify(value).replace(
-    /[\u007f-\u009f\u2028\u2029\p{Cf}]/gu,
-    (character) => `\\u${character.codePointAt(0)!.toString(16).padStart(4, "0")}`,
-  );
+  JSON.stringify(value).replace(hiddenCharacter,
+    (character) => {
+      const codePoint = character.codePointAt(0)!;
+      if (codePoint <= 0xffff) return `\\u${codePoint.toString(16).padStart(4, "0")}`;
+      const offset = codePoint - 0x10000;
+      const high = 0xd800 + (offset >> 10);
+      const low = 0xdc00 + (offset & 0x3ff);
+      return `\\u${high.toString(16)}\\u${low.toString(16)}`;
+    });
 
 const attention: Prisma.AmuxWorkItemWhereInput = {
   OR: [
