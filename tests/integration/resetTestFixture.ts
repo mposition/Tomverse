@@ -9,8 +9,8 @@ export async function resetTestFixture(
   prisma: PrismaClient,
   statement: string,
 ): Promise<void> {
-  const raw = process.env.TEST_DATABASE_URL;
-  const active = process.env.DATABASE_URL;
+  const raw = process.env.TEST_DATABASE_URL?.trim();
+  const active = process.env.DATABASE_URL?.trim();
   if (!raw || !active || raw !== active) {
     throw new Error("Fixture reset requires the exact test database URL");
   }
