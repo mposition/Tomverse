@@ -9,6 +9,7 @@ import { AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR } from
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
+import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { lockAmuxAdmissionAndReadIncident } from "./incident.ts";
 import { getConfiguredAmuxWorkerCatalog } from "./routing.ts";
 import { getAmuxWorkerTelemetry } from "./telemetry.ts";
@@ -92,9 +93,7 @@ async function claimCandidate(taskId: string, assignmentId: string,
     async (tx, now, recordReceipt: AmuxOrchestratorReceiptRecorder) => {
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
       if (incident.blocks_admission) throw new BoardImportError("incident_blocked", 409);
-      const halt = await tx.amuxOrchestratorHalt.findFirst({
-        where: { clearedAt: null }, select: { id: true },
-      });
+      const halt = await findOpenAmuxOrchestratorHalt(tx);
       if (halt) throw new BoardImportError("orchestrator_halted", 409);
       const locked = await tx.$queryRaw<Array<{ id: string }>>`
         SELECT "id" FROM "AmuxWorkItem" WHERE "id" = ${taskId} FOR UPDATE`;

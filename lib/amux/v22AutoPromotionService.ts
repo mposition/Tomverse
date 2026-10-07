@@ -8,6 +8,7 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
+import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from
   "./incidentCore.ts";
 import { getConfiguredAmuxWorkerCatalog } from "./routing.ts";
@@ -97,9 +98,7 @@ export async function configureV22AutoPromotion(input: {
           tx.amuxRecommendationAutoHalt.findFirst({
             where: { clearedAt: null }, select: { id: true },
           }),
-          tx.amuxOrchestratorHalt.findFirst({
-            where: { clearedAt: null }, select: { id: true },
-          }),
+          findOpenAmuxOrchestratorHalt(tx),
           readCapacity(tx, now),
         ]);
         if (halt || orchestratorHalt) {
@@ -207,8 +206,7 @@ async function requireV22GlobalGate(tx: Prisma.TransactionClient, now: Date) {
   const [halt, orchestratorHalt, incident, decisions, entries] = await Promise.all([
     tx.amuxRecommendationAutoHalt.findFirst({
       where: { clearedAt: null }, select: { id: true } }),
-    tx.amuxOrchestratorHalt.findFirst({
-      where: { clearedAt: null }, select: { id: true } }),
+    findOpenAmuxOrchestratorHalt(tx),
     tx.appSetting.findUnique({ where: { key: AMUX_INCIDENT_SETTING_KEY },
       select: { value: true } }),
     tx.amuxRecommendationDecision.findMany({

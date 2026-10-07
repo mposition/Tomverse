@@ -2277,6 +2277,9 @@ model AdminAuditLog {
   amuxV4RetentionHoldApprovals AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldApprovalAudit")
   amuxV4RetentionHoldReleases AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldReleaseAudit")
   amuxV4RetentionHoldNotices AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldNoticeAudit")
+  amuxV4DerivationGroups AmuxIdeaDerivationGroup[] @relation("AmuxV4DerivationApprovalAudit")
+  amuxPortfolioAssessments AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentAudit")
+  amuxPortfolioScoreSnapshots AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreSnapshotAudit")
   amuxV22PromotionControls AmuxV22PromotionControl[] @relation("AmuxV22PromotionControlAudit")
   amuxV22PromotionReceipts AmuxV22PromotionReceipt[] @relation("AmuxV22PromotionReceiptAudit")
   amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
@@ -7408,7 +7411,7 @@ model AmuxCliUsageAggregate {
   createdAt                  DateTime @default(now())
   retentionUntil             DateTime
 
-  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict)
+  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict, map: "AmuxCliUsageAggregate_cohort_fkey")
 
   @@index([retentionUntil])
 }
@@ -9005,6 +9008,7 @@ model AmuxIdeaSubmission {
   confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
   chunks            AmuxIdeaAnalysisChunk[]
   draftUnits        AmuxIdeaDraftUnit[]
+  derivationGroups  AmuxIdeaDerivationGroup[]
   unitDecisions     AmuxIdeaUnitDecision[]
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
@@ -9364,6 +9368,9 @@ model AmuxIdeaDraftUnit {
   idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   decisions AmuxIdeaUnitDecision[]
+  derivationGroup AmuxIdeaDerivationGroup? @relation("AmuxV4DerivedDrafts", fields: [derivationGroupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDraftUnit_derivation_group_fkey")
+  derivationSources AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationSource")
+  derivationTargets AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationTarget")
 
   @@unique([ideaId, chunkIndex, unitIndex])
   @@unique([id, ideaId, actorUserId, chunkIndex])
@@ -9390,7 +9397,12 @@ model AmuxIdeaDerivationGroup {
   approvalAuditLogId    String   @unique
   approvedAt            DateTime
 
-  @@index([ideaId, actorUserId])
+  idea AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_idea_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxV4DerivationApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_audit_fkey")
+  derivedDrafts AmuxIdeaDraftUnit[] @relation("AmuxV4DerivedDrafts")
+  edges AmuxIdeaDerivationEdge[]
+
+  @@index([ideaId, actorUserId], map: "AmuxIdeaDerivationGroup_idea_actor_idx")
 }
 
 /// Immutable source-to-derived-unit edge; original proposal rows stay intact.
@@ -9400,8 +9412,12 @@ model AmuxIdeaDerivationEdge {
   sourceUnitId String
   targetUnitId String
 
-  @@unique([groupId, sourceUnitId, targetUnitId])
-  @@index([targetUnitId])
+  group AmuxIdeaDerivationGroup @relation(fields: [groupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_group_fkey")
+  source AmuxIdeaDraftUnit @relation("AmuxV4DerivationSource", fields: [sourceUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_source_fkey")
+  target AmuxIdeaDraftUnit @relation("AmuxV4DerivationTarget", fields: [targetUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_target_fkey")
+
+  @@unique([groupId, sourceUnitId, targetUnitId], map: "AmuxIdeaDerivationEdge_tuple_key")
+  @@index([targetUnitId], map: "AmuxIdeaDerivationEdge_target_idx")
 }
 
 /// One owner-confirmed decision on one v4 proposal unit. This additive table
@@ -9562,8 +9578,9 @@ model AmuxPortfolioAssessment {
   approvalAuditLogId    String   @unique
   approvedAt            DateTime
 
-  node AmuxPortfolioNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  card AmuxWorkItem? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  node AmuxPortfolioNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_node_fkey")
+  card AmuxWorkItem? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_card_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioAssessmentAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   prior AmuxPortfolioAssessment? @relation("AmuxPortfolioAssessmentPrior", fields: [priorAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   successors AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentPrior")
   initiativeScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreInitiative")
@@ -9572,11 +9589,11 @@ model AmuxPortfolioAssessment {
   storyScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreStory")
   taskScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreTask")
 
-  @@unique([nodeId, assessmentVersion])
-  @@unique([cardId, assessmentVersion])
-  @@index([nodeId, approvedAt])
-  @@index([cardId, approvedAt])
-  @@index([evidenceAsOf])
+  @@unique([nodeId, assessmentVersion], map: "AmuxPortfolioAssessment_node_version_key")
+  @@unique([cardId, assessmentVersion], map: "AmuxPortfolioAssessment_card_version_key")
+  @@index([nodeId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_node_approved_idx")
+  @@index([cardId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_card_approved_idx")
+  @@index([evidenceAsOf], map: "AmuxPortfolioAssessment_evidence_idx")
 }
 
 /// One owner-confirmed, append-only calculation from exact assessment rows.
@@ -9605,6 +9622,7 @@ model AmuxPortfolioScoreSnapshot {
   computedAt            DateTime
 
   task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioScoreSnapshotAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   v22PromotionReceipts AmuxV22PromotionReceipt[]
   initiativeAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreInitiative", fields: [initiativeAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   epicAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreEpic", fields: [epicAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -9612,9 +9630,9 @@ model AmuxPortfolioScoreSnapshot {
   storyAssessment AmuxPortfolioAssessment? @relation("AmuxPortfolioScoreStory", fields: [storyAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   taskAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreTask", fields: [taskAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
-  @@index([taskId, computedAt])
-  @@index([activeStaleAt, taskId])
-  @@index([baselineStaleAt, taskId])
+  @@index([taskId, computedAt(sort: Desc)], map: "AmuxPortfolioScoreSnapshot_task_computed_idx")
+  @@index([activeStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_active_idx")
+  @@index([baselineStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_baseline_idx")
 }
 
 /// Owner activation is separate from the v8 grant switch. No row is seeded.

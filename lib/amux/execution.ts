@@ -6,6 +6,7 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
+import { findOpenAmuxOrchestratorHalt } from "@/lib/amux/orchestratorHaltStore";
 import { cancelPendingAmuxWorkDelivery } from "@/lib/amux/delivery";
 import {
   AMUX_DB_BOUNDARIES,
@@ -290,9 +291,7 @@ export async function startAmuxV22TaskExecution(input: {
       const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
       if (incident.blocks_admission) return { started: false as const,
         reason: "incident_frozen" as const };
-      const halt = await tx.amuxOrchestratorHalt.findFirst({
-        where: { clearedAt: null }, select: { id: true },
-      });
+      const halt = await findOpenAmuxOrchestratorHalt(tx);
       if (halt) return { started: false as const,
         reason: "orchestrator_halted" as const };
       const runtime = await lockRuntime(tx, input.worker);

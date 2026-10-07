@@ -5,6 +5,7 @@ import type { Session } from "next-auth";
 
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
+import { findOpenAmuxOrchestratorHalt } from "./orchestratorHaltStore.ts";
 import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import type { AmuxIdeaUnitConfirmationSnapshot } from
@@ -310,9 +311,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           approval.registeredWorkItemId === dependency.id,
         status: dependency.status, terminal: dependency.v4TerminalAt !== null };
     });
-    const halted = await tx.amuxOrchestratorHalt.findFirst({
-      where: { clearedAt: null }, select: { id: true },
-    });
+    const halted = await findOpenAmuxOrchestratorHalt(tx);
     const approvedIds = snapshot?.card?.dependencies;
     const facts: AmuxV4TaskReadyFacts = {
       card: { sourceSystem: card.sourceSystem, cardType: card.cardType,

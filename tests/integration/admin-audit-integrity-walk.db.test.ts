@@ -6,6 +6,7 @@ import {
   verifyAdminAuditIntegrity,
 } from "@/lib/adminAuditIntegrity";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 /**
  * The chain walk reads in batches now, and a batched walk can lie two ways.
@@ -28,7 +29,7 @@ import { prisma } from "@/lib/prisma";
 const KEY = "audit-walk-test-key-0123456789abcdef0123456789abcdef";
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
+  resetTestFixture(prisma, `TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
 
 let savedKey: string | undefined;
 let savedPrevious: string | undefined;
