@@ -405,7 +405,19 @@ const main = async () => {
   const slot = slotForInstant(Date.now());
   say(`answering for slot ${slot}`);
 
-  const outcome = await observe(plan.config);
+  let outcome;
+  try {
+    outcome = await observe(plan.config);
+  } catch (error) {
+    // Every failure the run can name has a stage and is submitted, so this is
+    // only what no stage covers. There is no stage for "the runner itself
+    // broke" and inventing one would store a claim about the backlog that no
+    // run made; the slot stays silent instead, and the silence check is what
+    // reports it. The name only -- an error's message can carry the request.
+    say(`the run could not finish: ${error?.name ?? "an error"}`);
+    finish(1);
+    return process.exitCode ?? 1;
+  }
 
   // One permission, taken once. If the preparation deadline fired while the
   // observation was still running it already took it, and this run must not
