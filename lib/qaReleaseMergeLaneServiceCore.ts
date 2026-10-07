@@ -316,7 +316,14 @@ export async function runQaReleaseMergeLaneRound(
   }
 
   const call = await ports.github.merge(pick.number, pick.headRefOid).catch((): QaReleaseMergeCall => ({ result: "unknown" }));
-  if (call.result === "refused") return sendReport(ports, attemptId, { kind: "merge", result: "refused" }, "merge_refused");
+  if (call.result === "refused") {
+    // A refusal can be GitHub declining because someone else merged it in the
+    // meantime: that merge is followed through the ordered re-read, so its
+    // deployment is tracked, rather than closed as refused.
+    const refusedPull = await ports.github.readPull(pick.number).catch(() => null);
+    if (refusedPull?.merged) return rereadAttempt(ports, { id: attemptId, pullRequestNumber: pick.number });
+    return sendReport(ports, attemptId, { kind: "merge", result: "refused" }, "merge_refused");
+  }
   if (call.result === "unknown") return sendReport(ports, attemptId, { kind: "merge", result: "unknown" }, "merge_unknown");
 
   // Where did it land (section 3 step 4)? Anything but a clear yes latches.
