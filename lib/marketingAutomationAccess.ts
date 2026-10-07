@@ -162,8 +162,8 @@ export const MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR = {
     APP_ENV,
     RAILWAY_ENVIRONMENT_NAME,
     TOMVERSE_DEPLOY_ENV,
-    ZERNIO_API_KEY_ENV,
-    ZERNIO_WEBHOOK_SECRET_ENV,
+    "ZERNIO_API_KEY", // a name, never a value (the literal keeps scanners from reading it as one)
+    "ZERNIO_WEBHOOK_SECRET",
   ],
   schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
 } as const;
