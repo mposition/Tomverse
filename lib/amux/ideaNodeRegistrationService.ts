@@ -7,7 +7,7 @@ import type { Session } from "next-auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
-import { loadAmuxNodeDuplicateScanner } from
+import { AmuxNodeDuplicateScanError, loadAmuxNodeDuplicateScanner } from
   "./ideaNodeDuplicateScanService.ts";
 import { assembleAmuxV4NodeConfirmation } from
   "./ideaNodeConfirmationSnapshotCore.ts";
@@ -212,6 +212,10 @@ export async function prepareAmuxV4NodeCreation(input: {
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    if (!callbackReturned && error instanceof AmuxNodeDuplicateScanError) {
+      throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
+        "integrity_unavailable" : "reconfirm");
+    }
     throw new AmuxV4UnitDecisionError("outcome_unknown");
   }
 }
@@ -299,6 +303,10 @@ export async function consumeAmuxV4NodeCreation(input: {
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    if (!callbackReturned && error instanceof AmuxNodeDuplicateScanError) {
+      throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
+        "integrity_unavailable" : "reconfirm");
+    }
     await markAmuxV4UnitConsumeOutcomeUnknown({ session: input.session,
       decisionId: input.decisionId,
       consumeRequestId: input.consumeRequestId });
