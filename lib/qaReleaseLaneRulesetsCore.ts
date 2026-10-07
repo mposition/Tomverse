@@ -30,13 +30,43 @@ export const QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID = 5;
  * token, and Dependabot opens its own branches.
  */
 export const QA_RELEASE_BYPASS_CANDIDATES = Object.freeze([
-  Object.freeze({ appId: 15368, slug: "github-actions", reason: "visual-baseline-record pushes its branch with the workflow token" }),
-  Object.freeze({ appId: 29110, slug: "dependabot", reason: "Dependabot creates and updates its own branches" }),
+  Object.freeze({
+    appId: 15368,
+    slug: "github-actions",
+    botLogin: "github-actions[bot]",
+    branchPattern: "visual-baseline/**",
+    reason: "visual-baseline-record pushes its branch with the workflow token",
+  }),
+  Object.freeze({
+    appId: 29110,
+    slug: "dependabot",
+    botLogin: "dependabot[bot]",
+    branchPattern: "dependabot/**",
+    reason: "Dependabot creates and updates its own branches",
+  }),
 ]);
 
 export const QA_RELEASE_UPDATE_RULESET_NAME = "qa-release-lane: no updates outside develop";
 export const QA_RELEASE_DEVELOP_RULESET_NAME = "qa-release-lane: develop through pull requests";
+/** The exact names the test rulesets carry; teardown removes these and nothing else. */
+export const QA_RELEASE_TEST_RULESET_NAMES = Object.freeze([
+  `${QA_RELEASE_UPDATE_RULESET_NAME} (test)`,
+  `${QA_RELEASE_DEVELOP_RULESET_NAME} (test)`,
+]);
 export const QA_RELEASE_TEST_PREFIX = "qa-lane-test/";
+
+/**
+ * The branches of the bypass automation that the test update ruleset also
+ * covers, so the observations see each listed App update a branch the
+ * ruleset applies to (item 7: the automation's branch updates succeed). Only
+ * a candidate's own branch pattern may be named, and only while its App is
+ * on the bypass list.
+ */
+export function qaReleaseAutomationRefs(bypassAppIds: readonly number[]): string[] {
+  return QA_RELEASE_BYPASS_CANDIDATES.filter((candidate) => bypassAppIds.includes(candidate.appId))
+    .map((candidate) => `refs/heads/${candidate.branchPattern}`)
+    .sort();
+}
 
 export type QaReleaseRulesetBody = {
   name: string;
@@ -83,7 +113,9 @@ export function qaReleaseLaneRulesets(input: {
     if (names.length < 2 || !names.every((name) => TEST_BRANCH.test(name)) || new Set(names).size !== names.length) {
       throw new Error("test_branches_invalid");
     }
-    updateInclude = scope.updateBranches.map(ref).sort();
+    // The bypass automation's own branches too, so its updates under the
+    // ruleset can be observed (item 7).
+    updateInclude = [...scope.updateBranches.map(ref), ...qaReleaseAutomationRefs(apps)].sort();
     updateExclude = [];
     developInclude = [ref(scope.developBranch)];
     suffix = " (test)";

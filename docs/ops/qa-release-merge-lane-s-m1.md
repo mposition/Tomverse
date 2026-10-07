@@ -53,19 +53,40 @@ GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
 ### 2-2. 준비, 관측, 정리
 
 로컬 PC의 PowerShell, Tomverse clone 폴더 안, 1단계와 같은 창(`$env:GH_TOKEN` 설정됨). 쓰는 명령입니다: `qa-lane-test/*`
-브랜치와 `(test)` ruleset만 만들고 바꾸며, `teardown`이 전부 지웁니다. `--bypass`는 ruleset을 지나가야 하는 기존 자동화입니다
-(GitHub Actions 15368, Dependabot 29110; `lib/qaReleaseLaneRulesetsCore.ts`의 근거). 목록을 바꾸려면 세 명령 모두 같은 값을 씁니다.
+브랜치와 이름이 정확히 `qa-release-lane: … (test)`인 ruleset 두 개만 만들고 바꾸며, `teardown`이 전부 지웁니다. `--bypass`는
+ruleset을 지나가야 하는 기존 자동화입니다(GitHub Actions 15368, Dependabot 29110; `lib/qaReleaseLaneRulesetsCore.ts`의 근거).
+목록을 바꾸려면 모든 명령에 같은 값을 씁니다.
+
+**1) 준비.** develop·main의 classic protection을 시험 브랜치에 그대로 복사하고 시험 ruleset을 건 뒤, GitHub에 저장된 내용을
+다시 읽어 복사가 정확한지 확인합니다. develop이나 main에 이미 ruleset이 있거나, classic protection에 이 도구가 정확히 복사할 수
+없는 설정(push 제한, 리뷰 우회 목록, 서명 필수, 알 수 없는 설정)이 있으면 아무것도 바꾸지 않고 멈춥니다(8절 10항).
 
 ```powershell
 npm run qa-release:lane-observe -- setup --observation-app-id <App ID> --bypass 15368,29110
 ```
 
+**2) 자동화의 브랜치 갱신 (8절 7항).** 시험 update ruleset은 bypass 자동화의 브랜치(`dependabot/**`, `visual-baseline/**`)에도
+걸려 있습니다. 그동안 각 자동화가 자기 브랜치를 한 번씩 갱신하게 합니다. 둘 다 운영자가 직접 일으킵니다.
+
+- GitHub Actions: Actions → `visual-baseline-record` → Run workflow(develop). 실행이 `visual-baseline/<run id>` 브랜치를
+  push합니다. 생긴 브랜치와 PR은 이 관측이 끝나면 닫거나 지웁니다.
+- Dependabot: 열린 Dependabot PR 하나에 `@dependabot rebase` 댓글을 답니다. Dependabot이 그 브랜치를 다시 push합니다.
+
+갱신이 GitHub 활동 기록에 남았는지 읽기 전용으로 확인합니다. 종료 코드 0이면 두 App 모두 관측된 것입니다.
+
+```powershell
+npm run qa-release:lane-observe -- automation-status --bypass 15368,29110
+```
+
+**3) 관측.** 시험 보호가 아직 실제 보호와 같은지, 자동화 갱신이 관측됐는지 먼저 다시 확인하고, 하나라도 아니면 아무것도
+하지 않고 멈춥니다. 같으면 여덟 관측을 실행하고 기록을 씁니다.
+
 ```powershell
 npm run qa-release:lane-observe -- observe --observation-app-id <App ID> --bypass 15368,29110 --observation-key C:\keys\qa-lane-observation.pem
 ```
 
-`observe`는 여덟 관측의 표와 기록 파일 경로(`docs/ops/qa-release-merge-lane-observations/*.json`)를 출력합니다. 기대는 다음과
-같고, 하나라도 다르면 **3단계로 가지 않습니다**(8절 7항).
+`observe`는 여덟 관측과 자동화 갱신의 표, 기록 파일 경로(`docs/ops/qa-release-merge-lane-observations/*.json`)를 출력합니다.
+기대는 다음과 같고, 하나라도 다르면 **3단계로 가지 않습니다**(8절 7항).
 
 | 관측 | 기대 | 정책 |
 |---|---|---|
@@ -77,15 +98,14 @@ npm run qa-release:lane-observe -- observe --observation-app-id <App ID> --bypas
 | App이 check를 통과한 commit으로 develop mirror ref를 직접 이동 | 거절 | 8.9 |
 | App이 develop mirror PR 병합 | 성공 | 8.9 |
 | 운영자가 develop mirror ref를 직접 이동 | 성공 | 8.9 |
+| bypass 자동화가 시험 ruleset 아래에서 자기 브랜치를 갱신 | App마다 1건 이상 | 8.7 |
+
+**4) 정리.** 시험 PR을 닫고, 정확히 그 두 이름이면서 시험 브랜치와 자동화 브랜치만 덮는 ruleset만 지우고, 시험 브랜치를
+지웁니다. 다른 브랜치를 덮는 ruleset은 이름이 같아도 지우지 않고 알립니다.
 
 ```powershell
 npm run qa-release:lane-observe -- teardown
 ```
-
-**하네스가 하지 못하는 관측 하나**: 8절 7항은 bypass에 넣은 자동화(Actions, Dependabot)의 브랜치 갱신 성공도 관측하라고
-합니다. 하네스는 그 실행을 일으킬 수 없으므로 기록에 `"automationUpdatesObserved": "not_observed"`로 남깁니다. 운영자가
-판단합니다 — 거는 날과 bypass 목록은 운영자가 정한다는 같은 항의 문장이 근거입니다. 3단계 뒤 첫 Dependabot PR과
-`visual-baseline-record` 실행을 확인하는 것으로 갈음할 수 있습니다.
 
 기록 파일은 PR로 commit합니다(이 디렉터리에 남는 것이 관측의 증거입니다).
 

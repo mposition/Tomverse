@@ -4,8 +4,20 @@ import test from "node:test";
 import {
   QA_RELEASE_BYPASS_CANDIDATES,
   QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID,
+  QA_RELEASE_TEST_RULESET_NAMES,
+  qaReleaseAutomationRefs,
   qaReleaseLaneRulesets,
 } from "../lib/qaReleaseLaneRulesetsCore.ts";
+
+test("only a bypassed App's own branches are added, and the test names are exact", () => {
+  assert.deepEqual(qaReleaseAutomationRefs([29110]), ["refs/heads/dependabot/**"]);
+  assert.deepEqual(qaReleaseAutomationRefs([]), []);
+  assert.deepEqual(qaReleaseAutomationRefs([123]), []);
+  assert.deepEqual(QA_RELEASE_TEST_RULESET_NAMES, [
+    "qa-release-lane: no updates outside develop (test)",
+    "qa-release-lane: develop through pull requests (test)",
+  ]);
+});
 
 const LANE_APP = 900001;
 const CANDIDATES = QA_RELEASE_BYPASS_CANDIDATES.map((candidate) => candidate.appId);
@@ -40,7 +52,8 @@ test("the test rulesets are the real ones pointed at the test branches only", ()
   const testSet = qaReleaseLaneRulesets({ scope, bypassAppIds: CANDIDATES, laneAppId: LANE_APP });
   const realSet = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds: CANDIDATES, laneAppId: LANE_APP });
   assert.deepEqual(testSet.update.conditions.ref_name, {
-    include: ["refs/heads/qa-lane-test/main-mirror", "refs/heads/qa-lane-test/other-base"],
+    // The bypass automation branches are covered too, so their updates can be observed.
+    include: ["refs/heads/dependabot/**", "refs/heads/qa-lane-test/main-mirror", "refs/heads/qa-lane-test/other-base", "refs/heads/visual-baseline/**"],
     exclude: [],
   });
   assert.deepEqual(testSet.develop.conditions.ref_name, { include: ["refs/heads/qa-lane-test/develop-mirror"], exclude: [] });

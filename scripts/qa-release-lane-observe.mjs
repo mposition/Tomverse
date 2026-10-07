@@ -1,22 +1,24 @@
 // The S-M0 test-branch observations of the merge lane's protection
 // (docs/policy/qa-release-agent.md version 7, section 8 items 7, 9, 10 and
-// 11). The operator runs it locally, in three steps:
+// 11). The operator runs it locally (docs/ops/qa-release-merge-lane-s-m1.md):
 //
 //   npm run qa-release:lane-observe -- setup --observation-app-id <id> --bypass 15368,29110
+//   npm run qa-release:lane-observe -- automation-status --bypass 15368,29110
 //   npm run qa-release:lane-observe -- observe --observation-app-id <id> --bypass 15368,29110 --observation-key <pem path>
 //   npm run qa-release:lane-observe -- teardown
 //
 // Credentials: GH_TOKEN (the operator's own token, repository admin) for
 // everything a person does, and the observation App's private key -- read
-// from a local file, never from the environment of a service, and never
-// printed (item 11) -- for everything the App does.
+// from a local file, never from a service's environment, and never printed
+// (item 11) -- for everything the App does.
 //
-// It writes only to branches named qa-lane-test/* and to rulesets whose
-// names end in "(test)": test branches copied from the real ones, the two
-// test rulesets, pull requests between test branches, and the merges and
-// ref moves being observed. `teardown` removes all of it. The real rulesets
-// are a separate step (scripts/qa-release-lane-rulesets.mjs) that requires
-// the record this writes.
+// It writes only to branches named qa-lane-test/* and to the two rulesets
+// named exactly in QA_RELEASE_TEST_RULESET_NAMES. The test update ruleset
+// also covers the bypass automation's own branches (dependabot/**,
+// visual-baseline/**) so their updates under it can be observed; the
+// automation is on its bypass list. `teardown` removes all of it. The real
+// rulesets are a separate step (scripts/qa-release-lane-rulesets.mjs) that
+// requires the record this writes.
 //
 // The output is the record and a verdict table: statuses and GitHub's error
 // messages, never a token, a key or a header.
@@ -24,12 +26,19 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 import {
+  qaReleaseClassicDifferences,
   qaReleaseClassicProtection,
   qaReleaseClassicProtectionBody,
   qaReleaseRulesetRules,
 } from "../lib/qaReleaseBranchProtectionCore.ts";
-import { QA_RELEASE_OBSERVATIONS, QA_RELEASE_TEST_BRANCHES as T, judgeQaReleaseObservations } from "../lib/qaReleaseLaneObservationCore.ts";
-import { qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
+import {
+  QA_RELEASE_OBSERVATIONS,
+  QA_RELEASE_TEST_BRANCHES as T,
+  judgeQaReleaseObservations,
+  qaReleaseAutomationMissing,
+  qaReleaseAutomationUpdates,
+} from "../lib/qaReleaseLaneObservationCore.ts";
+import { QA_RELEASE_TEST_RULESET_NAMES, qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
 import { qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 
 const OWNER = "mposition";
@@ -49,17 +58,16 @@ const fail = (message) => {
   console.error(message);
   process.exit(2);
 };
-if (!["setup", "observe", "teardown"].includes(command)) fail("usage: setup | observe | teardown (see the header of this file)");
+if (!["setup", "automation-status", "observe", "teardown"].includes(command)) {
+  fail("usage: setup | automation-status | observe | teardown (see the header of this file)");
+}
 const operatorToken = (process.env.GH_TOKEN || "").trim();
 if (!operatorToken) fail("GH_TOKEN (the operator's token, repository admin) is required.");
 const appId = option("observation-app-id");
-const bypassAppIds = (option("bypass") ?? "")
-  .split(",")
-  .filter(Boolean)
-  .map((value) => Number(value));
-if (command !== "teardown") {
-  if (!/^[1-9][0-9]{0,11}$/.test(appId ?? "")) fail("--observation-app-id <the observation App's numeric id> is required.");
-  if (bypassAppIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) fail("--bypass takes comma-separated numeric App ids.");
+const bypassAppIds = [...new Set((option("bypass") ?? "").split(",").filter(Boolean).map(Number))].sort((a, b) => a - b);
+if (command !== "teardown" && bypassAppIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) fail("--bypass takes comma-separated numeric App ids.");
+if ((command === "setup" || command === "observe") && !/^[1-9][0-9]{0,11}$/.test(appId ?? "")) {
+  fail("--observation-app-id <the observation App's numeric id> is required.");
 }
 
 // ---- HTTP ------------------------------------------------------------------
@@ -98,45 +106,125 @@ const headSha = async (branch) => {
   return ref.status === 200 ? ref.json.object.sha : null;
 };
 
-const readProtection = async (branch) => {
-  const classic = await call(operatorToken, "GET", `/branches/${branch}/protection`);
+const readClassic = async (branch) => {
+  const classic = await call(operatorToken, "GET", `/branches/${encodeURIComponent(branch)}/protection`);
   if (classic.status !== 200 && classic.status !== 404) throw new Error(`protection of ${branch} answered ${classic.status}`);
-  return {
-    branch,
-    classic: qaReleaseClassicProtection(classic.status === 404 ? null : classic.json),
-    rules: qaReleaseRulesetRules(await operator("GET", `/rules/branches/${branch}`)),
-  };
+  return qaReleaseClassicProtection(classic.status === 404 ? null : classic.json);
+};
+const readProtection = async (branch) => ({
+  branch,
+  classic: await readClassic(branch),
+  rules: qaReleaseRulesetRules(await operator("GET", `/rules/branches/${branch}`)),
+});
+
+/**
+ * Item 10 asks for the real branches' whole protection on the test branches.
+ * This harness copies classic protection exactly; it does not copy an
+ * existing ruleset, so with any ruleset on develop or main it refuses rather
+ * than observe a protection that is not the real one.
+ */
+const requireNoRealRulesets = (protection) => {
+  for (const branch of ["develop", "main"]) {
+    if (protection[branch].rules.length > 0) {
+      fail(`${branch} already has ruleset rules; this harness cannot copy them to a test branch, so it does not observe (policy section 8 item 10).`);
+    }
+  }
 };
 
-const testRulesetIds = async () => {
+/** The test rulesets the builder makes for this bypass list. */
+const testRulesetBodies = () =>
+  qaReleaseLaneRulesets({
+    scope: { kind: "test", updateBranches: [T.mainMirror, T.otherBase], developBranch: T.developMirror },
+    bypassAppIds,
+    laneAppId: Number(appId ?? 1),
+  });
+
+const listTestRulesets = async () => {
   const all = await operator("GET", "/rulesets?per_page=100");
-  return all.filter((ruleset) => typeof ruleset.name === "string" && ruleset.name.endsWith(" (test)")).map((ruleset) => ruleset.id);
+  return all.filter((ruleset) => QA_RELEASE_TEST_RULESET_NAMES.includes(ruleset.name));
+};
+
+/** The mirrors must still carry the real branches' classic protection, and the test rulesets must be the builder's. */
+const verifyTestProtection = async (protection) => {
+  const problems = [];
+  for (const [mirror, real] of [[T.mainMirror, protection.main], [T.developMirror, protection.develop]]) {
+    const differences = qaReleaseClassicDifferences(real.classic, await readClassic(mirror));
+    if (differences.length > 0) problems.push(`${mirror}: ${differences.join(", ")}`);
+  }
+  const expected = testRulesetBodies();
+  const existing = await listTestRulesets();
+  for (const body of [expected.update, expected.develop]) {
+    const found = existing.filter((ruleset) => ruleset.name === body.name);
+    if (found.length !== 1) {
+      problems.push(`ruleset "${body.name}": ${found.length} found`);
+      continue;
+    }
+    const detail = await operator("GET", `/rulesets/${found[0].id}`);
+    const same =
+      JSON.stringify(detail.conditions?.ref_name) === JSON.stringify(body.conditions.ref_name) &&
+      JSON.stringify(detail.rules?.map((rule) => ({ type: rule.type, parameters: rule.parameters }))) ===
+        JSON.stringify(body.rules.map((rule) => ({ type: rule.type, parameters: rule.parameters }))) &&
+      JSON.stringify((detail.bypass_actors ?? []).map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort()) ===
+        JSON.stringify(body.bypass_actors.map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort()) &&
+      detail.enforcement === "active";
+    if (!same) problems.push(`ruleset "${body.name}" differs from the one this bypass list makes`);
+  }
+  return problems;
+};
+
+/** When the test rulesets went on: the update ruleset's creation time. */
+const testRulesetsSince = async () => {
+  const update = (await listTestRulesets()).find((ruleset) => ruleset.name === QA_RELEASE_TEST_RULESET_NAMES[0]);
+  if (!update) fail("the test rulesets are missing; run setup first.");
+  const detail = await operator("GET", `/rulesets/${update.id}`);
+  if (typeof detail.created_at !== "string") throw new Error("ruleset creation time unreadable");
+  return detail.created_at;
+};
+
+/** Repository activity since the test rulesets went on, newest first, up to ten pages. */
+const automationEvidence = async () => {
+  const since = await testRulesetsSince();
+  const activity = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const batch = await operator("GET", `/activity?direction=desc&per_page=100&page=${page}`);
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    activity.push(...batch);
+    const oldest = batch[batch.length - 1]?.timestamp;
+    if (typeof oldest === "string" && Date.parse(oldest) < Date.parse(since)) break;
+  }
+  const updates = qaReleaseAutomationUpdates(activity, bypassAppIds, since);
+  return { since, updates, missingAppIds: qaReleaseAutomationMissing(updates, bypassAppIds) };
 };
 
 // ---- setup -----------------------------------------------------------------
 
 async function setup() {
-  const testNames = Object.values(T);
-  for (const name of testNames) {
+  for (const name of Object.values(T)) {
     if (await headSha(name)) fail(`${name} already exists; run teardown first.`);
   }
-  if ((await testRulesetIds()).length > 0) fail("test rulesets already exist; run teardown first.");
+  if ((await listTestRulesets()).length > 0) fail("test rulesets already exist; run teardown first.");
 
-  const develop = await readProtection("develop");
-  const main = await readProtection("main");
+  const protection = { develop: await readProtection("develop"), main: await readProtection("main") };
+  requireNoRealRulesets(protection);
+  let bodies;
+  try {
+    bodies = { main: qaReleaseClassicProtectionBody(protection.main.classic), develop: qaReleaseClassicProtectionBody(protection.develop.classic) };
+  } catch {
+    fail("develop's or main's classic protection holds a setting this harness cannot copy exactly; nothing was changed (policy section 8 item 10).");
+  }
+
   const mainHead = await headSha("main");
   const developHead = await headSha("develop");
-  const developCommit = await operator("GET", `/commits/${developHead}`);
-  const developParent = developCommit.parents?.[0]?.sha;
+  const developParent = (await operator("GET", `/commits/${developHead}`)).parents?.[0]?.sha;
   if (!SHA.test(mainHead ?? "") || !SHA.test(developHead ?? "") || !SHA.test(developParent ?? "")) fail("could not read the branch heads.");
 
   // Item 9 needs a commit whose required checks passed: develop's head, one
-  // fast-forward ahead of the develop mirror.
-  const required = develop.classic.present ? develop.classic.requiredChecks ?? [] : [];
+  // fast-forward ahead of the develop mirror -- from the App each check names.
+  const required = protection.develop.classic.present ? protection.develop.classic.requiredChecks ?? [] : [];
   const runs = await operator("GET", `/commits/${developHead}/check-runs?per_page=100`);
-  const green = new Set(runs.check_runs.filter((run) => run.conclusion === "success").map((run) => run.name));
-  const missing = required.filter((name) => !green.has(name));
-  if (missing.length > 0) fail(`develop's head has not passed every required check yet (${missing.join(", ")}); try again later.`);
+  const green = runs.check_runs.filter((run) => run.conclusion === "success");
+  const missing = required.filter((check) => !green.some((run) => run.name === check.context && (check.appId === null || run.app?.id === check.appId)));
+  if (missing.length > 0) fail(`develop's head has not passed every required check yet (${missing.map((c) => c.context).join(", ")}); try again later.`);
 
   const create = (name, sha) => operator("POST", "/git/refs", { ref: `refs/heads/${name}`, sha });
   await create(T.mainMirror, mainHead);
@@ -146,18 +234,25 @@ async function setup() {
   await create(T.headReviewed, developHead);
 
   // Item 10: the mirrors copy the real branches' classic protection.
-  for (const [branch, source] of [[T.mainMirror, main], [T.developMirror, develop]]) {
-    const body = qaReleaseClassicProtectionBody(source.classic);
-    if (body) await operator("PUT", `/branches/${encodeURIComponent(branch)}/protection`, body);
-  }
-  const { update, develop: developRuleset } = qaReleaseLaneRulesets({
-    scope: { kind: "test", updateBranches: [T.mainMirror, T.otherBase], developBranch: T.developMirror },
-    bypassAppIds,
-    laneAppId: Number(appId),
-  });
+  if (bodies.main) await operator("PUT", `/branches/${encodeURIComponent(T.mainMirror)}/protection`, bodies.main);
+  if (bodies.develop) await operator("PUT", `/branches/${encodeURIComponent(T.developMirror)}/protection`, bodies.develop);
+  const { update, develop } = testRulesetBodies();
   await operator("POST", "/rulesets", update);
-  await operator("POST", "/rulesets", developRuleset);
-  console.log(JSON.stringify({ setup: "done", mainHead, developHead, developMirrorAt: developParent, testBranches: testNames }, null, 2));
+  await operator("POST", "/rulesets", develop);
+
+  // Read back: a copy that GitHub stored differently is not a copy.
+  const problems = await verifyTestProtection(protection);
+  if (problems.length > 0) fail(`the test protection is not an exact copy (${problems.join("; ")}); run teardown.`);
+  console.log(JSON.stringify({ setup: "done", mainHead, developHead, developMirrorAt: developParent }, null, 2));
+  console.log("Next: make each bypass App update one of its branches (docs/ops/qa-release-merge-lane-s-m1.md 2-2), then automation-status.");
+}
+
+// ---- automation-status (read-only) -----------------------------------------
+
+async function automationStatus() {
+  const evidence = await automationEvidence();
+  console.log(JSON.stringify(evidence, null, 2));
+  process.exitCode = evidence.missingAppIds.length === 0 ? 0 : 1;
 }
 
 // ---- observe ---------------------------------------------------------------
@@ -165,6 +260,18 @@ async function setup() {
 async function observe() {
   const keyPath = option("observation-key");
   if (!keyPath) fail("--observation-key <path to the observation App's private key file> is required.");
+
+  // Item 10: the real branches' protection, read right before the
+  // observations, and the test branches must still carry exactly that.
+  const protection = { develop: await readProtection("develop"), main: await readProtection("main") };
+  requireNoRealRulesets(protection);
+  const problems = await verifyTestProtection(protection);
+  if (problems.length > 0) fail(`the test protection no longer matches the real one (${problems.join("; ")}); run teardown and setup again.`);
+  const automation = await automationEvidence();
+  if (automation.missingAppIds.length > 0) {
+    fail(`no branch update yet under the test ruleset by bypass App(s) ${automation.missingAppIds.join(", ")}; see automation-status (policy section 8 item 7).`);
+  }
+
   const key = readFileSync(keyPath, "utf8");
   const appToken = await qaReleaseInstallationToken(
     async (request) => {
@@ -175,9 +282,6 @@ async function observe() {
     key,
     Date.now,
   )();
-
-  // Item 10: the real branches' protection, read right before the observations.
-  const protection = { develop: await readProtection("develop"), main: await readProtection("main") };
   const developHead = await headSha(T.head);
   if (!developHead) fail("the test branches are missing; run setup first.");
 
@@ -194,11 +298,7 @@ async function observe() {
   const commitOnTop = async (token, branch) => {
     const parent = await headSha(branch);
     const commit = await must(token, "GET", `/git/commits/${parent}`);
-    const created = await must(token, "POST", "/git/commits", {
-      message: "QA-release merge lane S-M0 observation",
-      tree: commit.tree.sha,
-      parents: [parent],
-    });
+    const created = await must(token, "POST", "/git/commits", { message: "QA-release merge lane S-M0 observation", tree: commit.tree.sha, parents: [parent] });
     return created.sha;
   };
   const moveRef = (token, branch, sha) => call(token, "PATCH", `/git/refs/heads/${branch}`, { sha, force: false });
@@ -226,15 +326,15 @@ async function observe() {
 
   const verdict = judgeQaReleaseObservations(results);
   const record = {
-    recordVersion: 1,
+    recordVersion: 2,
     observedAt: new Date().toISOString(),
     repository: `${OWNER}/${REPO}`,
     observationAppId: Number(appId),
-    bypassAppIds: [...new Set(bypassAppIds)].sort((a, b) => a - b),
+    bypassAppIds,
     protection,
     results,
     verdict,
-    automationUpdatesObserved: "not_observed",
+    automation,
   };
   mkdirSync(RECORD_DIR, { recursive: true });
   const file = `${RECORD_DIR}/${record.observedAt.replace(/[:.]/g, "-")}.json`;
@@ -244,7 +344,8 @@ async function observe() {
     const r = results.find((entry) => entry.id === spec.id);
     console.log(`${v.ok ? "ok  " : "FAIL"}  ${spec.id.padEnd(24)} expected ${spec.expect.padEnd(9)} observed ${v.observed.padEnd(9)} ${r?.status ?? "-"}  ${r?.message ?? ""}`);
   }
-  console.log(`\n${verdict.passed ? "All eight as expected." : "NOT as expected: do not apply the real rulesets (policy section 8 item 7)."}`);
+  for (const update of automation.updates) console.log(`ok    automation ${update.appId} ${update.activityType} ${update.ref} at ${update.at}`);
+  console.log(`\n${verdict.passed ? "All as expected." : "NOT as expected: do not apply the real rulesets (policy section 8 item 7)."}`);
   console.log(`Record: ${file}`);
   process.exitCode = verdict.passed ? 0 : 1;
 }
@@ -256,16 +357,29 @@ async function teardown() {
   for (const pull of open.filter((entry) => entry.head?.ref?.startsWith("qa-lane-test/") || entry.base?.ref?.startsWith("qa-lane-test/"))) {
     await operator("PATCH", `/pulls/${pull.number}`, { state: "closed" });
   }
-  for (const id of await testRulesetIds()) await operator("DELETE", `/rulesets/${id}`, undefined, [204]);
+  // Only the two exact names, and only while every branch they cover is a
+  // test branch or a bypass automation branch -- never a ruleset that guards
+  // a real branch, whatever it is called.
+  const allowed = (ref) => ref.startsWith("refs/heads/qa-lane-test/") || ref === "refs/heads/dependabot/**" || ref === "refs/heads/visual-baseline/**";
+  for (const ruleset of await listTestRulesets()) {
+    const detail = await operator("GET", `/rulesets/${ruleset.id}`);
+    const include = detail.conditions?.ref_name?.include ?? [];
+    if (include.length === 0 || !include.every(allowed) || (detail.conditions?.ref_name?.exclude ?? []).length > 0) {
+      console.error(`left ruleset ${ruleset.id} ("${ruleset.name}") in place: it covers more than the test branches.`);
+      process.exitCode = 1;
+      continue;
+    }
+    await operator("DELETE", `/rulesets/${ruleset.id}`, undefined, [204]);
+  }
   for (const name of Object.values(T)) {
     await call(operatorToken, "DELETE", `/branches/${encodeURIComponent(name)}/protection`);
     if (await headSha(name)) await operator("DELETE", `/git/refs/heads/${name}`, undefined, [204]);
   }
-  console.log(JSON.stringify({ teardown: "done" }));
+  console.log(JSON.stringify({ teardown: process.exitCode ? "partial" : "done" }));
 }
 
 try {
-  await { setup, observe, teardown }[command]();
+  await { setup, "automation-status": automationStatus, observe, teardown }[command]();
 } catch (error) {
   console.error(`stopped: ${error instanceof Error ? error.message : "unknown error"}`);
   process.exitCode = 2;

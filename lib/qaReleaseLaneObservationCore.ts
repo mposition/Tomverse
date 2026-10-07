@@ -13,6 +13,7 @@
  */
 import type { QaReleaseBranchProtection } from "./qaReleaseBranchProtectionCore.ts";
 import { qaReleaseProtectionDifferences } from "./qaReleaseBranchProtectionCore.ts";
+import { QA_RELEASE_BYPASS_CANDIDATES } from "./qaReleaseLaneRulesetsCore.ts";
 
 export const QA_RELEASE_TEST_BRANCHES = Object.freeze({
   /** Copies main's protection; the update ruleset applies. */
@@ -101,8 +102,44 @@ export function judgeQaReleaseObservations(results: readonly QaReleaseObservatio
   return { passed: verdicts.every((verdict) => verdict.ok), verdicts };
 }
 
+/** One update of a bypass App's branch under the test ruleset, from GitHub's repository activity. */
+export type QaReleaseAutomationUpdate = { appId: number; ref: string; activityType: string; at: string };
+
+const AUTOMATION_ACTIVITY = new Set(["push", "force_push", "branch_creation"]);
+
+/**
+ * Item 7's last observation: every App on the bypass list updated one of its
+ * own branches -- which the test update ruleset covers -- after the test
+ * rulesets went on, and GitHub recorded it. Built from
+ * `GET /repos/{o}/{r}/activity` entries; anything else in them is ignored.
+ */
+export function qaReleaseAutomationUpdates(activity: readonly unknown[], bypassAppIds: readonly number[], sinceIso: string): QaReleaseAutomationUpdate[] {
+  const since = Date.parse(sinceIso);
+  if (!Number.isFinite(since)) throw new Error("since_invalid");
+  const updates: QaReleaseAutomationUpdate[] = [];
+  for (const raw of activity) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    const actor = entry.actor && typeof entry.actor === "object" ? (entry.actor as Record<string, unknown>).login : null;
+    if (typeof entry.ref !== "string" || typeof entry.timestamp !== "string" || typeof entry.activity_type !== "string") continue;
+    if (!AUTOMATION_ACTIVITY.has(entry.activity_type) || !(Date.parse(entry.timestamp) >= since)) continue;
+    for (const candidate of QA_RELEASE_BYPASS_CANDIDATES) {
+      const prefix = `refs/heads/${candidate.branchPattern.replace(/\*\*$/, "")}`;
+      if (bypassAppIds.includes(candidate.appId) && actor === candidate.botLogin && entry.ref.startsWith(prefix)) {
+        updates.push({ appId: candidate.appId, ref: entry.ref, activityType: entry.activity_type, at: entry.timestamp });
+      }
+    }
+  }
+  return updates.sort((a, b) => a.at.localeCompare(b.at) || a.ref.localeCompare(b.ref));
+}
+
+/** Which bypass Apps have no recorded update; empty when each has at least one. */
+export function qaReleaseAutomationMissing(updates: readonly QaReleaseAutomationUpdate[], bypassAppIds: readonly number[]): number[] {
+  return [...new Set(bypassAppIds)].filter((appId) => !updates.some((update) => update.appId === appId)).sort((a, b) => a - b);
+}
+
 export type QaReleaseObservationRecord = {
-  recordVersion: 1;
+  recordVersion: 2;
   observedAt: string;
   repository: string;
   observationAppId: number;
@@ -111,22 +148,25 @@ export type QaReleaseObservationRecord = {
   protection: { develop: QaReleaseBranchProtection; main: QaReleaseBranchProtection };
   results: QaReleaseObservationResult[];
   verdict: { passed: boolean; verdicts: QaReleaseObservationVerdict[] };
-  /** Item 7's automation updates, which this harness cannot trigger: the operator writes what was seen. */
-  automationUpdatesObserved: "not_observed";
+  /** Item 7: the bypass automation's own branch updates under the test ruleset, since it went on. */
+  automation: { since: string; updates: QaReleaseAutomationUpdate[]; missingAppIds: number[] };
 };
 
 /**
- * Whether a record still licenses applying the real rulesets: it passed, it
- * names the same bypass list, and the real branches' protection now is the
- * one it recorded (item 10: a change after the observation voids it).
+ * Whether a record still licenses applying the real rulesets: it passed --
+ * the eight observations and an update by every bypass App -- it names the
+ * same bypass list, and the real branches' protection now is the one it
+ * recorded (item 10: a change after the observation voids it).
  */
 export function qaReleaseRecordStillHolds(
   record: QaReleaseObservationRecord,
   now: { develop: QaReleaseBranchProtection; main: QaReleaseBranchProtection; bypassAppIds: readonly number[] },
 ): { holds: boolean; reasons: string[] } {
   const reasons: string[] = [];
-  if (record.recordVersion !== 1) reasons.push("record_version");
+  if (record.recordVersion !== 2) reasons.push("record_version");
   if (!judgeQaReleaseObservations(record.results).passed) reasons.push("observations_not_passed");
+  const updates = Array.isArray(record.automation?.updates) ? record.automation.updates : [];
+  if (qaReleaseAutomationMissing(updates, record.bypassAppIds ?? []).length > 0) reasons.push("automation_not_observed");
   const recorded = [...record.bypassAppIds].sort((a, b) => a - b).join(",");
   const requested = [...now.bypassAppIds].sort((a, b) => a - b).join(",");
   if (recorded !== requested) reasons.push("bypass_list_differs");

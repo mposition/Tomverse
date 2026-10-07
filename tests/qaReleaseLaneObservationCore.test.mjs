@@ -5,6 +5,8 @@ import { QA_RELEASE_DEVELOP_PROTECTION_RECORDED } from "../lib/qaReleaseBranchPr
 import {
   QA_RELEASE_OBSERVATIONS,
   judgeQaReleaseObservations,
+  qaReleaseAutomationMissing,
+  qaReleaseAutomationUpdates,
   qaReleaseRecordStillHolds,
 } from "../lib/qaReleaseLaneObservationCore.ts";
 
@@ -62,17 +64,47 @@ test("the reviewed pull request must be refused by a rule, not by classic protec
   assert.equal(judgeQaReleaseObservations(classic).passed, false);
 });
 
+const SINCE = "2026-10-08T00:00:00.000Z";
+const ACTIVITY = [
+  { ref: "refs/heads/dependabot/npm_and_yarn/next-16.3.9", timestamp: "2026-10-08T01:00:00Z", activity_type: "branch_creation", actor: { login: "dependabot[bot]" } },
+  { ref: "refs/heads/visual-baseline/2026-10-08", timestamp: "2026-10-08T02:00:00Z", activity_type: "push", actor: { login: "github-actions[bot]" } },
+];
+
 const record = (overrides = {}) => ({
-  recordVersion: 1,
-  observedAt: "2026-10-08T00:00:00.000Z",
+  recordVersion: 2,
+  observedAt: "2026-10-08T03:00:00.000Z",
   repository: "mposition/Tomverse",
   observationAppId: 1,
   bypassAppIds: [15368, 29110],
   protection: { develop: QA_RELEASE_DEVELOP_PROTECTION_RECORDED, main: { branch: "main", classic: { present: false }, rules: [] } },
   results: asExpected(),
   verdict: judgeQaReleaseObservations(asExpected()),
-  automationUpdatesObserved: "not_observed",
+  automation: { since: SINCE, updates: qaReleaseAutomationUpdates(ACTIVITY, [15368, 29110], SINCE), missingAppIds: [] },
   ...overrides,
+});
+
+test("an update by each bypass App on its own branch since the test ruleset went on, and nothing else, counts", () => {
+  const updates = qaReleaseAutomationUpdates(ACTIVITY, [15368, 29110], SINCE);
+  assert.deepEqual(updates.map((u) => u.appId), [29110, 15368]);
+  assert.deepEqual(qaReleaseAutomationMissing(updates, [15368, 29110]), []);
+
+  const noise = [
+    // before the ruleset went on
+    { ...ACTIVITY[0], timestamp: "2026-10-07T23:59:59Z" },
+    // the right bot on another App's branch
+    { ...ACTIVITY[1], ref: "refs/heads/dependabot/x" },
+    // a person on an automation branch
+    { ...ACTIVITY[0], actor: { login: "mposition" } },
+    // not an update
+    { ...ACTIVITY[1], activity_type: "branch_deletion" },
+    // malformed
+    null,
+    { ref: 1 },
+  ];
+  assert.deepEqual(qaReleaseAutomationUpdates(noise, [15368, 29110], SINCE), []);
+  assert.deepEqual(qaReleaseAutomationMissing([], [29110, 15368]), [15368, 29110]);
+  // An App not on the bypass list contributes nothing.
+  assert.deepEqual(qaReleaseAutomationUpdates(ACTIVITY, [29110], SINCE).map((u) => u.appId), [29110]);
 });
 const now = (overrides = {}) => ({
   develop: QA_RELEASE_DEVELOP_PROTECTION_RECORDED,
@@ -88,4 +120,8 @@ test("a record licenses the real rulesets only while it passed, names the same b
   assert.deepEqual(qaReleaseRecordStillHolds(record(), now({ main: changedMain })).reasons, ["main.rules"]);
   const failed = record({ results: asExpected().slice(2) });
   assert.deepEqual(qaReleaseRecordStillHolds(failed, now()).reasons, ["observations_not_passed"]);
+  // Item 7: no automation evidence, no real rulesets.
+  const unobserved = record({ automation: { since: SINCE, updates: [], missingAppIds: [15368, 29110] } });
+  assert.deepEqual(qaReleaseRecordStillHolds(unobserved, now()).reasons, ["automation_not_observed"]);
+  assert.deepEqual(qaReleaseRecordStillHolds(record({ recordVersion: 1 }), now()).reasons, ["record_version"]);
 });
