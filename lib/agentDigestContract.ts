@@ -19,7 +19,7 @@ export type AgentDigestAgentKey = (typeof AGENT_DIGEST_AGENT_KEYS)[number];
 export const AGENT_DIGEST_KINDS: Readonly<Record<AgentDigestAgentKey, readonly string[]>> = Object.freeze({
   "qa-release": Object.freeze(["daily_digest"]),
   "billing-finance-ops": Object.freeze(["price_deadline_digest"]),
-  "sre-ops": Object.freeze(["ops_digest"]),
+  "sre-ops": Object.freeze(["daily_digest"]),
 });
 
 /** The shared contract's serialized payload limit (contract item 7). */

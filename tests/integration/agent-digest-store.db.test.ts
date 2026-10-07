@@ -324,13 +324,13 @@ test("the meta purge deletes only rows whose body is gone and whose 365 days are
 });
 
 // docs/policy/sre-ops.md §1 item 3, §10: the registration migration widens the
-// CHECKs and the retention CASE for sre-ops. Its ops_digest row is accepted
+// CHECKs and the retention CASE for sre-ops. Its daily_digest row is accepted
 // with a 90-day body and recorded by the agent's one listed actor; another
 // agent's kind under sre-ops is refused by the database itself.
 test("sre-ops is registered with its kind, retention and intake actor", async () => {
   const result = await recordAgentDigestItem({
     agentKey: "sre-ops",
-    kind: "ops_digest",
+    kind: "daily_digest",
     schemaVersion: 1,
     idempotencyKey: `sre-ops:test:${randomUUID()}`,
     payload: { verdict: "quiet", items: [] },
@@ -347,7 +347,7 @@ test("sre-ops is registered with its kind, retention and intake actor", async ()
   await assert.rejects(
     prisma.$executeRawUnsafe(
       `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
-       VALUES ($1::uuid, 'sre-ops', 'daily_digest', 1, $2, '{}'::jsonb, $3, 2)`,
+       VALUES ($1::uuid, 'sre-ops', 'price_deadline_digest', 1, $2, '{}'::jsonb, $3, 2)`,
       randomUUID(),
       `sre-ops:test:${randomUUID()}`,
       "0".repeat(64),

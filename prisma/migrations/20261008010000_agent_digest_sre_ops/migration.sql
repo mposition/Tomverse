@@ -4,7 +4,7 @@
 -- baseline-check: replace-function-if-body-sha256 "agent_digest_item_before_insert" "645d567c1c37b2552cad31a4bed96df4d85ce1f9c70c8c4a2204d90d6247b725"
 --
 -- Only the three per-agent values change: the agentKey list, that agent's
--- kind list (ops_digest, the daily summary) and its body retention (90 days,
+-- kind list (daily_digest, the daily summary) and its body retention (90 days,
 -- §10). Every other column, CHECK and trigger of the shared table stays as
 -- 20261003000000_agent_digest_item and 20261004000000_agent_digest_billing_finance_ops
 -- left it, including the 16 KiB payload limit and the 365-day meta purge (N-4).
@@ -25,7 +25,7 @@ ALTER TABLE "AgentDigestItem"
   ADD CONSTRAINT "AgentDigestItem_kind_check"
   CHECK (("agentKey" = 'qa-release' AND "kind" IN ('daily_digest'))
       OR ("agentKey" = 'billing-finance-ops' AND "kind" IN ('price_deadline_digest'))
-      OR ("agentKey" = 'sre-ops' AND "kind" IN ('ops_digest')));
+      OR ("agentKey" = 'sre-ops' AND "kind" IN ('daily_digest')));
 
 -- The insert trigger as before, with one more WHEN. An agent without a
 -- retention still cannot insert.
