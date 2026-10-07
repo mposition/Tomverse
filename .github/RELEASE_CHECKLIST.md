@@ -440,7 +440,9 @@ over: the next release needs its own reviewed run or its own waiver.
 ## 3. Staging verification
 
 - [ ] `/api/build-info` reports the release SHA
-- [ ] local, `origin/develop` and staging SHAs agree
+- [ ] the release SHA, `origin/test` and Test's `/api/build-info` agree
+      (`npm run promote:test -- --sha=<release SHA>` moves `test` and checks the
+      last two; staging deploys `test`, not `develop`, §7.9)
 - [ ] `/status` and `/api/models/status` queried in the same window, with no
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above

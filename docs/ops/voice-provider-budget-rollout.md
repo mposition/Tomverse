@@ -376,7 +376,8 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
    않습니다.
 
 4. **[Railway 웹 대시보드]** staging이 `dde6ad87` 이상을 서비스 중인지
-   확인합니다. 아니라면 `develop`을 배포합니다.
+   확인합니다. 아니라면 그 SHA를 포함한 develop commit으로
+   `npm run promote:test -- --sha=<commit>`을 실행합니다(release checklist 7.9).
 
 5. **[staging Postgres shell — 쓰기]** staging에서만 flag를 켭니다.
    ```sql
