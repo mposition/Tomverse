@@ -1029,6 +1029,8 @@ export async function claimNextEngineeringAgentPublishWork(
   // below checks again in the function that spends it. Lookups continue.
   await lockEngineeringAgentHalt(tx);
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
+  const v22PublicationEnabled = amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
   const now = await databaseNow(tx);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
     SELECT w."id", w."state"
@@ -1038,6 +1040,12 @@ export async function claimNextEngineeringAgentPublishWork(
         w."state" IN ('needs_lookup', 'outcome_unknown')
         OR (
           ${publishAllowed} AND w."state" = 'queued'
+          AND (${v22PublicationEnabled} OR NOT EXISTS (
+            SELECT 1 FROM "EngineeringAgentRun" r
+            JOIN "AmuxWorkItem" card ON card."id" = r."cardId"
+            WHERE r."id" = w."runId"
+              AND card."sourceSystem" = 'admin-idea-v4'
+          ))
           AND EXISTS (
             SELECT 1 FROM "EngineeringAgentCapability" c
             WHERE c."unconsumedWorkItemId" = w."id" AND c."expiresAt" > ${now}
