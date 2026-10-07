@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let session: { user: { id: string } } | null = null;
 let role = "viewer";
+let adminSession = false;
 let reads = 0;
 
 mock.module("next-auth/next", { namedExports: {
@@ -15,6 +16,7 @@ mock.module("next-auth/next", { namedExports: {
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
   getAdminRole: () => role,
+  isAdminSession: () => adminSession,
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   consumeApiRateLimit: async () => undefined,
@@ -39,9 +41,14 @@ test("deployment readback is owner-only, no-store and diagnostic", async () => {
   assert.equal((await GET(new Request(url))).status, 404);
   session = { user: { id: "owner" } };
   role = "viewer";
+  adminSession = true;
   assert.equal((await GET(new Request(url))).status, 404);
   assert.equal(reads, 0);
   role = "owner";
+  adminSession = false;
+  assert.equal((await GET(new Request(url))).status, 404);
+  assert.equal(reads, 0);
+  adminSession = true;
   assert.equal((await GET(new Request(`${url}&extra=1`))).status, 400);
   assert.equal((await GET(new Request(url.replace("staging", "test")))).status, 400);
   const response = await GET(new Request(url));
