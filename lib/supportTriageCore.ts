@@ -485,3 +485,28 @@ export const TERMINAL_GROUP_RETENTION_DAYS = 30;
 /** The classes one retention batch deletes, one statement pair each, in this order. */
 export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
 export type RetentionClass = (typeof RETENTION_CLASSES)[number];
+
+/** Worker liveness (policy section 7): twice the 30-minute cadence plus 20 minutes. */
+export const WORKER_LIVENESS_THRESHOLD_SECONDS = 80 * 60;
+
+/**
+ * The one bit the heartbeat route answers: the retention heartbeat, or, while
+ * triage is enabled, a worker with no successful run within its threshold.
+ * No successful run at all is stale (fail-closed, no grace). With triage
+ * disabled the worker is not judged.
+ */
+export const supportTriageHeartbeatStale = (input: {
+  readonly now: Date;
+  readonly enabled: boolean;
+  readonly retention: { readonly latestSuccessAt: Date | null; readonly latestFinished: RetentionRunFact | null };
+  readonly workerLatestSuccessAt: Date | null;
+}): boolean => {
+  const retention = retentionHeartbeat({ now: input.now, ...input.retention });
+  if (retention.stale) return true;
+  if (!input.enabled) return false;
+  if (input.workerLatestSuccessAt === null) return true;
+  return (
+    (validTime(input.now, "now") - validTime(input.workerLatestSuccessAt, "workerLatestSuccessAt")) / 1_000 >
+    WORKER_LIVENESS_THRESHOLD_SECONDS
+  );
+};

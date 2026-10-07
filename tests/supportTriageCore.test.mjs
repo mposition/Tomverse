@@ -353,3 +353,26 @@ test("a retention batch over every class stays inside the lane's round-trip budg
   assert.ok(roundTrips <= core.RETENTION_BATCH_ROUND_TRIPS, String(roundTrips));
   assert.equal(core.LANE_TIMEOUTS.retention.maxRoundTrips, core.RETENTION_BATCH_ROUND_TRIPS);
 });
+
+test("the heartbeat bit: retention always, the worker only while triage is enabled, no success is stale", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  const now = new Date("2026-10-07T12:00:00.000Z");
+  const minutesAgo = (m) => new Date(now.getTime() - m * 60_000);
+  const healthy = {
+    latestSuccessAt: minutesAgo(10),
+    latestFinished: { finishedAt: minutesAgo(10), batchesCompleted: 1, overdueRemaining: 0, oldestOverdueAgeSeconds: 0 },
+  };
+  const stale = (enabled, retention, worker) =>
+    core.supportTriageHeartbeatStale({ now, enabled, retention, workerLatestSuccessAt: worker });
+  // flag off + retention late -> stale
+  assert.equal(stale(false, { ...healthy, latestSuccessAt: minutesAgo(81) }, null), true);
+  // retention never succeeded -> stale whatever the flag
+  assert.equal(stale(false, { latestSuccessAt: null, latestFinished: null }, null), true);
+  // flag on + worker never succeeded -> stale
+  assert.equal(stale(true, healthy, null), true);
+  // flag off + no worker record -> not stale
+  assert.equal(stale(false, healthy, null), false);
+  // flag on: the worker threshold is 80 minutes
+  assert.equal(stale(true, healthy, minutesAgo(80)), false);
+  assert.equal(stale(true, healthy, minutesAgo(81)), true);
+});
