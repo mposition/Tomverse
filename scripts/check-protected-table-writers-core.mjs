@@ -415,9 +415,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/opsObserverStore.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
-    writeVerbs: 8,
+    writeVerbs: 11,
     reason:
-      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its eight write verbs are two SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation and its items, and an INSERT into its own transition ledger. It writes the audit table only through $appendSystemAudit, which is writeSystemAuditLogEntry in lib/adminAudit.ts.",
+      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its eleven write verbs are three SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation and its items, an INSERT into its own transition ledger, and the owner genesis INSERTs of its own genesis and generation-0 state rows. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
   },
   {
     path: "lib/engineeringAgentStore.ts",
