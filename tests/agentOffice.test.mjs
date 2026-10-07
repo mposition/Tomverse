@@ -10,6 +10,7 @@ import {
   AGENT_OFFICE_DEPTS,
   AGENT_OFFICE_DEPT_IDS,
   AGENT_OFFICE_NARRATOR_ID,
+  AGENT_OFFICE_OPERATOR,
   AGENT_OFFICE_STAFF,
   AGENT_OFFICE_TEAM_IDS,
 } from "../lib/agentOffice/roster.ts";
@@ -523,9 +524,29 @@ test("the office wears Tomverse's colours, in both themes, and not the AI Review
 });
 
 test("the staff wear the office's palette, not the original's pink", () => {
+  const pinks = ["#ff8fc0", "#ffe6f2", "#c9b8ff", "#42283a"];
   for (const staff of AGENT_OFFICE_STAFF) {
     for (const colour of staff.colors) {
-      assert.ok(!["#ff8fc0", "#ffe6f2", "#c9b8ff"].includes(colour), `${staff.id} still wears ${colour}`);
+      assert.ok(!pinks.includes(colour), `${staff.id} still wears ${colour}`);
     }
+  }
+  for (const [key, colour] of Object.entries(AGENT_OFFICE_OPERATOR)) {
+    assert.ok(!pinks.includes(colour), `the operator's ${key} is still ${colour}`);
+  }
+});
+
+test("a variable set inline on a sprite or a portrait never shadows a theme token", () => {
+  // Custom properties inherit, so one set inline on an element replaces the
+  // theme's value for everything drawn inside it -- the rank badge, the name
+  // tag and the ring sit inside the sprite.
+  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
+  const theme = css.slice(css.indexOf(".office {"), css.indexOf("}", css.indexOf(".office {")));
+  const tokens = new Set([...theme.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1]));
+  assert.ok(tokens.has("--accent") && tokens.size > 40);
+  for (const file of ["components/admin/AgentOfficeWorld.tsx", "components/admin/AgentOfficePanel.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    const inline = [...source.matchAll(/"(--[a-z0-9-]+)":/g)].map((match) => match[1]);
+    assert.ok(inline.length > 0, `${file} sets no inline variables`);
+    for (const name of inline) assert.ok(!tokens.has(name), `${file} sets ${name} inline, shadowing the theme`);
   }
 });
