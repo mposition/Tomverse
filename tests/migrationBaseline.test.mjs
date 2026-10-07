@@ -370,3 +370,161 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
     previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
   });
 });
+
+/**
+ * Every migration whose only effect the diff cannot see, swept -- not one named
+ * migration at a time.
+ *
+ * The tests above each name one migration by path, so each was written after a
+ * staging deploy had already stopped on that migration. That happened three
+ * times: 20261002120000 (a partial index, 2026-10-02), 20261003130000 (a
+ * function, 2026-10-03) and 20261005030000 (a function and a constraint
+ * trigger, 2026-10-07, PR #2116). Each time the merge was green, the pre-deploy
+ * baseline guard refused, and the fix was one comment line. Nothing in the gate
+ * asked the question before the merge, so the fourth one would have cost
+ * another blocked deploy.
+ *
+ * What this sweep asks, and only this: a migration that creates a function, a
+ * trigger or a partial index, and nothing `schema.prisma` can express, must
+ * carry exactly one valid presence declaration. Those are the objects a
+ * declaration can probe, so a refusal there is fixable.
+ *
+ * What it deliberately does not ask. A migration that only adds a CHECK
+ * constraint, or only writes rows, is equally invisible to the diff and would
+ * be refused the same way -- but no declaration can prove it absent, so
+ * demanding one would be an unmeetable gate. Those stay out of scope and keep
+ * the guard's original refusal.
+ */
+
+/**
+ * Migrations that predate the declaration (2026-10-02) and are already applied.
+ * Editing a header changes the file Prisma recorded a checksum for, so they are
+ * exempt by their history, not by their content. The list only shrinks: a new
+ * migration has not been applied anywhere and can simply declare.
+ */
+const PRESENCE_SWEEP_EXEMPT = new Set([
+  "20260814140000_attempt_terminal_states",
+  "20260814160000_settlement_pointer_commit_check",
+  "20260918090000_admin_audit_log_append_only",
+  "20260920190000_prompt_refiner_shadow_execution_runner",
+  "20260923120000_marketing_autonomous_scheduled_insert",
+  // Applied on staging before the sweep existed; still pending on production,
+  // where it rides a release whose other migrations the diff does see.
+  "20261003060000_ops_observer_transaction_arm",
+]);
+
+/** Comment lines carry prose about DDL; only statements are evidence of it. */
+const statementsOf = (sql) =>
+  sql
+    .split(/\r?\n/)
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
+
+const indexStatementsIn = (statements) =>
+  [...statements.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?;/gi)].map((m) => m[0]);
+
+/** The DDL `prisma migrate diff` compares, because schema.prisma expresses it. */
+const DIFF_VISIBLE = [
+  /CREATE\s+TABLE/i,
+  /ADD\s+COLUMN/i,
+  /DROP\s+COLUMN/i,
+  /ALTER\s+COLUMN/i,
+  /CREATE\s+TYPE/i,
+  /ALTER\s+TYPE/i,
+  /DROP\s+TABLE/i,
+  /RENAME\s+TO/i,
+  /CREATE\s+SEQUENCE/i,
+  /CREATE\s+(?:OR\s+REPLACE\s+)?VIEW/i,
+];
+
+/**
+ * Whether this migration needs a declaration: it creates something a
+ * declaration can probe, and nothing the diff would notice.
+ */
+const needsDeclaration = (sql) => {
+  const statements = statementsOf(sql);
+  const indexes = indexStatementsIn(statements);
+  const visible =
+    DIFF_VISIBLE.some((pattern) => pattern.test(statements)) ||
+    indexes.some((statement) => !/\bWHERE\b/i.test(statement));
+  if (visible) return false;
+  return (
+    /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i.test(statements) ||
+    /CREATE\s+(?:CONSTRAINT\s+)?TRIGGER/i.test(statements) ||
+    indexes.some((statement) => /\bWHERE\b/i.test(statement))
+  );
+};
+
+test("every migration the diff cannot see declares a presence probe", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const missing = [];
+  const swept = [];
+  for (const name of migrationNames()) {
+    const sql = readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8");
+    if (!needsDeclaration(sql)) continue;
+    if (PRESENCE_SWEEP_EXEMPT.has(name)) continue;
+    swept.push(name);
+    const declaration = presenceDeclarationIn(sql);
+    if (declaration.kind === "none" || declaration.kind === "invalid") {
+      missing.push(`${name} (${declaration.kind})`);
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `these migrations change nothing schema.prisma describes, so the pre-deploy ` +
+      `baseline guard will refuse the deploy. Add one header line, e.g.\n` +
+      `  -- baseline-check: present-if-function "the_function_it_creates"\n` +
+      `See scripts/baseline-presence-core.mjs. Missing: ${missing.join(", ")}`,
+  );
+  // The sweep is worthless if the detector stops matching anything.
+  assert.ok(
+    swept.length >= 8,
+    `expected the sweep to still reach the declared migrations, reached ${swept.length}`,
+  );
+});
+
+test("the sweep's exemptions only shrink, and each one predates the sweep", () => {
+  // A new migration has not been applied anywhere, so it can declare instead of
+  // being exempted. Freezing the set is what keeps that true.
+  assert.equal(PRESENCE_SWEEP_EXEMPT.size, 6);
+  for (const name of PRESENCE_SWEEP_EXEMPT) {
+    assert.ok(
+      migrationNames().includes(name),
+      `exempt migration ${name} no longer exists; remove it from the set`,
+    );
+    assert.ok(
+      name < "20261003130000",
+      `${name} is not older than the declaration feature; it must declare`,
+    );
+  }
+});
+
+test("the detector reads statements, not the prose around them", () => {
+  // A header that explains a CREATE TABLE elsewhere must not count as one.
+  assert.equal(
+    needsDeclaration(`-- This replaces the CREATE TABLE in the baseline.
+CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+`),
+    true,
+  );
+  // A migration that also adds a column is visible to the diff on its own.
+  assert.equal(
+    needsDeclaration(`ALTER TABLE "T" ADD COLUMN "c" text;
+CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
+`),
+    false,
+  );
+  // An ordinary index is in schema.prisma; a partial one is not.
+  assert.equal(needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c");\n`), false);
+  assert.equal(
+    needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c") WHERE "k" = 'x';\n`),
+    true,
+  );
+  // Out of scope by decision: no declaration could prove either one absent.
+  assert.equal(needsDeclaration(`UPDATE "T" SET "c" = 'x';\n`), false);
+  assert.equal(
+    needsDeclaration(`ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" <> '');\n`),
+    false,
+  );
+});
