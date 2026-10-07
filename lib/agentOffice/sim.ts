@@ -557,16 +557,73 @@ export class AgentOffice {
         ["qa-lead", s.handoverQa],
       ] as [string, string][]
     ).filter(([id]) => !this.agentIsLive(id));
-    yield* this.meeting(
-      s.handoverTitle,
-      handover.map(([id]) => id),
-      handover
-    );
+    // With fewer than two teams left to hand over there is no meeting to hold.
+    if (handover.length > 1) {
+      yield* this.meeting(
+        s.handoverTitle,
+        handover.map(([id]) => id),
+        handover
+      );
+    }
 
     // ⑤ Engineering T2 draft
     this.phaseIndex = PHASE.engineering;
     yield* this.runDept("engineering", s.engineeringLabel, 7, s.engineeringDone);
 
+    // ⑥–⑧ The demo's one decision: a T2 draft, the operator's approval and
+    // the PR it leads to. A live engineering room's decisions are real and are
+    // made on its own screen, so the demo does not play one.
+    if (!this.isLive("engineering")) yield* this.decisionScenes(narrator);
+
+    // ⑨ Marketing drafts and the Guard
+    this.phaseIndex = PHASE.marketing;
+    yield* this.runDept("marketing", s.marketingLabel, 6.5, s.marketingDone);
+
+    // ⑩ Collecting digests: the desk's member collects while the chief waits to brief.
+    this.phaseIndex = PHASE.digest;
+    this.startDept("digest", s.digestLabel, 5, [AGENT_OFFICE_NARRATOR_ID]);
+    yield () => this.deptStatus.digest === "done";
+    this.pushLog("📦", s.digestLog, "mint");
+
+    // ⑪ Briefing the operator
+    this.phaseIndex = PHASE.briefing;
+    const operator = this.operator();
+    this.lock([narrator]);
+    this.stand(narrator);
+    this.say(narrator, s.briefWalk, 3);
+    this.goto(narrator, OPERATOR_REPORT_SPOT, "reporting");
+    this.enqueue(narrator, { k: "face", dir: "up" });
+    yield this.allFree([narrator]);
+    this.say(narrator, s.briefSay, 3.2);
+    this.say(operator, s.briefOperator, 2.6);
+    this.briefingReady = true;
+    this.onBriefing?.();
+    const stats = this.snapshot().stats;
+    this.pushLog("📋", s.briefLog(stats.done, stats.attention, stats.blocked), "pink");
+    yield 3;
+    this.stand(narrator);
+    this.sitAtDesk(narrator);
+    yield this.allFree([narrator]);
+    this.unlock([narrator]);
+
+    this.phaseIndex = PHASE.dayOver;
+    this.dayComplete = true;
+    this.running = false;
+    this.pushLog("🎀", s.dayOver, "yellow");
+
+    for (const agent of workers) {
+      // A live room's staff stay at their desks; the demo's day is not theirs.
+      if (this.live[agent.deptId]) continue;
+      if (Math.random() < 0.45) {
+        this.stand(agent);
+        this.goto(agent, rand(LOUNGE_ROOM.loiter), "onBreak");
+      }
+    }
+  }
+
+  /** ⑥–⑧: the draft summary, the operator's approval meeting and the PR preparation. */
+  private *decisionScenes(narrator: Agent): Script {
+    const s = this.copy.sim;
     // ⑥ Draft summary
     this.phaseIndex = PHASE.draftSummary;
     const engineer = this.leadOf("engineering");
@@ -644,50 +701,6 @@ export class AgentOffice {
     this.startDept("qa", s.ciLabel, 7);
     yield () => this.deptStatus.engineering === "done" && (qaLive || this.deptStatus.qa === "done");
     this.pushLog("🧪", s.prLog, "mint");
-
-    // ⑨ Marketing drafts and the Guard
-    this.phaseIndex = PHASE.marketing;
-    yield* this.runDept("marketing", s.marketingLabel, 6.5, s.marketingDone);
-
-    // ⑩ Collecting digests: the desk's member collects while the chief waits to brief.
-    this.phaseIndex = PHASE.digest;
-    this.startDept("digest", s.digestLabel, 5, [AGENT_OFFICE_NARRATOR_ID]);
-    yield () => this.deptStatus.digest === "done";
-    this.pushLog("📦", s.digestLog, "mint");
-
-    // ⑪ Briefing the operator
-    this.phaseIndex = PHASE.briefing;
-    this.lock([narrator]);
-    this.stand(narrator);
-    this.say(narrator, s.briefWalk, 3);
-    this.goto(narrator, OPERATOR_REPORT_SPOT, "reporting");
-    this.enqueue(narrator, { k: "face", dir: "up" });
-    yield this.allFree([narrator]);
-    this.say(narrator, s.briefSay, 3.2);
-    this.say(operator, s.briefOperator, 2.6);
-    this.briefingReady = true;
-    this.onBriefing?.();
-    const stats = this.snapshot().stats;
-    this.pushLog("📋", s.briefLog(stats.done, stats.attention, stats.blocked), "pink");
-    yield 3;
-    this.stand(narrator);
-    this.sitAtDesk(narrator);
-    yield this.allFree([narrator]);
-    this.unlock([narrator]);
-
-    this.phaseIndex = PHASE.dayOver;
-    this.dayComplete = true;
-    this.running = false;
-    this.pushLog("🎀", s.dayOver, "yellow");
-
-    for (const agent of workers) {
-      // A live room's staff stay at their desks; the demo's day is not theirs.
-      if (this.live[agent.deptId]) continue;
-      if (Math.random() < 0.45) {
-        this.stand(agent);
-        this.goto(agent, rand(LOUNGE_ROOM.loiter), "onBreak");
-      }
-    }
   }
 
   private isLive(deptId: string) {
@@ -955,13 +968,15 @@ export class AgentOffice {
     }
 
     for (const dept of this.workingDepts()) {
+      // A live room's work is its record's, not a demo task with a progress bar.
+      if (this.isLive(dept)) continue;
       lines.push(s.delayWorking(this.roomName(dept), this.deptTaskLabel(dept), this.deptProgress(dept)));
     }
 
-    // A real record that needs a look is named in its own words.
+    // A real record that needs a look, or a real run in progress, is named in its own words.
     for (const [dept, status] of Object.entries(this.deptStatus)) {
       const live = this.live[dept];
-      if (status === "attention" && live) lines.push(`${this.roomName(dept)}: ${live.line}`);
+      if ((status === "attention" || status === "working") && live) lines.push(`${this.roomName(dept)}: ${live.line}`);
     }
 
     const blocked = Object.entries(this.deptStatus)
