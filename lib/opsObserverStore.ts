@@ -92,8 +92,22 @@ export type OpsObserverStateRead =
       generation: number;
       keys: Record<string, unknown>;
       reservedOpen: boolean;
+      /** Present when the read named an owner date (see readOpsObserverState). */
+      budget?: OpsObserverDailyBudget;
     }
   | { trust: string };
+
+/**
+ * What a genesis has already reserved on one owner date (policy §5): every
+ * reserved item as the cap counts it, and whether that date's channel check
+ * is taken. The advance counts the same rows inside its own transaction and
+ * refuses a reservation over the cap; with these a run can keep to it first.
+ */
+export type OpsObserverDailyBudget = {
+  ownerDate: string;
+  reservedToday: { key: string; kind: string; capped: boolean }[];
+  channelCheckTaken: boolean;
+};
 
 /** Whether an audit row's own HMAC verifies under any integrity key and key order. */
 export function auditRowHashVerified(row: AuditRow, keys: string[]): boolean {
@@ -261,7 +275,9 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
 /**
  * Reads the ops-observer state for a run whose deadline is `runDeadline`.
  * Trusted: the genesis, mode, generation, keys and whether a reservation is
- * still open. Otherwise: the trust reason only.
+ * still open, and -- when `ownerDate` is given -- that date's budget, read in
+ * the same transaction with the same queries the advance counts with.
+ * Otherwise: the trust reason only.
  *
  * A read writes nothing, so no deferred deadline check runs at its COMMIT;
  * the answer is returned only after the separate short check confirms the
@@ -271,6 +287,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
 export async function readOpsObserverState(
   runDeadline: Date,
   client: PrismaClient = prisma,
+  ownerDate: string | null = null,
 ): Promise<OpsObserverStateRead> {
   const integrityKeys = adminAuditIntegrityKeys(process.env);
   const { result } = await withOpsObserverTransaction(
@@ -280,7 +297,7 @@ export async function readOpsObserverState(
       const gathered = await gatherFacts(tx, integrityKeys);
       const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
       if (!verdict.trusted || !gathered.head) return { trust: verdict.reason ?? "state_missing" };
-      return {
+      const state = {
         trust: "trusted" as const,
         genesisId: gathered.head.id,
         mode: gathered.head.mode,
@@ -288,6 +305,18 @@ export async function readOpsObserverState(
         keys: gathered.head.keys as Record<string, unknown>,
         reservedOpen: gathered.deliveries.length > 0,
       };
+      if (ownerDate === null) return state;
+      // One statement: the reserved items of this genesis on the date, and
+      // whether the date's channel check is taken (by any genesis, as the
+      // channel-check unique counts it).
+      const [row] = await tx.$queryRaw<{ items: { key: string; kind: string; capped: boolean }[]; channelCheckTaken: boolean }[]>`
+        SELECT coalesce((SELECT json_agg(json_build_object('key', i.signal || '#' || i.scope, 'kind', i.kind, 'capped', i.capped)
+                                ORDER BY i.signal, i.scope, i.kind)
+                           FROM "OpsObserverDeliveryItem" i
+                           JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
+                          WHERE d."genesisId" = ${state.genesisId}::uuid AND d."ownerDate" = ${ownerDate}::date), '[]'::json) AS items,
+               EXISTS (SELECT 1 FROM "OpsObserverDelivery" WHERE "channelCheckDate" = ${ownerDate}::date) AS "channelCheckTaken"`;
+      return { ...state, budget: { ownerDate, reservedToday: row.items, channelCheckTaken: row.channelCheckTaken } };
     },
     client,
   );

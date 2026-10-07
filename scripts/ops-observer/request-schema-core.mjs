@@ -24,11 +24,21 @@ const RUN_ID = /^[0-9a-z][0-9a-z:_-]{0,127}$/;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 
 const SHAPES = Object.freeze({
-  state: Object.freeze({ runDeadline: "deadline" }),
+  // The owner date the run counts its daily budget under (policy §5): the
+  // state answer carries that date's reservations, so the run can hold what
+  // it reserves to the cap the advance will enforce.
+  state: Object.freeze({ runDeadline: "deadline", ownerDate: "ownerDate" }),
   confirm: Object.freeze({ runDeadline: "deadline", deliveryId: "uuid", runId: "runId" }),
 });
 
 export { UUID as UUID_PATTERN, RUN_ID as RUN_ID_PATTERN };
+
+/** A real calendar date as YYYY-MM-DD, or false. */
+export function isOwnerDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
 
 export const REQUEST_ROUTES = Object.freeze(Object.keys(SHAPES));
 
@@ -83,6 +93,9 @@ export function parseOpsObserverRequest(route, bodyText, nowMs) {
       value[key] = raw;
     } else if (kind === "runId") {
       if (typeof raw !== "string" || !RUN_ID.test(raw)) return refuse("shape");
+      value[key] = raw;
+    } else if (kind === "ownerDate") {
+      if (!isOwnerDate(raw)) return refuse("shape");
       value[key] = raw;
     }
   }
