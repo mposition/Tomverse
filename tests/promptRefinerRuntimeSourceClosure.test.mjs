@@ -379,6 +379,10 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-04, merge current main: marketing, account email and AMUX edits
 // coexist in the fixed closure. Count and position-free inventory remain
 // unchanged; the digest below is repinned for source positions only.
+//
+// 2026-10-07, selective release of marketing S2e onto main: the S2e
+// pipeline additions in `lib/marketingAutomationAccess.ts` move source
+// positions only. Count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
