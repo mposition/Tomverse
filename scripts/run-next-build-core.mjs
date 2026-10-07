@@ -35,6 +35,13 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
+/** GitHub's Node default heap is too small for this repository's type pass. */
+export const nodeArgsForBuild = (env) =>
+  env.GITHUB_ACTIONS === "true" &&
+  !/--max-old-space-size(?:=|\s)/.test(env.NODE_OPTIONS ?? "")
+    ? ["--max-old-space-size=6144"]
+    : [];
+
 const INTERNAL_ERROR_MARKERS = [
   "TurbopackInternalError",
   "An unexpected Turbopack error occurred",

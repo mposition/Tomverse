@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
+  nodeArgsForBuild,
 } from "./run-next-build-core.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,6 +36,7 @@ const runBuild = () =>
     const child = spawn(
       process.execPath,
       [
+        ...nodeArgsForBuild(process.env),
         join(repoRoot, "node_modules", "next", "dist", "bin", "next"),
         "build",
         ...forwardedArgs,
