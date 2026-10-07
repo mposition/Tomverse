@@ -295,6 +295,57 @@ export async function readOpsObserverState(
   return result;
 }
 
+/** What the Admin genesis screen shows, and what an approval there binds. */
+export type OpsObserverAdminView = {
+  head: { genesisId: string; generation: number | null; mode: string; createdAt: string } | null;
+  trustReason: string;
+  /** When a genesis may next replace this head (the seven-day rule); null with no head. */
+  nextGenesisAt: string | null;
+  /** Whether the seven-day rule allows a genesis at the time of this read. */
+  genesisAllowedNow: boolean;
+};
+
+/**
+ * The owner's view of the chain (docs/policy/sre-ops.md §8): the head, with
+ * or without its state row, and the trust verdict -- exactly the values a
+ * genesis request must name back. Unlike the services' read it reports the
+ * head of an untrusted chain, because that is what a recovery replaces; it
+ * carries no keys. One bounded `state_read` transaction, and the deadline is
+ * checked again before the view is returned, so a late read shows nothing
+ * rather than a head the owner would then bind.
+ */
+export async function readOpsObserverAdminView(client: PrismaClient = prisma): Promise<OpsObserverAdminView> {
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  const runDeadline = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS);
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx): Promise<OpsObserverAdminView> => {
+      const gathered = await gatherFacts(tx, integrityKeys);
+      const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
+      const head = gathered.chainHead;
+      return {
+        head: head
+          ? {
+              genesisId: head.id,
+              generation: (head.generation as number | null) ?? null,
+              mode: head.mode,
+              createdAt: head.createdAt.toISOString(),
+            }
+          : null,
+        trustReason: verdict.trusted ? "trusted" : (verdict.reason ?? "state_missing"),
+        nextGenesisAt: head ? new Date(head.createdAt.getTime() + GENESIS_MIN_INTERVAL_MS).toISOString() : null,
+        genesisAllowedNow: !head || Date.now() - head.createdAt.getTime() >= GENESIS_MIN_INTERVAL_MS,
+      };
+    },
+    client,
+  );
+  // Like the services' read (policy §6): a late read is not returned as the
+  // head and verdict the owner will bind.
+  await assertNotLate(runDeadline, client);
+  return result;
+}
+
 /** After an abandon, the heartbeat is held this long (dead-man allowance 30 min + one period 10 min, policy §3 rule 9). */
 export const HEARTBEAT_WITHHOLD_MINUTES = 40;
 
