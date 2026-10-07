@@ -7,7 +7,7 @@ import { AMUX_PRISMA_INT_MAX } from "@/lib/amux/claimContract";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
-  isEngineeringAgentAmuxAdapterOpen,
+  engineeringAgentAmuxAdapterPermittedNow,
   startEngineeringAgentRun,
 } from "@/lib/engineeringAgentAmuxAdapter";
 import {
@@ -35,7 +35,7 @@ const requestSchema = z
 
 export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "runner")) return engineeringAgentUnauthorized();
-  if (!isEngineeringAgentAmuxAdapterOpen()) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
+  if (!(await engineeringAgentAmuxAdapterPermittedNow())) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
   try {
     const body = await readLimitedJson(request, 2048, requestSchema);
     const outcome = await runAttachedIdempotentEngineeringAgentRequest({
