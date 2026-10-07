@@ -697,6 +697,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
   },
   {
+    path: "prisma/migrations/20261008010000_agent_digest_sre_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 7,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for sre-ops (docs/policy/sre-ops.md §1 item 3, §10). It writes no row of any table.",
+  },
+  {
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,

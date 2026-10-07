@@ -101,7 +101,12 @@ test("a row cannot be born without its body", async () => {
 });
 
 test("closed agentKey and kind lists", async () => {
-  await assert.rejects(insert({ agentKey: "sre-ops", idempotencyKey: `sre-ops:${randomUUID()}` }), /agent_key|retention/);
+  await assert.rejects(insert({ agentKey: "unregistered-agent", idempotencyKey: `unregistered-agent:${randomUUID()}` }), /agent_key|retention/);
+  // A registered agent keeps to its own kinds: sre-ops with billing's kind is refused.
+  await assert.rejects(
+    insert({ agentKey: "sre-ops", kind: "price_deadline_digest", idempotencyKey: `sre-ops:${randomUUID()}` }),
+    /kind_check/,
+  );
   await assert.rejects(insert({ kind: "page" }), /kind_check/);
 });
 
