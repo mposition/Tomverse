@@ -299,6 +299,32 @@ pub struct V22SidecarResult {
     pub publish_files_digest: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V22ResultTransfer {
+    Write,
+    ReadBack,
+    Reject,
+}
+
+fn v22_result_transfer(result: &V22SidecarResult) -> V22ResultTransfer {
+    if result.result_sha256.is_none() ||
+        result.patch_digest.is_some() != result.patch_base_sha.is_some() ||
+        result.patch_body.is_some() && result.patch_digest.is_none() ||
+        result.publish_files.is_some() && result.publish_files_digest.is_none() ||
+        result.publish_files_digest.is_some() && result.patch_digest.is_none() {
+        return V22ResultTransfer::Reject;
+    }
+    if result.result_text.is_some() &&
+        (result.patch_digest.is_none() || result.patch_body.is_some()) &&
+        (result.publish_files_digest.is_none() || result.publish_files.is_some()) {
+        V22ResultTransfer::Write
+    } else {
+        // A confirmed sidecar has already erased volatile patch/file bytes.
+        // The durable digests still permit exact server read-back on retry.
+        V22ResultTransfer::ReadBack
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
@@ -1947,48 +1973,38 @@ pub async fn run_from_env() -> i32 {
                             });
                             if let Some((receipt, digest, outcome)) = verified {
                                 let result_record = if outcome == "succeeded" {
-                                    let patch_binding = v22_result.as_ref().and_then(|result|
-                                        result.patch_digest.as_deref().zip(
-                                            result.patch_base_sha.as_deref()));
-                                    let patch_transfer = v22_result.as_ref().and_then(|result|
-                                        result.patch_body.as_deref().zip(
-                                            result.patch_digest.as_deref()).zip(
-                                            result.patch_base_sha.as_deref())).map(
-                                                |((body, digest), base)| (body, digest, base));
-                                    let incomplete_patch_binding = v22_result.as_ref().is_some_and(
-                                        |result| result.patch_digest.is_some() !=
-                                            result.patch_base_sha.is_some() ||
-                                            result.patch_body.is_some() && patch_binding.is_none() ||
-                                            result.publish_files.is_some() !=
-                                                result.publish_files_digest.is_some());
-                                    if incomplete_patch_binding {
-                                        Ok(crate::tomverse_api::V22UsageRecord::Rejected)
-                                    } else { match v22_result.as_ref().and_then(|result|
-                                        result.result_sha256.as_deref()) {
-                                        Some(sha256) => match v22_result.as_ref().and_then(
-                                            |result| result.result_text.as_deref()) {
-                                            Some(text) if patch_binding.is_none() ||
-                                                patch_transfer.is_some() =>
-                                                api.v22_task_result_record_once(
-                                                    &entry.delivery.attempt_id,
-                                                    &entry.delivery.worker, text, sha256,
-                                                    patch_transfer,
-                                                    v22_result.as_ref().and_then(
-                                                        |result| result.publish_files.as_ref()),
-                                                    v22_result.as_ref().and_then(
-                                                        |result| result.publish_files_digest.as_deref()),
-                                                ).await,
-                                            Some(_) => api.v22_task_result_readback(
-                                                &entry.delivery.attempt_id, sha256,
-                                                patch_binding, v22_result.as_ref().and_then(
-                                                    |result| result.publish_files_digest.as_deref())).await,
-                                            None => api.v22_task_result_readback(
-                                                &entry.delivery.attempt_id, sha256,
-                                                patch_binding, v22_result.as_ref().and_then(
-                                                    |result| result.publish_files_digest.as_deref())).await,
+                                    match v22_result.as_ref() {
+                                        Some(result) => {
+                                            let sha256 = result.result_sha256.as_deref();
+                                            let patch_binding = result.patch_digest.as_deref().zip(
+                                                result.patch_base_sha.as_deref());
+                                            match (v22_result_transfer(result), sha256,
+                                                result.result_text.as_deref()) {
+                                                (V22ResultTransfer::Write, Some(sha256), Some(text)) =>
+                                                    api.v22_task_result_record_once(
+                                                        &entry.delivery.attempt_id,
+                                                        &entry.delivery.worker,
+                                                        text,
+                                                        sha256,
+                                                        result.patch_body.as_deref().zip(
+                                                            result.patch_digest.as_deref()).zip(
+                                                            result.patch_base_sha.as_deref()).map(
+                                                                |((body, digest), base)|
+                                                                    (body, digest, base)),
+                                                        result.publish_files.as_ref(),
+                                                        result.publish_files_digest.as_deref(),
+                                                    ).await,
+                                                (V22ResultTransfer::ReadBack, Some(sha256), _) =>
+                                                    api.v22_task_result_readback(
+                                                        &entry.delivery.attempt_id, sha256,
+                                                        patch_binding,
+                                                        result.publish_files_digest.as_deref(),
+                                                    ).await,
+                                                _ => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                            }
                                         },
                                         None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
-                                    } }
+                                    }
                                 } else {
                                     Ok(crate::tomverse_api::V22UsageRecord::Recorded)
                                 };
@@ -2379,6 +2395,27 @@ mod tests {
     const ATTEMPT_ID: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
+
+    #[test]
+    fn confirmed_patch_retries_by_exact_readback_without_volatile_bytes() {
+        let mut result = V22SidecarResult {
+            state: V22SidecarState::Succeeded,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some("private result".into()), result_sha256: Some("a".repeat(64)),
+            patch_body: Some("diff --git a/a b/a\n".into()),
+            patch_base_sha: Some("b".repeat(40)), patch_digest: Some("c".repeat(64)),
+            publish_files: Some(serde_json::json!([{"path":"a"}])),
+            publish_files_digest: Some("d".repeat(64)),
+        };
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Write);
+        result.patch_body = None;
+        result.publish_files = None;
+        result.result_text = None;
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::ReadBack);
+        result.publish_files = Some(serde_json::json!([{"path":"a"}]));
+        result.publish_files_digest = None;
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Reject);
+    }
 
     fn task() -> OwnedTodoTask {
         OwnedTodoTask {
