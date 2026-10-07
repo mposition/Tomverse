@@ -534,9 +534,18 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-07: A06 adds analysis claim, result, retention and key-retirement
  * audit scopes. The receiver still uses the same audit entry path; its shared
  * actor helper and watched schema bytes changed, so prior evidence is stale.
+ * 2026-10-07: `lib/deploymentEnvironment.ts` lists `dev`, the Railway
+ * environment that takes develop once staging holds release candidates. The
+ * receiver's staging test still needs both signals to say staging, and dev
+ * resolves to dev, so dev never reaches the shadow writer; descriptor and
+ * admission decisions are unchanged. Prior evidence is stale.
+ * 2026-10-07: A09 adds closed AMUX audit actors in the same imported helper closure.
+ * The receiver's admission and write path are unchanged.
+ * 2026-10-07: A12 portfolio and promotion work extends the watched schema
+ * and shared audit helper. The receiver's own admission stays unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "6e147a8e86464f4f1fbce2650467a81ecfe9d062aa0f871d337ad278c7b87698";
+  "f98304520e0a1496bb9b1ef078a443856edba6cdcc2e70c32b6aac79ecedb489";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

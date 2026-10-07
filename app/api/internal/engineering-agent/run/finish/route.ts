@@ -8,7 +8,7 @@ import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
   finishEngineeringAgentRun,
-  isEngineeringAgentAmuxAdapterOpen,
+  engineeringAgentAmuxAdapterPermittedNow,
 } from "@/lib/engineeringAgentAmuxAdapter";
 import { RUNNER_REPORTABLE_HALTS, RUN_OUTCOMES, isRunId } from "@/lib/engineeringAgentCore";
 import {
@@ -49,7 +49,7 @@ const requestSchema = z
 
 export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "runner")) return engineeringAgentUnauthorized();
-  if (!isEngineeringAgentAmuxAdapterOpen()) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
+  if (!(await engineeringAgentAmuxAdapterPermittedNow())) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
   try {
     const body = await readLimitedJson(request, 2048, requestSchema);
     const outcome = await runAttachedIdempotentEngineeringAgentRequest({

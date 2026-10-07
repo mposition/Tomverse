@@ -115,11 +115,13 @@ export const getSecurityEnvironmentStatus = () => {
     // operational incident nobody could act on.
     //
     // Each deployment now asserts the mode it is supposed to have. An unknown
-    // key shape (null) satisfies neither, so it fails both ways.
+    // key shape (null) satisfies neither, so it fails both ways. `dev` is held
+    // to staging's rule: it deploys every develop merge, so a live key there
+    // would bill real cards from code nobody has verified yet.
     stripeLiveMode:
       deployment === "production"
         ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === true
-        : deployment === "staging"
+        : deployment === "staging" || deployment === "dev"
           ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === false
           : true,
     providerUsageSyncSecret:
