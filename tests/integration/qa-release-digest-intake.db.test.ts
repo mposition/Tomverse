@@ -161,3 +161,46 @@ test("a digest submitted after its own run deadline is not recorded", async () =
   assert.deepEqual(await call(late), { status: 409, body: { error: "run_deadline_passed" } });
   assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-05" } }), 0);
 });
+
+// Policy sections 6 and 7: the intake refuses a call on another revision and a
+// second, different digest for a day, and queues the needs-a-check alert --
+// one row per UTC day with its system audit entry -- which the Monitor cannot
+// raise for either.
+test("a revision mismatch or a digest conflict queues today's needs-a-check alert once, with its audit", async () => {
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_attention" } });
+  revision = (await recordQaReleaseOperatorControl({ session: session as never, control: control(true) })).revision;
+  assert.deepEqual(await call(digestFor("2026-10-06"), { "x-qa-release-control-revision": String(revision - 1) }), {
+    status: 409,
+    body: { error: "control_revision_mismatch" },
+  });
+  const [alert] = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_attention" } });
+  assert.ok(alert);
+  assert.match(alert.referenceId, /^attention:\d{4}-\d{2}-\d{2}$/);
+  const audit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "qa_release.attention_alerted", targetId: alert.id },
+  });
+  assert.equal((audit.metadata as Record<string, unknown>).reason, "control_revision_mismatch");
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "qa-release-intake");
+
+  // Same UTC day: the conflict is refused and finds today's row, so no second one.
+  assert.equal((await call(digestFor("2026-10-06"))).status, 201);
+  assert.deepEqual(await call(digestFor("2026-10-06", 39)), { status: 409, body: { error: "digest_conflict" } });
+  assert.equal(await prisma.notificationDelivery.count({ where: { kind: "qa_release_attention" } }), 1);
+
+  // A fresh day's row is queued for a conflict on its own.
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_attention" } });
+  assert.deepEqual(await call(digestFor("2026-10-06", 38)), { status: 409, body: { error: "digest_conflict" } });
+  const [conflict] = await prisma.notificationDelivery.findMany({ where: { kind: "qa_release_attention" } });
+  const conflictAudit = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "qa_release.attention_alerted", targetId: conflict.id },
+  });
+  assert.equal((conflictAudit.metadata as Record<string, unknown>).reason, "digest_conflict");
+  await prisma.notificationDelivery.deleteMany({ where: { kind: "qa_release_attention" } });
+});
+
+test("a run deadline further away than the service's whole hard timeout is treated as passed", async () => {
+  const far = digestFor("2026-10-07", 40, new Date(Date.now() + 16 * 60_000).toISOString());
+  assert.deepEqual(await call(far), { status: 409, body: { error: "run_deadline_passed" } });
+  assert.equal(await prisma.agentDigestItem.count({ where: { idempotencyKey: "qa-release:daily:2026-10-07" } }), 0);
+  assert.equal((await call(digestFor("2026-10-07", 40, new Date(Date.now() + 14 * 60_000).toISOString()))).status, 201);
+});
