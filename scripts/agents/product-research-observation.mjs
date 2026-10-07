@@ -18,7 +18,11 @@
 //              submit with.
 
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_RUN_TIMINGS,
@@ -31,6 +35,28 @@ import {
   slotForInstant,
   systemNamesForPlatform,
 } from "../../lib/productResearchObservationRunnerCore.mjs";
+import {
+  OBSERVATION_SCHEMA_VERSION,
+  OBSERVED_BRANCHES,
+  buildObservationPayload,
+} from "../../lib/productResearchObservationCore.mjs";
+import {
+  ISSUE_FETCH_MAX_REQUESTS,
+  OBSERVED_REPOSITORY,
+  REPORT_MAX_BUFFER_BYTES,
+  STEP_TIMINGS,
+  admitIssuePage,
+  branchTipArgv,
+  childFailureStage,
+  cloneArgv,
+  commitPresentArgv,
+  issuesHeaders,
+  issuesUrl,
+  readBranchTip,
+  readReport,
+  reportArgv,
+  submissionBody,
+} from "../../lib/productResearchObservationStepCore.mjs";
 
 const PROBE = process.argv.slice(2).includes("--probe");
 
@@ -73,7 +99,215 @@ const probeImage = () => {
   return gitAvailable ? 0 : 1;
 };
 
-const main = () => {
+/**
+ * One git call, with nothing of the service's environment it does not need.
+ *
+ * `childEnvironment()` is what keeps the submission secret and the read token
+ * out of a child that has no use for them: git clones a public repository here,
+ * and a child that inherits everything is a child that can print anything.
+ */
+const runGit = (argv, { cwd, timeout } = {}) =>
+  spawnSync("git", argv, {
+    cwd,
+    encoding: "utf8",
+    timeout: timeout ?? STEP_TIMINGS.gitMs,
+    env: childEnvironment(process.env, { platform: process.platform }),
+  });
+
+/**
+ * The commits the run will read, pinned before anything reads them.
+ *
+ * A tip resolved once and then checked for presence: the report is given the
+ * sha rather than the branch name, so a push landing mid-run cannot move what
+ * the row describes.
+ */
+const resolveBranches = (directory) => {
+  const pinned = {};
+  for (const branch of OBSERVED_BRANCHES) {
+    const tip = runGit(branchTipArgv(branch), { cwd: directory });
+    const read = readBranchTip(branch, tip.status === 0 ? tip.stdout : "");
+    if (read.problem) {
+      return { stage: "release_branch_unavailable", detail: read.problem };
+    }
+    const present = runGit(commitPresentArgv(read.sha), { cwd: directory });
+    if (present.status !== 0) {
+      // A tip the clone names but does not have is the partial clone having
+      // fetched less than it said. The report would fail on it later with a
+      // stage that points at the report instead of at the clone.
+      return {
+        stage: "release_branch_unavailable",
+        detail: `${branch} tip is not a commit in the clone`,
+      };
+    }
+    pinned[branch] = read.sha;
+  }
+  return { pinned };
+};
+
+/**
+ * Every open issue, or the stage the read failed at.
+ *
+ * Paged to the structural ceiling rather than to exhaustion: a paging bug that
+ * never saw a short page would otherwise walk the API all night, and the
+ * ceiling turns that into a named failure for one slot.
+ */
+const readIssues = async (token) => {
+  let held = [];
+  let bytes = 0;
+  for (let page = 1; page <= ISSUE_FETCH_MAX_REQUESTS; page += 1) {
+    let response;
+    try {
+      response = await fetch(issuesUrl(OBSERVED_REPOSITORY, page), {
+        headers: issuesHeaders(token),
+        signal: AbortSignal.timeout(STEP_TIMINGS.issueFetchMs),
+      });
+    } catch {
+      // The reason is not reported: a fetch failure's message can carry the
+      // request, and the request carries the token's header.
+      return { stage: "issue_fetch_failed", detail: `page ${page} could not be fetched` };
+    }
+    if (!response.ok) {
+      // The status is a fact about the API, not about the token's value.
+      return { stage: "issue_fetch_failed", detail: `page ${page} answered ${response.status}` };
+    }
+    let parsed;
+    try {
+      parsed = await response.json();
+    } catch {
+      return { stage: "issue_fetch_failed", detail: `page ${page} was not JSON` };
+    }
+    const admitted = admitIssuePage(parsed, held, { bytes });
+    if (admitted.stage) return admitted;
+    held = admitted.issues;
+    bytes = admitted.bytes;
+    if (admitted.done) return { issues: held };
+  }
+  // The ceiling reached with a full page every time: there is more backlog than
+  // this run is allowed to read, and a partial read is a wrong observation.
+  return { stage: "issue_fetch_failed", detail: `${ISSUE_FETCH_MAX_REQUESTS} pages were not enough` };
+};
+
+/**
+ * What the run observed for its slot, as the submission's shape.
+ *
+ * Every return is either a payload with the two commits it read or a single
+ * failure stage. There is no third answer: a run that got part of the way
+ * carries nothing, because a row that holds half an observation is worse than a
+ * row that says the slot failed.
+ */
+const observe = async (config) => {
+  const directory = mkdtempSync(join(tmpdir(), "product-research-"));
+  try {
+    const clone = runGit(cloneArgv(OBSERVED_REPOSITORY, directory), {
+      timeout: STEP_TIMINGS.cloneMs,
+    });
+    if (clone.status !== 0) {
+      // The stage only. `git clone` prints the remote s message on failure, and a
+      // deploy log is read by whoever opens it.
+      const stage = childFailureStage(clone, "clone_failed");
+      say(`${stage}: the clone did not complete`);
+      return { failureStage: stage };
+    }
+
+    const branches = resolveBranches(directory);
+    if (branches.stage) {
+      say(`${branches.stage}: ${branches.detail}`);
+      return { failureStage: branches.stage };
+    }
+
+    const issues = await readIssues(config.githubToken);
+    if (issues.stage) {
+      say(`${issues.stage}: ${issues.detail}`);
+      return { failureStage: issues.stage };
+    }
+    say(`${issues.issues.length} open issues read`);
+
+    // Written to a file rather than piped: the report reads its issues from a
+    // path, and a pipe would put the list in the child's argv where a process
+    // listing can read it.
+    const issuesFile = join(directory, "open-issues.json");
+    writeFileSync(issuesFile, JSON.stringify(issues.issues), "utf8");
+
+    const child = spawnSync(
+      process.execPath,
+      reportArgv({
+        cli: fileURLToPath(new URL("../report-issue-backlog.mjs", import.meta.url)),
+        repository: directory,
+        issuesFile,
+        develop: branches.pinned.develop,
+        main: branches.pinned.main,
+      }),
+      {
+        cwd: fileURLToPath(new URL("../..", import.meta.url)),
+        encoding: "utf8",
+        timeout: STEP_TIMINGS.reportMs,
+        maxBuffer: REPORT_MAX_BUFFER_BYTES,
+        env: childEnvironment(process.env, { platform: process.platform }),
+      },
+    );
+    const read = readReport(child);
+    if (read.stage) {
+      say(`${childFailureStage(child, read.stage)}: ${read.detail}`);
+      return { failureStage: childFailureStage(child, read.stage) };
+    }
+
+    const built = buildObservationPayload(read.report);
+    if (built.failure) {
+      say(`${built.failure.stage}: ${built.failure.problem}`);
+      return { failureStage: built.failure.stage };
+    }
+
+    return {
+      payload: built.payload,
+      developSha: branches.pinned.develop,
+      mainSha: branches.pinned.main,
+    };
+  } finally {
+    // The clone is temporary whatever happened. A run that left it behind would
+    // fill the container's disk one slot at a time.
+    rmSync(directory, { recursive: true, force: true });
+  }
+};
+
+/**
+ * The run's one write, and the only thing it ever sends anywhere.
+ *
+ * Aborted at its own deadline rather than left to the watchdog: the watchdog
+ * ends the process, and a request cut off mid-flight is the one case where the
+ * run cannot know whether its row exists.
+ */
+const submit = async (config, body) => {
+  let response;
+  try {
+    response = await fetch(config.ingestUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.ingestSecret}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(DEFAULT_RUN_TIMINGS.submitAbortMs),
+    });
+  } catch {
+    // Not reported in detail and never retried: the request may have reached
+    // the route, and a second attempt is how one slot gets two answers.
+    return { problem: "the submission did not complete" };
+  }
+  let answer;
+  try {
+    answer = await response.json();
+  } catch {
+    answer = null;
+  }
+  if (!response.ok) {
+    // The route's refusal code, which names what it refused. Safe to print:
+    // it is a fixed vocabulary and carries nothing the caller sent.
+    return { problem: `the route answered ${response.status} ${answer?.refused ?? "with no code"}` };
+  }
+  return { recorded: answer };
+};
+
+const main = async () => {
   const timingProblems = runTimingProblems();
   if (timingProblems.length > 0) {
     // A contradiction between the deadlines is a mistake in the checked-in
@@ -151,12 +385,41 @@ const main = () => {
     finish(1);
   }, DEFAULT_RUN_TIMINGS.prepareMs);
 
-  // The clone, the issue read, the report and the submission are the next
-  // slice. Until they exist the planned run has nothing to do, and saying so is
-  // better than exiting 0 as though a row had been written.
-  say(`planned for slot ${slotForInstant(Date.now())}; no observation step built yet`);
-  finish(1);
-  return process.exitCode ?? 1;
+  const slot = slotForInstant(Date.now());
+  say(`answering for slot ${slot}`);
+
+  const outcome = await observe(plan.config);
+
+  // One permission, taken once. If the preparation deadline fired while the
+  // observation was still running it already took it, and this run must not
+  // send a second answer for the same slot.
+  if (!state.beginSubmit()) {
+    say("the deadline answered for this slot; not submitting");
+    return state.exitCode ?? 1;
+  }
+
+  const sent = await submit(
+    plan.config,
+    submissionBody({ schemaVersion: OBSERVATION_SCHEMA_VERSION, slot, ...outcome }),
+  );
+  if (sent.problem) {
+    say(`submission: ${sent.problem}`);
+    finish(1);
+    return process.exitCode ?? 1;
+  }
+
+  if (outcome.failureStage) {
+    // The row exists and says the slot failed. The run exits non-zero so the
+    // deploy log says so too -- the restart policy is NEVER, so this is a
+    // report, not a retry.
+    say(`recorded ${sent.recorded?.observationId ?? "a row"}: failed at ${outcome.failureStage}`);
+    finish(1);
+    return process.exitCode ?? 1;
+  }
+
+  say(`recorded ${sent.recorded?.observationId ?? "a row"}: ${outcome.payload.issues.length} issues`);
+  finish(0);
+  return process.exitCode ?? 0;
 };
 
-process.exitCode = main();
+process.exitCode = await main();
