@@ -358,6 +358,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
   },
+  "sre-ops-item": {
+    label: "운영 감시 메시지",
+    description: "page 메시지 하나가 무엇에 관한 것이었는지: 신호, 메시지 종류, 시각",
+  },
   "campaign-detail": {
     label: "캠페인 상세",
     description: "이 캠페인이 보내는 문구, 누가 무엇을 확인했는지, 발송 가능 여부",
