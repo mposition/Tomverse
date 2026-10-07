@@ -108,8 +108,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Both branches are compared, and the deployed commit may be well
-          # behind either. A shallow clone answers "the deployed commit is not
+          # Every deployed branch is compared (main, test, develop), and the
+          # deployed commit may be well behind any of them. `--fetch` needs
+          # each to exist on origin, `test` included. A shallow clone answers "the deployed commit is not
           # in this checkout" -- true, and useless.
           fetch-depth: 0
 
@@ -135,6 +136,7 @@ jobs:
           # public addresses, which is what these environments actually are.
           PRODUCTION_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
           STAGING_APP_URL: ${{ vars.STAGING_APP_URL }}
+          DEV_APP_URL: ${{ vars.DEV_APP_URL }}
         run: |
           node scripts/report-deployed-commit-drift.mjs \
             --gate \

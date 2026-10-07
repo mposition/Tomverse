@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import {
   deployedCommitDrift,
   describeDrift,
+  driftEnvironments,
   classifyBuildInfoResponse,
   describeEndpointFailure,
   BEHIND,
@@ -40,21 +41,7 @@ import {
   REDIRECT_LOOP,
 } from "./report-deployed-commit-drift-core.mjs";
 
-// Both hosts already appear in lib/ (accountEmails, robotsPolicyCore). They are
-// the public addresses of the two environments, not configuration -- but the
-// overrides exist so a review app or a renamed host does not need a code change.
-const ENVIRONMENTS = [
-  {
-    name: "production",
-    url: process.env.PRODUCTION_APP_URL || "https://tomverse.app",
-    branch: "main",
-  },
-  {
-    name: "staging",
-    url: process.env.STAGING_APP_URL || "https://staging.tomverse.app",
-    branch: "develop",
-  },
-];
+const ENVIRONMENTS = driftEnvironments(process.env);
 
 const DEFAULT_THRESHOLD_MINUTES = 60;
 

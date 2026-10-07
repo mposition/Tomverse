@@ -133,6 +133,15 @@ test("the probe holds no means of submitting, and never runs in production", () 
   assert.deepEqual([...variables].sort(), [...PROBE_SERVICE_VARIABLES].sort());
 });
 
+test("both projects deploy the same branch per environment", async () => {
+  // The Agent project's staging observes the release candidate the app's
+  // staging serves; a project left on develop would compare one build with
+  // another.
+  const { RAILWAY_ENVIRONMENT_BRANCHES } = await import("../.railway/scheduled-jobs.ts");
+  assert.deepEqual(AGENT_ENVIRONMENT_BRANCHES, RAILWAY_ENVIRONMENT_BRANCHES);
+  assert.equal(AGENT_ENVIRONMENT_BRANCHES.staging, "test");
+});
+
 test("the resource list is exactly the table for that environment, and refuses the unknown", () => {
   const { PRESERVED, dsl } = recordingDsl();
 
