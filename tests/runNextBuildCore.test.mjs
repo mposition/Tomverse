@@ -54,6 +54,38 @@ test("the production cache-restore failure is recognised", () => {
   assert.equal(isRecoverableTurbopackCacheFailure(CACHE_RESTORE_FAILURE), true);
 });
 
+/**
+ * The same corrupt cache in another form, from Railway deployment 4a96f1cc
+ * (staging, develop 1c02353, 2026-10-07T11:41:55Z): a panic in the task
+ * backend while reading the persisted store, reported as "Panic in async
+ * function" with none of the earlier internal-error markers. The same commit
+ * built and deployed on the other services that build it.
+ */
+const TASK_ID_PANIC = `
+▲ Next.js 16.3.8 (Turbopack)
+  Creating an optimized production build ...
+
+thread 'tokio-rt-worker' (84) panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:249:14:
+Failed to get task id: Unable to read next free task id from database
+
+Caused by:
+    0: Unable to open static sorted file
+
+> Build error occurred
+[Error: Panic in async function]
+`;
+
+test("a task-backend panic reading the persisted cache is recognised", () => {
+  assert.equal(isRecoverableTurbopackCacheFailure(TASK_ID_PANIC), true);
+  // The panic site alone, without a cache-read line, is not enough.
+  assert.equal(
+    isRecoverableTurbopackCacheFailure(
+      "thread 'tokio-rt-worker' panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:10:1:\nindex out of bounds"
+    ),
+    false
+  );
+});
+
 // A wrapper that retried on anything would hide real breakage and take twice
 // as long to report it. These are the failures that must still exit on the
 // first attempt.
