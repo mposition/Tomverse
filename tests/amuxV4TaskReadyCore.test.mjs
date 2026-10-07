@@ -3,6 +3,8 @@ import test from "node:test";
 
 import { evaluateAmuxV4TaskReady } from
   "../lib/amux/v4TaskReadyCore.ts";
+import { parseAmuxV4TaskReceipt } from
+  "../lib/amux/v4TaskReadyService.ts";
 
 const base = () => ({
   card: { sourceSystem: "admin-idea-v4", cardType: "task",
@@ -66,4 +68,23 @@ test("only explicit approved completed dependencies count", () => {
       status: "review", terminal: false },
   ] });
   assert.deepEqual(unfinished.reasons, ["dependency_incomplete"]);
+});
+
+test("malformed parent Story or hierarchy content is refused before path access", () => {
+  const content = { digest: "a".repeat(64), keyId: "key" };
+  const valid = { action: "register_card", card: {
+    cardType: "task", normalizedBody: content,
+    task: { role: "implement", grade: "advanced", brief: content,
+      costReceipt: {} },
+    parentStory: { id: "story", revision: 0, content }, dependencies: [],
+  }, hierarchy: ["initiative", "epic", "feature"].map((id) => ({
+    id, approvedDecisionId: `decision-${id}`, revision: 0, content,
+  })) };
+  assert.ok(parseAmuxV4TaskReceipt(valid));
+  const missingStoryContent = structuredClone(valid);
+  delete missingStoryContent.card.parentStory.content;
+  assert.equal(parseAmuxV4TaskReceipt(missingStoryContent), null);
+  const missingHierarchyContent = structuredClone(valid);
+  delete missingHierarchyContent.hierarchy[0].content.digest;
+  assert.equal(parseAmuxV4TaskReceipt(missingHierarchyContent), null);
 });

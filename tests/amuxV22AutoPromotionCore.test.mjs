@@ -4,9 +4,11 @@ import { test } from "node:test";
 
 import {
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
+  amuxV22AssessmentIdsCurrent,
   amuxV22AutoPromotionEnabled,
   amuxV22Capacity,
   amuxV22ScoreCurrent,
+  amuxV22TickWireResult,
 } from "../lib/amux/v22AutoPromotionCore.ts";
 
 test("v22 stays dark even when its environment flag is set", () => {
@@ -14,6 +16,25 @@ test("v22 stays dark even when its environment flag is set", () => {
   for (const flag of [undefined, "", "enabled", "true"]) {
     assert.equal(amuxV22AutoPromotionEnabled(flag), false);
   }
+});
+
+test("v22 tick maps receipts and refusals to the orchestrator v20 wire contract", () => {
+  assert.deepEqual(amuxV22TickWireResult({ promoted: true,
+    receiptId: "receipt", taskId: "private-task" }), {
+    status: 200, body: { promoted: true, consumption_id: "receipt", expired: 0 },
+  });
+  assert.deepEqual(amuxV22TickWireResult({ promoted: false,
+    reason: "auto_halted", haltId: "private-halt" }), {
+    status: 200, body: { promoted: false, reason: "auto_halted", expired: 0 },
+  });
+  assert.deepEqual(amuxV22TickWireResult({ promoted: false,
+    reason: "outcome_unknown", receiptId: "uncertain" }), {
+    status: 409, body: { promoted: false, reason: "outcome_unknown", expired: 0 },
+  });
+  const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
+  assert.match(route, /const wire = amuxV22TickWireResult\(result\)/);
+  assert.match(route, /reason: "apply_disabled", expired: 0/);
+  assert.doesNotMatch(route, /orchestrator_identity_required/);
 });
 
 test("normal admission respects wip, three-times-worker ceiling and two reserved lanes", () => {
@@ -54,6 +75,34 @@ test("a score must bind exact version, revision, approval and both freshness clo
   ]) {
     assert.equal(amuxV22ScoreCurrent({ ...input, ...changed }), false);
   }
+});
+
+test("a newer assessment at any hierarchy level invalidates a promotion score", () => {
+  for (const ids of [
+    ["initiative", "epic", "feature", "task"],
+    ["initiative", "epic", "feature", "story", "task"],
+  ]) {
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, ids), true);
+    for (const index of ids.keys()) {
+      const changed = [...ids]; changed[index] = "newer";
+      assert.equal(amuxV22AssessmentIdsCurrent(ids, changed), false);
+    }
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, ids.slice(1)), false);
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, [...ids, "extra"]), false);
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, [null, ...ids.slice(1)]), false);
+  }
+});
+
+test("promotion reads the latest assessments only after the audit and task locks", () => {
+  const service = readFileSync("lib/amux/v22AutoPromotionService.ts", "utf8");
+  const body = service.slice(service.indexOf("async function commitCandidate"),
+    service.indexOf("async function readBackLostPromotion"));
+  const auditLock = body.indexOf("await takeAuditChainLock(tx)");
+  const taskLock = body.indexOf('FOR UPDATE`');
+  const latestRead = body.indexOf("const latestAssessments = await Promise.all");
+  const freshnessGuard = body.indexOf("if (!amuxV22AssessmentIdsCurrent(");
+  assert.ok(auditLock > 0 && taskLock > auditLock &&
+    latestRead > taskLock && freshnessGuard > latestRead);
 });
 
 test("the legacy scheduler cannot claim a v22 Todo before worker routing ships", () => {

@@ -9,6 +9,20 @@ export const AMUX_V22_SEV1_RESERVED = 1;
 export const amuxV22AutoPromotionEnabled = (value: string | undefined) =>
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH && value === "enabled";
 
+/** The orchestrator's v20 tick wire contract is shared with the legacy path.
+ * V22 receipt IDs are consumed as opaque successful tick IDs, never as v8
+ * grants. Internal task/halt details must not leak into that response. */
+export function amuxV22TickWireResult(result:
+  { promoted: true; receiptId: string } |
+  { promoted: false; reason: string }) {
+  if (result.promoted) {
+    return { status: 200, body: { promoted: true,
+      consumption_id: result.receiptId, expired: 0 } };
+  }
+  return { status: result.reason === "outcome_unknown" ? 409 : 200,
+    body: { promoted: false, reason: result.reason, expired: 0 } };
+}
+
 /** The two lanes are held empty until their owner-declared classification and
  * worker-claim contract ships. Never lend an unclassified slot to a normal
  * task. The limit includes existing legacy todo/doing cards. */
@@ -45,4 +59,13 @@ export function amuxV22ScoreCurrent(input: {
     input.sourceApprovalId === input.currentSourceApprovalId &&
     input.now.getTime() < input.activeStaleAt.getTime() &&
     input.now.getTime() < input.baselineStaleAt.getTime();
+}
+
+/** A newer owner-approved assessment invalidates the score immediately. */
+export function amuxV22AssessmentIdsCurrent(
+  scored: readonly string[], latest: readonly (string | null)[],
+) {
+  return (scored.length === 4 || scored.length === 5) &&
+    latest.length === scored.length &&
+    scored.every((id, index) => latest[index] === id);
 }

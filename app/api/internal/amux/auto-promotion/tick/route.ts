@@ -12,7 +12,8 @@ import {
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
 import { AMUX_V22_AUTO_PROMOTION_ENV,
-  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
+  amuxV22AutoPromotionEnabled,
+  amuxV22TickWireResult } from "@/lib/amux/v22AutoPromotionCore";
 import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
@@ -85,7 +86,7 @@ export async function POST(request: Request) {
       );
     }
     if (v22Enabled && identity.kind !== "admitted" && !legacyEnabled) {
-      return Response.json({ promoted: false, reason: "orchestrator_identity_required" },
+      return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore });
     }
 
@@ -94,10 +95,8 @@ export async function POST(request: Request) {
         const result = await tickV22AutoPromotion();
         if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
             !legacyEnabled) {
-          return Response.json(result, {
-            status: !result.promoted && result.reason === "outcome_unknown" ? 409 : 200,
-            headers: noStore,
-          });
+          const wire = amuxV22TickWireResult(result);
+          return Response.json(wire.body, { status: wire.status, headers: noStore });
         }
       }
       const result = await tickAutoPromotion();

@@ -34,7 +34,7 @@ function ownerId(session: Session) {
   return id;
 }
 
-function receipt(raw: Prisma.JsonValue | null):
+export function parseAmuxV4TaskReceipt(raw: Prisma.JsonValue | null):
   AmuxIdeaUnitConfirmationSnapshot | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
       raw.action !== "register_card" ||
@@ -56,7 +56,13 @@ function receipt(raw: Prisma.JsonValue | null):
       (raw.card.parentStory !== null &&
         (typeof raw.card.parentStory !== "object" ||
           Array.isArray(raw.card.parentStory) ||
-          typeof raw.card.parentStory.id !== "string")) ||
+          typeof raw.card.parentStory.id !== "string" ||
+          !Number.isSafeInteger(raw.card.parentStory.revision) ||
+          !raw.card.parentStory.content ||
+          typeof raw.card.parentStory.content !== "object" ||
+          Array.isArray(raw.card.parentStory.content) ||
+          typeof raw.card.parentStory.content.digest !== "string" ||
+          typeof raw.card.parentStory.content.keyId !== "string")) ||
       !raw.card.task.costReceipt ||
       typeof raw.card.task.costReceipt !== "object" ||
       Array.isArray(raw.card.task.costReceipt) ||
@@ -68,8 +74,11 @@ function receipt(raw: Prisma.JsonValue | null):
       !raw.hierarchy.every((item) => item && typeof item === "object" &&
         !Array.isArray(item) && typeof item.id === "string" &&
         typeof item.approvedDecisionId === "string" &&
+        Number.isSafeInteger(item.revision) &&
         item.content && typeof item.content === "object" &&
-        !Array.isArray(item.content))) return null;
+        !Array.isArray(item.content) &&
+        typeof item.content.digest === "string" &&
+        typeof item.content.keyId === "string")) return null;
   return raw as unknown as AmuxIdeaUnitConfirmationSnapshot;
 }
 
@@ -212,7 +221,7 @@ export async function evaluateAmuxV4TaskReadyInTransaction(
           confirmationSnapshot: true,
           finalAuditLogId: true, registeredWorkItemId: true },
       }) : null;
-    const snapshot = receipt(decision?.confirmationSnapshot ?? null);
+    const snapshot = parseAmuxV4TaskReceipt(decision?.confirmationSnapshot ?? null);
     const audit = decision?.finalAuditLogId ? await tx.adminAuditLog.findUnique({
       where: { id: decision.finalAuditLogId },
       select: { action: true, actorUserId: true, targetId: true,
