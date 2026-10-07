@@ -62,7 +62,7 @@ const LEADS: Record<QaReleaseOperatorEmailKind, string> = {
   monitor_failed:
     "The QA release digest check could not finish a round, so whether the digest is current is not known. Nothing was decided or changed; open the Agent digests page to see the last digest, and the audit log for the reason recorded.",
   attention:
-    "The QA release digest check found the recorded operator control and the running configuration disagree: a service presented an operator control revision other than the newest, or the digest secret is missing while the agent is recorded as on. Nothing was decided or changed; open the Agent digests page to compare the newest operator control revision with the services' settings.",
+    "The QA release digest check found the recorded operator control and the running configuration disagree: a service presented an operator control revision other than the newest, the digest secret is missing while the agent is recorded as on, or a second, different digest was submitted for a day that already has one. Nothing was decided or changed; open the Agent digests page to compare the newest operator control revision with the services' settings.",
   digest_recorded:
     "The QA release digest for this date was recorded. It is a report, not a judgement: nothing was decided or changed. Open the Agent digests page to read it.",
   merge_lane_latched:

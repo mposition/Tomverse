@@ -335,10 +335,14 @@ export function createQaReleaseGithubPorts(input: {
       } catch {
         return { result: "unknown" };
       }
-      // A 4xx is GitHub declining before it merges (head moved, not mergeable,
-      // a ruleset, permissions): not merged. Anything else -- a 5xx, a
-      // timeout, a 200 that does not say merged -- is unknown.
-      if (response.status >= 400 && response.status < 500) return { result: "refused" };
+      // 405, 409 and 422 are GitHub declining this merge (not mergeable, head
+      // moved, a ruleset or validation): not merged. An authentication,
+      // permission or rate-limit answer (401, 403, 429) says nothing about the
+      // pull request and would walk the queue one refusal per round, so it is
+      // unknown, which latches. Anything else -- a 5xx, a timeout, a 200 that
+      // does not say merged -- is unknown too.
+      if (response.status === 405 || response.status === 409 || response.status === 422) return { result: "refused" };
+      if (response.status >= 400 && response.status < 500) return { result: "unknown" };
       if (response.status !== 200) return { result: "unknown" };
       try {
         const body = record(parseJson(response.text));
