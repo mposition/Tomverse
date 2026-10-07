@@ -252,6 +252,11 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
  * Reads the ops-observer state for a run whose deadline is `runDeadline`.
  * Trusted: the genesis, mode, generation, keys and whether a reservation is
  * still open. Otherwise: the trust reason only.
+ *
+ * A read writes nothing, so no deferred deadline check runs at its COMMIT;
+ * the answer is returned only after the separate short check confirms the
+ * run is not past its deadline (policy §6 item 5), and a late run gets
+ * OpsObserverLateError instead of a state it could act on.
  */
 export async function readOpsObserverState(
   runDeadline: Date,
@@ -276,6 +281,7 @@ export async function readOpsObserverState(
     },
     client,
   );
+  await assertNotLate(runDeadline, client);
   return result;
 }
 
