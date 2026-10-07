@@ -22,6 +22,7 @@ const DEPLOYMENT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const APPROVABLE_STAGE_IDS = new Set([
   "prompt-refiner-vnext-one-shot-v3",
   "prompt-refiner-vnext-one-shot-v4",
+  "prompt-refiner-vnext-one-shot-v5",
 ]);
 
 function assertExactBinding(binding: PromptRefinerVnextOneShotAuditBinding): void {

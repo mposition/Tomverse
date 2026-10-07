@@ -1,6 +1,8 @@
 -- The retention deadline of the sre-ops reservations (docs/policy/sre-ops.md
 -- §6 item 5, §10).
 --
+-- baseline-check: present-if-function "ops_observer_retention_deadline_check"
+--
 -- Every other ops-observer write carries its run deadline on the row, and a
 -- deferred constraint trigger refuses the COMMIT once the database clock is
 -- past it. A retention batch only deletes, so the deleted row has no deadline

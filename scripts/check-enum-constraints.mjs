@@ -1029,6 +1029,11 @@ const REGISTRY = {
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
   },
+  AmuxIdeaDerivationGroup_shape_check: {
+    owner: "database",
+    reason:
+      "A compound split/merge constraint binds operation to source and target counts and digest shapes. The owner-authored derivation writer validates this shape before insert; the database remains the final guard.",
+  },
   OpsObserverDelivery_status_check: {
     owner: "list",
     module: "scripts/ops-observer/delivery-core.mjs",

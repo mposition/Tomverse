@@ -1,4 +1,4 @@
-import { isAmuxIdeaRequestId } from "./ideaSubmissionCore.ts";
+import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 import type { AvailableFrontierModel } from "./ideaFrontierCatalogUiCore.ts";
 
 export type PreparedIdeaTransferPreview = {

@@ -13,6 +13,8 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import type { PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 
@@ -42,16 +44,17 @@ type ApprovedPriceRow = {
 /** Recheck the locked approval and current registry price in the app transaction. */
 export async function assertPromptRefinerVnextOneShotPriceForAdmission(
   tx: Prisma.TransactionClient,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<void> {
   const rows = await tx.$queryRaw<ApprovedPriceRow[]>`
     SELECT "id", "status", "pricePinDigest", "perRequestCostMicroUsd",
       "slotCount", "costCeilingMicroUsd"
     FROM "PromptRefinerVnextOneShotStage"
-    WHERE "id" = ${STAGE_ID}
+    WHERE "id" = ${stageId}
     FOR NO KEY UPDATE NOWAIT
   `;
   const stage = rows.length === 1 ? rows[0] : null;
-  if (!stage || stage.id !== STAGE_ID) {
+  if (!stage || stage.id !== stageId) {
     throw new Error("vnext_one_shot_approved_stage_unavailable");
   }
   if (stage.status !== "staged" && stage.status !== "run_approved") {
