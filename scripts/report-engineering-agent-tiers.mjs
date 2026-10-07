@@ -23,6 +23,7 @@
  * Read-only: it reads Git objects and writes nothing.
  *
  *   npm run report:engineering-agent-tiers -- --limit 30 [--ref origin/develop] [--json]
+ *   npm run report:engineering-agent-tiers -- --limit 30 --simulate-tests-excluded --json
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -30,6 +31,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { cacheIsolationRecordSignature } from "../lib/agentCacheIsolationRecord.ts";
 import { analyseCredentialReachability, credentialForbiddenPaths } from "../lib/agentCredentialReachability.ts";
+import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialReviewedExclusions.ts";
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
@@ -44,6 +46,9 @@ const option = (name, fallback) => {
 const limit = Number.parseInt(option("--limit", "30"), 10);
 const ref = option("--ref", "origin/develop");
 const asJson = args.includes("--json");
+// This is a read-only what-if report. It does not change the deployed image,
+// policy, or the runtime T1 authority list.
+const simulateTestsExcluded = args.includes("--simulate-tests-excluded");
 
 const git = (gitArgs, input) =>
   execFileSync("git", gitArgs, { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024, input });
@@ -148,22 +153,26 @@ for (const commit of commits) {
   const workflows = listing
     .filter((entry) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry.path))
     .map((entry) => ({ path: entry.path, blobSha: entry.oid, text: text(entry.oid) }));
-  // Always judged blind to the record first. §5's record is only true while
+  // Always judged blind to the cache record first. Human-reviewed, blob-pinned
+  // job exclusions still apply; they cannot lift the separate cache rule.
+  // §5's record is only true while
   // check:agent-pr-cache-isolation passes, and that check reads the analysis
   // taken with the record ignored -- an analysis taken with it applied reports
   // no cache reasons at all, so the condition the record rests on would look
   // satisfied because the evidence had been hidden.
-  const blind = analyseCredentialReachability({ workflows, exclusions: [], cacheIsolationRecorded: false });
+  const blind = analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: false });
   const narrow = judgeAgentPrCacheIsolation(blind);
   const signature = cacheIsolationRecordSignature();
   // Both halves, and nothing else lifts it: the owner's signature, and the
   // condition holding against these workflows right now.
   const isolationRecorded = signature.signed && narrow.status === "judged" && narrow.held;
   const credential = isolationRecorded
-    ? analyseCredentialReachability({ workflows, exclusions: [], cacheIsolationRecorded: true })
+    ? analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: true })
     : blind;
   if (isolationRecorded) tally.cacheIsolationApplied += 1;
-  const slice = computeControlPlaneSlice({ baseFiles, changes });
+  const slice = computeControlPlaneSlice({ baseFiles, changes,
+    ...(simulateTestsExcluded ? { deployExcludedPrefixes: ["tests"] } : {}),
+  });
   const lock = JSON.parse(text(listing.find((entry) => entry.path === "package-lock.json")?.oid ?? "") || "{}");
   const installedVersions = Object.fromEntries(
     Object.keys(CONVENTION_VERSIONS).map((name) => [name, lock.packages?.[`node_modules/${name}`]?.version ?? null]),
@@ -244,6 +253,7 @@ for (const commit of commits) {
 
 const summary = {
   ref,
+  simulatedTestsExcluded: simulateTestsExcluded,
   pullRequests: tally.total,
   t1: tally.t1,
   t2: tally.t2,

@@ -531,6 +531,8 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * The AMUX expiry, settlement, unknown-outcome and auto-cancel audit scopes
  * move those same helper bytes again. Existing signed staging evidence becomes
  * stale; the receiver's own admission and write path remain unchanged.
+ * 2026-10-07: v22 worker claim adds a closed system-audit actor in the same
+ * imported helper closure. Re-pin after the AMUX source changes are verified.
  * 2026-10-07: A06 adds analysis claim, result, retention and key-retirement
  * audit scopes. The receiver still uses the same audit entry path; its shared
  * actor helper and watched schema bytes changed, so prior evidence is stale.
@@ -539,11 +541,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * receiver's staging test still needs both signals to say staging, and dev
  * resolves to dev, so dev never reaches the shadow writer; descriptor and
  * admission decisions are unchanged. Prior evidence is stale.
- * A09 adds closed AMUX audit actors in the same imported helper closure.
+ * 2026-10-07: A09 adds closed AMUX audit actors in the same imported helper closure.
  * The receiver's admission and write path are unchanged.
+ * 2026-10-07: A12 portfolio and promotion work extends the watched schema
+ * and shared audit helper. The receiver's own admission stays unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "09b47d334398bb402088c00d187a479b20a0c8c56e52901b015edeb5e53f9dd8";
+  "1a289ed4ae74b45dc4ad6a07bfe76939d3119db72c7174343cd8d41f462c7044";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

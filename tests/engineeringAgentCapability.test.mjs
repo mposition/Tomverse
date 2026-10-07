@@ -294,6 +294,7 @@ test("after two recurrences only escalation is left", () => {
 
 test("B resolves only when AMUX concludes the same way; otherwise C; never guessed", () => {
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "review", domainOutcome: "t1_queued" }), "resolved");
+  assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "review", domainOutcome: "private_result" }), "resolved");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "blocked", domainOutcome: "t1_queued" }), "C");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "abandoned" }), "resolved");
   assert.equal(resolveBOnAmuxTerminal({ amuxSettlement: "recovered", domainOutcome: "mystery" }), "unmapped");

@@ -704,9 +704,45 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskResult",
+    publicName: "amux_v22_task_results",
+    prismaModel: "AmuxV22TaskResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskPatch",
+    publicName: "amux_v22_task_patches",
+    prismaModel: "AmuxV22TaskPatch",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaRetentionHold",
     publicName: "amux_idea_retention_holds",
     prismaModel: "AmuxIdeaRetentionHold",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioAssessment",
+    publicName: "amux_portfolio_assessments",
+    prismaModel: "AmuxPortfolioAssessment",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioScoreSnapshot",
+    publicName: "amux_portfolio_score_snapshots",
+    prismaModel: "AmuxPortfolioScoreSnapshot",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPromotionControl",
+    publicName: "amux_v22_promotion_controls",
+    prismaModel: "AmuxV22PromotionControl",
+    state: "unverified",
+  },
+  {
+    domain: "amuxWorkerLaneDecision",
+    publicName: "amux_v22_lane_decisions",
+    prismaModel: "AmuxV22LaneDecision",
     state: "unverified",
   },
   {

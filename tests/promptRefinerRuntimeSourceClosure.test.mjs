@@ -428,6 +428,12 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
 // same audit helper. The 228-entry count and position-free inventory still
 // match origin/develop; only source positions moved.
+// 2026-10-07, AMUX v22 worker claim: one named system actor shifts positions
+// in the already-reviewed audit module. The 228-entry count and position-free
+// inventory still match; this repins positions only.
+// 2026-10-07, AMUX v22 integration: the webhook pipeline fingerprint note in
+// marketingAutomationAccess.ts shifts positions of its existing computed
+// accesses. The count and position-free digest remain unchanged.
 // 2026-10-07, A06 analysis claim, result and retention actions extend that
 // helper again. The position-free 228-entry inventory is unchanged; only
 // source line positions in the reviewed closure move.
@@ -435,12 +441,16 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
 // accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
 // added; count 228 and the position-free inventory are unchanged.
+// 2026-10-07, A12 merge: the A09/A12 notes and shared audit-helper lines
+// move source positions only; count 228 and position-free digest stay fixed.
+// 2026-10-07, A15 merge: the same 228 computed accesses retain their
+// position-free digest; A13-A15 additions move reviewed source positions.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "b54dd59167e4632884856b77d4833544",
-  "dafc98b23fa60f8094801870e0abe6eb",
+  "4949127bfa8cec476f72454d7f1cac71",
+  "2652c8fc9833e5876ff4d8ade648f465",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

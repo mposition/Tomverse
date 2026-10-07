@@ -24,6 +24,7 @@ export function assembleAmuxV4TaskConfirmation(input: {
   hierarchy: [Node, Node, Node]; sourceFeatureRef: string;
   parentStory: CardReference | null; dependencies: CardReference[];
   costReceipt: V4TaskCostCeilingReceipt;
+  publicPrDisclosureApproved: boolean;
   duplicateScan: AmuxIdeaDuplicateScan; decisionReason: string | null;
   key: AmuxDigestKey;
 }): AmuxIdeaUnitConfirmationSnapshot | null {
@@ -34,6 +35,7 @@ export function assembleAmuxV4TaskConfirmation(input: {
       hierarchy[2].level !== "feature" ||
       proposal.executionBrief === null || proposal.taskRole === null ||
       proposal.executionGrade === null ||
+      (input.publicPrDisclosureApproved && proposal.taskRole !== "implement") ||
       input.costReceipt.role !== proposal.taskRole ||
       input.costReceipt.grade !== proposal.executionGrade ||
       (proposal.parentStoryRef === null) !== (input.parentStory === null) ||
@@ -86,6 +88,7 @@ export function assembleAmuxV4TaskConfirmation(input: {
         parentStory: input.parentStory, dependencies: input.dependencies,
         evidence: [], task: { role: proposal.taskRole,
           grade: proposal.executionGrade,
+          publicPrDisclosureApproved: input.publicPrDisclosureApproved,
           brief: { digest: brief.digest, keyId: brief.digestKeyId },
           costReceipt: input.costReceipt } },
       duplicates: input.duplicateScan, decisionReason };

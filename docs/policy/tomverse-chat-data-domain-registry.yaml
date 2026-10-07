@@ -1742,6 +1742,108 @@ domains:
       and retains purge and key-deletion audit references. It has no content
       body, but its account-deletion and export treatment is unverified.
 
+  - domain: amuxTaskResult
+    prismaModel: AmuxV22TaskResult
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task result account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      Encrypted Task result text is linked to an operator idea without a direct
+      User relation. The approved 90-day body clock does not settle account
+      deletion or unified export; public PR publication is a separate gate.
+
+  - domain: amuxTaskPatch
+    prismaModel: AmuxV22TaskPatch
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task patch account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The private patch is encrypted and tied to an operator idea by ideaId.
+      Its expiry and key retirement do not by themselves decide account
+      deletion or unified export; a public develop PR needs separate consent.
+
+  - domain: amuxPortfolioAssessment
+    prismaModel: AmuxPortfolioAssessment
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, portfolio-assessment deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      Operator approval and evidence references can derive from private ideas.
+      Neither account-deletion nor unified-export treatment is verified.
+
+  - domain: amuxPortfolioScoreSnapshot
+    prismaModel: AmuxPortfolioScoreSnapshot
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, portfolio-score deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The immutable snapshot links operator-approved assessments and a task.
+      Its account-deletion and export paths remain unverified.
+
+  - domain: amuxPromotionControl
+    prismaModel: AmuxV22PromotionControl
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v22, promotion-control deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The control records the approving operator and audit reference, without
+      idea text. Account-deletion and export handling are not yet verified.
+
+  - domain: amuxWorkerLaneDecision
+    prismaModel: AmuxV22LaneDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v22, lane-decision deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The append-only decision links a task to an approving operator and audit
+      entry. Account-deletion and export treatment remain unverified.
+
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft
     userLinkageRole: actor

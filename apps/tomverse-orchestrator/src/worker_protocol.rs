@@ -153,6 +153,11 @@ impl WorkerControlPlane for TomverseApi {
         generation: i64,
         result: &AgentTurnResult,
     ) -> Result<ExecutionSettleResponse> {
+        if delivery.assignment_id.is_some() {
+            return TomverseApi::v22_execution_settle_unverified(
+                self, delivery, instance_id, generation,
+            ).await;
+        }
         let (outcome, to_status, reason) = settlement_fields(result);
 
         TomverseApi::execution_settle(
@@ -494,6 +499,8 @@ mod tests {
     impl FakeControl {
         fn delivery() -> PulledDelivery {
             PulledDelivery {
+                assignment_id: None,
+                v22_execution: None,
                 attempt_id: "00000000-0000-4000-8000-000000000011".into(),
                 task_id: "TASK-1".into(),
                 worker: "worker-a".into(),
