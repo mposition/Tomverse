@@ -391,6 +391,9 @@ run(
     // sre-ops advance: state, checkpoint, audit entry and ledger row in one
     // transaction; stale base, untrusted chain and unchanged keys write nothing.
     "tests/integration/ops-observer-store-advance.db.test.ts",
+    // sre-ops advance with a reservation: owed items only, replay, channel
+    // check, the daily cap counted in the store; refusals write nothing.
+    "tests/integration/ops-observer-store-reserve.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
