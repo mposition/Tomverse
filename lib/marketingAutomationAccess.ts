@@ -528,6 +528,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * admission decisions are unchanged. The value below is computed with that
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
+ *
+ * 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main
+ * (docs/policy/amux-decision-maker.md §10): three system actors join
+ * `lib/adminAuditSystemActors.ts` and the Decision Maker models add back
+ * relations to `AdminAuditLog` in the watched schema. The receiver's calls,
+ * descriptor and admission decisions are unchanged; the bytes moved, so
+ * evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
   "2cee411f3565b954d58c3d1f31348e3f990bc6f213b8cb86ba8edc046418cc3f";

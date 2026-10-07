@@ -90,6 +90,11 @@ test("the system actor list is closed and changes only by review", () => {
     "product-research-retention",
     // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
     "billing-finance-ops-intake",
+    // docs/policy/amux-decision-maker.md §10: the routing route and one actor
+    // per DM instance. A DM writes proposals, never approvals (§1).
+    "amux-decision-router",
+    "amux-decision-maker-openai",
+    "amux-decision-maker-anthropic",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

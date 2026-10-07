@@ -2282,6 +2282,7 @@ model AdminAuditLog {
   amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
   amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
   amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
+  amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8325,6 +8326,34 @@ model AmuxOrchestratorHalt {
 
   @@index([clearedAt, openedAt])
   @@index([requestId])
+}
+
+/// AMUX Decision Maker switch events (docs/policy/amux-decision-maker.md §8,
+/// §10): append-only, and a scope's state is its newest event. Single writer:
+/// lib/amux/decisionMakerSwitchStore.ts. Migration
+/// 20261008030000_amux_decision_maker_switch holds the CHECKs (kill switch
+/// `on`/`off`, an instance `off`/`proposal`, a person only as `operator`, the
+/// system only latching an instance `off`) and the trigger that binds each
+/// event to an audit row of its own transaction, keeps a scope's sequence
+/// increasing, sets `createdAt` from the database clock and refuses every
+/// update and delete. `actorUserId` is the operator's id on a person's event
+/// and intentionally has no User foreign key, like the other AMUX operator
+/// evidence.
+model AmuxDecisionMakerSwitchEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  scope       String
+  value       String
+  reasonCode  String
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scope, sequence])
 }
 
 /// The shared agent digest table: one row per stored digest item of any agent
