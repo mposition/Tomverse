@@ -1,5 +1,6 @@
 -- A consumed node selection/link is a metadata-only relationship. It must
 -- finalize exactly its own proposal and bind an existing approved v4 target.
+-- baseline-check: present-if-function "amux_v4_node_link_consistency_guard"
 CREATE FUNCTION amux_v4_node_link_consistency_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
