@@ -709,6 +709,222 @@ async function syntheticFirstClaim() {
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
 
+test("seventeen idea-only cards remain three bounded pages without an idea-wide cap", async () => {
+  const { claim, previewId, holdId, selectedModelId,
+    frontierApprovalId } = await syntheticFirstClaim();
+  const nodes = [
+    { level: "initiative", parentRef: null },
+    { level: "epic", parentRef: "c0:node-0" },
+    { level: "feature", parentRef: "c0:node-1" },
+  ].map((node, index) => ({ kind: "node", localId: `c0:node-${index}`,
+    title: `Synthetic node ${index}`, description: "A bounded source proposal.",
+    sourceRefIds: ["operator_idea"], ...node }));
+  const cards = Array.from({ length: 8 }, (_, index) => ({
+    kind: "card", localId: `c0:card-${index}`, cardType: "story",
+    storyKind: "general", title: `Story ${index}`,
+    problem: "The idea includes more than eight independent stories.",
+    scopeIn: ["Review this story"], scopeOut: ["Do not execute"],
+    completionCriteria: ["The owner can review the result"],
+    featureRef: "c0:node-2", parentStoryRef: null, dependencyRefs: [],
+    duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
+    executionBrief: null, sourceRefIds: ["operator_idea"],
+  }));
+  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "propose", coverageStatus: "more",
+    continuationKind: "output", ownerQuestion: null,
+    coveredScope: "Eight independently reviewable stories were proposed.",
+    remainingScope: "At least one further story remains from the same idea.",
+    units: [...nodes, ...cards] });
+  const saved = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
+      outcome: "verified_success", rawModelOutput,
+      inputTokens: 100, outputTokens: 50, keys }));
+  assert.equal(saved.state, "draft_ready");
+  const [idea, first, next, preview, units] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } },
+    }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({
+      where: { ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 1 } },
+    }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+    prisma.amuxIdeaDraftUnit.findMany({ where: { ideaId: claim.ideaId } }),
+  ]);
+  assert.equal(idea.state, "analyzing");
+  assert.equal(idea.analysisCompletedAt, null);
+  assert.deepEqual([first.coverageStatus, first.continuationKind,
+    first.outputPending, first.remainingStartOrdinal],
+  ["more", "output", true, 0]);
+  assert.deepEqual([next.state, next.attempt, next.leaseGeneration,
+    next.chunkIndex, next.revisionChunkIndex, next.currentPreviewId],
+  ["pending", 0, 0, 1, 1, null]);
+  assert.equal(next.sourcePlanRevisionId, first.sourcePlanRevisionId);
+  assert.equal(preview.state, "completed");
+  assert.equal(first.freeformPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
+  assert.equal(preview.payloadPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
+  assert.equal(units.length, 11);
+  assert.equal(await prisma.amuxWorkItem.count({ where: {
+    sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
+  } }), 0);
+  const partial = await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys);
+  assert.equal(partial.state, "partial");
+  if (partial.state !== "partial") throw new Error("first page was not visible");
+  assert.equal(partial.nextChunkIndex, 1);
+  assert.match(partial.remainingScope ?? "", /further story/);
+
+  const secondPreviewId = randomUUID();
+  const continuation = await prisma.$transaction((tx) =>
+    commitIdeaOnlyTransferPreview(tx, { session, request,
+      choice: { previewId: secondPreviewId, ideaId: claim.ideaId,
+        chunkIndex: 1, provider: "openai", modelId: selectedModelId,
+        reasoningEffort: "high", approvalId: frontierApprovalId,
+        approvalVersion: 1 }, keys, browserNonce }));
+  assert.equal(continuation.payload.version, 2);
+  assert.equal(continuation.payload.chunkIndex, 1);
+  assert.match(continuation.payload.prompt, /At least one further story/);
+  await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: secondPreviewId,
+      ideaId: claim.ideaId, payloadDigest: continuation.payloadDigest,
+      payloadDigestKeyId: continuation.payloadDigestKeyId }, browserNonce, keys }));
+  const priorHold = await prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
+    where: { id: holdId }, select: { priceVersionId: true },
+  });
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId: randomUUID(), previewId: secondPreviewId,
+      priceVersionId: priorHold.priceVersionId!, runner, keys }));
+  const nextClaim = await prisma.$transaction((tx) =>
+    commitAmuxIdeaOnlyAnalysisClaim(tx,
+      { requestId: randomUUID(), previewId: secondPreviewId, keys }));
+  const nextEight = Array.from({ length: 8 }, (_, index) => ({
+    kind: "card", localId: `c1:card-${index}`, cardType: "story",
+    storyKind: "general", title: `Story ${index + 9}`,
+    problem: "Another independently reviewable story remains.",
+    scopeIn: ["Review this story"], scopeOut: ["Do not execute"],
+    completionCriteria: ["The owner can review the result"],
+    featureRef: "c0:node-2", parentStoryRef: null, dependencyRefs: [],
+    duplicateCandidateRefs: [], taskRole: null, executionGrade: null,
+    executionBrief: null, sourceRefIds: ["operator_idea"],
+  }));
+  const secondOutput = JSON.stringify({ schemaVersion: 2, previewId: secondPreviewId,
+    chunkIndex: 1, outcome: "propose", coverageStatus: "more",
+    continuationKind: "output", ownerQuestion: null,
+    coveredScope: "Eight more independent stories were proposed.",
+    remainingScope: "A seventeenth story remains from the same idea.",
+    units: nextEight });
+  const secondResult = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId: secondPreviewId,
+      holdId: nextClaim.holdId, leaseGeneration: 1,
+      outcome: "verified_success", rawModelOutput: secondOutput,
+      inputTokens: 100, outputTokens: 50, keys }));
+  assert.equal(secondResult.state, "draft_ready");
+  const secondPage = await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId,
+    keys, 1);
+  assert.equal(secondPage.state, "partial");
+  if (secondPage.state !== "partial") throw new Error("second page was not visible");
+  assert.equal(secondPage.nextChunkIndex, 2);
+
+  const thirdPreviewId = randomUUID();
+  const third = await prisma.$transaction((tx) =>
+    commitIdeaOnlyTransferPreview(tx, { session, request,
+      choice: { previewId: thirdPreviewId, ideaId: claim.ideaId,
+        chunkIndex: 2, provider: "openai", modelId: selectedModelId,
+        reasoningEffort: "high", approvalId: frontierApprovalId,
+        approvalVersion: 1 }, keys, browserNonce }));
+  assert.match(third.payload.prompt, /c0:node-2/);
+  await prisma.$transaction((tx) => commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: thirdPreviewId,
+      ideaId: claim.ideaId, payloadDigest: third.payloadDigest,
+      payloadDigestKeyId: third.payloadDigestKeyId }, browserNonce, keys }));
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId: randomUUID(), previewId: thirdPreviewId,
+      priceVersionId: priorHold.priceVersionId!, runner, keys }));
+  const thirdClaim = await prisma.$transaction((tx) =>
+    commitAmuxIdeaOnlyAnalysisClaim(tx,
+      { requestId: randomUUID(), previewId: thirdPreviewId, keys }));
+  const finalOutput = JSON.stringify({ schemaVersion: 2, previewId: thirdPreviewId,
+    chunkIndex: 2, outcome: "propose", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The seventeenth story was proposed.",
+    remainingScope: null, units: [{ ...nextEight[0], localId: "c2:card-0",
+      title: "Story 17" }] });
+  const finished = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId: thirdPreviewId,
+      holdId: thirdClaim.holdId, leaseGeneration: 1,
+      outcome: "verified_success", rawModelOutput: finalOutput,
+      inputTokens: 100, outputTokens: 50, keys }));
+  assert.equal(finished.state, "draft_ready");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: claim.ideaId }, select: { state: true },
+  })).state, "awaiting_owner");
+  const finalPage = await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId,
+    keys, 2);
+  assert.equal(finalPage.state, "ready");
+  if (finalPage.state !== "ready") throw new Error("final page was not visible");
+  assert.equal(finalPage.units.length, 1);
+  assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: {
+    ideaId: claim.ideaId,
+  } }), 20);
+  const finishedIdea = await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: claim.ideaId }, select: { analysisCompletedAt: true },
+  });
+  assert.ok(finishedIdea.analysisCompletedAt);
+  const finalPurgeDeadline = finishedIdea.analysisCompletedAt.getTime() +
+    24 * 60 * 60_000;
+  const retainedPages = await prisma.amuxIdeaAnalysisChunk.findMany({
+    where: { ideaId: claim.ideaId }, select: { freeformPurgeAfter: true },
+  });
+  const retainedPayloads = await prisma.amuxIdeaTransferPreview.findMany({
+    where: { ideaId: claim.ideaId }, select: { payloadPurgeAfter: true },
+  });
+  assert.equal(retainedPages.length, 3);
+  assert.equal(retainedPayloads.length, 3);
+  assert.ok(retainedPages.every((row) => row.freeformPurgeAfter &&
+    row.freeformPurgeAfter.getTime() <= finalPurgeDeadline));
+  assert.ok(retainedPayloads.every((row) => row.payloadPurgeAfter &&
+    row.payloadPurgeAfter.getTime() <= finalPurgeDeadline));
+});
+
+test("a bounded owner question is saved as a pause, not a provider failure", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  const question = "Which existing Feature should this story belong to?";
+  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "needs_information",
+    coverageStatus: "needs_owner_input", continuationKind: "input",
+    ownerQuestion: question, coveredScope: "The idea was read; hierarchy is unresolved.",
+    remainingScope: "Story and Task proposals need the owner's Feature choice.",
+    units: [] });
+  const result = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
+      outcome: "verified_success", rawModelOutput,
+      inputTokens: 100, outputTokens: 50, keys }));
+  assert.equal(result.state, "draft_ready");
+  const [idea, chunk, next] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 },
+    } }),
+    prisma.amuxIdeaAnalysisChunk.findUnique({ where: {
+      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 1 },
+    } }),
+  ]);
+  assert.equal(idea.state, "analyzing");
+  assert.equal(chunk.coverageStatus, "needs_owner_input");
+  assert.equal(chunk.freeformPurgeAfter?.getTime(),
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
+  assert.equal(next, null);
+  const visible = await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys);
+  assert.equal(visible.state, "needs_owner_input");
+  if (visible.state !== "needs_owner_input") throw new Error("owner question missing");
+  assert.equal(visible.ownerQuestion, question);
+});
+
 test("known provider failure is visible and permits a new owner preview only", async () => {
   const { claim, previewId, holdId, selectedModelId,
     frontierApprovalId } = await syntheticFirstClaim();

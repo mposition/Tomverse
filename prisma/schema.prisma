@@ -7108,6 +7108,8 @@ model AmuxWorkItem {
   executionBriefDigest  String?
   /// Only new admin-idea-v4 cards use these fields. Existing rows remain NULL.
   cardType              String?
+  /// For v4 Stories only: Bug is a Story subtype, not an executable card.
+  storyKind             String?
   parentFeatureNodeId   String?
   parentStoryCardId     String?
   v4TitleCiphertext     Bytes?
@@ -7115,6 +7117,12 @@ model AmuxWorkItem {
   v4TitleKeyVersion     Int?
   v4TitleDigest         String?
   v4TitleDigestKeyId    String?
+  v4BodyCiphertext      Bytes?
+  v4BodyKeyId           String?
+  v4BodyKeyVersion      Int?
+  v4BodyDigest          String?
+  v4BodyDigestKeyId     String?
+  v4BodyPurgedAt        DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
   v4BriefKeyVersion     Int?
@@ -9178,6 +9186,8 @@ model AmuxIdeaDraftUnit {
   localRef          String?
   unitKind          String
   state             String
+  /// Owner-authored split/merge output; null for model-authored units.
+  derivationGroupId String?
   expiresAt         DateTime
   bodyCiphertext    Bytes?
   bodyKeyId         String?
@@ -9202,6 +9212,37 @@ model AmuxIdeaDraftUnit {
   /// schema cannot express their WHERE predicates.
 }
 
+/// Owner-approved split/merge provenance. Contains keyed commitments, never
+/// source or derived proposal text. One group may contain several edges.
+model AmuxIdeaDerivationGroup {
+  id                    String   @id
+  ideaId                String
+  actorUserId           String
+  requestId             String   @unique @db.Uuid
+  operation             String
+  sourceCount           Int
+  targetCount           Int
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  reasonDigest          String
+  reasonDigestKeyId     String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  @@index([ideaId, actorUserId])
+}
+
+/// Immutable source-to-derived-unit edge; original proposal rows stay intact.
+model AmuxIdeaDerivationEdge {
+  id           String @id
+  groupId      String
+  sourceUnitId String
+  targetUnitId String
+
+  @@unique([groupId, sourceUnitId, targetUnitId])
+  @@index([targetUnitId])
+}
+
 /// One owner-confirmed decision on one v4 proposal unit. This additive table
 /// is dark: it neither registers a card nor grants execution. The consumed
 /// result must be joined to a future protected writer before any live path.
@@ -9222,6 +9263,9 @@ model AmuxIdeaUnitDecision {
   unitDigestKeyId            String
   confirmationDigest         String
   confirmationDigestKeyId    String
+  /// Non-body owner-reviewed selection and cost receipt. Immutable after prepare;
+  /// the plaintext proposal and idea source are never copied here.
+  confirmationSnapshot       Json?
   sourcePreviewId            String
   sourcePreviewDigest        String
   sourcePreviewDigestKeyId   String
@@ -9360,4 +9404,24 @@ model SupportTriageDecisionRecordLink {
 
   @@unique([recordId, feedbackId])
   @@index([feedbackId])
+}
+
+/// Owner-approved, versioned Agent worker/model ceiling inputs. These are
+/// separate from Chat pricing and user credit entitlement.
+model AmuxV4TaskCostCatalogApproval {
+  id                   String    @id
+  version              Int       @unique
+  status               String
+  catalogVersion       String    @unique
+  pricingVersion       String
+  catalog              Json
+  catalogDigest        String
+  evidenceDigest       String
+  approvedByUserId     String
+  approvalAuditLogId   String    @unique
+  approvedAt           DateTime
+  revokedAt            DateTime?
+  revocationAuditLogId String?   @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 }

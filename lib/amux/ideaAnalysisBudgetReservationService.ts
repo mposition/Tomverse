@@ -58,7 +58,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     where: { id: input.previewId },
     select: { ideaId: true, chunkIndex: true },
   });
-  if (!identity || identity.chunkIndex !== 0) refuse("not_ready");
+  if (!identity) refuse("not_ready");
   const ideaLock = await tx.$queryRaw<Array<{ id: string }>>`
     SELECT "id" FROM "AmuxIdeaSubmission"
     WHERE "id" = ${identity.ideaId} FOR UPDATE
@@ -66,7 +66,8 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   if (ideaLock.length !== 1) refuse("not_ready");
   const chunkLock = await tx.$queryRaw<Array<{ chunkIndex: number }>>`
     SELECT "chunkIndex" FROM "AmuxIdeaAnalysisChunk"
-    WHERE "ideaId" = ${identity.ideaId} AND "chunkIndex" = 0 FOR UPDATE
+    WHERE "ideaId" = ${identity.ideaId}
+      AND "chunkIndex" = ${identity.chunkIndex} FOR UPDATE
   `;
   if (chunkLock.length !== 1) refuse("not_ready");
   const previewLock = await tx.$queryRaw<Array<{ id: string }>>`
@@ -87,12 +88,14 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   }
   const idea = await tx.amuxIdeaSubmission.findUnique({ where: { id: identity.ideaId } });
   const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
-    where: { ideaId_chunkIndex: { ideaId: identity.ideaId, chunkIndex: 0 } },
+    where: { ideaId_chunkIndex: { ideaId: identity.ideaId,
+      chunkIndex: identity.chunkIndex } },
   });
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: input.previewId },
   });
-  if (!idea || !chunk || !preview || idea.state !== "submitted" ||
+  if (!idea || !chunk || !preview ||
+      idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
       !input.session.user?.id || !isAdminSession(input.session) ||
       getAdminRole(input.session) !== "owner" ||
       input.session.user.id !== idea.actorUserId ||
@@ -103,7 +106,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       chunk.currentPreviewId !== preview.id ||
       chunk.attempt !== preview.attempt ||
       chunk.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
-      preview.ideaId !== idea.id || preview.chunkIndex !== 0 ||
+      preview.ideaId !== idea.id || preview.chunkIndex !== identity.chunkIndex ||
       preview.sourcePlanRevisionId !== idea.currentSourcePlanRevisionId ||
       preview.sourceScopeApprovalId !== null ||
       preview.sourceUnitOrdinal !== 0 ||
@@ -152,7 +155,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
       !preparedMetadata || typeof preparedMetadata !== "object" ||
       Array.isArray(preparedMetadata) ||
       (preparedMetadata as Record<string, unknown>).ideaId !== idea.id ||
-      (preparedMetadata as Record<string, unknown>).chunkIndex !== 0 ||
+      (preparedMetadata as Record<string, unknown>).chunkIndex !== identity.chunkIndex ||
       (preparedMetadata as Record<string, unknown>).sourcePlanRevisionId !==
         preview.sourcePlanRevisionId ||
       (preparedMetadata as Record<string, unknown>).payloadDigest !== preview.payloadDigest ||
@@ -180,7 +183,9 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     }
     const record = payload as Record<string, unknown>;
     const selection = record.selection;
-    if (record.version !== 1 || record.previewId !== preview.id ||
+    if (record.version !== (identity.chunkIndex === 0 ? 1 : 2) ||
+        (identity.chunkIndex > 0 && record.chunkIndex !== identity.chunkIndex) ||
+        record.previewId !== preview.id ||
         record.ideaId !== idea.id || record.templateVersion !== preview.templateVersion ||
         typeof record.prompt !== "string" ||
         !record.prompt.includes(`"previewId":"${preview.id}"`) ||

@@ -84,6 +84,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
   const [result, setResult] = useState<InputPreviewResult | null>(null);
   const [submission, setSubmission] = useState<SubmissionState>({ kind: "idle" });
   const [planReadyIdeaId, setPlanReadyIdeaId] = useState<string | null>(null);
+  const [continuationChunkIndex, setContinuationChunkIndex] = useState(0);
   const onInitialPlanCommitted = useCallback((committedIdeaId: string) => {
     setPlanReadyIdeaId(committedIdeaId);
   }, []);
@@ -159,6 +160,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       }, requestId);
       if (decision.kind === "submitted") {
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+        setContinuationChunkIndex(0);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
           hasExternalSources: decision.hasExternalSources });
       } else {
@@ -225,6 +227,7 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
       }, requestId);
       if (decision.kind === "submitted") {
         rememberConfirmedIdeaRequest(receiptStore(), operatorId, requestId);
+        setContinuationChunkIndex(0);
         setSubmission({ kind: "submitted", requestId, ideaId: decision.ideaId,
           hasExternalSources: decision.hasExternalSources });
       } else if (decision.kind === "refused") {
@@ -417,7 +420,8 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         onCommitted={onInitialPlanCommitted}
       />
       <AmuxFrontierModelsPanel
-        key={submission.kind === "submitted" ? submission.ideaId : "none"}
+        key={submission.kind === "submitted" ?
+          `${submission.ideaId}:${continuationChunkIndex}` : "none"}
         available={frontierModelsAvailable}
         previewAvailable={transferPreviewAvailable}
         confirmAvailable={transferConfirmAvailable}
@@ -426,9 +430,12 @@ export function AmuxIdeaInputPanel({ submissionAvailable, sourceScopePreviewAvai
         planReady={submission.kind === "submitted" && planReadyIdeaId === submission.ideaId}
         declaredExternalSources={submission.kind === "submitted" && submission.hasExternalSources}
         operatorId={operatorId}
+        chunkIndex={continuationChunkIndex}
       />
       {analysisResultAvailable && submission.kind === "submitted" ?
-        <AmuxIdeaAnalysisResultPanel key={submission.ideaId} ideaId={submission.ideaId} /> : null}
+        <AmuxIdeaAnalysisResultPanel key={submission.ideaId}
+          ideaId={submission.ideaId}
+          onContinuationReady={setContinuationChunkIndex} /> : null}
       {submission.kind === "submitted" ? (
         <section className="space-y-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800" aria-labelledby="amux-v4-source-scope-heading">
           <h3 id="amux-v4-source-scope-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{messages.sourceScopeTitle}</h3>
