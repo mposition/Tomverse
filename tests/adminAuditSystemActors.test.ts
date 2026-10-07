@@ -69,6 +69,7 @@ test("the system actor list is closed and changes only by review", () => {
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",
+    "amux-v22-worker-claim",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",

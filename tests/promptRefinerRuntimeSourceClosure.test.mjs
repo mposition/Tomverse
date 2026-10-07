@@ -428,12 +428,15 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
 // same audit helper. The 228-entry count and position-free inventory still
 // match origin/develop; only source positions moved.
+// 2026-10-07, AMUX v22 worker claim: one named system actor shifts positions
+// in the already-reviewed audit module. The 228-entry count and position-free
+// inventory still match; this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "0e4d7b2c8a668df39f8eda5948cc087c",
-  "a0424ffea654a5b028091cd64d226ff1",
+  "d96644cde50218ceba7768236f2375cc",
+  "f5653447511afe770147e7a54c4da04d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

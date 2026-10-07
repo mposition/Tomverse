@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 import type { AmuxAdminCardRow } from "@/lib/amux/adminCardList";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
@@ -27,7 +28,7 @@ export function AmuxCardListPanel({
     setResultText(null);
     setResultState("loading");
     try {
-      const response = await fetch(`/api/admin/amux/v22-task-result?taskId=${encodeURIComponent(taskId)}`,
+      const response = await adminFetch(`/api/admin/amux/v22-task-result?taskId=${encodeURIComponent(taskId)}`,
         { cache: "no-store" });
       if (response.status === 404) { setResultState("missing"); return; }
       if (!response.ok) { setResultState("unavailable"); return; }
