@@ -7,7 +7,8 @@ import type { Session } from "next-auth";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
-import { loadAmuxCardDuplicateScanner } from "./ideaCardDuplicateScanService.ts";
+import { AmuxCardDuplicateScanError, loadAmuxCardDuplicateScanner } from
+  "./ideaCardDuplicateScanService.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
 import { amuxV4UnitBrowserDigest } from "./ideaUnitBrowserCore.ts";
 import { createAmuxContentKeyRing } from "./ideaKeyStore.ts";
@@ -235,6 +236,10 @@ export async function prepareAmuxV4CardRegistration(input: {
       maxWait: 5_000, timeout: 15_000 });
   } catch (error) {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
+    if (!callbackReturned && error instanceof AmuxCardDuplicateScanError) {
+      throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
+        "integrity_unavailable" : "reconfirm");
+    }
     throw new AmuxV4UnitDecisionError("outcome_unknown");
   }
 }
@@ -349,6 +354,12 @@ export async function consumeAmuxV4CardRegistration(input: {
     if (!callbackReturned && error instanceof AmuxV4UnitDecisionError) throw error;
     if (!callbackReturned && error instanceof AmuxV4TaskCatalogApprovalError) {
       throw new AmuxV4UnitDecisionError("not_ready");
+    }
+    // The scanner throws inside the transaction callback, before any commit.
+    // Prisma has rolled that callback back; it is not an unknown outcome.
+    if (!callbackReturned && error instanceof AmuxCardDuplicateScanError) {
+      throw new AmuxV4UnitDecisionError(error.code === "integrity_unavailable" ?
+        "integrity_unavailable" : "reconfirm");
     }
     await markAmuxV4UnitConsumeOutcomeUnknown({ session: input.session,
       decisionId: input.decisionId,
