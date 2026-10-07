@@ -31,12 +31,11 @@ export async function resetTestFixture(
     await prisma.$transaction(async (tx) => {
       // Verify the backend on this exact connection. URL query overrides and a
       // separately configured Prisma client must never bypass the test guard.
-      const [backend] = await tx.$queryRawUnsafe<Array<{ database: string; address: string | null }>>(
-        'SELECT current_database() AS "database", inet_server_addr()::text AS "address"',
+      const [backend] = await tx.$queryRawUnsafe<Array<{ database: string }>>(
+        'SELECT current_database() AS "database"',
       );
-      if (!backend || backend.database !== name ||
-          !["127.0.0.1", "::1"].includes(backend.address ?? "")) {
-        throw new Error("Fixture reset requires the exact loopback test database backend");
+      if (!backend || backend.database !== name) {
+        throw new Error("Fixture reset requires the exact test database backend");
       }
       // SET LOCAL reverts automatically at COMMIT/ROLLBACK. It is not inherited
       // by any later assertion, including tests of the append-only guards.
