@@ -27,7 +27,7 @@ import {
 } from "@/lib/adminAuditIntegrityCore";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { prisma } from "@/lib/prisma";
-import { type OpsObserverClient, withOpsObserverTransaction } from "@/lib/opsObserverTransaction";
+import { type OpsObserverClient, assertNotLate, withOpsObserverTransaction } from "@/lib/opsObserverTransaction";
 import {
   OPS_OBSERVER_OWN_TABLES,
   OPS_OBSERVER_SHARED_TABLES,
@@ -135,7 +135,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
   const head = heads.length === 1 ? heads[0] : null;
   const base = { auditKeyCount: integrityKeys.length };
   if (!head || head.stateGenesisId === null) {
-    return { facts: { ...base, genesis: null, state: null }, head: null };
+    return { facts: { ...base, genesis: null, state: null }, head: null, ledgerRows: [], deliveries: [] };
   }
 
   // 2. The human approval of this genesis.
@@ -218,6 +218,7 @@ async function gatherFacts(tx: OpsObserverClient, integrityKeys: string[]) {
   return {
     head,
     deliveries,
+    ledgerRows,
     facts: {
       ...base,
       genesis: {
@@ -272,5 +273,158 @@ export async function readOpsObserverState(
     },
     client,
   );
+  return result;
+}
+
+/** After an abandon, the heartbeat is held this long (dead-man allowance 30 min + one period 10 min, policy §3 rule 9). */
+export const HEARTBEAT_WITHHOLD_MINUTES = 40;
+
+export type OpsObserverAdvanceInput = {
+  runDeadline: Date;
+  runId: string;
+  baseGenesisId: string;
+  baseGeneration: number;
+  keys: Record<string, unknown>;
+  reservation: unknown;
+};
+
+export type OpsObserverAdvanceResult =
+  | { result: "advanced" | "noop"; sendPermitted: false; heartbeatWithheld: boolean; generation: number }
+  | { result: "conflict" | "reservation_unsupported"; sendPermitted: false }
+  | { result: "untrusted"; trust: string; sendPermitted: false };
+
+/** Key order does not change a key state; compare the value, not the bytes. */
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const entries = Object.keys(value as object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
+async function heartbeatWithheld(tx: OpsObserverClient): Promise<boolean> {
+  // Any genesis: an abandon under an earlier genesis still means a page may
+  // have gone unsent, and the dead-man monitor must get its chance to say so.
+  const rows = await tx.$queryRaw<{ withheld: boolean }[]>`
+    SELECT coalesce(max("abandonedAt") + make_interval(mins => ${HEARTBEAT_WITHHOLD_MINUTES}) > clock_timestamp(), false)
+           AS withheld
+      FROM "OpsObserverDelivery"`;
+  return rows[0]?.withheld !== false;
+}
+
+/**
+ * Advances the state one generation in one `advance` transaction: the trust
+ * check again, the base genesis and generation compared (a stale base is a
+ * conflict and writes nothing), any open reservation closed as abandoned, the
+ * keys written with the checkpoint moved to the previous generation, the
+ * state_advanced audit entry as the ops-observer actor, and its ledger row --
+ * all committing together or not at all. Unchanged keys with nothing to close
+ * write nothing (noop). A reservation is not accepted yet: it is refused before
+ * any transaction opens (docs/policy/sre-ops.md §3 rules 3, 7, 9 and 10).
+ *
+ * Success is reported only after a separate short transaction confirms the
+ * run is not past its deadline (policy §6 item 5).
+ */
+export async function advanceOpsObserverState(
+  input: OpsObserverAdvanceInput,
+  client: PrismaClient = prisma,
+): Promise<OpsObserverAdvanceResult> {
+  if (input.reservation !== null) return { result: "reservation_unsupported", sendPermitted: false };
+  const integrityKeys = adminAuditIntegrityKeys(process.env);
+  const { result } = await withOpsObserverTransaction(
+    "advance",
+    input.runDeadline,
+    async (tx): Promise<OpsObserverAdvanceResult> => {
+      const gathered = await gatherFacts(tx, integrityKeys);
+      const verdict = judgeTrust(gathered.facts) as { trusted: boolean; reason?: string };
+      const head = gathered.head;
+      if (!verdict.trusted || !head) {
+        return { result: "untrusted", trust: verdict.reason ?? "state_missing", sendPermitted: false };
+      }
+      const previousGeneration = head.generation as number;
+      if (head.id !== input.baseGenesisId || previousGeneration !== input.baseGeneration) {
+        return { result: "conflict", sendPermitted: false };
+      }
+      if (!keysAreValid(input.keys)) return { result: "conflict", sendPermitted: false };
+
+      // Take the base before writing anything. Under READ COMMITTED another
+      // advance may have committed since the facts were read; the lock waits
+      // for it, re-reads the row, and finds no row at the base. Then nothing
+      // has been written and the conflict is the whole answer.
+      const locked = await tx.$queryRaw<{ generation: number }[]>`
+        SELECT generation FROM "OpsObserverState"
+         WHERE "genesisId" = ${head.id}::uuid AND generation = ${previousGeneration}
+         FOR UPDATE`;
+      if (locked.length === 0) return { result: "conflict", sendPermitted: false };
+
+      // Every reservation still open is closed, whichever genesis made it: one
+      // left by a genesis since replaced is just as unknown, and the marker that
+      // allows one open reservation spans the table.
+      const abandoned = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE "OpsObserverDelivery"
+           SET status = 'abandoned', "stampStatus" = 'abandoned', "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
+         WHERE status = 'reserved'
+        RETURNING id`;
+      if (abandoned.length === 0 && stableJson(input.keys) === stableJson(head.keys)) {
+        return {
+          result: "noop",
+          sendPermitted: false,
+          heartbeatWithheld: await heartbeatWithheld(tx),
+          generation: previousGeneration,
+        };
+      }
+
+      // The checkpoint moves to the generation before this one, whose ledger
+      // row the trust check just verified; at generation 0 the genesis
+      // approval stays the checkpoint.
+      const anchor = gathered.ledgerRows.find((row) => row.generation === previousGeneration) ?? null;
+      if (previousGeneration > 0 && !anchor) return { result: "untrusted", trust: "checkpoint_broken", sendPermitted: false };
+      const checkpoint = previousGeneration;
+      const [updated] = await tx.$queryRaw<{ generation: number; stampKeysSha256: string }[]>`
+        UPDATE "OpsObserverState"
+           SET generation = generation + 1, keys = ${JSON.stringify(input.keys)}::jsonb,
+               "verifiedThroughGeneration" = ${checkpoint},
+               "verifiedThroughAuditId" = ${anchor?.auditLogId ?? null},
+               "verifiedThroughAuditHash" = ${anchor?.auditEntryHash ?? null},
+               "runDeadlineAt" = ${input.runDeadline.toISOString()}::timestamptz
+         WHERE "genesisId" = ${head.id}::uuid AND generation = ${previousGeneration}
+        RETURNING generation, "stampKeysSha256"`;
+      // The row is locked at the base, so this cannot miss; if it does, roll
+      // back the abandon with it rather than report a conflict over a write.
+      if (!updated) throw new Error("ops_observer_state_update_missed_locked_row");
+
+      const entry = await tx.$appendSystemAudit({
+        action: "ops_observer.state_advanced",
+        targetType: "OpsObserverState",
+        targetId: head.id,
+        summary: "Advanced the ops-observer state.",
+        metadata: {
+          generation: updated.generation,
+          keysSha256: updated.stampKeysSha256,
+          abandonedDeliveryIds: abandoned.map((row) => row.id),
+          reservedDeliveryId: null,
+          digestItemId: null,
+          verifiedThroughGeneration: checkpoint,
+          verifiedThroughAuditHash: anchor?.auditEntryHash ?? null,
+          runDeadlineAt: input.runDeadline.toISOString(),
+          runId: input.runId,
+        },
+      });
+      // T0 already refused a missing key, so an unsigned entry is a defect.
+      if (!entry.entryHash) throw new Error("ops_observer_audit_unsigned");
+      await tx.$executeRaw`
+        INSERT INTO "OpsObserverTransition" ("genesisId", generation, "auditLogId", "auditEntryHash", "keysSha256", "runDeadlineAt")
+        VALUES (${head.id}::uuid, ${updated.generation}, ${entry.id}, ${entry.entryHash}, ${updated.stampKeysSha256}, ${input.runDeadline.toISOString()}::timestamptz)`;
+      return {
+        result: "advanced",
+        sendPermitted: false,
+        heartbeatWithheld: await heartbeatWithheld(tx),
+        generation: updated.generation,
+      };
+    },
+    client,
+  );
+  if (result.result === "advanced" || result.result === "noop") await assertNotLate(input.runDeadline, client);
   return result;
 }
