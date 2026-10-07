@@ -762,3 +762,49 @@ test("a payload that cannot say is null rather than a screen full of zeroes", ()
     assert.equal(observationSummaryView(payload), null, JSON.stringify(payload) ?? "undefined");
   }
 });
+
+test("a verdict the vocabulary does not have is not a screen of zeroes", () => {
+  // `undefined + 1` is NaN and `typeof NaN` is "number", so a shape check that
+  // only asks for numbers lets this through: the six known verdicts all read
+  // zero beside a non-zero row count, and an empty stored record agrees with
+  // them, so the screen would show a measurement nobody made.
+  const row = (verdict) => ({
+    id: "1",
+    title: "one",
+    verdict,
+    resolvedOn: [],
+    missingFrom: [],
+    blockedOnPresent: false,
+    signals: {
+      probe: { develop: "none", main: "none" },
+      pricing: { develop: "none", main: "none" },
+      commits: { develop: false, main: false },
+    },
+  });
+
+  const unknown = [row("not_a_verdict")];
+  // The recount itself does produce the NaN, which is what the guard is for.
+  assert.equal(
+    Number.isNaN(summariseObservation(unknown).counts.byVerdict.not_a_verdict),
+    true,
+  );
+  assert.equal(
+    observationSummaryView({ issues: unknown, counts: { byVerdict: {} }, blindSpots: {} }),
+    null,
+  );
+  assert.equal(observationSummaryView({ issues: unknown, ...summariseObservation(unknown) }), null);
+
+  // A count that is not a count is refused the same way, from either side.
+  const known = [row("open_work")];
+  assert.ok(observationSummaryView({ issues: known, ...summariseObservation(known) }));
+  for (const byVerdict of [{ open_work: 1.5 }, { open_work: -1 }, { open_work: Number.NaN }]) {
+    const view = observationSummaryView({
+      issues: known,
+      counts: { byVerdict },
+      blindSpots: { noSignalIssues: 1, oneBranchOnly: 0 },
+    });
+    // The recount is still sound, so the section renders -- it is the stored
+    // figure that is refused, and that is what the warning is for.
+    assert.equal(view.storedCountsAgree, false, JSON.stringify(byVerdict));
+  }
+});
