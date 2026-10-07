@@ -1,4 +1,5 @@
 import type { Language } from "@/components/LanguageProvider";
+import type { DeploymentEnvironment } from "@/lib/deploymentEnvironment";
 
 // Dedicated copy for the STG-F010 build-info menu row/detail panel, kept
 // separate from chatHelpCopy.ts (which is one large object already) rather
@@ -18,7 +19,7 @@ export type BuildInfoCopy = {
   copyButton: string;
   copySuccess: string;
   copyFailure: string;
-  environmentNames: Record<"development" | "staging" | "production" | "test", string>;
+  environmentNames: Record<DeploymentEnvironment, string>;
   deploymentStatusNames: Record<"success" | "in_progress" | "failed" | "unknown", string>;
 };
 
@@ -39,6 +40,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "Couldn't copy build info.",
     environmentNames: {
       development: "Local",
+      dev: "Dev",
       staging: "Staging",
       production: "Production",
       test: "Test",
@@ -66,6 +68,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "빌드 정보를 복사하지 못했습니다.",
     environmentNames: {
       development: "로컬",
+      dev: "개발",
       staging: "스테이징",
       production: "프로덕션",
       test: "테스트",
@@ -93,6 +96,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "复制构建信息失败。",
     environmentNames: {
       development: "本地",
+      dev: "开发",
       staging: "预发布",
       production: "生产",
       test: "测试",
@@ -120,6 +124,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "Impossible de copier les infos de build.",
     environmentNames: {
       development: "Local",
+      dev: "Dev",
       staging: "Préproduction",
       production: "Production",
       test: "Test",
@@ -147,6 +152,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "Build-Info konnte nicht kopiert werden.",
     environmentNames: {
       development: "Lokal",
+      dev: "Dev",
       staging: "Staging",
       production: "Produktion",
       test: "Test",
@@ -174,6 +180,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "No se pudo copiar la info de compilación.",
     environmentNames: {
       development: "Local",
+      dev: "Dev",
       staging: "Staging",
       production: "Producción",
       test: "Prueba",
@@ -201,6 +208,7 @@ export const buildInfoCopy: Record<Language, BuildInfoCopy> = {
     copyFailure: "Não foi possível copiar a info de build.",
     environmentNames: {
       development: "Local",
+      dev: "Dev",
       staging: "Staging",
       production: "Produção",
       test: "Teste",
