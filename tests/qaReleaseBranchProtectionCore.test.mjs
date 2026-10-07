@@ -75,6 +75,10 @@ test("settings the first version dropped are compared too", () => {
 
   const restricted = { ...structuredClone(DEVELOP_RAW), restrictions: { users: [{ login: "someone" }], teams: [], apps: [] } };
   assert.deepEqual(differences(restricted), ["classic.restrictions"]);
+  // Push restrictions that allow nobody are still a restriction, not its absence.
+  const nobody = { ...structuredClone(DEVELOP_RAW), restrictions: { users: [], teams: [], apps: [] } };
+  assert.deepEqual(differences(nobody), ["classic.restrictions"]);
+  assert.throws(() => qaReleaseClassicProtectionBody(qaReleaseClassicProtection(nobody)), /protection_not_copyable/);
 
   const bypass = structuredClone(DEVELOP_RAW);
   bypass.required_pull_request_reviews.bypass_pull_request_allowances = { users: [], teams: [], apps: [{ slug: "some-app" }] };

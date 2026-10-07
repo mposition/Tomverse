@@ -26,6 +26,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 import {
+  qaReleaseCanonicalJson,
   qaReleaseClassicDifferences,
   qaReleaseClassicProtection,
   qaReleaseClassicProtectionBody,
@@ -160,37 +161,68 @@ const verifyTestProtection = async (protection) => {
       continue;
     }
     const detail = await operator("GET", `/rulesets/${found[0].id}`);
+    // Compared as values: key order and the order of rules, refs and bypass
+    // entries carry no meaning, so they are normalised first.
+    const sortedRefs = (refName) => ({ include: [...(refName?.include ?? [])].sort(), exclude: [...(refName?.exclude ?? [])].sort() });
+    const rulesOf = (rules) => [...(rules ?? [])].map((rule) => ({ type: rule.type, parameters: rule.parameters ?? null })).sort((a, b) => a.type.localeCompare(b.type));
+    const bypassOf = (actors) => [...(actors ?? [])].map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort((a, b) => String(a).localeCompare(String(b)));
     const same =
-      JSON.stringify(detail.conditions?.ref_name) === JSON.stringify(body.conditions.ref_name) &&
-      JSON.stringify(detail.rules?.map((rule) => ({ type: rule.type, parameters: rule.parameters }))) ===
-        JSON.stringify(body.rules.map((rule) => ({ type: rule.type, parameters: rule.parameters }))) &&
-      JSON.stringify((detail.bypass_actors ?? []).map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort()) ===
-        JSON.stringify(body.bypass_actors.map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort()) &&
+      qaReleaseCanonicalJson(sortedRefs(detail.conditions?.ref_name)) === qaReleaseCanonicalJson(sortedRefs(body.conditions.ref_name)) &&
+      qaReleaseCanonicalJson(rulesOf(detail.rules)) === qaReleaseCanonicalJson(rulesOf(body.rules)) &&
+      qaReleaseCanonicalJson(bypassOf(detail.bypass_actors)) === qaReleaseCanonicalJson(bypassOf(body.bypass_actors)) &&
       detail.enforcement === "active";
     if (!same) problems.push(`ruleset "${body.name}" differs from the one this bypass list makes`);
   }
   return problems;
 };
 
-/** When the test rulesets went on: the update ruleset's creation time. */
+/**
+ * Since when the test update ruleset has been in its current form: its last
+ * change, not its creation. A ruleset disabled or narrowed and then restored
+ * would pass the current-state check, and an update made while it was off
+ * must not count as an update under it.
+ */
 const testRulesetsSince = async () => {
   const update = (await listTestRulesets()).find((ruleset) => ruleset.name === QA_RELEASE_TEST_RULESET_NAMES[0]);
   if (!update) fail("the test rulesets are missing; run setup first.");
   const detail = await operator("GET", `/rulesets/${update.id}`);
-  if (typeof detail.created_at !== "string") throw new Error("ruleset creation time unreadable");
-  return detail.created_at;
+  const times = [detail.created_at, detail.updated_at].filter((value) => typeof value === "string" && Number.isFinite(Date.parse(value)));
+  if (times.length === 0) throw new Error("ruleset times unreadable");
+  return times.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
 };
 
-/** Repository activity since the test rulesets went on, newest first, up to ten pages. */
+/**
+ * The `rel="next"` URL of a Link header, only when it stays on this
+ * repository's activity endpoint. GitHub writes the cursor link with the
+ * numeric repository id (`/repositories/<id>/activity?...&after=...`).
+ */
+const nextLink = (link, repositoryId) => {
+  const match = /<([^>]+)>;\s*rel="next"/.exec(link ?? "");
+  if (!match) return null;
+  const allowed = [`${API}/activity?`, `https://api.github.com/repositories/${repositoryId}/activity?`];
+  return allowed.some((prefix) => match[1].startsWith(prefix)) ? match[1] : null;
+};
+
+/** Repository activity since the test ruleset's current form, newest first, following GitHub's cursor up to ten pages. */
 const automationEvidence = async () => {
   const since = await testRulesetsSince();
+  const repositoryId = (await operator("GET", "")).id;
+  if (!Number.isSafeInteger(repositoryId)) throw new Error("repository id unreadable");
   const activity = [];
-  for (let page = 1; page <= 10; page += 1) {
-    const batch = await operator("GET", `/activity?direction=desc&per_page=100&page=${page}`);
+  let url = `${API}/activity?direction=desc&per_page=100`;
+  for (let page = 0; page < 10 && url; page += 1) {
+    const response = await fetch(url, {
+      headers: { accept: "application/vnd.github+json", authorization: `Bearer ${operatorToken}`, "x-github-api-version": "2022-11-28" },
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status !== 200) throw new Error(`activity answered ${response.status}`);
+    const batch = await response.json();
     if (!Array.isArray(batch) || batch.length === 0) break;
     activity.push(...batch);
     const oldest = batch[batch.length - 1]?.timestamp;
     if (typeof oldest === "string" && Date.parse(oldest) < Date.parse(since)) break;
+    url = nextLink(response.headers.get("link"), repositoryId);
   }
   const updates = qaReleaseAutomationUpdates(activity, bypassAppIds, since);
   return { since, updates, missingAppIds: qaReleaseAutomationMissing(updates, bypassAppIds) };

@@ -31,14 +31,14 @@ export type QaReleaseClassicProtection =
       dismissStaleReviews: boolean | null;
       requireCodeOwnerReviews: boolean | null;
       requireLastPushApproval: boolean | null;
-      /** Who may dismiss reviews; null when the list names nobody. */
+      /** Who may dismiss reviews; null when GitHub returned no list. */
       dismissalRestrictions: QaReleaseActorList | null;
-      /** Who may merge without the required reviews; null when the list names nobody. */
+      /** Who may merge without the required reviews; null when GitHub returned no list. */
       reviewBypass: QaReleaseActorList | null;
       /** Each required check with the App that must provide it (null: any App). */
       requiredChecks: QaReleaseRequiredCheck[] | null;
       strict: boolean | null;
-      /** Who may push at all; null when the branch has no push restriction. */
+      /** Who may push at all; null when the branch has no push restriction (an empty list is a restriction). */
       restrictions: QaReleaseActorList | null;
       enforceAdmins: boolean;
       allowForcePushes: boolean;
@@ -87,12 +87,15 @@ const namesOf = (value: unknown, key: "login" | "slug"): string[] => {
     })
     .sort();
 };
-/** A classic actor list, or null when it names nobody. */
+/**
+ * A classic actor list, or null only when GitHub returned none. A list that is
+ * present but names nobody is kept as such: push restrictions with no
+ * allowed actor are a restriction, not its absence.
+ */
 const actorList = (value: unknown): QaReleaseActorList | null => {
   if (value === undefined || value === null) return null;
   const list = record(value);
-  const result = { users: namesOf(list.users, "login"), teams: namesOf(list.teams, "slug"), apps: namesOf(list.apps, "slug") };
-  return result.users.length + result.teams.length + result.apps.length === 0 ? null : result;
+  return { users: namesOf(list.users, "login"), teams: namesOf(list.teams, "slug"), apps: namesOf(list.apps, "slug") };
 };
 
 const TOP_LEVEL_KEYS = new Set([
@@ -201,6 +204,7 @@ export function qaReleaseRulesetRules(raw: unknown): QaReleaseRulesetRule[] {
 }
 
 /** Stable JSON: object keys sorted at every depth, so equal values serialise equally. */
+export const qaReleaseCanonicalJson = (value: unknown): string => canonical(value);
 const canonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {
