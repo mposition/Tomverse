@@ -686,6 +686,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaContentKeyRetirement",
+    publicName: "amux_idea_content_key_retirements",
+    prismaModel: "AmuxIdeaContentKeyRetirement",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaRetentionHold",
+    publicName: "amux_idea_retention_holds",
+    prismaModel: "AmuxIdeaRetentionHold",
+    state: "unverified",
+  },
+  {
     domain: "amuxPortfolioNode",
     publicName: "amux_portfolio_nodes",
     prismaModel: "AmuxPortfolioNode",
