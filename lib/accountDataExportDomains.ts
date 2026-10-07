@@ -686,15 +686,45 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
-    domain: "amuxIdeaContentKeyRetirement",
-    publicName: "amux_idea_content_key_retirements",
-    prismaModel: "AmuxIdeaContentKeyRetirement",
-    state: "unverified",
-  },
-  {
     domain: "amuxIdeaRetentionHold",
     publicName: "amux_idea_retention_holds",
     prismaModel: "AmuxIdeaRetentionHold",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaDerivationGroup",
+    publicName: "amux_idea_derivation_groups",
+    prismaModel: "AmuxIdeaDerivationGroup",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioAssessment",
+    publicName: "amux_portfolio_assessments",
+    prismaModel: "AmuxPortfolioAssessment",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioScoreSnapshot",
+    publicName: "amux_portfolio_score_snapshots",
+    prismaModel: "AmuxPortfolioScoreSnapshot",
+    state: "unverified",
+  },
+  {
+    domain: "amuxV22PromotionControl",
+    publicName: "amux_v22_promotion_controls",
+    prismaModel: "AmuxV22PromotionControl",
+    state: "unverified",
+  },
+  {
+    domain: "amuxV22LaneDecision",
+    publicName: "amux_v22_lane_decisions",
+    prismaModel: "AmuxV22LaneDecision",
+    state: "unverified",
+  },
+  {
+    domain: "amuxV4TaskCostCatalogApproval",
+    publicName: "amux_v4_task_cost_catalog_approvals",
+    prismaModel: "AmuxV4TaskCostCatalogApproval",
     state: "unverified",
   },
   {

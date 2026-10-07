@@ -531,9 +531,11 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * The AMUX expiry, settlement, unknown-outcome and auto-cancel audit scopes
  * move those same helper bytes again. Existing signed staging evidence becomes
  * stale; the receiver's own admission and write path remain unchanged.
+ * 2026-10-07: v22 worker claim adds a closed system-audit actor in the same
+ * imported helper closure. Re-pin after the AMUX source changes are verified.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "0e7f99576007fdede9b85d21b1a4baf829568a914002012fa170e6f0f49f4585";
+  "d01a64219f41da186f9b5487c7f08fa9cc8c006ca06900635faebd29b9d0efe0";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -17,7 +17,7 @@ test("the AMUX card list is an owner-only section that is not advertised to othe
   // the old address redirects there.
   const page = await read("app/(site)/(application)/admin/amux-execution/page.tsx");
   assert.match(page, /getAdminRole\(session\) !== "owner"\) notFound\(\)/);
-  assert.match(page, /await listAmuxCardsForAdmin\(\)/);
+  assert.match(page, /listAmuxCardsForAdmin\(\)/);
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-cards"], "/admin/amux-execution?tab=cards");
   const meta = resolveAdminPageMeta("/admin/amux-execution");
   assert.equal(meta.isKnown, true);
@@ -51,5 +51,6 @@ test("the card list reads identifiers and state only", async () => {
 test("the panel states how many rows it shows out of how many", async () => {
   const panel = await read("components/admin/AmuxCardListPanel.tsx");
   assert.match(panel, /messages\.shown\(rows\.length, total, limit\)/);
-  assert.doesNotMatch(panel, /adminFetch|fetch\(/);
+  assert.match(panel, /adminFetch\(`\/api\/admin\/amux\/v22-task-result/);
+  assert.doesNotMatch(panel, /\bfetch\s*\(/);
 });

@@ -26,7 +26,7 @@ const walk = (directory) =>
 const withoutComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-test("one store module writes the three tables; nothing else in the application names them", () => {
+test("one store module writes the three tables; admission readers only query the halt", () => {
   // Foundation rule: one module writes an Agent's tables. A Prisma accessor or
   // a quoted table name anywhere else is a second writer or a reader that
   // bypasses the store's rules (the clear rule, the resolver rule).
@@ -39,10 +39,22 @@ test("one store module writes the three tables; nothing else in the application 
   // The export declaration names the Prisma model as data, to exclude it from
   // the customer export; it neither reads nor writes the table.
   const declarations = new Set(["lib/accountDataExportDomains.ts"]);
+  const haltReaders = new Set([
+    "lib/amux/execution.ts",
+    "lib/amux/v22AutoPromotionService.ts",
+    "lib/amux/v22WorkerClaimService.ts",
+    "lib/amux/v4TaskReadyService.ts",
+  ]);
+  for (const path of haltReaders) {
+    const source = withoutComments(read(path));
+    assert.match(source, /tx\.amuxOrchestratorHalt\.findFirst\(/, path);
+    assert.doesNotMatch(source, /tx\.amuxOrchestratorHalt\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\(/, path);
+    assert.doesNotMatch(source, /amuxOrchestrator(?:Write|WriteReceipt)\./, path);
+  }
   const offenders = files.filter(
     (path) =>
       path !== STORE &&
-      !declarations.has(path) &&
+      !declarations.has(path) && !haltReaders.has(path) &&
       pattern.test(withoutComments(readFileSync(join(root, path), "utf8"))),
   );
   assert.deepEqual(offenders, []);

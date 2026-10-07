@@ -98,6 +98,11 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261005120000_amux_v4_task_dag_guard",
   // A12: v22-only receipt and a separate, still-dark promotion gate.
   "20261006100000_amux_v22_auto_promotion",
+  "20261006110000_amux_v22_worker_assignment",
+  "20261006130000_amux_cli_usage_event",
+  "20261006140000_amux_v22_execution_binding",
+  "20261006150000_amux_v22_task_result",
+  "20261006234000_amux_v22_task_patch",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -338,7 +343,7 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("only the catalog and analysis admission routes open direct AMUX transactions", () => {
+test("only the named AMUX receipt and admission routes open direct transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
@@ -346,7 +351,9 @@ test("only the catalog and analysis admission routes open direct AMUX transactio
   // reconciliation contracts; the commit-deadline boundary still governs
   // orchestration task execution.
   assert.deepEqual(direct, [
+    "app/api/internal/amux/cli-usage/route.ts",
     "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v22/execution/result/route.ts",
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);

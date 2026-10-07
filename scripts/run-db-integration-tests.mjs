@@ -238,6 +238,17 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // AMUX v4/v22 receipts, retention and patch boundaries must execute in CI.
+    "tests/integration/amuxCliUsageLedger.db.test.mjs",
+    "tests/integration/amuxCliUsageRetention.db.test.mjs",
+    "tests/integration/amuxCliUsageWriter.db.test.mjs",
+    "tests/integration/amuxV22AutoPromotion.db.test.mjs",
+    "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
+    "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4PortfolioScore.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the
     // idempotency prefix, rows born with their body, and the expiry and purge
     // that are the only update and delete.

@@ -239,7 +239,7 @@ test("AMUX v4 queue candidate filter requires confirmation and current analysis"
   assert.deepEqual(where.confirmedByUserId, { not: null });
   assert.deepEqual(where.confirmationAuditLogId, { not: null });
   assert.deepEqual(where.confirmExpiresAt, { gt: now });
-  assert.deepEqual(where.idea, { state: "submitted", analysisDeadlineAt: { gt: now },
+  assert.deepEqual(where.idea, { state: { in: ["submitted", "analyzing"] }, analysisDeadlineAt: { gt: now },
     currentSourcePlan: { is: { state: "active" } } });
   assert.deepEqual(where.sourcePlanRevision, { is: { state: "active" } });
   assert.deepEqual(where.planBoundCurrentForChunk, { is: { state: "awaiting_preview" } });
