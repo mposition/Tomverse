@@ -40,7 +40,7 @@ npm run promote:test -- --sha=<develop 병합 commit>
 - 이 변경(merge train·IaC 표·drift·`promote:test`)이 `develop`에 병합돼 있고, 로컬 clone이 그 `develop`입니다.
 - QA Release Merge Lane이 돌고 있지 않습니다. 2026-10-07 현재 그 서비스는 Railway에 없습니다. 있다면 develop lane
   스위치를 끄는 revision을 먼저 기록합니다 — 그 lane은 staging에서 develop 배포를 기다리므로 전환 뒤 15분이면
-  latch합니다(`docs/policy/qa-release-agent.md` §8, 대상 환경 개정 전까지).
+  latch합니다(docs/policy/qa-release-agent.md §8, 대상 환경 개정 전까지).
 
 **순서** (2~4는 이어서 합니다. 사이에 staging이 develop의 새 병합을 배포하면 전환이 그만큼 되돌아갑니다)
 
@@ -84,6 +84,6 @@ train은 이 변경 이전의 script로 돌리면 staging을 기다립니다.
 - **IaC apply의 checkout.** staging cron은 `test`의 코드를 돌리므로 staging apply는 `origin/test` checkout에서 합니다
   — 단 `test`가 이 변경을 담은 뒤부터입니다(그 전의 표는 staging을 `develop`이라고 말합니다). 어느 환경이든 plan이
   서비스 생성이나 삭제를 보이면 apply하지 않습니다.
-- **정책 개정을 기다리는 둘:** QA Release Merge Lane의 대상(`docs/policy/qa-release-agent.md` §8)과 feedback
-  auto-fix의 승격 관측(`docs/policy/trace-feedback-automation.md` §9.3)은 아직 staging을 봅니다. 둘 다 2026-10-07
+- **정책 개정을 기다리는 둘:** QA Release Merge Lane의 대상(docs/policy/qa-release-agent.md §8)과 feedback
+  auto-fix의 승격 관측(docs/policy/trace-feedback-automation.md §9.3)은 아직 staging을 봅니다. 둘 다 2026-10-07
   현재 운영되지 않습니다.
