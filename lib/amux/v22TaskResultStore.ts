@@ -165,7 +165,7 @@ export async function recordAmuxV22TaskResult(tx: Prisma.TransactionClient,
 /** Owner-only callers may read one retained result; no plaintext is logged. */
 export async function readAmuxV22TaskResultForOwner(taskId: string) {
   const row = await prisma.amuxV22TaskResult.findFirst({
-    where: { taskId }, orderBy: [{ createdAt: "desc" }],
+    where: { taskId }, orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
     select: { attemptId: true, ideaId: true, ciphertext: true,
       keyId: true, keyVersion: true, digest: true, digestKeyId: true,
       sourceSha256: true, bodyPurgedAt: true, createdAt: true },
