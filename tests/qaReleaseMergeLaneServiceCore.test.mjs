@@ -271,3 +271,21 @@ test("with the lane switch off (S-M1) the round names the pull request it would 
   assert.equal(outcome.headSha, HEAD);
   for (const name of ["consume", "merge", "report"]) assert.equal(names(shadow.calls).includes(name), false, name);
 });
+
+test("a merge refused because someone else merged it meanwhile is followed through the re-read, not closed as refused", async () => {
+  const merged = ports({
+    merge: { result: "refused" },
+    readPull: (n) => (merged.calls.some((c) => c[0] === "merge") ? pull(n, { merged: true, mergeCommitSha: MERGE }) : pull(n)),
+  });
+  await runQaReleaseMergeLaneRound(ENV, merged.ports);
+  assert.deepEqual(reports(merged.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
+});
+
+test("a merge refused while the pull request cannot be re-read is unknown, which latches, never refused", async () => {
+  const unread = ports({
+    merge: { result: "refused" },
+    readPull: (n) => (unread.calls.some((c) => c[0] === "merge") ? null : pull(n)),
+  });
+  await runQaReleaseMergeLaneRound(ENV, unread.ports);
+  assert.deepEqual(reports(unread.calls), [{ kind: "merge", result: "unknown" }]);
+});
