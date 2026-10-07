@@ -46,3 +46,12 @@ export function amuxV22ScoreCurrent(input: {
     input.now.getTime() < input.activeStaleAt.getTime() &&
     input.now.getTime() < input.baselineStaleAt.getTime();
 }
+
+/** A newer owner-approved assessment invalidates the score immediately. */
+export function amuxV22AssessmentIdsCurrent(
+  scored: readonly string[], latest: readonly (string | null)[],
+) {
+  return (scored.length === 4 || scored.length === 5) &&
+    latest.length === scored.length &&
+    scored.every((id, index) => latest[index] === id);
+}

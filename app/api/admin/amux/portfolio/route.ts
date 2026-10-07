@@ -164,6 +164,12 @@ export async function GET(request: Request) {
         status: error.code === "not_found" ? 404 :
           error.code === "forbidden" ? 403 : 503, headers: noStore });
     }
+    if (error instanceof AmuxPortfolioError) {
+      return NextResponse.json({ error: error.code }, {
+        status: error.code === "not_found" ? 404 :
+          error.code === "forbidden" ? 403 :
+          error.code === "not_ready" ? 409 : 503, headers: noStore });
+    }
     const security = apiSecurityResponse(error);
     if (security) { security.headers.set("Cache-Control", noStore["Cache-Control"]); return security; }
     return NextResponse.json({ error: "portfolio_readback_unavailable" },

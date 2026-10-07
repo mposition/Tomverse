@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     }
     if ((v22Enabled || claimEnabled) && identity.kind !== "admitted" &&
         !legacyEnabled) {
-      return Response.json({ promoted: false, reason: "orchestrator_identity_required" },
+      return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore });
     }
 

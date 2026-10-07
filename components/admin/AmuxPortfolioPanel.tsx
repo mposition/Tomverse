@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { z } from "zod";
 
@@ -7,6 +9,9 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxPortfolioMessages } from
   "@/lib/adminMessages/amuxPortfolio";
+import { adminCommonMessages } from "@/lib/adminMessages/common";
+import { adminRecentAuthenticationHref } from
+  "@/lib/adminReauthenticationCore";
 
 const kinds = ["initiative", "epic", "feature", "story", "task"] as const;
 type Kind = typeof kinds[number];
@@ -42,6 +47,8 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
   writeAvailable: boolean;
 }) {
   const m = useAdminMessages(adminAmuxPortfolioMessages);
+  const common = useAdminMessages(adminCommonMessages);
+  const pathname = usePathname();
   const [kind, setKind] = useState<Kind>("initiative");
   const [subjectId, setSubjectId] = useState("");
   const [taskId, setTaskId] = useState("");
@@ -314,6 +321,11 @@ export function AmuxPortfolioPanel({ writeAvailable }: {
         className="min-h-11 rounded border border-zinc-400 px-3">{m.readback}</button>
     </div> : null}
     {result ? <p role="status">{result}</p> : null}
-    {error ? <p role="alert">{error}</p> : null}
+    {error ? <div role="alert"><p>{error}</p>
+      {error === m.reauth ? <Link href={adminRecentAuthenticationHref(pathname)}
+        className="inline-flex min-h-11 items-center underline">
+        {common.apiFailure.reauthenticate}
+      </Link> : null}
+    </div> : null}
   </section>;
 }

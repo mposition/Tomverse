@@ -30,14 +30,23 @@ async function loadRoute(): Promise<{
     } });
     mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
       consumeApiRateLimit: async () => undefined,
-      apiSecurityResponse: () => null,
+      apiSecurityResponse: (error: unknown) =>
+        error instanceof Error && error.message === "invalid request" ?
+          Response.json({ error: "Invalid request payload.",
+            code: "INVALID_REQUEST" }, { status: 400 }) : null,
       readLimitedJson: async (request: Request, limit: number, schema: {
-        parse: (value: unknown) => unknown,
+        safeParse: (value: unknown) => { success: boolean; data: unknown },
       }) => {
         const raw = await request.text();
         if (raw.length > limit) throw new Error("too large");
-        return schema.parse(JSON.parse(raw));
+        const parsed = schema.safeParse(JSON.parse(raw));
+        if (!parsed.success) throw new Error("invalid request");
+        return parsed.data;
       },
+    } });
+    mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
+      hasValidMutationOrigin: (request: Request) =>
+        request.headers.get("origin") === "https://tomverse.test",
     } });
     mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
     mock.module(mod("lib/amux/v22AutoPromotionService.ts"), { namedExports: {
@@ -56,7 +65,8 @@ async function loadRoute(): Promise<{
 
 const post = (body: unknown) => new Request(
   "https://tomverse.test/api/admin/amux/v22-auto-promotion",
-  { method: "POST", headers: { "content-type": "application/json" },
+  { method: "POST", headers: { "content-type": "application/json",
+    origin: "https://tomverse.test" },
     body: JSON.stringify(body) });
 const valid = { policyVersion: 22, active: false, expectedAuditLogId: null };
 const reset = () => { world.session = { user: { id: "owner-1" } };
@@ -95,9 +105,13 @@ test("only the exact v22 control shape reaches the writer", async () => {
     { ...valid, extra: true },
     { policyVersion: 22, active: true },
   ]) {
-    await assert.rejects(() => POST(post(invalid)));
+    assert.equal((await POST(post(invalid))).status, 400);
     assert.equal(world.writes, 0);
   }
+  const crossSite = post(valid);
+  crossSite.headers.set("origin", "https://elsewhere.test");
+  assert.equal((await POST(crossSite)).status, 403);
+  assert.equal(world.writes, 0);
   const accepted = await POST(post(valid));
   assert.equal(accepted.status, 200);
   assert.deepEqual(await accepted.json(), { active: false, changed: true });
