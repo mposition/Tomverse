@@ -6,6 +6,8 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
+import { normalizeAmuxUntrustedReason,
+  publicAmuxEscalationReasonCode } from "./escalation.ts";
 import {
   AMUX_EXECUTION_LANES, AMUX_EXECUTION_PAGE_SIZE,
   AMUX_EXECUTION_VISIBLE_LANES,
@@ -437,11 +439,13 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
     dependencies: card.dependencies.map((edge) => edge.dependency),
     dependents: card.dependents.map((edge) => edge.task),
     attempts: card.executionAttempts.map((attempt) => ({ ...attempt,
+      reason: normalizeAmuxUntrustedReason(attempt.reason),
       startedAt: attempt.startedAt.toISOString(),
       endedAt: attempt.endedAt?.toISOString() ?? null,
       reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
       settledCostMicrousd: attempt.settledCostMicrousd?.toString() ?? null })),
     escalations: card.humanEscalations.map((item) => ({ ...item,
+      reason: publicAmuxEscalationReasonCode(card.status),
       createdAt: item.createdAt.toISOString() })),
     score: card.portfolioScoreSnapshots[0] ? {
       ...card.portfolioScoreSnapshots[0],

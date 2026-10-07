@@ -145,14 +145,18 @@ test("v4 review digest binds private evidence without changing legacy review dig
 });
 
 test("a PR-less v4 non-code result may be approved only with verified full evidence", () => {
-  const base = { sourceSystem: "admin-idea-v4", taskRole: "design",
+  const base = { sourceSystem: "admin-idea-v4", cardType: "task",
+    taskRole: "design", reviewPrNumber: null,
     artifactAvailable: false, v4EvidenceVerified: true, displayTruncated: false };
   assert.equal(amuxReviewApprovalHasEvidence(base), true);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, v4EvidenceVerified: false }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayTruncated: true }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement" }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement",
-    artifactAvailable: true }), true);
+    reviewPrNumber: 123, artifactAvailable: true,
+    v4EvidenceVerified: false }), true);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, reviewPrNumber: 123 }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, cardType: "story" }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: null }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy" }), false);
 });

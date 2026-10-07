@@ -54,15 +54,16 @@ export type AmuxReviewOutcome = "approve" | "retry" | "block";
 export type AmuxReviewTaskStatus = "review" | "blocked";
 
 export const amuxReviewApprovalHasEvidence = (input: {
-  sourceSystem: string | null; taskRole: string | null;
+  sourceSystem: string | null; cardType: string | null;
+  taskRole: string | null; reviewPrNumber: number | null;
   artifactAvailable: boolean; v4EvidenceVerified: boolean;
   displayTruncated: boolean;
 }) => !input.displayTruncated && (input.sourceSystem === "admin-idea-v4" ?
-  input.v4EvidenceVerified &&
-    (input.taskRole === "implement" ? input.artifactAvailable :
+  input.cardType === "task" && (input.reviewPrNumber !== null ?
+    input.artifactAvailable :
+    input.v4EvidenceVerified &&
       ["design", "test", "review", "verify", "investigate", "operate"]
-        .includes(input.taskRole ?? "")) :
-  input.artifactAvailable);
+        .includes(input.taskRole ?? "")) : input.artifactAvailable);
 
 export const amuxV4ReviewEvidenceMatches = (input: {
   task: { id: string; sourceSystem: string | null; revision: number;
@@ -70,8 +71,8 @@ export const amuxV4ReviewEvidenceMatches = (input: {
     briefDigest: string | null };
   evidence: { taskId: string; revision: number;
     titleDigest: string | null; bodyDigest: string | null;
-    briefDigest: string | null; resultAttemptId: string;
-    resultSha256: string } | null;
+    briefDigest: string | null; resultAttemptId: string | null;
+    resultSha256: string | null } | null;
   result: { attemptId: string; sourceSha256: string;
     bodyPurgedAt: Date | null } | null;
   attempt: { id: string; v22AssignmentId: string | null } | null;
@@ -82,6 +83,8 @@ export const amuxV4ReviewEvidenceMatches = (input: {
   input.evidence.titleDigest === input.task.titleDigest &&
   input.evidence.bodyDigest === input.task.bodyDigest &&
   input.evidence.briefDigest === input.task.briefDigest &&
+  input.evidence.resultAttemptId !== null &&
+  input.evidence.resultSha256 !== null &&
   input.result.attemptId === input.evidence.resultAttemptId &&
   input.result.sourceSha256 === input.evidence.resultSha256 &&
   input.result.bodyPurgedAt === null &&

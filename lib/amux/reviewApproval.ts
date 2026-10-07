@@ -37,8 +37,8 @@ type Client = Prisma.TransactionClient;
 type V4ReviewEvidence = {
   taskId: string; revision: number; title: string; description: string;
   titleDigest: string | null; bodyDigest: string | null;
-  briefDigest: string | null; resultAttemptId: string;
-  resultSha256: string;
+  briefDigest: string | null; resultAttemptId: string | null;
+  resultSha256: string | null;
 };
 
 /** Verified private content is read outside the row-lock transaction. The
@@ -47,24 +47,30 @@ async function v4EvidenceForEscalation(escalationId: string):
   Promise<V4ReviewEvidence | null> {
   const escalation = await prisma.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
-    select: { task: { select: { id: true, sourceSystem: true } } },
+    select: { task: { select: { id: true, sourceSystem: true,
+      reviewPrNumber: true } } },
   });
   if (!escalation || escalation.task.sourceSystem !== "admin-idea-v4") return null;
   try {
     const detail = await readAmuxExecutionTaskDetail(escalation.task.id);
     if (!detail?.title || !detail.body || !detail.brief ||
-        detail.result?.state !== "available" || !detail.result.text ||
         !detail.v4EvidenceDigests?.title || !detail.v4EvidenceDigests.body ||
         !detail.v4EvidenceDigests.brief) return null;
+    const retainedResult = detail.result?.state === "available" &&
+      detail.result.text ? detail.result : null;
+    const retainedResultText = retainedResult?.text ?? null;
     return {
       taskId: escalation.task.id, revision: detail.revision,
       title: detail.title,
-      description: `Scope and completion criteria:\n${detail.body}\n\nApproved brief:\n${detail.brief}\n\nVerified worker result:\n${detail.result.text}`,
+      description: `Scope and completion criteria:\n${detail.body}\n\nApproved brief:\n${detail.brief}` +
+        (escalation.task.reviewPrNumber === null && retainedResultText ?
+          `\n\nVerified worker result:\n${retainedResultText}` : ""),
       titleDigest: detail.v4EvidenceDigests.title,
       bodyDigest: detail.v4EvidenceDigests.body,
       briefDigest: detail.v4EvidenceDigests.brief,
-      resultAttemptId: detail.result.attemptId,
-      resultSha256: detail.result.sha256 ?? sha256Hex(detail.result.text),
+      resultAttemptId: retainedResult?.attemptId ?? null,
+      resultSha256: retainedResultText ?
+        retainedResult?.sha256 ?? sha256Hex(retainedResultText) : null,
     };
   } catch { return null; }
 }
@@ -191,13 +197,18 @@ async function snapshot(
     ? escalation.openedTaskRevision !== null &&
       task.revision > escalation.openedTaskRevision && task.dueParseState === "valid"
     : task.dueParseState === "valid" || task.dueParseState === "none";
+  const v4ContentValid = task.sourceSystem === "admin-idea-v4" &&
+    fetchedV4?.taskId === task.id && fetchedV4.revision === task.revision &&
+    fetchedV4.titleDigest === task.v4TitleDigest &&
+    fetchedV4.bodyDigest === task.v4BodyDigest &&
+    fetchedV4.briefDigest === task.v4BriefDigest;
   const v4Valid = amuxV4ReviewEvidenceMatches({
     task: { id: task.id, sourceSystem: task.sourceSystem,
       revision: task.revision, titleDigest: task.v4TitleDigest,
       bodyDigest: task.v4BodyDigest, briefDigest: task.v4BriefDigest },
     evidence: fetchedV4, result: latestV4Result, attempt: lastAttempt,
   });
-  const description = v4Valid && fetchedV4 ? fetchedV4.description : task.description;
+  const description = v4ContentValid && fetchedV4 ? fetchedV4.description : task.description;
   // Ingress allows 50,000 Unicode characters, not 50,000 UTF-8 bytes. The
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
@@ -209,7 +220,9 @@ async function snapshot(
   const outcomes: AmuxReviewOutcome[] = [];
   if (baseEligible && task.status === "review" && reviewAttempt) {
     if (amuxReviewApprovalHasEvidence({ sourceSystem: task.sourceSystem,
-      taskRole: task.taskRole, artifactAvailable: artifact !== null,
+      cardType: task.cardType, taskRole: task.taskRole,
+      reviewPrNumber: task.reviewPrNumber,
+      artifactAvailable: artifact !== null,
       v4EvidenceVerified: v4Valid, displayTruncated })) outcomes.push("approve");
     outcomes.push("block");
   }
@@ -233,7 +246,7 @@ async function snapshot(
     task_id: task.id,
     task_revision: task.revision,
     task_status: task.status === "review" ? "review" : "blocked",
-    title: v4Valid && fetchedV4 ? fetchedV4.title : task.title,
+    title: v4ContentValid && fetchedV4 ? fetchedV4.title : task.title,
     description,
     due_parse_state: task.dueParseState,
     due_at: task.dueAt?.toISOString() ?? null,
@@ -260,7 +273,7 @@ async function snapshot(
   const digest = amuxReviewSubjectDigest(subject);
   const text = `Task ID: ${task.id}\nRevision: ${task.revision}\nEscalation ID: ${escalation.id}`;
   const context = {
-    title: safeReviewDisplayText(v4Valid && fetchedV4 ? fetchedV4.title : task.title),
+    title: safeReviewDisplayText(v4ContentValid && fetchedV4 ? fetchedV4.title : task.title),
     description: safeReviewDisplayText(description),
     result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
     escalation_reason: reason,
