@@ -11,6 +11,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
+  qaLiveDept,
   researchLiveDept,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
@@ -88,7 +89,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   // The rooms that read a real record, in the console's language. Each
   // navigation brings a fresh server reading, and the engine takes it.
   const liveDepts = useMemo<Record<string, AgentOfficeLiveDept>>(
-    () => ({ research: researchLiveDept(live.research, live.readAt, m.real.research) }),
+    () => ({
+      research: researchLiveDept(live.research, live.readAt, m.real.research),
+      qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
+    }),
     [live, m]
   );
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
@@ -336,10 +340,7 @@ function LiveView({
   onDuty: number;
 }) {
   const progress = Math.round((snap.phaseIndex / (PHASE_COUNT - 1)) * 100);
-  const waitingNames = ["engineering", "qa", "digest"]
-    .map((dept) => engine.deptLead[dept]?.name)
-    .filter(Boolean)
-    .join(" · ");
+  const waitingNames = engine.approverNames();
 
   return (
     <>
