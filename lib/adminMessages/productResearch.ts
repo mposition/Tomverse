@@ -42,6 +42,13 @@ export const adminProductResearchMessages = defineAdminMessages({
     verdictColumn: "Source verdict",
     branchesColumn: "Branches",
     blockedOn: "The source records a blockedOn entry",
+    summaryHeading: "This slot's verdict distribution",
+    summaryNote:
+      "Counted from the {count} rows above, for this slot alone. It is not a running total, and nothing here is a judgement about the backlog -- the verdicts carry their own meaning.",
+    summaryBlindSpots:
+      "Rows with no signal on either branch: {noSignal}. Rows resolved on one branch only: {oneBranch}.",
+    summaryMismatch:
+      "The counts stored with this slot do not match the rows stored beside them. The figures shown are recounted from the rows.",
     windowsHeading: "Phase windows, as arithmetic",
     windowsNote:
       "These are computed from the slots above and reported only. A phase transition is signed by an operator; nothing on this screen moves one.",
@@ -83,6 +90,13 @@ export const adminProductResearchMessages = defineAdminMessages({
     verdictColumn: "원천 판정",
     branchesColumn: "branch",
     blockedOn: "원천에 blockedOn 기록 있음",
+    summaryHeading: "이 회차의 판정 분포",
+    summaryNote:
+      "위 {count}개 행에서 센 값이며, 이 회차만의 것입니다. 누적 합계가 아니고, 어떤 판단도 아닙니다 -- 각 판정의 뜻은 그 판정 문구가 말합니다.",
+    summaryBlindSpots:
+      "양쪽 branch 모두에서 신호가 없는 행: {noSignal}. 한쪽 branch에서만 충족된 행: {oneBranch}.",
+    summaryMismatch:
+      "이 회차에 저장된 수가 함께 저장된 행과 맞지 않습니다. 표시된 값은 행에서 다시 센 것입니다.",
     windowsHeading: "단계 창 계산값",
     windowsNote:
       "위 회차들에서 계산한 값이며 보고 전용입니다. 단계 전환은 운영자가 서명하고, 이 화면은 어떤 단계도 옮기지 않습니다.",
