@@ -16,14 +16,28 @@ export async function resetTestFixture(
   }
   const target = new URL(raw);
   const name = decodeURIComponent(target.pathname.replace(/^\//, ""));
+  const table = '"[A-Za-z_][A-Za-z0-9_]*"';
+  const truncate = new RegExp(
+    `^TRUNCATE\\s+TABLE\\s+${table}(?:\\s*,\\s*${table})*\\s+RESTART\\s+IDENTITY\\s+CASCADE$`,
+    "i",
+  );
   if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
       !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name) ||
-      statement.includes(";") ||
-      !/^TRUNCATE\s+TABLE\s+[\s\S]+\s+CASCADE\s*$/i.test(statement.trim())) {
+      target.search !== "" ||
+      !truncate.test(statement.trim())) {
     throw new Error("Fixture reset is limited to loopback test databases and TRUNCATE CASCADE");
   }
   try {
     await prisma.$transaction(async (tx) => {
+      // Verify the backend on this exact connection. URL query overrides and a
+      // separately configured Prisma client must never bypass the test guard.
+      const [backend] = await tx.$queryRawUnsafe<Array<{ database: string; address: string | null }>>(
+        'SELECT current_database() AS "database", inet_server_addr()::text AS "address"',
+      );
+      if (!backend || backend.database !== name ||
+          !["127.0.0.1", "::1"].includes(backend.address ?? "")) {
+        throw new Error("Fixture reset requires the exact loopback test database backend");
+      }
       // SET LOCAL reverts automatically at COMMIT/ROLLBACK. It is not inherited
       // by any later assertion, including tests of the append-only guards.
       await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");

@@ -52,6 +52,18 @@ test("one store module reads and writes the three tables", () => {
   assert.match(read(STORE), /INSERT INTO "AmuxOrchestratorHalt"/);
 });
 
+test("every AMUX admission path consults the central halt store", () => {
+  for (const path of [
+    "lib/amux/execution.ts",
+    "lib/amux/v4TaskReadyService.ts",
+    "lib/amux/v22WorkerClaimService.ts",
+    "lib/amux/v22AutoPromotionService.ts",
+  ]) {
+    const source = withoutComments(read(path));
+    assert.match(source, /findOpenAmuxOrchestratorHalt\(tx\)/, path);
+  }
+});
+
 test("the clear never runs the original claim, recovery or promotion", () => {
   // Section 7: "해제는 원래 작업을 다시 하지 않는다."
   const store = withoutComments(read(STORE));
