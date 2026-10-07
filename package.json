@@ -239,6 +239,7 @@
     "report:ai-review-judged-denominators": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-denominators.mjs",
     "report:ai-review-judged-run": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-run.mjs",
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
+    "report:trust-safety-railway-variables": "node --import tsx scripts/report-trust-safety-railway-variables.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",
     "drill:fallback-verify": "node scripts/verify-fallback-drill.mjs",
