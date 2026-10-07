@@ -374,6 +374,9 @@ run(
     // sre-ops state read: the trust facts gathered in one bounded transaction,
     // trusted with the state or the reason only (own throwaway schema).
     "tests/integration/ops-observer-store-read.db.test.ts",
+    // sre-ops advance: state, checkpoint, audit entry and ledger row in one
+    // transaction; stale base, untrusted chain and unchanged keys write nothing.
+    "tests/integration/ops-observer-store-advance.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
