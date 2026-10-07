@@ -39,12 +39,65 @@ const RESULT_STATUS = new Map<string, number>([
   ["internal_error", 500],
 ]);
 
+/**
+ * What the deployed Agents image puts in every process environment, measured
+ * on 2026-10-03 (lib/productResearchObservationRunnerCore.mjs records the same
+ * measurement). Exact names where the name was measured; the builder's and
+ * toolchain's families by prefix, because their members are many and change
+ * with Railpack. RAILWAY_ is not a prefix here: the platform's names are the
+ * exact list in QA_RELEASE_RAILWAY_VARIABLES, so a variable merely starting
+ * with RAILWAY_ is refused. A family that newly appears refuses the start and
+ * is named in the log; the fix is to measure again.
+ */
+export const SUPPORT_TRIAGE_RETENTION_IMAGE_VARIABLES = Object.freeze([
+  "CI",
+  "NEXT_TELEMETRY_DISABLED",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+] as const);
+export const SUPPORT_TRIAGE_RETENTION_IMAGE_PREFIXES = Object.freeze(["RAILPACK_", "MISE_", "__MISE_"] as const);
+
+/** Names Windows adds to every child process; only for exercising the service on a developer machine. */
+const WINDOWS_PROCESS_VARIABLES = [
+  "COMSPEC",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LOGONSERVER",
+  "PATHEXT",
+  "SYSTEMDRIVE",
+  "SystemDrive",
+  "SYSTEMROOT",
+  "SystemRoot",
+  "USERDOMAIN",
+  "USERNAME",
+  "USERPROFILE",
+  "WINDIR",
+];
+
+/** A value that is a database connection string, in URL or libpq keyword form. */
+const DATABASE_URL_SHAPE =
+  /^(postgres(ql)?|mysql|mariadb|mongodb(\+srv)?|redis(s)?|prisma(\+postgres)?|jdbc|libsql):/i;
+const CONNINFO_SHAPE =
+  /(?=[\s\S]*\b(?:password|passfile)\s*=)(?=[\s\S]*\b(?:host|hostaddr|port|dbname|user)\s*=)/i;
+
+export type SupportTriageRetentionRefusalReason =
+  | "env_not_allowed"
+  | "env_holds_connection_string"
+  | "secret_missing_or_short";
+
 export type SupportTriageRetentionServiceOutcome =
   | { readonly exitCode: 0; readonly outcome: "ran"; readonly result: "ok" }
   | { readonly exitCode: 1; readonly outcome: "ran"; readonly result: string; readonly status: number }
   | {
       readonly exitCode: 1;
-      readonly outcome: "refused_to_start" | "destination_unknown" | "run_outcome_unknown";
+      readonly outcome: "refused_to_start";
+      readonly reason: SupportTriageRetentionRefusalReason;
+      /** Variable names only, never a value. */
+      readonly names?: readonly string[];
+    }
+  | {
+      readonly exitCode: 1;
+      readonly outcome: "destination_unknown" | "run_outcome_unknown";
       readonly status?: number;
     };
 
@@ -53,14 +106,21 @@ export type SupportTriageRetentionPost = (
   headers: Readonly<Record<string, string>>
 ) => Promise<{ status: number; body: unknown }>;
 
-/** Whether the process environment holds only this service's name and the runtime's. */
-export function supportTriageRetentionServiceEnvAllowed(names: readonly string[]): boolean {
+/** The names in this environment that the service does not expect, sorted. */
+export function supportTriageRetentionUnexpectedNames(
+  names: readonly string[],
+  platform: string = process.platform
+): string[] {
   const allowed = new Set<string>([
     ...SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES,
     ...QA_RELEASE_RUNTIME_VARIABLES,
     ...QA_RELEASE_RAILWAY_VARIABLES,
+    ...SUPPORT_TRIAGE_RETENTION_IMAGE_VARIABLES,
+    ...(platform === "win32" ? WINDOWS_PROCESS_VARIABLES : []),
   ]);
-  return names.every((name) => allowed.has(name));
+  return names
+    .filter((name) => !allowed.has(name) && !SUPPORT_TRIAGE_RETENTION_IMAGE_PREFIXES.some((prefix) => name.startsWith(prefix)))
+    .sort();
 }
 
 /** What the supervisor checks before it starts a child; the child checks it again. */
@@ -68,8 +128,23 @@ export function supportTriageRetentionStartRefusal(
   env: Readonly<Record<string, string | undefined>>
 ): SupportTriageRetentionServiceOutcome | null {
   const names = Object.keys(env).filter((name) => env[name] !== undefined);
-  if (!supportTriageRetentionServiceEnvAllowed(names)) return { exitCode: 1, outcome: "refused_to_start" };
-  if ((env.SUPPORT_TRIAGE_RETENTION_SECRET ?? "").length < 32) return { exitCode: 1, outcome: "refused_to_start" };
+  const unexpected = supportTriageRetentionUnexpectedNames(names);
+  if (unexpected.length > 0) {
+    return { exitCode: 1, outcome: "refused_to_start", reason: "env_not_allowed", names: unexpected };
+  }
+  // A connection string pasted into any variable, whatever its name.
+  const shaped = names
+    .filter((name) => {
+      const value = (env[name] ?? "").trim();
+      return DATABASE_URL_SHAPE.test(value) || CONNINFO_SHAPE.test(value);
+    })
+    .sort();
+  if (shaped.length > 0) {
+    return { exitCode: 1, outcome: "refused_to_start", reason: "env_holds_connection_string", names: shaped };
+  }
+  if ((env.SUPPORT_TRIAGE_RETENTION_SECRET ?? "").length < 32) {
+    return { exitCode: 1, outcome: "refused_to_start", reason: "secret_missing_or_short" };
+  }
   const environment = validateEnvironment(env.RAILWAY_ENVIRONMENT_NAME);
   if (environment !== "staging" && environment !== "production") return { exitCode: 1, outcome: "destination_unknown" };
   return null;

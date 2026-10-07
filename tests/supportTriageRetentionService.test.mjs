@@ -84,22 +84,54 @@ test("only an ok with 200 is a success; the destination is the environment's, wi
 });
 
 test("it refuses to start with any other variable, a short secret, or an unknown environment, and calls nothing", async () => {
-  for (const env of [
-    { ...ENV, DATABASE_URL: "postgres://x" },
-    { ...ENV, SUPPORT_TRIAGE_HEARTBEAT_SECRET: "h".repeat(40) },
-    { ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: "s".repeat(31) },
-    { ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: undefined },
+  for (const [env, expected] of [
+    [{ ...ENV, DATABASE_URL: "postgres://x" }, { reason: "env_not_allowed", names: ["DATABASE_URL"] }],
+    [{ ...ENV, SUPPORT_TRIAGE_HEARTBEAT_SECRET: "h".repeat(40) }, { reason: "env_not_allowed", names: ["SUPPORT_TRIAGE_HEARTBEAT_SECRET"] }],
+    // RAILWAY_ is an exact list, not a prefix.
+    [{ ...ENV, RAILWAY_DATABASE_TOKEN: "t" }, { reason: "env_not_allowed", names: ["RAILWAY_DATABASE_TOKEN"] }],
+    // An allowed name holding a connection string.
+    [{ ...ENV, RAILPACK_SOMETHING: "postgresql://u:p@h/db" }, { reason: "env_holds_connection_string", names: ["RAILPACK_SOMETHING"] }],
+    [{ ...ENV, CI: "host=db port=5432 password=x" }, { reason: "env_holds_connection_string", names: ["CI"] }],
+    [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: "s".repeat(31) }, { reason: "secret_missing_or_short" }],
+    [{ ...ENV, SUPPORT_TRIAGE_RETENTION_SECRET: undefined }, { reason: "secret_missing_or_short" }],
   ]) {
     const port = answering(200, { result: "ok" });
-    assert.deepEqual(await runSupportTriageRetentionService(env, port.post), { exitCode: 1, outcome: "refused_to_start" });
+    assert.deepEqual(await runSupportTriageRetentionService(env, port.post), {
+      exitCode: 1,
+      outcome: "refused_to_start",
+      ...expected,
+    });
     assert.equal(port.calls.length, 0);
   }
+  // A refusal names variables, never values.
+  const leaked = await runSupportTriageRetentionService({ ...ENV, OTHER: "secret-value-here" }, answering(200, {}).post);
+  assert.ok(!JSON.stringify(leaked).includes("secret-value-here"));
   const dev = answering(200, { result: "ok" });
   assert.deepEqual(await runSupportTriageRetentionService({ ...ENV, RAILWAY_ENVIRONMENT_NAME: "dev" }, dev.post), {
     exitCode: 1,
     outcome: "destination_unknown",
   });
   assert.equal(dev.calls.length, 0);
+});
+
+test("the names measured in the deployed Agents image are accepted", async () => {
+  // Measured 2026-10-03 (lib/productResearchObservationRunnerCore.mjs).
+  const image = {
+    ...ENV,
+    CI: "true",
+    NEXT_TELEMETRY_DISABLED: "1",
+    SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt",
+    SSL_CERT_DIR: "/etc/ssl/certs",
+    RAILPACK_PACKAGES: "node@22",
+    MISE_DATA_DIR: "/mise",
+    __MISE_ORIG_PATH: "/usr/bin",
+    HOME: "/root",
+    NODE_VERSION: "22",
+    RAILWAY_ENVIRONMENT_NAME: "staging",
+    RAILWAY_SERVICE_NAME: "Support Triage Retention",
+  };
+  const port = answering(200, { result: "ok" });
+  assert.deepEqual(await runSupportTriageRetentionService(image, port.post), { exitCode: 0, outcome: "ran", result: "ok" });
 });
 
 test("the child's port gives up on a server that never answers, within its timeout", async () => {
