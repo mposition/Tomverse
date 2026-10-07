@@ -896,14 +896,15 @@ export type OpsObserverDeliveryView = {
  * §4): the link carries only its server-minted id, and this is what the owner
  * sees behind it -- the keys, message kinds and times the message itself may
  * not carry. Read-only; `null` for an id that is not (or no longer, after the
- * ninety days of §10) a reservation. One bounded `state_read` transaction.
+ * ninety days of §10) a reservation. One bounded `state_read` transaction,
+ * and the deadline is checked again before anything is returned.
  */
 export async function readOpsObserverDelivery(
   deliveryId: string,
   client: PrismaClient = prisma,
+  runDeadline: Date = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS),
 ): Promise<OpsObserverDeliveryView | null> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deliveryId)) return null;
-  const runDeadline = new Date(Date.now() + GENESIS_REQUEST_DEADLINE_MS);
   const { result } = await withOpsObserverTransaction(
     "state_read",
     runDeadline,
@@ -948,5 +949,7 @@ export async function readOpsObserverDelivery(
     },
     client,
   );
+  // Like every other read (policy §6 item 5): a late read shows nothing.
+  await assertNotLate(runDeadline, client);
   return result;
 }

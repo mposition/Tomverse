@@ -166,6 +166,8 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       // An unknown id, or anything that is not a UUID, is no reservation.
       assert.equal(await readOpsObserverDelivery("00000000-0000-4000-8000-000000000000", client), null);
       assert.equal(await readOpsObserverDelivery("../etc", client), null);
+      // A read without the time left to finish returns nothing at all.
+      await assert.rejects(readOpsObserverDelivery(old1.deliveryId, client, inSeconds(5)));
     });
 
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
