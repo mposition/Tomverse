@@ -1,0 +1,54 @@
+import assert from "node:assert/strict";
+import { basename } from "node:path";
+import test from "node:test";
+
+import { loadEngineeringAgentV22BaseEvidence } from
+  "../lib/engineeringAgentV22BaseEvidence.ts";
+import { gitObjectId } from "../lib/engineeringAgentTreeVerify.ts";
+
+const source = new Map([
+  ["tsconfig.json", '{"compilerOptions":{"module":"esnext"}}'],
+  ["package-lock.json", '{"packages":{"node_modules/next":{"version":"16.3.8"}}}'],
+  ["x.yml", "name: CI\non: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n"],
+  ["sample.json", '{"value":1}\n'],
+]);
+const tree = [
+  ["tsconfig.json", "tsconfig.json"],
+  ["package-lock.json", "package-lock.json"],
+  [".github/workflows/x.yml", "x.yml"],
+  ["tests/fixtures/sample.json", "sample.json"],
+].map(([path, key]) => ({ path, mode: "100644", type: "blob",
+  oid: gitObjectId("blob", Buffer.from(source.get(key))),
+}));
+const ports = {
+  tree, root: process.cwd(),
+  stat: async () => ({ isFile: () => true }),
+  read: async (path) => {
+    const key = basename(path);
+    if (key === "sample.json") throw new Error("not_in_image");
+    return Buffer.from(source.get(key));
+  },
+};
+
+test("base evidence admits exact image bytes and known missing tests", async () => {
+  const result = await loadEngineeringAgentV22BaseEvidence({
+    ...ports, excludedPrefixes: ["tests"],
+  });
+  assert.ok(result);
+  assert.equal(result.workflows.length, 1);
+  assert.equal(result.workflows[0].blobSha, tree[2].oid);
+  assert.equal(result.baseFiles.find((file) =>
+    file.path === "tests/fixtures/sample.json").text, "");
+  assert.equal(result.installedVersions.next, "16.3.8");
+});
+
+test("missing source or mismatched bytes fail closed", async () => {
+  assert.equal(await loadEngineeringAgentV22BaseEvidence({
+    ...ports, excludedPrefixes: [],
+  }), null);
+  assert.equal(await loadEngineeringAgentV22BaseEvidence({
+    ...ports, excludedPrefixes: ["tests"],
+    read: async (path) => basename(path) === "x.yml" ?
+      Buffer.from("altered") : ports.read(path),
+  }), null);
+});
