@@ -1265,6 +1265,27 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
 - **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
   판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
 
+# AMUX Decision Maker
+
+AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·저장·전송·runner 코드를
+건드리기 전에 읽습니다.
+
+- `docs/policy/amux-decision-maker.md`
+
+절대 조건:
+
+- **v1은 제안 모드만입니다.** DM의 출력은 운영자가 Admin에서 확정하기 전에는 worker에게 가지
+  않습니다. 자율 경로를 만들지 않습니다 — 그것은 v2 정책과 공통 기반 원칙 3의 별도 개정입니다.
+- **라우팅은 `lib/amux/decisionMakerCore.ts`의 `routeDmQuestion()` 한 곳입니다.** 모든 검사를
+  실행하고 모든 거절 사유를 남기며, 결과는 `dm_proposal`과 `operator` 둘뿐입니다.
+- **용어 목록·비밀 경로 목록·경로 문법·출력 상한을 바꾸면 정책 버전이 바뀝니다.** 테스트의
+  고정값이 그 목록의 기준입니다.
+- DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
+  단계의 PR이 이 절에 추가합니다.
+- **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
+  I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
