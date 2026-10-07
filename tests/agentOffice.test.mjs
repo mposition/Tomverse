@@ -483,3 +483,49 @@ test("a record that needs a look is counted on its own, never as a decision", ()
     assert.doesNotMatch(adminAgentOfficeMessages[locale].briefing.done(3), /observation|관측/);
   }
 });
+
+// ── Theme ─────────────────────────────────────────────────────────────────
+
+test("the office wears Tomverse's colours, in both themes, and not the AI Review gradient", () => {
+  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
+  // The original's pinks and lavenders are gone.
+  for (const pink of ["#ff8fc0", "#ff5fa8", "#ffe6f2", "#ffb9d9", "#c9b8ff", "#4a2b3c", "rgba(255, 95, 168"]) {
+    assert.ok(!css.toLowerCase().includes(pink), `${pink} is back in the office stylesheet`);
+  }
+  // Cyan, blue and purple together are AI Review's (AGENTS.md, accent roles).
+  assert.doesNotMatch(css, /#0e7490|#22d3ee|#9333ea|#c084fc|tomverse-accent/);
+
+  // Dark is written twice -- for an explicit choice and for the system's --
+  // and the two copies must not drift.
+  const block = (selector) => {
+    const at = css.indexOf(selector);
+    assert.ok(at >= 0, `${selector} is missing`);
+    const body = css
+      .slice(css.indexOf("{", at) + 1, css.indexOf("}", at))
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    return body
+      .split(";")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .sort();
+  };
+  const explicit = block(":global(.dark) .office");
+  const system = block(":global(:root:not(.light):not(.dark)) .office");
+  assert.deepEqual(system, explicit);
+  assert.ok(explicit.length > 40, "the dark block lost its tokens");
+
+  // Every token dark sets is one light defines.
+  const light = new Set(block(".office {").map((line) => line.split(":")[0]));
+  for (const line of explicit) {
+    const name = line.split(":")[0];
+    if (name.startsWith("--")) assert.ok(light.has(name), `${name} has a dark value and no light one`);
+  }
+});
+
+test("the staff wear the office's palette, not the original's pink", () => {
+  for (const staff of AGENT_OFFICE_STAFF) {
+    for (const colour of staff.colors) {
+      assert.ok(!["#ff8fc0", "#ffe6f2", "#c9b8ff"].includes(colour), `${staff.id} still wears ${colour}`);
+    }
+  }
+});
