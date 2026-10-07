@@ -15,8 +15,13 @@ import { readPromptRefinerVnextOneShotOperationalShadow } from
   "@/lib/promptRefinerVnextOneShotOperationalShadow";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { readPromptRefinerVnextOneShotTerminalReceipts } from
+  "@/lib/promptRefinerVnextOneShotTerminalReceipt";
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import { V4_HELD_COST_MICRO_USD, V4_OBSERVED_COST_MICRO_USD, V4_STAGE_ID,
+  V5_STAGE_ID, type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 export const PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_ACTION =
   "prompt_refiner.vnext_one_shot.paid_dispatch_authorized";
@@ -43,6 +48,12 @@ export function promptRefinerVnextOneShotPaidAuthorizationMetadata(
     perRequestCostMicroUsd: Number(stage.perRequestCostMicroUsd),
     slotCount: stage.slotCount,
     costCeilingMicroUsd: Number(stage.costCeilingMicroUsd),
+    ...(stage.id === V5_STAGE_ID ? {
+      predecessorObservedCostMicroUsd: V4_OBSERVED_COST_MICRO_USD,
+      predecessorHeldCostUpperBoundMicroUsd: V4_HELD_COST_MICRO_USD,
+      crossRunWorstCaseMicroUsd: V4_OBSERVED_COST_MICRO_USD +
+        V4_HELD_COST_MICRO_USD + Number(stage.costCeilingMicroUsd),
+    } : {}),
   };
 }
 
@@ -56,14 +67,15 @@ export async function readPromptRefinerVnextOneShotPaidAuthorization(
     where: {
       action: PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_ACTION,
       targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID,
+      targetId: stage.id,
     },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   const shadow = entry && await tx.adminAuditLog.findUnique({
     where: { id: shadowAuditLogId }, select: { createdAt: true },
   });
-  const valid = Boolean(entry && stage.id === STAGE_ID &&
+  const valid = Boolean(entry && (stage.id === STAGE_ID ||
+    stage.id === V5_STAGE_ID) &&
     stage.status === "run_approved" && stage.runApprovalAuditLogId &&
     shadow && entry.createdAt.getTime() > shadow.createdAt.getTime() &&
     entry.actorUserId === stage.approvedBy &&
@@ -93,24 +105,43 @@ export async function approvePromptRefinerVnextOneShotPaidDispatch(input: {
   session: Session;
   request: Request;
   expected: PromptRefinerVnextPaidAuthorizationPins;
-}): Promise<Readonly<{ stageId: typeof STAGE_ID; paidAuthorizationAuditLogId: string;
+  stageId?: PromptRefinerRunnableStageId;
+}): Promise<Readonly<{ stageId: PromptRefinerRunnableStageId; paidAuthorizationAuditLogId: string;
   dispatchAuthorized: false }>> {
   if (!input.session.user?.id || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_paid_approval_context_invalid");
   }
+  const stageId = input.stageId ?? STAGE_ID;
+  if (stageId !== STAGE_ID && stageId !== V5_STAGE_ID) {
+    throw new Error("vnext_one_shot_paid_approval_stage_invalid");
+  }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!snapshot.stagePresent || snapshot.stageStatus !== "run_approved" ||
         !snapshot.reservationShapeValid || !snapshot.approvalAuditsValid ||
         snapshot.slotCount !== 80 || snapshot.reservedSlots !== 80 ||
         snapshot.consumedSlots !== 0) {
       throw new Error("vnext_one_shot_paid_approval_stage_unavailable");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    if (stageId === V5_STAGE_ID) {
+      const predecessor = await readPromptRefinerVnextOneShotTerminalReceipts(
+        tx, V4_STAGE_ID);
+      if (!predecessor.valid || predecessor.stageStatus !== "closed" ||
+          predecessor.terminalReceipts !== 33 ||
+          predecessor.unknownReceipts !== 1 ||
+          predecessor.consumedWithoutReceipt !== 0 ||
+          predecessor.observedCostMicroUsd !== V4_OBSERVED_COST_MICRO_USD ||
+          predecessor.unresolvedCostUpperBoundMicroUsd !== V4_HELD_COST_MICRO_USD ||
+          predecessor.slots[33]?.state !== "outcome_unknown" ||
+          predecessor.slots.slice(34).some((slot) => slot.state !== "not_attempted")) {
+        throw new Error("vnext_one_shot_paid_approval_predecessor_unavailable");
+      }
+    }
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.approvedBy !== input.session.user.id ||
         stage.stageApprovalAuditLogId !== input.expected.stageApprovalAuditLogId ||
@@ -140,7 +171,7 @@ export async function approvePromptRefinerVnextOneShotPaidDispatch(input: {
     const paidAuthorizationAuditLogId = await writeAdminAuditLog({
       tx, session: input.session, request: input.request,
       action: PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_ACTION,
-      targetType: "PromptRefinerVnextOneShotStage", targetId: STAGE_ID,
+      targetType: "PromptRefinerVnextOneShotStage", targetId: stageId,
       summary: PROMPT_REFINER_VNEXT_PAID_AUTHORIZATION_SUMMARY,
       metadata: promptRefinerVnextOneShotPaidAuthorizationMetadata(
         stage, shadow.shadowAuditLogId,
@@ -152,7 +183,7 @@ export async function approvePromptRefinerVnextOneShotPaidDispatch(input: {
     if (!readback.valid || readback.auditLogId !== paidAuthorizationAuditLogId) {
       throw new Error("vnext_one_shot_paid_approval_readback_invalid");
     }
-    return Object.freeze({ stageId: STAGE_ID, paidAuthorizationAuditLogId,
+    return Object.freeze({ stageId, paidAuthorizationAuditLogId,
       dispatchAuthorized: false as const });
   }, { maxWait: 5_000, timeout: 15_000 });
 }

@@ -12,7 +12,10 @@
  * exist in the route table today.
  */
 
-/** Room order: four columns, two rows. Seven teams and the digest desk. */
+/**
+ * Room order. The eight teams fill the two rows of team rooms in this order; the
+ * digest desk sits in the top row beside the operator's office.
+ */
 export const AGENT_OFFICE_DEPT_IDS = [
   "engineering",
   "qa",
@@ -20,13 +23,14 @@ export const AGENT_OFFICE_DEPT_IDS = [
   "support",
   "marketing",
   "finance",
+  "trust",
   "research",
   "digest",
 ] as const;
 
 export type AgentOfficeDeptId = (typeof AGENT_OFFICE_DEPT_IDS)[number];
 
-/** The seven agent teams. The digest desk is where their digests are read, not a team. */
+/** The eight agent teams. The digest desk is where their digests are read, not a team. */
 export const AGENT_OFFICE_TEAM_IDS = AGENT_OFFICE_DEPT_IDS.filter(
   (id): id is Exclude<AgentOfficeDeptId, "digest"> => id !== "digest"
 );
@@ -66,6 +70,8 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     recordHref: "/admin/marketing",
   },
   { id: "finance", icon: "🧾", policy: "docs/policy/billing-finance-ops.md", recordHref: null },
+  // Its policy is not on develop yet, so there is no path to name.
+  { id: "trust", icon: "🛡️", policy: null, recordHref: null },
   {
     id: "research",
     icon: "🔭",
@@ -90,49 +96,53 @@ export type AgentOfficeStaffMeta = {
   id: string;
   dept: AgentOfficeDeptId;
   rank: Exclude<AgentOfficeRank, "operator">;
-  /** [hair, shirt, accent] -- the original office's pastel set. */
+  /** [hair, shirt, accent] -- soft blues, slate, mint and amber, not the original's pink. */
   colors: readonly [string, string, string];
 };
 
 export const AGENT_OFFICE_STAFF: readonly AgentOfficeStaffMeta[] = [
-  { id: "engineering-lead", dept: "engineering", rank: "lead", colors: ["#2c2638", "#ff8fc0", "#ff8fc0"] },
-  { id: "engineering-m1", dept: "engineering", rank: "member", colors: ["#4a3a2a", "#fff3b0", "#b8f0dd"] },
-  { id: "engineering-m2", dept: "engineering", rank: "member", colors: ["#7a3f58", "#c9b8ff", "#ff8fc0"] },
+  { id: "engineering-lead", dept: "engineering", rank: "lead", colors: ["#2c2638", "#93c5fd", "#93c5fd"] },
+  { id: "engineering-m1", dept: "engineering", rank: "member", colors: ["#4a3a2a", "#fde68a", "#b8f0dd"] },
+  { id: "engineering-m2", dept: "engineering", rank: "member", colors: ["#7a3f58", "#bae6fd", "#93c5fd"] },
 
   { id: "qa-lead", dept: "qa", rank: "lead", colors: ["#2d4b46", "#b8f0dd", "#b8f0dd"] },
-  { id: "qa-m1", dept: "qa", rank: "member", colors: ["#463227", "#ffe6f2", "#b8f0dd"] },
-  { id: "qa-m2", dept: "qa", rank: "member", colors: ["#6c3a55", "#c9b8ff", "#fff3b0"] },
+  { id: "qa-m1", dept: "qa", rank: "member", colors: ["#463227", "#e4e4e7", "#b8f0dd"] },
+  { id: "qa-m2", dept: "qa", rank: "member", colors: ["#6c3a55", "#bae6fd", "#fde68a"] },
 
   { id: "sre-lead", dept: "sre", rank: "lead", colors: ["#3b3b49", "#b8f0dd", "#b8f0dd"] },
-  { id: "sre-m1", dept: "sre", rank: "member", colors: ["#573049", "#fff3b0", "#ff8fc0"] },
-  { id: "sre-m2", dept: "sre", rank: "member", colors: ["#2e3a4a", "#ffe6f2", "#b8f0dd"] },
+  { id: "sre-m1", dept: "sre", rank: "member", colors: ["#573049", "#fde68a", "#93c5fd"] },
+  { id: "sre-m2", dept: "sre", rank: "member", colors: ["#2e3a4a", "#e4e4e7", "#b8f0dd"] },
 
   { id: "support-lead", dept: "support", rank: "lead", colors: ["#563a32", "#b8f0dd", "#b8f0dd"] },
-  { id: "support-m1", dept: "support", rank: "member", colors: ["#452d3f", "#c9b8ff", "#fff3b0"] },
-  { id: "support-m2", dept: "support", rank: "member", colors: ["#8a4a3c", "#b8f0dd", "#ff8fc0"] },
+  { id: "support-m1", dept: "support", rank: "member", colors: ["#452d3f", "#bae6fd", "#fde68a"] },
+  { id: "support-m2", dept: "support", rank: "member", colors: ["#8a4a3c", "#b8f0dd", "#93c5fd"] },
 
-  { id: "marketing-lead", dept: "marketing", rank: "lead", colors: ["#c26e4b", "#ff8fc0", "#fff3b0"] },
-  { id: "marketing-m1", dept: "marketing", rank: "member", colors: ["#7b4a2f", "#b8f0dd", "#ff8fc0"] },
-  { id: "marketing-m2", dept: "marketing", rank: "member", colors: ["#2c2638", "#fff3b0", "#c9b8ff"] },
+  { id: "marketing-lead", dept: "marketing", rank: "lead", colors: ["#c26e4b", "#93c5fd", "#fde68a"] },
+  { id: "marketing-m1", dept: "marketing", rank: "member", colors: ["#7b4a2f", "#b8f0dd", "#93c5fd"] },
+  { id: "marketing-m2", dept: "marketing", rank: "member", colors: ["#2c2638", "#fde68a", "#bae6fd"] },
 
-  { id: "finance-lead", dept: "finance", rank: "lead", colors: ["#313b56", "#fff3b0", "#fff3b0"] },
-  { id: "finance-m1", dept: "finance", rank: "member", colors: ["#4b3b2c", "#b8f0dd", "#c9b8ff"] },
-  { id: "finance-m2", dept: "finance", rank: "member", colors: ["#3c3a4f", "#ffe6f2", "#c9b8ff"] },
+  { id: "finance-lead", dept: "finance", rank: "lead", colors: ["#313b56", "#fde68a", "#fde68a"] },
+  { id: "finance-m1", dept: "finance", rank: "member", colors: ["#4b3b2c", "#b8f0dd", "#bae6fd"] },
+  { id: "finance-m2", dept: "finance", rank: "member", colors: ["#3c3a4f", "#e4e4e7", "#bae6fd"] },
 
-  { id: "research-lead", dept: "research", rank: "lead", colors: ["#6b3d34", "#fff3b0", "#ff8fc0"] },
-  { id: "research-m1", dept: "research", rank: "member", colors: ["#2f2a3d", "#c9b8ff", "#b8f0dd"] },
-  { id: "research-m2", dept: "research", rank: "member", colors: ["#5a3450", "#fff3b0", "#ff8fc0"] },
+  { id: "trust-lead", dept: "trust", rank: "lead", colors: ["#2d4b46", "#cbd5e1", "#bae6fd"] },
+  { id: "trust-m1", dept: "trust", rank: "member", colors: ["#6b4a2f", "#b8f0dd", "#fde68a"] },
+  { id: "trust-m2", dept: "trust", rank: "member", colors: ["#452d3f", "#fde68a", "#b8f0dd"] },
 
-  { id: "digest-lead", dept: "digest", rank: "lead", colors: ["#7a453c", "#c9b8ff", "#c9b8ff"] },
-  { id: "digest-m1", dept: "digest", rank: "member", colors: ["#334a3a", "#ffe6f2", "#fff3b0"] },
+  { id: "research-lead", dept: "research", rank: "lead", colors: ["#6b3d34", "#fde68a", "#93c5fd"] },
+  { id: "research-m1", dept: "research", rank: "member", colors: ["#2f2a3d", "#bae6fd", "#b8f0dd"] },
+  { id: "research-m2", dept: "research", rank: "member", colors: ["#5a3450", "#fde68a", "#93c5fd"] },
+
+  { id: "digest-lead", dept: "digest", rank: "lead", colors: ["#7a453c", "#bae6fd", "#bae6fd"] },
+  { id: "digest-m1", dept: "digest", rank: "member", colors: ["#334a3a", "#e4e4e7", "#fde68a"] },
 ];
 
 /** The operator: the one person in the office, at the desk in the operator's room. */
 export const AGENT_OFFICE_OPERATOR = {
   id: "operator",
-  hair: "#42283a",
-  shirt: "#ff8fc0",
-  accent: "#fff3b0",
+  hair: "#27272a",
+  shirt: "#2563eb",
+  accent: "#fde68a",
   skin: "#ffdcc4",
 } as const;
 
@@ -152,5 +162,6 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
   ["support", ["고객지원", "support", "신고", "triage", "답변 초안"]],
   ["marketing", ["마케팅", "marketing", "guard", "게시", "소셜", "social", "seo"]],
   ["finance", ["재무", "과금", "finance", "billing", "가격", "price", "정산", "ledger"]],
+  ["trust", ["신뢰", "안전", "trust", "safety", "컴플라이언스", "compliance", "dsr", "개인정보 요청"]],
   ["digest", ["다이제스트", "digest", "비서"]],
 ];

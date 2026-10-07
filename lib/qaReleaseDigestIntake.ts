@@ -5,6 +5,8 @@ import { z } from "zod";
 import { ApiSecurityError, readLimitedJson } from "@/lib/apiSecurity";
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { qaReleaseDigestSchema } from "@/lib/qaReleaseDigestSchemaCore";
+import { QA_RELEASE_DIGEST_HARD_TIMEOUT_MS } from "@/lib/qaReleaseDigestServiceCore";
+import { queueQaReleaseIntakeAttention } from "@/lib/qaReleaseMonitor";
 import { readLatestQaReleaseOperatorControl } from "@/lib/qaReleaseOperatorControlStore";
 import {
   QA_RELEASE_CONTROL_REVISION_HEADER,
@@ -56,9 +58,11 @@ export async function receiveQaReleaseDigest(
     env,
   });
   if (!admission.ok) {
-    return admission.reason === "unauthorized"
-      ? answer(401, { error: "unauthorized" })
-      : answer(admission.reason === "control_revision_unavailable" ? 503 : 409, { error: admission.reason });
+    if (admission.reason === "unauthorized") return answer(401, { error: "unauthorized" });
+    // Policy section 6: a call on another revision is refused and the operator
+    // is told (section 7's needs-a-check alert, once per UTC day).
+    if (admission.reason === "control_revision_mismatch") await queueQaReleaseIntakeAttention("control_revision_mismatch");
+    return answer(admission.reason === "control_revision_unavailable" ? 503 : 409, { error: admission.reason });
   }
   if (!control?.digestEnabled) return answer(409, { error: "digest_disabled" });
 
@@ -94,8 +98,15 @@ export async function receiveQaReleaseDigest(
     // section 3). The database clock decides, and a late answer rolls both
     // writes back. Admission and this check keep the created path at the
     // policy's nine statements (AGENT_DIGEST_STORE_TIMEOUTS.statements).
+    // The deadline comes from the service, so it is also bounded here: one
+    // further away than the service's whole hard timeout from the database
+    // clock cannot be the deadline of a run that is still going, and is
+    // treated as passed (policy section 3).
     async (tx) => {
-      const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT clock_timestamp() >= ${new Date(digest.runDeadline)}::timestamptz AS late`;
+      const clock = await tx.$queryRaw<{ late: boolean }[]>`SELECT
+        clock_timestamp() >= ${new Date(digest.runDeadline)}::timestamptz
+        OR ${new Date(digest.runDeadline)}::timestamptz > clock_timestamp() + make_interval(secs => ${QA_RELEASE_DIGEST_HARD_TIMEOUT_MS / 1000})
+        AS late`;
       return clock[0]?.late === false ? null : "run_deadline_passed";
     },
   );
@@ -105,10 +116,13 @@ export async function receiveQaReleaseDigest(
     case "replayed":
       return answer(200, { status: "replayed", id: result.id, payloadSha256: result.payloadSha256 });
     case "conflict":
+      // Policy section 7: a submission conflict needs a check.
+      await queueQaReleaseIntakeAttention("digest_conflict");
       return answer(409, { error: "digest_conflict" });
     case "refused":
       return answer(422, { error: result.reason });
     case "not_admitted":
+      if (result.reason === "control_revision_mismatch") await queueQaReleaseIntakeAttention("control_revision_mismatch");
       return answer(409, { error: result.reason });
   }
 }

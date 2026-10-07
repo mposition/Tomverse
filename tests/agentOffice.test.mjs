@@ -10,10 +10,13 @@ import {
   AGENT_OFFICE_DEPTS,
   AGENT_OFFICE_DEPT_IDS,
   AGENT_OFFICE_NARRATOR_ID,
+  AGENT_OFFICE_OPERATOR,
   AGENT_OFFICE_STAFF,
   AGENT_OFFICE_TEAM_IDS,
 } from "../lib/agentOffice/roster.ts";
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
+import { researchLiveDept, researchTone } from "../lib/agentOffice/live.ts";
+import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
   DEPT_ROOMS,
   ENTRANCE,
@@ -30,11 +33,11 @@ const reaches = (target) => {
   return Boolean(last) && last.x === target.x && last.y === target.y;
 };
 
-test("the office holds the seven agent teams and the digest desk", () => {
-  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 7);
+test("the office holds the eight agent teams and the digest desk", () => {
+  assert.equal(AGENT_OFFICE_TEAM_IDS.length, 8);
   assert.deepEqual(
     [...AGENT_OFFICE_TEAM_IDS].sort(),
-    ["engineering", "finance", "marketing", "qa", "research", "sre", "support"]
+    ["engineering", "finance", "marketing", "qa", "research", "sre", "support", "trust"]
   );
   assert.equal(DEPT_ROOMS.length, AGENT_OFFICE_DEPT_IDS.length);
   assert.ok(AGENT_OFFICE_DEPT_IDS.includes("digest"));
@@ -242,4 +245,308 @@ test("the office's two sections are addresses, not component state", () => {
   assert.doesNotMatch(panel, /useState<View>/);
   // Both dialogs keep the shared focus contract.
   assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, 2);
+});
+
+// ── Live rooms ────────────────────────────────────────────────────────────
+
+const at = (iso) => new Date(iso);
+const okRow = (slot) => ({ slot: at(slot), outcome: "ok", failureStage: null });
+
+test("the research room's state comes from the agent's own slot and silence judgements", () => {
+  assert.deepEqual(
+    agentOfficeResearchState({ enabled: false, rows: [], lastSuccessAt: null, enabledSince: null, now: at("2026-10-07T22:00:00Z") }),
+    { kind: "disabled" }
+  );
+
+  // 21:30 UTC is the slot; at 22:00 its window is still open.
+  const ok = agentOfficeResearchState({
+    enabled: true,
+    rows: [okRow("2026-10-07T21:30:00Z")],
+    lastSuccessAt: at("2026-10-07T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T22:00:00Z"),
+  });
+  assert.equal(ok.kind, "observed");
+  assert.equal(ok.slot, "2026-10-07T21:30:00.000Z");
+  assert.equal(ok.slotState, "ok");
+  assert.equal(ok.windowOpen, true);
+  assert.equal(ok.silence, "recent");
+  assert.equal(researchTone(ok), "done");
+
+  // An hour after the slot its window is closed; a day-old success is not yet silence.
+  const late = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T23:10:00Z"),
+  });
+  assert.equal(late.slotState, "missing");
+  assert.equal(late.windowOpen, false);
+  assert.equal(late.silence, "recent");
+  assert.equal(researchTone(late), "waiting");
+
+  // Before 21:30 a moment still answers for yesterday's slot -- and by then a
+  // missed run has made the agent silent (26 hours).
+  const nextMorning = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-08T00:10:00Z"),
+  });
+  assert.equal(nextMorning.slot, "2026-10-07T21:30:00.000Z");
+  assert.equal(nextMorning.silence, "silent");
+
+  const silent = agentOfficeResearchState({
+    enabled: true,
+    rows: [],
+    lastSuccessAt: at("2026-10-04T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T22:00:00Z"),
+  });
+  assert.equal(silent.silence, "silent");
+  assert.equal(researchTone(silent), "attention");
+
+  const failed = agentOfficeResearchState({
+    enabled: true,
+    rows: [{ slot: at("2026-10-07T21:30:00Z"), outcome: "failed", failureStage: "clone" }],
+    lastSuccessAt: at("2026-10-06T21:30:00Z"),
+    enabledSince: at("2026-10-01T00:00:00Z"),
+    now: at("2026-10-07T21:50:00Z"),
+  });
+  assert.equal(failed.slotState, "failed");
+  assert.equal(failed.failureStage, "clone");
+  assert.equal(researchTone(failed), "attention");
+});
+
+test("a live room's line says what the record says, in UTC, and an unread record is not a state", () => {
+  const copy = adminAgentOfficeMessages.ko.real.research;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const ok = researchLiveDept(
+    {
+      kind: "observed",
+      slot: "2026-10-07T21:30:00.000Z",
+      slotState: "ok",
+      failureStage: null,
+      windowOpen: true,
+      lastSuccessAt: "2026-10-07T21:30:00.000Z",
+      silence: "recent",
+      silenceHours: 0.6,
+    },
+    readAt,
+    copy
+  );
+  assert.equal(ok.status, "done");
+  assert.equal(ok.line, "직전 회차 기록됨 · 10-07 21:30 UTC");
+  assert.match(ok.detail, /마지막 성공 10-07 21:30 UTC/);
+  assert.match(ok.detail, /읽은 시각 10-07 22:05 UTC/);
+
+  assert.equal(ok.badge, "기록됨");
+
+  // A read that failed needs a look; it is not "waiting on a link" and not done.
+  const unread = researchLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+  assert.equal(unread.line, copy.unread);
+
+  // A switched-off agent waits; it is not a failure.
+  assert.equal(researchLiveDept({ kind: "disabled" }, readAt, copy).status, "waiting");
+
+  // Before 21:30 UTC the slot that has passed is yesterday's, and the line
+  // says which slot it means rather than calling it today's.
+  const morning = researchLiveDept(
+    agentOfficeResearchState({
+      enabled: true,
+      rows: [{ slot: at("2026-10-07T21:30:00Z"), outcome: "failed", failureStage: "clone" }],
+      lastSuccessAt: at("2026-10-06T21:30:00Z"),
+      enabledSince: at("2026-10-01T00:00:00Z"),
+      now: at("2026-10-08T01:00:00Z"),
+    }),
+    "2026-10-08T01:00:00.000Z",
+    copy
+  );
+  assert.equal(morning.line, "직전 회차 실패 · 10-07 21:30 UTC · clone");
+  assert.equal(morning.badge, "실패");
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.research;
+    for (const value of [words.ok("x"), words.failed("x", "y"), words.duplicate("x"), words.missingOpen("x"), words.missing("x")]) {
+      assert.doesNotMatch(value, /today|오늘/i, `${locale}: "${value}" calls the slot today's`);
+      assert.match(value, /x/, `${locale}: "${value}" does not name its slot`);
+    }
+  }
+});
+
+test("a live room is never simulated: no scripted work, and its status is the record's", () => {
+  const live = {
+    research: {
+      status: "done",
+      badge: "Recorded",
+      line: "Today's run recorded · 10-07 21:30 UTC",
+      detail: "read 10-07 22:05 UTC",
+    },
+  };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  office.speed = 10;
+  office.start();
+  let worked = false;
+  let meetingWithResearch = false;
+  const spoken = new Set();
+  const watch = () => {
+    for (const agent of office.agents) {
+      if (agent.deptId === "research" && agent.speech) spoken.add(agent.speech);
+      if (agent.deptId === "research" && (agent.status === "working" || agent.progress > 0)) worked = true;
+      if (agent.id === "research-lead" && agent.status === "meeting" && !office.approvalPending) {
+        meetingWithResearch = true;
+      }
+    }
+    return office.approvalPending;
+  };
+  runUntil(office, watch);
+  assert.equal(office.deptStatus.research, "done");
+  office.approve();
+  runUntil(office, () => {
+    watch();
+    return office.dayComplete;
+  });
+  assert.equal(worked, false, "the research room was given scripted work");
+  // ...and the orders that make everyone speak or move do not reach it either.
+  for (let i = 0; i < 2000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  office.command("Thank you, everyone");
+  office.command("Everyone back to your desks");
+  office.command("Call a meeting with every team");
+  for (let i = 0; i < 4000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  for (const agent of office.agents) {
+    if (agent.deptId === "research") assert.notEqual(agent.status, "onBreak", agent.id);
+  }
+  assert.deepEqual(
+    [...spoken].filter((line) => line !== live.research.line),
+    [],
+    "a live room's staff said something the record did not say"
+  );
+  assert.equal(meetingWithResearch, false, "the research lead sat in the scripted hand-off");
+  assert.equal(office.deptStatus.research, "done");
+  assert.ok(office.log.some((entry) => entry.text.includes("(real record): Today's run recorded")));
+
+  // The console answers about it with the record, not with a demo line.
+  office.command("What is research doing?");
+  assert.match(office.chat.at(-1).text, /real record/);
+
+  // A fresh reading moves the room and nothing else.
+  const before = { ...office.deptStatus };
+  office.setLive({ research: { status: "attention", badge: "Unread", line: "Could not read its record", detail: "" } });
+  assert.equal(office.deptStatus.research, "attention");
+  assert.equal(office.snapshot().stats.attention, 1);
+  // A real record that needs a look is not a decision waiting for the operator.
+  assert.equal(office.snapshot().stats.approval, 0);
+  // ...and the delay report names it in its own words.
+  office.command("Why is it slow?");
+  assert.match(office.chat.at(-1).text, /Product research: Could not read its record/);
+  for (const id of Object.keys(before)) {
+    if (id !== "research") assert.equal(office.deptStatus[id], before[id], id);
+  }
+});
+
+test("the office reads the research agent's state, never its content, and writes nothing", () => {
+  // Code only: the module's comments name the writer it avoids.
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.match(source, /^import "server-only";/m);
+  // No write of any kind, and not the anchor writer the agent's own section uses.
+  assert.doesNotMatch(source, /\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\(/);
+  assert.doesNotMatch(source, /\$executeRaw|\$queryRaw/);
+  assert.doesNotMatch(source, /readProductResearchEnabledSince\(/);
+  // The observation row is selected for its slot, outcome and failure stage only.
+  assert.match(source, /select: \{ slot: true, outcome: true, failureStage: true \}/);
+  assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
+});
+
+test("a record that needs a look is counted on its own, never as a decision", () => {
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.match(copy.sim.briefLog(5, 1, 4), locale === "en" ? /1 needs a look/ : /확인 필요 1개/);
+  }
+  assert.equal(adminAgentOfficeMessages.en.dashboard.briefAttention(1), "1 real record needs a look");
+  assert.match(adminAgentOfficeMessages.en.briefing.attention(1), /1 room —/);
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.doesNotMatch(panel, /stats\.approval \+ snap\.stats\.attention/);
+  assert.match(panel, /m\.dashboard\.metricAttention/);
+  assert.match(panel, /m\.live\.attention\(snap\.stats\.attention\)/);
+  // The end-of-day brief no longer claims the scripted observation was done.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].briefing.done(3), /observation|관측/);
+  }
+});
+
+// ── Theme ─────────────────────────────────────────────────────────────────
+
+test("the office wears Tomverse's colours, in both themes, and not the AI Review gradient", () => {
+  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
+  // The original's pinks and lavenders are gone.
+  for (const pink of ["#ff8fc0", "#ff5fa8", "#ffe6f2", "#ffb9d9", "#c9b8ff", "#4a2b3c", "rgba(255, 95, 168"]) {
+    assert.ok(!css.toLowerCase().includes(pink), `${pink} is back in the office stylesheet`);
+  }
+  // Cyan, blue and purple together are AI Review's (AGENTS.md, accent roles).
+  assert.doesNotMatch(css, /#0e7490|#22d3ee|#9333ea|#c084fc|tomverse-accent/);
+
+  // Dark is written twice -- for an explicit choice and for the system's --
+  // and the two copies must not drift.
+  const block = (selector) => {
+    const at = css.indexOf(selector);
+    assert.ok(at >= 0, `${selector} is missing`);
+    const body = css
+      .slice(css.indexOf("{", at) + 1, css.indexOf("}", at))
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    return body
+      .split(";")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .sort();
+  };
+  const explicit = block(":global(.dark) .office");
+  const system = block(":global(:root:not(.light):not(.dark)) .office");
+  assert.deepEqual(system, explicit);
+  assert.ok(explicit.length > 40, "the dark block lost its tokens");
+
+  // Every token dark sets is one light defines.
+  const light = new Set(block(".office {").map((line) => line.split(":")[0]));
+  for (const line of explicit) {
+    const name = line.split(":")[0];
+    if (name.startsWith("--")) assert.ok(light.has(name), `${name} has a dark value and no light one`);
+  }
+});
+
+test("the staff wear the office's palette, not the original's pink", () => {
+  const pinks = ["#ff8fc0", "#ffe6f2", "#c9b8ff", "#42283a"];
+  for (const staff of AGENT_OFFICE_STAFF) {
+    for (const colour of staff.colors) {
+      assert.ok(!pinks.includes(colour), `${staff.id} still wears ${colour}`);
+    }
+  }
+  for (const [key, colour] of Object.entries(AGENT_OFFICE_OPERATOR)) {
+    assert.ok(!pinks.includes(colour), `the operator's ${key} is still ${colour}`);
+  }
+});
+
+test("a variable set inline on a sprite or a portrait never shadows a theme token", () => {
+  // Custom properties inherit, so one set inline on an element replaces the
+  // theme's value for everything drawn inside it -- the rank badge, the name
+  // tag and the ring sit inside the sprite.
+  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
+  const theme = css.slice(css.indexOf(".office {"), css.indexOf("}", css.indexOf(".office {")));
+  const tokens = new Set([...theme.matchAll(/(--[a-z0-9-]+):/g)].map((match) => match[1]));
+  assert.ok(tokens.has("--accent") && tokens.size > 40);
+  for (const file of ["components/admin/AgentOfficeWorld.tsx", "components/admin/AgentOfficePanel.tsx"]) {
+    const source = readFileSync(file, "utf8");
+    const inline = [...source.matchAll(/"(--[a-z0-9-]+)":/g)].map((match) => match[1]);
+    assert.ok(inline.length > 0, `${file} sets no inline variables`);
+    for (const name of inline) assert.ok(!tokens.has(name), `${file} sets ${name} inline, shadowing the theme`);
+  }
 });

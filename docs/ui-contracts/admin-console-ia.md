@@ -100,21 +100,34 @@ records the next operator control revision, offered to owner and ops only;
 its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
-**Agent office** is a shell: a pixel office for the seven agent teams and the
+**Agent office** is a shell: a pixel office for the eight agent teams and the
 digest desk, after the original AI OFFICE UI by godseng.mom. It plays a demo
-day in the browser and reads no agent's state, so under rule 8 everything on
-it that could be read as a fact says it is a demo -- a notice above the
-office, a chip on the approval card, "SIMULATION" and "SIM CLOCK" where the
-original said real-time. Its approve button advances the demo and nothing
-else; there is no publish link. The only facts on it are the record links:
-each team links to the page above that holds its record, and a team with no
-such page is drawn as waiting on a link instead of being given a status
-(`lib/agentOffice/roster.ts`, `tests/agentOffice.test.mjs`). It loads
-nothing, writes nothing, carries no badge and no `writeRoles`. Its two
-sections are `?tab=` addresses (rule 2); it draws its own tab strip, as the
-original did, and those tabs are links, so moving between them keeps the
-panel and its demo day mounted. The console shell owns the page's `h1`, so
-the office's own titles are `h2`s.
+day in the browser, so under rule 8 everything on it that could be read as a
+fact says it is a demo -- a notice above the office, a chip on the approval
+card, "SIMULATION" and "SIM CLOCK" where the original said real-time. Its
+approve button advances the demo and nothing else; there is no publish link.
+The facts on it are the record links and the rooms marked LIVE. Each team
+links to the page above that holds its record, and a team with no such page
+is drawn as waiting on a link instead of being given a status. A LIVE room
+reads that team's operating state on the server and the demo leaves it
+alone: for product research, the app switch, the latest scheduled slot
+(recorded, failed, or not yet, and whether its window is open), the newest
+success and the agent's own silence verdict, all in UTC -- never its
+observations, which
+`docs/policy/product-research-agent.md §4` and
+`docs/policy/product-research-agent.md §8` keep to its own section.
+That read is read-only (it looks the silence anchor up rather than creating
+it), and a read that fails is drawn as unread, never as a state
+(`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
+`tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
+and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
+draws its own tab strip, as the original did, and those tabs are links, so
+moving between them keeps the panel and its demo day mounted and brings a
+fresh reading of the LIVE rooms. The console shell owns the page's `h1`, so
+the office's own titles are `h2`s. It wears the console's colours rather than
+the original's pink: role tokens for text, line, surface, the primary blue and
+the room states, set for light and for dark so it follows the console's
+theme; the AI Review gradient is not among them.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

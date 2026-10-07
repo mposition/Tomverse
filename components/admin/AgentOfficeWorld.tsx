@@ -55,10 +55,12 @@ const AgentLayer = memo(function AgentLayer({
           data-agent-id={agent.id}
           style={
             {
-              "--hair": agent.hair,
-              "--shirt": agent.shirt,
-              "--accent": agent.accent,
-              "--skin": agent.skin,
+              // Sprite-only names: a theme token set here (--accent) would be
+              // shadowed for the badge, name tag and ring drawn inside it.
+              "--cloth-hair": agent.hair,
+              "--cloth-shirt": agent.shirt,
+              "--cloth-accent": agent.accent,
+              "--cloth-skin": agent.skin,
             } as CSSProperties
           }
         >
@@ -325,8 +327,9 @@ export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onS
                   <b>
                     {room.icon} {roomName(room.id)}
                   </b>
+                  {engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
-                    <i className={cx("rm-dot", status)} title={m.deptStatus[status]} />
+                    <i className={cx("rm-dot", status)} title={engine.liveDept(room.id)?.badge ?? m.deptStatus[status]} />
                   ) : null}
                 </span>
                 <span className={cx("rm-code")}>{room.short}</span>

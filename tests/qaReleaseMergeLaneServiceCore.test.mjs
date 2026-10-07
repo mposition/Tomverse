@@ -286,3 +286,21 @@ test("a status or service name outside the report's closed form never stops the 
   assert.notEqual(qaReleaseDeployObservation(report.observation), null);
   assert.deepEqual(report.observation, [{ service: "s_ web_api _prod_", status: "SUCCESS", commitSha: MERGE }]);
 });
+
+test("a merge refused because someone else merged it meanwhile is followed through the re-read, not closed as refused", async () => {
+  const merged = ports({
+    merge: { result: "refused" },
+    readPull: (n) => (merged.calls.some((c) => c[0] === "merge") ? pull(n, { merged: true, mergeCommitSha: MERGE }) : pull(n)),
+  });
+  await runQaReleaseMergeLaneRound(ENV, merged.ports);
+  assert.deepEqual(reports(merged.calls), [{ kind: "reread", result: "merged_on_develop", mergeCommitSha: MERGE }]);
+});
+
+test("a merge refused while the pull request cannot be re-read is unknown, which latches, never refused", async () => {
+  const unread = ports({
+    merge: { result: "refused" },
+    readPull: (n) => (unread.calls.some((c) => c[0] === "merge") ? null : pull(n)),
+  });
+  await runQaReleaseMergeLaneRound(ENV, unread.ports);
+  assert.deepEqual(reports(unread.calls), [{ kind: "merge", result: "unknown" }]);
+});

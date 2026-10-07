@@ -330,6 +330,9 @@ run(
     // Support-triage decision records: twelve months by CHECK, never updated,
     // at least one link at commit, and no record outlives any of its links.
     "tests/integration/support-triage-decision-record.db.test.ts",
+    // Support-triage retention and heartbeat routes: own secrets, counts only,
+    // non-2xx when retention makes no progress, a fail-closed heartbeat.
+    "tests/integration/support-triage-routes.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
@@ -368,6 +371,9 @@ run(
     // The analysis-only USD 50 ledger migration must install its namespace,
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
+    // Retention must clear due bodies, preserve the audit trail and retire
+    // external unit keys without silently extending a legal hold.
+    "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
@@ -391,6 +397,9 @@ run(
     // sre-ops genesis: the owner's approval bound to the head, the transition
     // and seven-day rules, and a created chain the state read trusts.
     "tests/integration/ops-observer-store-genesis.db.test.ts",
+    // sre-ops retention: closed reservations past ninety days deleted in
+    // bounded batches with their items; reserved and recent rows stay.
+    "tests/integration/ops-observer-store-retention.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

@@ -7,6 +7,8 @@ import { PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY } from
   "@/lib/promptRefinerVnextOneShotSlotConsumption";
 import { promptRefinerVnextOneShotShadowPublicKeyDigest } from
   "@/lib/promptRefinerVnextOneShotShadowProof";
+import { promptRefinerVnextOneShotGatePublicKeyDigest } from
+  "@/lib/promptRefinerVnextOneShotGateAttestation";
 import { observePromptRefinerVnextOneShotDeployment } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadback";
 import { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST } from
@@ -21,6 +23,8 @@ import type { PromptRefinerVnextOneShotAuditBinding } from
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
+const V5_STAGE_ID = "prompt-refiner-vnext-one-shot-v5";
+const V5_PREVIOUS_STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const SHA256 = /^[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;
 
@@ -43,6 +47,7 @@ export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
  */
 export async function preparePromptRefinerVnextOneShotStageBinding(
   expected: PromptRefinerVnextOneShotStageRequestPins,
+  successor: "v4" | "v5" = "v4",
 ): Promise<PromptRefinerVnextOneShotAuditBinding & Readonly<{
   sourceCommitPreregistrationVerified: false;
   dispatchAuthorized: false;
@@ -61,6 +66,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST ?? "";
   const runnerToken = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN ?? "";
   let signerPinValid = false;
+  let gateSignerPinValid = successor !== "v5";
   try {
     signerPinValid = SHA256.test(shadowPublicKeyDigest) &&
       promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey) ===
@@ -68,19 +74,37 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
   } catch {
     signerPinValid = false;
   }
+  if (successor === "v5") {
+    const gatePublicKey =
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "";
+    const gatePublicKeyDigest =
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST ?? "";
+    try {
+      gateSignerPinValid = SHA256.test(gatePublicKeyDigest) &&
+        promptRefinerVnextOneShotGatePublicKeyDigest(gatePublicKey) ===
+          gatePublicKeyDigest;
+    } catch {
+      gateSignerPinValid = false;
+    }
+  }
   if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v4-paid-terminal-guard-v1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1" ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1" ||
-      !signerPinValid || runnerToken.length < 32 || runnerToken.length > 256 ||
+      !signerPinValid || !gateSignerPinValid ||
+      (successor === "v5" && (
+        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED !== "1" ||
+        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPOSITION_WRITE_ENABLED !== "1")) ||
+      runnerToken.length < 32 || runnerToken.length > 256 ||
       process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY) {
     throw new Error("vnext_one_shot_recovery_capability_unavailable");
   }
   const deployment = await observePromptRefinerVnextOneShotDeployment();
+  const previousId = successor === "v5" ? V5_PREVIOUS_STAGE_ID : PREVIOUS_STAGE_ID;
   const previous = await prisma.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: PREVIOUS_STAGE_ID },
+    where: { id: previousId },
     select: { sourceCommitSha: true, sourceManifestDigest: true },
   });
   if (!previous || !deployment.commitSha) {
@@ -102,7 +126,7 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
     throw new Error("vnext_one_shot_stage_observation_mismatch");
   }
   return Object.freeze({
-    id: STAGE_ID,
+    id: successor === "v5" ? V5_STAGE_ID : STAGE_ID,
     // The transaction-level signed preregistration must confirm this source
     // commit; current checkout bytes are independently rehashed above.
     sourceCommitSha: expected.sourceCommitSha,

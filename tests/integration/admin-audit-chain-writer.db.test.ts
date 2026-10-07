@@ -7,6 +7,7 @@ import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { verifyAdminAuditIntegrity } from "@/lib/adminAuditIntegrity";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 // The audit writer against a real table: rows it writes form a chain the
 // verifier accepts.
@@ -23,7 +24,7 @@ import { prisma } from "@/lib/prisma";
 const SECRET = "admin-audit-chain-writer-db-secret-0032";
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "PromptRefinerShadowAttempt",
       "PromptRefinerShadowRun",
@@ -42,7 +43,7 @@ const reset = () =>
       "AmuxIdeaUnitDecision",
       "EngineeringAgentApproval",
       "AdminAuditLog"
-    RESTART IDENTITY
+    RESTART IDENTITY CASCADE
   `);
 
 const session = {
