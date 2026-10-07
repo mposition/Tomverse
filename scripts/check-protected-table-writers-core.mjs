@@ -1082,6 +1082,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "prisma/migrations/20261007180000_amux_v4_prless_review_evidence/migration.sql",
+    count: 3,
+    reason:
+      "Three dynamic SELECTs in the v4 PR-less review guard read the fixed task, latest retained result, and attempt. The trigger\'s own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:

@@ -545,7 +545,7 @@ test("Routing keeps Chat shadow routing and points at where AMUX assignment went
   assert.doesNotMatch(page, /AdminAmuxRoutingPanel/);
   assert.match(page, /<AdminRoutingShadowPanel \/>/);
   assert.match(page, /href="\/admin\/amux-execution\?tab=assignment"/);
-  assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel \/>/);
+  assert.match(readPage("amux-execution"), /<AdminAmuxRoutingPanel focusEscalationId=/);
 });
 
 test("the Execution badge counts the escalations the Assignment section lists and the open halts", () => {
