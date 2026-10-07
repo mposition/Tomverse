@@ -8,6 +8,15 @@ export type AmuxExecutionLane = (typeof AMUX_EXECUTION_LANES)[number];
 export const AMUX_EXECUTION_PAGE_SIZE = 8;
 export const AMUX_EXECUTION_MAX_PAGE = 10_000;
 
+/** A read-only rendering of worker text must expose invisible code points;
+ * JSON escaping also distinguishes an actual control from a literal `\\u`.
+ */
+export const amuxVisibleUntrustedText = (value: string) =>
+  JSON.stringify(value).replace(
+    /[\u007f-\u009f\u2028\u2029\p{Cf}]/gu,
+    (character) => `\\u${character.codePointAt(0)!.toString(16).padStart(4, "0")}`,
+  );
+
 const attention: Prisma.AmuxWorkItemWhereInput = {
   OR: [
     { status: "blocked" },

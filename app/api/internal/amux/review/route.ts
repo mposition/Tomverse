@@ -79,8 +79,8 @@ export async function POST(request: Request) {
         where: { id: action.escalation_id },
         select: { task: { select: { sourceSystem: true } } },
       });
-    if (reviewSource?.task.sourceSystem === "admin-idea-v4" &&
-        getAdminRole(session) !== "owner") {
+    if (getAdminRole(session) !== "owner" &&
+        (!reviewSource || reviewSource.task.sourceSystem === "admin-idea-v4")) {
       return NextResponse.json({ error: "Not found." },
         { status: 404, headers: noStore });
     }

@@ -6,6 +6,7 @@ import {
   AMUX_REVIEW_PROPOSAL_TTL_MS,
   amuxReviewApprovalReadiness,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewProposalExpiry,
   amuxReviewRequestDigest,
@@ -147,10 +148,12 @@ test("v4 review digest binds private evidence without changing legacy review dig
 test("a PR-less v4 non-code result may be approved only with verified full evidence", () => {
   const base = { sourceSystem: "admin-idea-v4", cardType: "task",
     taskRole: "design", reviewPrNumber: null,
-    artifactAvailable: false, v4EvidenceVerified: true, displayTruncated: false };
+    artifactAvailable: false, v4EvidenceVerified: true,
+    displayTruncated: false, displayExact: true };
   assert.equal(amuxReviewApprovalHasEvidence(base), true);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, v4EvidenceVerified: false }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayTruncated: true }), false);
+  assert.equal(amuxReviewApprovalHasEvidence({ ...base, displayExact: false }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement" }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: "implement",
     reviewPrNumber: 123, artifactAvailable: true,
@@ -159,6 +162,14 @@ test("a PR-less v4 non-code result may be approved only with verified full evide
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, cardType: "story" }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, taskRole: null }), false);
   assert.equal(amuxReviewApprovalHasEvidence({ ...base, sourceSystem: "legacy" }), false);
+});
+
+test("v4 approval is closed when the owner display would hide source characters", () => {
+  assert.equal(amuxReviewDisplayIsExact("plain Korean 한국어"), true);
+  for (const hidden of ["x\u202ey", "x\u200by", "x\u0001y", "x\r\ny",
+    "e\u0301", "x\ud800y"]) {
+    assert.equal(amuxReviewDisplayIsExact(hidden), false);
+  }
 });
 
 test("v4 completion evidence is tied to the exact card revision and latest retained attempt", () => {

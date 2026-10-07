@@ -6,8 +6,8 @@ import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
-  AMUX_REVIEW_DISPLAY_MAX_BYTES,
   amuxReviewApprovalHasEvidence,
+  amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
@@ -15,6 +15,7 @@ import {
   amuxV22ReviewRetryHasVerifiedOutcome,
   amuxV4ReviewEvidenceMatches,
   sha256Hex,
+  safeReviewDisplayText,
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
@@ -77,23 +78,6 @@ async function v4EvidenceForEscalation(escalationId: string):
 
 const refuse = (code: string, status = 409): never => {
   throw new AmuxReviewRefusal(code, status);
-};
-
-/** Privileged display only. Keep task prose apart from immutable PR identity. */
-const safeReviewDisplayText = (value: string | null) => {
-  if (value === null) return null;
-  const cleaned = value.normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
-    .replace(/\r\n?/gu, "\n");
-  let text = "";
-  let bytes = 0;
-  for (const character of cleaned) {
-    const size = Buffer.byteLength(character, "utf8");
-    if (bytes + size > AMUX_REVIEW_DISPLAY_MAX_BYTES) break;
-    text += character;
-    bytes += size;
-  }
-  return text;
 };
 
 const dbNow = async (tx: Client) => {
@@ -209,10 +193,15 @@ async function snapshot(
     evidence: fetchedV4, result: latestV4Result, attempt: lastAttempt,
   });
   const description = v4ContentValid && fetchedV4 ? fetchedV4.description : task.description;
+  const reviewTitle = v4ContentValid && fetchedV4 ? fetchedV4.title : task.title;
   // Ingress allows 50,000 Unicode characters, not 50,000 UTF-8 bytes. The
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
   const displayTruncated = amuxReviewTextExceedsDisplay(description);
+  // A v4 approval must bind exactly the text the owner can inspect. A control
+  // character, bidi override, or normalization change is not silently hidden.
+  const displayExact = amuxReviewDisplayIsExact(reviewTitle) &&
+    amuxReviewDisplayIsExact(description);
   const safe = escalation.status === "open" || escalation.status === "acknowledged";
   const baseEligible = safe && task.archivedAt === null &&
     (task.status === "review" || task.status === "blocked") &&
@@ -223,7 +212,8 @@ async function snapshot(
       cardType: task.cardType, taskRole: task.taskRole,
       reviewPrNumber: task.reviewPrNumber,
       artifactAvailable: artifact !== null,
-      v4EvidenceVerified: v4Valid, displayTruncated })) outcomes.push("approve");
+      v4EvidenceVerified: v4Valid, displayTruncated,
+      displayExact })) outcomes.push("approve");
     outcomes.push("block");
   }
   if (baseEligible && task.status === "blocked") {
@@ -246,7 +236,7 @@ async function snapshot(
     task_id: task.id,
     task_revision: task.revision,
     task_status: task.status === "review" ? "review" : "blocked",
-    title: v4ContentValid && fetchedV4 ? fetchedV4.title : task.title,
+    title: reviewTitle,
     description,
     due_parse_state: task.dueParseState,
     due_at: task.dueAt?.toISOString() ?? null,
@@ -273,7 +263,7 @@ async function snapshot(
   const digest = amuxReviewSubjectDigest(subject);
   const text = `Task ID: ${task.id}\nRevision: ${task.revision}\nEscalation ID: ${escalation.id}`;
   const context = {
-    title: safeReviewDisplayText(v4ContentValid && fetchedV4 ? fetchedV4.title : task.title),
+    title: safeReviewDisplayText(reviewTitle),
     description: safeReviewDisplayText(description),
     result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
     escalation_reason: reason,

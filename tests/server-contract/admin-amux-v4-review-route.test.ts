@@ -8,6 +8,7 @@ const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let role = "operator";
 let recent = false;
 let reviewReads = 0;
+let reviewSourceExists = true;
 
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => ({ user: { id: "admin" } }),
@@ -41,12 +42,12 @@ mock.module(mod("lib/adminAudit.ts"), { namedExports: {
 } });
 mock.module(mod("lib/prisma.ts"), { namedExports: {
   prisma: {
-    amuxHumanEscalation: { findUnique: async () => ({
+    amuxHumanEscalation: { findUnique: async () => reviewSourceExists ? ({
       task: { sourceSystem: "admin-idea-v4" },
-    }) },
-    amuxReviewProposal: { findUnique: async () => ({
+    }) : null },
+    amuxReviewProposal: { findUnique: async () => reviewSourceExists ? ({
       task: { sourceSystem: "admin-idea-v4" },
-    }) },
+    }) : null },
   },
 } });
 mock.module(mod("lib/amux/reviewApproval.ts"), { namedExports: {
@@ -74,9 +75,15 @@ test("v4 review detail, decision lookup and acknowledgement are owner-only", asy
   const lookup = { action: "decision_status", decision_id:
     "9fbe32e2-2f47-4a77-84fb-faa64e20609e", subject_digest: "a".repeat(64) };
   const ack = { action: "acknowledge", escalation_id: detail.escalation_id };
-  assert.equal((await POST(request(detail))).status, 404);
-  assert.equal((await POST(request(lookup))).status, 404);
-  assert.equal((await POST(request(ack))).status, 404);
+  for (const command of [detail, lookup, ack]) {
+    const existing = await POST(request(command));
+    reviewSourceExists = false;
+    const absent = await POST(request(command));
+    reviewSourceExists = true;
+    assert.equal(existing.status, 404);
+    assert.equal(absent.status, 404);
+    assert.deepEqual(await existing.json(), await absent.json());
+  }
   assert.equal(reviewReads, 0);
   role = "owner";
   assert.equal((await POST(request(ack))).status, 428);

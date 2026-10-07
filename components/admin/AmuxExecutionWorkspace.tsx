@@ -9,6 +9,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAmuxExecutionMessages } from "@/lib/adminMessages/amuxExecution";
 import {
   AMUX_EXECUTION_VISIBLE_LANES,
+  amuxVisibleUntrustedText,
   type AmuxExecutionLane,
 } from "@/lib/amux/adminExecutionViewCore";
 
@@ -348,8 +349,9 @@ export function AmuxExecutionWorkspace() {
             <p>{date(selected.result.createdAt)} · {selected.result.attemptId}</p>
             {selected.result.sha256 && <p className="break-all font-mono text-xs">
               SHA-256: {selected.result.sha256}</p>}
+            <p className="text-xs text-zinc-500">{m.resultEncoding}</p>
             <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded border p-2">
-              {selected.result.text}</pre>
+              {amuxVisibleUntrustedText(selected.result.text)}</pre>
             {selected.result.patch?.state === "available" && <p className="break-all font-mono text-xs">
               {m.patchEvidence}: {selected.result.patch.baseSha} · {selected.result.patch.sha256}
             </p>}

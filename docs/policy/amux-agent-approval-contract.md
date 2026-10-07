@@ -85,7 +85,9 @@ v1.4의 **좁은 예외**는 `sourceSystem=admin-idea-v4`, `cardType=task`,
 제목·범위·실행 brief의 검증된 digest와 마지막 성공 attempt의 보존된 결과 본문
 SHA-256을 운영자에게 보여 주고 검토 대상 digest에 포함한다. 결과가 삭제됐거나
 복호화·digest 검증에 실패하거나 마지막 attempt/assignment와 다르면 `approve`를
-닫는다. DB의 제안 INSERT guard도 PR 없는 승인에 대해 이 출처·역할·결과 존재·
+닫는다. 화면의 제어·방향 문자 제거 또는 Unicode 정규화 때문에 원문과 표시 문구가
+달라지는 경우에도 `approve`를 닫아, 보이지 않는 원문에 동의한 것으로 처리하지
+않는다. DB의 제안 INSERT guard도 PR 없는 승인에 대해 이 출처·역할·결과 존재·
 attempt 결속을 확인한다. 기존 카드와 v4 `implement` Task의 PR 필수 계약은 그대로다.
 PR 없는 완료 판정은 외부 게시·병합·배포 승인이 아니며, 운영자가 작업별 완료
 조건과 독립 검증 근거를 직접 판단한다.

@@ -8,6 +8,25 @@ export const amuxReviewTextExceedsDisplay = (value: string | null) =>
   value !== null &&
   Buffer.byteLength(value.normalize("NFC"), "utf8") > AMUX_REVIEW_DISPLAY_MAX_BYTES;
 
+export const safeReviewDisplayText = (value: string | null) => {
+  if (value === null) return null;
+  const cleaned = value.normalize("NFC")
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu, "")
+    .replace(/\r\n?/gu, "\n");
+  let text = "";
+  let bytes = 0;
+  for (const character of cleaned) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > AMUX_REVIEW_DISPLAY_MAX_BYTES) break;
+    text += character;
+    bytes += size;
+  }
+  return text;
+};
+
+export const amuxReviewDisplayIsExact = (value: string | null) =>
+  safeReviewDisplayText(value) === value;
+
 export const isAmuxAgentApprovalEnabled = (value: string | undefined) =>
   value === "true";
 
@@ -57,9 +76,10 @@ export const amuxReviewApprovalHasEvidence = (input: {
   sourceSystem: string | null; cardType: string | null;
   taskRole: string | null; reviewPrNumber: number | null;
   artifactAvailable: boolean; v4EvidenceVerified: boolean;
-  displayTruncated: boolean;
+  displayTruncated: boolean; displayExact: boolean;
 }) => !input.displayTruncated && (input.sourceSystem === "admin-idea-v4" ?
-  input.cardType === "task" && (input.reviewPrNumber !== null ?
+  input.cardType === "task" && input.displayExact &&
+    (input.reviewPrNumber !== null ?
     input.artifactAvailable :
     input.v4EvidenceVerified &&
       ["design", "test", "review", "verify", "investigate", "operate"]

@@ -5,7 +5,7 @@ import test from "node:test";
 import {
   AMUX_EXECUTION_LANES, AMUX_EXECUTION_VISIBLE_LANES,
   amuxExecutionLaneWhere, parseAmuxExecutionLane,
-  parseAmuxExecutionPage,
+  parseAmuxExecutionPage, amuxVisibleUntrustedText,
 } from "../lib/amux/adminExecutionViewCore.ts";
 
 test("six board lanes and archive are separate projections", () => {
@@ -26,6 +26,13 @@ test("six board lanes and archive are separate projections", () => {
   assert.equal(JSON.stringify(amuxExecutionLaneWhere("in_review")).includes('"status":"review"'), true);
   assert.deepEqual(amuxExecutionLaneWhere("archive").OR[1].AND[2],
     { status: { in: ["done", "cancelled"] } });
+});
+
+test("worker text renders controls visibly without conflating literal escapes", () => {
+  assert.notEqual(amuxVisibleUntrustedText("x\u202ey"),
+    amuxVisibleUntrustedText("x\\u202ey"));
+  assert.match(amuxVisibleUntrustedText("x\u202ey"), /\\u202e/);
+  assert.match(amuxVisibleUntrustedText("x\u0001y"), /\\u0001/);
 });
 
 test("execution UI reads the same DB through bounded owner-only read routes", async () => {

@@ -363,7 +363,8 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
         orderBy: { createdAt: "desc" as const }, take: 10,
         select: { id: true, reason: true, status: true, createdAt: true } },
       portfolioScoreSnapshots: { orderBy: { computedAt: "desc" as const },
-        take: 1, select: { scoreTotal: true, components: true,
+        take: 1, select: { taskRevision: true,
+          scoreTotal: true, components: true,
           evidenceAsOf: true, activeStaleAt: true, baselineStaleAt: true } },
       engineeringAgentRuns: { orderBy: { startedAt: "desc" as const },
         take: 10, select: { id: true, baseSha: true, status: true,
@@ -449,7 +450,8 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       createdAt: item.createdAt.toISOString() })),
     score: card.portfolioScoreSnapshots[0] ? {
       ...card.portfolioScoreSnapshots[0],
-      activeFresh: card.portfolioScoreSnapshots[0].activeStaleAt.getTime() >
+      activeFresh: card.portfolioScoreSnapshots[0].taskRevision ===
+        card.revision && card.portfolioScoreSnapshots[0].activeStaleAt.getTime() >
         new Date().getTime(),
       evidenceAsOf: card.portfolioScoreSnapshots[0].evidenceAsOf.toISOString(),
       activeStaleAt: card.portfolioScoreSnapshots[0].activeStaleAt.toISOString(),
