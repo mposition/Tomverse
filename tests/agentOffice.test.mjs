@@ -1079,6 +1079,8 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   for (const locale of ["en", "ko"]) {
     assert.doesNotMatch(adminAgentOfficeMessages[locale].real.amux.more(2), /page|화면/);
   }
+  assert.equal(adminAgentOfficeMessages.en.real.amux.more(1), "1 more worker not drawn here");
+  assert.equal(adminAgentOfficeMessages.en.real.amux.more(3), "3 more workers not drawn here");
   assert.equal(view([]).note, copy.noWorkers);
 
   const unread = amuxRoomView({ kind: "unread" }, readAt, 12, copy);
