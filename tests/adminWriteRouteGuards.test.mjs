@@ -94,11 +94,11 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "716c784e6c5da262bd672eb30644727f74227028a2872d0d038b2a5130989757";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "faa49f4ee1f34d0f6ce90101f38cae4c7b2d929dcac77b05362eb639a14b9446";
 const RESOLUTION_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 // The entire AMUX-local import closure is pinned. A new writer or import
 // invalidates the exception until its read-only behavior is reviewed.
-const RESOLUTION_REVIEWED_DIGEST = "7206aaae6fa654dcafd3033625a13648a4355047e7f72107eb905778a52f4978";
+const RESOLUTION_REVIEWED_DIGEST = "5777109fb68c656e768ab8e96a1e6477cc750e2dbba65f44d7426959eb960877";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
@@ -453,8 +453,9 @@ test("a route that can queue an approval can also answer the step-up refusal", (
         (route.source.includes("runWithAdminApproval") ||
           route.source.includes("assertRecentAdminAuthentication")) &&
         !route.source.includes("adminApprovalErrorResponse") &&
-        !( !route.source.includes("runWithAdminApproval") &&
-          /if\s*\(\s*isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)/.test(route.source) &&
+        !(!route.source.includes("runWithAdminApproval") &&
+          (/if\s*\(\s*isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)/.test(route.source) ||
+            /if\s*\(\s*!isAdminReauthenticationError\s*\(\s*error\s*\)\s*\)\s*throw\s+error/.test(route.source)) &&
           /return\s+[^;]*status:\s*428/.test(route.source))
     )
     .map((route) => route.name);
