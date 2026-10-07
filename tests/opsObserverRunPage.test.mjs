@@ -235,3 +235,62 @@ test("what the run sends is what the routes' own parsers accept", async () => {
   assert.equal(parsed.value.reservation.items[0].kind, "new_open");
   assert.equal(parseOpsObserverRequest("confirm", JSON.stringify(confirm.body), at).ok, true);
 });
+
+test("every message of one incident names how it began: a worsening or recovery after a reopen is a reopen", async () => {
+  const { incidentOrigin } = await import("../scripts/ops-observer/advance-request-core.mjs");
+  const ownerDate = "2026-10-08";
+  const observations = Object.fromEntries(S2_PAGE_KEYS.map((key) => [key, "unknown"]));
+  const budget = { reservedToday: [], channelCheckTaken: false };
+  const reservedKinds = (prev, observation) =>
+    planAdvance({ state: { keys: { ...initial(), [P3]: prev }, budget }, observations: { ...observations, [P3]: observation },
+      nowMs: START, ownerDate }).reservation?.items.map((item) => [item.kind, item.origin]);
+
+  // Reopened two hours after a recovery: the opening, a worsening and the recovery are all "reopen".
+  const reopenedAt = START - 3_600_000;
+  const reopened = { status: "open", streak: 0, openedAt: reopenedAt, lastBand: "delayed", recoveredAt: reopenedAt - 7_200_000,
+    newOpenOwnerDate: "2026-10-07" };
+  assert.equal(incidentOrigin(reopened), "reopen");
+  assert.deepEqual(reservedKinds(reopened, "stuck"), [["worsening", "reopen"]]);
+  assert.deepEqual(reservedKinds({ ...reopened, streak: 1 }, "ok"), [["recovery", "reopen"]]);
+  // Opened a day and more after its last recovery, or never recovered: "new" throughout.
+  const fresh = { ...reopened, recoveredAt: reopenedAt - 25 * 3_600_000 };
+  assert.equal(incidentOrigin(fresh), "new");
+  assert.deepEqual(reservedKinds(fresh, "stuck"), [["worsening", "new"]]);
+  assert.deepEqual(reservedKinds({ ...fresh, recoveredAt: null, streak: 1 }, "ok"), [["recovery", "new"]]);
+});
+
+test("an unusable permitted answer, a 409 and an unlisted string are logged as closed enums", async () => {
+  const base = {
+    "/api/health": [200, {}],
+    "/api/internal/ops-snapshot": [200, snapshot({ reconciliationStuck: true })],
+    "/api/internal/ops-observer/state": [200, trusted()],
+  };
+  // A permitted reservation whose id the link cannot carry: no crash, no confirm, no heartbeat.
+  const bad = fakeFetch({ ...base,
+    "/api/internal/ops-observer/advance": [200, { result: "advanced", sendPermitted: true, deliveryId: "NOT-A-UUID", heartbeatWithheld: false, generation: 5 }] });
+  const unusable = await run(bad);
+  assert.deepEqual([unusable.exitCode, unusable.outcome], [1, "delivery_unusable"]);
+  assert.equal(bad.paths().at(-1), "/api/internal/ops-observer/advance");
+
+  // A 409 on the state and on the confirm is the deadline.
+  const lateState = fakeFetch({ ...base, "/api/internal/ops-observer/state": [409, { error: "late" }] });
+  assert.equal((await run(lateState)).outcome, "late");
+  const lateConfirm = fakeFetch({ ...base,
+    "/api/internal/ops-observer/advance": [200, { result: "advanced", sendPermitted: true, deliveryId: DELIVERY, heartbeatWithheld: false, generation: 5 }],
+    "/api/internal/ops-observer/confirm": [409, { error: "late" }] });
+  assert.equal((await run(lateConfirm)).outcome, "late");
+
+  // Strings from the app reach the log only as known enums.
+  const odd = fakeFetch({ ...base,
+    "/api/internal/ops-observer/state": [200, { trust: "rm -rf <script>" }],
+  });
+  const oddRun = await run(odd);
+  assert.equal(JSON.parse(oddRun.lines[0]).reason, "state_unavailable");
+  const oddAdvance = fakeFetch({ ...base, "/api/internal/ops-observer/advance": [200, { result: "<injected>" }] });
+  assert.equal(JSON.parse((await run(oddAdvance)).lines[0]).result, "unknown");
+  const oddConfirm = fakeFetch({ ...base,
+    "/api/internal/ops-observer/advance": [200, { result: "advanced", sendPermitted: true, deliveryId: DELIVERY, heartbeatWithheld: false, generation: 5 }],
+    "/api/internal/ops-observer/confirm": [200, { result: "<injected>" }] });
+  const confirmRun = await run(oddConfirm);
+  assert.deepEqual([confirmRun.outcome, JSON.parse(confirmRun.lines[0]).result], ["confirm_refused", "unknown"]);
+});

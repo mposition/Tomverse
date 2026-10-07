@@ -91,6 +91,19 @@ export function owedMessage(signal, prev, next, ownerDate) {
 }
 
 /**
+ * How the incident an open key state belongs to began: "reopen" when it
+ * opened inside the reopen window after the key's last recovery, else "new".
+ * An open key keeps that recovery time unchanged until it recovers again, so
+ * every message of one incident -- its opening, a worsening, its recovery
+ * (read from the open state before it) -- names the same origin. With the
+ * owner's fixed UTC+10 zone (decision T-1) a same-date reopen is always inside
+ * the window, so the time rule is the whole rule.
+ */
+export function incidentOrigin(openState) {
+  return openState.recoveredAt !== null && openState.openedAt - openState.recoveredAt < REOPEN_WINDOW_MS ? "reopen" : "new";
+}
+
+/**
  * Every message the move from `previousKeys` to `nextKeys` owes, one per key at
  * most, as { signal, scope, kind, openedAt(ms) }.
  */

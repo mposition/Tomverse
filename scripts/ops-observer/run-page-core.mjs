@@ -27,12 +27,22 @@
 // No request is retried. Logs are one JSON line per run with enums and counts
 // only: no URL, no secret, no key state, no response body.
 
-import { owedMessages } from "./advance-request-core.mjs";
+import { incidentOrigin, owedMessages } from "./advance-request-core.mjs";
 import { S2_PAGE_SIGNALS, evaluateKey } from "./classify-core.mjs";
-import { checkNotification, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
+import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, renderPageMessage } from "./content-guard-core.mjs";
 import { observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
+import { TRUST_REASONS } from "./trust-check-core.mjs";
+
+/** The store's advance and confirm answers; anything else is logged as unknown. */
+const ADVANCE_RESULTS = Object.freeze(["advanced", "noop", "conflict", "replayed", "rejected", "reservation_not_owed",
+  "channel_check_taken", "untrusted"]);
+const CONFIRM_RESULTS = Object.freeze(["confirmed", "shadowed", "replayed", "abandoned", "not_found", "untrusted"]);
+
+/** A response string as a closed enum: a 409 is the deadline, an unlisted value is unknown. */
+const asEnum = (answer, field, allowed) =>
+  answer.status === 409 ? "late" : allowed.includes(answer.json?.[field]) ? answer.json[field] : "unknown";
 
 /** The owner's time zone (decision T-1): UTC+10 all year, no daylight saving. */
 export const OWNER_TIME_ZONE = "Australia/Brisbane";
@@ -81,7 +91,9 @@ export function planAdvance({ state, observations, nowMs, ownerDate, channelChec
           signal: item.signal,
           scope: item.scope,
           kind: item.kind,
-          origin: item.kind === "reopen" ? "reopen" : "new",
+          // How the incident began, from its open state: the key now for an
+          // opening or a worsening, the key before the move for a recovery.
+          origin: incidentOrigin(item.kind === "recovery" ? state.keys[item.key] : keys[item.key]),
           openedAt: item.openedAt,
         })),
       }
@@ -163,8 +175,9 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
   // 3. The state. Only trusted goes on.
   const state = await request("/api/internal/ops-observer/state", { body: { runDeadline, ownerDate } });
   if (state.late) return finish(1, "late");
+  if (state.status === 409) return finish(1, "late");
   if (state.status !== 200 || !isTrustedState(state.json)) {
-    const reason = typeof state.json?.trust === "string" ? state.json.trust : state.status === 409 ? "late" : "state_unavailable";
+    const reason = TRUST_REASONS.includes(state.json?.trust) ? state.json.trust : "state_unavailable";
     return finish(1, "untrusted", { reason });
   }
   record.mode = state.json.mode;
@@ -187,13 +200,17 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
   });
   if (advance.late) return finish(1, "late");
   const result = advance.json?.result;
+  if (advance.status === 409) return finish(1, "late");
   if (advance.status !== 200 || (result !== "advanced" && result !== "noop")) {
-    return finish(1, "advance_refused", { result: typeof result === "string" ? result : advance.status === 409 ? "late" : "unknown" });
+    return finish(1, "advance_refused", { result: asEnum(advance, "result", ADVANCE_RESULTS) });
   }
 
   // 6. The reservation, if this answer carries one.
   if (result === "advanced" && advance.json.sendPermitted === true) {
     const deliveryId = advance.json.deliveryId;
+    // A permitted answer with no reservation planned, or an id the link
+    // cannot carry, is not one this run can act on.
+    if (!plan.reservation || !isCanonicalItemId(deliveryId)) return finish(1, "delivery_unusable");
     const message =
       plan.reservation.items.length > 0
         ? renderPageMessage({ itemId: deliveryId, withChannelCheck: plan.reservation.channelCheck })
@@ -208,8 +225,9 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
     }
     const confirm = await request("/api/internal/ops-observer/confirm", { body: { runDeadline, deliveryId, runId } });
     if (confirm.late) return finish(1, "late");
+    if (confirm.status === 409) return finish(1, "late");
     if (confirm.status !== 200 || confirm.json?.result !== "shadowed") {
-      return finish(1, "confirm_refused", { result: typeof confirm.json?.result === "string" ? confirm.json.result : "unknown" });
+      return finish(1, "confirm_refused", { result: asEnum(confirm, "result", CONFIRM_RESULTS) });
     }
     record.shadowed = true;
   }
