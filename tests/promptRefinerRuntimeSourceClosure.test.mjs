@@ -435,12 +435,14 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
 // accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
 // added; count 228 and the position-free inventory are unchanged.
+// 2026-10-07, A12 merge: the A09/A12 notes and shared audit-helper lines
+// move source positions only; count 228 and position-free digest stay fixed.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "b54dd59167e4632884856b77d4833544",
-  "dafc98b23fa60f8094801870e0abe6eb",
+  "ff62b964a957fa4719b0dfff49e34e5b",
+  "3050e68adcbb0f3af5ec996d1af9600a",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

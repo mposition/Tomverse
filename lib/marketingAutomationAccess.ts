@@ -539,11 +539,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * receiver's staging test still needs both signals to say staging, and dev
  * resolves to dev, so dev never reaches the shadow writer; descriptor and
  * admission decisions are unchanged. Prior evidence is stale.
- * A09 adds closed AMUX audit actors in the same imported helper closure.
+ * 2026-10-07: A09 adds closed AMUX audit actors in the same imported helper closure.
  * The receiver's admission and write path are unchanged.
+ * 2026-10-07: A12 portfolio and promotion work extends the watched schema
+ * and shared audit helper. The receiver's own admission stays unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "09b47d334398bb402088c00d187a479b20a0c8c56e52901b015edeb5e53f9dd8";
+  "f98304520e0a1496bb9b1ef078a443856edba6cdcc2e70c32b6aac79ecedb489";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
