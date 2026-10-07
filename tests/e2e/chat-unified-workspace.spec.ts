@@ -1038,11 +1038,26 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
     await chooseConversation(page, SECOND_CONVERSATION);
     await expect.poll(state.draftHydrateStarted).toBe(true);
-    await page.waitForTimeout(1_200);
 
-    const reads = state.draftRequests().filter(({ method }) => method === "GET");
-    expect(reads.filter(({ scopeKey }) => scopeKey === CONVERSATION)).toHaveLength(1);
-    expect(reads.filter(({ scopeKey }) => scopeKey === SECOND_CONVERSATION)).toHaveLength(1);
+    // Counted from the moment the switch has taken effect. The poll above is
+    // true only once a GET with no planned failure reached the fixture's hold,
+    // and in this test that is the new scope's own read.
+    //
+    // Asserting one read in total instead made this depend on the switch
+    // beating the one-second first retry that the failure armed
+    // (components/chat/useConversationDrafts.ts: 1_000 * 2 ** 0). On mobile the
+    // switch opens the drawer and waits for it before clicking the item, so it
+    // lost that race most nights while the product was behaving correctly: a
+    // retry that fires while the user is still in that conversation is not a
+    // retry that survived leaving it, and leaving is what this forbids.
+    const readsFor = (scopeKey: string) => state.draftRequests().filter(
+      (entry) => entry.method === "GET" && entry.scopeKey === scopeKey
+    ).length;
+    const readsWhenLeft = readsFor(CONVERSATION);
+    expect(readsFor(SECOND_CONVERSATION)).toBe(1);
+    await page.waitForTimeout(1_200);
+    expect(readsFor(CONVERSATION)).toBe(readsWhenLeft);
+    expect(readsFor(SECOND_CONVERSATION)).toBe(1);
     state.releaseDraftHydrate();
   });
 
@@ -1057,10 +1072,20 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
 
     await chooseConversation(page, SECOND_CONVERSATION);
+    // Same race as the hydration test above, and counted the same way: the new
+    // scope's own hydrate read is the signal that the switch has taken effect,
+    // and the question is whether a write for the scope that was left arrives
+    // after that. The persistence retry is armed on the same one-second first
+    // delay, so a total of one write was a bet on the drawer being faster.
+    await expect.poll(() => state.draftRequests().some(
+      (entry) => entry.method === "GET" && entry.scopeKey === SECOND_CONVERSATION
+    )).toBe(true);
+    const writesFor = (scopeKey: string) => state.draftRequests().filter(
+      (entry) => entry.method === "PUT" && entry.scopeKey === scopeKey
+    ).length;
+    const writesWhenLeft = writesFor(CONVERSATION);
     await page.waitForTimeout(1_200);
-    expect(state.draftRequests().filter(
-      ({ method, scopeKey }) => method === "PUT" && scopeKey === CONVERSATION
-    )).toHaveLength(1);
+    expect(writesFor(CONVERSATION)).toBe(writesWhenLeft);
   });
 
   test("a transport failure followed by a revision conflict clears the stale failure banner", async ({ page }) => {
