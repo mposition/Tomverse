@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 // Pure constants; nothing here is behind a module mock.
 import { REFUND_REQUEST_METADATA_KEY } from "@/lib/refundSagaCore";
+import { resetTestFixture } from "./resetTestFixture";
 
 // The administrator refund decision route, driven end to end against a real
 // PostgreSQL.
@@ -202,7 +203,7 @@ before(async () => {
 });
 
 const resetRefundData = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "AdminAuditLog",
       "NotificationDelivery",
