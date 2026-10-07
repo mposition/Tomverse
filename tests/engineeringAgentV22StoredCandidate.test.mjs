@@ -13,7 +13,7 @@ const patch = { text: "diff --git a/file.ts b/file.ts\n",
   sha256: "b".repeat(64), baseSha: snapshot.baseSha };
 const candidate = { ok: true, baseRootTreeId: "d".repeat(40),
   expectedTreeId: "c".repeat(40),
-  changes: [], baseTree: [] };
+  changes: [], baseTree: [], baseCommitterDate: "1791336934 +1000" };
 const tier = { tier: "T2", findings: [{
   reason: "slice_analysis_failed", path: null }] };
 

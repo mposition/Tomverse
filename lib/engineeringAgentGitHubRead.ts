@@ -273,7 +273,7 @@ export async function readEngineeringAgentGitBlob(oid: string,
  * commit SHA; neither its tree listing nor a caller-provided URL is trusted. */
 export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   deps: Deps = {}): Promise<{ base: TreeEntry[]; rootTreeId: string;
-    baseGitattributes: string | null }> {
+    baseGitattributes: string | null; baseCommitterDate: string | null }> {
   if (!SHA.test(baseSha)) throw new EngineeringAgentGitHubReadError("invalid_input");
   const resolved = withDefaults(deps);
   if (await readEngineeringAgentDevelopHead(deps) !== baseSha)
@@ -284,6 +284,16 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   if (commit?.sha !== baseSha || typeof rootTreeId !== "string" ||
       !SHA.test(rootTreeId))
     throw new EngineeringAgentGitHubReadError("invalid_response");
+  // GitHub normalizes the JSON committer date to UTC. A verified commit's
+  // signed payload retains the exact Git timestamp and zone needed for the
+  // Publisher's deterministic commit object. Without it, publication stays
+  // private rather than inventing a timezone.
+  const verification = record(commit?.verification);
+  const payload = verification?.verified === true &&
+    typeof verification.payload === "string" ? verification.payload : null;
+  const baseCommitterDate = payload?.startsWith(`tree ${rootTreeId}\n`) ?
+    /^committer [^\r\n]+ <[^<>\r\n]+> (\d{1,12} [+-]\d{4})$/m.exec(
+      payload)?.[1] ?? null : null;
   const tree = record(await githubJson(`/git/trees/${rootTreeId}?recursive=1`,
     resolved, MAX_TREE_JSON_BYTES));
   if (!tree || tree.sha !== rootTreeId || tree.truncated !== false ||
@@ -314,7 +324,8 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
       baseGitattributes = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     } finally { bytes.fill(0); }
   }
-  return { base, rootTreeId, baseGitattributes };
+  return { base, rootTreeId, baseGitattributes,
+    baseCommitterDate };
 }
 
 /**

@@ -19,7 +19,7 @@ const livePorts: Ports = {
 type VerifiedCandidate = ReturnType<typeof verifyEngineeringAgentV22SparseCandidate>;
 type LoadedCandidate =
   (Extract<VerifiedCandidate, { ok: true }> & { baseRootTreeId: string;
-    baseTree: Base["base"] }) |
+    baseTree: Base["base"]; baseCommitterDate: string | null }) |
   Extract<VerifiedCandidate, { ok: false }>;
 
 /** Read only the old blobs named by a sparse v22 patch. GitHub is pinned to
@@ -50,6 +50,7 @@ export async function loadEngineeringAgentV22Candidate(input: {
       files: input.files, baseBlobs: bytes,
     });
     return verified.ok ? { ...verified,
-      baseRootTreeId: pinned.rootTreeId, baseTree: pinned.base } : verified;
+      baseRootTreeId: pinned.rootTreeId, baseTree: pinned.base,
+      baseCommitterDate: pinned.baseCommitterDate } : verified;
   } finally { for (const value of bytes.values()) value.fill(0); }
 }

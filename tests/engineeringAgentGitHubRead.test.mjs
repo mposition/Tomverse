@@ -66,7 +66,10 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
     .update(treeBody).digest("hex");
   const routes = {
     "/commits/develop": () => ({ sha: PIN }),
-    [`/git/commits/${PIN}`]: () => ({ sha: PIN, tree: { sha: treeId } }),
+    [`/git/commits/${PIN}`]: () => ({ sha: PIN, tree: { sha: treeId },
+      verification: { verified: true, payload:
+        `tree ${treeId}\ncommitter GitHub <noreply@github.com> 1791336934 +1000\n\nmessage\n` },
+    }),
     [`/git/trees/${treeId}`]: () => ({ sha: treeId, truncated: false,
       tree: [{ path: "safe.txt", type: "blob", mode: "100644",
         sha: blobId }] }),
@@ -74,8 +77,16 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
   const { fetchImpl, seen } = fakeFetch(routes);
   assert.deepEqual(await readEngineeringAgentPinnedBaseTree(PIN, { env, fetchImpl }),
     { base: [{ path: "safe.txt", type: "blob", mode: "100644",
-      oid: blobId }], rootTreeId: treeId, baseGitattributes: null });
+      oid: blobId }], rootTreeId: treeId, baseGitattributes: null,
+      baseCommitterDate: "1791336934 +1000" });
   assert.ok(seen.every((call) => call.init.method === "GET"));
+  const unsigned = await readEngineeringAgentPinnedBaseTree(PIN, { env,
+    fetchImpl: fakeFetch({ ...routes,
+      [`/git/commits/${PIN}`]: () => ({ sha: PIN,
+        tree: { sha: treeId }, verification: { verified: false,
+          payload: null } }),
+    }).fetchImpl });
+  assert.equal(unsigned.baseCommitterDate, null);
   await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN, { env,
     fetchImpl: fakeFetch({ ...routes,
       [`/git/trees/${treeId}`]: () => ({ sha: treeId, truncated: true,
