@@ -55,10 +55,12 @@ const AgentLayer = memo(function AgentLayer({
           data-agent-id={agent.id}
           style={
             {
-              "--hair": agent.hair,
-              "--shirt": agent.shirt,
-              "--accent": agent.accent,
-              "--skin": agent.skin,
+              // Sprite-only names: a theme token set here (--accent) would be
+              // shadowed for the badge, name tag and ring drawn inside it.
+              "--cloth-hair": agent.hair,
+              "--cloth-shirt": agent.shirt,
+              "--cloth-accent": agent.accent,
+              "--cloth-skin": agent.skin,
             } as CSSProperties
           }
         >

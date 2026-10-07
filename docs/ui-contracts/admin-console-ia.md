@@ -124,7 +124,10 @@ and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
 draws its own tab strip, as the original did, and those tabs are links, so
 moving between them keeps the panel and its demo day mounted and brings a
 fresh reading of the LIVE rooms. The console shell owns the page's `h1`, so
-the office's own titles are `h2`s.
+the office's own titles are `h2`s. It wears the console's colours rather than
+the original's pink: role tokens for text, line, surface, the primary blue and
+the room states, set for light and for dark so it follows the console's
+theme; the AI Review gradient is not among them.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to
