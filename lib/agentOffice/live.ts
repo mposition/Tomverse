@@ -6,8 +6,8 @@
  * tests share the one mapping from a state to what a room says.
  *
  * Product research is the first such room. What the office shows of it is the
- * agent's operating state -- the app switch, whether today's run was recorded,
- * when the last success was, whether it has gone silent -- and never what it
+ * agent's operating state -- the app switch, whether its latest scheduled run
+ * was recorded, when the last success was, whether it has gone silent -- and never what it
  * observed: docs/policy/product-research-agent.md §4 gives its observations
  * one place to be read, its own section, and §8 keeps issue titles there.
  */

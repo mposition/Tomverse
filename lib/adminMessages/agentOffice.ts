@@ -378,8 +378,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       dialogLabel: "Digest desk briefing",
       dateLine: (clock: string, name: string) => `${clock} · final briefing from ${name}`,
       title: "Operator, today's work is wrapped up.",
-      done: (count: number) => `Done: ${count} rooms`,
-      attention: (count: number) => `Needs a look: ${count} rooms — a real record has a problem`,
+      done: (count: number) => `Done: ${count} ${count === 1 ? "room" : "rooms"}`,
+      attention: (count: number) =>
+        `Needs a look: ${count} ${count === 1 ? "room" : "rooms"} — a real record has a problem`,
       approved: "One decision applied — the T2 draft went to the publisher",
       blocked: (count: number) => `Waiting on a link: ${count} teams — they need a record screen first`,
       decisionLabel: "What you decide today",
@@ -430,7 +431,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefPhase: (phase: string, done: number) => `${phase} in progress — ${done} teams done`,
       briefApprovalNeeded: "A T2 draft needs your decision",
       briefNoApproval: "Nothing waiting for a decision",
-      briefAttention: (count: number) => `${count} real records need a look`,
+      briefAttention: (count: number) =>
+        count === 1 ? "1 real record needs a look" : `${count} real records need a look`,
       briefBlocked: "Some teams are waiting on a record screen",
       decisionLabel: "The one thing you decide today",
       decisionPending: "Decide whether this T2 draft may become a pull request.",
@@ -532,8 +534,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefWalk: "Every report is in. Heading to the operator.",
       briefSay: "Operator, there's nothing left to decide today.",
       briefOperator: "Thanks, everyone ✨",
-      briefLog: (done: number, blocked: number) =>
-        `Digest desk briefing done — ${done} teams done · ${blocked} waiting on a link`,
+      briefLog: (done: number, attention: number, blocked: number) =>
+        `Digest desk briefing done — ${done} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link`,
       dayOver: "Demo day over. Staff are heading to the lounge.",
       deptStarted: (room: string, label: string) => `${room} started — ${label}`,
       deptDone: (room: string, report: string) => `${room} done — ${report}`,
@@ -562,7 +564,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       statusMeeting: (title: string) => `Meeting in progress — ${title}`,
       statusGap: "A hand-off between steps is in progress. The next team starts shortly.",
       statusCounts: (done: number, attention: number, blocked: number, onDuty: number) =>
-        `${done} rooms done · ${attention} need a look · ${blocked} waiting on a link · ${onDuty} on duty.`,
+        `${done} ${done === 1 ? "room" : "rooms"} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link · ${onDuty} on duty.`,
       statusNext: (phase: string) => `Next up: “${phase}”.`,
       delayApproval: (names: string, seconds: number) =>
         `One cause: your decision. ${names} have been waiting in the approval room for ${seconds}s.`,
@@ -1131,8 +1133,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefWalk: "전사 보고 취합했어요. 운영자님께 갑니다.",
       briefSay: "운영자님, 오늘 결정할 건 이제 없어요.",
       briefOperator: "고생했어요 ✨",
-      briefLog: (done: number, blocked: number) =>
-        `다이제스트실 최종 브리핑 완료 — 완료 ${done}팀 · 연동 대기 ${blocked}팀`,
+      briefLog: (done: number, attention: number, blocked: number) =>
+        `다이제스트실 최종 브리핑 완료 — 완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀`,
       dayOver: "데모 하루 종료. 직원들이 라운지로 이동합니다.",
       deptStarted: (room: string, label: string) => `${room} 업무 시작 — ${label}`,
       deptDone: (room: string, report: string) => `${room} 완료 — ${report}`,

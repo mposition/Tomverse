@@ -446,6 +446,11 @@ export class AgentOffice {
   }
 
   say(agent: Agent, text: string, dur = 2.6, kind: "talk" | "think" = "talk") {
+    // A live room's staff say the record's line or nothing: beside a LIVE
+    // chip, a greeting, a cheer or a passing thought would read as the
+    // agent's own finding. One gate here rather than one at every caller.
+    const live = this.live[agent.deptId];
+    if (live && text !== live.line) return;
     agent.speech = text;
     agent.speechKind = kind;
     agent.speechFor = dur;
@@ -503,8 +508,7 @@ export class AgentOffice {
         agent,
         { k: "status", s: "commuting" },
         { k: "wait", dur: Math.random() * 6 },
-        // A live room's staff say nothing the record did not say.
-        { k: "fn", fn: () => (this.live[agent.deptId] ? undefined : this.say(agent, rand(s.greetings), 2.4)) },
+        { k: "fn", fn: () => this.say(agent, rand(s.greetings), 2.4) },
         { k: "walk", to: agent.home },
         { k: "face", dir: "up" },
         { k: "anim", a: "sit" },
@@ -674,7 +678,7 @@ export class AgentOffice {
     this.briefingReady = true;
     this.onBriefing?.();
     const stats = this.snapshot().stats;
-    this.pushLog("📋", s.briefLog(stats.done, stats.blocked), "pink");
+    this.pushLog("📋", s.briefLog(stats.done, stats.attention, stats.blocked), "pink");
     yield 3;
     this.stand(narrator);
     this.sitAtDesk(narrator);
@@ -687,6 +691,8 @@ export class AgentOffice {
     this.pushLog("🎀", s.dayOver, "yellow");
 
     for (const agent of workers) {
+      // A live room's staff stay at their desks; the demo's day is not theirs.
+      if (this.live[agent.deptId]) continue;
       if (Math.random() < 0.45) {
         this.stand(agent);
         this.goto(agent, rand(LOUNGE_ROOM.loiter), "onBreak");

@@ -409,6 +409,21 @@ test("a live room is never simulated: no scripted work, and its status is the re
     return office.dayComplete;
   });
   assert.equal(worked, false, "the research room was given scripted work");
+  // ...and the orders that make everyone speak or move do not reach it either.
+  for (let i = 0; i < 2000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  office.command("Thank you, everyone");
+  office.command("Everyone back to your desks");
+  office.command("Call a meeting with every team");
+  for (let i = 0; i < 4000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  for (const agent of office.agents) {
+    if (agent.deptId === "research") assert.notEqual(agent.status, "onBreak", agent.id);
+  }
   assert.deepEqual(
     [...spoken].filter((line) => line !== live.research.line),
     [],
@@ -453,6 +468,12 @@ test("the office reads the research agent's state, never its content, and writes
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.match(copy.sim.briefLog(5, 1, 4), locale === "en" ? /1 needs a look/ : /확인 필요 1개/);
+  }
+  assert.equal(adminAgentOfficeMessages.en.dashboard.briefAttention(1), "1 real record needs a look");
+  assert.match(adminAgentOfficeMessages.en.briefing.attention(1), /1 room —/);
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.doesNotMatch(panel, /stats\.approval \+ snap\.stats\.attention/);
   assert.match(panel, /m\.dashboard\.metricAttention/);
