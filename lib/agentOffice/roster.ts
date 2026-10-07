@@ -61,7 +61,7 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/qa-release-agent.md",
     recordHref: "/admin/agent-digests?tab=qa-release",
   },
-  { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: null },
+  { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: "/admin/sre-ops" },
   { id: "support", icon: "🎧", policy: "docs/policy/support-triage.md", recordHref: null },
   {
     id: "marketing",
@@ -69,7 +69,12 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/marketing-automation.md",
     recordHref: "/admin/marketing",
   },
-  { id: "finance", icon: "🧾", policy: "docs/policy/billing-finance-ops.md", recordHref: null },
+  {
+    id: "finance",
+    icon: "🧾",
+    policy: "docs/policy/billing-finance-ops.md",
+    recordHref: "/admin/agent-digests?tab=billing-finance-ops",
+  },
   // Its policy is not on develop yet, so there is no path to name.
   { id: "trust", icon: "🛡️", policy: null, recordHref: null },
   {
