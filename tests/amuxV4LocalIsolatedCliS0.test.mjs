@@ -160,8 +160,9 @@ test("nonzero fake CLI is diagnosed without reading its stderr", {
 test("deadline kills a fake CLI inside the bwrap process tree", {
   // GitHub-hosted Node may live outside /usr/bin and bwrap is not installed
   // there; the dedicated Ubuntu S0 exercises this exact sandbox path.
-  skip: process.platform !== "linux" || !existsSync("/usr/bin/node") ||
-    !existsSync("/usr/bin/bwrap"),
+  skip: process.platform !== "linux" ? "Linux sandbox only" :
+    !existsSync("/usr/bin/node") || !existsSync("/usr/bin/bwrap") ?
+      "requires the dedicated Ubuntu S0 image" : false,
 }, async () => {
   const directory = await mkdtemp("/tmp/amux-v4-socket-");
   const socketPath = join(directory, "proxy.sock");
