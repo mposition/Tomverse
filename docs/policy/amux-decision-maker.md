@@ -140,9 +140,12 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
   `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*`, `*secret*`, `*credential*`, `.npmrc`, `.netrc`,
   `.pgpass`이고 바꾸면 정책 버전이 바뀐다. 남은 파일 전체를 기존 secret 검사 규칙으로 검사해 걸린 파일을
   뺀다. 파일당 256 KiB·합계 2 MiB를 넘으면 §3-7로 운영자다. 무엇을 뺐는지는 건수와 사유만 기록한다.
-- **허용 저장소:** v1 허용 목록은 `github.com/mposition/Tomverse` 하나다. 비교할 저장소 식별자는 worker가
-  적거나 바꿀 수 있는 값이 아니라, 로컬 AMUX가 그 worker 세션에 등록한 worktree의 `origin` remote에서
-  유도한다(scheme·사용자 정보·`.git` 접미사를 떼고 host는 소문자). 목록 밖 저장소의 질문은 카드만 보낸다.
+- **허용 저장소:** v1 허용 목록은 `github.com/mposition/Tomverse` 하나다. worker는 같은 계정에서 `origin`
+  같은 로컬 Git 설정을 바꿀 수 있으므로, 저장소 판정에 remote 설정이나 worker가 적은 값을 쓰지 않는다. 판정은
+  **내용**으로 한다. HEAD 이력의 root commit이 정확히 하나이고, 그것이 정책 버전에 고정한 이 저장소의 root
+  commit SHA와 같아야 한다. 이 검사와 스냅샷 읽기는 replace 객체·graft를 끈 Git(`GIT_NO_REPLACE_OBJECTS=1`)으로
+  하며, shallow 이력은 root를 증명하지 못하므로 거절이다. 통과하지 못한 질문은 카드만 보낸다. 통과한 저장소의
+  파일은 공개 저장소의 commit에서 온 것이거나 그 worker가 자기 브랜치에 쓴 것이다.
 - **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드도 스냅샷도 DM 공급사로 가는 회수할 수 없는 새
   전송이다(§11). 그 승인 전에는 DM 프로세스를 시작하지 않는다.
 - **실행 계정:** DM 프로세스는 worker 계정과 다른 권한 없는 Linux 계정에서 돈다. 두 CLI 로그인만 있고
@@ -212,13 +215,14 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 
 - 요청은 (카드 id, 질문 revision)당 하나다. 같은 질문이 다시 와도 새 요청을 만들지 않는다.
 - **결속 값:** 카드 id와 질문 revision, 묻는 worker id, AMUX 세션 id와 그 세션의 시도 번호, 저장소
-  remote와 HEAD commit, 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
+  root commit 판정 결과와 HEAD commit, 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
   용어 목록·경로 분류·scanner 버전. 요청이 닫혔거나 결속 값이 하나라도 바뀐 요청에 도착한 결과는 거절을
   기록한다.
 - **DB 시계 마감:** 요청 행은 DB 시계로 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)을 갖는다. 배정과
   결과 수신을 쓰는 트랜잭션은 오케스트레이션 정책 v19의 `AmuxCommitDeadline` 장치를 쓴다. 그 트랜잭션의
   fence가 기한 D(해당 마감에서 commit 예비시간 200 ms를 뺀 값)를 남기고, `DEFERRABLE INITIALLY DEFERRED`
-  constraint trigger가 COMMIT의 검사 시점에 DB 시계가 D에 닿았으면 트랜잭션 전체를 거부한다. 그래서
+  constraint trigger가 COMMIT의 검사 시점에 DB 시계가 D에 닿았으면(`clock_timestamp() >= D`, migration
+  `20260929200000_amux_commit_deadline_check`) 트랜잭션 전체를 거부한다. 그래서
   **검사 시점에 마감을 넘긴 결과는 DB가 제안으로 기록하지 않는다.** 검사 뒤의 commit record 기록·flush는
   이 장치 밖이며 commit 예비시간이 그 구간을 위해 있다. 이 정책은 durable 완료 시각을 보장한다고 쓰지
   않는다. 운영자 확정은 결과 마감에 묶이지 않고 요청의 열림 상태와 결속 값에만 묶인다.
@@ -303,7 +307,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 테스트, 용어 목록·`resolution`·카드 secret 검사 라우팅 테스트, 검사 시점에 마감을 넘긴 COMMIT 거부 DB
 테스트, 요청당 종결 결과 1개 테스트, 직접 답과 확정 답이 함께 와도 하나만 전달된다는 로컬 테스트, 모델이 쓴
 문장이 카드에 가지 않는다는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
-금지 플래그를 거부한다는 테스트, 읽기 전용 모드·DM 계정 격리의 S0 증거, 스냅샷의 허용 저장소·비밀 제외
+금지 플래그를 거부한다는 테스트, 읽기 전용 모드·DM 계정 격리의 S0 증거, 스냅샷의 허용 저장소(root commit 불일치·replace 객체·shallow 이력 거절)·비밀 제외
 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
 
 ## 13. 이 정책이 하지 않는 것
