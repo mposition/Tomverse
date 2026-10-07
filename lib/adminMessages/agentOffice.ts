@@ -571,7 +571,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noWorkers: "The worker catalog has no active worker",
         summary: (connected: number, total: number, busy: number, attention: number) =>
           `${connected}/${total} connected · ${busy} busy · ${attention} need a look`,
-        more: (count: number) => `${count} more on the AMUX execution page`,
+        more: (count: number) => `${count} more workers not drawn here`,
         heartbeat: (time: string) => `last heartbeat ${time}`,
         noHeartbeat: "no heartbeat recorded",
         readAt: (time: string) => `read ${time}`,
@@ -1268,7 +1268,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noWorkers: "worker 카탈로그에 활성 worker가 없음",
         summary: (connected: number, total: number, busy: number, attention: number) =>
           `연결 ${connected}/${total} · 작업 중 ${busy} · 확인 필요 ${attention}`,
-        more: (count: number) => `AMUX 실행 화면에 worker ${count}개 더`,
+        more: (count: number) => `여기 그리지 못한 worker ${count}개`,
         heartbeat: (time: string) => `마지막 heartbeat ${time}`,
         noHeartbeat: "heartbeat 기록 없음",
         readAt: (time: string) => `읽은 시각 ${time}`,

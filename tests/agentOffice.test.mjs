@@ -1072,8 +1072,13 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   // room says in words how many are not.
   const crowded = view([worker("a", "ready"), worker("b", "busy"), worker("c", "error")], 1);
   assert.equal(crowded.workers[0].name, "c");
-  assert.equal(crowded.note, "AMUX 실행 화면에 worker 2개 더");
-  assert.match(crowded.summary, /AMUX 실행 화면에 worker 2개 더/);
+  assert.equal(crowded.note, "여기 그리지 못한 worker 2개");
+  assert.match(crowded.summary, /여기 그리지 못한 worker 2개/);
+  // It says the workers are not drawn, not where else they are: one not
+  // running has no runtime row for any other screen to list.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].real.amux.more(2), /page|화면/);
+  }
   assert.equal(view([]).note, copy.noWorkers);
 
   const unread = amuxRoomView({ kind: "unread" }, readAt, 12, copy);
@@ -1110,7 +1115,7 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   assert.doesNotMatch(amux, /amuxWorkItem|amuxExecutionAttempt|amuxRouteDecision|title|process\.env/);
   assert.ok(
     amux.indexOf("now: new Date()") > amux.indexOf("await prisma"),
-    "the lease is judged against a clock taken before the read"
+    "the lease must be judged against a clock taken after the read"
   );
   assert.match(amux, /read: "amux_workers"/);
 
