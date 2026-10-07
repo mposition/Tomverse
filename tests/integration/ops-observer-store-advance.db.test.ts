@@ -95,7 +95,7 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
     assert.equal((await read()).trust, "trusted");
 
     await t.test("an advance writes the state, its audit entry and its ledger row together, and reads as trusted", async () => {
-      assert.deepEqual(await advance(0, withStreak(1)), { result: "advanced", sendPermitted: false, heartbeatWithheld: false, generation: 1 });
+      assert.deepEqual(await advance(0, withStreak(1)), { result: "advanced", sendPermitted: false, deliveryId: null, heartbeatWithheld: false, generation: 1 });
       assert.deepEqual(await counts(), { generation: 1, ledger: 1, audits: 1 });
       const second = await advance(1, withStreak(2));
       assert.equal(second.result, "advanced");
@@ -112,14 +112,13 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
       assert.equal((await read()).trust, "trusted");
     });
 
-    await t.test("a stale base, an untrusted chain or a reservation writes nothing", async () => {
+    await t.test("a stale base or an untrusted chain writes nothing", async () => {
       const before = await counts();
       assert.deepEqual(await advance(3, withStreak(1)), { result: "conflict", sendPermitted: false });
       assert.deepEqual(await advanceOpsObserverState(
         { runDeadline: inSeconds(150), runId: "run-x", baseGenesisId: randomUUID(), baseGeneration: before.generation, keys: initial, reservation: null },
         client,
       ), { result: "conflict", sendPermitted: false });
-      assert.deepEqual(await advance(before.generation, initial, { reservation: { items: [] } }), { result: "reservation_unsupported", sendPermitted: false });
       process.env.ADMIN_AUDIT_INTEGRITY_KEY = "another-integrity-key-0123456789abcdef";
       try {
         assert.deepEqual(await advance(before.generation, initial), { result: "untrusted", trust: "audit_unverified", sendPermitted: false });
@@ -149,7 +148,7 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
       const { rows: keyRows } = await q(`SELECT keys FROM "OpsObserverState" WHERE "genesisId" = $1`, [genesisId]);
       // Same keys: the abandon alone is a change and is recorded.
       const result = await advance(before.generation, keyRows[0].keys);
-      assert.deepEqual(result, { result: "advanced", sendPermitted: false, heartbeatWithheld: true, generation: before.generation + 1 });
+      assert.deepEqual(result, { result: "advanced", sendPermitted: false, deliveryId: null, heartbeatWithheld: true, generation: before.generation + 1 });
       const { rows } = await q(`SELECT status FROM "OpsObserverDelivery" WHERE id = $1`, [deliveryId]);
       assert.equal(rows[0].status, "abandoned");
       const audit = await q(`SELECT metadata FROM "AdminAuditLog" WHERE action = 'ops_observer.state_advanced'
@@ -196,7 +195,7 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
       assert.equal((await read()).trust, "trusted");
 
       const result = await advance(0, withStreak(1), { baseGenesisId: recoveryId });
-      assert.deepEqual(result, { result: "advanced", sendPermitted: false, heartbeatWithheld: true, generation: 1 });
+      assert.deepEqual(result, { result: "advanced", sendPermitted: false, deliveryId: null, heartbeatWithheld: true, generation: 1 });
       const { rows } = await q(`SELECT status FROM "OpsObserverDelivery" WHERE id = $1`, [leftOpen]);
       assert.equal(rows[0].status, "abandoned");
     });
