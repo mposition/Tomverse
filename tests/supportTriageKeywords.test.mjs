@@ -30,6 +30,41 @@ test("the corpus covers every flag, every lane and every locale", () => {
   for (const locale of KEYWORD_LOCALES) assert.ok(prefixes.has(locale), locale);
 });
 
+test("every term of every locale raises its flag inside a sentence", () => {
+  for (const flag of core.KEYWORD_FLAGS) {
+    for (const locale of KEYWORD_LOCALES) {
+      for (const term of SUPPORT_TRIAGE_KEYWORDS[flag][locale]) {
+        assert.ok(keywordFlagsIn(`Hello. ${term}. Thanks`).includes(flag), `${flag} ${locale} ${term}`);
+      }
+    }
+  }
+});
+
+test("spacing, inflections and inserted words that previously slipped through", () => {
+  const cases = [
+    ["요즘 죽고싶어요", ["self_harm_threat"]],
+    ["살기싫어요 정말", ["self_harm_threat"]],
+    ["계정삭제 해주세요", ["account_privacy"]],
+    ["请删除我的账号", ["account_privacy"]],
+    ["請刪除我的帳號", ["account_privacy"]],
+    ["Mein Rechtsanwalt meldet sich", ["legal"]],
+    ["Lesen Sie Ihre Datenschutzerklärung", ["account_privacy"]],
+    ["They sued another company", ["legal"]],
+    ["Our lawyers are reviewing this", ["legal"]],
+    ["This content is copyrighted", ["legal"]],
+    ["Tengo dos pagos duplicados", ["money"]],
+    ["I will press charges", ["legal"]],
+    ["I was in charge of the team", []],
+    ["Thanks for the courtesy", []],
+    ["There is an issue here", []],
+  ];
+  for (const [text, flags] of cases) assert.deepEqual(keywordFlagsIn(text), flags, text);
+});
+
+test("money and the trust and safety flags partition the flags exactly", () => {
+  assert.deepEqual(["money", ...core.TRUST_SAFETY_FLAGS].sort(), [...core.KEYWORD_FLAGS].sort());
+});
+
 test("every flag has a list in every locale, and the flags are the core's", () => {
   assert.deepEqual(Object.keys(SUPPORT_TRIAGE_KEYWORDS).sort(), [...core.KEYWORD_FLAGS].sort());
   for (const flag of core.KEYWORD_FLAGS) {
