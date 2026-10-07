@@ -69,11 +69,11 @@ import type { EngineeringAgentMode, WriteResultOutcome } from "@/lib/engineering
 import { prisma } from "@/lib/prisma";
 
 /**
- * Version 12 of the orchestration policy ships this false. Turning it on is a
- * separate version of that policy; the engineering operating mode must also
- * allow the write.
+ * Version 12 of the orchestration policy shipped this false; version 25 turns
+ * it on. A call still reaches AMUX only while the execution API gate is open
+ * and the engineering operating mode is not off.
  */
-export const ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH = false;
+export const ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH = true;
 
 /** The one AMUX worker this adapter speaks for (policy §8). */
 export const ENGINEERING_AGENT_AMUX_WORKER = "engineering-runner";

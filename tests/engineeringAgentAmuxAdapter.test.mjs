@@ -11,6 +11,7 @@ import {
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
+import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
 import {
   ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
@@ -44,8 +45,9 @@ import {
 // the round-5 review fixes that sit beside it.
 
 test("the adapter ships closed, and opens only with its latch, the execution API and a mode that is not off", () => {
-  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, false, "version 12 ships the latch off");
-  assert.equal(isEngineeringAgentAmuxAdapterOpen(), false);
+  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, true, "version 25 turns the latch on");
+  // With the latch on, the fast check is exactly the execution API gate.
+  assert.equal(isEngineeringAgentAmuxAdapterOpen(), isAmuxExecutionApiEnabled());
   for (const mode of ["shadow", "t1"]) {
     assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
     assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
