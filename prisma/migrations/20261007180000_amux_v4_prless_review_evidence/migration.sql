@@ -1,5 +1,6 @@
 -- v1.4: permit only a v4 non-code Task's retained result to substitute for
 -- GitHub PR evidence. Existing PR approvals retain their exact SHA contract.
+-- baseline-check: present-if-function "amux_review_v4_prless_source_guard"
 CREATE FUNCTION amux_review_v4_prless_source_guard()
 RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp AS $$
