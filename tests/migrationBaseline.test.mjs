@@ -384,10 +384,18 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
  * asked the question before the merge, so the fourth one would have cost
  * another blocked deploy.
  *
- * What this sweep asks, and only this: a migration that creates a function, a
- * trigger or a partial index, and nothing `schema.prisma` can express, must
- * carry exactly one valid presence declaration. Those are the objects a
- * declaration can probe, so a refusal there is fixable.
+ * What this sweep asks: a migration that creates a function, a trigger, or an
+ * index `schema.prisma` cannot express, and nothing it can, must carry exactly
+ * one valid presence declaration.
+ *
+ * **An index counts as described only when its key list is plain.** A partial
+ * index (`WHERE`) and an expression index (`lower("c")`) are both invisible to
+ * the diff, and `present-if-relation` can probe either, so both need a
+ * declaration. The first draft of this sweep read any index without `WHERE` as
+ * described, which let an expression-index-only migration through undeclared --
+ * the exact class the sweep exists to catch. Anything the key-list test cannot
+ * recognise is treated as not described, because a needless declaration costs a
+ * comment line and a missing one costs a blocked deploy.
  *
  * What it deliberately does not ask. A migration that only adds a CHECK
  * constraint, or only writes rows, is equally invisible to the diff and would
@@ -397,10 +405,16 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
  */
 
 /**
- * Migrations that predate the declaration (2026-10-02) and are already applied.
- * Editing a header changes the file Prisma recorded a checksum for, so they are
- * exempt by their history, not by their content. The list only shrinks: a new
- * migration has not been applied anywhere and can simply declare.
+ * Migrations that were already applied before this sweep existed. Editing a
+ * header changes the file Prisma recorded a checksum for, so they are exempt by
+ * their history, not by their content. Five predate the declaration itself
+ * (2026-10-02); 20261003060000 is later but was applied to staging before this
+ * sweep, which is the same reason.
+ *
+ * The set only shrinks. A new migration is dated after the threshold below and
+ * has been applied nowhere, so it can simply declare. Replacing one entry with
+ * another past migration is caught by the sweep itself: the entry that left the
+ * set is still undeclared, so the sweep then names it.
  */
 const PRESENCE_SWEEP_EXEMPT = new Set([
   "20260814140000_attempt_terminal_states",
@@ -408,20 +422,55 @@ const PRESENCE_SWEEP_EXEMPT = new Set([
   "20260918090000_admin_audit_log_append_only",
   "20260920190000_prompt_refiner_shadow_execution_runner",
   "20260923120000_marketing_autonomous_scheduled_insert",
-  // Applied on staging before the sweep existed; still pending on production,
-  // where it rides a release whose other migrations the diff does see.
   "20261003060000_ops_observer_transaction_arm",
 ]);
 
-/** Comment lines carry prose about DDL; only statements are evidence of it. */
+/** No migration newer than the sweep may be exempted. */
+const PRESENCE_SWEEP_EXEMPT_BEFORE = "20261003130000";
+
+/**
+ * Only statements are evidence of DDL. Header prose explains it, a block
+ * comment can quote it, and a trailing comment can sit beside it; none of the
+ * three is a statement. Removing text can only make a migration look less
+ * described, which is the safe direction: it asks for a declaration rather than
+ * skipping one.
+ */
 const statementsOf = (sql) =>
   sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
     .split(/\r?\n/)
-    .filter((line) => !line.trim().startsWith("--"))
+    .map((line) => line.replace(/--.*$/, ""))
     .join("\n");
 
 const indexStatementsIn = (statements) =>
   [...statements.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?;/gi)].map((m) => m[0]);
+
+/** A comma-separated list of column names, optionally sorted. Nothing else. */
+const PLAIN_KEY_LIST =
+  /^\(\s*(?:"?[A-Za-z_][A-Za-z0-9_]*"?(?:\s+(?:ASC|DESC))?)(?:\s*,\s*"?[A-Za-z_][A-Za-z0-9_]*"?(?:\s+(?:ASC|DESC))?)*\s*\)$/i;
+
+/** Whether schema.prisma can express this index, so the diff would compare it. */
+const indexIsDescribed = (statement) => {
+  const afterOn = /\bON\b[\s\S]*?(\([\s\S]*)/i.exec(statement);
+  if (!afterOn) return false;
+  const rest = afterOn[1];
+  let depth = 0;
+  let end = -1;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === "(") depth += 1;
+    else if (rest[i] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return false;
+  const keys = rest.slice(0, end + 1).replace(/\s+/g, " ").trim();
+  if (!PLAIN_KEY_LIST.test(keys)) return false;
+  return !/\b(?:WHERE|INCLUDE)\b/i.test(rest.slice(end + 1));
+};
 
 /** The DDL `prisma migrate diff` compares, because schema.prisma expresses it. */
 const DIFF_VISIBLE = [
@@ -446,12 +495,12 @@ const needsDeclaration = (sql) => {
   const indexes = indexStatementsIn(statements);
   const visible =
     DIFF_VISIBLE.some((pattern) => pattern.test(statements)) ||
-    indexes.some((statement) => !/\bWHERE\b/i.test(statement));
+    indexes.some(indexIsDescribed);
   if (visible) return false;
   return (
     /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i.test(statements) ||
     /CREATE\s+(?:CONSTRAINT\s+)?TRIGGER/i.test(statements) ||
-    indexes.some((statement) => /\bWHERE\b/i.test(statement))
+    indexes.some((statement) => !indexIsDescribed(statement))
   );
 };
 
@@ -484,44 +533,62 @@ test("every migration the diff cannot see declares a presence probe", async () =
   );
 });
 
-test("the sweep's exemptions only shrink, and each one predates the sweep", () => {
-  // A new migration has not been applied anywhere, so it can declare instead of
-  // being exempted. Freezing the set is what keeps that true.
-  assert.equal(PRESENCE_SWEEP_EXEMPT.size, 6);
+test("the sweep's exemptions only shrink, and none is newer than the sweep", () => {
+  // Deleting an entry is the intended edit, so the count is a ceiling and not an
+  // equality: an earlier draft pinned it at the current size and would have
+  // failed the very shrink this set is supposed to allow.
+  assert.ok(
+    PRESENCE_SWEEP_EXEMPT.size <= 6,
+    `the exemption set may only shrink, found ${PRESENCE_SWEEP_EXEMPT.size}`,
+  );
   for (const name of PRESENCE_SWEEP_EXEMPT) {
     assert.ok(
       migrationNames().includes(name),
       `exempt migration ${name} no longer exists; remove it from the set`,
     );
     assert.ok(
-      name < "20261003130000",
-      `${name} is not older than the declaration feature; it must declare`,
+      name < PRESENCE_SWEEP_EXEMPT_BEFORE,
+      `${name} is not older than the sweep; it must declare instead`,
     );
   }
 });
 
 test("the detector reads statements, not the prose around them", () => {
+  const fn = `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;\n`;
   // A header that explains a CREATE TABLE elsewhere must not count as one.
-  assert.equal(
-    needsDeclaration(`-- This replaces the CREATE TABLE in the baseline.
-CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
-`),
-    true,
-  );
+  assert.equal(needsDeclaration(`-- This replaces the CREATE TABLE in the baseline.\n${fn}`), true);
+  // Nor may a block comment or a trailing comment quoting the same DDL.
+  assert.equal(needsDeclaration(`/* once a CREATE TABLE lived here */\n${fn}`), true);
+  assert.equal(needsDeclaration(`${fn.trimEnd()} -- replaces an ADD COLUMN\n`), true);
   // A migration that also adds a column is visible to the diff on its own.
+  assert.equal(needsDeclaration(`ALTER TABLE "T" ADD COLUMN "c" text;\n${fn}`), false);
+});
+
+test("only an index schema.prisma can express counts as described", () => {
+  // Plain key lists are in schema.prisma, so the diff compares them.
+  assert.equal(needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c");\n`), false);
   assert.equal(
-    needsDeclaration(`ALTER TABLE "T" ADD COLUMN "c" text;
-CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;
-`),
+    needsDeclaration(`CREATE INDEX "T_a_b_idx" ON "T"("a" ASC, "b" DESC);\n`),
     false,
   );
-  // An ordinary index is in schema.prisma; a partial one is not.
-  assert.equal(needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c");\n`), false);
+  // Partial and expression indexes are not, and a probe can answer for both.
   assert.equal(
     needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c") WHERE "k" = 'x';\n`),
     true,
   );
-  // Out of scope by decision: no declaration could prove either one absent.
+  assert.equal(
+    needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"(lower("c"));\n`),
+    true,
+  );
+  assert.equal(
+    needsDeclaration(`CREATE INDEX "T_c_idx" ON "T"("c") INCLUDE ("d");\n`),
+    true,
+  );
+});
+
+test("the classes no declaration could answer for stay out of scope", () => {
+  // Both are invisible to the diff and both would be refused, but nothing a
+  // declaration can name proves either absent.
   assert.equal(needsDeclaration(`UPDATE "T" SET "c" = 'x';\n`), false);
   assert.equal(
     needsDeclaration(`ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" <> '');\n`),
