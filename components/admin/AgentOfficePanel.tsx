@@ -863,32 +863,32 @@ function DashboardView({
       </header>
 
       <section className={cx("summary-grid")}>
-        <article className={cx("metric yellow")}>
+        <article className={cx("metric staff")}>
           <span>{m.dashboard.metricStaff}</span>
           <strong>{engine.staff.length}</strong>
           <small>{m.dashboard.stampStaff}</small>
         </article>
-        <article className={cx("metric mint")}>
+        <article className={cx("metric done")}>
           <span>{m.dashboard.metricDone}</span>
           <strong>{snap.stats.done}</strong>
           <small>{m.dashboard.stampDone}</small>
         </article>
-        <article className={cx("metric pink")}>
+        <article className={cx("metric working")}>
           <span>{m.dashboard.metricWorking}</span>
           <strong>{snap.stats.working}</strong>
           <small>{m.dashboard.stampWorking}</small>
         </article>
-        <article className={cx("metric lav")}>
+        <article className={cx("metric approval")}>
           <span>{m.dashboard.metricApproval}</span>
           <strong>{snap.stats.approval}</strong>
           <small>{m.dashboard.stampApproval}</small>
         </article>
-        <article className={cx("metric pink")}>
+        <article className={cx("metric attention")}>
           <span>{m.dashboard.metricAttention}</span>
           <strong>{snap.stats.attention}</strong>
           <small>{m.dashboard.stampAttention}</small>
         </article>
-        <article className={cx("metric white")}>
+        <article className={cx("metric blocked")}>
           <span>{m.dashboard.metricBlocked}</span>
           <strong>{snap.stats.blocked}</strong>
           <small>{m.dashboard.stampBlocked}</small>
