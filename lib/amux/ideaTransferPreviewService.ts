@@ -413,7 +413,9 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       payloadCiphertext: Uint8Array.from(sealed.ciphertext), payloadKeyId: sealed.keyId,
       payloadKeyVersion: sealed.keyVersion, payloadDigest: sealed.digest,
       payloadDigestKeyId: sealed.digestKeyId, expiresAt,
-      payloadPurgeAfter: expiresAt,
+      // A consumed page may supply references to the next bounded page.
+      // Unused previews are retired at expiresAt by the purge worker.
+      payloadPurgeAfter: new Date(idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000),
     } });
     const updated = await tx.amuxIdeaAnalysisChunk.updateMany({
       where: { ideaId: idea.id, chunkIndex, actorUserId,

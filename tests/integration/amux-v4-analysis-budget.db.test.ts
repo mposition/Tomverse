@@ -784,7 +784,7 @@ test("seventeen idea-only cards remain three bounded pages without an idea-wide 
   assert.equal(first.freeformPurgeAfter?.getTime(),
     idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
   assert.equal(preview.payloadPurgeAfter?.getTime(),
-    first.analysisCompletedAt?.getTime());
+    idea.analysisDeadlineAt.getTime() + 24 * 60 * 60_000);
   assert.equal(units.length, 11);
   assert.equal(await prisma.amuxWorkItem.count({ where: {
     sourceSystem: "admin-idea-v4", sourceKey: claim.ideaId,
@@ -1258,6 +1258,10 @@ test("a complete first result saves independent encrypted units and closes only 
   }), /rollback synthetic payload tamper/);
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 0);
 
+  // A claim made before preview expiry may finish after the original purge
+  // eligibility time. The in-flight body remains protected until settlement.
+  await prisma.amuxIdeaTransferPreview.update({ where: { id: previewId },
+    data: { payloadPurgeAfter: new Date(Date.now() - 1_000) } });
   const saved = await prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, input));
   assert.equal(saved.unitCount, 4);
