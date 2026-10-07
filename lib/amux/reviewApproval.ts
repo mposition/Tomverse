@@ -270,7 +270,8 @@ async function snapshot(
     last_attempt_reason: attemptReason,
     previous_block_reason: previousBlockReason,
   };
-  return { escalation, task, lastAttempt, budget, used, subject, digest, text, context, displayTruncated, outcomes, artifact };
+  return { escalation, task, lastAttempt, budget, used, subject, digest, text,
+    context, displayTruncated, displayExact, outcomes, artifact };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
@@ -278,7 +279,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
     artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
   ]);
   const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
-  const { escalation, task, lastAttempt, used, digest, text, context, displayTruncated, outcomes, artifact } = state;
+  const { escalation, task, lastAttempt, used, digest, text, context,
+    displayTruncated, displayExact, outcomes, artifact } = state;
   return {
     available: true,
     escalation: {
@@ -301,7 +303,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       to_status: lastAttempt.toStatus,
       ended_at: lastAttempt.endedAt?.toISOString() ?? null,
     } : null,
-    review_content: { text, digest, truncated: displayTruncated },
+    review_content: { text, digest, truncated: displayTruncated,
+      display_mismatch: task.sourceSystem === "admin-idea-v4" && !displayExact },
     review_context: context,
     review_artifact: artifact ? {
       pr_number: artifact.prNumber,

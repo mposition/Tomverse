@@ -7,7 +7,7 @@ import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
 import { normalizeAmuxUntrustedReason,
-  publicAmuxEscalationReasonCode } from "./escalation.ts";
+  storedAmuxEscalationReasonCode } from "./escalation.ts";
 import {
   AMUX_EXECUTION_LANES, AMUX_EXECUTION_PAGE_SIZE,
   AMUX_EXECUTION_VISIBLE_LANES,
@@ -361,7 +361,8 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
           settledCostMicrousd: true, costConfirmed: true } },
       humanEscalations: { where: { status: { in: ["open", "acknowledged"] } },
         orderBy: { createdAt: "desc" as const }, take: 10,
-        select: { id: true, reason: true, status: true, createdAt: true } },
+        select: { id: true, reason: true, specialty: true,
+          status: true, createdAt: true } },
       portfolioScoreSnapshots: { orderBy: { computedAt: "desc" as const },
         take: 1, select: { taskRevision: true,
           scoreTotal: true, components: true,
@@ -446,7 +447,7 @@ export async function readAmuxExecutionTaskDetail(taskId: string) {
       reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
       settledCostMicrousd: attempt.settledCostMicrousd?.toString() ?? null })),
     escalations: card.humanEscalations.map((item) => ({ ...item,
-      reason: publicAmuxEscalationReasonCode(card.status),
+      reason: storedAmuxEscalationReasonCode(item.reason, item.specialty),
       createdAt: item.createdAt.toISOString() })),
     score: card.portfolioScoreSnapshots[0] ? {
       ...card.portfolioScoreSnapshots[0],

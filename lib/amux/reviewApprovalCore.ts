@@ -11,8 +11,7 @@ export const amuxReviewTextExceedsDisplay = (value: string | null) =>
 export const safeReviewDisplayText = (value: string | null) => {
   if (value === null) return null;
   const cleaned = value.normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu, "")
-    .replace(/\r\n?/gu, "\n");
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu, "");
   let text = "";
   let bytes = 0;
   for (const character of cleaned) {

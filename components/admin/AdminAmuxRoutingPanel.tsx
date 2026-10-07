@@ -155,7 +155,8 @@ type ReviewDetail = {
     to_status: string;
     ended_at: string | null;
   } | null;
-  review_content: { text: string; digest: string; truncated: boolean } | null;
+  review_content: { text: string; digest: string;
+    truncated: boolean; display_mismatch?: boolean } | null;
   review_context: {
     title: string | null;
     description: string | null;
@@ -874,6 +875,9 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null }: {
                             </p>}
                           {review.review_content?.truncated && (
                             <p className="text-sm font-bold text-amber-200">{m.reviewContentTruncated}</p>
+                          )}
+                          {review.review_content?.display_mismatch && (
+                            <p className="text-sm font-bold text-amber-200">{m.reviewDisplayMismatch}</p>
                           )}
                           <p className="text-sm text-zinc-400">{m.escalationReason}: {review.review_context.escalation_reason}</p>
                           {review.review_context.last_attempt_reason && (
