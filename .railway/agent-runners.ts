@@ -292,6 +292,14 @@ export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
 
 const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 
+/**
+ * The Support Triage Retention service's one variable
+ * (docs/policy/support-triage.md §3): the retention route secret, nothing
+ * else. The same list lib/supportTriageRetentionServiceCore.ts accepts at
+ * start; the IaC test holds the two equal.
+ */
+const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -401,6 +409,18 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     cronSchedule: "0 21 * * *",
     environments: {
       production: OPS_OBSERVER_DIGEST_VARIABLES,
+    },
+  },
+  {
+    // docs/policy/support-triage.md §3, §5: every 30 minutes, whatever the
+    // triage flag says. Applied by the operator at stage P0c.
+    key: "support_triage_retention",
+    service: "Support Triage Retention",
+    startCommand: "node --experimental-strip-types scripts/support-triage-retention-service.mjs",
+    cronSchedule: "*/30 * * * *",
+    environments: {
+      production: SUPPORT_TRIAGE_RETENTION_VARIABLES,
+      staging: SUPPORT_TRIAGE_RETENTION_VARIABLES,
     },
   },
   {

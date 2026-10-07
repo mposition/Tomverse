@@ -467,3 +467,15 @@ test("the orchestrator's restart policy is Railway's default, so it is declared 
   assert.equal(orchestrator.deploy.restartPolicyMaxRetries, null);
   assert.equal(Object.prototype.hasOwnProperty.call(orchestrator.deploy, "restartPolicyType"), true, "null is declared, not left out");
 });
+
+test("the Support Triage Retention service declares exactly the variable its start check accepts, and starts node directly", async () => {
+  const { SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES } = await import("../lib/supportTriageRetentionServiceCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "support_triage_retention");
+  assert.ok(runner);
+  for (const environment of ["production", "staging"]) {
+    assert.deepEqual([...runner.environments[environment]].sort(), [...SUPPORT_TRIAGE_RETENTION_SERVICE_VARIABLES].sort(), environment);
+  }
+  // docs/policy/support-triage.md §3: every 30 minutes.
+  assert.equal(runner.cronSchedule, "*/30 * * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/support-triage-retention-service.mjs");
+});
