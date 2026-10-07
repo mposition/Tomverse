@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { v22PublishCandidateMatches } from
+  "../lib/engineeringAgentV22PublicationDecision.ts";
+
+const publication = { ok: true, runId: "123456789012", taskId: "card-1",
+  baseSha: "a".repeat(40), patchDigest: "b".repeat(64),
+  tier: { tier: "T1" }, candidate: {
+    baseCommitterDate: "1791336934 +1000" } };
+const input = (overrides = {}) => ({ policyVersion: 4,
+  modeAtStart: "t1", runId: publication.runId,
+  taskId: publication.taskId, baseSha: publication.baseSha,
+  patchDigest: publication.patchDigest, publication, ...overrides });
+
+test("v22 publication requires the approved policy and exact locked bindings", () => {
+  assert.equal(v22PublishCandidateMatches(input()), true);
+  for (const changed of [
+    { policyVersion: 3 },
+    { modeAtStart: "shadow" },
+    { runId: "another-run" },
+    { taskId: "another-card" },
+    { baseSha: "c".repeat(40) },
+    { patchDigest: "d".repeat(64) },
+    { publication: null },
+    { publication: { ok: false } },
+    { publication: { ...publication, tier: { tier: "T2" } } },
+    { publication: { ...publication, candidate: {
+      baseCommitterDate: null } } },
+  ]) assert.equal(v22PublishCandidateMatches(input(changed)), false);
+});

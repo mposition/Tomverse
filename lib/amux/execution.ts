@@ -38,12 +38,15 @@ import {
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
-import { v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
+import { ENGINEERING_AGENT_COMMIT_IDENTITY,
+  ENGINEERING_AGENT_POLICY_VERSION,
+  v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
+  issueEngineeringAgentCapability,
   lockEngineeringAgentV22Run,
   openEngineeringAgentWorkItem,
   readEngineeringAgentSwitches,
@@ -59,6 +62,12 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
+import { loadEngineeringAgentV22StoredCandidate } from
+  "@/lib/engineeringAgentV22StoredCandidate";
+import { v22PublishCandidateMatches } from
+  "@/lib/engineeringAgentV22PublicationDecision";
+import { readAmuxV22PublicPrConsent } from
+  "@/lib/amux/v22PublicPrConsent";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -1089,8 +1098,15 @@ export async function settleAmuxV22TaskExecution(input: {
 }) {
   const patch = input.outcome === "succeeded" ?
     await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
+  // Tier work and GitHub reads happen outside the short settlement transaction.
+  // Any missing evidence keeps the result private; it never becomes a worker
+  // assertion that the patch is T1.
+  const publication = patch && amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ?
+    await loadEngineeringAgentV22StoredCandidate(input.attemptId)
+      .catch(() => null) : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
-    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 20 },
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 },
     async (tx, context) => {
       const now = context.dbNow;
       const runtime = await lockRuntime(tx, input.worker);
@@ -1175,15 +1191,49 @@ export async function settleAmuxV22TaskExecution(input: {
           return { settled: false as const,
             reason: "publication_product_conflict" as const };
         if (!product) {
-          const opened = await openEngineeringAgentWorkItem(
-            engineeringAgentTransactionInAmux(context.attachedTransaction), {
+          const publish = v22PublishCandidateMatches({
+            policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+            modeAtStart: run.modeAtStart, runId: run.id,
+            taskId: task.id, baseSha: patch.baseSha,
+            patchDigest: patch.sha256, publication,
+          }) &&
+            amuxV22EngineeringPublicationEnabled(
+              process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+            (await readEngineeringAgentSwitches(tx)).publishAllowed &&
+            await readAmuxV22PublicPrConsent(task.id, tx);
+          const engineeringTx = engineeringAgentTransactionInAmux(
+            context.attachedTransaction);
+          if (publish && publication?.ok &&
+              publication.candidate.baseCommitterDate !== null) {
+            const opened = await openEngineeringAgentWorkItem(engineeringTx, {
+              kind: "publish", causeKey: `publish:${run.id}`,
+              runId: run.id, patchBody: patch.text,
+              patchDigest: patch.sha256, baseSha: patch.baseSha,
+              expectedTreeId: publication.candidate.expectedTreeId,
+            });
+            await issueEngineeringAgentCapability(engineeringTx, {
+              workItemId: opened.workItemId,
+              capability: { baseSha: patch.baseSha,
+                patchDigest: patch.sha256,
+                expectedTreeId: publication.candidate.expectedTreeId,
+                commit: { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
+                  baseCommitterDate:
+                    publication.candidate.baseCommitterDate,
+                  runId: run.id, cardRef: task.id },
+              },
+            });
+            product = { id: opened.workItemId, kind: "publish",
+              patchDigest: patch.sha256, baseSha: patch.baseSha };
+          } else {
+            const opened = await openEngineeringAgentWorkItem(engineeringTx, {
               kind: "t2_draft", causeKey: `t2_draft:${run.id}`,
               runId: run.id, patchBody: patch.text,
               patchDigest: patch.sha256, baseSha: patch.baseSha,
               reason: "t1_evidence_unavailable",
             });
-          product = { id: opened.workItemId, kind: "t2_draft",
-            patchDigest: patch.sha256, baseSha: patch.baseSha };
+            product = { id: opened.workItemId, kind: "t2_draft",
+              patchDigest: patch.sha256, baseSha: patch.baseSha };
+          }
         }
       }
       const budget = settlementDestinationForBudget({
