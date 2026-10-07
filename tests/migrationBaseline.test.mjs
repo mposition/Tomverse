@@ -370,3 +370,484 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
     previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
   });
 });
+
+/**
+ * Every migration whose only effect the diff cannot see, swept -- not one named
+ * migration at a time.
+ *
+ * The tests above each name one migration by path, so each was written after a
+ * staging deploy had already stopped on that migration. That happened three
+ * times: 20261002120000 (a partial index, 2026-10-02), 20261003130000 (a
+ * function, 2026-10-03) and 20261005030000 (a function and a constraint
+ * trigger, 2026-10-07, PR #2116). Each time the merge was green, the pre-deploy
+ * baseline guard refused, and the fix was one comment line. Nothing in the gate
+ * asked the question before the merge, so the fourth one would have cost
+ * another blocked deploy.
+ *
+ * What this sweep asks: a migration that creates a function, a trigger, or an
+ * index `schema.prisma` cannot express, and nothing it can, must carry exactly
+ * one valid presence declaration.
+ *
+ * **An index counts as described only when its key list is plain.** A partial
+ * index (`WHERE`) and an expression index (`lower("c")`) are both invisible to
+ * the diff, and `present-if-relation` can probe either, so both need a
+ * declaration. The first draft of this sweep read any index without `WHERE` as
+ * described, which let an expression-index-only migration through undeclared --
+ * the exact class the sweep exists to catch. Anything the key-list test cannot
+ * recognise is treated as not described, because a needless declaration costs a
+ * comment line and a missing one costs a blocked deploy.
+ *
+ * **A comment, a string literal and a function body are not statements.** The
+ * detector removes all three before reading, and statementsOf below records the
+ * two drafts that got that wrong.
+ *
+ * What it deliberately does not ask. A migration that only adds a CHECK
+ * constraint, or only writes rows, is equally invisible to the diff and would
+ * be refused the same way -- but no declaration can prove it absent, so
+ * demanding one would be an unmeetable gate. Those stay out of scope and keep
+ * the guard's original refusal.
+ */
+
+/**
+ * Migrations that were already applied before this sweep existed. Editing a
+ * header changes the file Prisma recorded a checksum for, so they are exempt by
+ * their history, not by their content. Five predate the declaration itself
+ * (2026-10-02); 20261003060000 is later but was applied to staging before this
+ * sweep, which is the same reason.
+ *
+ * The set only shrinks. A new migration is dated after the threshold below and
+ * has been applied nowhere, so it can simply declare. Replacing one entry with
+ * another past migration is caught by the sweep itself: the entry that left the
+ * set is still undeclared, so the sweep then names it.
+ */
+const PRESENCE_SWEEP_EXEMPT = new Set([
+  "20260814140000_attempt_terminal_states",
+  "20260814160000_settlement_pointer_commit_check",
+  "20260918090000_admin_audit_log_append_only",
+  "20260920190000_prompt_refiner_shadow_execution_runner",
+  "20260923120000_marketing_autonomous_scheduled_insert",
+  "20261003060000_ops_observer_transaction_arm",
+]);
+
+/** No migration newer than the sweep may be exempted. */
+const PRESENCE_SWEEP_EXEMPT_BEFORE = "20261003130000";
+
+/**
+ * The statements, with everything that only looks like one removed -- and a
+ * verdict on whether the scan is trustworthy.
+ *
+ * Three drafts of this were wrong, each in a different place, and the third is
+ * why it now reports uncertainty instead of only answering. The first handled
+ * only standalone `--` lines, so DDL quoted in a block comment counted as a
+ * statement. The second dropped `--` to end of line unconditionally, which
+ * truncated `CREATE INDEX idx ON t ((replace(c, '--', '')));` at the literal
+ * and took the `;` with it: no index was found, and an expression-index-only
+ * migration passed undeclared. The third mishandled `E'it\'s --'` and read the
+ * identifier `idx$tag$` as the start of a function body, each with the same
+ * consequence.
+ *
+ * Reading SQL with one pass will keep having corners, so the pass says when it
+ * has met one and `needsDeclaration` treats that as "declare it". Being wrong
+ * in that direction costs a comment line; being wrong the other way costs a
+ * blocked deploy.
+ *
+ * What it does know:
+ *
+ *  - Comments go, and block comments nest, as PostgreSQL allows.
+ *  - A string literal keeps its quotes and loses its contents, so a literal
+ *    naming described DDL cannot make a migration look described.
+ *  - In `E'...'` a backslash escapes the next character; everywhere else it is
+ *    ordinary, because standard_conforming_strings has been on by default since
+ *    PostgreSQL 9.1 and these migrations run with the server's defaults. Real
+ *    migrations here use `E'[^ \t\n\r\f\v]'`, so this is not a hypothetical.
+ *  - A dollar-quoted body keeps its delimiters and loses its contents: DDL
+ *    written inside a function body is not applied by the migration, so the
+ *    diff cannot see it either.
+ *  - A dollar-quote tag cannot follow an identifier character, which is how
+ *    `idx$tag$` is told from a body: it is one identifier, and it is emitted
+ *    as one.
+ *  - A quoted identifier is kept verbatim, because the index key list test
+ *    reads those.
+ *  - Newlines survive everywhere, so a line-oriented reading of the result
+ *    still lines up with the file.
+ *
+ * What makes it uncertain: a literal, a quoted identifier, a block comment or
+ * a dollar-quoted body that never closes. Today no migration in the tree
+ * reaches that branch.
+ */
+const SINGLE_QUOTE = String.fromCharCode(39);
+
+const scanStatements = (sql) => {
+  let out = "";
+  let certain = true;
+  let i = 0;
+  const end = sql.length;
+
+  while (i < end) {
+    const char = sql[i];
+
+    if (char === "-" && sql[i + 1] === "-") {
+      while (i < end && sql[i] !== "\n") i += 1;
+      out += " ";
+      continue;
+    }
+
+    if (char === "/" && sql[i + 1] === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < end && depth > 0) {
+        if (sql[i] === "/" && sql[i + 1] === "*") {
+          depth += 1;
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "*" && sql[i + 1] === "/") {
+          depth -= 1;
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "\n") out += "\n";
+        i += 1;
+      }
+      if (depth > 0) certain = false;
+      out += " ";
+      continue;
+    }
+
+    if (char === SINGLE_QUOTE) {
+      const escaping = /(?:^|[^A-Za-z0-9_$])[Ee]$/.test(
+        " " + sql.slice(Math.max(0, i - 2), i),
+      );
+      i += 1;
+      let closed = false;
+      while (i < end) {
+        if (escaping && sql[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === SINGLE_QUOTE && sql[i + 1] === SINGLE_QUOTE) {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === SINGLE_QUOTE) {
+          i += 1;
+          closed = true;
+          break;
+        }
+        if (sql[i] === "\n") out += "\n";
+        i += 1;
+      }
+      if (!closed) certain = false;
+      out += SINGLE_QUOTE + SINGLE_QUOTE;
+      continue;
+    }
+
+    if (char === '"') {
+      out += char;
+      i += 1;
+      let closed = false;
+      while (i < end) {
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          out += '""';
+          i += 2;
+          continue;
+        }
+        if (sql[i] === '"') {
+          out += '"';
+          i += 1;
+          closed = true;
+          break;
+        }
+        out += sql[i];
+        i += 1;
+      }
+      if (!closed) certain = false;
+      continue;
+    }
+
+    const dollarTag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+    if (dollarTag) {
+      const previous = sql[i - 1];
+      if (previous !== undefined && /[A-Za-z0-9_$]/.test(previous)) {
+        out += dollarTag[0];
+        i += dollarTag[0].length;
+        continue;
+      }
+      const tag = dollarTag[0];
+      i += tag.length;
+      const close = sql.indexOf(tag, i);
+      if (close < 0) certain = false;
+      const body = close < 0 ? sql.slice(i) : sql.slice(i, close);
+      for (const bodyChar of body) if (bodyChar === "\n") out += "\n";
+      i = close < 0 ? end : close + tag.length;
+      out += tag + tag;
+      continue;
+    }
+
+    out += char;
+    i += 1;
+  }
+  return { statements: out, certain };
+};
+
+const indexStatementsIn = (statements) =>
+  [...statements.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?;/gi)].map((m) => m[0]);
+
+/** A comma-separated list of column names, optionally sorted. Nothing else. */
+const PLAIN_KEY_LIST =
+  /^\(\s*(?:"?[A-Za-z_][A-Za-z0-9_]*"?(?:\s+(?:ASC|DESC))?)(?:\s*,\s*"?[A-Za-z_][A-Za-z0-9_]*"?(?:\s+(?:ASC|DESC))?)*\s*\)$/i;
+
+/** Whether schema.prisma can express this index, so the diff would compare it. */
+const indexIsDescribed = (statement) => {
+  const afterOn = /\bON\b[\s\S]*?(\([\s\S]*)/i.exec(statement);
+  if (!afterOn) return false;
+  const rest = afterOn[1];
+  let depth = 0;
+  let end = -1;
+  for (let i = 0; i < rest.length; i += 1) {
+    if (rest[i] === "(") depth += 1;
+    else if (rest[i] === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  if (end < 0) return false;
+  const keys = rest.slice(0, end + 1).replace(/\s+/g, " ").trim();
+  if (!PLAIN_KEY_LIST.test(keys)) return false;
+  return !/\b(?:WHERE|INCLUDE)\b/i.test(rest.slice(end + 1));
+};
+
+/** The DDL `prisma migrate diff` compares, because schema.prisma expresses it. */
+const DIFF_VISIBLE = [
+  /CREATE\s+TABLE/i,
+  /ADD\s+COLUMN/i,
+  /DROP\s+COLUMN/i,
+  /ALTER\s+COLUMN/i,
+  /CREATE\s+TYPE/i,
+  /ALTER\s+TYPE/i,
+  /DROP\s+TABLE/i,
+  /RENAME\s+TO/i,
+  /CREATE\s+SEQUENCE/i,
+  /CREATE\s+(?:OR\s+REPLACE\s+)?VIEW/i,
+];
+
+/** The objects a declaration can name, looked for in the raw text. */
+const PROBEABLE_MENTION =
+  /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION|CREATE\s+(?:CONSTRAINT\s+)?TRIGGER|CREATE\s+(?:UNIQUE\s+)?INDEX/i;
+
+/**
+ * Whether this migration needs a declaration: it creates something a
+ * declaration can probe, and nothing the diff would notice.
+ *
+ * A scan the reader could not trust answers "yes" whenever the file mentions an
+ * object a probe could name. That reads the raw text, comments included, which
+ * is the fail-closed side of both choices.
+ */
+const needsDeclaration = (sql) => {
+  const { statements, certain } = scanStatements(sql);
+  if (!certain) return PROBEABLE_MENTION.test(sql);
+  const indexes = indexStatementsIn(statements);
+  const visible =
+    DIFF_VISIBLE.some((pattern) => pattern.test(statements)) ||
+    indexes.some(indexIsDescribed);
+  if (visible) return false;
+  return (
+    /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION/i.test(statements) ||
+    /CREATE\s+(?:CONSTRAINT\s+)?TRIGGER/i.test(statements) ||
+    indexes.some((statement) => !indexIsDescribed(statement))
+  );
+};
+
+test("every migration the diff cannot see declares a presence probe", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const missing = [];
+  const swept = [];
+  for (const name of migrationNames()) {
+    const sql = readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8");
+    if (!needsDeclaration(sql)) continue;
+    if (PRESENCE_SWEEP_EXEMPT.has(name)) continue;
+    swept.push(name);
+    const declaration = presenceDeclarationIn(sql);
+    if (declaration.kind === "none" || declaration.kind === "invalid") {
+      missing.push(`${name} (${declaration.kind})`);
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `these migrations change nothing schema.prisma describes, so the pre-deploy ` +
+      `baseline guard will refuse the deploy. Add one header line, e.g.\n` +
+      `  -- baseline-check: present-if-function "the_function_it_creates"\n` +
+      `See scripts/baseline-presence-core.mjs. Missing: ${missing.join(", ")}`,
+  );
+  // The sweep is worthless if the detector stops matching anything.
+  assert.ok(
+    swept.length >= 8,
+    `expected the sweep to still reach the declared migrations, reached ${swept.length}`,
+  );
+});
+
+test("the sweep's exemptions only shrink, and none is newer than the sweep", () => {
+  // Deleting an entry is the intended edit, so the count is a ceiling and not an
+  // equality: an earlier draft pinned it at the current size and would have
+  // failed the very shrink this set is supposed to allow.
+  assert.ok(
+    PRESENCE_SWEEP_EXEMPT.size <= 6,
+    `the exemption set may only shrink, found ${PRESENCE_SWEEP_EXEMPT.size}`,
+  );
+  for (const name of PRESENCE_SWEEP_EXEMPT) {
+    assert.ok(
+      migrationNames().includes(name),
+      `exempt migration ${name} no longer exists; remove it from the set`,
+    );
+    assert.ok(
+      name < PRESENCE_SWEEP_EXEMPT_BEFORE,
+      `${name} is not older than the sweep; it must declare instead`,
+    );
+  }
+});
+
+test("the detector reads statements, not the prose around them", () => {
+  const fn = `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$;\n`;
+  // A header that explains a CREATE TABLE elsewhere must not count as one.
+  assert.equal(needsDeclaration(`-- This replaces the CREATE TABLE in the baseline.\n${fn}`), true);
+  // Nor may a block comment or a trailing comment quoting the same DDL.
+  assert.equal(needsDeclaration(`/* once a CREATE TABLE lived here */\n${fn}`), true);
+  assert.equal(
+    needsDeclaration(`/* outer /* nested CREATE TABLE */ still a comment */\n${fn}`),
+    true,
+  );
+  // A string literal is not a statement, and neither is a function body.
+  assert.equal(
+    needsDeclaration(
+      `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE 'ADD COLUMN'; END $$;\n`,
+    ),
+    true,
+  );
+  assert.equal(needsDeclaration(`${fn.trimEnd()} -- replaces an ADD COLUMN\n`), true);
+  // A migration that also adds a column is visible to the diff on its own.
+  assert.equal(needsDeclaration(`ALTER TABLE "T" ADD COLUMN "c" text;\n${fn}`), false);
+});
+
+test("a comment marker inside a literal is not a comment", () => {
+  // The case that made the previous draft blind. Dropping `--` to end of
+  // line truncated the statement at the literal and took the `;` with it, so
+  // no index was found and the migration was judged to need no declaration.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, '--', '')));\n`),
+    true,
+  );
+  // A doubled quote ends nothing, so the statement still reaches its semicolon.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, 'it''s --', '')));\n`),
+    true,
+  );
+  // A literal that merely names described DDL does not make it described.
+  assert.equal(
+    needsDeclaration(
+      `CREATE TRIGGER t AFTER DELETE ON "T" EXECUTE FUNCTION f('CREATE TABLE "X"');\n`,
+    ),
+    true,
+  );
+});
+
+test("only an index schema.prisma can express counts as described", () => {
+  // Plain key lists are in schema.prisma, so the diff compares them.
+  assert.equal(needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c");\n`), false);
+  assert.equal(
+    needsDeclaration(`CREATE INDEX "T_a_b_idx" ON "T"("a" ASC, "b" DESC);\n`),
+    false,
+  );
+  // Partial and expression indexes are not, and a probe can answer for both.
+  assert.equal(
+    needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"("c") WHERE "k" = 'x';\n`),
+    true,
+  );
+  assert.equal(
+    needsDeclaration(`CREATE UNIQUE INDEX "T_c_key" ON "T"(lower("c"));\n`),
+    true,
+  );
+  assert.equal(
+    needsDeclaration(`CREATE INDEX "T_c_idx" ON "T"("c") INCLUDE ("d");\n`),
+    true,
+  );
+});
+
+test("the classes no declaration could answer for stay out of scope", () => {
+  // Both are invisible to the diff and both would be refused, but nothing a
+  // declaration can name proves either absent.
+  assert.equal(needsDeclaration(`UPDATE "T" SET "c" = 'x';\n`), false);
+  assert.equal(
+    needsDeclaration(`ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" <> '');\n`),
+    false,
+  );
+});
+
+test("a backslash escape only escapes inside E'...'", () => {
+  // Round 3's first case. The scanner read the backslash as ordinary, so the
+  // escaped quote closed the literal, the `--` after it became a comment, and
+  // the `;` went with it -- no index found, no declaration asked for.
+  const escaped = `CREATE INDEX idx ON t ((replace(c, E'it\\'s --', '')));\n`;
+  // The fixture is only the case if the backslash survived into it. Writing
+  // these through a shell once collapsed it and quietly tested other SQL.
+  assert.ok(escaped.includes("\\'"), "the fixture must contain a real backslash");
+  assert.equal(needsDeclaration(escaped), true);
+  // Without the E prefix the backslash is ordinary, which is what
+  // standard_conforming_strings means, so the literal runs to the next quote.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, '\\', '')));\n`),
+    true,
+  );
+  // The form real migrations here use.
+  assert.equal(
+    needsDeclaration(
+      `ALTER TABLE "T" ADD CONSTRAINT "T_c_check" CHECK ("c" ~ E'[^ \\t\\n]');\n`,
+    ),
+    false,
+  );
+});
+
+test("a dollar-quote tag cannot follow an identifier character", () => {
+  // Round 3's second case: `idx$tag$` is one identifier, and reading it as the
+  // start of a body swallowed the rest of the statement.
+  assert.equal(needsDeclaration(`CREATE INDEX idx$tag$ ON t ((lower(c)));\n`), true);
+  // With the boundary present it is a body, and its contents are not statements.
+  assert.equal(
+    needsDeclaration(
+      `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $tag$ BEGIN RETURN NULL; END $tag$;\n`,
+    ),
+    true,
+  );
+});
+
+test("a scan it cannot trust asks for the declaration", () => {
+  // The valve that bounds this detector: three drafts were each wrong about
+  // some corner of SQL, so an unclosed construct answers "declare it" rather
+  // than guessing. Being wrong here costs a comment line.
+  const unterminated = `CREATE INDEX idx ON t ((lower(c))); -- note\nSELECT 'oops\n`;
+  assert.equal(scanStatements(unterminated).certain, false);
+  assert.equal(needsDeclaration(unterminated), true);
+  // An unclosed body is the same answer.
+  assert.equal(
+    needsDeclaration(`CREATE FUNCTION f() RETURNS trigger AS $$ BEGIN RETURN NULL;\n`),
+    true,
+  );
+  // But an untrustworthy scan of a file that names nothing a probe could
+  // answer for is still out of scope, not a demand nobody can meet.
+  assert.equal(needsDeclaration(`UPDATE "T" SET "c" = 'oops\n`), false);
+});
+
+test("no migration in the tree needs the untrusted-scan valve", () => {
+  // The valve is for a corner nobody has written yet. If this starts failing,
+  // the named migration is not wrong -- it just has to declare, and the sweep
+  // will say so.
+  const untrusted = migrationNames().filter(
+    (name) =>
+      !scanStatements(readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8"))
+        .certain,
+  );
+  assert.deepEqual(untrusted, []);
+});
