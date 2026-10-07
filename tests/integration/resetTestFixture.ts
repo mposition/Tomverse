@@ -19,7 +19,7 @@ export async function resetTestFixture(
   if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
       !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name) ||
       statement.includes(";") ||
-      !/^TRUNCATE TABLE [\s\S]+ CASCADE\s*$/i.test(statement.trim())) {
+      !/^TRUNCATE\s+TABLE\s+[\s\S]+\s+CASCADE\s*$/i.test(statement.trim())) {
     throw new Error("Fixture reset is limited to loopback test databases and TRUNCATE CASCADE");
   }
   try {
