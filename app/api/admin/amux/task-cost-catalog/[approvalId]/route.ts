@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { getServerSession } from "next-auth/next";
 import { NextResponse } from "next/server";
 
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { isAdminReauthenticationError,
   assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
@@ -19,7 +20,9 @@ export async function GET(request: Request, context: {
 }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id) return NextResponse.json({ error: "not_found" },
+    if (!session?.user?.id || !isAdminSession(session) ||
+        getAdminRole(session) !== "owner")
+      return NextResponse.json({ error: "not_found" },
       { status: 404, headers: noStore });
     await assertRecentAdminAuthentication(session);
     await consumeApiRateLimit(request, session.user.id,

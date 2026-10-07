@@ -431,12 +431,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-07, A06 analysis claim, result and retention actions extend that
 // helper again. The position-free 228-entry inventory is unchanged; only
 // source line positions in the reviewed closure move.
+// 2026-10-07, dev environment: the marketing pipeline fingerprint record in
+// `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
+// accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
+// added; count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8b071d0c555991d682fea3f78b3473c4",
-  "76e0b8233eaaaeb91271d91085cd4820",
+  "b54dd59167e4632884856b77d4833544",
+  "dafc98b23fa60f8094801870e0abe6eb",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
