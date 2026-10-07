@@ -12,6 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
 import { configureV22AutoPromotion,
   readV22AutoPromotionControl } from "@/lib/amux/v22AutoPromotionService";
+import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const bodySchema = z.object({ policyVersion: z.literal(22),
@@ -54,6 +55,10 @@ export async function POST(request: Request) {
   try {
     const auth = await requireOwner(true);
     if ("response" in auth) return auth.response;
+    if (!hasValidMutationOrigin(request)) {
+      return Response.json({ error: "origin_refused" },
+        { status: 403, headers: noStore });
+    }
     await consumeApiRateLimit(request, auth.session.user.id,
       "admin-amux-v22-auto-promotion", { minute: 5, day: 20 });
     const body = await readLimitedJson(request, 1024, bodySchema);

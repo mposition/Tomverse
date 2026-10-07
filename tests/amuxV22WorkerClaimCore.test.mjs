@@ -96,6 +96,11 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
   { promoted: false, claimed: true, policy_version: 22,
     task_id: "task-1", assignment_id: "assignment-1",
     worker_name: "worker-1" });
+  const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
+  assert.match(route, /Response\.json\(v22PromotionTickWire\(result\)/);
+  assert.match(route, /Response\.json\(v22WorkerClaimTickWire\(result\)/);
+  assert.match(route, /reason: "apply_disabled", expired: 0/);
+  assert.doesNotMatch(route, /orchestrator_identity_required/);
 });
 
 test("assigned v4 Todo stays out of the legacy owned queue and execution start", () => {

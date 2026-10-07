@@ -136,11 +136,11 @@ test("the merge is PUT on the merge API with the head pinned, and its answer is 
   assert.deepEqual(await merged.github.merge(12, HEAD), { result: "merged", sha: MERGE });
   assert.deepEqual(JSON.parse(merged.calls[0].body), { sha: HEAD, merge_method: "merge" });
 
-  for (const status of [403, 405, 409, 422]) {
+  for (const status of [405, 409, 422]) {
     const refused = ports([[is("PUT", `${REPO}/pulls/12/merge`), json(status, { message: "no" })]]);
     assert.deepEqual(await refused.github.merge(12, HEAD), { result: "refused" }, String(status));
   }
-  for (const answer of [json(500, {}), json(502, {}), json(200, { merged: false }), { status: 200, text: "<html>" }]) {
+  for (const answer of [json(401, {}), json(403, {}), json(429, {}), json(500, {}), json(502, {}), json(200, { merged: false }), { status: 200, text: "<html>" }]) {
     const unknown = ports([[is("PUT", `${REPO}/pulls/12/merge`), answer]]);
     assert.deepEqual(await unknown.github.merge(12, HEAD), { result: "unknown" });
   }

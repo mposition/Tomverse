@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
-import { writeAdminAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 import { BoardImportError } from "./boardImportCore.ts";
 import type { AmuxOrchestratorReceiptRecorder } from "./dbBoundary.ts";
@@ -26,7 +26,7 @@ import { evaluateAmuxV4TaskReadyInTransaction,
 import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
   AMUX_V22_PARALLEL_RESERVED, AMUX_V22_SEV1_RESERVED,
-  amuxV22AutoPromotionEnabled, amuxV22Capacity,
+  amuxV22AssessmentIdsCurrent, amuxV22AutoPromotionEnabled, amuxV22Capacity,
   amuxV22ScoreCurrent } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 
@@ -35,7 +35,7 @@ const MAX_CANDIDATES_PER_TICK = 8;
 const V22_AUDIT_ACTION = "amux.v22.auto_promotion.consumed";
 
 async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
-  code: "cost_exceeded" | "global_wip_exceeded" | "lifecycle_write",
+  code: "cost_exceeded" | "lifecycle_write",
   recordReceipt: AmuxOrchestratorReceiptRecorder) {
   const already = await tx.amuxRecommendationAutoHalt.findFirst({
     where: { clearedAt: null }, select: { id: true },
@@ -252,12 +252,17 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
       const capacity = await readCapacity(tx, now);
       if (capacity.occupied > capacity.decision.queueLimit &&
           capacity.decision.queueLimit > 0) {
-        return openV22CriticalHalt(tx, now, "global_wip_exceeded",
-          recordReceipt);
+        // Worker leases can lapse while existing Todo/doing cards remain.
+        // That is temporary saturation, not an irreversible violation.
+        throw new BoardImportError("capacity_full", 409);
       }
       if (!capacity.decision.allowed || !capacity.row?.wipLimit) {
         throw new BoardImportError(capacity.decision.reason ?? "capacity_full", 409);
       }
+      // Owner assessment and score approvals take this lock before their
+      // subject row. Keep the same order and read the latest evidence only
+      // after the lock, so a superseded score cannot promote a Task.
+      await takeAuditChainLock(tx);
       const top = await latestCandidates(tx, now);
       const current = top.find((row) => row.taskId === input.candidate.taskId);
       if (!current || current.id !== input.candidate.id) {
@@ -279,7 +284,15 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
         select: { id: true, taskId: true, taskRevision: true,
           sourceApprovalId: true, scoreVersion: true, scoreTotal: true,
           activeStaleAt: true, baselineStaleAt: true,
-          approvalAuditLogId: true },
+          approvalAuditLogId: true,
+          initiativeAssessmentId: true, epicAssessmentId: true,
+          featureAssessmentId: true, storyAssessmentId: true,
+          taskAssessmentId: true,
+          initiativeAssessment: { select: { nodeId: true } },
+          epicAssessment: { select: { nodeId: true } },
+          featureAssessment: { select: { nodeId: true } },
+          storyAssessment: { select: { cardId: true } },
+          taskAssessment: { select: { cardId: true } } },
       });
       if (!score || score.taskId !== current.taskId ||
           !amuxV22ScoreCurrent({ scoreVersion: score.scoreVersion,
@@ -290,6 +303,37 @@ async function commitCandidate(input: { candidate: Candidate; receiptId: string;
             currentSourceApprovalId: ready.sourceApprovalId,
             activeStaleAt: score.activeStaleAt,
             baselineStaleAt: score.baselineStaleAt, now })) {
+        throw new BoardImportError("score_changed", 409);
+      }
+      const initiativeNodeId = score.initiativeAssessment.nodeId;
+      const epicNodeId = score.epicAssessment.nodeId;
+      const featureNodeId = score.featureAssessment.nodeId;
+      const storyCardId = score.storyAssessment?.cardId ?? null;
+      if (!initiativeNodeId || !epicNodeId ||
+          featureNodeId !== ready.parentFeatureNodeId ||
+          storyCardId !== ready.parentStoryCardId ||
+          score.taskAssessment.cardId !== current.taskId ||
+          (score.storyAssessmentId === null) !==
+            (ready.parentStoryCardId === null)) {
+        throw new BoardImportError("score_changed", 409);
+      }
+      const assessmentBindings = [
+        { id: score.initiativeAssessmentId, where: { nodeId: initiativeNodeId } },
+        { id: score.epicAssessmentId, where: { nodeId: epicNodeId } },
+        { id: score.featureAssessmentId, where: { nodeId: featureNodeId } },
+        ...(storyCardId && score.storyAssessmentId ? [{
+          id: score.storyAssessmentId, where: { cardId: storyCardId },
+        }] : []),
+        { id: score.taskAssessmentId, where: { cardId: current.taskId } },
+      ];
+      const latestAssessments = await Promise.all(assessmentBindings.map(
+        (binding) => tx.amuxPortfolioAssessment.findFirst({
+          where: binding.where,
+          orderBy: { assessmentVersion: "desc" }, select: { id: true },
+        })));
+      if (!amuxV22AssessmentIdsCurrent(
+        assessmentBindings.map((binding) => binding.id),
+        latestAssessments.map((assessment) => assessment?.id ?? null))) {
         throw new BoardImportError("score_changed", 409);
       }
       const scoreAudit = await tx.adminAuditLog.findUnique({

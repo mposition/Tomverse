@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 import {
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
+  amuxV22AssessmentIdsCurrent,
   amuxV22AutoPromotionEnabled,
   amuxV22Capacity,
   amuxV22ScoreCurrent,
@@ -54,6 +55,34 @@ test("a score must bind exact version, revision, approval and both freshness clo
   ]) {
     assert.equal(amuxV22ScoreCurrent({ ...input, ...changed }), false);
   }
+});
+
+test("a newer assessment at any hierarchy level invalidates a promotion score", () => {
+  for (const ids of [
+    ["initiative", "epic", "feature", "task"],
+    ["initiative", "epic", "feature", "story", "task"],
+  ]) {
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, ids), true);
+    for (const index of ids.keys()) {
+      const changed = [...ids]; changed[index] = "newer";
+      assert.equal(amuxV22AssessmentIdsCurrent(ids, changed), false);
+    }
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, ids.slice(1)), false);
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, [...ids, "extra"]), false);
+    assert.equal(amuxV22AssessmentIdsCurrent(ids, [null, ...ids.slice(1)]), false);
+  }
+});
+
+test("promotion reads the latest assessments only after the audit and task locks", () => {
+  const service = readFileSync("lib/amux/v22AutoPromotionService.ts", "utf8");
+  const body = service.slice(service.indexOf("async function commitCandidate"),
+    service.indexOf("async function readBackLostPromotion"));
+  const auditLock = body.indexOf("await takeAuditChainLock(tx)");
+  const taskLock = body.indexOf('FOR UPDATE`');
+  const latestRead = body.indexOf("const latestAssessments = await Promise.all");
+  const freshnessGuard = body.indexOf("if (!amuxV22AssessmentIdsCurrent(");
+  assert.ok(auditLock > 0 && taskLock > auditLock &&
+    latestRead > taskLock && freshnessGuard > latestRead);
 });
 
 test("the legacy scheduler never claims a v22 Todo", () => {

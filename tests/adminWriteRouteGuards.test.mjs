@@ -322,6 +322,8 @@ const isReadOnlyAmuxResolutionPreview = (route,
         `${route.source}\n${service}\n${resultReader}`) ||
       /\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(
         `${route.source}\n${service}\n${resultReader}`) ||
+      /\$(?:executeRaw|queryRaw)Unsafe\s*\(/.test(
+        `${route.source}\n${service}\n${resultReader}`) ||
       /\bfetch\s*\(|\bimport\s*\(/.test(`${route.source}\n${service}\n${resultReader}`)) {
     return false;
   }
