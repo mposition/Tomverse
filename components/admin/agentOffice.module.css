@@ -705,6 +705,16 @@ a.integration-row:hover { border-color: var(--accent); }
 .rm-lounge { background: var(--room-lounge); }
 .rm-link { flex: none; color: var(--accent); font-weight: 900; text-decoration: none; }
 .rm-link:hover, .rm-link:focus-visible { text-decoration: underline; }
+.rm-note {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 18px;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
 .rm.working { background: var(--working-tint); }
 .rm.done { background: var(--done-tint); }
 .rm.approval { background: var(--approval-tint); }
