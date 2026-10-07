@@ -186,6 +186,17 @@ test("production and staging declare every job; dev declares the operator's set,
   assert.equal(RAILWAY_ENVIRONMENT_BRANCHES.dev, "develop");
 });
 
+test("develop lands on dev; staging holds the test branch's release candidate", () => {
+  // The lane switch (2026-10-07). staging following develop again would put
+  // every develop merge back on the environment a pinned verification is
+  // using, which is the wait this split removed.
+  assert.deepEqual(RAILWAY_ENVIRONMENT_BRANCHES, {
+    production: "main",
+    staging: "test",
+    dev: "develop",
+  });
+});
+
 test("the IaC entry point stays a pass-through owning only the scheduled-jobs partial", () => {
   const source = readFileSync(join(process.cwd(), ".railway", "railway.ts"), "utf8");
   assert.match(source, /export const partial = "scheduled-jobs";/);

@@ -52,14 +52,14 @@ export const AGENT_RAILWAY_REGION = "asia-southeast1-eqsg3a";
 
 /**
  * The branch each Railway environment deploys, as in the cron table: dev takes
- * every develop merge, and staging follows develop beside it until the lane
- * switch moves it to the `test` branch.
+ * every develop merge, and staging deploys the `test` branch the promotion
+ * script moves to a release candidate.
  */
 export const AGENT_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
 > = {
   production: "main",
-  staging: "develop",
+  staging: "test",
   dev: "develop",
 };
 
@@ -242,7 +242,8 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     startCommand: "npm run agent:product-research-observation -- --probe",
     cronSchedule: null,
     // dev is where develop lands, so the probe goes with it. staging keeps its
-    // copy until the lane switch, when staging stops following develop.
+    // copy: it runs the release candidate, and the probe answers for that
+    // image.
     environments: {
       staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
       dev: PRODUCT_RESEARCH_PROBE_VARIABLES,

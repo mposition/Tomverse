@@ -29,6 +29,7 @@ import { execFileSync } from "node:child_process";
 import {
   deployedCommitDrift,
   describeDrift,
+  driftEnvironments,
   classifyBuildInfoResponse,
   describeEndpointFailure,
   BEHIND,
@@ -40,21 +41,7 @@ import {
   REDIRECT_LOOP,
 } from "./report-deployed-commit-drift-core.mjs";
 
-// Both hosts already appear in lib/ (accountEmails, robotsPolicyCore). They are
-// the public addresses of the two environments, not configuration -- but the
-// overrides exist so a review app or a renamed host does not need a code change.
-const ENVIRONMENTS = [
-  {
-    name: "production",
-    url: process.env.PRODUCTION_APP_URL || "https://tomverse.app",
-    branch: "main",
-  },
-  {
-    name: "staging",
-    url: process.env.STAGING_APP_URL || "https://staging.tomverse.app",
-    branch: "develop",
-  },
-];
+const ENVIRONMENTS = driftEnvironments(process.env);
 
 const DEFAULT_THRESHOLD_MINUTES = 60;
 
@@ -210,8 +197,23 @@ if (selected.length === 0) {
   process.exit(2);
 }
 
+// A branch origin does not have is that environment's answer -- unknown,
+// reported below -- not a reason to skip comparing every other one. `test`
+// exists only once somebody has promoted a candidate (docs/ops/dev-test-lanes.md).
+const missingOnOrigin = new Set();
+
 if (shouldFetch) {
   for (const branch of new Set(selected.map((environment) => environment.branch))) {
+    try {
+      git("ls-remote", "--exit-code", "origin", `refs/heads/${branch}`);
+    } catch (cause) {
+      if (cause?.status === 2) {
+        missingOnOrigin.add(branch);
+        continue;
+      }
+      console.error(`could not read origin/${branch}: ${cause?.message || cause}`);
+      process.exit(2);
+    }
     try {
       git("fetch", "origin", branch, "--quiet");
     } catch (cause) {
@@ -225,7 +227,7 @@ const now = new Date().toISOString();
 let past = 0;
 
 for (const environment of selected) {
-  const headSha = headOf(environment.branch);
+  const headSha = missingOnOrigin.has(environment.branch) ? null : headOf(environment.branch);
   const { sha: deployedSha, error } = await fetchDeployedSha(environment.url);
   const deployedShaKnown = Boolean(deployedSha) && commitExists(deployedSha);
   const drift = deployedCommitDrift({
@@ -242,6 +244,7 @@ for (const environment of selected) {
 
   console.log(describeDrift(environment.name, drift));
   if (error) console.log(`  ${environment.url}/api/build-info: ${error}`);
+  if (missingOnOrigin.has(environment.branch)) console.log(`  origin has no branch ${environment.branch}`);
   console.log(`  branch ${environment.branch}, threshold ${thresholdMinutes} minutes`);
 
   // Three things reach a person, and the third is the one this exists for.
