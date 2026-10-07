@@ -149,7 +149,9 @@ for (const commit of commits) {
   const workflows = listing
     .filter((entry) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(entry.path))
     .map((entry) => ({ path: entry.path, blobSha: entry.oid, text: text(entry.oid) }));
-  // Always judged blind to the record first. §5's record is only true while
+  // Always judged blind to the cache record first. Human-reviewed, blob-pinned
+  // job exclusions still apply; they cannot lift the separate cache rule.
+  // §5's record is only true while
   // check:agent-pr-cache-isolation passes, and that check reads the analysis
   // taken with the record ignored -- an analysis taken with it applied reports
   // no cache reasons at all, so the condition the record rests on would look

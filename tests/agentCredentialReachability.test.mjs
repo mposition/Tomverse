@@ -792,8 +792,12 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // cache is not found" and "cache write denied: token has no writable scopes"
 // in one job.
 // .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and 10.
-// Owner-approved correction after both false-positive fixes: the earlier
-// cf63... value measured only the first fix, before the branch-filter change.
+// 2026-10-07 owner-approved false-positive correction: a hyphenated `needs`
+// expression stopped inventing a credentialed job, and the two exact
+// to-develop opt-in globs stopped matching agent/engineering/<digits>.
+// The unexcluded baseline is now 20 credentialed jobs, 1 reason, 1 path rule,
+// 7 reached workflows, and still forbids all because of the remaining PAT job.
+// The intermediate cf63... value measured only the first correction.
 const POSTURE_DIGEST = "ed4f5e71fc85";
 
 test("owner-reviewed workflow exclusion is exact-blob-only", () => {
