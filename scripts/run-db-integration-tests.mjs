@@ -388,6 +388,9 @@ run(
     // sre-ops confirm: the close decided by the genesis mode, replay, abandoned
     // and untrusted refusals.
     "tests/integration/ops-observer-store-confirm.db.test.ts",
+    // sre-ops genesis: the owner's approval bound to the head, the transition
+    // and seven-day rules, and a created chain the state read trusts.
+    "tests/integration/ops-observer-store-genesis.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
