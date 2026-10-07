@@ -170,6 +170,7 @@ test("a PR-less v4 non-code result may be approved only with verified full evide
 
 test("approval is closed when the owner display would hide source characters", () => {
   assert.equal(amuxReviewDisplayIsExact("plain Korean 한국어"), true);
+  assert.equal(amuxReviewDisplayIsExact("x".repeat(AMUX_REVIEW_DISPLAY_MAX_BYTES + 1)), true);
   for (const hidden of ["x\u202ey", "x\u200by", "x\u0001y", "x\r\ny",
     "e\u0301", "x\ud800y"]) {
     assert.equal(amuxReviewDisplayIsExact(hidden), false);

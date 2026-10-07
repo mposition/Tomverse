@@ -17,7 +17,7 @@ const visibleCodePoint = (character: string) => {
 /** Preserve ordinary line breaks for inspection while making hidden characters
  * explicit and unambiguous, including non-BMP format characters. */
 export const amuxVisibleInspectionText = (value: string) =>
-  value.replace(hiddenCharacter, visibleCodePoint);
+  value.replace(/\\/g, "\\\\").replace(hiddenCharacter, visibleCodePoint);
 
 /** A read-only rendering of worker text must expose invisible code points;
  * JSON escaping also distinguishes an actual control from a literal `\\u`.

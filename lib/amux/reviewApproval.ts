@@ -218,7 +218,7 @@ async function snapshot(
   }
   if (baseEligible && task.status === "blocked") {
     outcomes.push("block");
-    if (!displayTruncated && budget.allowed && dueCorrected &&
+    if (!displayTruncated && displayExact && budget.allowed && dueCorrected &&
         amuxV22ReviewRetryHasVerifiedOutcome({
           sourceSystem: task.sourceSystem, attempt: lastAttempt,
         }) &&

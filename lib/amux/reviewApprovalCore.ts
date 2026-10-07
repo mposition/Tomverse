@@ -8,10 +8,12 @@ export const amuxReviewTextExceedsDisplay = (value: string | null) =>
   value !== null &&
   Buffer.byteLength(value.normalize("NFC"), "utf8") > AMUX_REVIEW_DISPLAY_MAX_BYTES;
 
+const cleanedReviewDisplayText = (value: string) => value.normalize("NFC")
+  .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu, "");
+
 export const safeReviewDisplayText = (value: string | null) => {
   if (value === null) return null;
-  const cleaned = value.normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Cs}]/gu, "");
+  const cleaned = cleanedReviewDisplayText(value);
   let text = "";
   let bytes = 0;
   for (const character of cleaned) {
@@ -24,7 +26,7 @@ export const safeReviewDisplayText = (value: string | null) => {
 };
 
 export const amuxReviewDisplayIsExact = (value: string | null) =>
-  safeReviewDisplayText(value) === value;
+  value === null || cleanedReviewDisplayText(value) === value;
 
 export const isAmuxAgentApprovalEnabled = (value: string | undefined) =>
   value === "true";

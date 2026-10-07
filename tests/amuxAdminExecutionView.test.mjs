@@ -36,6 +36,7 @@ test("worker text renders controls visibly without conflating literal escapes", 
   assert.match(amuxVisibleUntrustedText("x\u0001y"), /\\u0001/);
   assert.equal(amuxVisibleInspectionText("plain\n한국어"), "plain\n한국어");
   assert.equal(amuxVisibleInspectionText("x\u202ey"), "x\\u{202E}y");
+  assert.equal(amuxVisibleInspectionText("x\\u{202E}y"), "x\\\\u{202E}y");
   assert.equal(amuxVisibleInspectionText("x\ud800y"), "x\\u{D800}y");
   assert.equal(amuxVisibleInspectionText("x\u{E0001}2"), "x\\u{E0001}2");
   assert.equal(amuxVisibleUntrustedText("x\u{E0001}2"),
