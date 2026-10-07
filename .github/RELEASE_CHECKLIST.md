@@ -439,10 +439,9 @@ over: the next release needs its own reviewed run or its own waiver.
 
 ## 3. Staging verification
 
-- [ ] `/api/build-info` reports the release SHA
 - [ ] the release SHA, `origin/test` and Test's `/api/build-info` agree
-      (`npm run promote:test -- --sha=<release SHA>` moves `test` and checks the
-      last two; staging deploys `test`, not `develop`, §7.9)
+      (`npm run promote:test -- --sha=<release SHA>` moves `test` and waits for
+      the last; staging deploys `test`, not `develop`, §7.9)
 - [ ] `/status` and `/api/models/status` queried in the same window, with no
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above
@@ -944,11 +943,16 @@ takes while `develop` keeps landing on dev. Before the split both shared one
 environment: a verification pinned to a staging SHA either held every develop
 deploy or had its build replaced mid-run.
 
-`promote:test` takes a commit that is already on `develop` (or, for 7.9.1, on
-the `release/**` branch named by `--source`), refuses a move that drops the
-current candidate unless `--allow-rewind` says nobody is verifying it, pushes
-with a lease on the `test` it read, and waits until Test's `/api/build-info`
-names the candidate. `--dry-run` reads only.
+`promote:test` takes a commit `develop` actually pointed at -- a merge
+commit, never a pull request's head -- or, for 7.9.1, one on the `release/**`
+branch named by `--source`. It refuses a candidate whose GitHub Actions suites
+did not all pass (a cancelled one included: Wait for CI would skip it), and a
+move that drops the current candidate unless `--allow-rewind` says nobody is
+verifying it. It pushes with a lease on the `test` it read and waits until
+Test's `/api/build-info` names the candidate. `--dry-run` reads only. A
+selective release's candidate is not on `develop`, so moving `test` to it, and
+back to `develop` afterwards, are both rewinds. The one-time switch and the
+order it needs are in `docs/ops/dev-test-lanes.md`.
 
 Three lanes. Which one a change takes is decided by what it is, not by how
 inconvenient the alternative feels.
@@ -959,7 +963,9 @@ inconvenient the alternative feels.
 | Part of `develop`, needed sooner | `release/**`, cut from `main` | the exact RC SHA promoted to Test (`--source=release/...`) or a scratch environment, then merged to `main` |
 | A declared incident or a security advisory | `hotfix/**` | §7.9.2, and the incident or advisory is named |
 
-A full release merges the branch made at the RC SHA, not `develop`'s head:
+A full release merges a `release/<date>-<subject>` branch made at the RC SHA
+(`git push origin <RC SHA>:refs/heads/release/<date>-<subject>`), not
+`develop`'s head:
 `develop` has moved on since the candidate was promoted, and its head is a
 build nobody verified. A `develop` -> `main` pull request is still accepted by
 the source policy, and is the same thing only when `develop` has not moved
@@ -979,6 +985,10 @@ branch or the automation that carries its own gates fails the required check
 `develop` and ships with the next release.
 
 ### 7.9.1 Selective release: `release/**`
+
+A full release's branch shares the prefix but is cut at the candidate on
+`develop` (7.9); the cut-from-`main` and cherry-pick items below are for a
+selective release.
 
 For a change that is finished, is already on `develop`, and should not wait for
 everything else on `develop`. This is not an exception and needs no waiver; it
@@ -1077,7 +1087,7 @@ https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
 ### 7.9.5 The next full release after `main` has carried a cherry-pick
 
 A `release/**` lane (7.9.1) leaves `main` holding commits that also exist on
-`develop` **as different objects**. The next full `develop` -> `main` release
+`develop` **as different objects**. The next full release
 meets them again, and how it meets them has to be checked rather than assumed.
 
 **`main` having the files does not mean the branches converged.** On 2026-09-08

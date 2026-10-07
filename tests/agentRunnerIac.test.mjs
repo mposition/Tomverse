@@ -115,7 +115,7 @@ test("the observation runner's declared variables are the ones the run checks fo
 
 test("the probe holds no means of submitting, and never runs in production", () => {
   const probe = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_probe");
-  // It goes where develop lands: staging until the lane switch, and dev.
+  // dev, where develop lands, and staging, which runs the release candidate.
   assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "staging"]);
   assert.deepEqual([...probe.environments.dev].sort(), [...probe.environments.staging].sort());
   // S0 measures what the image can do. Nothing about that needs the ability to

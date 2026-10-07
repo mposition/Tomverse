@@ -56,9 +56,37 @@ export function parseSourceBranch(value) {
   return RELEASE_BRANCH.test(text) && !text.includes("..") ? text : null;
 }
 
-/** Why the move must not happen, or null. */
-export function refusalReason({ move, onSource, allowRewind }) {
+/**
+ * The GitHub Actions check suites on the candidate, as Railway's Wait for CI
+ * reads them: it looks at Actions suites only, holds a deployment while any
+ * is unfinished, and skips it when any concluded otherwise
+ * (.github/RELEASE_CHECKLIST.md 7.9.4).
+ *
+ * "failed" includes `cancelled`: a develop push cancels the previous push's
+ * runs, so a commit merged a minute before another often carries cancelled
+ * suites, and Test would never deploy it.
+ */
+const PASSING_SUITE_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
+export function checkSuitesVerdict(suites) {
+  const actions = (Array.isArray(suites) ? suites : []).filter((suite) => suite?.app === "github-actions");
+  if (actions.length === 0) return "none";
+  if (actions.some((suite) => suite.status === "completed" && !PASSING_SUITE_CONCLUSIONS.has(suite.conclusion))) {
+    return "failed";
+  }
+  return actions.some((suite) => suite.status !== "completed") ? "pending" : "passed";
+}
+
+/**
+ * Why the move must not happen, or null.
+ *
+ * `onSource` means the candidate is on the source branch's first-parent
+ * history -- a merge commit develop actually pointed at, which dev deployed.
+ * Mere ancestry would also admit a pull request's head or a commit inside a
+ * merged branch: a tree develop never had.
+ */
+export function refusalReason({ move, onSource, allowRewind, suites }) {
   if (!onSource) return "not_on_source";
+  if (suites === "failed") return "checks_failed";
   if (move === "rewind" && !allowRewind) return "rewind_needs_allow_rewind";
   return null;
 }

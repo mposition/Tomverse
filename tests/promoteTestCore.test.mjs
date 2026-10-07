@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   buildInfoServes,
+  checkSuitesVerdict,
   classifyMove,
   parseCandidate,
   parseSourceBranch,
@@ -37,13 +38,29 @@ test("a candidate comes from develop or a release branch, nowhere else", () => {
   }
 });
 
-test("a candidate off its source is refused, and a rewind needs a person to say so", () => {
-  assert.equal(refusalReason({ move: "forward", onSource: false, allowRewind: true }), "not_on_source");
-  assert.equal(refusalReason({ move: "rewind", onSource: true, allowRewind: false }), "rewind_needs_allow_rewind");
-  assert.equal(refusalReason({ move: "rewind", onSource: true, allowRewind: true }), null);
+test("a candidate off its source, or with a failed suite, is refused; a rewind needs a person to say so", () => {
+  const ok = { onSource: true, allowRewind: false, suites: "passed" };
+  assert.equal(refusalReason({ ...ok, move: "forward", onSource: false, allowRewind: true }), "not_on_source");
+  assert.equal(refusalReason({ ...ok, move: "forward", suites: "failed" }), "checks_failed");
+  assert.equal(refusalReason({ ...ok, move: "rewind" }), "rewind_needs_allow_rewind");
+  assert.equal(refusalReason({ ...ok, move: "rewind", allowRewind: true }), null);
   for (const move of ["create", "noop", "forward"]) {
-    assert.equal(refusalReason({ move, onSource: true, allowRewind: false }), null, move);
+    for (const suites of ["passed", "pending", "none"]) {
+      assert.equal(refusalReason({ ...ok, move, suites }), null, `${move} ${suites}`);
+    }
   }
+});
+
+test("check suites are read the way Railway's Wait for CI reads them", () => {
+  const actions = (status, conclusion) => ({ app: "github-actions", status, conclusion });
+  assert.equal(checkSuitesVerdict([]), "none");
+  // Other apps' suites are ignored, as Railway ignores them.
+  assert.equal(checkSuitesVerdict([{ app: "claude", status: "completed", conclusion: "failure" }]), "none");
+  assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("completed", "skipped")]), "passed");
+  assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("in_progress", null)]), "pending");
+  // A later develop push cancels the earlier one's runs; Test would skip that commit.
+  assert.equal(checkSuitesVerdict([actions("completed", "success"), actions("completed", "cancelled")]), "failed");
+  assert.equal(checkSuitesVerdict([actions("in_progress", null), actions("completed", "failure")]), "failed");
 });
 
 test("the push is pinned to the test branch that was read", () => {

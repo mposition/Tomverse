@@ -267,7 +267,8 @@ staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배
 - merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
 - Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
   입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
-- 절차와 release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 

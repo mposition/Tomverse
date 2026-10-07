@@ -58,7 +58,8 @@ partial 이름(`scheduled-jobs`)은 첫 apply 뒤에 **바꾸지 않습니다.**
 ## 4. 적용 절차 (환경마다 한 번, staging 먼저)
 
 **실행 위치:** 로컬 PC의 PowerShell, Tomverse clone 폴더 안(이 PR이 병합된 `develop`, production은 `main`).
-staging·dev도 `develop` checkout에서 적용합니다 — 어느 브랜치를 배포할지는 checkout이 아니라 표가 정합니다.
+dev는 `develop`, staging은 `test` checkout에서 적용합니다 — staging cron이 돌리는 코드와 표가 어긋나지 않게.
+단 `test`가 2026-10-07의 lane 전환을 담기 전에는 staging에 apply하지 않습니다(`docs/ops/dev-test-lanes.md` 4절).
 **필요한 것:**
 - Node 22
 - Railway CLI **5.42.1 이상**(`railway --version`으로 확인, 낮으면 `railway upgrade`)
