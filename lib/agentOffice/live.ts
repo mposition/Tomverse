@@ -215,6 +215,7 @@ type QaCopy = {
   revision: (revision: number) => string;
   noRevision: string;
   latched: string;
+  lastReceived: (time: string) => string;
   readAt: (time: string) => string;
 };
 
@@ -250,6 +251,10 @@ export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCo
             : copy.badges.notConfigured;
 
   const facts = [state.controlRevision === null ? copy.noRevision : copy.revision(state.controlRevision)];
+  // The fresh and stale lines already carry the time; the others do not.
+  if (state.latestDigestAt && state.verdict !== "fresh" && state.verdict !== "stale") {
+    facts.push(copy.lastReceived(utcStamp(state.latestDigestAt)));
+  }
   if (state.mergeLaneLatched) facts.push(copy.latched);
   facts.push(read);
   return { status, badge, line, detail: facts.join(" · ") };

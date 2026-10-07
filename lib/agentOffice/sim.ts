@@ -1085,7 +1085,10 @@ export class AgentOffice {
       this.pushChat("staff", this.narratorName(), s.orderBusy);
       return;
     }
+    // A live room is not called in: its lead stays at the desk, and the
+    // console answers about it with the record instead.
     const ids = Object.keys(this.deptStatus)
+      .filter((dept) => !this.isLive(dept))
       .map((dept) => this.deptLead[dept].id)
       .filter((id) => !this.locked.has(id) && this.agentById.get(id)?.status !== "offDuty")
       .slice(0, 6);
@@ -1104,10 +1107,8 @@ export class AgentOffice {
     const lines = ids.map((id): [string, string] => {
       const agent = this.agentById.get(id)!;
       const status = this.deptStatus[agent.deptId];
-      const live = this.live[agent.deptId];
-      const text = live
-        ? live.line
-        : status === "working"
+      const text =
+        status === "working"
           ? s.conveneWorking(this.deptTaskLabel(agent.deptId), this.deptProgress(agent.deptId))
           : status === "done"
             ? s.conveneDone

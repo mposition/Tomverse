@@ -541,7 +541,10 @@ test("the QA room says whether a digest arrived, in UTC, and a latched lane need
   const off = agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false } }));
   assert.equal(qaTone(off), "waiting");
   assert.equal(qaLiveDept(off, readAt, copy).line, copy.disabled);
-  const dark = agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false }));
+  // A digest stored before it was switched off is still named.
+  assert.equal(qaLiveDept(off, readAt, copy).detail, "제어 기록 5번 · 마지막 digest 10-07 06:00 UTC · 읽은 시각 10-07 22:05 UTC");
+  assert.match(mismatch.detail, /마지막 digest 10-07 06:00 UTC/);
+  const dark = agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false, latestDigestAt: null }));
   assert.equal(qaTone(dark), "waiting");
   assert.equal(qaLiveDept(dark, readAt, copy).detail, "제어 기록 없음 · 읽은 시각 10-07 22:05 UTC");
 
@@ -592,8 +595,16 @@ test("with research and QA both live the demo day still reaches its end, and QA 
     watch();
     return office.dayComplete;
   });
+  // QA's lead is second in room order, so a meeting the operator calls would
+  // reach it first if live rooms were not left out.
+  office.command("Call a meeting with every team");
+  for (let i = 0; i < 4000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  assert.ok(office.log.some((entry) => entry.text.startsWith("Operator order: urgent meeting")), "the meeting was not called");
   assert.equal(qaWorked, false, "the QA room was given scripted work");
-  assert.equal(qaInMeeting, false, "the QA lead sat in a scripted meeting");
+  assert.equal(qaInMeeting, false, "the QA lead sat in a meeting");
   assert.deepEqual([...spoken].filter((line) => line !== live.qa.line), []);
   assert.equal(office.deptStatus.qa, "attention");
   assert.ok(office.log.some((entry) => entry.text.includes("(real record): Digest silent")));
@@ -621,6 +632,9 @@ test("the office reads the QA agent's state, never a digest's content", () => {
   assert.match(qa, /\(process\.env\[QA_RELEASE_ROUTE_SECRET_ENV\.digest\] \?\? ""\)\.length >= 32/);
   assert.equal((qa.match(/process\.env/g) || []).length, 1);
   assert.match(qa, /read: "qa_release"/);
+  // The verdict's clock is taken after the reads, not handed in before them.
+  assert.match(qa, /async function readQa\(\)/);
+  assert.ok(qa.indexOf("now: new Date()") > qa.indexOf("await Promise.all"));
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {

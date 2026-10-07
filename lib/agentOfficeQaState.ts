@@ -5,10 +5,17 @@
  * function its silence monitor calls, with the same inputs: whether a usable
  * digest secret is configured (its length, never its value), the newest
  * operator control revision's `digestEnabled`, and when the newest digest
- * was stored. The one difference is the clock: the monitor reads the
- * database's, the office passes the app's, so within a clock skew of the
- * 28-hour line the two can disagree for that moment. The office is a view;
- * the monitor's verdict is the one that alerts.
+ * was stored. The difference is the clock and the snapshot: the monitor
+ * reads every fact and the database clock in one statement, the office reads
+ * the facts separately and judges them against the app's clock taken after
+ * them. So a database clock running ahead of the app's can make a digest
+ * stored a moment ago read as dated in the future (stale), and within a clock
+ * skew of the 28-hour line the two can disagree. The office is a view; the
+ * monitor's verdict is the one that alerts.
+ *
+ * "Configured" is this app process's environment, the same one the monitor
+ * route sees -- a secret set on the host but not yet in a running process is
+ * not configured here, for the office and the monitor alike.
  */
 
 import type { AgentOfficeQaState } from "@/lib/agentOffice/live";

@@ -77,7 +77,7 @@ async function readResearch(now: Date): Promise<AgentOfficeResearchState> {
  * body is not selected -- the office says whether a digest arrived, never
  * what it says.
  */
-async function readQa(now: Date): Promise<AgentOfficeQaState> {
+async function readQa(): Promise<AgentOfficeQaState> {
   try {
     const [control, latest, latch] = await Promise.all([
       prisma.qaReleaseOperatorControl.findFirst({
@@ -101,7 +101,9 @@ async function readQa(now: Date): Promise<AgentOfficeQaState> {
       control,
       latestDigestAt: latest?.createdAt ?? null,
       mergeLaneLatched: latch?.latched === true,
-      now,
+      // Taken after the reads: a digest stored while they ran must not be
+      // dated after the clock it is judged against.
+      now: new Date(),
     });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "qa_release" });
@@ -110,6 +112,6 @@ async function readQa(now: Date): Promise<AgentOfficeQaState> {
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa] = await Promise.all([readResearch(now), readQa(now)]);
+  const [research, qa] = await Promise.all([readResearch(now), readQa()]);
   return { readAt: now.toISOString(), research, qa };
 }
