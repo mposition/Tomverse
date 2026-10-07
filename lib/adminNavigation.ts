@@ -608,6 +608,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "sre-ops",
+    label: "SRE agent",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
+    group: "Operations",
+    writeRoles: ["owner"],
+    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
+  },
+  {
     id: "agent-digests",
     label: "Agent digests",
     href: "/admin/agent-digests",
@@ -629,14 +638,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
-    // A shell: a pixel office for the seven agent teams that plays a demo day
-    // and links each team to the page that holds its record. It reads no
-    // agent state and writes nothing, so it carries no badge and no
-    // writeRoles.
+    // A shell: a pixel office for the eight agent teams that plays a demo day
+    // and links each team to the page that holds its record. A LIVE room reads
+    // that team's operating state, read only; nothing on the page writes, so
+    // it carries no badge and no writeRoles.
     id: "office",
     label: "Agent office",
     href: "/admin/office",
-    description: "A pixel office shell for the seven agent teams, with a link to each team's record",
+    description: "A pixel office shell for the eight agent teams, with a link to each team's record",
     group: "Operations",
     aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
     // The office draws its own tab strip, as the original UI did; its tabs are

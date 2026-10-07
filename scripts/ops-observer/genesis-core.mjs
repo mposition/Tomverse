@@ -33,3 +33,19 @@ export function genesisRefusal({ reason, mode, supersedesGenesisId }, head) {
   if (reason === "recovery") return mode === head.mode ? null : "ops_observer_genesis_transition";
   return head.mode === "shadow" && mode === "live" ? null : "ops_observer_genesis_transition";
 }
+
+/**
+ * The one genesis the owner can be offered for a chain, from the Admin view
+ * (`head`, `trustReason`), or null when none fits: `initial` (shadow) with no
+ * head; `recovery` in the head's mode when the chain is not trusted;
+ * `activation` to live when a trusted chain is shadow. A trusted live chain
+ * has no genesis -- stopping it is the switch. The seven-day rule is the
+ * store's to judge; the screen only states it.
+ */
+export function genesisOffer({ head, trustReason }) {
+  if (head === null) return { reason: "initial", mode: "shadow" };
+  if (!GENESIS_MODES.includes(head.mode)) return null;
+  if (trustReason !== "trusted") return { reason: "recovery", mode: head.mode };
+  if (head.mode === "shadow") return { reason: "activation", mode: "live" };
+  return null;
+}

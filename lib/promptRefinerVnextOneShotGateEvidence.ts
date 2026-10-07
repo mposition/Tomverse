@@ -23,6 +23,11 @@ import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
 import { readPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { readPromptRefinerVnextOneShotTerminalReceipts } from
+  "@/lib/promptRefinerVnextOneShotTerminalReceipt";
+import { V4_STAGE_ID, V5_STAGE_ID,
+  type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 import {
   evaluatePromptRefinerVnextOneShotGateSummary,
   type PromptRefinerVnextOneShotGateOutcome,
@@ -34,7 +39,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
+const STAGE_ID = V4_STAGE_ID;
 const GATE_ACTION = "prompt_refiner.vnext_one_shot.gate_evaluated";
 const DISPOSITION_ACTION = "prompt_refiner.vnext_one_shot.disposition_recorded";
 const GATE_SUMMARY = "Recorded the content-free one-shot deterministic gate result.";
@@ -99,17 +104,18 @@ const dispositionMetadata = (gateAuditLogId: string,
 export async function readPromptRefinerVnextOneShotGateEvidence(
   tx: Prisma.TransactionClient,
   stage: PromptRefinerVnextOneShotStage | null,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<Readonly<{
   present: boolean; valid: boolean; gateAuditLogId: string | null;
   gateOutcome: PromptRefinerVnextOneShotGateOutcome | null;
 }>> {
   const rows = await tx.adminAuditLog.findMany({
     where: { action: GATE_ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID },
+      targetId: stageId },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let outcome: PromptRefinerVnextOneShotGateOutcome | null = null;
-  if (entry && stage?.id === STAGE_ID && stage.runApprovalAuditLogId &&
+  if (entry && stage?.id === stageId && stage.runApprovalAuditLogId &&
       entry.actorUserId === stage.approvedBy && entry.summary === GATE_SUMMARY &&
       entry.metadata && typeof entry.metadata === "object" &&
       !Array.isArray(entry.metadata)) {
@@ -135,7 +141,7 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
         gateAuditLogId: null, gateOutcome: null });
     }
     const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
-    const slots = await readPromptRefinerVnextOneShotStage(tx);
+    const slots = await readPromptRefinerVnextOneShotStage(tx, stageId);
     const attempted = evaluated.summary.outcomes.suggested +
       evaluated.summary.outcomes.abstained +
       evaluated.summary.outcomes.failed + evaluated.summary.outcomes.unknown;
@@ -147,7 +153,8 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
         slots.reservationShapeValid && slots.approvalAuditsValid &&
         slots.consumedSlots === attempted &&
         slots.reservedSlots === evaluated.summary.outcomes.not_dispatched &&
-        (await verifyConsumedSlotAudits(tx, attempted,
+        await v5TerminalEvidenceMatches(tx, stageId, evaluated) &&
+        (await verifyConsumedSlotAudits(tx, attempted, stageId,
           attestation.runApprovalAuditLogId))?.digest ===
             attestation.slotBindingDigest &&
         canonicalBenchmarkJson(metadata) ===
@@ -162,10 +169,11 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
 
 async function verifyConsumedSlotAudits(
   tx: Prisma.TransactionClient, consumedSlots: number,
+  stageId: PromptRefinerRunnableStageId,
   runApprovalAuditLogId: string,
 ): Promise<Readonly<{ latest: Date; digest: string }> | null> {
   const slots = await tx.promptRefinerVnextOneShotSlot.findMany({
-    where: { stageId: STAGE_ID, status: "consumed" },
+    where: { stageId, status: "consumed" },
     select: { id: true, slotIndex: true, requestId: true },
   });
   if (slots.length !== consumedSlots) return null;
@@ -216,12 +224,37 @@ async function verifyConsumedSlotAudits(
   }
 }
 
+async function v5TerminalEvidenceMatches(
+  tx: Prisma.TransactionClient,
+  stageId: PromptRefinerRunnableStageId,
+  evaluated: ReturnType<typeof evaluatePromptRefinerVnextOneShotGateSummary>,
+): Promise<boolean> {
+  if (stageId !== V5_STAGE_ID) return true;
+  const receipts = await readPromptRefinerVnextOneShotTerminalReceipts(tx, stageId);
+  const outcomes = evaluated.summary.outcomes;
+  return receipts.valid && receipts.terminalReceipts === PROMPT_REFINER_VNEXT_SLOT_COUNT &&
+    receipts.unknownReceipts === 0 && receipts.consumedWithoutReceipt === 0 &&
+    receipts.reservedSlots === 0 &&
+    receipts.observedCostMicroUsd === evaluated.summary.cost.knownCostMicroUsd &&
+    receipts.slots.filter((slot) => slot.state === "terminal" &&
+      "resultKind" in slot &&
+      slot.resultKind === "suggested").length === outcomes.suggested &&
+    receipts.slots.filter((slot) => slot.state === "terminal" &&
+      "resultKind" in slot &&
+      slot.resultKind === "abstained").length === outcomes.abstained &&
+    receipts.slots.filter((slot) => slot.state === "terminal" &&
+      "resultKind" in slot &&
+      slot.resultKind === "failed").length === outcomes.failed;
+}
+
 /** Server rechecks the bound stage, all attempted slots, audit and shadow. */
 export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
   session: Session;
   request: Request;
   attestation: unknown;
+  stageId?: PromptRefinerRunnableStageId;
 }) {
+  const stageId = input.stageId ?? STAGE_ID;
   if (!input.session?.user?.id || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_gate_context_invalid");
   }
@@ -236,7 +269,7 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!snapshot.stagePresent || !snapshot.reservationShapeValid ||
         !snapshot.approvalAuditsValid ||
         !["run_approved", "closed"].includes(snapshot.stageStatus ?? "") ||
@@ -244,9 +277,9 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
         snapshot.slotCount !== PROMPT_REFINER_VNEXT_SLOT_COUNT) {
       throw new Error("vnext_one_shot_gate_stage_unavailable");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.approvedBy !== input.session.user.id ||
         !targetMatches(stage, attestation) ||
@@ -262,7 +295,7 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
     const attempted = evaluated.summary.outcomes.suggested +
       evaluated.summary.outcomes.abstained + evaluated.summary.outcomes.failed +
       evaluated.summary.outcomes.unknown;
-    const slotAudits = await verifyConsumedSlotAudits(tx, attempted,
+    const slotAudits = await verifyConsumedSlotAudits(tx, attempted, stageId,
       attestation.runApprovalAuditLogId);
     const shadowAudit = await tx.adminAuditLog.findUnique({
       where: { id: attestation.shadowAuditLogId },
@@ -271,20 +304,21 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
     if (snapshot.consumedSlots !== attempted ||
         snapshot.reservedSlots !== evaluated.summary.outcomes.not_dispatched ||
         !slotAudits || slotAudits.digest !== attestation.slotBindingDigest ||
+        !await v5TerminalEvidenceMatches(tx, stageId, evaluated) ||
         !shadowAudit ||
         Date.parse(attestation.signedAt) < slotAudits.latest.getTime() ||
         Date.parse(attestation.signedAt) < shadowAudit.createdAt.getTime()) {
       throw new Error("vnext_one_shot_gate_slot_evidence_mismatch");
     }
-    const prior = await readPromptRefinerVnextOneShotGateEvidence(tx, stage);
+    const prior = await readPromptRefinerVnextOneShotGateEvidence(tx, stage, stageId);
     if (prior.present) throw new Error("vnext_one_shot_gate_duplicate");
     const gateAuditLogId = await writeAdminAuditLog({
       tx, session: input.session, request: input.request,
       action: GATE_ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID, summary: GATE_SUMMARY,
+      targetId: stageId, summary: GATE_SUMMARY,
       metadata: gateMetadata(stage, attestation, evaluated, signer),
     });
-    const readback = await readPromptRefinerVnextOneShotGateEvidence(tx, stage);
+    const readback = await readPromptRefinerVnextOneShotGateEvidence(tx, stage, stageId);
     if (!readback.valid || readback.gateAuditLogId !== gateAuditLogId ||
         readback.gateOutcome !== evaluated.outcome) {
       throw new Error("vnext_one_shot_gate_readback_invalid");
@@ -297,11 +331,12 @@ export async function recordPromptRefinerVnextOneShotGateEvidence(input: {
 
 export async function readPromptRefinerVnextOneShotDisposition(
   tx: Prisma.TransactionClient, stage: PromptRefinerVnextOneShotStage | null,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ) {
-  const gate = await readPromptRefinerVnextOneShotGateEvidence(tx, stage);
+  const gate = await readPromptRefinerVnextOneShotGateEvidence(tx, stage, stageId);
   const rows = await tx.adminAuditLog.findMany({
     where: { action: DISPOSITION_ACTION,
-      targetType: "PromptRefinerVnextOneShotStage", targetId: STAGE_ID },
+      targetType: "PromptRefinerVnextOneShotStage", targetId: stageId },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let decision: PromptRefinerVnextOneShotGateOutcome | null = null;
@@ -336,46 +371,48 @@ export async function recordPromptRefinerVnextOneShotDisposition(input: {
   request: Request;
   target: PromptRefinerVnextOneShotGateTarget & { gateAuditLogId: string };
   decision: PromptRefinerVnextOneShotGateOutcome;
+  stageId?: PromptRefinerRunnableStageId;
 }) {
+  const stageId = input.stageId ?? STAGE_ID;
   if (!input.session?.user?.id || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_disposition_context_invalid");
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!snapshot.stagePresent || !snapshot.reservationShapeValid ||
         !snapshot.approvalAuditsValid) {
       throw new Error("vnext_one_shot_disposition_stage_unavailable");
     }
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.approvedBy !== input.session.user.id ||
         !targetMatches(stage, input.target)) {
       throw new Error("vnext_one_shot_disposition_binding_mismatch");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
     if (!shadow.valid || shadow.shadowAuditLogId !== input.target.shadowAuditLogId) {
       throw new Error("vnext_one_shot_disposition_binding_mismatch");
     }
-    const gate = await readPromptRefinerVnextOneShotGateEvidence(tx, stage);
+    const gate = await readPromptRefinerVnextOneShotGateEvidence(tx, stage, stageId);
     if (!gate.valid || gate.gateAuditLogId !== input.target.gateAuditLogId ||
         !gate.gateOutcome || !stage.runApprovalAuditLogId ||
         !canRecordPromptRefinerVnextOneShotDisposition(gate.gateOutcome,
           input.decision)) {
       throw new Error("vnext_one_shot_disposition_gate_unavailable");
     }
-    const prior = await readPromptRefinerVnextOneShotDisposition(tx, stage);
+    const prior = await readPromptRefinerVnextOneShotDisposition(tx, stage, stageId);
     if (prior.present) throw new Error("vnext_one_shot_disposition_duplicate");
     const dispositionAuditLogId = await writeAdminAuditLog({
       tx, session: input.session, request: input.request,
       action: DISPOSITION_ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID, summary: DISPOSITION_SUMMARY,
+      targetId: stageId, summary: DISPOSITION_SUMMARY,
       metadata: dispositionMetadata(gate.gateAuditLogId,
         stage.runApprovalAuditLogId, gate.gateOutcome, input.decision),
     });
-    const readback = await readPromptRefinerVnextOneShotDisposition(tx, stage);
+    const readback = await readPromptRefinerVnextOneShotDisposition(tx, stage, stageId);
     if (!readback.valid ||
         readback.dispositionAuditLogId !== dispositionAuditLogId) {
       throw new Error("vnext_one_shot_disposition_readback_invalid");

@@ -32,7 +32,8 @@ const syntheticModelIds = new Set<string>();
 process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
-process.env.ADMIN_AUDIT_INTEGRITY_KEY = `synthetic-frontier-audit-${randomUUID()}`;
+process.env.ADMIN_AUDIT_INTEGRITY_KEY =
+  "synthetic-amux-v4-frontier-catalog-audit-key-2026";
 const session = {
   user: { id: ownerId, email: ownerEmail, authenticatedAt: new Date().toISOString() },
   expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),

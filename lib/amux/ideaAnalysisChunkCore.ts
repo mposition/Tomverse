@@ -345,6 +345,25 @@ const parseUnit = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   return reject("schema_rejected");
 };
 
+/** Re-check one digest-verified, stored unit after other units or the 24-hour
+ * freeform have been purged. This does not resolve cross-unit references or
+ * admit new model output; the full chunk guard must run before storage. */
+export function inspectAmuxStoredAnalysisUnit(input: {
+  raw: string; chunkIndex: number; permittedSourceRefIds: readonly string[];
+}): { ok: true; unit: AmuxAnalysisChunk["units"][number] } |
+  { ok: false } {
+  if (typeof input?.raw !== "string" || byteLength(input.raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES ||
+      !Number.isSafeInteger(input.chunkIndex) || input.chunkIndex < 0 ||
+      !Array.isArray(input.permittedSourceRefIds) ||
+      input.permittedSourceRefIds.some((refId) => !amuxAnalysisRefSafe(refId))) {
+    return { ok: false };
+  }
+  try {
+    return { ok: true, unit: parseUnit(JSON.parse(input.raw),
+      new Set(input.permittedSourceRefIds), input.chunkIndex) };
+  } catch { return { ok: false }; }
+}
+
 type TargetRef = AmuxPermittedTargetRef | AmuxAnalysisNode | AmuxAnalysisCard;
 
 /** This resolves only refs supplied in the trusted preview or present in this

@@ -68,10 +68,10 @@ pub const NATIVE_FAMILIES: &[(&str, &str)] = &[
     ("/api/brex", "tokenized card issuance, webhook budget checks and credential health; disabled until configured (api/brex.rs)"),
     ("/api/_clear_sw", "service-worker cache reset landing page"),
     ("/health", "health + build discriminator"),
-    // The /api-prefixed alias for the same handler. Lanes guess this path
-    // because every sibling diagnostic is under /api/ (2026-08-30 sweep: 20
-    // 404s in 24h, hand-typed).
-    ("/api/health", "alias of /health; also the /api/health/invariants prefix"),
+    // Keep readiness separate from the slower invariant scan: a shared
+    // latency family files a false /api/health regression (CC-77).
+    ("/api/health", "alias of /health readiness"),
+    ("/api/health/invariants", "invariant diagnostics, measured separately from readiness"),
     ("/manifest.json", "PWA manifest from branding prefs"),
     (
         "/api/_clear_sw",
@@ -108,6 +108,7 @@ pub const NATIVE_FAMILIES: &[(&str, &str)] = &[
     ("/api/memory", "global memory document"),
     ("/api/review", "weekly trends engine + digest markdown"),
     ("/api/workers", "modern worker API (+dead-letters)"),
+    ("/api/routing", "read-only worker routing catalog (api/routing.rs)"),
     (
         "/api/models",
         "typed OpenAI, Claude, and Gemini model catalog shared by provider adapters and every worker picker (api/workers.rs)",

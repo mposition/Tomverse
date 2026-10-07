@@ -30,6 +30,8 @@ import {
 } from "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
 import { prisma } from "@/lib/prisma";
 import { canonicalBenchmarkJson } from "@/lib/routerDevelopmentBenchmark";
+import { V5_STAGE_ID, type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
 const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const HISTORICAL_STAGE_ID = "prompt-refiner-vnext-one-shot-v3";
@@ -101,7 +103,8 @@ const shadowMetadata = (stage: PromptRefinerVnextOneShotStage,
 /** A signed, content-free app observation. Duplicates and unknown rows fail closed. */
 export async function readPromptRefinerVnextOneShotOperationalShadow(
   tx: Prisma.TransactionClient,
-  stage: PromptRefinerVnextOneShotStage | null
+  stage: PromptRefinerVnextOneShotStage | null,
+  stageId: PromptRefinerRunnableStageId = STAGE_ID,
 ): Promise<Readonly<{
   present: boolean;
   valid: boolean;
@@ -111,7 +114,7 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
 }>> {
   const rows = await tx.adminAuditLog.findMany({
     where: { action: ACTION, targetType: "PromptRefinerVnextOneShotStage",
-      targetId: stage?.id ?? STAGE_ID },
+      targetId: stage?.id ?? stageId },
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let valid = false;
@@ -128,7 +131,8 @@ export async function readPromptRefinerVnextOneShotOperationalShadow(
     Number.isInteger(metadata.cacheWriteInputTokens) &&
     metadata.cacheWriteInputTokens === 0 ? 0 as const : null;
   const signedMs = signedAt ? Date.parse(signedAt) : NaN;
-  if (entry && (stage?.id === STAGE_ID || stage?.id === HISTORICAL_STAGE_ID) &&
+  if (entry && (stage?.id === STAGE_ID || stage?.id === HISTORICAL_STAGE_ID ||
+      stage?.id === V5_STAGE_ID) &&
       signedAt && signerDigest &&
       cacheWriteInputTokens === 0 &&
       SHA256.test(signerDigest) && Number.isFinite(signedMs) &&
@@ -163,11 +167,16 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
   session: Session;
   request: Request;
   proof: unknown;
+  stageId?: PromptRefinerRunnableStageId;
 }): Promise<Readonly<{ stageId: string; shadowAuditLogId: string;
   dispatchAuthorized: false }>> {
   if (!input.session?.user?.id || !input.proof ||
       adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_shadow_context_invalid");
+  }
+  const stageId = input.stageId ?? STAGE_ID;
+  if (stageId !== STAGE_ID && stageId !== V5_STAGE_ID) {
+    throw new Error("vnext_one_shot_shadow_stage_invalid");
   }
   const signer = readSignerPin();
   const proof: PromptRefinerVnextOneShotShadowProof =
@@ -179,7 +188,7 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const snapshot = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!snapshot.stagePresent || snapshot.stageStatus !== "run_approved" ||
         !snapshot.reservationShapeValid || !snapshot.approvalAuditsValid ||
         snapshot.slotCount !== PROMPT_REFINER_VNEXT_SLOT_COUNT ||
@@ -187,10 +196,10 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
         snapshot.consumedSlots !== 0) {
       throw new Error("vnext_one_shot_shadow_stage_unavailable");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
     await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage) throw new Error("vnext_one_shot_shadow_binding_mismatch");
     const target = promptRefinerVnextOneShotShadowTarget(stage);
@@ -209,7 +218,7 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
     const shadowAuditLogId = await writeAdminAuditLog({
       tx, session: input.session, request: input.request,
       action: ACTION,
-      targetType: "PromptRefinerVnextOneShotStage", targetId: STAGE_ID,
+      targetType: "PromptRefinerVnextOneShotStage", targetId: stageId,
       summary: SUMMARY,
       metadata: shadowMetadata(stage, proof.signedAt, signer.digest,
         proof.cacheWriteInputTokens),
@@ -218,7 +227,7 @@ export async function recordPromptRefinerVnextOneShotOperationalShadow(input: {
     if (!evidence.valid || evidence.shadowAuditLogId !== shadowAuditLogId) {
       throw new Error("vnext_one_shot_shadow_evidence_unverified");
     }
-    return Object.freeze({ stageId: STAGE_ID, shadowAuditLogId,
+    return Object.freeze({ stageId, shadowAuditLogId,
       dispatchAuthorized: false as const });
   }, { maxWait: 5_000, timeout: 15_000 });
 }

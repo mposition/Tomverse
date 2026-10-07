@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pollAmuxV4AnalysisCandidateIds } from "../lib/amux/ideaLocalQueuePoll.mjs";
+import { pollAmuxV4AnalysisCandidateIds,
+  AMUX_V4_ANALYSIS_APP_ORIGIN_ENV } from "../lib/amux/ideaLocalQueuePoll.mjs";
 
 const secret = "local_queue_only_012345678901234567890123456789";
 const candidate = (index) => ({
@@ -11,6 +12,8 @@ const candidate = (index) => ({
 const page = { candidates: Array.from({ length: 32 }, (_, index) => candidate(index)),
   hasMore: true, nextCursor: "next_page_1" };
 const json = (body) => Response.json(body);
+
+process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = "https://staging.tomverse.example/";
 
 test("local AMUX v4 supervisor polls only candidate metadata with its own identity", async () => {
   let observed;
@@ -51,11 +54,32 @@ test("local AMUX v4 poll refuses invalid origin or secret before network", async
   assert.equal(calls, 0);
 });
 
+test("local AMUX v4 poll pins the app origin before sending its bearer credential", async () => {
+  let calls = 0;
+  const fetchImpl = async () => { calls += 1; return json(page); };
+  assert.deepEqual(await pollAmuxV4AnalysisCandidateIds({
+    origin: "https://tomverse.example/", agentSecret: secret, fetchImpl,
+  }), { kind: "refused" });
+  const previous = process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  delete process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV];
+  try {
+    assert.deepEqual(await pollAmuxV4AnalysisCandidateIds({
+      origin: "https://staging.tomverse.example/", agentSecret: secret, fetchImpl,
+    }), { kind: "refused" });
+  } finally { process.env[AMUX_V4_ANALYSIS_APP_ORIGIN_ENV] = previous; }
+  assert.equal(calls, 0);
+});
+
 test("local AMUX v4 poll fails closed on redirect, disabled route and unknown result", async () => {
-  const basis = { origin: "https://tomverse.example/", agentSecret: secret };
+  const basis = { origin: "https://staging.tomverse.example/", agentSecret: secret };
   assert.deepEqual(await pollAmuxV4AnalysisCandidateIds({ ...basis,
     fetchImpl: async () => new Response(null, { status: 302,
       headers: { location: "https://evil.example/" } }),
+  }), { kind: "unavailable" });
+  const redirected = json(page);
+  Object.defineProperty(redirected, "url", { value: "https://evil.example/" });
+  assert.deepEqual(await pollAmuxV4AnalysisCandidateIds({ ...basis,
+    fetchImpl: async () => redirected,
   }), { kind: "unavailable" });
   assert.deepEqual(await pollAmuxV4AnalysisCandidateIds({ ...basis,
     fetchImpl: async () => new Response(null, { status: 409 }),

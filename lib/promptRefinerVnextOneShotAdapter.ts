@@ -9,6 +9,10 @@ import {
   type PromptRefinerVnextModelOutput,
 } from "@/lib/promptRefinerQualityEvaluationVnextCore";
 import {
+  isPromptRefinerVnextConfirmedFailureCode,
+  type PromptRefinerVnextConfirmedFailureCode,
+} from "@/lib/promptRefinerVnextOneShotFailureCodes";
+import {
   guardPromptRefinerVnextBilledUsage,
   PROMPT_REFINER_VNEXT_MAX_INPUT_TOKENS,
   PROMPT_REFINER_VNEXT_MAX_OUTPUT_TOKENS,
@@ -24,9 +28,7 @@ const FRAMING_BYTES = 128;
 type Generate = (options: Record<string, unknown>) => Promise<unknown>;
 type Schedule = (callback: () => void, delayMs: number) => unknown;
 type Cancel = (handle: unknown) => void;
-type Outcome = Readonly<{
-  status: "bounded_response";
-  output: PromptRefinerVnextModelOutput;
+type BilledResult = Readonly<{
   costUpperBoundMicroUsd: number;
   usage: Readonly<{
     inputTokens: number;
@@ -39,9 +41,18 @@ type Outcome = Readonly<{
   cacheWriteInputTokens: 0;
   toolCallCount: 0;
   dispatchAuthorized: false;
-}> | Readonly<{
+}>;
+type Outcome = (BilledResult & Readonly<{
+  status: "bounded_response";
+  output: PromptRefinerVnextModelOutput;
+}>) | (BilledResult & Readonly<{
+  status: "confirmed_failure";
+  failureCode: PromptRefinerVnextConfirmedFailureCode;
+}>) | Readonly<{
   status: "outcome_unknown";
   reason: "timeout" | "provider_error" | "response_unverified";
+  diagnosticCode?: "response_envelope_invalid" | "cache_write_unverified" |
+    "usage_cost_unverified" | "output_parse_unverified";
   dispatchAuthorized: false;
 }>;
 
@@ -56,8 +67,10 @@ const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
-const unknown = (reason: "timeout" | "provider_error" | "response_unverified"): Outcome =>
-  Object.freeze({ status: "outcome_unknown", reason, dispatchAuthorized: false });
+const unknown = (reason: "timeout" | "provider_error" | "response_unverified",
+  diagnosticCode?: Extract<Outcome, { status: "outcome_unknown" }>["diagnosticCode"]
+): Outcome => Object.freeze({ status: "outcome_unknown", reason,
+  ...(diagnosticCode ? { diagnosticCode } : {}), dispatchAuthorized: false });
 
 /**
  * A11's isolated generation boundary. The A15 owner runner reaches this
@@ -156,13 +169,13 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
           !Array.isArray(result.toolResults) || result.toolResults.length !== 0 ||
           !Array.isArray(step.toolCalls) || step.toolCalls.length !== 0 ||
           !Array.isArray(step.toolResults) || step.toolResults.length !== 0) {
-        return unknown("response_unverified");
+        return unknown("response_unverified", "response_envelope_invalid");
       }
       const usage = record(result.usage);
       const details = record(usage?.inputTokenDetails);
       if (!details || details.cacheWriteTokens !== 0 ||
           !Number.isSafeInteger(details.cacheWriteTokens)) {
-        return unknown("response_unverified");
+        return unknown("response_unverified", "cache_write_unverified");
       }
       const normalizedUsage = {
         inputTokens: usage?.inputTokens,
@@ -177,9 +190,34 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
       });
       if (!checked.complete || checked.costUpperBoundMicroUsd === null ||
           checked.costUpperBoundMicroUsd > PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD) {
-        return unknown("response_unverified");
+        return unknown("response_unverified", "usage_cost_unverified");
       }
-      const output = parsePromptRefinerVnextModelOutput(result.text as string, input.sourceText);
+      const responseText = result.text;
+      if (typeof responseText !== "string") {
+        return unknown("response_unverified", "output_parse_unverified");
+      }
+      let output: PromptRefinerVnextModelOutput;
+      try {
+        output = parsePromptRefinerVnextModelOutput(responseText, input.sourceText);
+      } catch (error) {
+        const code = error instanceof Error ? error.message : null;
+        if (!isPromptRefinerVnextConfirmedFailureCode(code)) {
+          return unknown("response_unverified", "output_parse_unverified");
+        }
+        return Object.freeze({
+          status: "confirmed_failure", failureCode: code,
+          costUpperBoundMicroUsd: checked.costUpperBoundMicroUsd,
+          usage: Object.freeze({
+            inputTokens: normalizedUsage.inputTokens as number,
+            outputTokens: normalizedUsage.outputTokens as number,
+            cachedInputTokens: normalizedUsage.cachedInputTokens as number,
+            cacheWriteInputTokens: 0 as const,
+            reasoningTokens: normalizedUsage.reasoningTokens as number | null,
+          }),
+          intentToTerminalLatencyMs: Math.ceil(elapsedMs),
+          cacheWriteInputTokens: 0, toolCallCount: 0, dispatchAuthorized: false,
+        });
+      }
       return Object.freeze({
         status: "bounded_response", output,
         costUpperBoundMicroUsd: checked.costUpperBoundMicroUsd,
@@ -194,7 +232,7 @@ export function createPromptRefinerVnextOneShotAdapter(dependencies: {
         cacheWriteInputTokens: 0, toolCallCount: 0, dispatchAuthorized: false,
       });
     } catch {
-      return unknown("response_unverified");
+      return unknown("response_unverified", "output_parse_unverified");
     }
   };
 }

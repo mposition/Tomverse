@@ -18,7 +18,11 @@ const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const deploymentId = z.string().uuid();
+const V5 = "prompt-refiner-vnext-one-shot-v5";
+const V4_CONFIRMATION = "AUTHORIZE_VNEXT_ONE_SHOT_V3_PAID_DISPATCH_AFTER_B06";
+const V5_CONFIRMATION = "AUTHORIZE_VNEXT_ONE_SHOT_NEW_V5_PAID_DISPATCH_80_SLOTS";
 const schema = z.object({
+  stageId: z.literal(V5).optional(),
   stageApprovalAuditLogId: z.string().min(1).max(128),
   runApprovalAuditLogId: z.string().min(1).max(128),
   shadowAuditLogId: z.string().min(1).max(128),
@@ -29,8 +33,10 @@ const schema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.literal("AUTHORIZE_VNEXT_ONE_SHOT_V3_PAID_DISPATCH_AFTER_B06"),
-}).strict();
+  confirmation: z.enum([V4_CONFIRMATION, V5_CONFIRMATION]),
+}).strict().refine((value) => value.stageId === V5
+  ? value.confirmation === V5_CONFIRMATION
+  : value.confirmation === V4_CONFIRMATION);
 
 /** Future, separate owner approval. B06 does not invoke this route. */
 export async function POST(request: Request) {
@@ -59,12 +65,12 @@ export async function POST(request: Request) {
         { status: 409, headers });
     }
     const body = await readLimitedJson(request, 2 * 1024, schema);
-    const { confirmation: _confirmation, ...expected } = body;
+    const { confirmation: _confirmation, stageId, ...expected } = body;
     void _confirmation;
     await consumeApiRateLimit(request, session.user.id,
       "admin-prompt-refiner-vnext-paid-authorization", { minute: 3, day: 12 });
     const result = await approvePromptRefinerVnextOneShotPaidDispatch({
-      session, request, expected,
+      session, request, expected, stageId,
     });
     return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
@@ -76,6 +82,7 @@ export async function POST(request: Request) {
     if (error instanceof Error && [
       "vnext_one_shot_paid_approval_context_invalid",
       "vnext_one_shot_paid_approval_stage_unavailable",
+      "vnext_one_shot_paid_approval_predecessor_unavailable",
       "vnext_one_shot_paid_approval_binding_mismatch",
       "vnext_one_shot_paid_approval_shadow_unavailable",
       "vnext_one_shot_paid_approval_duplicate",

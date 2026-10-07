@@ -112,7 +112,7 @@
 .text-button { min-height: 42px; border: 0; background: transparent; color: var(--ink-soft); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .trust-copy { color: var(--ink-faint); font-size: 11px; line-height: 1.5; text-align: center; }
 
-.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 18px; }
+.summary-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 18px; }
 .metric {
   position: relative;
   display: grid;
@@ -185,11 +185,13 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .done { background: var(--mint); }
 .working { background: var(--yellow); animation: pulse 1s infinite alternate; }
 .approval { background: #ffd1e5; }
+.attention { background: #ffd1e5; }
 .blocked { background: #e7ddff; }
 .waiting { background: white; }
 .status-dot.done { background: #36c78a; }
 .status-dot.working { background: #ffd855; }
 .status-dot.approval { background: var(--pink-deep); }
+.status-dot.attention { background: var(--pink-deep); }
 .status-dot.blocked { background: var(--lav); }
 .status-dot.waiting { background: #ddd0d7; }
 
@@ -230,6 +232,14 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .team-modal .btn-primary { width: 100%; }
 .toast { position: fixed; z-index: 70; left: 50%; bottom: 24px; transform: translate(-50%, 70px); padding: 10px 18px; border-radius: 999px; background: var(--ink); color: white; font-size: 12px; font-weight: 900; opacity: 0; transition: .25s; pointer-events: none; }
 .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+/* A room that reads a real record says so wherever the room is named. */
+.live-chip { display: inline-block; margin-left: 5px; padding: 0 5px; border: 1.5px solid var(--ink); border-radius: 99px; background: var(--mint); color: var(--ink); font-size: 9px; font-style: normal; font-weight: 900; letter-spacing: .04em; vertical-align: 1px; }
+.rm-head .live-chip { margin-left: 0; font-size: 8px; }
+.mini-badge.live { background: var(--mint); box-shadow: inset 0 0 0 1.5px #36c78a; }
+.live-box { display: grid; gap: 4px; margin-bottom: 10px; padding: 12px; border: 2px solid #36c78a; border-radius: 9px; background: #effbf5; }
+.live-box strong { font-size: 13px; }
+.live-box small { color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
 
 /* The shell notice: what this screen is, before anything on it is read as a fact. */
 .shell-notice {
@@ -446,6 +456,7 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .lc.on-duty { background: var(--yellow); }
 .lc.done { background: var(--mint); }
 .lc.working { background: var(--pink); color: #fff; }
+.lc.attention { background: #ffd1e5; }
 .lc.blocked { background: var(--lav); }
 
 .live-grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
@@ -498,6 +509,7 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .rm.working { background: #fffaf0; }
 .rm.done { background: #f2fdf8; }
 .rm.approval { background: #fff0f7; }
+.rm.attention { background: #fff0f7; }
 .rm.blocked { background: #f6f4fb; }
 .rm.hot { animation: roomPulse 1.6s ease-in-out infinite; }
 .rm-head {
@@ -530,6 +542,7 @@ a.integration-row:hover { border-color: var(--pink-deep); }
 .rm-dot.done { background: #4bd6a4; }
 .rm-dot.working { background: #ffd83d; animation: blinkDot .9s steps(2) infinite; }
 .rm-dot.approval { background: var(--pink-deep); animation: blinkDot .6s steps(2) infinite; }
+.rm-dot.attention { background: var(--pink-deep); }
 .rm-dot.blocked { background: var(--lav); }
 .rm-dot.waiting { background: #fff; }
 .rm-door { position: absolute; width: 18px; height: 4px; background: var(--yellow); box-shadow: 0 0 0 1.5px var(--ink); }
@@ -912,7 +925,6 @@ a.integration-row:hover { border-color: var(--pink-deep); }
   .office-title { font-size: 27px; }
   .summary-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .metric { min-height: 88px; }
-  .metric:last-child { grid-column: 1 / -1; }
   .side-stack { grid-template-columns: 1fr; }
   .team-grid { grid-template-columns: 1fr; }
   .section-heading { display: grid; }

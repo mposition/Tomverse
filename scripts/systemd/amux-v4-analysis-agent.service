@@ -1,0 +1,25 @@
+[Unit]
+Description=Tomverse AMUX v4 local idea analysis (one claim)
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-v4/analysis-agent-once.mjs
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/tomverse-amux-v4/analysis-agent.env
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v4/analysis-agent-once.mjs
+WorkingDirectory=%h
+TimeoutStartSec=650s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/tomverse-amux-v4-analysis
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v4-analysis-agent
+
+# The timer may start again, but a failed/unknown outcome leaves a durable
+# marker that rejects queue access until an operator reconciles the receipt.

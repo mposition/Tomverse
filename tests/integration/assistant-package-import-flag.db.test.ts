@@ -8,6 +8,7 @@ import {
 } from "@/lib/appSettings";
 import { ASSISTANT_PACKAGE_IMPORT_FLAG_KEY } from "@/lib/assistantPackageImportAccess";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 /**
  * The only way the import flag changes.
@@ -22,7 +23,7 @@ import { prisma } from "@/lib/prisma";
  */
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE "AdminAuditLog", "AppSetting", "User" RESTART IDENTITY CASCADE
   `);
 

@@ -368,6 +368,9 @@ run(
     // The analysis-only USD 50 ledger migration must install its namespace,
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
+    // Retention must clear due bodies, preserve the audit trail and retire
+    // external unit keys without silently extending a legal hold.
+    "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
@@ -382,6 +385,18 @@ run(
     // sre-ops advance: state, checkpoint, audit entry and ledger row in one
     // transaction; stale base, untrusted chain and unchanged keys write nothing.
     "tests/integration/ops-observer-store-advance.db.test.ts",
+    // sre-ops advance with a reservation: owed items only, replay, channel
+    // check, the daily cap counted in the store; refusals write nothing.
+    "tests/integration/ops-observer-store-reserve.db.test.ts",
+    // sre-ops confirm: the close decided by the genesis mode, replay, abandoned
+    // and untrusted refusals.
+    "tests/integration/ops-observer-store-confirm.db.test.ts",
+    // sre-ops genesis: the owner's approval bound to the head, the transition
+    // and seven-day rules, and a created chain the state read trusts.
+    "tests/integration/ops-observer-store-genesis.db.test.ts",
+    // sre-ops retention: closed reservations past ninety days deleted in
+    // bounded batches with their items; reserved and recent rows stay.
+    "tests/integration/ops-observer-store-retention.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

@@ -428,12 +428,19 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
 // same audit helper. The 228-entry count and position-free inventory still
 // match origin/develop; only source positions moved.
+// 2026-10-07, A06 analysis claim, result and retention actions extend that
+// helper again. The position-free 228-entry inventory is unchanged; only
+// source line positions in the reviewed closure move.
+// 2026-10-07, dev environment: the marketing pipeline fingerprint record in
+// `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
+// accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
+// added; count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "0e4d7b2c8a668df39f8eda5948cc087c",
-  "a0424ffea654a5b028091cd64d226ff1",
+  "ef6e125184dd36d197eeefa807da0bbd",
+  "19e3b603036ec6d2a22e78534b3f4dd3",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

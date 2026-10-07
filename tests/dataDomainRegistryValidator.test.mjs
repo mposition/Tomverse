@@ -188,6 +188,16 @@ test("a user-linked model missing from the registry is rejected", () => {
   assert.match(output, /MemoryItem holds user data but is not in the registry/);
 });
 
+test("an AMUX idea child missing from the registry is rejected", () => {
+  const { code, output } = run((registry) => {
+    registry.domains = registry.domains.filter(
+      (row) => row.prismaModel !== "AmuxIdeaContentKeyRetirement"
+    );
+  });
+  assert.equal(code, 1);
+  assert.match(output, /AmuxIdeaContentKeyRetirement holds user data but is not in the registry/);
+});
+
 test("a registry that disagrees with the export declarations is rejected", () => {
   const { code, output } = run((_registry, find) => {
     find("account").inUnifiedExport = "excluded";
