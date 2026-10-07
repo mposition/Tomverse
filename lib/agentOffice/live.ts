@@ -371,6 +371,7 @@ export function engineeringLiveDept(
   const last = state.lastRun;
   const lastLine = last ? copy.lastRun(last.outcome ?? last.status, utcStamp(last.endedAt)) : copy.noRun;
   const since = state.activeSince ? utcStamp(state.activeSince) : "—";
+  const runningLine = state.activeRuns === 1 ? copy.running(since) : copy.runningMany(state.activeRuns, since);
 
   const [badge, line]: [string, string] =
     state.halt !== "none"
@@ -386,10 +387,7 @@ export function engineeringLiveDept(
               : state.frozen
                 ? [copy.badges.frozen, copy.frozen]
                 : state.activeRuns > 0
-                  ? [
-                      copy.badges.running,
-                      state.activeRuns === 1 ? copy.running(since) : copy.runningMany(state.activeRuns, since),
-                    ]
+                  ? [copy.badges.running, runningLine]
                   : last
                     ? [copy.badges.clear, lastLine]
                     : [copy.badges.noRun, copy.noRun];
@@ -400,6 +398,9 @@ export function engineeringLiveDept(
   // it needs a look, otherwise here -- including beside runs in progress,
   // which are other runs than it.
   if (last && line !== lastLine) facts.push(lastLine);
+  // Runs in progress are a fact even when a halt, a decision or a failed run
+  // takes the line.
+  if (state.activeRuns > 0 && line !== runningLine) facts.push(runningLine);
   facts.push(
     state.runnerLastFinishAt ? copy.runnerFinish(utcStamp(state.runnerLastFinishAt)) : copy.runnerNever,
     state.publisherLastFinishAt ? copy.publisherFinish(utcStamp(state.publisherLastFinishAt)) : copy.publisherNever,

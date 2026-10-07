@@ -791,6 +791,23 @@ test("the engineering room says how the agent stands: halts and decisions first,
   assert.equal(running.status, "working");
   assert.equal(running.line, "작업 중 · 10-07 20:00 UTC 시작");
   assert.match(running.detail, /직전 회차 private_result · 10-07 21:30 UTC/);
+  assert.doesNotMatch(running.detail, /작업 중/, "the runs in progress are named once");
+  // Runs in progress stay on screen when a failed run, a halt or a decision takes the line.
+  const failedWhileRunning = room({
+    active: { count: 2, since: at("2026-10-07T20:00:00Z") },
+    lastRun: { status: "finished", outcome: "agent_failed", startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") },
+  });
+  assert.equal(failedWhileRunning.status, "attention");
+  assert.equal(failedWhileRunning.line, "직전 회차 agent_failed · 10-07 21:30 UTC");
+  assert.match(failedWhileRunning.detail, /작업 중 2건 · 가장 이른 시작 10-07 20:00 UTC/);
+  assert.match(
+    room({ halt: "state_mismatch", active: { count: 1, since: at("2026-10-07T20:00:00Z") } }).detail,
+    /작업 중 · 10-07 20:00 UTC 시작/
+  );
+  assert.match(
+    room({ openOwnerItems: [{ kind: "decision", count: 1 }], active: { count: 1, since: at("2026-10-07T20:00:00Z") } }).detail,
+    /작업 중 · 10-07 20:00 UTC 시작/
+  );
   const two = room({ active: { count: 2, since: at("2026-10-07T20:00:00Z") } });
   assert.equal(two.line, "작업 중 2건 · 가장 이른 시작 10-07 20:00 UTC");
 
@@ -869,18 +886,39 @@ test("with engineering live the demo plays no decision, and the day still reache
 });
 
 test("a live room at work is named by its record, not by a demo progress figure", () => {
+  // As in the real office: research, QA and engineering all read their records.
+  const line = (text) => ({ status: "done", badge: "", line: text, detail: "" });
   const office = new AgentOffice(adminAgentOfficeMessages.en, {
+    research: line("Latest run recorded"),
+    qa: line("Latest digest received"),
     engineering: { status: "working", badge: "Running", line: "Run in progress · started 10-07 20:00 UTC", detail: "" },
   });
+  const s = adminAgentOfficeMessages.en.sim;
   office.speed = 10;
   office.start();
   runUntil(office, () => office.phaseIndex >= PHASE.research);
   office.command("Status?");
-  const status = office.chat.at(-1).text;
+  let status = office.chat.at(-1).text;
   assert.match(status, /Engineering: Run in progress · started 10-07 20:00 UTC/);
   assert.doesNotMatch(status, /Engineering 0%/);
+  assert.ok(!status.includes(s.statusGap), status);
   office.command("Why is it slow?");
   assert.match(office.chat.at(-1).text, /Engineering: Run in progress/);
+  // At the end of the demo day a real run in progress is not "all done".
+  runUntil(office, () => office.dayComplete);
+  office.command("Status?");
+  status = office.chat.at(-1).text;
+  assert.ok(!status.includes(s.statusDayDone), status);
+  assert.match(status, /Engineering: Run in progress/);
+  // With no live room at work the demo's own summaries still apply.
+  const plain = new AgentOffice(adminAgentOfficeMessages.en);
+  plain.speed = 10;
+  plain.start();
+  runUntil(plain, () => plain.approvalPending);
+  plain.approve();
+  runUntil(plain, () => plain.dayComplete);
+  plain.command("Status?");
+  assert.ok(plain.chat.at(-1).text.includes(s.statusDayDone));
 });
 
 test("the office reads the engineering agent's state, never what it worked on", () => {
@@ -914,8 +952,24 @@ test("the office reads the engineering agent's state, never what it worked on", 
   const briefing = panel.slice(panel.indexOf("function BriefingModal"), panel.indexOf("function DashboardView"));
   assert.match(briefing, /engineeringLive \? m\.dashboard\.decisionLive : m\.briefing\.decisionNone/);
   assert.match(panel, /engineeringLive \? m\.live\.skipToEnd : m\.live\.skip/);
+  // No copy shown while engineering is live claims there is nothing to decide.
   for (const locale of ["en", "ko"]) {
-    assert.doesNotMatch(adminAgentOfficeMessages[locale].sim.briefSayLive, /nothing left to decide|결정할 건 이제 없어요/);
+    const c = adminAgentOfficeMessages[locale];
+    for (const value of [
+      c.sim.briefSayLive,
+      c.sim.skipLogDayEnd,
+      c.live.skipToEnd,
+      c.live.skipToEndHint,
+      c.dashboard.decisionLive,
+      c.approval.liveTitle,
+      c.approval.liveBody,
+    ]) {
+      assert.doesNotMatch(
+        value,
+        /nothing (left )?to decide|nothing comes to you|결정할 (건|일이?) (이제 )?(없|올라오지)/,
+        `${locale}: ${value}`
+      );
+    }
   }
 });
 
