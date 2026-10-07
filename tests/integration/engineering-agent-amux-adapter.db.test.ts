@@ -95,6 +95,8 @@ const MODE_KEY = "feature.engineeringAgentMode";
 const FREEZE_KEY = "feature.engineeringAgentFreeze";
 const fixtureTaskIds: string[] = [];
 const fixtureWorkers: string[] = [];
+/** Publish items whose result was recorded while the adapter was closed. */
+const closedAdapterFixtures: Array<{ runId: string; workItemId: string }> = [];
 
 const setMode = (value: string) =>
   prisma.appSetting.upsert({
@@ -142,6 +144,9 @@ after(async () => {
     user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
     expires: new Date(Date.now() + 3_600_000).toISOString(),
   } as Session;
+  // A closed-adapter result's mismatch names no run, so the sweep below would
+  // miss it; it is closed here, whatever stopped its test.
+  for (const fixture of closedAdapterFixtures) await closeClosedAdapterFixture(fixture);
   // Only this file's runs are opened as mismatches: a sweep would open one
   // for any other suite's orphaned run too, and leave it open.
   const orphaned = await prisma.engineeringAgentRun.findMany({
@@ -1112,6 +1117,7 @@ test("a closed adapter records a publisher's pull request on the engineering sid
         expectedTreeId: sha1("tree"),
       }),
     );
+    closedAdapterFixtures.push({ runId, workItemId });
     await inTx((tx) =>
       issueEngineeringAgentCapability(tx, {
         workItemId,
@@ -1180,28 +1186,51 @@ test("a closed adapter records a publisher's pull request on the engineering sid
     const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
     assert.equal(card.reviewPrNumber, null);
 
-    // A person closes it, as section 11 has them do; that leaves the mode off.
+    // A person closes it, as section 11 has them do; escalation turns the mode
+    // off, and the binding is then closed and pruned under a mode that allows it.
+    await closeClosedAdapterFixture({ runId, workItemId });
+    assert.equal(
+      (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state,
+      "resolved",
+    );
+    assert.equal(
+      (await prisma.engineeringAgentBinding.findUniqueOrThrow({ where: { id: binding.id } })).state,
+      "pruned",
+    );
+  } finally {
+    // Whatever stopped the test, nothing of it stays open to halt the next one.
+    for (const fixture of closedAdapterFixtures) await closeClosedAdapterFixture(fixture);
+    await setMode("shadow");
+  }
+});
+
+/** Closes a closed-adapter fixture's mismatch and binding; safe to call twice. */
+async function closeClosedAdapterFixture(fixture: { runId: string; workItemId: string }) {
+  const open = await prisma.engineeringAgentWorkItem.findFirst({
+    where: { kind: "state_mismatch", state: "open", causeKey: `review_pr:${fixture.workItemId}` },
+    select: { id: true },
+  });
+  if (open) {
     const owner = {
       user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
       expires: new Date(Date.now() + 3_600_000).toISOString(),
     } as Session;
     await runEngineeringAgentTransaction(
       prisma,
-      (tx) =>
-        resolveEngineeringAgentStateMismatch(tx, {
-          session: owner,
-          workItemId: mismatch.id,
-          action: "escalate_incident",
-        }),
-      { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+      (tx) => resolveEngineeringAgentStateMismatch(tx, { session: owner, workItemId: open.id, action: "escalate_incident" }),
+      { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, open.id) },
     );
-    assert.equal(
-      (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state,
-      "resolved",
-    );
-    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
-    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
-  } finally {
-    await setMode("shadow");
   }
-});
+  // Moving a binding is maintenance, which mode off refuses.
+  await setMode("shadow");
+  const bindings = await prisma.engineeringAgentBinding.findMany({
+    where: { runId: fixture.runId, state: { in: ["open", "closed"] } },
+    select: { id: true, state: true },
+  });
+  for (const binding of bindings) {
+    if (binding.state === "open") {
+      await runEngineeringAgentTransaction(prisma, (tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    }
+    await runEngineeringAgentTransaction(prisma, (tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  }
+}
