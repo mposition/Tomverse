@@ -819,10 +819,10 @@ a.integration-row:hover { border-color: var(--accent); }
   height: 12px;
   border: 1.5px solid var(--outline);
   border-radius: 4px 4px 3px 3px;
-  background: var(--shirt);
+  background: var(--cloth-shirt);
   box-shadow: inset 0 -3px 0 rgba(9, 9, 11, .12);
 }
-.p-arm { bottom: 8px; width: 3.5px; height: 9px; border: 1.5px solid var(--outline); border-radius: 3px; background: var(--shirt); }
+.p-arm { bottom: 8px; width: 3.5px; height: 9px; border: 1.5px solid var(--outline); border-radius: 3px; background: var(--cloth-shirt); }
 .p-arm.l { left: 0; }
 .p-arm.r { right: 0; }
 .p-head {
@@ -832,7 +832,7 @@ a.integration-row:hover { border-color: var(--accent); }
   height: 12px;
   border: 1.5px solid var(--outline);
   border-radius: 5px;
-  background: var(--skin);
+  background: var(--cloth-skin);
 }
 .p-eye { position: absolute; top: 5px; width: 2px; height: 2.5px; border-radius: 1px; background: var(--outline); }
 .p-eye.l { left: 2.5px; }
@@ -844,9 +844,9 @@ a.integration-row:hover { border-color: var(--accent); }
   height: 6px;
   border: 1.5px solid var(--outline);
   border-radius: 6px 6px 2px 2px;
-  background: var(--hair);
+  background: var(--cloth-hair);
 }
-.r-lead .p-torso { box-shadow: inset 0 -3px 0 rgba(9, 9, 11, .12), 0 0 0 1.5px var(--accent); }
+.r-lead .p-torso { box-shadow: inset 0 -3px 0 rgba(9, 9, 11, .12), 0 0 0 1.5px var(--cloth-accent); }
 .r-operator .ag-body { width: 20px; height: 31px; }
 .r-operator .p-hair { box-shadow: 0 -3px 0 #fbbf24; }
 
