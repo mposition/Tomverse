@@ -135,33 +135,32 @@ v1에서 이 선언은 **라우팅에 쓰지 않는다.** 운영자가 판단할
 
 - **카드:** 질문 카드의 구조화된 필드(유형·질문·선택지·효과 등급·경로·`resolution`·해제 조건·worker가 적은
   맥락)만. 상위·의존 카드는 넣지 않는다. 카드 텍스트는 합계 16 KiB 이하. 카드의 URL을 가져오지 않는다.
-- **저장소 스냅샷:** 저장소 전체가 아니라 **고른 파일**이다. 대상은 worker가 typed ask에 적은 맥락 경로
-  (최대 64개)와 변경 선택지가 선언한 경로를 합친 것이며, 각각 그 worker의 현재 HEAD에 있는 Git 추적
-  파일이어야 한다. 디렉터리, untracked·ignored 파일, worker 홈, 다른 worktree, submodule, symlink,
-  바이너리(NUL 바이트 또는 UTF-8 아님)는 넣지 않는다. 비밀 패턴 목록에 걸린 경로를 뺀다. v1 목록은
-  `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*`, `*secret*`, `*credential*`, `.npmrc`, `.netrc`,
-  `.pgpass`이고 바꾸면 정책 버전이 바뀐다. 남은 파일 전체를 기존 secret 검사 규칙으로 검사해 걸린 파일을
-  뺀다. 파일당 256 KiB·합계 2 MiB를 넘으면 §3-7로 운영자다. 무엇을 뺐는지는 건수와 사유만 기록한다.
-- **허용 저장소:** v1 허용 목록은 `github.com/mposition/Tomverse` 하나다. worker는 같은 계정에서 `origin`
-  같은 로컬 Git 설정을 바꿀 수 있으므로, 저장소 판정에 remote 설정이나 worker가 적은 값을 쓰지 않는다. 판정은
-  **내용**으로 한다. HEAD 이력의 root commit이 정확히 하나이고, 그것이 정책 버전에 고정한 이 저장소의 root
-  commit SHA와 같아야 한다(v1 값
-  `6fa9c86772361fb54d60408735e289e4bef3cb83`). 부모 관계를 바꿀 수 있는 장치는 모두 끄거나 거절한다. 검사와 스냅샷 읽기의 Git은
-  replace 객체를 끄고(`GIT_NO_REPLACE_OBJECTS=1`), graft 파일을 빈 파일로 지정하고(`GIT_GRAFT_FILE`),
-  commit-graph를 읽지 않는다(`core.commitGraph=false`). 공통 Git 디렉터리에 비어 있지 않은 `info/grafts`가
-  있거나 shallow 이력(`shallow` 파일)이면 root를 증명하지 못하므로 거절이다. 통과하지 못한 질문은 카드만 보낸다. 통과한 저장소의
-  파일은 공개 저장소의 commit에서 온 것이거나 그 worker가 자기 브랜치에 쓴 것이다.
-- **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드도 스냅샷도 DM 공급사로 가는 회수할 수 없는 새
-  전송이다(§11). 그 승인 전에는 DM 프로세스를 시작하지 않는다.
-- **실행 계정:** DM 프로세스는 worker 계정과 다른 권한 없는 Linux 계정에서 돈다. 두 CLI 로그인만 있고
-  GitHub 로그인·git credential helper·SSH 키·제품 DB·배포 자격증명·bridge 환경 파일·worker 홈 읽기
-  권한이 없다. 입력은 그 질문 동안만 그 계정의 작업 디렉터리에 있다.
+- **저장소 스냅샷 — 공개된 내용만:** 스냅샷은 GitHub의 공개 저장소 `github.com/mposition/Tomverse`에 이미
+  있는 commit의 파일만이다. 로컬 AMUX는 대상 commit의 full SHA를 **한 번** 정하고, 그 SHA와 경로로 GitHub의
+  공개 HTTPS 경로에서 자격증명 없이 파일을 받는다. 대상은 묻는 worker의 HEAD SHA가 그 경로로 받아지면 그
+  SHA, 아니면 앱이 기록한 최신 `develop` SHA다. 이후 그 SHA를 다시 해석하지 않는다. **로컬 Git 메타데이터
+  (remote·graft·replace·shallow·commit-graph)는 저장소 판정에도 파일 읽기에도 쓰지 않는다.** worker가 push하지
+  않은 변경은 스냅샷에 없고, worker가 카드에 적은 맥락으로만 간다. GitHub는 같은 network의 fork commit도 상위
+  저장소 경로로 내주지만, 그 내용도 이미 공개된 것이다.
+- **스냅샷의 파일:** worker가 typed ask에 적은 맥락 경로(최대 64개)와 변경 선택지가 선언한 경로 가운데 대상
+  SHA에 있는 파일이다. 디렉터리, submodule, symlink, 바이너리(NUL 바이트 또는 UTF-8 아님)는 넣지 않는다. 비밀
+  패턴 목록(v1: `.env*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_*`, `*secret*`, `*credential*`, `.npmrc`,
+  `.netrc`, `.pgpass`, 바꾸면 정책 버전이 바뀐다)에 걸린 경로를 빼고, 남은 파일을 기존 secret 검사 규칙으로
+  검사해 걸린 파일을 뺀다. 파일당 256 KiB·합계 2 MiB를 넘으면 §3-7로 운영자다. 무엇을 뺐는지는 건수와
+  사유만 기록한다. 받은 바이트로 Git blob id를 계산해 manifest(경로·blob id)에 넣는다.
+- **r16 §3 승인 전에는 아무것도 보내지 않는다.** 카드는 공개되지 않은 텍스트이고, DM 공급사로 가는 회수할
+  수 없는 새 전송이다(§11). 그 승인 전에는 DM 프로세스를 시작하지 않는다.
+- **실행 계정:** 공급사마다 별도의 권한 없는 Linux 계정을 둔다. 각 계정에는 **자기 공급사 CLI의 인증 하나만**
+  있고 다른 공급사 CLI의 인증은 없다. GitHub 로그인·git credential helper·SSH 키·제품 DB·배포 자격증명·bridge
+  환경 파일이 없다. worker 홈, 저장소 clone, 다른 DM 계정, AMUX 상태 파일은 이 계정이 읽을 수 없는 권한이어야
+  한다. 입력은 그 계정의 작업 디렉터리에만 두고 프로세스가 끝나면 지운다. `codex`의 read-only sandbox는 파일
+  읽기와 명령 실행을 막지 않으므로, **DM이 읽을 수 있는 범위는 sandbox가 아니라 이 계정 경계가 정한다.**
 - **실행 방식:** DM은 일반 worker launcher를 쓰지 않는다. 지금의 launcher는 `codex`에
   `--dangerously-bypass-approvals-and-sandbox`나 `--sandbox workspace-write`와 `--add-dir`을, `claude`에
   `--dangerously-skip-permissions`를 붙이기 때문이다. 전용 launcher가 질문마다 비대화형 프로세스 하나를
-  **고정 argv**로 시작한다. `codex`는 read-only sandbox에 추가 디렉터리 없음, `claude`는 도구를 모두 끈
-  모드다. 정확한 argv는 S0이 실측해 정책 버전에 기록한다. 실행 직전 argv에 위의 플래그나 쓰기·명령 실행을
-  허용하는 플래그가 있으면 시작을 거부한다.
+  **고정 argv**로 시작한다. 명령 실행을 끌 수 있는 모드가 있으면 그 모드를 쓴다. 정확한 CLI 버전, argv, 사용자
+  설정 파일을 무시하는 조건, 임시 세션 조건은 S0이 실측해 정책 버전에 기록한다. 실행 직전 argv에 위의 플래그나
+  쓰기·명령 실행을 허용하는 플래그가 있으면 시작을 거부한다.
 - **hard timeout:** 질문당 30분이 지나면 DM 프로세스를 강제 종료한다. 늦은 결과는 §9가 거절한다.
 - **외부 텍스트:** worker가 카드에 인용한 로그·이슈 발췌는 데이터다. DM 지시문은 그 안의 지시를 따르지
   말라고 명시한다(원칙 3의 둘째 문장).
@@ -186,9 +185,10 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   본문의 digest가 저장된 본문과 같을 때만 그 본문을 답으로 만든다. 본문 행은 고칠 수 없다(§10). 운영자가
   고친 답은 새 본문 행이 되고 그 digest가 판정에 기록된다. 결속 값이 바뀌었으면 Admin은 제안을 낡은 것으로
   보이고 그대로 확정할 수 없게 한다. 운영자는 직접 답한다.
-- **kill switch 중에는 기록 열람만 남는다**(공통 기반의 kill switch 규칙). 새 라우팅, DM 프로세스 시작, 제안의
-  확정·고쳐서 확정, bridge의 확정 답 조회·전달을 모두 거부한다. 운영자의 직접 답은 DM 밖의 기존 경로라
-  그대로다. 인스턴스 `off`는 그 인스턴스의 새 라우팅과 프로세스 시작만 멈춘다.
+- **kill switch는 DM 경로 전체를 끈다**(공통 기반의 kill switch 규칙). 새 라우팅, DM 프로세스 시작, 제안의
+  확정·고쳐서 확정, bridge의 확정 답 조회·전달을 모두 거부하고, DM 기록은 열람만 된다. 운영자의 직접 답과
+  kill switch 해제 같은 사람 조작은 DM 경로가 아니므로 그대로다. 인스턴스 `off`는 그 인스턴스의 새 라우팅과
+  프로세스 시작만 멈춘다.
 
 ## 7. DM 인스턴스, 실행 위치, 표시
 
@@ -212,7 +212,7 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 ## 8. 스위치와 정지
 
 - 인스턴스별 스위치는 `off`·`proposal` 둘뿐이다. 기본 `off`, 읽기 실패 `off`. 저장소의 CHECK 제약이 다른
-  값을 거부한다. 전체 kill switch는 모든 질문을 운영자에게 보낸다. 스위치 변경과 latch 해제는 `ops:write`와
+  값을 거부한다. 전체 kill switch는 DM 경로 전체를 끈다(§6). 스위치 변경과 latch 해제는 `ops:write`와
   최근 step-up을 요구하고 사람 감사로 남는다.
 - 검증 실패(§6)가 연속 3건이면 그 인스턴스를 `off`로 latch한다. 해제는 운영자만.
 - §4의 보고가 결정 2의 기준을 넘어도 이 정책 안에서는 아무것도 바뀌지 않는다.
@@ -220,8 +220,8 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 ## 9. 결과를 모를 때와 늦은 결과
 
 - 요청은 (카드 id, 질문 revision)당 하나다. 같은 질문이 다시 와도 새 요청을 만들지 않는다.
-- **결속 값:** 카드 id와 질문 revision, 묻는 worker id, AMUX 세션 id와 그 세션의 시도 번호, 저장소
-  root commit 판정 결과와 HEAD commit, 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
+- **결속 값:** 카드 id와 질문 revision, 묻는 worker id, AMUX 세션 id와 그 세션의 시도 번호, 스냅샷
+  대상 commit SHA와 그 출처(worker HEAD 또는 `develop`), 선택지 집합 digest, 스냅샷 manifest digest, 입력 payload digest, 정책 버전,
   용어 목록·경로 분류·scanner 버전. 요청이 닫혔거나 결속 값이 하나라도 바뀐 요청에 도착한 결과는 거절을
   기록한다.
 - **DB 시계 마감:** 요청 행은 DB 시계로 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)을 갖는다. 배정과
@@ -234,12 +234,12 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   않는다. 운영자 확정은 결과 마감에 묶이지 않고 요청의 열림 상태와 결속 값에만 묶인다.
 - **한 번만 소비:** 요청마다 종결 결과 행과 전달 결정 행은 각각 하나뿐이다(DB 유일 제약).
 - **timeout 층:** route 트랜잭션은 기존 AMUX DB 경계(`lib/amux/dbBoundary.ts`)를 그대로 쓴다.
-  `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms다. DM store의
-  wrapper는 트랜잭션 안에서 실행된 SQL 문장을 Prisma `query` 이벤트로 세며(BEGIN·COMMIT 제외), 설정문·fence·
-  `writeSystemAuditLog()`의 문장을 **모두 포함해 12개**를 상한으로 둔다. 13번째 문장이 관측되면 트랜잭션을
-  실패시킨다. 관측 시점에 그 문장은 이미 실행됐으므로 유도 최대 시간은 13문장으로 잡아
-  13 × (200 + 100) + 200 = 4,100 ms이며, 앱이 유도한 값이고 DB 상한이 아니다. 각 연산의 실제 문장 수(감사
-  append 포함)는 테스트가 고정한다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL 16이 있고 16에는 그 설정이 없으며,
+  `statement_timeout` 200 ms, `idle_in_transaction_session_timeout` 100 ms, commit 예비시간 200 ms다. **문장 수는 코드
+  구조로 정한다.** DM store의 각 연산은 반복·조건부 추가 쿼리가 없는 고정된 문장열이고, 설정문·fence·
+  `writeSystemAuditLog()`의 문장(무결성 키가 있으면 잠금·시계·이전 hash·삽입)을 **모두 포함해 12개 이하**다.
+  연산마다 실제 SQL 문장 수를 테스트가 전용 Prisma client로 세어 고정하고, 숫자가 바뀌면 테스트가 실패한다.
+  런타임 계수기는 두지 않는다. 트랜잭션당 최대 시간은 그 셋에서 유도한 12 × (200 + 100) + 200 = 3,800 ms이며,
+  앱이 유도한 값이고 DB 상한이 아니다. `transaction_timeout`은 걸지 않는다. CI에 PostgreSQL 16이 있고 16에는 그 설정이 없으며,
   기존 경계도 같은 이유로 걸지 않는다. route 예산은 `AMUX_ROUTE_BUDGET_MS`(15초)이고, 남은 route 시간이
   트랜잭션 최대 시간보다 짧으면 트랜잭션을 시작하지 않는다(`amuxRouteHasBudgetForMs`). 연결 대기도 남은
   시간에서 그 최대 시간을 뺀 만큼으로 묶는다(`amuxDbConnectionWaitMs`). 묶이지 않고 남는 구간은 첫 문장
@@ -261,14 +261,17 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
   질문 카드 텍스트(16 KiB), DM 제안 답 본문(8 KiB), DM 근거(4 KiB), DM 이관 사유(1 KiB), 운영자가 고친
   답(8 KiB). 요청당 합계는 40 KiB 이하다. 저장 전에 secret 검사를 통과해야 한다. 본문 행은 고칠 수 없다(UPDATE를
   trigger가 막는다).
-- **보존:** 보존 상태는 본문 표가 아니라 **별도의 append-only 보존 상태 표**에 둔다. 요청이 닫힐 때 그 표에
-  DB 시계로 계산한 `retentionUntil`(닫힘 + 90일) 행을 한 번 넣고, 두 번째 행과 UPDATE·DELETE는 trigger가 막는다.
-  열린 요청은 생성 30일 뒤 `stale`로 닫으므로 본문은 길어야 120일 남는다. legal hold는 같은 표에 걸기·풀기
-  행을 덧붙이는 방식이며 `ops:write`와 최근 step-up의 사람 조작으로만 하고 사람 감사로 남는다. 본문 표의
-  DELETE는 보존 상태 표에서 `retentionUntil`이 지났고 hold 행이 없거나 마지막 hold 행이 풀기인 요청의 행에만 trigger가 허락한다. 예외는 하나다. 개인정보 삭제 요청이 확인되면 운영자가 해당 행을
-  `ops:write`와 최근 step-up으로 지우며, 그 삭제는 사람 감사로 남고 hold가 걸린 행은 hold를 먼저 풀어야 한다.
-  백업은 플랫폼의 백업 보존 기간을 따른다. 본문은 감사 metadata·로그·알림에 넣지 않는다. 저장소 스냅샷은
-  앱으로 보내지 않는다.
+- **보존:** 보존 상태는 본문 표가 아니라 **별도의 append-only 보존 사건 표**에 둔다. 사건 종류는
+  `retention_set`·`hold_set`·`hold_release` 셋뿐이다. `retention_set`은 요청이 닫힐 때 DB 시계로 계산한
+  `retentionUntil`(닫힘 + 90일)을 담으며 요청당 하나다(부분 유일 제약). `hold_set`은 열린 hold가 없을 때만,
+  `hold_release`는 열린 hold가 있을 때만 들어가고, 순서는 DB가 매기는 단조 증가 번호로 정한다. 사건 삽입과
+  본문 삭제는 요청 단위 advisory lock으로 직렬화한다. UPDATE·DELETE는 trigger가 막는다. 열린 요청은 생성 30일
+  뒤 `stale`로 닫으므로 본문은 길어야 120일 남는다. hold 걸기·풀기는 `ops:write`와 최근 step-up의 사람
+  조작이고 사람 감사로 남는다. 본문 표의 DELETE는 (1) `retentionUntil`이 지났고 (2) 열린 hold가 없는 요청의
+  행에만 trigger가 허락한다. 예외는 하나다. 개인정보 삭제 요청이 확인되면 운영자가 해당 행을 `ops:write`와
+  최근 step-up으로 지우며, 그 삭제는 사람 감사로 남고 열린 hold가 있으면 먼저 풀어야 한다. 백업은 플랫폼의
+  백업 보존 기간을 따른다. 본문은 감사 metadata·로그·알림에 넣지 않는다. 저장소 스냅샷은 앱으로 보내지
+  않는다.
 - **데이터 등록부:** 본문 표(worker가 쓴 자유 텍스트에 개인정보가 섞일 수 있다)와 사람의 id를 가진 원장
   행을 공개 data-domain registry에 운영 기록으로 등록한다. 본문 표에는 사용자 계정 키가 없으므로 계정 단위
   고객 export에 넣지 않으며, 열람·삭제 요청은 운영자가 본문을 검색해 처리한다.
@@ -290,9 +293,9 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 - DM은 구독형 CLI 계정을 쓴다. 공급사 청구액을 측정한다고 주장하지 않는다. 사용자 크레딧·플랜·Chat
   provider 예산과 닿지 않는다(원칙 5). `budget` 질문의 지출은 운영자가 확정할 때 운영자의 결정이다.
 - 질문 카드와 스냅샷은 묻는 worker의 공급사와 **다른** 공급사로 간다. 그 공급사가 같은 바이트를 이미
-  받았다고 가정하지 않는다. **카드와 스냅샷의 전체 payload를 배정된 DM 공급사에 대한 새 전송으로 보며**,
-  공통 기반 r16 §3의 승인, 전송 의도 기록, S0의 처리위탁·국외 이전(APP 포함) 검토가 그 전체를 범위로 한다. 이 정책은 처리 region을 보장한다고 쓰지 않는다. 중국 본토 접속·처리
-  region·그 지역 공급자는 쓰지 않는다.
+  받았다고 가정하지 않는다. 스냅샷은 GitHub에 이미 공개된 내용이지만, **카드는 공개되지 않은 텍스트이고
+  배정된 DM 공급사에 대한 새 전송이다.** 공통 기반 r16의 원칙 2·§3 승인, 전송 의도 기록, S0의 처리위탁·
+  국외 이전(APP 포함) 검토가 카드와 스냅샷의 전체 payload를 범위로 한다.
 - DM은 고객 대면 문구를 만들지 않는다.
 
 ## 12. 단계
@@ -315,11 +318,12 @@ DM 출력은 `.strict()` 스키마 값 하나이며 종류별로 검증한다.
 어떤 DM 출력도 worker에게 전달되지 않는다는 테스트**, 스위치가 `off`·`proposal` 밖의 값을 거부한다는 DB
 테스트, 용어 목록·`resolution`·카드 secret 검사 라우팅 테스트, 검사 시점에 마감을 넘긴 COMMIT 거부 DB
 테스트, 요청당 종결 결과 1개 테스트, 직접 답과 확정 답이 함께 와도 하나만 전달된다는 로컬 테스트, 확정 전
-카드 상태가 DM 출력 종류(`select`·`free_text`·`escalate`·실패)와 무관하다는 테스트, 트랜잭션당 SQL 문장 12개
-초과를 거부하는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
-금지 플래그를 거부한다는 테스트, 읽기 전용 모드·DM 계정 격리의 S0 증거, 스냅샷의 허용 저장소(root commit 불일치·replace 객체·`info/grafts`로 다른 저장소를 고정 root에 잇는 공격·
-commit-graph·shallow 이력 거절)·비밀 제외 테스트, kill switch 중 확정·전달 거부 테스트, 감사 append를 포함한
-문장 수 상한 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
+카드 상태가 DM 출력 종류(`select`·`free_text`·`escalate`·실패)와 무관하다는 테스트, 연산별 SQL 문장 수(감사
+append 포함, 12 이하)를 고정하는 테스트, 보여 준 digest와 다른 본문은 확정되지 않는다는 테스트, 전용 launcher가
+금지 플래그를 거부한다는 테스트, DM 계정 격리의 S0 증거(작업 디렉터리 밖 파일 읽기, 다른 공급사 CLI
+실행, 그 공급사 밖 host로의 네트워크가 모두 실패), 스냅샷이 GitHub 공개 경로의 고정 SHA 밖에서 바이트를
+읽지 않고 받은 바이트의 blob id가 manifest와 같다는 테스트, 비밀 경로 제외 테스트, kill switch 중 확정·전달
+거부 테스트, 보존 사건 표의 삽입 조건(`retention_set` 하나, hold 전이 순서)과 본문 삭제 조건 테스트, 전송 의도 없이는 DM 프로세스가 시작되지 않는다는 테스트.
 
 ## 13. 이 정책이 하지 않는 것
 
