@@ -23,12 +23,14 @@
  * Read-only: it reads Git objects and writes nothing.
  *
  *   npm run report:engineering-agent-tiers -- --limit 30 [--ref origin/develop] [--json]
+ *   npm run report:engineering-agent-tiers -- --limit 30 --simulate-tests-excluded --json
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
 
 import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { analyseCredentialReachability, credentialForbiddenPaths } from "../lib/agentCredentialReachability.ts";
+import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialReviewedExclusions.ts";
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
@@ -41,6 +43,9 @@ const option = (name, fallback) => {
 const limit = Number.parseInt(option("--limit", "30"), 10);
 const ref = option("--ref", "origin/develop");
 const asJson = args.includes("--json");
+// This is a read-only what-if report. It does not change the deployed image,
+// policy, or the runtime T1 authority list.
+const simulateTestsExcluded = args.includes("--simulate-tests-excluded");
 
 const git = (gitArgs, input) =>
   execFileSync("git", gitArgs, { encoding: "buffer", maxBuffer: 1024 * 1024 * 1024, input });
@@ -223,6 +228,7 @@ for (const commit of commits) {
 
 const summary = {
   ref,
+  simulatedTestsExcluded: simulateTestsExcluded,
   pullRequests: tally.total,
   t1: tally.t1,
   t2: tally.t2,

@@ -33,6 +33,7 @@ const preparedSchema = z.object({
   storyKind: z.enum(["general", "bug"]).nullable(),
   featureNodeId: ref, duplicateCandidateIds: z.array(ref).max(64),
   taskCostReceipt: costReceiptSchema.nullable(),
+  publicPrDisclosureApproved: z.boolean(),
   backlogOnly: z.literal(true), executionAuthorized: z.literal(false),
   retryWrite: z.literal(false), auditId: ref,
 }).strict();
@@ -46,6 +47,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
   const [features, setFeatures] = useState<z.infer<typeof catalogSchema>["features"]>([]);
   const [featureId, setFeatureId] = useState("");
   const [reason, setReason] = useState("");
+  const [publicPrDisclosureApproved, setPublicPrDisclosureApproved] = useState(false);
   const [duplicateIds, setDuplicateIds] = useState<string[]>([]);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ideaId, draftUnitId: unit.id, featureNodeId: featureId,
           prepareRequestId, cardType: proposal.cardType,
+          publicPrDisclosureApproved: isTask && publicPrDisclosureApproved,
           decisionReason: duplicateIds.length ? reason.trim() || null : null }),
       });
       if (!response.ok) { await fail(response); return; }
@@ -111,6 +114,8 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
           parsed.data.title !== proposal.title ||
           parsed.data.featureNodeId !== featureId ||
           parsed.data.cardType !== proposal.cardType ||
+          parsed.data.publicPrDisclosureApproved !==
+            (isTask && publicPrDisclosureApproved) ||
           (isTask && !parsed.data.taskCostReceipt) ||
           (!isTask && parsed.data.taskCostReceipt !== null)) {
         setUnknown(true); return;
@@ -216,6 +221,13 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
         onChange={(event) => setReason(event.target.value)}
         className="mt-1 w-full rounded border border-zinc-400 bg-transparent p-2" />
     </label> : null}
+    {isTask && proposal.taskRole === "implement" && !prepared && !closed ?
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" checked={publicPrDisclosureApproved}
+          disabled={busy || unknown || registered}
+          onChange={(event) => setPublicPrDisclosureApproved(event.target.checked)} />
+        <span>{m.taskRegistrationPublicPrConsent}</span>
+      </label> : null}
     {featureId && !prepared && !closed ? <button type="button" onClick={() => void prepare()}
       disabled={busy || unknown || (duplicateIds.length > 0 &&
         reason.trim().length < 3)}
@@ -229,6 +241,8 @@ export function AmuxIdeaCardRegistrationPanel({ ideaId, unit }: {
         {prepared.confirmationDigest}</code></p>
       <p>{m.storyRegistrationExpires}: {prepared.expiresAt}</p>
       <p>{m.storyRegistrationDuplicates}: {prepared.duplicateCandidateIds.join(", ") || "—"}</p>
+      {isTask ? <p>{prepared.publicPrDisclosureApproved ?
+        m.taskRegistrationPublicPrApproved : m.taskRegistrationPublicPrOff}</p> : null}
       {prepared.taskCostReceipt ? <div className="space-y-1">
         <p>{m.taskRegistrationCostCeiling}:
           {prepared.taskCostReceipt.ceilingMicroUsd} µUSD ·

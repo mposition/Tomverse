@@ -458,6 +458,8 @@ export async function commitAmuxV4CardRegistration(tx: Prisma.TransactionClient,
     metadata: { ideaId: plan.ideaId, draftUnitId: plan.draftUnitId,
       cardId: input.cardId, action: "register_card", status: "backlog",
       confirmationDigest: prepared.confirmationDigest,
+      publicPrDisclosureApproved:
+        input.snapshot.card?.task?.publicPrDisclosureApproved === true,
       ownerAssigned: false, executionAttempted: false },
   });
   const consumed = await tx.amuxIdeaUnitDecision.updateMany({

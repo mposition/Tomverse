@@ -11,6 +11,7 @@ import {
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
+  amuxV22ReviewRetryHasVerifiedOutcome,
   sha256Hex,
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
@@ -164,6 +165,9 @@ async function snapshot(
   if (baseEligible && task.status === "blocked") {
     outcomes.push("block");
     if (!displayTruncated && budget.allowed && dueCorrected &&
+        amuxV22ReviewRetryHasVerifiedOutcome({
+          sourceSystem: task.sourceSystem, attempt: lastAttempt,
+        }) &&
         (lastAttempt !== null || escalation.specialty === "planning-review")) {
       outcomes.push("retry");
     }

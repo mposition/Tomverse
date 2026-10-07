@@ -39,6 +39,7 @@ export type AmuxV4StoryPrepareChoice = {
   prepareRequestId: string;
   decisionReason: string | null;
   cardType?: "story" | "task";
+  publicPrDisclosureApproved?: boolean;
 };
 
 const ID = /^[A-Za-z0-9_-]{8,80}$/;
@@ -64,7 +65,8 @@ export async function prepareAmuxV4CardRegistration(input: {
       !ID.test(choice.featureNodeId) || !UUID.test(choice.prepareRequestId) ||
       (choice.decisionReason !== null &&
         (choice.decisionReason.length < 3 || choice.decisionReason.length > 500 ||
-          choice.decisionReason !== choice.decisionReason.trim()))) {
+          choice.decisionReason !== choice.decisionReason.trim())) ||
+      (choice.publicPrDisclosureApproved === true && choice.cardType !== "task")) {
     throw new AmuxV4UnitDecisionError("not_ready");
   }
   const verified = await readVerifiedAmuxCardProposal(input.session,
@@ -205,7 +207,9 @@ export async function prepareAmuxV4CardRegistration(input: {
             verified.proposal.taskRole, verified.proposal.executionGrade);
           taskCost = { ok: true as const, receipt: approved.receipt };
           snapshot = assembleAmuxV4TaskConfirmation({ ...common, ...refs,
-            costReceipt: approved.receipt });
+            costReceipt: approved.receipt,
+            publicPrDisclosureApproved:
+              choice.publicPrDisclosureApproved === true });
         } catch (error) {
           if (error instanceof AmuxV4TaskCatalogApprovalError) {
             throw new AmuxV4UnitDecisionError("not_ready");
@@ -226,6 +230,7 @@ export async function prepareAmuxV4CardRegistration(input: {
         featureNodeId: feature.id, duplicateCandidateIds:
           duplicates.candidates.map((candidate) => candidate.id),
         taskCostReceipt: taskCost?.receipt ?? null,
+        publicPrDisclosureApproved: snapshot.card?.task?.publicPrDisclosureApproved === true,
         backlogOnly: true as const, executionAuthorized: false as const };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       maxWait: 5_000, timeout: 15_000 });

@@ -13,6 +13,8 @@ import { cancelOverdueAmuxIdeaAnalyses, purgeDueAmuxRawIdeas } from
   "@/lib/amux/ideaRawRetentionService";
 import { notifyDueAmuxRetentionHolds } from
   "@/lib/amux/ideaRetentionHoldNoticeService";
+import { purgeDueAmuxV22TaskResults } from
+  "@/lib/amux/v22TaskResultRetention";
 
 /** The isolated retention trigger has no product DB credential. */
 export async function POST(request: Request): Promise<Response> {
@@ -41,7 +43,9 @@ export async function POST(request: Request): Promise<Response> {
     const cancellation = await cancelOverdueAmuxIdeaAnalyses();
     const raw = await purgeDueAmuxRawIdeas();
     const analysis = await purgeDueAmuxAnalysisContent();
-    return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis });
+    const taskResults = await purgeDueAmuxV22TaskResults();
+    return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis,
+      taskResults });
   } catch {
     // The worker stops on unknown DB or S3 outcome. The response carries no
     // content, secret, object key, or suggestion to blind-retry this tick.

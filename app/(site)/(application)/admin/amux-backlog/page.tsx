@@ -10,6 +10,7 @@ import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxTaskCostCatalogApprovalPanel } from
   "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
+import { AmuxPortfolioPanel } from "@/components/admin/AmuxPortfolioPanel";
 import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
@@ -57,6 +58,9 @@ import { authOptions } from "@/lib/auth";
 import { AMUX_V4_TASK_CATALOG_WRITE_ENV,
   amuxV4TaskCatalogWriteEnabled } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
+import { AMUX_V4_PORTFOLIO_WRITE_ENV,
+  amuxV4PortfolioWriteEnabled } from
+  "@/lib/amux/portfolioAssessmentService";
 
 const TABS = adminNavItemTabs("amux-backlog");
 
@@ -124,6 +128,8 @@ export default async function AdminAmuxBacklogPage({
         <>
         <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
           amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} />
+        <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
+          process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}

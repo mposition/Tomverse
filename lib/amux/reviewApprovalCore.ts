@@ -53,6 +53,19 @@ export const amuxReviewApprovalReadiness = (env: {
 export type AmuxReviewOutcome = "approve" | "retry" | "block";
 export type AmuxReviewTaskStatus = "review" | "blocked";
 
+/** An unknown v22 worker result may still be running outside the app lease.
+ * Legacy review keeps its existing contract; a v22 retry needs an exact,
+ * receipt-backed terminal result rather than an operator guess. */
+export const amuxV22ReviewRetryHasVerifiedOutcome = (input: {
+  sourceSystem: string | null;
+  attempt: { v22AssignmentId: string | null; outcome: string | null;
+    toStatus: string | null; reason: string | null } | null;
+}) => input.sourceSystem !== "admin-idea-v4" || input.attempt === null ||
+  (input.attempt.v22AssignmentId !== null &&
+    input.attempt.outcome === "blocked" &&
+    input.attempt.toStatus === "blocked" &&
+    input.attempt.reason === "reported_result");
+
 export type AmuxReviewSubject = {
   escalation_id: string;
   task_id: string;

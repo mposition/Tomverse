@@ -38,7 +38,8 @@ test("retry is bounded, planning correction is revision-proven, and approve need
   assert.match(service, /escalation\.openedTaskRevision !== null/);
   assert.match(service, /task\.revision > escalation\.openedTaskRevision/);
   assert.match(service, /task\.dueParseState === "valid"/);
-  assert.match(service, /!displayTruncated && budget\.allowed && dueCorrected &&\s*\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
+  assert.match(service, /!displayTruncated && budget\.allowed && dueCorrected &&\s*amuxV22ReviewRetryHasVerifiedOutcome\(/);
+  assert.match(service, /\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
   assert.match(service, /if \(artifact && !displayTruncated\) outcomes\.push\("approve"\)/);
   assert.match(service, /amuxReviewTextExceedsDisplay\(description\)/);
   assert.match(service, /readAmuxReviewPullRequest\(escalation\.task\.reviewPrNumber\)/);
