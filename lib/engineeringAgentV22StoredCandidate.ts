@@ -5,8 +5,15 @@ import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
   "@/lib/amux/v22TaskExecutionCore";
 import { readAmuxV22TaskPatchEvidence } from "@/lib/amux/v22TaskResultStore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
+import type { TierVerdict } from "@/lib/agentPushPolicy";
 import { loadEngineeringAgentV22Candidate } from
   "@/lib/engineeringAgentV22CandidateLoad";
+import { loadEngineeringAgentV22BaseEvidence } from
+  "@/lib/engineeringAgentV22BaseEvidence";
+import { readEngineeringAgentV22ImageExclusion } from
+  "@/lib/engineeringAgentV22ImageEvidence";
+import { decideEngineeringAgentV22Tier } from
+  "@/lib/engineeringAgentV22Tier";
 import { readEngineeringAgentSwitches } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
 
@@ -19,7 +26,24 @@ type Ports = {
   readSwitch: () => Promise<boolean>;
   publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
+  readTier: (baseSha: string, candidate: Extract<Candidate,
+    { ok: true }>) => Promise<TierVerdict>;
 };
+
+async function readTier(baseSha: string,
+  candidate: Extract<Candidate, { ok: true }>): Promise<TierVerdict> {
+  const excluded = await readEngineeringAgentV22ImageExclusion(baseSha);
+  const evidence = await loadEngineeringAgentV22BaseEvidence({
+    tree: candidate.baseTree, excludedPrefixes: excluded,
+  });
+  if (!evidence) return { tier: "T2", findings: [{
+    reason: "slice_analysis_failed", path: null,
+  }] };
+  return decideEngineeringAgentV22Tier({
+    changes: candidate.changes, ...evidence,
+    deployExcludedPrefixes: excluded,
+  });
+}
 
 async function readSnapshot(attemptId: string): Promise<Snapshot> {
   const run = await prisma.engineeringAgentRun.findUnique({
@@ -52,6 +76,7 @@ const livePorts: Ports = {
   publicationEnabled: () => amuxV22EngineeringPublicationEnabled(
     process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
   loadCandidate: loadEngineeringAgentV22Candidate,
+  readTier,
 };
 
 /** This is a verified candidate, not T1 authority. Every read that could
@@ -61,7 +86,8 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   ports: Ports = livePorts): Promise<
     { ok: true; runId: string; taskId: string; baseSha: string;
       patchBody: string; patchDigest: string;
-      candidate: Extract<Candidate, { ok: true }> } |
+      candidate: Extract<Candidate, { ok: true }>;
+      tier: TierVerdict } |
     { ok: false; reason: string }
   > {
   const first = await ports.readSnapshot(attemptId);
@@ -75,6 +101,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const candidate = await ports.loadCandidate({ baseSha: first.baseSha,
     files: patch.files });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
+  const tier = await ports.readTier(first.baseSha, candidate);
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||
@@ -82,7 +109,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_state_changed" };
   return { ok: true, ...first, patchBody: patch.text,
-    patchDigest: patch.sha256, candidate };
+    patchDigest: patch.sha256, candidate, tier };
 }
 
 /** The internal preflight may report identifiers and digests, never the
