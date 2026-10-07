@@ -1704,6 +1704,44 @@ domains:
       and retains purge and key-deletion audit references. It has no content
       body, but its account-deletion and export treatment is unverified.
 
+  - domain: amuxTaskResult
+    prismaModel: AmuxV22TaskResult
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task result account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      Encrypted Task result text is linked to an operator idea without a direct
+      User relation. The approved 90-day body clock does not settle account
+      deletion or unified export; public PR publication is a separate gate.
+
+  - domain: amuxTaskPatch
+    prismaModel: AmuxV22TaskPatch
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task patch account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The private patch is encrypted and tied to an operator idea by ideaId.
+      Its expiry and key retirement do not by themselves decide account
+      deletion or unified export; a public develop PR needs separate consent.
+
   - domain: amuxIdeaDerivationGroup
     prismaModel: AmuxIdeaDerivationGroup
     userLinkageRole: actor

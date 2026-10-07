@@ -188,6 +188,14 @@ test("a user-linked model missing from the registry is rejected", () => {
   assert.match(output, /MemoryItem holds user data but is not in the registry/);
 });
 
+test("an idea-linked encrypted Task patch cannot escape through its indirect owner link", () => {
+  const { code, output } = run((registry) => {
+    registry.domains = registry.domains.filter((row) => row.prismaModel !== "AmuxV22TaskPatch");
+  });
+  assert.equal(code, 1);
+  assert.match(output, /AmuxV22TaskPatch holds user data but is not in the registry/);
+});
+
 test("a registry that disagrees with the export declarations is rejected", () => {
   const { code, output } = run((_registry, find) => {
     find("account").inUnifiedExport = "excluded";

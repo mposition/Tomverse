@@ -692,6 +692,18 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskResult",
+    publicName: "amux_v22_task_results",
+    prismaModel: "AmuxV22TaskResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskPatch",
+    publicName: "amux_v22_task_patches",
+    prismaModel: "AmuxV22TaskPatch",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaRetentionHold",
     publicName: "amux_idea_retention_holds",
     prismaModel: "AmuxIdeaRetentionHold",
