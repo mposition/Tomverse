@@ -67,7 +67,7 @@ const headerLines = (sql) => {
  * The object or replacement a migration declares, or why it declares none.
  *
  * `none`: no declaration in the header. `invalid`: more than one, or one that is
- * not exactly the form above with a plain identifier. Both mean the guard cannot
+ * not exactly the approved plain identifier or typed function signature. Both mean the guard cannot
  * prove this migration absent.
  */
 export const presenceDeclarationIn = (sql) => {

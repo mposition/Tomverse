@@ -287,7 +287,7 @@ const isDarkReadOnlyAmuxResolutionPreview = (route) => {
       amuxResolutionReviewedDigest() !== RESOLUTION_REVIEWED_DIGEST ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(amuxResolutionPreviewCore) ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
-      /\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(|\$(?:queryRaw|executeRaw)\b|\bfetch\s*\(|\bimport\s*\(/.test(amuxResolutionPreviewService)) {
+      /\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(|\$(?:queryRaw|executeRaw)(?:Unsafe)?\b|\bfetch\s*\(|\bimport\s*\(/.test(amuxResolutionPreviewService)) {
     return false;
   }
   const post = route.source.slice(route.source.indexOf("export async function POST"));
