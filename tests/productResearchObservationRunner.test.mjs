@@ -9,7 +9,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import process from "node:process";
 import test from "node:test";
 
@@ -330,66 +330,98 @@ test("npm's own variables are not what stops a run", () => {
 });
 
 /**
- * The deployed start command, stopped at the line this test is about.
+ * The deployed start command, run to its own end.
  *
- * It keeps the real PATH, so npm finds its shell and the run gets as far as
- * announcing its slot -- and then it is killed, because the next thing it does
- * is clone this repository from GitHub. Waiting for that would put a network
- * fetch and a minute of wall clock inside a unit test; killing it is not a
- * workaround but the scope: what is being tested is the environment npm hands
- * the run, which is settled before any IO starts.
+ * It keeps the real PATH, because npm needs an `npm` and a `sh` and neither is
+ * reliably beside `node`. Nothing is killed and nothing is cut short: the run
+ * reaches its own clone, fails it against the shim the caller put on PATH,
+ * records the failed slot against the caller's server and exits. The deadline
+ * below is a safety net for a run that hangs, not the normal path -- a test
+ * that resolved on a pattern in stdout would resolve after the clone had
+ * already started, and a killed run never reaches the `finally` that removes
+ * its temporary clone.
  */
-const runThroughNpmUntil = (env, pattern) =>
+const runThroughNpmToEnd = (env) =>
   new Promise((resolve) => {
     const child = spawn(
       process.platform === "win32" ? "npm.cmd" : "npm",
       ["run", "--silent", "agent:product-research-observation"],
-      // Its own process group, so the kill below reaches the node process npm
-      // started and not only npm. Killing npm alone would leave the run
-      // cloning this repository in the background for its whole fifteen-minute
-      // deadline, inside a CI job that has already finished with it.
+      // Its own process group, so the deadline's kill reaches the node process
+      // npm started rather than only npm.
       { shell: process.platform === "win32", detached: true, env },
     );
     let output = "";
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(deadline);
+    const read = (chunk) => {
+      output += chunk;
+    };
+    child.stdout.on("data", read);
+    child.stderr.on("data", read);
+    const deadline = setTimeout(() => {
       try {
-        // The group, by the negated pid. It may already be gone -- `done` also
-        // runs on close -- and that throws rather than reporting nothing to do.
         process.kill(-child.pid);
       } catch {
         child.kill();
       }
-      resolve(output);
-    };
-    const read = (chunk) => {
-      output += chunk;
-      if (pattern.test(output)) done();
-    };
-    child.stdout.on("data", read);
-    child.stderr.on("data", read);
-    // Resolves on exit too: a run that refused its environment never prints
-    // the pattern, and that output is exactly what the assertion reads.
-    child.on("close", done);
-    const deadline = setTimeout(done, 120_000);
+    }, 120_000);
+    child.on("close", (status) => {
+      clearTimeout(deadline);
+      resolve({ status, output });
+    });
   });
 
-test("the deployed start command plans its slot", { skip: process.platform === "win32" }, async () => {
-  // The container has a short environment and npm adds to it, which is the
-  // whole combination production runs. Skipped on Windows, where the shell
-  // needs APPDATA, SystemRoot and a dozen more that Linux genuinely does not
-  // have -- declaring those to make this pass here would widen the check for
-  // the platform that actually runs it. The Linux CI runner is where it holds.
-  const output = await runThroughNpmUntil(
-    { PATH: process.env.PATH, HOME: process.env.HOME, ...SERVICE_ENV },
-    /answering for slot/,
-  );
-  assert.deepEqual(reportedNames(output), [], output);
-  assert.match(output, /answering for slot/, output);
-});
+/**
+ * A `git` on PATH that fails, in a directory of its own.
+ *
+ * The alternative is letting the run clone this repository from GitHub, which
+ * puts a network fetch and a minute of wall clock inside a unit test. A shim
+ * rather than a PATH with no git on it: npm needs the directories that hold
+ * git -- on Ubuntu `/bin` is a symlink to `/usr/bin` -- so taking them away
+ * takes `sh` with them.
+ */
+const gitShimDirectory = () => {
+  const directory = mkdtempSync(join(tmpdir(), "product-research-git-shim-"));
+  const shim = join(directory, "git");
+  writeFileSync(shim, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  return directory;
+};
+
+test(
+  "the deployed start command records a failed slot",
+  { skip: process.platform === "win32" },
+  async () => {
+    // The container has a short environment and npm adds to it, which is the
+    // whole combination production runs. Skipped on Windows, where the shell
+    // needs APPDATA, SystemRoot and a dozen more that Linux genuinely does not
+    // have -- declaring those to make this pass here would widen the check for
+    // the platform that actually runs it. The Linux CI runner is where it holds.
+    const shim = gitShimDirectory();
+    const ingest = await ingestServer();
+    try {
+      const { status, output } = await runThroughNpmToEnd({
+        PATH: `${shim}${delimiter}${process.env.PATH}`,
+        HOME: process.env.HOME,
+        ...SERVICE_ENV,
+        PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      });
+
+      // Nothing npm added stopped it: that is what this lane is for, and the
+      // lines below are the proof it got past planning at all.
+      assert.deepEqual(reportedNames(output), [], output);
+      assert.match(output, /answering for slot/, output);
+      assert.match(output, /clone_failed/, output);
+      assert.match(output, /recorded obs-2026-10-07-abcdef12: failed at clone_failed/, output);
+      assert.equal(status, 1, output);
+
+      assert.equal(ingest.received.length, 1, "the slot got one answer");
+      const sent = JSON.parse(ingest.received[0].body);
+      assert.equal(sent.outcome, "failed");
+      assert.equal(sent.failureStage, "clone_failed");
+    } finally {
+      await ingest.close();
+      rmSync(shim, { recursive: true, force: true });
+    }
+  },
+);
 test("the report's own output is what the payload builder accepts", () => {
   // The link no unit test can reach by reading either side: the report prints
   // its own shape and `buildObservationPayload` refuses anything it does not
