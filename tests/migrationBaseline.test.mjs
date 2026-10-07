@@ -397,6 +397,10 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
  * recognise is treated as not described, because a needless declaration costs a
  * comment line and a missing one costs a blocked deploy.
  *
+ * **A comment, a string literal and a function body are not statements.** The
+ * detector removes all three before reading, and statementsOf below records the
+ * two drafts that got that wrong.
+ *
  * What it deliberately does not ask. A migration that only adds a CHECK
  * constraint, or only writes rows, is equally invisible to the diff and would
  * be refused the same way -- but no declaration can prove it absent, so
@@ -429,18 +433,107 @@ const PRESENCE_SWEEP_EXEMPT = new Set([
 const PRESENCE_SWEEP_EXEMPT_BEFORE = "20261003130000";
 
 /**
- * Only statements are evidence of DDL. Header prose explains it, a block
- * comment can quote it, and a trailing comment can sit beside it; none of the
- * three is a statement. Removing text can only make a migration look less
- * described, which is the safe direction: it asks for a declaration rather than
- * skipping one.
+ * The statements, with everything that only looks like one removed.
+ *
+ * This has to know SQL quoting, and two drafts that did not were each wrong in
+ * a different way. The first handled only standalone `--` lines, so DDL quoted
+ * in a block comment counted as a statement. The second dropped `--` to end of
+ * line unconditionally, which truncated
+ * `CREATE INDEX idx ON t ((replace(c, '--', '')));` at the literal and took the
+ * `;` with it: no index was found, and an expression-index-only migration
+ * passed undeclared -- the class the sweep exists to catch.
+ *
+ * So, in one pass: comments go, and block comments nest as PostgreSQL allows;
+ * a string literal keeps its quotes and loses its contents; a dollar-quoted
+ * body keeps its delimiters and loses its contents, because DDL written inside
+ * a function body is not applied by the migration and the diff cannot see it
+ * either; a quoted identifier is kept verbatim, because the index key list test
+ * reads those. Newlines survive everywhere, so a line-oriented reading of the
+ * result still lines up with the file.
  */
-const statementsOf = (sql) =>
-  sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .split(/\r?\n/)
-    .map((line) => line.replace(/--.*$/, ""))
-    .join("\n");
+const statementsOf = (sql) => {
+  let out = "";
+  let i = 0;
+  const end = sql.length;
+  while (i < end) {
+    const char = sql[i];
+    if (char === "-" && sql[i + 1] === "-") {
+      while (i < end && sql[i] !== "\n") i += 1;
+      out += " ";
+      continue;
+    }
+    if (char === "/" && sql[i + 1] === "*") {
+      let depth = 1;
+      i += 2;
+      while (i < end && depth > 0) {
+        if (sql[i] === "/" && sql[i + 1] === "*") {
+          depth += 1;
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "*" && sql[i + 1] === "/") {
+          depth -= 1;
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "\n") out += "\n";
+        i += 1;
+      }
+      out += " ";
+      continue;
+    }
+    if (char === "'") {
+      i += 1;
+      while (i < end) {
+        if (sql[i] === "'" && sql[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "'") {
+          i += 1;
+          break;
+        }
+        if (sql[i] === "\n") out += "\n";
+        i += 1;
+      }
+      out += "''";
+      continue;
+    }
+    if (char === '"') {
+      out += char;
+      i += 1;
+      while (i < end) {
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          out += '""';
+          i += 2;
+          continue;
+        }
+        if (sql[i] === '"') {
+          out += '"';
+          i += 1;
+          break;
+        }
+        out += sql[i];
+        i += 1;
+      }
+      continue;
+    }
+    const dollarTag = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+    if (dollarTag) {
+      const tag = dollarTag[0];
+      i += tag.length;
+      const close = sql.indexOf(tag, i);
+      const body = close < 0 ? sql.slice(i) : sql.slice(i, close);
+      for (const bodyChar of body) if (bodyChar === "\n") out += "\n";
+      i = close < 0 ? end : close + tag.length;
+      out += tag + tag;
+      continue;
+    }
+    out += char;
+    i += 1;
+  }
+  return out;
+};
 
 const indexStatementsIn = (statements) =>
   [...statements.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX[\s\S]*?;/gi)].map((m) => m[0]);
@@ -559,9 +652,42 @@ test("the detector reads statements, not the prose around them", () => {
   assert.equal(needsDeclaration(`-- This replaces the CREATE TABLE in the baseline.\n${fn}`), true);
   // Nor may a block comment or a trailing comment quoting the same DDL.
   assert.equal(needsDeclaration(`/* once a CREATE TABLE lived here */\n${fn}`), true);
+  assert.equal(
+    needsDeclaration(`/* outer /* nested CREATE TABLE */ still a comment */\n${fn}`),
+    true,
+  );
+  // A string literal is not a statement, and neither is a function body.
+  assert.equal(
+    needsDeclaration(
+      `CREATE FUNCTION f() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE 'ADD COLUMN'; END $$;\n`,
+    ),
+    true,
+  );
   assert.equal(needsDeclaration(`${fn.trimEnd()} -- replaces an ADD COLUMN\n`), true);
   // A migration that also adds a column is visible to the diff on its own.
   assert.equal(needsDeclaration(`ALTER TABLE "T" ADD COLUMN "c" text;\n${fn}`), false);
+});
+
+test("a comment marker inside a literal is not a comment", () => {
+  // The case that made the previous draft blind. Dropping `--` to end of
+  // line truncated the statement at the literal and took the `;` with it, so
+  // no index was found and the migration was judged to need no declaration.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, '--', '')));\n`),
+    true,
+  );
+  // A doubled quote ends nothing, so the statement still reaches its semicolon.
+  assert.equal(
+    needsDeclaration(`CREATE INDEX idx ON t ((replace(c, 'it''s --', '')));\n`),
+    true,
+  );
+  // A literal that merely names described DDL does not make it described.
+  assert.equal(
+    needsDeclaration(
+      `CREATE TRIGGER t AFTER DELETE ON "T" EXECUTE FUNCTION f('CREATE TABLE "X"');\n`,
+    ),
+    true,
+  );
 });
 
 test("only an index schema.prisma can express counts as described", () => {
