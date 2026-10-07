@@ -78,8 +78,10 @@ grep -a -o -E "$C(-dirty)?" "$R/amux-server-rs" | sort | uniq -c
 `ssh <host> 'bash -s' < install.sh`처럼 파일로 넘겨야 셸 인용 문제가 없다.
 
 쓰는 것: `~/.local/bin/amux-server-rs`(교체), 같은 폴더의 백업 파일, 그리고 AMUX
-서버 재시작. 30초 안에 `/health`가 새 commit을 보고하지 않으면 스크립트가 스스로
-백업으로 되돌린다. 수동 되돌리기는 5단계다.
+서버 재시작. `/health`를 30번 검사해도 새 commit이 보고되지 않으면 스크립트가
+스스로 백업으로 되돌린다. 검사 한 번은 연결이 바로 거부되면 약 1초, 응답 없이
+시간 초과되면 약 3초(요청 2초와 대기 1초)이므로, 되돌리기는 재시작 뒤 최대 약
+90초가 걸린다. 수동 되돌리기는 5단계다.
 
 ```bash
 #!/usr/bin/env bash
