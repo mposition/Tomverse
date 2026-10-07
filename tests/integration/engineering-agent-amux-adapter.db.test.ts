@@ -26,6 +26,10 @@ import {
 } from "@/lib/amux/workerRuntime";
 import {
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+  ENGINEERING_AGENT_AMUX_WORKER,
+  engineeringAgentAmuxAdapterPermittedNow,
+  recordEngineeringAgentPublisherResult,
+  registerEngineeringAgentWorker,
   engineeringPublishResultAttachment,
   engineeringRunEndAttachment,
   engineeringRunHeartbeatAttachment,
@@ -60,8 +64,9 @@ import { prisma } from "@/lib/prisma";
 // one fact or neither happened; and the adapter's settlement runs against
 // AMUX's delivery acknowledgement and expired-execution recovery without a
 // deadlock. The AMUX writers are called directly with the adapter's
-// attachments: the public adapter functions return before any transaction
-// while the code latch is false, as the reconciliation tests do for theirs.
+// attachments. The public adapter functions also need the execution API gate
+// (version 25 turned the code latch on); only the tests of the whole gate
+// open it, and each closes it again.
 // A missing TEST_DATABASE_URL means this file was not executed, not that it
 // passed.
 
@@ -1046,4 +1051,157 @@ test("a settlement records the agent's own spend under the agent scope, apart fr
     }),
     /AmuxCostLedgerEntry_agent_scope_check/,
   );
+});
+
+// The whole gate (orchestration policy version 25): with the code latch and
+// the execution API both open, the engineering mode alone decides.
+const withExecutionApi = async <T>(work: () => Promise<T>): Promise<T> => {
+  const previous = process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+  process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = "1";
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED;
+    else process.env.TOMVERSE_AMUX_EXECUTION_API_ENABLED = previous;
+  }
+};
+
+test("mode off closes a public adapter call before it writes anything to AMUX", async () => {
+  await withExecutionApi(async () => {
+    try {
+      await setMode("shadow");
+      assert.equal(await engineeringAgentAmuxAdapterPermittedNow(), true, "shadow with the latch and the API is open");
+      await setMode("off");
+      assert.equal(await engineeringAgentAmuxAdapterPermittedNow(), false, "mode off closes the gate");
+      const before = await prisma.amuxWorkerRuntime.findMany({
+        where: { workerName: ENGINEERING_AGENT_AMUX_WORKER },
+        select: { generation: true, instanceId: true },
+      });
+      await assert.rejects(
+        registerEngineeringAgentWorker({ instanceId: randomUUID() }),
+        (error) => error instanceof EngineeringAgentStoreRefusedError && error.code === "adapter_closed",
+      );
+      const afterRows = await prisma.amuxWorkerRuntime.findMany({
+        where: { workerName: ENGINEERING_AGENT_AMUX_WORKER },
+        select: { generation: true, instanceId: true },
+      });
+      assert.deepEqual(afterRows, before, "no runtime generation was registered");
+    } finally {
+      await setMode("shadow");
+    }
+  });
+});
+
+test("a closed adapter records a publisher's pull request on the engineering side, never on the card", async () => {
+  const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+  const inTx = <T>(work: Parameters<typeof runEngineeringAgentTransaction<T>>[1]) =>
+    runEngineeringAgentTransaction(prisma, work);
+  await setMode("t1");
+  try {
+    const fixture = await readyWorkerWithCard({ requiresHumanReview: true });
+    const runId = nextRunId();
+    const started = await startWithRun(fixture, runId);
+    const { workItemId } = await inTx((tx) =>
+      openEngineeringAgentWorkItem(tx, {
+        kind: "publish",
+        causeKey: `publish:${runId}:closed-adapter`,
+        runId,
+        patchBody: "patch",
+        patchDigest: sha256("patch"),
+        baseSha: sha1(runId),
+        expectedTreeId: sha1("tree"),
+      }),
+    );
+    await inTx((tx) =>
+      issueEngineeringAgentCapability(tx, {
+        workItemId,
+        capability: {
+          baseSha: sha1(runId),
+          patchDigest: sha256("patch"),
+          expectedTreeId: sha1("tree"),
+          commit: {
+            identity: { name: "Tomverse Engineering Agent", email: "engineering-agent@users.noreply.github.com" },
+            baseCommitterDate: "1759000000 +1000",
+            runId,
+            cardRef: fixture.taskId,
+          },
+        },
+      }),
+    );
+    const settled = await withAmuxRouteBudget(
+      () =>
+        settleAmuxExecution(
+          {
+            attemptId: started.attemptId,
+            worker: fixture.worker,
+            instanceId: fixture.instanceId,
+            generation: fixture.generation,
+            taskRevision: started.taskRevision,
+            outcome: "succeeded",
+            toStatus: "review",
+            actualCostMicrousd: null,
+          },
+          engineeringRunEndAttachment({ runId, outcome: "t1_queued", halt: "none" }),
+        ),
+      ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
+    );
+    assert.equal(settled.settled, true);
+    const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, { workItemId, mode: "write", leaseMs: 60_000 }));
+
+    // The pull request now exists; then the mode goes off before the result arrives.
+    await setMode("off");
+    const prNumber = 900_000 + Math.floor(Math.random() * 90_000);
+    const result = await withExecutionApi(() =>
+      recordEngineeringAgentPublisherResult({
+        workItemId,
+        fencingToken: claim.fencingToken,
+        outcome: "confirmed",
+        pullRequest: {
+          prNumber,
+          headSha: sha1("head"),
+          verifiedHeadSha: sha1("head"),
+          snapshot: { baseSha: sha1(runId), diffDigest: sha256("diff"), treeId: sha1("tree"), invalidatedReviewIds: [] },
+        },
+      }),
+    );
+    assert.equal(result.recorded, false);
+    assert.equal(result.recorded === false ? result.reason : null, "adapter_closed");
+
+    // Recorded on the engineering side: settled, bound, and a mismatch for a person.
+    const item = await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: workItemId } });
+    assert.equal(item.state, "published");
+    const binding = await prisma.engineeringAgentBinding.findFirstOrThrow({ where: { runId, prNumber } });
+    const mismatch = await prisma.engineeringAgentWorkItem.findFirstOrThrow({
+      where: { kind: "state_mismatch", causeKey: `review_pr:${workItemId}` },
+    });
+    assert.equal(mismatch.state, "open");
+    assert.equal(mismatch.reason, "adapter_closed");
+    // Never on the card: the number did not reach AMUX.
+    const card = await prisma.amuxWorkItem.findUniqueOrThrow({ where: { id: fixture.taskId } });
+    assert.equal(card.reviewPrNumber, null);
+
+    // A person closes it, as section 11 has them do; that leaves the mode off.
+    const owner = {
+      user: { id: `eng-adapter-owner-${randomUUID()}`, email: "owner@example.test" },
+      expires: new Date(Date.now() + 3_600_000).toISOString(),
+    } as Session;
+    await runEngineeringAgentTransaction(
+      prisma,
+      (tx) =>
+        resolveEngineeringAgentStateMismatch(tx, {
+          session: owner,
+          workItemId: mismatch.id,
+          action: "escalate_incident",
+        }),
+      { beforeAuditLock: (tx) => lockEngineeringAgentMismatchAmuxRows(tx, mismatch.id) },
+    );
+    assert.equal(
+      (await prisma.engineeringAgentWorkItem.findUniqueOrThrow({ where: { id: mismatch.id } })).state,
+      "resolved",
+    );
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "closed" }));
+    await inTx((tx) => moveEngineeringAgentBinding(tx, { bindingId: binding.id, to: "pruned" }));
+  } finally {
+    await setMode("shadow");
+  }
 });
