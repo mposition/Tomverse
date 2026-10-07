@@ -50,6 +50,7 @@ test("pinned GitHub loader reads only named old blobs and wipes their bytes", as
     readBlob: async (oid) => { reads.push(`blob:${oid}`); return fetched; },
   });
   assert.equal(result.ok, true);
+  assert.equal(result.baseRootTreeId, root);
   assert.deepEqual(reads, [`base:${"a".repeat(40)}`, `blob:${beforeOid}`]);
   assert.deepEqual(fetched, Buffer.alloc(before.length));
 });

@@ -18,6 +18,7 @@ mock.module(mod("lib/engineeringAgentV22StoredCandidate.ts"), {
     engineeringAgentV22CandidateSummary: (value) => ({
       verified: true, queued: false, baseSha: value.baseSha,
       patchDigest: value.patchDigest,
+      baseTreeId: value.candidate.baseRootTreeId,
       expectedTreeId: value.candidate.expectedTreeId,
       changedPaths: value.candidate.changes.map((entry) => entry.path),
     }),
@@ -48,7 +49,8 @@ assert.deepEqual(await response.json(), { verified: false,
 
 result = { ok: true, baseSha: "a".repeat(40),
   patchDigest: "b".repeat(64), patchBody: "private patch text",
-  candidate: { expectedTreeId: "c".repeat(40),
+  candidate: { baseRootTreeId: "d".repeat(40),
+    expectedTreeId: "c".repeat(40),
     changes: [{ path: "tests/example.test.mjs", addedText: "private" }] } };
 response = await POST(request({ attemptId }));
 assert.equal(response.status, 200);
@@ -56,6 +58,7 @@ assert.equal(response.headers.get("cache-control"), "no-store");
 const body = await response.json();
 assert.deepEqual(body, { verified: true, queued: false,
   baseSha: result.baseSha, patchDigest: result.patchDigest,
+  baseTreeId: result.candidate.baseRootTreeId,
   expectedTreeId: result.candidate.expectedTreeId,
   changedPaths: ["tests/example.test.mjs"] });
 assert.equal(JSON.stringify(body).includes("private"), false);

@@ -16,14 +16,17 @@ const livePorts: Ports = {
   readBase: readEngineeringAgentPinnedBaseTree,
   readBlob: (oid) => readEngineeringAgentGitBlob(oid),
 };
+type VerifiedCandidate = ReturnType<typeof verifyEngineeringAgentV22SparseCandidate>;
+type LoadedCandidate =
+  (Extract<VerifiedCandidate, { ok: true }> & { baseRootTreeId: string }) |
+  Extract<VerifiedCandidate, { ok: false }>;
 
 /** Read only the old blobs named by a sparse v22 patch. GitHub is pinned to
  * the fixed repository's current develop head; the worker supplies no URL or
  * tree listing. A failure gives no permission to publish. */
 export async function loadEngineeringAgentV22Candidate(input: {
   baseSha: string; files: readonly V22PublishFile[];
-}, ports: Ports = livePorts): Promise<ReturnType<
-  typeof verifyEngineeringAgentV22SparseCandidate>> {
+}, ports: Ports = livePorts): Promise<LoadedCandidate> {
   if (!/^[0-9a-f]{40}$/.test(input.baseSha) ||
       input.files.length < 1 || input.files.length > PUSH_LIMITS.maxFiles ||
       input.files.some((file) => !isCanonicalRepoPath(file.path) ||
@@ -40,10 +43,12 @@ export async function loadEngineeringAgentV22Candidate(input: {
       if (!bytes.has(previous.oid))
         bytes.set(previous.oid, await ports.readBlob(previous.oid));
     }
-    return verifyEngineeringAgentV22SparseCandidate({
+    const verified = verifyEngineeringAgentV22SparseCandidate({
       base: pinned.base, baseRootTreeId: pinned.rootTreeId,
       baseGitattributes: pinned.baseGitattributes,
       files: input.files, baseBlobs: bytes,
     });
+    return verified.ok ? { ...verified,
+      baseRootTreeId: pinned.rootTreeId } : verified;
   } finally { for (const value of bytes.values()) value.fill(0); }
 }

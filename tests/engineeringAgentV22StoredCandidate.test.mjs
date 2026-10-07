@@ -11,7 +11,8 @@ const snapshot = { runId: "123456789012", taskId: "task-1",
 const patch = { text: "diff --git a/file.ts b/file.ts\n",
   files: [{ path: "file.ts", mode: "100644", bytesBase64: "YQ==" }],
   sha256: "b".repeat(64), baseSha: snapshot.baseSha };
-const candidate = { ok: true, expectedTreeId: "c".repeat(40),
+const candidate = { ok: true, baseRootTreeId: "d".repeat(40),
+  expectedTreeId: "c".repeat(40),
   changes: [] };
 
 function ports(overrides = {}) {
@@ -35,7 +36,8 @@ test("stored v22 patch reaches the pinned candidate loader only with consent", a
     patchBody: patch.text, patchDigest: patch.sha256, candidate });
   assert.deepEqual(engineeringAgentV22CandidateSummary(value), {
     verified: true, queued: false, baseSha: snapshot.baseSha,
-    patchDigest: patch.sha256, expectedTreeId: candidate.expectedTreeId,
+    patchDigest: patch.sha256, baseTreeId: candidate.baseRootTreeId,
+    expectedTreeId: candidate.expectedTreeId,
     changedPaths: [],
   });
   const refused = await loadEngineeringAgentV22StoredCandidate(attemptId,

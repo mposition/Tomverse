@@ -85,6 +85,7 @@ export function engineeringAgentV22CandidateSummary(
     typeof loadEngineeringAgentV22StoredCandidate>>, { ok: true }>) {
   return { verified: true as const, queued: false as const,
     baseSha: value.baseSha, patchDigest: value.patchDigest,
+    baseTreeId: value.candidate.baseRootTreeId,
     expectedTreeId: value.candidate.expectedTreeId,
     changedPaths: value.candidate.changes.map((entry) => entry.path) };
 }
