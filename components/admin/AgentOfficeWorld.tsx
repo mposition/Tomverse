@@ -411,6 +411,11 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
                   ) : null}
                 </span>
                 <span className={cx("rm-code")}>{room.short}</span>
+                {isAmux && amux.note ? (
+                  <span className={cx("rm-note")} data-testid="agent-office-amux-note">
+                    {amux.note}
+                  </span>
+                ) : null}
                 {room.doors.map((door) => (
                   <span
                     key={`${door.x}-${door.y}`}

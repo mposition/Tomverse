@@ -450,6 +450,7 @@ type AmuxCopy = {
   states: Record<AgentOfficeAmuxWorkerState, string>;
   unread: string;
   noCatalog: string;
+  noWorkers: string;
   summary: (connected: number, total: number, busy: number, attention: number) => string;
   more: (count: number) => string;
   heartbeat: (time: string) => string;
@@ -471,8 +472,13 @@ export type AgentOfficeAmuxWorkerView = {
 export type AgentOfficeAmuxView = {
   status: DeptStatus;
   summary: string;
+  /** Words drawn in the room itself: why it is empty, or how many are not drawn. */
+  note: string | null;
+  /** In drawing order: when they do not all fit, the ones that need a look come first. */
   workers: AgentOfficeAmuxWorkerView[];
 };
+
+const DRAW_ORDER: readonly DeptStatus[] = ["attention", "working", "done", "waiting"];
 
 /** The AMUX room: its colour, its one-line summary and each worker's sprite. */
 export function amuxRoomView(
@@ -482,8 +488,12 @@ export function amuxRoomView(
   copy: AmuxCopy
 ): AgentOfficeAmuxView {
   const read = copy.readAt(utcStamp(readAt));
-  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, workers: [] };
-  if (state.kind === "no_catalog") return { status: "waiting", summary: `${copy.noCatalog} · ${read}`, workers: [] };
+  if (state.kind === "unread") {
+    return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, workers: [] };
+  }
+  if (state.kind === "no_catalog") {
+    return { status: "waiting", summary: `${copy.noCatalog} · ${read}`, note: copy.noCatalog, workers: [] };
+  }
 
   const workers = state.workers.map((worker): AgentOfficeAmuxWorkerView => {
     const status = amuxWorkerTone(worker.state);
@@ -502,8 +512,19 @@ export function amuxRoomView(
   const connected = workers.filter((worker) => ["ready", "idle", "busy"].includes(worker.state)).length;
   const status: DeptStatus =
     count("attention") > 0 ? "attention" : count("working") > 0 ? "working" : count("done") > 0 ? "done" : "waiting";
+  const overflow = Math.max(0, workers.length - desks);
   const parts = [copy.summary(connected, workers.length, count("working"), count("attention"))];
-  if (workers.length > desks) parts.push(copy.more(workers.length - desks));
+  if (overflow > 0) parts.push(copy.more(overflow));
   parts.push(read);
-  return { status, summary: parts.join(" · "), workers };
+  return {
+    status,
+    summary: parts.join(" · "),
+    note: workers.length === 0 ? copy.noWorkers : overflow > 0 ? copy.more(overflow) : null,
+    // Catalog order, unless they do not all fit: then a worker that needs a
+    // look is never the one left off the floor.
+    workers:
+      overflow > 0
+        ? [...workers].sort((a, b) => DRAW_ORDER.indexOf(a.status) - DRAW_ORDER.indexOf(b.status))
+        : workers,
+  };
 }

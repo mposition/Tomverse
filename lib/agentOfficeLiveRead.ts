@@ -182,7 +182,8 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
           select: { workerName: true, status: true, dispatchReady: true, heartbeatAt: true, leaseExpiresAt: true },
         })
       : [];
-    // Judged after the read: a heartbeat written while it ran is not counted as lost.
+    // Judged against a clock taken after the read: a lease that has run out
+    // by then is lost, never live.
     return agentOfficeAmuxState({ catalog, runtimes, now: new Date() });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "amux_workers" });

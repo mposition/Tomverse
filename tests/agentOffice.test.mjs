@@ -1067,15 +1067,24 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   assert.equal(view([worker("a", "ready")]).status, "done");
   assert.equal(view([worker("a", "paused"), worker("b", "not_running")]).status, "waiting");
   assert.equal(view([]).status, "waiting");
-  assert.match(view([worker("a", "ready"), worker("b", "ready")], 1).summary, /그림에 없는 worker 1개 더/);
+  assert.equal(mixed.note, null);
+  // When they do not all fit, the ones that need a look are drawn, and the
+  // room says in words how many are not.
+  const crowded = view([worker("a", "ready"), worker("b", "busy"), worker("c", "error")], 1);
+  assert.equal(crowded.workers[0].name, "c");
+  assert.equal(crowded.note, "AMUX 실행 화면에 worker 2개 더");
+  assert.match(crowded.summary, /AMUX 실행 화면에 worker 2개 더/);
+  assert.equal(view([]).note, copy.noWorkers);
 
   const unread = amuxRoomView({ kind: "unread" }, readAt, 12, copy);
   assert.equal(unread.status, "attention");
   assert.deepEqual(unread.workers, []);
   assert.match(unread.summary, /worker 기록을 읽지 못함/);
+  assert.equal(unread.note, copy.unread, "a failed read is said in the room, not only in a tooltip");
   const none = amuxRoomView({ kind: "no_catalog" }, readAt, 12, copy);
   assert.equal(none.status, "waiting");
   assert.match(none.summary, /카탈로그가 없음/);
+  assert.equal(none.note, copy.noCatalog);
 
   for (const locale of ["en", "ko"]) {
     const states = adminAgentOfficeMessages[locale].real.amux.states;
@@ -1099,7 +1108,10 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
     /select: \{ workerName: true, status: true, dispatchReady: true, heartbeatAt: true, leaseExpiresAt: true \}/
   );
   assert.doesNotMatch(amux, /amuxWorkItem|amuxExecutionAttempt|amuxRouteDecision|title|process\.env/);
-  assert.ok(amux.indexOf("now: new Date()") > amux.indexOf("await prisma"), "the lease is judged before the read");
+  assert.ok(
+    amux.indexOf("now: new Date()") > amux.indexOf("await prisma"),
+    "the lease is judged against a clock taken before the read"
+  );
   assert.match(amux, /read: "amux_workers"/);
 
   // Workers are drawn by their own layer: not engine agents, so the demo can
@@ -1108,6 +1120,7 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   const layer = world.slice(world.indexOf("const WorkerLayer"), world.indexOf("const PropLayer"));
   assert.doesNotMatch(layer, /onPointerUp|onPick|engine/);
   assert.match(world, /<WorkerLayer workers=\{amux\.workers\} \/>/);
+  assert.match(world, /isAmux && amux\.note \?/);
   assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
 });
 
