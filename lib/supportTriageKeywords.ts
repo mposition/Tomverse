@@ -12,8 +12,10 @@
  *
  * Matching: the text is NFKC-normalised and lower-cased. A term in a script
  * that separates words with spaces matches only as a whole word or phrase,
- * so "sue" does not match "issue" and "court" does not match "courtesy" or
- * "courted"; the inflected forms that matter are listed as terms. A Hangul or
+ * itself or with a plural s or es (courts, factures, tribunales), so "sue"
+ * does not match "issue" and "court" does not match "courtesy" or "courted".
+ * Verb forms and other plurals are listed as terms (sued, breached,
+ * Rechnungen). A Hangul or
  * Han term matches as a substring of the text as written. Only a space the
  * term itself contains is optional ("죽고 싶" also matches "죽고싶"): the
  * text's own spaces are never removed, so separate words cannot fuse into a
@@ -34,9 +36,9 @@ export type KeywordLocale = (typeof KEYWORD_LOCALES)[number];
 export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Record<KeywordLocale, readonly string[]>>>> =
   Object.freeze({
     money: Object.freeze({
-      en: ["refund", "refunds", "refunded", "refunding", "charged", "charges", "overcharged", "double charge", "double charged", "unexpected charge", "billing", "billed", "invoice", "invoices", "payment", "payments", "subscription", "subscriptions", "credits", "credit card", "chargeback", "chargebacks", "money back", "compensation", "cancel my plan"],
+      en: ["refund", "refunds", "refunded", "refunding", "charged", "charges", "overcharged", "double charge", "double charged", "unexpected charge", "billing", "billed", "invoice", "invoices", "invoiced", "payment", "payments", "subscription", "subscriptions", "credits", "credit card", "chargeback", "chargebacks", "money back", "compensation", "cancel my plan"],
       ko: ["환불", "결제", "청구", "요금", "구독", "크레딧", "이중 결제", "카드 결제", "보상", "돈을 돌려"],
-      de: ["rückerstattung", "erstattung", "abbuchung", "abgebucht", "rechnung", "zahlung", "abonnement", "abo", "guthaben", "geld zurück"],
+      de: ["rückerstattung", "rückerstattungen", "erstattung", "abbuchung", "abbuchungen", "abgebucht", "rechnung", "rechnungen", "zahlung", "zahlungen", "abonnement", "abo", "guthaben", "geld zurück"],
       es: ["reembolso", "reembolsos", "cobro", "cobros", "cobrado", "cobraron", "factura", "facturas", "pago", "pagos", "suscripción", "créditos", "devolución", "compensación"],
       fr: ["remboursement", "rembourser", "prélèvement", "prélevé", "facture", "paiement", "abonnement", "crédits", "débité"],
       pt: ["reembolso", "cobrança", "cobranças", "cobrado", "fatura", "faturas", "pagamento", "pagamentos", "assinatura", "créditos", "estorno", "devolução"],
@@ -52,25 +54,25 @@ export const SUPPORT_TRIAGE_KEYWORDS: Readonly<Record<KeywordFlag, Readonly<Reco
       zh: ["删除账号", "刪除帳號", "删除我的账号", "刪除我的帳號", "删除账户", "刪除帳戶", "删除我的账户", "刪除我的帳戶", "注销账号", "註銷帳號", "注销我的账号", "註銷我的帳號", "注销账户", "註銷帳戶", "注销我的账户", "註銷我的帳戶", "个人信息", "個人資料", "隐私", "隱私"],
     }),
     security: Object.freeze({
-      en: ["hacked", "security", "vulnerability", "phishing", "unauthorized login", "unauthorised login", "breach", "exploit", "someone logged into my account", "password leak", "account takeover"],
+      en: ["hacked", "hacking", "security", "vulnerability", "vulnerabilities", "phishing", "unauthorized login", "unauthorised login", "breach", "breached", "exploit", "exploited", "exploiting", "someone logged into my account", "password leak", "account takeover"],
       ko: ["해킹", "보안", "취약점", "피싱", "무단 로그인", "도용", "유출"],
-      de: ["gehackt", "sicherheit", "sicherheitslücke", "phishing", "unbefugter zugriff", "datenleck"],
+      de: ["gehackt", "sicherheit", "sicherheitslücke", "sicherheitslücken", "phishing", "unbefugter zugriff", "datenleck"],
       es: ["hackeado", "hackeada", "hackearon", "seguridad", "vulnerabilidad", "phishing", "acceso no autorizado", "filtración"],
       fr: ["piraté", "sécurité", "vulnérabilité", "hameçonnage", "phishing", "accès non autorisé", "fuite"],
       pt: ["hackeado", "hackeada", "hackearam", "segurança", "vulnerabilidade", "phishing", "acesso não autorizado", "vazamento"],
       zh: ["被盗", "被盜", "黑客", "駭客", "漏洞", "钓鱼", "釣魚", "安全", "泄露", "洩露"],
     }),
     legal: Object.freeze({
-      en: ["lawsuit", "lawsuits", "lawyer", "lawyers", "attorney", "attorneys", "legal action", "sue", "sued", "suing", "copyright", "copyrighted", "dmca", "court", "subpoena", "press charges", "pressing charges", "pressed charges"],
+      en: ["lawsuit", "lawsuits", "lawyer", "lawyers", "attorney", "attorneys", "legal action", "sue", "sued", "suing", "copyright", "copyrighted", "dmca", "court", "subpoena", "subpoenaed", "press charges", "pressing charges", "pressed charges", "file charges", "filing charges", "filed charges", "criminal charges"],
       ko: ["소송", "변호사", "법적", "고소", "저작권", "법원"],
-      de: ["klage", "anwalt", "anwältin", "rechtsanwalt", "rechtsanwältin", "rechtliche schritte", "urheberrecht", "gericht"],
+      de: ["klage", "klagen", "anwalt", "anwälte", "anwältin", "rechtsanwalt", "rechtsanwältin", "rechtliche schritte", "urheberrecht", "gericht"],
       es: ["demanda", "abogado", "acciones legales", "derechos de autor", "tribunal"],
       fr: ["poursuite", "avocat", "action en justice", "droit d'auteur", "tribunal"],
       pt: ["processo judicial", "advogado", "ação judicial", "direitos autorais", "tribunal"],
       zh: ["律师", "律師", "起诉", "起訴", "诉讼", "訴訟", "版权", "版權", "法院"],
     }),
     self_harm_threat: Object.freeze({
-      en: ["suicide", "suicidal", "kill myself", "end my life", "self harm", "self-harm", "want to die", "hurt myself"],
+      en: ["suicide", "suicidal", "kill myself", "killing myself", "end my life", "self harm", "self-harm", "self harming", "self-harming", "want to die", "hurt myself", "hurting myself"],
       ko: ["자살", "자해", "죽고 싶", "살기 싫", "목숨을 끊"],
       de: ["selbstmord", "suizid", "mich umbringen", "nicht mehr leben"],
       es: ["suicidio", "suicidarme", "quitarme la vida", "autolesión", "quiero morir"],
@@ -100,7 +102,7 @@ const MATCHERS: readonly Matcher[] = KEYWORD_FLAGS.map((flag) => {
   const wordPattern =
     words.length === 0
       ? null
-      : new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.map(escape).join("|")})(?![\\p{L}\\p{N}])`, "u");
+      : new RegExp(`(?<![\\p{L}\\p{N}])(?:${words.map(escape).join("|")})(?:s|es)?(?![\\p{L}\\p{N}])`, "u");
   return {
     flag,
     test: (text: string) => (substringPattern?.test(text) ?? false) || (wordPattern?.test(text) ?? false),
