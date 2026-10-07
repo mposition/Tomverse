@@ -30,6 +30,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { CONVENTION_VERSIONS } from "../lib/agentAuthorityFiles.ts";
 import { cacheIsolationRecordSignature } from "../lib/agentCacheIsolationRecord.ts";
 import { analyseCredentialReachability, credentialForbiddenPaths } from "../lib/agentCredentialReachability.ts";
+import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialReviewedExclusions.ts";
 import { computeControlPlaneSlice } from "../lib/agentControlPlaneSlice.ts";
 import { decideTier, policyNamedTestPaths } from "../lib/agentPushPolicy.ts";
 import { TREE_LIMITS, decodeText, diffLines, unsupportedTreeChanges } from "../lib/engineeringAgentTreeVerify.ts";
@@ -153,14 +154,14 @@ for (const commit of commits) {
   // taken with the record ignored -- an analysis taken with it applied reports
   // no cache reasons at all, so the condition the record rests on would look
   // satisfied because the evidence had been hidden.
-  const blind = analyseCredentialReachability({ workflows, exclusions: [], cacheIsolationRecorded: false });
+  const blind = analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: false });
   const narrow = judgeAgentPrCacheIsolation(blind);
   const signature = cacheIsolationRecordSignature();
   // Both halves, and nothing else lifts it: the owner's signature, and the
   // condition holding against these workflows right now.
   const isolationRecorded = signature.signed && narrow.status === "judged" && narrow.held;
   const credential = isolationRecorded
-    ? analyseCredentialReachability({ workflows, exclusions: [], cacheIsolationRecorded: true })
+    ? analyseCredentialReachability({ workflows, exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS, cacheIsolationRecorded: true })
     : blind;
   if (isolationRecorded) tally.cacheIsolationApplied += 1;
   const slice = computeControlPlaneSlice({ baseFiles, changes });
