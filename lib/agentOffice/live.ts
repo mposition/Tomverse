@@ -88,11 +88,11 @@ type ResearchCopy = {
   };
   unread: string;
   disabled: string;
-  ok: (time: string) => string;
-  failed: (stage: string) => string;
-  duplicate: string;
-  missingOpen: string;
-  missing: string;
+  ok: (slot: string) => string;
+  failed: (slot: string, stage: string) => string;
+  duplicate: (slot: string) => string;
+  missingOpen: (slot: string) => string;
+  missing: (slot: string) => string;
   lastSuccess: (time: string) => string;
   noSuccess: string;
   silent: (hours: number) => string;
@@ -115,16 +115,19 @@ export function researchLiveDept(
     return { status, badge: copy.badges.disabled, line: copy.disabled, detail: read };
   }
 
+  // "Latest", never "today": before 21:30 UTC the slot that has passed is
+  // yesterday's, so every line names the slot it is about.
+  const slot = utcStamp(state.slot);
   const line =
     state.slotState === "ok"
-      ? copy.ok(utcStamp(state.slot))
+      ? copy.ok(slot)
       : state.slotState === "failed"
-        ? copy.failed(state.failureStage ?? "unknown")
+        ? copy.failed(slot, state.failureStage ?? "unknown")
         : state.slotState === "duplicate"
-          ? copy.duplicate
+          ? copy.duplicate(slot)
           : state.windowOpen
-            ? copy.missingOpen
-            : copy.missing;
+            ? copy.missingOpen(slot)
+            : copy.missing(slot);
 
   const facts = [
     state.lastSuccessAt ? copy.lastSuccess(utcStamp(state.lastSuccessAt)) : copy.noSuccess,

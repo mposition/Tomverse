@@ -503,7 +503,8 @@ export class AgentOffice {
         agent,
         { k: "status", s: "commuting" },
         { k: "wait", dur: Math.random() * 6 },
-        { k: "fn", fn: () => this.say(agent, rand(s.greetings), 2.4) },
+        // A live room's staff say nothing the record did not say.
+        { k: "fn", fn: () => (this.live[agent.deptId] ? undefined : this.say(agent, rand(s.greetings), 2.4)) },
         { k: "walk", to: agent.home },
         { k: "face", dir: "up" },
         { k: "anim", a: "sit" },
@@ -901,7 +902,7 @@ export class AgentOffice {
     }
 
     const stats = this.snapshot().stats;
-    lines.push(s.statusCounts(stats.done, stats.blocked, this.onDutyCount()));
+    lines.push(s.statusCounts(stats.done, stats.attention, stats.blocked, this.onDutyCount()));
     const next = this.copy.phases[this.phaseIndex + 1];
     if (next && !this.dayComplete) lines.push(s.statusNext(next));
 
@@ -985,7 +986,7 @@ export class AgentOffice {
     if (ORDER.late.test(question) && status === "waiting" && !live) lines.push(s.deptNotLate);
 
     this.pushChat("staff", s.speaker(lead.name, this.roomName(deptId)), lines.join("\n"));
-    this.say(lead, s.reportHere, 3);
+    this.say(lead, live ? live.line : s.reportHere, 3);
     lead.anim = "talk";
     this.spotlightRoom(deptId, 8);
     this.pushLog("🎤", s.deptCheckLog(this.roomName(deptId)), "yellow");
@@ -1373,6 +1374,9 @@ export class AgentOffice {
   /** Idle behaviour: a passing thought, a coffee, a word with a teammate. */
   private idleBrain(agent: Agent, dt: number) {
     if (agent.rank === "operator" || this.locked.has(agent.id)) return;
+    // A live room's staff keep to their desks and say nothing of their own:
+    // beside a LIVE chip, a passing thought would read as the agent's finding.
+    if (this.live[agent.deptId]) return;
     agent.idleFor -= dt;
     if (agent.idleFor > 0) return;
     agent.idleFor = 7 + Math.random() * 14;

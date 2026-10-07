@@ -337,7 +337,7 @@ test("a live room's line says what the record says, in UTC, and an unread record
     copy
   );
   assert.equal(ok.status, "done");
-  assert.equal(ok.line, "오늘 회차 기록됨 · 10-07 21:30 UTC");
+  assert.equal(ok.line, "직전 회차 기록됨 · 10-07 21:30 UTC");
   assert.match(ok.detail, /마지막 성공 10-07 21:30 UTC/);
   assert.match(ok.detail, /읽은 시각 10-07 22:05 UTC/);
 
@@ -351,6 +351,29 @@ test("a live room's line says what the record says, in UTC, and an unread record
 
   // A switched-off agent waits; it is not a failure.
   assert.equal(researchLiveDept({ kind: "disabled" }, readAt, copy).status, "waiting");
+
+  // Before 21:30 UTC the slot that has passed is yesterday's, and the line
+  // says which slot it means rather than calling it today's.
+  const morning = researchLiveDept(
+    agentOfficeResearchState({
+      enabled: true,
+      rows: [{ slot: at("2026-10-07T21:30:00Z"), outcome: "failed", failureStage: "clone" }],
+      lastSuccessAt: at("2026-10-06T21:30:00Z"),
+      enabledSince: at("2026-10-01T00:00:00Z"),
+      now: at("2026-10-08T01:00:00Z"),
+    }),
+    "2026-10-08T01:00:00.000Z",
+    copy
+  );
+  assert.equal(morning.line, "직전 회차 실패 · 10-07 21:30 UTC · clone");
+  assert.equal(morning.badge, "실패");
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.research;
+    for (const value of [words.ok("x"), words.failed("x", "y"), words.duplicate("x"), words.missingOpen("x"), words.missing("x")]) {
+      assert.doesNotMatch(value, /today|오늘/i, `${locale}: "${value}" calls the slot today's`);
+      assert.match(value, /x/, `${locale}: "${value}" does not name its slot`);
+    }
+  }
 });
 
 test("a live room is never simulated: no scripted work, and its status is the record's", () => {
@@ -367,8 +390,10 @@ test("a live room is never simulated: no scripted work, and its status is the re
   office.start();
   let worked = false;
   let meetingWithResearch = false;
+  const spoken = new Set();
   const watch = () => {
     for (const agent of office.agents) {
+      if (agent.deptId === "research" && agent.speech) spoken.add(agent.speech);
       if (agent.deptId === "research" && (agent.status === "working" || agent.progress > 0)) worked = true;
       if (agent.id === "research-lead" && agent.status === "meeting" && !office.approvalPending) {
         meetingWithResearch = true;
@@ -384,6 +409,11 @@ test("a live room is never simulated: no scripted work, and its status is the re
     return office.dayComplete;
   });
   assert.equal(worked, false, "the research room was given scripted work");
+  assert.deepEqual(
+    [...spoken].filter((line) => line !== live.research.line),
+    [],
+    "a live room's staff said something the record did not say"
+  );
   assert.equal(meetingWithResearch, false, "the research lead sat in the scripted hand-off");
   assert.equal(office.deptStatus.research, "done");
   assert.ok(office.log.some((entry) => entry.text.includes("(real record): Today's run recorded")));
@@ -397,6 +427,8 @@ test("a live room is never simulated: no scripted work, and its status is the re
   office.setLive({ research: { status: "attention", badge: "Unread", line: "Could not read its record", detail: "" } });
   assert.equal(office.deptStatus.research, "attention");
   assert.equal(office.snapshot().stats.attention, 1);
+  // A real record that needs a look is not a decision waiting for the operator.
+  assert.equal(office.snapshot().stats.approval, 0);
   // ...and the delay report names it in its own words.
   office.command("Why is it slow?");
   assert.match(office.chat.at(-1).text, /Product research: Could not read its record/);
@@ -418,4 +450,15 @@ test("the office reads the research agent's state, never its content, and writes
   // The observation row is selected for its slot, outcome and failure stage only.
   assert.match(source, /select: \{ slot: true, outcome: true, failureStage: true \}/);
   assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
+});
+
+test("a record that needs a look is counted on its own, never as a decision", () => {
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.doesNotMatch(panel, /stats\.approval \+ snap\.stats\.attention/);
+  assert.match(panel, /m\.dashboard\.metricAttention/);
+  assert.match(panel, /m\.live\.attention\(snap\.stats\.attention\)/);
+  // The end-of-day brief no longer claims the scripted observation was done.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].briefing.done(3), /observation|관측/);
+  }
 });
