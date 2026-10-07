@@ -18,7 +18,7 @@
 | 항목 | 값 |
 |---|---|
 | 운영 주체 | SIA Monkey See Monkey Do (라트비아, 리가) |
-| 처리 지역 | 업체: 서비스와 데이터는 Hetzner bare metal, 암호화된 DB 백업은 Amazon Web Services, 운영 메일은 Fastmail. **국가·리전은 공개 문서(privacy, about)에 없어 미확인** — 운영자가 공급자에게 확인해 이 칸을 채웁니다(아래 "켜기 전 남은 조건") |
+| 처리 지역 | 업체: 서비스와 데이터는 Hetzner bare metal, 암호화된 DB 백업은 Amazon Web Services, 운영 메일은 Fastmail. **국가·리전: 독일, Hetzner Falkenstein 데이터센터(FSN-DCx)** — 공급자 블로그 "Healthchecks.io Hosting Setup, 2022 Edition"(`https://blog.healthchecks.io/hp-rewrite/abb0df5931cba61014d36e1f194fa752`, 2026-10-07 확인)의 서술이며 계약상 약속은 아닙니다. privacy·about 문서는 국가를 적지 않습니다. 백업(AWS)의 리전은 공개되지 않았습니다 |
 | 이 Agent가 보내는 것 | 회차마다 성공 응답 뒤에만 `GET <check URL>` 한 번, 본문 없음, 헤더는 런타임 기본값뿐 |
 | monitor가 기록하는 것 | 수신 시각, 발신 IP(Railway egress), **User-Agent**(Node 런타임의 고정 문자열로, 회차의 내용을 담지 않음), 본문(없음) |
 | 개인정보 | **없음.** 고객 데이터·verdict·`modelId`·기한이 신호에 실리지 않습니다(§1.3). 알림 주소는 운영자 자신의 것 |
@@ -74,7 +74,7 @@ HTTP 요청은 User-Agent를 함께 보내므로 이 공급자에서 그 문장�
 
 아래가 모두 해소되기 전에는 스위치를 켜지 않습니다.
 
-1. **처리 국가·리전** — 공급자에게 확인해 1번 표를 채웁니다.
+1. ~~처리 국가·리전~~ — 공급자 블로그 기준 독일(1번 표). 백업 리전은 미공개로 남깁니다(고객 데이터가 가지 않으므로 차단 아님).
 2. **User-Agent** — 정책 §1.3의 "신호 시각·발신 IP뿐"과 맞추는 방법을 운영자가 정합니다. 선택지 둘:
    (a) 정책을 개정해 "신호 시각, 발신 IP, 회차 내용을 담지 않는 고정 User-Agent"로 고칩니다(정책 버전 증가와 §0
    판정이 필요합니다). (b) 서비스가 빈 User-Agent를 보내도록 코드를 고치고, 공급자에 남는 값이 비어 있는지 7번
