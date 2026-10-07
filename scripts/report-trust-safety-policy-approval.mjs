@@ -1,4 +1,4 @@
-// Runs the §2 approval judgement of
+// Runs the docs/policy/trust-safety-compliance-agent.md §2 approval judgement of
 // `docs/policy/trust-safety-compliance-agent.md` and prints the manifest that
 // section requires.
 //
@@ -25,15 +25,27 @@ import {
   changedTheFile,
   isEvilMerge,
   judgeTrustSafetyPolicyApproval,
+  readAllOrNothing,
+  versionEntryOf,
 } from "./report-trust-safety-policy-approval-core.mjs";
 
 const POLICY_PATH = "docs/policy/trust-safety-compliance-agent.md";
 const ALLOWLIST_PATH = "docs/policy/agent-operator-allowlist.md";
-const BRANCH = "origin/develop";
+const DEFAULT_BRANCH = "origin/develop";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const args = process.argv.slice(2);
 const asJson = args.includes("--json");
+// docs/policy/trust-safety-compliance-agent.md §2 asks for this judgement twice: before stage 1 merges anything, and on every
+// re-approval. The first of those is about a ref that is not yet develop, so the
+// ref is an argument -- and a ref that cannot be read is how the fail-closed
+// path is exercised for real rather than asserted.
+const branchIndex = args.indexOf("--branch");
+const BRANCH = branchIndex >= 0 ? args[branchIndex + 1] : DEFAULT_BRANCH;
+if (branchIndex >= 0 && !BRANCH) {
+  console.error("--branch needs a revision");
+  process.exit(2);
+}
 
 const run = (command, commandArgs) => {
   const result = spawnSync(command, commandArgs, {
@@ -50,7 +62,7 @@ const run = (command, commandArgs) => {
 const git = (...commandArgs) => run("git", commandArgs);
 
 /**
- * `gh` is read-only here. A failure returns undefined rather than a guess: §2
+ * `gh` is read-only here. A failure returns undefined rather than a guess: docs/policy/trust-safety-compliance-agent.md §2
  * treats a fact it cannot read as unmet, and the core says so for each step.
  */
 const gh = (...commandArgs) => {
@@ -63,14 +75,43 @@ const gh = (...commandArgs) => {
   }
 };
 
+/**
+ * A path at a revision: present with a blob, genuinely absent, or unreadable.
+ *
+ * These three are not interchangeable, and an earlier draft collapsed the last
+ * two. A file that does not exist yet at some commit is an ordinary fact -- the
+ * policy had a first commit. A read that failed is docs/policy/trust-safety-compliance-agent.md §2's "could not read", which
+ * it calls unmet. Turning the second into the first let a version the reader
+ * never opened drop out of V_max.
+ *
+ * `git rev-parse <rev>:<path>` fails for both cases, so the two are separated
+ * by asking the tree whether the entry is there at all.
+ */
+const entryAt = (rev, path) => {
+  const listed = git("ls-tree", "--format=%(objectname)", rev, "--", path);
+  if (!listed.ok) return { state: "unreadable" };
+  const blob = listed.stdout.trim();
+  if (blob === "") return { state: "absent" };
+  return { state: "present", blob };
+};
+
 const blobOf = (rev, path) => {
-  const result = git("rev-parse", `${rev}:${path}`);
-  return result.ok ? result.stdout.trim() : undefined;
+  const entry = entryAt(rev, path);
+  return entry.state === "present" ? entry.blob : undefined;
+};
+
+/** The text at a revision, with absence and failure kept apart. */
+const readAt = (rev, path) => {
+  const entry = entryAt(rev, path);
+  if (entry.state !== "present") return entry;
+  const result = git("show", `${rev}:${path}`);
+  if (!result.ok) return { state: "unreadable" };
+  return { state: "present", text: result.stdout };
 };
 
 const fileAt = (rev, path) => {
-  const result = git("show", `${rev}:${path}`);
-  return result.ok ? result.stdout : undefined;
+  const read = readAt(rev, path);
+  return read.state === "present" ? read.text : undefined;
 };
 
 /** The header line's three fields, read from the one line that holds them. */
@@ -213,7 +254,10 @@ const pullRequestFacts = (number) => {
     mergedAtUtcDate: view.mergedAt ? String(view.mergedAt).slice(0, 10) : undefined,
     mergedBy: view.mergedBy ? { login: view.mergedBy, type: type ?? "unreadable" } : undefined,
     files: view.files,
-    commits: (view.commits ?? []).map((sha) => identityOf(sha)).filter(Boolean),
+    // One commit whose object is not local makes the whole observation
+    // unreadable. Dropping it would leave its author unchecked, and dropping
+    // every one would leave an empty array that `every()` calls true.
+    commits: readAllOrNothing(view.commits, identityOf),
   };
 };
 
@@ -222,34 +266,35 @@ const pullRequestFacts = (number) => {
 const policyText = fileAt(BRANCH, POLICY_PATH);
 const header = headerFields(policyText);
 
-const policyTouching = commitsTouching(BRANCH, POLICY_PATH) ?? [];
-const policyChanging = policyTouching.filter((sha) => changedTheFile(commitWithParents(sha, POLICY_PATH)));
-const lastChangeCommit = policyChanging[0];
+const policyTouching = commitsTouching(BRANCH, POLICY_PATH);
+const policyChanging = policyTouching?.filter((sha) =>
+  changedTheFile(commitWithParents(sha, POLICY_PATH)),
+);
+const lastChangeCommit = policyChanging?.[0];
 
 const containing = lastChangeCommit ? pullRequestsFor(lastChangeCommit) : undefined;
 const approvalPr = containing?.length === 1 ? pullRequestFacts(containing[0].number) : undefined;
 const base = approvalPr?.baseSha;
 
-const policyCommitsReachableFromBase = base
-  ? (commitsTouching(base, POLICY_PATH) ?? []).map((sha) => ({
-      sha,
-      version: headerFields(fileAt(sha, POLICY_PATH))?.version,
-    }))
-  : undefined;
+const reachablePolicyCommits = base ? commitsTouching(base, POLICY_PATH) : undefined;
+const policyCommitsReachableFromBase = reachablePolicyCommits?.map((sha) =>
+  // Absent is an ordinary fact with no version; unreadable is not.
+  versionEntryOf(sha, readAt(sha, POLICY_PATH), (text) => headerFields(text)?.version),
+);
 
 const allowlistTextAtBase = base ? fileAt(base, ALLOWLIST_PATH) : undefined;
-const allowlistTouching = base ? (commitsTouching(base, ALLOWLIST_PATH) ?? []) : [];
-const allowlistCommits = allowlistTouching.map((sha) => commitWithParents(sha, ALLOWLIST_PATH));
-const allowlistChanging = allowlistCommits.filter(changedTheFile);
+const allowlistTouching = base ? commitsTouching(base, ALLOWLIST_PATH) : undefined;
+const allowlistCommits = allowlistTouching?.map((sha) => commitWithParents(sha, ALLOWLIST_PATH));
+const allowlistChanging = allowlistCommits?.filter(changedTheFile);
 const allowlistCarrying = allowlistCommits
-  .filter((commit) => !changedTheFile(commit))
+  ?.filter((commit) => !changedTheFile(commit))
   .map((commit) => commit.sha);
 
-const observedAllowlistGenesis = allowlistChanging.length
+const observedAllowlistGenesis = allowlistChanging?.length
   ? allowlistChanging[allowlistChanging.length - 1].sha
   : undefined;
 
-const allowlistChanges = allowlistChanging.map((commit) => {
+const allowlistChanges = allowlistChanging?.map((commit) => {
   const prs = pullRequestsFor(commit.sha);
   return {
     sha: commit.sha,
@@ -258,23 +303,27 @@ const allowlistChanges = allowlistChanging.map((commit) => {
   };
 });
 
-const allowlistPrNumbers = [
-  ...new Set(allowlistChanges.flatMap((change) => change.prNumbers ?? [])),
-];
-const genesisPrNumber = allowlistChanges.find((change) => change.sha === observedAllowlistGenesis)
+const allowlistPrNumbers = allowlistChanges
+  ? [...new Set(allowlistChanges.flatMap((change) => change.prNumbers ?? []))]
+  : undefined;
+const genesisPrNumber = allowlistChanges?.find((change) => change.sha === observedAllowlistGenesis)
   ?.prNumbers?.[0];
 
-const allowlistPrs = allowlistPrNumbers.map((number) => {
+const allowlistPrs = allowlistPrNumbers?.map((number) => {
   const facts = pullRequestFacts(number);
   if (facts === undefined) return { number };
   const ownChanges = allowlistChanges.filter((change) => (change.prNumbers ?? []).includes(number));
   const mergeText = facts.mergeCommit ? fileAt(facts.mergeCommit, ALLOWLIST_PATH) : undefined;
   const baseText = facts.baseSha ? fileAt(facts.baseSha, ALLOWLIST_PATH) : undefined;
   const baseList = allowlistApprovers(baseText);
+  const mergeHeader = headerFields(mergeText);
   return {
     ...facts,
     commitPrCounts: ownChanges.map((change) => (change.prNumbers ?? []).length),
-    approvedAtAtMerge: headerFields(mergeText)?.approvedAt,
+    // Items 2 and 3 compare against the approver the allowlist named at this
+    // pull request's own merge, never today's.
+    approvedByAtMerge: mergeHeader?.approvedBy,
+    approvedAtAtMerge: mergeHeader?.approvedAt,
     baseVersion: headerFields(baseText)?.version,
     mergeVersion: headerFields(mergeText)?.version,
     baseListApprovers: baseList,
@@ -285,11 +334,12 @@ const allowlistPrs = allowlistPrNumbers.map((number) => {
   };
 });
 
-const policyChangesAfterMerge = approvalPr?.mergeCommit
-  ? (
-      commitsTouching(`${approvalPr.mergeCommit}..${BRANCH}`, POLICY_PATH) ?? []
-    ).filter((sha) => changedTheFile(commitWithParents(sha, POLICY_PATH)))
+const laterTouching = approvalPr?.mergeCommit
+  ? commitsTouching(`${approvalPr.mergeCommit}..${BRANCH}`, POLICY_PATH)
   : undefined;
+const policyChangesAfterMerge = laterTouching?.filter((sha) =>
+  changedTheFile(commitWithParents(sha, POLICY_PATH)),
+);
 
 const allowlistApproversAtBase = allowlistApprovers(allowlistTextAtBase);
 
@@ -310,9 +360,9 @@ const report = judgeTrustSafetyPolicyApproval({
     allowlistApproversAtBase === undefined || header?.approvedBy === undefined
       ? undefined
       : allowlistApproversAtBase.includes(header.approvedBy),
-  allowlistChanges: base ? allowlistChanges : undefined,
-  allowlistCarryingMerges: allowlistCarrying,
-  allowlistPrs: base ? allowlistPrs : undefined,
+  allowlistChanges,
+  allowlistCarryingMerges: allowlistCarrying ?? [],
+  allowlistPrs,
   genesisPrNumber,
 });
 
@@ -325,8 +375,15 @@ if (asJson) {
 
 const mark = (met) => (met === true ? "pass" : met === false ? "FAIL" : met === "skipped" ? "skip" : "????");
 
-console.log(`§2 approval judgement of ${POLICY_PATH}`);
+console.log(`docs/policy/trust-safety-compliance-agent.md §2 approval judgement of ${POLICY_PATH}`);
 console.log(`read from ${BRANCH}\n`);
+if (report.verdict !== "approved") {
+  console.log(
+    report.verdict === "unreadable"
+      ? "Something needed could not be read. docs/policy/trust-safety-compliance-agent.md §2 calls that unmet, not unknown.\n"
+      : "",
+  );
+}
 
 for (const entry of report.steps) {
   console.log(`[${mark(entry.met)}] ${entry.id}. ${entry.title}`);
@@ -354,3 +411,8 @@ for (const note of report.manifest.notes) console.log(`  - ${note}`);
 console.log("\nnot in this report, on purpose");
 for (const omission of report.manifest.omitted) console.log(`  - ${omission}`);
 console.log("\nA person runs this and signs the verdict (§12 (4)). Nothing here was written.");
+
+// A non-zero exit so a verdict that is not an approval cannot be missed by
+// someone running this from a shell. It remains a report: no workflow consumes
+// this code, and §12 (4) is where the signature happens.
+if (report.verdict !== "approved") process.exit(1);

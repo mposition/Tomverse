@@ -12,13 +12,15 @@ import {
   judgeTrustSafetyPolicyApproval,
   maxApprovedVersion,
   parseVersion,
+  readAllOrNothing,
+  versionEntryOf,
 } from "../scripts/report-trust-safety-policy-approval-core.mjs";
 
 /**
- * The §2 judgement of the trust-safety policy, pinned against the two failures
+ * The docs/policy/trust-safety-compliance-agent.md §2 judgement of the trust-safety policy, pinned against the two failures
  * that made version 2 necessary.
  *
- * Version 1 was merged and **failed its own §2**: `approvedAt` named 2026-10-05
+ * Version 1 was merged and **failed its own docs/policy/trust-safety-compliance-agent.md §2**: `approvedAt` named 2026-10-05
  * while the merge was 2026-10-07 (step 5), and commit-level wording made the
  * allowlist's own genesis pull request a permanent violation (step 0). Both were
  * found by a person reading the document afterwards. These tests hold the code
@@ -71,6 +73,7 @@ const v2 = () => ({
       mergedBy: { login: "mposition", type: "User" },
       mergedAtUtcDate: "2026-09-21",
       approvedAtAtMerge: "2026-09-21",
+      approvedByAtMerge: "mposition",
       files: ["docs/policy/agent-operator-allowlist.md"],
       commitPrCounts: [1, 1],
       commits: [
@@ -131,6 +134,7 @@ test("counting an ancestry merge as a change is what failed version 1's step 0",
       mergedBy: { login: "mposition", type: "User" },
       mergedAtUtcDate: "2026-10-01",
       approvedAtAtMerge: "2026-09-21",
+      approvedByAtMerge: "mposition",
       files: ["docs/policy/agent-operator-allowlist.md"],
       commitPrCounts: [1],
       baseListApprovers: ["mposition"],
@@ -158,11 +162,7 @@ test("counting an ancestry merge as a change is what failed version 1's step 0",
 
 test("the genesis pull request is exempt from exactly two items, reported as skipped", () => {
   const judgement = judgeAllowlistPr(
-    {
-      ...v2().allowlistPrs[0],
-      allowlistPath: "docs/policy/agent-operator-allowlist.md",
-      approvedBy: "mposition",
-    },
+    { ...v2().allowlistPrs[0], allowlistPath: "docs/policy/agent-operator-allowlist.md" },
     { genesis: true },
   );
   const skipped = judgement.items.filter((item) => item.met === "skipped").map((item) => item.id);
@@ -285,7 +285,7 @@ test("a fact that cannot be read is never an approval", () => {
     const report = judgeTrustSafetyPolicyApproval(observation);
     assert.notEqual(report.verdict, "approved", `${blank} missing must not be approved`);
   }
-  // §2 says an unreadable merger is unmet, not unknown; the step says so in
+  // docs/policy/trust-safety-compliance-agent.md §2 says an unreadable merger is unmet, not unknown; the step says so in
   // its own words.
   const observation = v2();
   delete observation.approvalPr.mergedBy;
@@ -302,10 +302,10 @@ test("the manifest always carries the two fixed notes", () => {
   assert.match(FIXED_NOTES.authorship, /procedure, not authorship/);
 });
 
-test("the manifest never carries the two outputs §2 withdrew", () => {
+test("the manifest never carries the two outputs docs/policy/trust-safety-compliance-agent.md §2 withdrew", () => {
   const report = judgeTrustSafetyPolicyApproval(v2());
   const text = JSON.stringify(report);
-  // §2 withdrew both: the first parent's version as a comparison point, and a
+  // docs/policy/trust-safety-compliance-agent.md §2 withdrew both: the first parent's version as a comparison point, and a
   // 1-7 verdict for a V_max commit. Printing either would have the manifest
   // demand work the script does not do.
   assert.equal(/firstParent/i.test(text), false);
@@ -325,4 +325,133 @@ test("the report writes nothing: the core takes no writer and returns data", () 
   const second = judgeTrustSafetyPolicyApproval(observation);
   assert.equal(JSON.stringify(observation), frozen);
   assert.deepEqual(first, second);
+});
+
+test("a past allowlist pull request is judged against its own approvedBy", () => {
+  // The current policy's approver must not be substituted for a past merge's.
+  // Both directions are wrong, so both are pinned.
+  const base = {
+    ...v2().allowlistPrs[0],
+    allowlistPath: "docs/policy/agent-operator-allowlist.md",
+  };
+
+  // A different legitimate approver signs the policy today. The genesis
+  // history, authored and merged by its own approver, still holds.
+  const withOtherApproverToday = judgeAllowlistPr(base, { genesis: true });
+  assert.equal(withOtherApproverToday.items.find((item) => item.id === 2).met, true);
+  assert.equal(withOtherApproverToday.items.find((item) => item.id === 3).met, true);
+
+  // A past merge whose allowlist named someone else, authored by today's
+  // approver, must fail -- it would have passed had the current approver been
+  // substituted in.
+  const mismatched = judgeAllowlistPr(
+    { ...base, approvedByAtMerge: "someone-else" },
+    { genesis: true },
+  );
+  assert.equal(mismatched.items.find((item) => item.id === 2).met, false);
+  assert.equal(mismatched.items.find((item) => item.id === 3).met, false);
+  assert.match(mismatched.items.find((item) => item.id === 2).because, /someone-else/);
+
+  // And an unreadable approvedBy at that merge is unreadable, not a pass.
+  const unknown = judgeAllowlistPr({ ...base, approvedByAtMerge: undefined }, { genesis: true });
+  assert.equal(unknown.items.find((item) => item.id === 2).met, undefined);
+  assert.equal(unknown.items.find((item) => item.id === 3).met, undefined);
+  assert.equal(unknown.met, undefined);
+});
+
+test("no readable commit is unmet, not vacuously true", () => {
+  // An empty array passes `every()`. A pull request always has at least one
+  // commit, so an empty list means the reader failed.
+  const empty = judgeAllowlistPr(
+    {
+      ...v2().allowlistPrs[0],
+      allowlistPath: "docs/policy/agent-operator-allowlist.md",
+      commits: [],
+    },
+    { genesis: true },
+  );
+  assert.equal(empty.items.find((item) => item.id === 2).met, undefined);
+  assert.match(empty.items.find((item) => item.id === 2).because, /vacuously true/);
+
+  const observation = v2();
+  observation.approvalPr.commits = [];
+  const report = judgeTrustSafetyPolicyApproval(observation);
+  assert.equal(stepOf(report, 6).met, undefined);
+  assert.match(stepOf(report, 6).because, /vacuously true/);
+  assert.notEqual(report.verdict, "approved");
+});
+
+test("a version it could not read leaves V_max unknown, not absent", () => {
+  // Skipping an unreadable commit would let a reused number pass while a commit
+  // the reader never opened held a higher one.
+  const observation = v2();
+  observation.header.version = "2";
+  observation.policyCommitsReachableFromBase = [
+    { sha: "a", version: "1" },
+    { sha: "b", unreadable: true },
+  ];
+  const report = judgeTrustSafetyPolicyApproval(observation);
+  const increase = stepOf(report, "0a").checks.find((check) => check.id === "0a-increase");
+  assert.equal(increase.met, undefined);
+  assert.deepEqual(increase.vMaxUnread, ["b"]);
+  assert.notEqual(report.verdict, "approved");
+
+  assert.deepEqual(maxApprovedVersion(undefined), {
+    value: undefined,
+    holders: [],
+    unreadable: true,
+  });
+  const partial = maxApprovedVersion([{ sha: "a", version: "3" }, { sha: "b", unreadable: true }]);
+  assert.equal(partial.unreadable, true);
+  assert.equal(partial.value, undefined);
+});
+
+test("one unreadable item makes the whole list unreadable", () => {
+  // The rule a review found missing from the wrapper, where filter(Boolean)
+  // dropped unreadable commits and an empty result then passed every().
+  const lookup = (sha) => (sha === "bad" ? undefined : { sha });
+  assert.deepEqual(readAllOrNothing(["a", "b"], lookup), [{ sha: "a" }, { sha: "b" }]);
+  assert.equal(readAllOrNothing(["a", "bad", "b"], lookup), undefined);
+  assert.equal(readAllOrNothing(undefined, lookup), undefined);
+  // An empty input is an empty list, not a failure; the judgement itself is
+  // what refuses to read an empty commit list as a pass.
+  assert.deepEqual(readAllOrNothing([], lookup), []);
+});
+
+test("absent and unreadable are different entries for V_max", () => {
+  const versionOf = (text) => /^version: (\d+)/.exec(text ?? "")?.[1];
+  assert.deepEqual(versionEntryOf("a", { state: "present", text: "version: 2" }, versionOf), {
+    sha: "a",
+    version: "2",
+  });
+  // The file had a first commit; before it there is no version, and that is an
+  // ordinary fact rather than a failure.
+  assert.deepEqual(versionEntryOf("b", { state: "absent" }, versionOf), {
+    sha: "b",
+    version: undefined,
+  });
+  assert.deepEqual(versionEntryOf("c", { state: "unreadable" }, versionOf), {
+    sha: "c",
+    unreadable: true,
+  });
+  assert.deepEqual(versionEntryOf("d", undefined, versionOf), { sha: "d", unreadable: true });
+  // And the two must not meet the same answer downstream.
+  assert.equal(maxApprovedVersion([versionEntryOf("b", { state: "absent" }, versionOf)]).unreadable, undefined);
+  assert.equal(maxApprovedVersion([versionEntryOf("c", { state: "unreadable" }, versionOf)]).unreadable, true);
+});
+
+test("an unreadable policy file is not a policy with empty fields", () => {
+  // This report is read as a record of what the document says, so it must not
+  // say the header is blank when it could not open the file.
+  const observation = v2();
+  delete observation.header;
+  const report = judgeTrustSafetyPolicyApproval(observation);
+  const zeroA = stepOf(report, "0a");
+  assert.equal(zeroA.checks.find((check) => check.id === "0a-filled").met, undefined);
+  assert.match(
+    zeroA.checks.find((check) => check.id === "0a-filled").because,
+    /could not be read/,
+  );
+  assert.equal(zeroA.checks.find((check) => check.id === "0a-integer").met, undefined);
+  assert.notEqual(report.verdict, "approved");
 });

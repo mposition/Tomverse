@@ -96,9 +96,19 @@ export const parseVersion = (value) => {
  * SHA.
  */
 export const maxApprovedVersion = (commits) => {
+  if (commits === undefined) return { value: undefined, holders: [], unreadable: true };
   let value;
   const holders = [];
-  for (const commit of commits ?? []) {
+  const unread = [];
+  for (const commit of commits) {
+    // A commit whose file could not be read is not a commit without a version.
+    // Skipping it silently would let a reused number pass while a commit the
+    // reader never saw held a higher one -- which is the opposite of what §2
+    // says about a fact it cannot read.
+    if (commit.unreadable) {
+      unread.push(commit.sha);
+      continue;
+    }
     const version = parseVersion(commit.version);
     if (version === undefined) continue;
     if (value === undefined || version > value) {
@@ -106,6 +116,9 @@ export const maxApprovedVersion = (commits) => {
       holders.length = 0;
     }
     if (version === value) holders.push(commit.sha);
+  }
+  if (unread.length > 0) {
+    return { value: undefined, holders: [], unreadable: true, unread };
   }
   return { value, holders };
 };
@@ -123,6 +136,39 @@ export const changedTheFile = (commit) => {
 /** Whether a merge introduced the change itself rather than carrying one. */
 export const isEvilMerge = (commit) =>
   (commit.parents ?? []).length > 1 && changedTheFile(commit);
+
+/**
+ * Every item, or nothing at all.
+ *
+ * The lookup is injected so this is testable without a repository: it is the
+ * rule that one unreadable commit makes a whole observation unreadable, and a
+ * review found it missing from the wrapper, where `filter(Boolean)` dropped the
+ * commits it could not read. An empty result then passed `every()`.
+ */
+export const readAllOrNothing = (items, lookup) => {
+  if (items === undefined) return undefined;
+  const read = [];
+  for (const item of items) {
+    const value = lookup(item);
+    if (value === undefined) return undefined;
+    read.push(value);
+  }
+  return read;
+};
+
+/**
+ * One commit's entry for the V_max calculation, from a three-state read.
+ *
+ * `absent` is an ordinary fact -- the file had a first commit, and before it
+ * there is no version. `unreadable` is §2's "could not read", which it calls
+ * unmet. Collapsing the two is what let a version the reader never opened drop
+ * out of the maximum.
+ */
+export const versionEntryOf = (sha, read, versionOf) => {
+  if (read?.state === "unreadable" || read === undefined) return { sha, unreadable: true };
+  if (read.state === "absent") return { sha, version: undefined };
+  return { sha, version: versionOf(read.text) };
+};
 
 export const hasToDevelopSegment = (branch) =>
   String(branch ?? "")
@@ -189,34 +235,48 @@ export const judgeAllowlistPr = (pr, { genesis = false } = {}) => {
     pr.files === undefined ? "the changed files could not be read" : `changed ${(pr.files ?? []).join(", ")}`,
   );
 
+  // §2 0번 (다) 2 and 3 name **the allowlist's approvedBy at that pull
+  // request's own merge commit**, not the policy's current approver. An earlier
+  // draft passed the current one into every past judgement, which both ways
+  // round is wrong: a different legitimate approver signing the policy today
+  // would fail the genesis history, and a past allowlist whose approvedBy
+  // differed from its author would pass whenever it happened to match today's.
+  const approver = pr.approvedByAtMerge;
   const identities = pr.commits ?? [];
   add(
     2,
-    "every commit's git author and committer is the approver and not a bot",
-    pr.commits === undefined
+    "every commit's git author and committer is that merge's approver and not a bot",
+    pr.commits === undefined || approver === undefined || identities.length === 0
       ? undefined
       : identities.every(
-          (commit) => identityIs(commit.author, pr.approvedBy) && identityIs(commit.committer, pr.approvedBy),
+          (commit) => identityIs(commit.author, approver) && identityIs(commit.committer, approver),
         ),
     pr.commits === undefined
       ? "the commits could not be read"
-      : identities
-          .map(
-            (commit) =>
-              `${commit.sha}: author ${commit.author?.name ?? "?"}, committer ${commit.committer?.name ?? "?"}`,
-          )
-          .join("; "),
+      : approver === undefined
+        ? "the allowlist's approvedBy at this pull request's merge commit could not be read"
+        : identities.length === 0
+          ? "no commit was readable for this pull request, which is unmet rather than vacuously true"
+          : `against approvedBy ${approver}: ` +
+            identities
+              .map(
+                (commit) =>
+                  `${commit.sha}: author ${commit.author?.name ?? "?"}, committer ${commit.committer?.name ?? "?"}`,
+              )
+              .join("; "),
   );
 
   add(
     3,
-    "the merger is the approver and a GitHub User",
-    pr.mergedBy === undefined
+    "the merger is that merge's approver and a GitHub User",
+    pr.mergedBy === undefined || approver === undefined
       ? undefined
-      : pr.mergedBy.login === pr.approvedBy && pr.mergedBy.type === "User",
+      : pr.mergedBy.login === approver && pr.mergedBy.type === "User",
     pr.mergedBy === undefined
       ? "the merger could not be read"
-      : `merged by ${pr.mergedBy.login} (type ${pr.mergedBy.type})`,
+      : approver === undefined
+        ? "the allowlist's approvedBy at this pull request's merge commit could not be read"
+        : `merged by ${pr.mergedBy.login} (type ${pr.mergedBy.type}) against approvedBy ${approver}`,
   );
 
   add(
@@ -337,7 +397,7 @@ const judgeStepZero = (o) => {
   );
 
   const prJudgements = (o.allowlistPrs ?? []).map((pr) =>
-    judgeAllowlistPr({ ...pr, allowlistPath: o.allowlistPath, approvedBy: o.header?.approvedBy }, {
+    judgeAllowlistPr({ ...pr, allowlistPath: o.allowlistPath }, {
       genesis: pr.number === o.genesisPrNumber,
     }),
   );
@@ -374,10 +434,16 @@ const judgeStepZero = (o) => {
 
 const judgeStepZeroA = (o) => {
   const header = o.header ?? {};
+  // A file that could not be read is not a file with empty fields. Both block
+  // an approval, but only one of them is a statement about the document, and
+  // this report is read as a record of what the document says.
+  const readable = o.header !== undefined;
   const filled =
-    !isPlaceholder(header.version) &&
-    !isPlaceholder(header.approvedBy) &&
-    !isPlaceholder(header.approvedAt);
+    !readable
+      ? undefined
+      : !isPlaceholder(header.version) &&
+        !isPlaceholder(header.approvedBy) &&
+        !isPlaceholder(header.approvedAt);
   const version = parseVersion(header.version);
   const lastRow = parseVersion(o.historyLastRowVersion);
   const vMax = maxApprovedVersion(o.policyCommitsReachableFromBase);
@@ -387,13 +453,15 @@ const judgeStepZeroA = (o) => {
       "0a-filled",
       "version, approvedBy and approvedAt are filled, not placeholders",
       filled,
-      `version ${header.version ?? "(absent)"}, approvedBy ${header.approvedBy ?? "(absent)"}, approvedAt ${header.approvedAt ?? "(absent)"}`,
+      readable
+        ? `version ${header.version ?? "(absent)"}, approvedBy ${header.approvedBy ?? "(absent)"}, approvedAt ${header.approvedAt ?? "(absent)"}`
+        : "the policy file could not be read, so the header says nothing either way",
     ),
     step(
       "0a-integer",
       "version is a positive integer with no leading zero",
-      version !== undefined,
-      `read ${header.version ?? "(absent)"}`,
+      readable ? version !== undefined : undefined,
+      readable ? `read ${header.version ?? "(absent)"}` : "the policy file could not be read",
     ),
     step(
       "0a-last-row",
@@ -406,17 +474,21 @@ const judgeStepZeroA = (o) => {
     step(
       "0a-increase",
       "version is strictly greater than V_max",
-      o.policyCommitsReachableFromBase === undefined || version === undefined
+      vMax.unreadable || version === undefined
         ? undefined
         : vMax.value === undefined
           ? version === 1
           : version > vMax.value,
-      o.policyCommitsReachableFromBase === undefined || version === undefined
-        ? "the reachable commits or the header version could not be read"
-        : vMax.value === undefined
-          ? `no non-placeholder version is reachable, so this version must be exactly 1; it is ${version}`
-          : `${version} against V_max ${vMax.value}`,
-      { vMax: vMax.value ?? null, vMaxHolders: vMax.holders },
+      vMax.unreadable
+        ? `a reachable commit's copy of the file could not be read, so V_max is unknown${
+            vMax.unread ? `: ${vMax.unread.join(", ")}` : ""
+          }`
+        : version === undefined
+          ? "the header version could not be read"
+          : vMax.value === undefined
+            ? `no non-placeholder version is reachable, so this version must be exactly 1; it is ${version}`
+            : `${version} against V_max ${vMax.value}`,
+      { vMax: vMax.value ?? null, vMaxHolders: vMax.holders, vMaxUnread: vMax.unread ?? [] },
     ),
   ];
 
@@ -501,7 +573,7 @@ export const judgeTrustSafetyPolicyApproval = (observation) => {
     step(
       6,
       "the pull request changed this file alone, by the approver and not a bot",
-      pr?.files === undefined || prCommits === undefined
+      pr?.files === undefined || prCommits === undefined || prCommits.length === 0
         ? undefined
         : pr.files.length === 1 &&
           pr.files[0] === o.policyPath &&
@@ -512,7 +584,9 @@ export const judgeTrustSafetyPolicyApproval = (observation) => {
           ),
       pr?.files === undefined || prCommits === undefined
         ? "the changed files or the commits could not be read"
-        : `changed ${pr.files.join(", ")}; ` +
+        : prCommits.length === 0
+          ? "no commit was readable for this pull request, which is unmet rather than vacuously true"
+          : `changed ${pr.files.join(", ")}; ` +
           prCommits
             .map(
               (commit) =>
