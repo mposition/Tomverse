@@ -526,43 +526,6 @@ pub fn apply_event(
     Ok(WriteOutcome { applied: !events.is_empty(), events })
 }
 
-/// End every open turn row of `worker` WITHOUT completing anything: the ledger
-/// half of `TurnCompleted`, minus its command confirmation and checkpoint.
-///
-/// Invariant 6 ends a turn when the worker yields, including to a usage limit,
-/// a failure or a wait for input. `TurnCompleted` is the event for the idle
-/// yield, and it also confirms the in-flight Delivered command, a terminal
-/// state that cannot later fail. A limit or a failure is not evidence that the
-/// command was done, so those yields close the row through this instead. All
-/// open rows are closed, so a row an earlier path left open cannot be
-/// "completed" later by an unrelated idle prompt.
-pub fn end_open_turns(
-    conn: &Connection,
-    worker: &WorkerId,
-    outcome: &str,
-    now: DateTime<Utc>,
-) -> rusqlite::Result<WriteOutcome> {
-    let open: Vec<String> = {
-        let mut stmt =
-            conn.prepare("SELECT id FROM _amux_turns WHERE worker_id = ?1 AND ended_at IS NULL")?;
-        let rows = stmt.query_map(params![worker.as_str()], |r| r.get::<_, String>(0))?;
-        rows.collect::<rusqlite::Result<_>>()?
-    };
-    let outcome_json = serde_json::json!({ "outcome": outcome }).to_string();
-    let now_s = now.to_rfc3339();
-    let mut events = Vec::new();
-    for id in open {
-        let n = conn.execute(
-            "UPDATE _amux_turns SET ended_at = ?2, outcome = ?3 WHERE id = ?1 AND ended_at IS NULL",
-            params![id, now_s, outcome_json],
-        )?;
-        if n > 0 {
-            events.push(ev(EntityType::Turn, &id, MutationKind::Updated));
-        }
-    }
-    Ok(WriteOutcome { applied: !events.is_empty(), events })
-}
-
 /// If an ExecuteTask turn completed WITHOUT the worker writing its board
 /// card, append a board-visible note to the card (log + rev bump + Task
 /// event) so the drift is on the ledger everyone already reads.
@@ -957,39 +920,6 @@ mod tests {
         let conn = store.read().unwrap();
         let cmd = commands::by_id(&conn, &cmd_id).unwrap().unwrap();
         assert_eq!(cmd.state, CommandState::Confirmed, "Invariant 34: TurnCompleted confirms");
-    }
-
-    #[test]
-    fn end_open_turns_closes_rows_without_confirming_the_command() {
-        let store = store();
-        seed(&store);
-        let cmd_id = enqueue_and_deliver(&store, WorkerCommand::Continue);
-        apply(&store, WorkerEvent::TurnStarted { turn_id: trn(3) });
-        apply(&store, WorkerEvent::TurnStarted { turn_id: trn(4) });
-
-        let reply = store
-            .write(|conn| end_open_turns(conn, &wid(), "scraped pane stopped generating: rate_limited", Utc::now()))
-            .unwrap();
-        assert!(reply.applied);
-
-        let conn = store.read().unwrap();
-        let open: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM _amux_turns WHERE worker_id = ?1 AND ended_at IS NULL",
-                params![wid().as_str()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(open, 0, "every open row is ended");
-        let cmd = commands::by_id(&conn, &cmd_id).unwrap().unwrap();
-        assert_eq!(cmd.state, CommandState::Delivered, "a limit is not a completion");
-        drop(conn);
-
-        // Nothing left to end: a no-op that must not bump the revision.
-        let again = store
-            .write(|conn| end_open_turns(conn, &wid(), "x", Utc::now()))
-            .unwrap();
-        assert!(!again.applied);
     }
 
     #[test]

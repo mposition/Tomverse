@@ -322,8 +322,7 @@ impl ScanLoop {
             // StatusChanged every pass (Invariant 37, ethos rule 5). Runs
             // before the empty-events guard because an active pane's scan is
             // empty by design.
-            let generating = adapter.generating(&captured);
-            if generating {
+            if adapter.generating(&captured) {
                 let event = {
                     let conn = self.store.read()?;
                     let prior = crate::db::queries::get_worker(&conn, &wid_str)
@@ -352,72 +351,6 @@ impl ScanLoop {
                             tracing::warn!(worker = %worker, error = %e, "codex active event apply failed")
                         }
                     }
-                }
-            }
-
-            // The scrape ends the turns it starts. For a provider whose turns
-            // only this scrape sees, a frame that is no longer generating but
-            // shows a recognised state means the worker yielded, and
-            // Invariant 6 ends the turn there:
-            // - at the idle prompt, with TurnCompleted, the same event a
-            //   native `idle` status produces (it also confirms the delivered
-            //   command: the worker finished a turn and is ready);
-            // - at anything else (a usage-limit banner, a failure, a wait for
-            //   input), the row is ended WITHOUT completing anything
-            //   (`end_open_turns`): a limit is not evidence the command was
-            //   done. Its own event then moves the worker off Active.
-            // Every open row is ended, so the next working frame opens one new
-            // turn instead of stacking rows that a later idle prompt would
-            // complete one per pass.
-            // The dedupe hash describes the screen from BEFORE the turn, so it
-            // is forgotten on this edge: otherwise an identical post-turn idle
-            // prompt or banner is deduped as "still on screen" and the worker
-            // stays Active. It is forgotten only on the edge (Active, or an
-            // open row), so a screen that stays put is still deduped.
-            if !generating && !events.is_empty() && adapter.scrapes_turns() {
-                let (prior_active, open_turn) = {
-                    let conn = self.store.read()?;
-                    let prior = crate::db::queries::get_worker(&conn, &wid_str)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.state);
-                    (matches!(prior, Some(WorkerState::Active { .. })), open_turn_id(&conn, &wid_str))
-                };
-                if let Some(turn_id) = open_turn.clone() {
-                    let completion = scraped_turn_end(&events).is_none().then(|| {
-                        WorkerEvent::TurnCompleted(amux_core::protocol::TurnResult {
-                            turn_id,
-                            outcome: "scraped pane at the idle prompt".into(),
-                        })
-                    });
-                    let outcome = format!(
-                        "scraped pane stopped generating: {}",
-                        scraped_turn_end(&events).unwrap_or_else(|| "idle_prompt".into())
-                    );
-                    let w = worker.clone();
-                    match self
-                        .store
-                        .write_async(move |conn| {
-                            let now = chrono::Utc::now();
-                            let mut out = match &completion {
-                                Some(ev) => crate::orchestrator::events::apply_event(conn, &w, ev, now)?,
-                                None => crate::db::WriteOutcome { applied: false, events: vec![] },
-                            };
-                            let rest = crate::orchestrator::events::end_open_turns(conn, &w, &outcome, now)?;
-                            out.applied |= rest.applied;
-                            out.events.extend(rest.events);
-                            Ok(out)
-                        })
-                        .await
-                    {
-                        Ok(_) => report.events_applied += 1,
-                        Err(e) => {
-                            tracing::warn!(worker = %worker, error = %e, "scraped turn end apply failed")
-                        }
-                    }
-                }
-                if prior_active || open_turn.is_some() {
-                    self.last_scan.lock().unwrap().remove(&worker);
                 }
             }
 
@@ -532,23 +465,6 @@ fn open_turn_id(conn: &Connection, wid: &str) -> Option<TurnId> {
     .and_then(|t| TurnId::parse(&t).ok())
 }
 
-/// How a scraped turn ended, from the events a non-generating frame emitted:
-/// `None` when the pane is at the idle prompt (a completion), otherwise the
-/// yield that is not one: `rate_limited`, `failed`, or the wait reason.
-/// `TerminalAdapter::scan` drops the idle prompt when a limit or failure is on
-/// screen, so an idle prompt here means neither is.
-fn scraped_turn_end(events: &[WorkerEvent]) -> Option<String> {
-    if events.iter().any(|e| matches!(e, WorkerEvent::Waiting(w) if w.reason == "idle_prompt")) {
-        return None;
-    }
-    events.iter().find_map(|e| match e {
-        WorkerEvent::RateLimited(_) => Some("rate_limited".to_string()),
-        WorkerEvent::Failed(_) => Some("failed".to_string()),
-        WorkerEvent::Waiting(w) => Some(w.reason.clone()),
-        _ => None,
-    }).or_else(|| Some("unrecognised".to_string()))
-}
-
 /// Map a backend-reported agent status (#84: herdr `working|blocked|idle|
 /// done`) onto the WorkerEvent that moves the store toward it, or `None`
 /// when it is already there. Pure so the mapping table is testable
@@ -610,9 +526,6 @@ mod tests {
     struct ScriptedBackend {
         name: &'static str,
         frame: String,
-        /// Frames returned by successive captures before falling back to
-        /// `frame`, for passes that must see the pane change.
-        sequence: std::sync::Mutex<std::collections::VecDeque<String>>,
         /// Native agent states the backend reports (backend_ref -> status).
         /// Empty = the tmux default (no native voice).
         native: BTreeMap<String, String>,
@@ -641,7 +554,7 @@ mod tests {
             Ok(vec![])
         }
         async fn capture(&self, _p: &ProcessRef, _l: u32) -> crate::backend::Result<String> {
-            Ok(self.sequence.lock().unwrap().pop_front().unwrap_or_else(|| self.frame.clone()))
+            Ok(self.frame.clone())
         }
         async fn agent_states(&self) -> crate::backend::Result<BTreeMap<String, String>> {
             Ok(self.native.clone())
@@ -675,17 +588,13 @@ mod tests {
     /// A tmux worker whose provider is codex (hookless: the scrape is its only
     /// voice), for the AMUX-3165 active-via-scrape path.
     fn seed_codex_worker(store: &SharedStore, w: &WorkerId) {
-        seed_hookless_worker(store, w, "codex");
-    }
-
-    fn seed_hookless_worker(store: &SharedStore, w: &WorkerId, provider: &str) {
-        let (id, sid, provider) = (w.to_string(), format!("ses_{w}"), provider.to_string());
+        let (id, sid) = (w.to_string(), format!("ses_{w}"));
         store
             .write(move |conn| {
                 conn.execute(
                     "INSERT INTO _amux_workers (id, display_name, provider, created_at, updated_at)
-                     VALUES (?1, 'term', ?2, 'now', 'now')",
-                    params![id, provider],
+                     VALUES (?1, 'term', 'codex', 'now', 'now')",
+                    params![id],
                 )?;
                 conn.execute(
                     "INSERT INTO _amux_sessions (id, worker_id, backend, backend_ref, started_at)
@@ -1117,145 +1026,6 @@ mod tests {
             !matches!(worker_state(&store, &w), WorkerState::Active { .. }),
             "an idle codex model bar must not read Active"
         );
-    }
-
-    // Copilot's composer between its rules, with the status row below.
-    const COPILOT_RULE: &str = "────────────────────────────────";
-    fn copilot_frame(status: &str) -> String {
-        format!(" ● amux-copilot-probe\n{COPILOT_RULE}\n❯\n{COPILOT_RULE}\n {status}")
-    }
-
-    /// Open turn rows for a worker (ended_at NULL).
-    fn open_turns(store: &SharedStore, w: &WorkerId) -> i64 {
-        let conn = store.read().unwrap();
-        conn.query_row(
-            "SELECT COUNT(*) FROM _amux_turns WHERE worker_id = ?1 AND ended_at IS NULL",
-            params![w.to_string()],
-            |r| r.get(0),
-        )
-        .unwrap()
-    }
-
-    /// Every turn row of a worker, oldest first: (ended, stored outcome text).
-    fn turn_rows(store: &SharedStore, w: &WorkerId) -> Vec<(bool, String)> {
-        let conn = store.read().unwrap();
-        let mut stmt = conn
-            .prepare(
-                "SELECT ended_at IS NOT NULL, COALESCE(outcome, '') FROM _amux_turns
-                 WHERE worker_id = ?1 ORDER BY rowid",
-            )
-            .unwrap();
-        stmt.query_map(params![w.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect()
-    }
-
-    /// idle -> working -> idle -> idle in ONE scan loop. The two idle prompts
-    /// emit identical events, so the second used to be deduped as "still on
-    /// screen": the worker the turn made Active stayed Active and the turn
-    /// row the generating edge opened stayed open. Now the turn is closed at
-    /// the idle prompt and only the unchanged fourth frame is deduped.
-    #[tokio::test]
-    async fn idle_prompt_after_a_scraped_turn_ends_the_turn() {
-        let cases = [
-            ("codex", CODEX_IDLE.to_string(), CODEX_WORKING.to_string()),
-            // ollama runs codex --oss; same panes, same turn ownership.
-            ("ollama", CODEX_IDLE.to_string(), CODEX_WORKING.to_string()),
-            (
-                "copilot",
-                copilot_frame("← open sidebar · Interactive · Manual Approval · / commands"),
-                copilot_frame("● Working · 106 B esc interrupt"),
-            ),
-        ];
-        for (n, (provider, idle, working)) in cases.into_iter().enumerate() {
-            let store = store();
-            let w = wid(40 + n as u128);
-            seed_hookless_worker(&store, &w, provider);
-            let scan = ScanLoop::new(
-                store.clone(),
-                vec![Arc::new(ScriptedBackend {
-                    name: "tmux",
-                    frame: idle.clone(),
-                    sequence: std::sync::Mutex::new(
-                        [idle.clone(), working.clone(), idle.clone()].into(),
-                    ),
-                    ..Default::default()
-                })],
-                Some(Arc::new(MockProtocol::new())),
-            );
-            scan.scan_once().await.unwrap();
-            assert!(!matches!(worker_state(&store, &w), WorkerState::Active { .. }), "{provider}: starts idle");
-            scan.scan_once().await.unwrap();
-            assert!(matches!(worker_state(&store, &w), WorkerState::Active { .. }), "{provider}: turn runs");
-            assert_eq!(open_turns(&store, &w), 1, "{provider}: the generating edge opens one turn");
-            let r3 = scan.scan_once().await.unwrap();
-            assert!(r3.events_applied > 0, "{provider}: the idle prompt after the turn must apply: {r3:?}");
-            assert!(
-                !matches!(worker_state(&store, &w), WorkerState::Active { .. }),
-                "{provider}: a finished turn must not leave the worker Active"
-            );
-            assert_eq!(open_turns(&store, &w), 0, "{provider}: the idle prompt closes the turn row");
-            let rows = turn_rows(&store, &w);
-            assert_eq!(rows.len(), 1, "{provider}: {rows:?}");
-            assert!(rows[0].1.contains("scraped pane at the idle prompt"), "{provider}: completed at idle: {rows:?}");
-            // The same idle frame again is a screen still up: deduped.
-            let r4 = scan.scan_once().await.unwrap();
-            assert_eq!(r4.events_applied, 0, "{provider}: unchanged idle pane must dedupe: {r4:?}");
-        }
-    }
-
-    /// limit -> working -> limit -> limit -> working -> idle -> idle. A
-    /// usage-limit banner ends the turn (Invariant 6) but is not a completion,
-    /// and an identical banner after the turn must apply again instead of
-    /// being deduped. When work resumes, exactly one new turn opens, and the
-    /// idle prompt completes that one turn only.
-    #[tokio::test]
-    async fn limit_ends_a_scraped_turn_without_completing_it() {
-        const CODEX_LIMIT: &str = "■ You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.";
-        let store = store();
-        let w = wid(45);
-        seed_hookless_worker(&store, &w, "codex");
-        let frames = [CODEX_LIMIT, CODEX_WORKING, CODEX_LIMIT, CODEX_LIMIT, CODEX_WORKING, CODEX_IDLE];
-        let scan = ScanLoop::new(
-            store.clone(),
-            vec![Arc::new(ScriptedBackend {
-                name: "tmux",
-                frame: CODEX_IDLE.into(),
-                sequence: std::sync::Mutex::new(frames.iter().map(|f| f.to_string()).collect()),
-                ..Default::default()
-            })],
-            Some(Arc::new(MockProtocol::new())),
-        );
-        scan.scan_once().await.unwrap();
-        assert!(matches!(worker_state(&store, &w), WorkerState::RateLimited { .. }));
-        scan.scan_once().await.unwrap();
-        assert!(matches!(worker_state(&store, &w), WorkerState::Active { .. }));
-        assert_eq!(open_turns(&store, &w), 1);
-
-        let r3 = scan.scan_once().await.unwrap();
-        assert!(r3.events_applied > 0, "the banner after the turn must apply: {r3:?}");
-        assert!(matches!(worker_state(&store, &w), WorkerState::RateLimited { .. }));
-        assert_eq!(open_turns(&store, &w), 0, "the limit ends the turn");
-        let rows = turn_rows(&store, &w);
-        assert!(rows[0].1.contains("rate_limited"), "ended by the limit, not completed: {rows:?}");
-        assert!(!rows[0].1.contains("idle prompt"), "{rows:?}");
-
-        let r4 = scan.scan_once().await.unwrap();
-        assert_eq!(r4.events_applied, 0, "a banner still on screen must dedupe: {r4:?}");
-
-        scan.scan_once().await.unwrap();
-        assert!(matches!(worker_state(&store, &w), WorkerState::Active { .. }));
-        assert_eq!(open_turns(&store, &w), 1, "resuming opens one new turn");
-        scan.scan_once().await.unwrap();
-        assert_eq!(open_turns(&store, &w), 0);
-        let rows = turn_rows(&store, &w);
-        assert_eq!(rows.len(), 2, "one turn per working stretch: {rows:?}");
-        assert!(rows[1].1.contains("scraped pane at the idle prompt"), "{rows:?}");
-        // The idle screen staying up completes nothing further.
-        let r7 = scan.scan_once().await.unwrap();
-        assert_eq!(r7.events_applied, 0, "{r7:?}");
-        assert_eq!(turn_rows(&store, &w).len(), 2);
     }
 
     // ---- /api/debug/scan publish (AF-80) -----------------------------------
