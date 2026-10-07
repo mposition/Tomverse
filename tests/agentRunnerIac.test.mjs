@@ -16,6 +16,7 @@ import {
   AGENT_ENVIRONMENT_BRANCHES,
   AGENT_RAILWAY_PROJECT,
   AGENT_RAILWAY_REGION,
+  AGENT_RAILWAY_REPOSITORY,
   AGENT_RUNNER_SERVICES,
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
@@ -23,6 +24,7 @@ import {
   DECLARED_SERVICE_VARIABLES,
   PROBE_SERVICE_VARIABLES,
 } from "../lib/productResearchObservationRunnerCore.mjs";
+import { OBSERVED_REPOSITORY } from "../lib/productResearchObservationStepCore.mjs";
 
 const railwayDirectory = join(process.cwd(), ".railway");
 
@@ -311,4 +313,12 @@ test("the merge lane runs in production only, every 10 minutes, with exactly its
   assert.deepEqual([...runner.environments.production].sort(), [...QA_RELEASE_SERVICE_VARIABLES.mergeLane].sort());
   assert.equal(runner.cronSchedule, "*/10 * * * *");
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/qa-release-merge-lane-service.mjs");
+});
+
+test("the repository the run clones is the one the services deploy from", () => {
+  // Two files name a repository: the IaC gives it to Railway as the services'
+  // source, and the step core clones it. A run that cloned a different one
+  // would answer for a backlog that is not this product's while looking
+  // exactly like a correct run, and nothing downstream could tell.
+  assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
 });
