@@ -1186,14 +1186,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The deferred card-link guard only reads the canonical human consume audit and checks the approved draft and target card. It creates no AdminAuditLog rows.",
   },
   {
-    path: "prisma/migrations/20261006151000_prompt_refiner_one_shot_terminal_recovery/migration.sql",
-    table: "AdminAuditLog",
-    tableMentions: 4,
-    writeVerbs: 6,
-    reason:
-      "The v4 one-shot recovery migration reads linked historical audit rows and counts forbidden audit actions in schema-qualified SELECTs. Its DDL replaces stage guards and creates a v4 guard; it never inserts, updates, or deletes AdminAuditLog.",
-  },
-  {
     path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 4,

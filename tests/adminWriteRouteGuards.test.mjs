@@ -89,6 +89,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaInputCore.ts",
   "lib/amux/ideaKeyConfig.ts",
   "lib/amux/ideaKeyStore.ts",
+  "lib/amux/ideaRequestIdCore.ts",
   "lib/amux/ideaSourceScopeCore.ts",
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
@@ -96,7 +97,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "8680a50971ef3f7dfe63f4e4bb9a40b3f66f1eeed38bf262abbacad98d68dc6d";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "4d0cb01a641d5380b759e67ca60004fc834724e3760594f801964df018b2bea3";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -114,7 +115,7 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "66febcf1f93bbe104207fb276022b9b29240be642d2c9f40d27c098755163943";
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "dcd4d6963ab4d4edb37db9c4f119ca8be00847e2a4952a273cbc060171b6f3c0";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
