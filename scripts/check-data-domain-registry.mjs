@@ -249,11 +249,13 @@ const holdsActorIdentity = (body) => {
   return false;
 };
 const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
+const AMUX_IDEA_PARENT_LINK = /\bAmuxIdeaSubmission\??\s+@relation\(/;
 const holdsUserData = new Set(
   models
     .filter(
       ({ body }) =>
-        USER_LINK.test(body) || USER_COLUMN.test(body) || holdsActorIdentity(body)
+        USER_LINK.test(body) || USER_COLUMN.test(body) ||
+        holdsActorIdentity(body) || AMUX_IDEA_PARENT_LINK.test(body)
     )
     .map(({ name }) => name)
 );

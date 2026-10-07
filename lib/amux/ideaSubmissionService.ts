@@ -10,6 +10,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { analysisDeadlineAt } from "./ideaRetentionCore.ts";
 import {
   AMUX_V4_IDEA_SUBMISSION_ENV,
@@ -24,7 +25,8 @@ const STATEMENT_TIMEOUT = "5000";
 
 export class IdeaSubmissionError extends Error {
   constructor(
-    readonly code: "submission_disabled" | "forbidden" | "audit_unavailable" | "request_already_seen" | "outcome_unknown",
+    readonly code: "submission_disabled" | "forbidden" | "audit_unavailable" |
+      "key_store_unavailable" | "request_already_seen" | "outcome_unknown",
     readonly status: number,
     readonly readBack?: "committed" | "partial" | "unavailable",
     readonly ideaId?: string,
@@ -174,8 +176,18 @@ export async function submitIdea(input: {
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaSubmissionError("audit_unavailable", 503);
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const global = loadCurrentAmuxContentKeys(process.env);
   const ideaId = randomUUID();
+  const keyIdentity = { ideaId, purpose: "idea_raw" as const, subjectId: ideaId };
+  let keys: AmuxContentKeys;
+  try {
+    const unit = await createAmuxContentUnitKeys(keyIdentity);
+    keys = amuxContentKeyRing(global, [{ identity: keyIdentity, keys: unit }]);
+  } catch {
+    // No DB transaction was opened. An uncertain object-store PUT can leave
+    // only an orphan key, never a committed user body.
+    throw new IdeaSubmissionError("key_store_unavailable", 503);
+  }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {

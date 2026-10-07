@@ -2269,6 +2269,11 @@ model AdminAuditLog {
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
   amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
+  amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
+  amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
+  amuxV4RetentionHoldApprovals AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldApprovalAudit")
+  amuxV4RetentionHoldReleases AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldReleaseAudit")
+  amuxV4RetentionHoldNotices AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldNoticeAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8515,6 +8520,8 @@ model AmuxIdeaSubmission {
   draftUnits        AmuxIdeaDraftUnit[]
   unitDecisions     AmuxIdeaUnitDecision[]
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
+  contentKeyRetirements AmuxIdeaContentKeyRetirement[]
+  retentionHolds AmuxIdeaRetentionHold[]
   currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, actorUserId])
@@ -8522,6 +8529,52 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// A DB body purge and its external per-unit key deletion are separate
+/// irreversible steps. The retirement row is inserted with the purge audit;
+/// a verified key deletion completes it later without losing retry identity.
+model AmuxIdeaContentKeyRetirement {
+  ideaId              String
+  purpose             String
+  subjectId           String
+  bodyPurgedAt        DateTime
+  keyDeletedAt        DateTime?
+  purgeAuditLogId     String    @unique
+  keyDeleteAuditLogId String?   @unique
+  createdAt           DateTime  @default(now())
+
+  idea           AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  purgeAudit     AdminAuditLog @relation("AmuxV4ContentPurgeAudit", fields: [purgeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxV4KeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([ideaId, purpose, subjectId])
+  @@index([keyDeletedAt, bodyPurgedAt])
+}
+
+/// One owner-approved idea-wide hold pauses all four analysis content clocks.
+/// It never moves those clocks; expiry or release makes overdue rows due again.
+model AmuxIdeaRetentionHold {
+  id                String    @id @db.Uuid
+  ideaId            String
+  actorUserId       String
+  reasonCode        String
+  createdAt         DateTime  @default(now())
+  expiresAt         DateTime
+  releasedAt        DateTime?
+  noticeAt          DateTime
+  noticeSentAt      DateTime?
+  noticeAuditLogId  String?   @unique
+  approvalAuditLogId String   @unique
+  releaseAuditLogId  String?  @unique
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit AdminAuditLog @relation("AmuxV4RetentionHoldApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  releaseAudit AdminAuditLog? @relation("AmuxV4RetentionHoldReleaseAudit", fields: [releaseAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  noticeAudit AdminAuditLog? @relation("AmuxV4RetentionHoldNoticeAudit", fields: [noticeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, releasedAt, expiresAt])
+  @@index([noticeAt, noticeSentAt])
 }
 
 /// Immutable ordered source-unit manifest for one analysis revision. Only

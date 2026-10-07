@@ -5,6 +5,7 @@ import {
   AMUX_ANALYSIS_CHUNK_CARD_CAP,
   AMUX_ANALYSIS_CHUNK_MAX_BYTES,
   inspectAmuxAnalysisChunk,
+  inspectAmuxStoredAnalysisUnit,
 } from "../lib/amux/ideaAnalysisChunkCore.ts";
 
 const sourceRef = "idea:sha256_opaque";
@@ -89,6 +90,18 @@ test("one bounded chunk can propose hierarchy, Story, Task, and Error evidence w
   assert.equal(result.chunk.units[2].kind, "card");
   assert.equal("digest" in result, false, "a plain content digest must not escape this parser");
   assert.equal(typeof result.canonical, "string");
+});
+
+test("a retained unit is still readable after another unit's body is purged", () => {
+  const result = inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify(story()), chunkIndex: 0, permittedSourceRefIds: [sourceRef],
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.unit.localId, "c0:card-1");
+  assert.deepEqual(inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify({ ...story(), sourceRefIds: ["unapproved"] }),
+    chunkIndex: 0, permittedSourceRefIds: [sourceRef],
+  }), { ok: false });
 });
 
 test("eight cards cap a chunk, not an entire project idea", () => {

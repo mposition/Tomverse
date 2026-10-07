@@ -1,0 +1,22 @@
+[Unit]
+Description=Tomverse AMUX v4 content retention (one bounded tick)
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=%h/.local/lib/tomverse-amux-v4/content-retention-once.mjs
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/tomverse-amux-v4/content-retention.env
+ExecStart=/usr/bin/node %h/.local/lib/tomverse-amux-v4/content-retention-once.mjs
+WorkingDirectory=%h
+TimeoutStartSec=650s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/tomverse-amux-v4-content-retention
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v4-content-retention

@@ -128,7 +128,7 @@ test("operator-idea-only initial plan is bound to the owned submission and syste
   assert.equal(await prisma.amuxIdeaAnalysisChunk.count({ where: { ideaId } }), 1);
 });
 
-test("idea-only transfer preview stores exact encrypted input, binds the chunk, and sends nothing", async () => {
+test("idea-only transfer preview stores encrypted input and refuses a missing external key", async () => {
   const text = `SYNTHETIC_PREVIEW_${randomUUID()}`;
   const ideaId = await createIdea({ idea: text });
   const plan = await prisma.$transaction((tx) => commitInitialIdeaSourcePlan(tx,
@@ -157,11 +157,10 @@ test("idea-only transfer preview stores exact encrypted input, binds the chunk, 
   assert.equal(chunk.currentPreviewId, choice.previewId);
   assert.equal(chunk.state, "awaiting_preview");
   assert.equal(chunk.attempt, 1);
-  assert.deepEqual(await readIdeaOnlyTransferPreview(session, choice.previewId), {
-    state: "prepared", previewId: choice.previewId, expiresAt: row.expiresAt,
-    payload: result.payload, payloadDigest: result.payloadDigest,
-    payloadDigestKeyId: result.payloadDigestKeyId, transferAuthorized: false,
-  });
+  // This older synthetic writer supplies an in-memory key, not an external
+  // unit key. The production read path must not silently fall back to it.
+  assert.deepEqual(await readIdeaOnlyTransferPreview(session, choice.previewId),
+    { state: "unavailable", transferAuthorized: false });
   const audit = await prisma.adminAuditLog.findFirstOrThrow({
     where: { action: "amux.v4.transfer_preview.prepared",
       targetType: "AmuxIdeaTransferPreview", targetId: choice.previewId },

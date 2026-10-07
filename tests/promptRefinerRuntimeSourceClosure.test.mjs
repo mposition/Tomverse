@@ -390,7 +390,7 @@ const compilerOptions = parsedConfig.options;
 // marketing pipeline fingerprint repin move source positions only. Count and
 // position-free inventory are unchanged.
 // 2026-10-08, the AMUX-only release adds scoped budget, settlement, expiry,
-// unknown-outcome and auto-cancel audit actions.
+// unknown-outcome, auto-cancel, claim, result and retention audit actions.
 // Repin the source-position digest after assembling the release tree.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =

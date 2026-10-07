@@ -53,6 +53,14 @@ export const AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE = "initial-source-plan-v1" as con
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION = "AMUX_V4_ANALYSIS_BUDGET_RESERVED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE = "analysis-budget-reserve-v1" as const;
+/** The app consumes one confirmed preview before the isolated local attempt. */
+export const AMUX_V4_ANALYSIS_CLAIM_ACTION = "AMUX_V4_ANALYSIS_CLAIMED" as const;
+export const AMUX_V4_ANALYSIS_CLAIM_TARGET = "AmuxIdeaTransferPreview" as const;
+export const AMUX_V4_ANALYSIS_CLAIM_SCOPE = "analysis-claim-v1" as const;
+/** One fenced result receipt binds a request ID to content digest before settlement. */
+export const AMUX_V4_ANALYSIS_RESULT_ACTION = "AMUX_V4_ANALYSIS_RESULT_ACCEPTED" as const;
+export const AMUX_V4_ANALYSIS_RESULT_TARGET = "AmuxIdeaTransferPreview" as const;
+export const AMUX_V4_ANALYSIS_RESULT_SCOPE = "analysis-result-v1" as const;
 /** Expiry may release only a never-dispatched AMUX analysis hold. */
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION = "AMUX_V4_ANALYSIS_UNUSED_RESERVATION_EXPIRED" as const;
 export const AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
@@ -65,10 +73,24 @@ export const AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE = "analysis-budget-settle-v1" 
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION = "AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET = "AmuxIdeaAnalysisBudgetHold" as const;
 export const AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE = "analysis-outcome-unknown-v1" as const;
+/** One complete, normalized first analysis is stored as independently purgeable units. */
+export const AMUX_V4_FIRST_DRAFT_SAVED_ACTION = "AMUX_V4_FIRST_ANALYSIS_DRAFT_SAVED" as const;
+export const AMUX_V4_FIRST_DRAFT_SAVED_TARGET = "AmuxIdeaAnalysisChunk" as const;
+export const AMUX_V4_FIRST_DRAFT_SAVED_SCOPE = "first-analysis-draft-save-v1" as const;
 /** Policy v6: an unfinished idea stops at its immutable seven-day deadline. */
 export const AMUX_V4_IDEA_AUTO_CANCEL_ACTION = "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_TARGET = "AmuxIdeaSubmission" as const;
 export const AMUX_V4_IDEA_AUTO_CANCEL_SCOPE = "idea-analysis-auto-cancel-v1" as const;
+/** Retention first clears the DB body, then verifies external key deletion. */
+export const AMUX_V4_CONTENT_PURGE_ACTION = "amux.v4.content.body_purged" as const;
+export const AMUX_V4_CONTENT_KEY_DELETE_ACTION = "amux.v4.content.key_deleted" as const;
+export const AMUX_V4_CONTENT_RETIREMENT_TARGET = "AmuxIdeaContentKeyRetirement" as const;
+export const AMUX_V4_CONTENT_PURGE_SCOPE = "idea-content-purge-v1" as const;
+export const AMUX_V4_CONTENT_KEY_DELETE_SCOPE = "idea-content-key-delete-v1" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_ACTION = "amux.v4.retention_hold.notice_sent" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_TARGET = "AmuxIdeaRetentionHold" as const;
+export const AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE = "idea-retention-hold-notice-v1" as const;
+/** One authenticated source collector claims one already owner-approved file. */
 
 /**
  * Candidate actor identities for the approved AMUX intake v4 and
@@ -124,6 +146,14 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
       targetType === AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE;
   }
+  if (action === AMUX_V4_ANALYSIS_CLAIM_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_CLAIM_TARGET) {
+    return AMUX_V4_ANALYSIS_CLAIM_SCOPE;
+  }
+  if (action === AMUX_V4_ANALYSIS_RESULT_ACTION &&
+      targetType === AMUX_V4_ANALYSIS_RESULT_TARGET) {
+    return AMUX_V4_ANALYSIS_RESULT_SCOPE;
+  }
   if (action === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION &&
       targetType === AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET) {
     return AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE;
@@ -136,9 +166,25 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
       targetType === AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET) {
     return AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE;
   }
+  if (action === AMUX_V4_FIRST_DRAFT_SAVED_ACTION &&
+      targetType === AMUX_V4_FIRST_DRAFT_SAVED_TARGET) {
+    return AMUX_V4_FIRST_DRAFT_SAVED_SCOPE;
+  }
   if (action === AMUX_V4_IDEA_AUTO_CANCEL_ACTION &&
       targetType === AMUX_V4_IDEA_AUTO_CANCEL_TARGET) {
     return AMUX_V4_IDEA_AUTO_CANCEL_SCOPE;
+  }
+  if (action === AMUX_V4_CONTENT_PURGE_ACTION &&
+      targetType === AMUX_V4_CONTENT_RETIREMENT_TARGET) {
+    return AMUX_V4_CONTENT_PURGE_SCOPE;
+  }
+  if (action === AMUX_V4_CONTENT_KEY_DELETE_ACTION &&
+      targetType === AMUX_V4_CONTENT_RETIREMENT_TARGET) {
+    return AMUX_V4_CONTENT_KEY_DELETE_SCOPE;
+  }
+  if (action === AMUX_V4_RETENTION_HOLD_NOTICE_ACTION &&
+      targetType === AMUX_V4_RETENTION_HOLD_NOTICE_TARGET) {
+    return AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE;
   }
   return null;
 };
