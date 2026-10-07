@@ -42,6 +42,7 @@ test("retry is bounded, planning correction is revision-proven, and approval nee
   assert.match(service, /\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
   assert.match(service, /amuxReviewApprovalHasEvidence\(\{ sourceSystem: task\.sourceSystem/);
   assert.match(service, /display_mismatch: task\.sourceSystem === "admin-idea-v4" && !displayExact/);
+  assert.match(service, /result_attempt_id: task\.reviewPrNumber === null && v4Valid/);
   assert.match(service, /v4EvidenceVerified: v4Valid, displayTruncated/);
   assert.match(service, /amuxReviewTextExceedsDisplay\(description\)/);
   assert.match(service, /readAmuxReviewPullRequest\(escalation\.task\.reviewPrNumber\)/);

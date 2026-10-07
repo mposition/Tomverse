@@ -256,8 +256,10 @@ async function snapshot(
       title_digest: task.v4TitleDigest,
       body_digest: task.v4BodyDigest,
       brief_digest: task.v4BriefDigest,
-      result_attempt_id: v4Valid && fetchedV4 ? fetchedV4.resultAttemptId : null,
-      result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
+      result_attempt_id: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+        fetchedV4.resultAttemptId : null,
+      result_sha256: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+        fetchedV4.resultSha256 : null,
     } } : {}),
   };
   const digest = amuxReviewSubjectDigest(subject);
@@ -265,7 +267,8 @@ async function snapshot(
   const context = {
     title: safeReviewDisplayText(reviewTitle),
     description: safeReviewDisplayText(description),
-    result_sha256: v4Valid && fetchedV4 ? fetchedV4.resultSha256 : null,
+    result_sha256: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+      fetchedV4.resultSha256 : null,
     escalation_reason: reason,
     last_attempt_reason: attemptReason,
     previous_block_reason: previousBlockReason,
