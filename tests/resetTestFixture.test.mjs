@@ -46,6 +46,9 @@ test("fixture reset checks the actual backend before trigger bypass", async () =
     assert.deepEqual(calls, []);
     await resetTestFixture(makeClient("tomverse_test", calls), 'TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE');
     assert.deepEqual(calls, ["SET LOCAL session_replication_role = replica", 'TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE']);
+    process.env.TEST_DATABASE_URL = ` ${process.env.DATABASE_URL}\r\n`;
+    await resetTestFixture(makeClient("tomverse_test", calls), 'TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE');
+    assert.equal(calls.length, 4);
     await assert.rejects(resetTestFixture(makeClient("tomverse_test", calls), 'TRUNCATE TABLE "AdminAuditLog" WHERE true RESTART IDENTITY CASCADE'), /TRUNCATE CASCADE/);
   } finally { restore(); }
 });

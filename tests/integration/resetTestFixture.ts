@@ -5,8 +5,8 @@ export async function resetTestFixture(
   prisma: PrismaClient,
   statement: string,
 ): Promise<void> {
-  const raw = process.env.TEST_DATABASE_URL;
-  if (!raw || raw !== process.env.DATABASE_URL) {
+  const raw = process.env.TEST_DATABASE_URL?.trim();
+  if (!raw || raw !== process.env.DATABASE_URL?.trim()) {
     throw new Error("Fixture reset requires the exact test database URL");
   }
   const target = new URL(raw);
@@ -18,6 +18,8 @@ export async function resetTestFixture(
   );
   if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
       !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name) ||
+      // Unlike the runner, this trigger-bypass helper needs a named test DB
+      // and refuses query options that can override the connection target.
       target.search !== "" ||
       !truncate.test(statement.trim())) {
     throw new Error("Fixture reset is limited to loopback test databases and TRUNCATE CASCADE");
