@@ -437,12 +437,14 @@ const compilerOptions = parsedConfig.options;
 // added; count 228 and the position-free inventory are unchanged.
 // 2026-10-07, A12 merge: the A09/A12 notes and shared audit-helper lines
 // move source positions only; count 228 and position-free digest stay fixed.
+// 2026-10-07, A15 merge: the same 228 computed accesses retain their
+// position-free digest; A13-A15 additions move reviewed source positions.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ff62b964a957fa4719b0dfff49e34e5b",
-  "3050e68adcbb0f3af5ec996d1af9600a",
+  "8bd9d9a3c04f5956215f420fe86764c941",
+  "497e675e63bff13bdededc704778e6",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
