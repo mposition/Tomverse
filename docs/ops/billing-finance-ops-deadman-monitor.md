@@ -18,7 +18,7 @@
 | 항목 | 값 |
 |---|---|
 | 운영 주체 | SIA Monkey See Monkey Do (라트비아, 리가) |
-| 처리 지역 | 업체: 서비스와 데이터는 Hetzner bare metal, 암호화된 DB 백업은 Amazon Web Services, 운영 메일은 Fastmail. **국가·리전: 독일, Hetzner Falkenstein 데이터센터(FSN-DCx)** — 공급자 블로그 "Healthchecks.io Hosting Setup, 2022 Edition"(`https://blog.healthchecks.io/hp-rewrite/abb0df5931cba61014d36e1f194fa752`, 2026-10-07 확인)의 서술이며 계약상 약속은 아닙니다. privacy·about 문서는 국가를 적지 않습니다. 백업(AWS)의 리전은 공개되지 않았습니다 |
+| 처리 지역 | 업체: 서비스와 데이터는 Hetzner bare metal, 암호화된 DB 백업은 Amazon Web Services, 운영 메일은 Fastmail. **국가·리전: 독일, Hetzner Falkenstein 데이터센터(FSN-DCx)** — 공급자 블로그 "Healthchecks.io Hosting Setup, 2022 Edition"(`https://blog.healthchecks.io/hp-rewrite/abb0df5931cba61014d36e1f194fa752`, 2026-10-07 확인)의 서술이며 계약상 약속은 아닙니다. privacy·about 문서는 국가를 적지 않습니다. Hetzner는 EU 위치(독일·핀란드)의 비클라우드 제품 데이터를 EU 안에서만 처리·저장한다고 밝힙니다(`https://docs.hetzner.com/general/company-and-policy/data-protection-at-hetzner`, 2026-10-07 확인) — 이것은 Hetzner가 자기 고객(공급자)에게 한 약속이고 우리와의 계약은 아닙니다. 백업(AWS)의 리전은 공개되지 않았습니다 |
 | 이 Agent가 보내는 것 | 회차마다 성공 응답 뒤에만 `GET <check URL>` 한 번, 본문 없음, 헤더는 런타임 기본값뿐 |
 | monitor가 기록하는 것 | 수신 시각, 발신 IP(Railway egress), **User-Agent**(Node 런타임의 고정 문자열로, 회차의 내용을 담지 않음), 본문(없음) |
 | 개인정보 | **없음.** 고객 데이터·verdict·`modelId`·기한이 신호에 실리지 않습니다(§1.3). 알림 주소는 운영자 자신의 것 |
