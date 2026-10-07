@@ -197,7 +197,8 @@ async function snapshot(
   // Ingress allows 50,000 Unicode characters, not 50,000 UTF-8 bytes. The
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
-  const displayTruncated = amuxReviewTextExceedsDisplay(description);
+  const displayTruncated = amuxReviewTextExceedsDisplay(reviewTitle) ||
+    amuxReviewTextExceedsDisplay(description);
   // Every approval must bind exactly the text the owner can inspect. A control
   // character, bidi override, or normalization change is not silently hidden.
   const displayExact = amuxReviewDisplayIsExact(reviewTitle) &&

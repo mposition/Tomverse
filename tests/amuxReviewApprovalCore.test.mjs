@@ -114,6 +114,7 @@ test("multibyte ingress text is not mistaken for a 50k-byte display limit", () =
   assert.equal(AMUX_REVIEW_DISPLAY_MAX_BYTES, 200_000);
   assert.equal(amuxReviewTextExceedsDisplay("한".repeat(50_000)), false);
   assert.equal(amuxReviewTextExceedsDisplay("x".repeat(200_001)), true);
+  assert.equal(amuxReviewTextExceedsDisplay("제".repeat(100_000)), true);
   assert.equal(amuxReviewTextExceedsDisplay(null), false);
 });
 
