@@ -38,17 +38,14 @@ import {
 import { calculateCurrentApprovedAmuxV4TaskCost } from
   "@/lib/amux/v4TaskCostCatalogApprovalService";
 import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
-import { ENGINEERING_AGENT_COMMIT_IDENTITY,
-  ENGINEERING_AGENT_POLICY_VERSION,
+import { ENGINEERING_AGENT_POLICY_VERSION,
   v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
 import {
   EngineeringAgentStoreRefusedError,
   endEngineeringAgentRun,
   engineeringAgentTransactionInAmux,
   heartbeatEngineeringAgentRun,
-  issueEngineeringAgentCapability,
   lockEngineeringAgentV22Run,
-  openEngineeringAgentWorkItem,
   readEngineeringAgentSwitches,
   recordEngineeringAgentRunStart,
   requireEngineeringAgentRunAdmission,
@@ -66,6 +63,8 @@ import { loadEngineeringAgentV22StoredCandidate } from
   "@/lib/engineeringAgentV22StoredCandidate";
 import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
+import { openEngineeringAgentV22Product } from
+  "@/lib/engineeringAgentV22ProductStore";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 
@@ -1207,37 +1206,10 @@ export async function settleAmuxV22TaskExecution(input: {
             await readAmuxV22PublicPrConsent(task.id, tx);
           const engineeringTx = engineeringAgentTransactionInAmux(
             context.attachedTransaction);
-          if (publish && publication?.ok &&
-              publication.candidate.baseCommitterDate !== null) {
-            const opened = await openEngineeringAgentWorkItem(engineeringTx, {
-              kind: "publish", causeKey: `publish:${run.id}`,
-              runId: run.id, patchBody: patch.text,
-              patchDigest: patch.sha256, baseSha: patch.baseSha,
-              expectedTreeId: publication.candidate.expectedTreeId,
-            });
-            await issueEngineeringAgentCapability(engineeringTx, {
-              workItemId: opened.workItemId,
-              capability: { baseSha: patch.baseSha,
-                patchDigest: patch.sha256,
-                expectedTreeId: publication.candidate.expectedTreeId,
-                commit: { identity: ENGINEERING_AGENT_COMMIT_IDENTITY,
-                  baseCommitterDate:
-                    publication.candidate.baseCommitterDate,
-                  runId: run.id, cardRef: task.id },
-              },
-            });
-            product = { id: opened.workItemId, kind: "publish",
-              patchDigest: patch.sha256, baseSha: patch.baseSha };
-          } else {
-            const opened = await openEngineeringAgentWorkItem(engineeringTx, {
-              kind: "t2_draft", causeKey: `t2_draft:${run.id}`,
-              runId: run.id, patchBody: patch.text,
-              patchDigest: patch.sha256, baseSha: patch.baseSha,
-              reason: "t1_evidence_unavailable",
-            });
-            product = { id: opened.workItemId, kind: "t2_draft",
-              patchDigest: patch.sha256, baseSha: patch.baseSha };
-          }
+          product = await openEngineeringAgentV22Product(engineeringTx, {
+            runId: run.id, taskId: task.id, patch, publish,
+            candidate: publication?.ok ? publication.candidate : null,
+          });
         }
       }
       const budget = settlementDestinationForBudget({
