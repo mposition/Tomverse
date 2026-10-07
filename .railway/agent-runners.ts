@@ -16,12 +16,12 @@
 // scheduled-jobs.ts is: the unit tests read it without installing the SDK.
 //
 // Two differences from `RailwayCronService` are the whole point of this type:
-// a service may exist in one environment and not the other (a probe that only
-// staging needs), and a service may have no cron at all (a probe an operator
+// a service may exist in one environment and not another (a probe that
+// production never needs), and a service may have no cron at all (a probe an operator
 // runs by hand). Expressing either in the cron table would have meant giving
 // every scheduled job an optional schedule.
 
-export type RailwayEnvironment = "production" | "staging";
+export type RailwayEnvironment = "production" | "staging" | "dev";
 
 export type AgentRunnerService = {
   readonly key: string;
@@ -50,12 +50,17 @@ export const AGENT_RAILWAY_REPOSITORY = "mposition/Tomverse";
  */
 export const AGENT_RAILWAY_REGION = "asia-southeast1-eqsg3a";
 
-/** The branch each Railway environment deploys, as in the cron table. */
+/**
+ * The branch each Railway environment deploys, as in the cron table: dev takes
+ * every develop merge, and staging follows develop beside it until the lane
+ * switch moves it to the `test` branch.
+ */
 export const AGENT_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
 > = {
   production: "main",
   staging: "develop",
+  dev: "develop",
 };
 
 export const isAgentRailwayEnvironment = (
@@ -141,9 +146,12 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // 21:30 UTC, which is 07:30 Australia/Brisbane -- a restatement of the UTC
     // time for the operator who reads the result, not a second schedule.
     cronSchedule: "30 21 * * *",
+    // dev's ingest URL and secret must be dev's app: an agent that writes to
+    // another environment's app writes into that environment's data.
     environments: {
       production: PRODUCT_RESEARCH_VARIABLES,
       staging: PRODUCT_RESEARCH_VARIABLES,
+      dev: PRODUCT_RESEARCH_VARIABLES,
     },
   },
   {
@@ -155,6 +163,8 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     startCommand: "node --experimental-strip-types scripts/qa-release-digest-service.mjs",
     // Policy section 10: 21:00 UTC daily.
     cronSchedule: "0 21 * * *",
+    // Not on dev: lib/qaReleaseDigestEndpointCore.ts knows staging's and
+    // production's origins only, and refuses any other environment.
     environments: {
       production: QA_RELEASE_DIGEST_VARIABLES,
       staging: QA_RELEASE_DIGEST_VARIABLES,
@@ -167,6 +177,8 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // Every 30 minutes: policy section 10's proposed value, approved by the
     // operator on 2026-10-03.
     cronSchedule: "*/30 * * * *",
+    // Not on dev, for the digest's reason: it submits through the same
+    // staging-or-production endpoint table.
     environments: {
       production: QA_RELEASE_MONITOR_VARIABLES,
       staging: QA_RELEASE_MONITOR_VARIABLES,
@@ -197,6 +209,8 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     // docs/policy/billing-finance-ops.md §1.1: 01:00 UTC daily, two hours
     // before the Maintenance Cron's silence check reads the day.
     cronSchedule: "0 1 * * *",
+    // Not on dev: the run endpoint table and the digest schema name staging
+    // and production only (lib/billingFinanceOpsServiceCore.ts).
     environments: {
       production: BILLING_FINANCE_OPS_VARIABLES,
       staging: BILLING_FINANCE_OPS_VARIABLES,
@@ -207,7 +221,12 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     service: "Product Research Probe",
     startCommand: "npm run agent:product-research-observation -- --probe",
     cronSchedule: null,
-    environments: { staging: PRODUCT_RESEARCH_PROBE_VARIABLES },
+    // dev is where develop lands, so the probe goes with it. staging keeps its
+    // copy until the lane switch, when staging stops following develop.
+    environments: {
+      staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
+      dev: PRODUCT_RESEARCH_PROBE_VARIABLES,
+    },
   },
 ];
 
