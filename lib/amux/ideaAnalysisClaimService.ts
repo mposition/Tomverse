@@ -380,7 +380,9 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
     }
     // The audit-chain lock above serializes every claim, including direct
     // service callers. PostgreSQL returns the day as text so process TZ cannot
-    // shift the 12-per-UTC-day admission boundary.
+    // shift the 12-per-UTC-day admission boundary. If midnight passes since
+    // the earlier readiness clock, counting the claim on the later day is
+    // conservative and does not permit an extra claim on the earlier day.
     const claimDayUtc = await enforceAmuxV4DailyClaimLimit(tx);
     const auditId = await writeSystemAuditLog({ tx,
       systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,

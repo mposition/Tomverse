@@ -102,7 +102,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       preview.consumedAt === null || preview.outcomeUnknownAt !== null ||
       preview.payloadPurgedAt !== null || !preview.payloadCiphertext ||
       !preview.payloadKeyId || !preview.payloadKeyVersion ||
-      !preview.payloadPurgeAfter || now >= preview.payloadPurgeAfter ||
+      !preview.payloadPurgeAfter ||
       hold.previewId !== preview.id || hold.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
       hold.modelId !== preview.modelId || hold.status !== "succeeded" ||
       hold.dispatchedAt === null || hold.closedAt === null ||
@@ -170,7 +170,8 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
   // Completion makes both transient bodies eligible for the next purge tick.
   // The separate 30-day proposal units retain only the approved structured draft.
-  const payloadPurgeAfter = now;
+  const payloadPurgeAfter = new Date(Math.min(now.getTime(),
+    preview.payloadPurgeAfter.getTime()));
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
     action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,

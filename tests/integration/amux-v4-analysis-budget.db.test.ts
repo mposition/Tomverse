@@ -1042,6 +1042,10 @@ test("a complete first result saves independent encrypted units and closes only 
   }), /rollback synthetic payload tamper/);
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 0);
 
+  // A claim made before preview expiry may finish after the original purge
+  // eligibility time. The in-flight body remains protected until settlement.
+  await prisma.amuxIdeaTransferPreview.update({ where: { id: previewId },
+    data: { payloadPurgeAfter: new Date(Date.now() - 1_000) } });
   const saved = await prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, input));
   assert.equal(saved.unitCount, 4);
