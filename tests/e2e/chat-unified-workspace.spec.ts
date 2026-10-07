@@ -1030,61 +1030,75 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   test("leaving a failed hydration scope cancels its retry without restarting the new scope", async ({ page }) => {
+    // Three failures, not one, so that a retry is still *pending* at the moment
+    // this scope is left -- the only state in which there is a cancel to
+    // observe. With one failure neither environment reached it. Locally the
+    // switch beat the one-second timer, so nothing was pending and removing the
+    // product's guard altogether did not fail this test. In CI the mobile
+    // drawer took longer than a second, so the timer had already fired, which
+    // is correct -- the user had not left yet -- and the old assertion of one
+    // read in total failed on behaviour that was right. Three failures leave a
+    // pending delay of 1_000 * 2 ** 2 (useConversationDrafts.ts): four seconds,
+    // which the drawer cannot outlast.
     const state = await openChat(page, {
       holdDraftHydrate: true,
-      draftFailurePlan: [{ method: "GET", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "GET", scopeKey: CONVERSATION },
+        { method: "GET", scopeKey: CONVERSATION },
+        { method: "GET", scopeKey: CONVERSATION },
+      ],
     });
     await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
-
-    await chooseConversation(page, SECOND_CONVERSATION);
-    await expect.poll(state.draftHydrateStarted).toBe(true);
-
-    // Counted from the moment the switch has taken effect. The poll above is
-    // true only once a GET with no planned failure reached the fixture's hold,
-    // and in this test that is the new scope's own read.
-    //
-    // Asserting one read in total instead made this depend on the switch
-    // beating the one-second first retry that the failure armed
-    // (components/chat/useConversationDrafts.ts: 1_000 * 2 ** 0). On mobile the
-    // switch opens the drawer and waits for it before clicking the item, so it
-    // lost that race most nights while the product was behaving correctly: a
-    // retry that fires while the user is still in that conversation is not a
-    // retry that survived leaving it, and leaving is what this forbids.
     const readsFor = (scopeKey: string) => state.draftRequests().filter(
       (entry) => entry.method === "GET" && entry.scopeKey === scopeKey
     ).length;
+    // Reads at roughly 0s, 1s and 3s; the third arms the four-second retry.
+    await expect.poll(() => readsFor(CONVERSATION), { timeout: 20_000 }).toBe(3);
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    await expect.poll(state.draftHydrateStarted).toBe(true);
     const readsWhenLeft = readsFor(CONVERSATION);
     expect(readsFor(SECOND_CONVERSATION)).toBe(1);
-    await page.waitForTimeout(1_200);
+
+    // Past that pending retry. Uncancelled it bumps the hydrate revision, and
+    // because the effect always reads the *active* scope the extra read lands
+    // on the scope just entered rather than the one left -- which is the half
+    // of this test's name the guard actually protects.
+    await page.waitForTimeout(5_000);
     expect(readsFor(CONVERSATION)).toBe(readsWhenLeft);
     expect(readsFor(SECOND_CONVERSATION)).toBe(1);
     state.releaseDraftHydrate();
   });
 
   test("leaving a failed persistence scope cancels its background retry", async ({ page }) => {
+    // Three failures for the same reason as the hydration test above: with one,
+    // the retry had either already fired or was never pending by the time the
+    // mobile drawer finished, so neither a correct product nor a broken one
+    // changed the outcome. The third failure leaves a four-second retry pending.
     const state = await openChat(page, {
-      draftFailurePlan: [{ method: "PUT", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+      ],
     });
     await page.getByTestId("chat-textarea").fill("Do not retry this from another Chat.");
-    await expect.poll(() => state.draftRequests().filter(
-      ({ method, scopeKey }) => method === "PUT" && scopeKey === CONVERSATION
-    ).length).toBe(1);
-    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
-
-    await chooseConversation(page, SECOND_CONVERSATION);
-    // Same race as the hydration test above, and counted the same way: the new
-    // scope's own hydrate read is the signal that the switch has taken effect,
-    // and the question is whether a write for the scope that was left arrives
-    // after that. The persistence retry is armed on the same one-second first
-    // delay, so a total of one write was a bet on the drawer being faster.
-    await expect.poll(() => state.draftRequests().some(
-      (entry) => entry.method === "GET" && entry.scopeKey === SECOND_CONVERSATION
-    )).toBe(true);
     const writesFor = (scopeKey: string) => state.draftRequests().filter(
       (entry) => entry.method === "PUT" && entry.scopeKey === scopeKey
     ).length;
+    await expect.poll(() => writesFor(CONVERSATION), { timeout: 20_000 }).toBe(3);
+    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
+
+    await chooseConversation(page, SECOND_CONVERSATION);
+    // The new scope's own hydrate read is the signal that the switch has taken
+    // effect; the question is whether the write retry pending for the scope
+    // just left survives it. Here the uncancelled retry re-saves that same key,
+    // so the extra request lands on the scope left rather than the one entered.
+    await expect.poll(() => state.draftRequests().some(
+      (entry) => entry.method === "GET" && entry.scopeKey === SECOND_CONVERSATION
+    )).toBe(true);
     const writesWhenLeft = writesFor(CONVERSATION);
-    await page.waitForTimeout(1_200);
+    await page.waitForTimeout(5_000);
     expect(writesFor(CONVERSATION)).toBe(writesWhenLeft);
   });
 
