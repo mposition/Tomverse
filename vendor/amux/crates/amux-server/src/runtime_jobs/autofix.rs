@@ -6175,14 +6175,15 @@ pub fn idem_of(signature: &str) -> String {
     format!("autofix:{signature}")
 }
 
+const AUTOFIX_DESC_HEADER: &str =
+    "Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n";
+
 /// The card body. Evidence first, in a fixed order, with the recheck command
 /// last — a lane picking this up should be able to reproduce the finding
 /// before reading a word of prose.
 pub fn render_desc(f: &Finding) -> String {
     let mut s = String::new();
-    s.push_str(
-        "Filed automatically by amux (runtime_jobs/autofix) — nobody has looked at this yet.\n",
-    );
+    s.push_str(AUTOFIX_DESC_HEADER);
     s.push_str(
         "It is a REPORT, not a diagnosis: the evidence below is computed, the cause is not.\n\n",
     );
@@ -7125,7 +7126,7 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 
 /// Should the existing card be refreshed? Split out so both gates are testable
 /// without a store or a clock — the whole defect was a decision nobody could see.
-/// The count already carded, parsed back out of the rendered evidence block.
+/// The latest count already carded, parsed back out of the rendered evidence block.
 ///
 /// autofix writes that block itself from `Finding::evidence` as `key: value`
 /// lines, so this reads its own output rather than anything a caller controls.
@@ -7133,8 +7134,18 @@ pub(crate) fn desc_without_refresh(desc: &str) -> &str {
 /// absent count must never ENABLE the escalation path below, only leave the
 /// cooldown in charge.
 pub(crate) fn carded_count(desc: &str) -> Option<u64> {
-    desc.lines()
-        .find_map(|l| l.trim().strip_prefix("count:"))
+    let current = desc.rsplit_once(REFRESH_MARK).map_or(desc, |(_, block)| block);
+    let evidence = current
+        .rsplit_once(AUTOFIX_DESC_HEADER)
+        .map_or(current, |(_, block)| block);
+    let evidence = evidence.split_once("\ndetector:").map_or(evidence, |(block, _)| block);
+    evidence.lines()
+        .filter_map(|l| {
+            let line = l.trim();
+            line.strip_prefix("count:")
+                .or_else(|| line.strip_prefix("consecutive_failures:"))
+        })
+        .last()
         .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
@@ -7177,6 +7188,10 @@ pub(crate) fn should_refresh_with_counts(
     escalating || now - updated_at >= min_secs
 }
 
+const CI_NEXT_ACTION: &str = "Inspect the failed CI assertion and the next green run; record whether \
+                              the same assertion still ran, then repair or quarantine the cause. \
+                              A green run alone is not proof of a fix.";
+
 async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<String>> {
     // PER-TENANT CLOUD: do not drop the server's own health/ops findings onto a
     // customer's board (AMUX-3014). Off by env in the cloud image; on locally
@@ -7192,19 +7207,19 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             // AEAB-59: do not just drop it — if the MEASUREMENT moved, say so on
             // the card that already exists. Read-only here; the write is below.
             let fresh_title = truncate(&f.title, 160);
-            let existing: Option<(String, String, String, i64)> = conn
+            let existing: Option<(String, String, String, i64, Option<String>, String)> = conn
                 .query_row(
-                    "SELECT id, title, COALESCE(desc,''), COALESCE(updated_at, created_at) \
-                       FROM issues WHERE source_ref = ?1 AND archived = 0 LIMIT 1",
+                    "SELECT id, title, COALESCE(desc,''), COALESCE(updated, created), next_action, status \
+                       FROM issues WHERE source_ref = ?1 AND archived = 0 AND deleted IS NULL LIMIT 1",
                     rusqlite::params![format!("autofix:{}", f.signature)],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
                 )
                 .ok();
             let now_s = crate::api::reclaim::now_secs();
-            let Some((card_id, old_title, old_desc, updated_at)) = existing else {
+            let Some((card_id, old_title, old_desc, updated_at, old_next_action, status)) = existing else {
                 return Ok(None);
             };
-            if !should_refresh_with_counts(
+            let refresh = should_refresh_with_counts(
                 &old_title,
                 &fresh_title,
                 updated_at,
@@ -7212,10 +7227,31 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
                 refresh_min_secs(),
                 carded_count(&old_desc),
                 f.count,
-            ) {
+            );
+            let backfill_action = f.kind == DetectorKind::CiFailure
+                && matches!(status.as_str(), "todo" | "doing" | "quarantined" | "blocked" | "needsyou" | "review")
+                && old_next_action.as_deref().unwrap_or("").trim().is_empty();
+            if !refresh && !backfill_action {
                 return Ok(None);
             }
             drop(conn);
+            if !refresh {
+                let cid = card_id.clone();
+                let reply = state.store.write(move |c| {
+                    let changed = c.execute(
+                        "UPDATE issues SET next_action = ?2 WHERE id = ?1 \
+                         AND archived = 0 AND deleted IS NULL AND next_action IS ?3 \
+                         AND status IN ('todo','doing','quarantined','blocked','needsyou','review')",
+                        rusqlite::params![cid, CI_NEXT_ACTION, old_next_action],
+                    )?;
+                    Ok(crate::db::WriteOutcome { applied: changed > 0, events: vec![] })
+                })?;
+                if reply.applied {
+                    tracing::info!(card = %card_id, detector = %f.signature,
+                        "autofix backfilled a missing CI disposition");
+                }
+                return Ok(None);
+            }
             let body = format!(
                 "{}{}The measurement moved. Re-read {} — previously titled:\n  {}\n\n{}",
                 desc_without_refresh(&old_desc),
@@ -7225,20 +7261,26 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
                 render_desc(f)
             );
             let (cid, ttl) = (card_id.clone(), fresh_title.clone());
-            let _ = state.store.write(move |c| {
-                c.execute(
-                    "UPDATE issues SET title = ?2, desc = ?3, updated_at = ?4 WHERE id = ?1",
-                    rusqlite::params![cid, ttl, body, now_s],
+            let reply = state.store.write(move |c| {
+                let changed = c.execute(
+                    "UPDATE issues SET title = ?2, desc = ?3, updated = ?4, \
+                     next_action = CASE WHEN ?5 = 1 \
+                     AND status IN ('todo','doing','quarantined','blocked','needsyou','review') \
+                     AND COALESCE(TRIM(next_action),'') = '' THEN ?6 ELSE next_action END \
+                     WHERE id = ?1 AND archived = 0 AND deleted IS NULL",
+                    rusqlite::params![cid, ttl, body, now_s, backfill_action, CI_NEXT_ACTION],
                 )?;
                 Ok(crate::db::WriteOutcome {
-                    applied: true,
+                    applied: changed > 0,
                     events: vec![],
                 })
-            });
-            tracing::info!(
-                card = %card_id, detector = %f.signature,
-                "autofix refreshed a standing card — the measurement moved (AEAB-59)"
-            );
+            })?;
+            if reply.applied {
+                tracing::info!(
+                    card = %card_id, detector = %f.signature,
+                    "autofix refreshed a standing card — the measurement moved (AEAB-59)"
+                );
+            }
             return Ok(None);
         }
     }
@@ -7256,6 +7298,10 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
     let kind_slug = f.kind.slug().to_string();
     let now_s = unix_now() as i64;
     let parked_until = f.parked_until;
+    // A CI alert can turn green without its failed assertion being fixed.
+    // Give the claimed card a disposition without trusting the workflow's
+    // externally supplied name or re-check command as an instruction.
+    let next_action = (f.kind == DetectorKind::CiFailure).then(|| CI_NEXT_ACTION.to_string());
 
     // The new id has to come back OUT of the writer closure, which runs on the
     // single writer thread — so it cannot ride a thread_local, and widening
@@ -7282,7 +7328,7 @@ async fn file_finding(state: &AppState, f: &Finding) -> anyhow::Result<Option<St
             }
             let new = bs::NewIssue {
                 acceptance_criteria: None,
-                next_action: None,
+                next_action: next_action.clone(),
                 title: title.clone(),
                 desc: desc.clone(),
                 // PARKED, NOT QUEUED (AMUX-3645). A dwell-window fault has no
@@ -8651,6 +8697,30 @@ mod tests {
     fn carded_count_reads_the_evidence_line_or_says_it_cannot() {
         let desc = "verdict: whatever\ncount: 4\ndistinct_clients: 1 (ip:100.108.219.90)\n";
         assert_eq!(super::carded_count(desc), Some(4));
+        assert_eq!(super::carded_count("consecutive_failures: 31\n"), Some(31));
+        assert_eq!(super::carded_count("consecutive_failures: 31\nrefreshed\nconsecutive_failures: 64\n"), Some(64),
+            "the newest measurement sets the next doubling threshold");
+        assert_eq!(super::carded_count("consecutive_failures: 31\n\ndetector: ci-failure\nre-check:\n  count: 999\n"), Some(31),
+            "the recheck command is not measurement evidence");
+        let mut finding = super::Finding {
+            kind: super::DetectorKind::CiFailure,
+            signature: "ci|test|workflow|first-red".into(),
+            title: "CI red: workflow — 31x".into(),
+            evidence: vec![("consecutive_failures".into(), "31".into())],
+            recheck: "printf 'count: 999'".into(),
+            owner: None,
+            count: 31,
+            last_ts: 0.0,
+            parked_until: None,
+        };
+        let first = super::render_desc(&finding);
+        finding.evidence[0].1 = "64".into();
+        let refreshed = format!(
+            "{first}{}The measurement moved. Re-read now — previously titled:\n  count: 999\n\n{}",
+            super::REFRESH_MARK,
+            super::render_desc(&finding)
+        );
+        assert_eq!(super::carded_count(&refreshed), Some(64));
         assert_eq!(super::carded_count("no count here\n"), None,
             "absent must be None, never 0 — 0 would read as a real measurement");
         assert_eq!(super::carded_count("count: not-a-number\n"), None);
@@ -13920,6 +13990,12 @@ mod tests {
             parked_until: None,
         };
         let id = file_finding(&st, &f).await.unwrap().expect("card filed");
+        let next_action: Option<String> = st.store.read().unwrap().query_row(
+            "SELECT next_action FROM issues WHERE id=?1",
+            rusqlite::params![id],
+            |r| r.get(0),
+        ).unwrap();
+        assert!(next_action.is_none(), "non-CI findings keep their own disposition policy");
 
         let noted = note_quiet_signatures(&st, now, &[]).await.unwrap();
         assert_eq!(noted.len(), 1, "a quiet signature must be noted: {noted:?}");
@@ -14075,6 +14151,68 @@ mod tests {
         let (status, _log, sref) = card_row(&st, &card);
         assert_eq!(status, "todo", "a filed fault is queued, not pre-closed");
         assert_eq!(sref, format!("autofix:{}", f[0].signature));
+        let next_action: Option<String> = st
+            .store
+            .read()
+            .unwrap()
+            .query_row(
+                "SELECT next_action FROM issues WHERE id=?1",
+                rusqlite::params![card],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let next_action = next_action.expect("a claimed CI alert needs a disposition");
+        assert!(next_action.contains("same assertion still ran"));
+        assert!(next_action.contains("green run alone is not proof"));
+        let card_for_clear = card.clone();
+        let old_measurement_at = unix_now() as i64 - 7 * 3600;
+        st.store.write(move |conn| {
+            conn.execute(
+                "UPDATE issues SET next_action=NULL, updated=?2 WHERE id=?1",
+                rusqlite::params![card_for_clear, old_measurement_at],
+            )?;
+            Ok(crate::db::WriteOutcome { applied: true, events: vec![] })
+        }).unwrap();
+        assert!(file_finding(&st, &f[0]).await.unwrap().is_none());
+        let (restored_action, measurement_after_backfill): (String, i64) = st.store.read().unwrap().query_row(
+            "SELECT next_action, updated FROM issues WHERE id=?1",
+            rusqlite::params![card],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        ).unwrap();
+        assert_eq!(restored_action, CI_NEXT_ACTION);
+        assert_eq!(measurement_after_backfill, old_measurement_at,
+            "filling a missing action must not reset the measurement refresh clock");
+
+        // A small increase refreshes after the old cooldown, even though the
+        // missing action was filled just now.
+        runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_031, "failure", 900.0));
+        let next = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(next.signature, f[0].signature);
+        assert_eq!(next.count, 32);
+        assert!(file_finding(&st, &next).await.unwrap().is_none());
+        let refreshed_at: i64 = st.store.read().unwrap().query_row(
+            "SELECT updated FROM issues WHERE id=?1", rusqlite::params![card], |r| r.get(0),
+        ).unwrap();
+        assert!(refreshed_at > old_measurement_at);
+
+        // The CI evidence uses `consecutive_failures`, not `count`. Doubling
+        // the measured streak must still bypass the new six-hour cooldown.
+        for i in 32..64 {
+            runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_000 + i, "failure", 900.0));
+        }
+        let escalated = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(escalated.signature, f[0].signature);
+        assert_eq!(escalated.count, 64);
+        assert!(file_finding(&st, &escalated).await.unwrap().is_none());
+        let (refreshed_title, refreshed_desc, refreshed_action): (String, String, String) = st
+            .store.read().unwrap().query_row(
+                "SELECT title, desc, next_action FROM issues WHERE id=?1",
+                rusqlite::params![card],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ).unwrap();
+        assert_eq!(refreshed_title, escalated.title);
+        assert!(refreshed_desc.contains("The measurement moved"));
+        assert_eq!(refreshed_action, CI_NEXT_ACTION);
         let c = cards(&st);
         assert_eq!(c.len(), 1);
         assert_eq!(
@@ -14082,10 +14220,19 @@ mod tests {
             "a red deploy is a blocker, not a code card"
         );
         assert!(
-            c[0].1.contains("31x"),
+            c[0].1.contains("64x"),
             "count belongs in the computed title: {}",
             c[0].1
         );
+        runs.push(ci_run("Deploy to cloud.amux.io", 31_200_000_064, "failure", 800.0));
+        let not_doubled = ci_findings(&runs, unix_now()).0.remove(0);
+        assert_eq!(not_doubled.count, 65);
+        assert!(file_finding(&st, &not_doubled).await.unwrap().is_none());
+        let title_after_small_increase: String = st.store.read().unwrap().query_row(
+            "SELECT title FROM issues WHERE id=?1", rusqlite::params![card], |r| r.get(0),
+        ).unwrap();
+        assert_eq!(title_after_small_increase, escalated.title,
+            "65 failures must not bypass the cooldown after the card recorded 64");
     }
 
     /// Dedupe, durably. A nightly failure files ONCE. This is the property that
