@@ -18,6 +18,25 @@ export function amuxV22EngineeringPublicationEnabled(value: string | undefined) 
 
 export const AMUX_V22_SEALED_DELIVERY_MARKER = "amux-v22:sealed-brief";
 
+/** Settlement must use the same sealed patch it read before the transaction.
+ * A patch arriving or being purged between those reads is not a private
+ * result and cannot be silently ignored. */
+export function v22SettlementPatchMatches(input: {
+  taskId: string;
+  readPatch: { taskId: string; sha256: string; baseSha: string } | null;
+  storedPatch: { taskId: string; patchSha256: string; baseSha: string;
+    bodyPurgedAt: Date | null } | null;
+}) {
+  const { readPatch, storedPatch } = input;
+  if (readPatch === null || storedPatch === null)
+    return readPatch === null && storedPatch === null;
+  return readPatch.taskId === input.taskId &&
+    storedPatch.taskId === input.taskId &&
+    readPatch.sha256 === storedPatch.patchSha256 &&
+    readPatch.baseSha === storedPatch.baseSha &&
+    storedPatch.bodyPurgedAt === null;
+}
+
 export function v22ExecutionCostWithinAssignment(input: {
   assignedMicroUsd: bigint;
   currentMicroUsd: bigint;

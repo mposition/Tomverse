@@ -4,12 +4,32 @@ import test from "node:test";
 import { amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
-  v22ExecutionReceiptVerified } from
+  v22ExecutionReceiptVerified,
+  v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
 test("v22 execution stays dark even with an enabled environment value", () => {
   assert.equal(amuxV22TaskExecutionEnabled("enabled"), false);
   assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), false);
+});
+
+test("settlement refuses a patch inserted, removed, or changed after decrypt", () => {
+  const readPatch = { taskId: "task-1", sha256: "a".repeat(64),
+    baseSha: "b".repeat(40) };
+  const storedPatch = { taskId: "task-1", patchSha256: readPatch.sha256,
+    baseSha: readPatch.baseSha, bodyPurgedAt: null };
+  const matches = (read, stored) => v22SettlementPatchMatches({
+    taskId: "task-1", readPatch: read, storedPatch: stored,
+  });
+  assert.equal(matches(null, null), true);
+  assert.equal(matches(readPatch, storedPatch), true);
+  assert.equal(matches(null, storedPatch), false);
+  assert.equal(matches(readPatch, null), false);
+  assert.equal(matches(readPatch, { ...storedPatch,
+    patchSha256: "c".repeat(64) }), false);
+  assert.equal(matches(readPatch, { ...storedPatch,
+    bodyPurgedAt: new Date() }), false);
+  assert.equal(matches({ ...readPatch, taskId: "task-2" }, storedPatch), false);
 });
 
 test("each attempt fits the assigned route and cumulative owner ceiling", () => {

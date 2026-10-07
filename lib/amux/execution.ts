@@ -55,7 +55,8 @@ import { AMUX_V22_SEALED_DELIVERY_MARKER,
   AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
   amuxV22TaskExecutionEnabled,
   v22ExecutionCostWithinAssignment,
-  v22ExecutionReceiptVerified } from "@/lib/amux/v22TaskExecutionCore";
+  v22ExecutionReceiptVerified,
+  v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
 import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
 
@@ -1140,6 +1141,15 @@ export async function settleAmuxV22TaskExecution(input: {
         return { settled: false as const, reason: "result_unverified" as const };
       if (input.outcome !== "blocked" && !receiptsComplete)
         return { settled: false as const, reason: "usage_unverified" as const };
+      const storedPatch = await tx.amuxV22TaskPatch.findUnique({
+        where: { attemptId: attempt.id },
+        select: { taskId: true, patchSha256: true, baseSha: true,
+          bodyPurgedAt: true },
+      });
+      if (!v22SettlementPatchMatches({ taskId: task.id,
+        readPatch: patch, storedPatch }))
+        return { settled: false as const,
+          reason: "publication_state_changed" as const };
       const run = await lockEngineeringAgentV22Run(
         engineeringAgentTransactionInAmux(context.attachedTransaction),
         attempt.id);
