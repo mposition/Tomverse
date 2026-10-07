@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { chmod, lstat, mkdtemp, rmdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -127,7 +128,7 @@ test("S0 claim is empty, owned, expiring and consumed before any model call", {
 test("bounded child kills its process group at the deadline without a model call", {
   skip: process.platform !== "linux",
 }, async () => {
-  const child = spawn("/usr/bin/node", ["-e", "setInterval(() => {}, 1000)"],
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"],
     { detached: true, stdio: "ignore", shell: false,
       env: { PATH: "/usr/bin:/bin" } });
   const result = await awaitAmuxV4BoundedChild(child, 50);
@@ -148,7 +149,7 @@ test("failed child spawn is handled without an unhandled error", {
 test("nonzero fake CLI is diagnosed without reading its stderr", {
   skip: process.platform !== "linux",
 }, async () => {
-  const child = spawn("/usr/bin/node", ["-e", "process.exit(23)"], {
+  const child = spawn(process.execPath, ["-e", "process.exit(23)"], {
     detached: true, stdio: "ignore", shell: false,
     env: { PATH: "/usr/bin:/bin" },
   });
@@ -157,7 +158,11 @@ test("nonzero fake CLI is diagnosed without reading its stderr", {
 });
 
 test("deadline kills a fake CLI inside the bwrap process tree", {
-  skip: process.platform !== "linux",
+  // GitHub-hosted Node may live outside /usr/bin and bwrap is not installed
+  // there; the dedicated Ubuntu S0 exercises this exact sandbox path.
+  skip: process.platform !== "linux" ? "Linux sandbox only" :
+    !existsSync("/usr/bin/node") || !existsSync("/usr/bin/bwrap") ?
+      "requires the dedicated Ubuntu S0 image" : false,
 }, async () => {
   const directory = await mkdtemp("/tmp/amux-v4-socket-");
   const socketPath = join(directory, "proxy.sock");

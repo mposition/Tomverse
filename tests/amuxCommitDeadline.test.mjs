@@ -92,6 +92,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261005060000_amux_v4_rejection_consistency",
   "20261005070000_amux_v4_node_link_consistency",
   "20261005080000_amux_v4_card_link_consistency",
+  "20261005090000_amux_v4_unit_actor_scope",
+  "20261005100000_amux_v4_derivation_groups",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -332,18 +334,24 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("only the catalog and analysis admission routes open direct AMUX transactions", () => {
+test("only reviewed AMUX internal routes open their own bounded transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The analysis admission routes predate A09 and own their explicit
-  // reconciliation contracts; the commit-deadline boundary still governs
-  // orchestration task execution.
-  assert.deepEqual(direct, [
-    "app/api/internal/amux/tasks/route.ts",
-    "app/api/internal/amux/v4/analysis-claim/route.ts",
-    "app/api/internal/amux/v4/analysis-result/route.ts",
-  ]);
+  // The tasks route upserts catalog cards and records no execution success,
+  // so it has no deadline to keep and is outside the commit deadline check.
+  const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
+  const result = "app/api/internal/amux/v4/analysis-result/route.ts";
+  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts", claim, result]);
+  // The two analysis routes pre-load external content keys before the DB
+  // transaction, keep writes dark, and bound both write and receipt reads.
+  for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
+    const source = withoutComments(read(path));
+    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));
+    assert.match(source, /maxWait: 5_000, timeout: 15_000/);
+    assert.match(source, /maxWait: 5_000, timeout: 10_000/);
+    assert.match(source, /callbackReturned = true/);
+  }
 });
 
 test("the push harnesses install the migration's own function and trigger, idempotently", () => {

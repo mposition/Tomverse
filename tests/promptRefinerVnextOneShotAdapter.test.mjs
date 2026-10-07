@@ -149,28 +149,46 @@ test("A11 refuses missing or nonzero cache-write count after a response", async 
     else observed.usage.inputTokenDetails.cacheWriteTokens = cacheWriteTokens;
     const result = await adapter(async () => observed)({ requestId, sourceText });
     assert.deepEqual(result, {
-      status: "outcome_unknown", reason: "response_unverified", dispatchAuthorized: false,
+      status: "outcome_unknown", reason: "response_unverified",
+      diagnosticCode: "cache_write_unverified", dispatchAuthorized: false,
     });
   }
 });
 
-test("A11 refuses tool activity, multi-step calls, warnings and malformed output", async () => {
+test("A11 keeps envelope and usage ambiguity unknown without retry", async () => {
   const mutations = [
-    (value) => { value.toolCalls.push({ toolName: "synthetic" }); },
-    (value) => { value.steps[0].toolResults.push({ toolName: "synthetic" }); },
-    (value) => { value.steps.push({ toolCalls: [], toolResults: [] }); },
-    (value) => { value.warnings.push({ type: "unsupported-setting" }); },
-    (value) => { value.finishReason = "tool-calls"; },
-    (value) => { value.text = "not JSON"; },
-    (value) => { value.usage.inputTokens = 100_001; },
-    (value) => { value.usage.outputTokens = 4097; },
-    (value) => { Object.defineProperty(value, "text", { get() { throw new Error("synthetic getter"); } }); },
+    [(value) => { value.toolCalls.push({ toolName: "synthetic" }); }, "response_envelope_invalid"],
+    [(value) => { value.steps[0].toolResults.push({ toolName: "synthetic" }); }, "response_envelope_invalid"],
+    [(value) => { value.steps.push({ toolCalls: [], toolResults: [] }); }, "response_envelope_invalid"],
+    [(value) => { value.warnings.push({ type: "unsupported-setting" }); }, "response_envelope_invalid"],
+    [(value) => { value.finishReason = "tool-calls"; }, "response_envelope_invalid"],
+    [(value) => { value.usage.inputTokens = 100_001; }, "usage_cost_unverified"],
+    [(value) => { value.usage.outputTokens = 4097; }, "usage_cost_unverified"],
+    [(value) => { Object.defineProperty(value, "text", { get() { throw new Error("synthetic getter"); } }); }, "output_parse_unverified"],
   ];
-  for (const mutate of mutations) {
+  for (const [mutate, diagnosticCode] of mutations) {
     const observed = response();
     mutate(observed);
     assert.deepEqual(await adapter(async () => observed)({ requestId, sourceText }), {
-      status: "outcome_unknown", reason: "response_unverified", dispatchAuthorized: false,
+      status: "outcome_unknown", reason: "response_unverified",
+      diagnosticCode, dispatchAuthorized: false,
     });
   }
+});
+
+test("A11 records a confirmed strict-parser failure with complete bounded usage", async () => {
+  let calls = 0;
+  const observed = response();
+  observed.text = "not JSON";
+  const result = await adapter(async () => { calls++; return observed; })({ requestId, sourceText });
+  assert.equal(calls, 1);
+  const { intentToTerminalLatencyMs, ...receipt } = result;
+  assert.ok(Number.isInteger(intentToTerminalLatencyMs));
+  assert.deepEqual(receipt, {
+    status: "confirmed_failure", failureCode: "vnext_strict_parse_failure",
+    costUpperBoundMicroUsd: 160,
+    usage: { inputTokens: 200, outputTokens: 100, cachedInputTokens: 0,
+      cacheWriteInputTokens: 0, reasoningTokens: 10 },
+    cacheWriteInputTokens: 0, toolCallCount: 0, dispatchAuthorized: false,
+  });
 });
