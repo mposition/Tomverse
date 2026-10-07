@@ -12,28 +12,17 @@ import {
 } from "@/lib/adminReauthentication";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
   "@/lib/apiSecurity";
-import { approvePromptRefinerVnextOneShotRun } from
-  "@/lib/promptRefinerVnextOneShotRunApproval";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
-
-const DEFINITE_REFUSALS = new Set([
-  "vnext_one_shot_run_approval_context_invalid",
-  "vnext_one_shot_run_custody_pin_unavailable",
-  "vnext_one_shot_run_stage_not_ready",
-  "vnext_one_shot_run_binding_mismatch",
-  "vnext_one_shot_price_mismatch",
-]);
+import { preparePromptRefinerVnextOneShotStageBinding } from
+  "@/lib/promptRefinerVnextOneShotStageAdmission";
+import { createPromptRefinerVnextOneShotV5Stage } from
+  "@/lib/promptRefinerVnextOneShotV5StageWriter";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
 const sha = z.string().regex(/^[0-9a-f]{40}$/);
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
 const deploymentId = z.string().regex(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
-const V5 = "prompt-refiner-vnext-one-shot-v5";
-const V4_CONFIRMATION = "APPROVE_VNEXT_ONE_SHOT_RUN_80_SLOTS";
-const V5_CONFIRMATION = "APPROVE_VNEXT_ONE_SHOT_NEW_V5_RUN_80_SLOTS";
 const requestSchema = z.object({
-  stageId: z.literal(V5).optional(),
-  stageApprovalAuditLogId: z.string().min(1).max(128),
   sourceCommitSha: sha,
   sourceManifestDigest: digest,
   runnerDigest: digest,
@@ -41,12 +30,10 @@ const requestSchema = z.object({
   runtimeDeploymentId: deploymentId,
   runtimeCommitSha: sha,
   pricePinDigest: digest,
-  confirmation: z.enum([V4_CONFIRMATION, V5_CONFIRMATION]),
-}).strict().refine((value) => value.stageId === V5
-  ? value.confirmation === V5_CONFIRMATION
-  : value.confirmation === V4_CONFIRMATION);
+  confirmation: z.literal("APPROVE_VNEXT_ONE_SHOT_POST_UNKNOWN_NEW_V5_STAGE_ONLY"),
+}).strict();
 
-/** Separate owner approval after stage; never dispatches or calls a provider. */
+/** Owner-only v5 stage write. It never authorizes a run or provider call. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -69,33 +56,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden." }, { status: 403, headers });
     }
     await consumeApiRateLimit(request, session.user.id,
-      "admin-prompt-refiner-vnext-run-approval", { minute: 1, day: 3 });
-    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1") {
-      return NextResponse.json({ code: "RUN_WRITE_DISABLED" },
+      "admin-prompt-refiner-vnext-v5-stage-approval", { minute: 1, day: 3 });
+    if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED !== "1") {
+      return NextResponse.json({ code: "V5_STAGE_WRITE_DISABLED" },
         { status: 409, headers });
     }
     const body = await readLimitedJson(request, 2 * 1024, requestSchema);
-    const { confirmation: _confirmation, stageId, ...expected } = body;
-    void _confirmation;
-    const result = await approvePromptRefinerVnextOneShotRun({
-      session, request, expected, stageId,
+    const binding = await preparePromptRefinerVnextOneShotStageBinding(body, "v5");
+    const result = await createPromptRefinerVnextOneShotV5Stage({
+      session, request, binding,
     });
-    return NextResponse.json({
-      stageId: result.stageId,
-      runApprovalAuditLogId: result.runApprovalAuditLogId,
-      dispatchAuthorized: false,
-    }, { status: 201, headers });
+    return NextResponse.json(result, { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    if (error instanceof Error && DEFINITE_REFUSALS.has(error.message)) {
-      return NextResponse.json({ code: "RUN_APPROVAL_REFUSED",
-        retryAuthorized: false }, { status: 409, headers });
-    }
-    return NextResponse.json({ code: "RUN_APPROVAL_OUTCOME_UNKNOWN",
+    return NextResponse.json({ code: "V5_STAGE_APPROVAL_OUTCOME_UNKNOWN",
       retryAuthorized: false, humanReviewRequired: true },
       { status: 503, headers });
   }

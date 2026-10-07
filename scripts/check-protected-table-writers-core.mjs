@@ -1105,6 +1105,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The v4 one-shot recovery migration reads linked historical audit rows and counts forbidden audit actions in schema-qualified SELECTs. Its DDL replaces stage guards and creates a v4 guard; it never inserts, updates, or deletes AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 6,
+    reason:
+      "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
@@ -1162,6 +1170,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 12,
     reason:
       "Twelve dynamic SELECTs in the v4 recovery guards read fixed historical stages, slots and audit rows through TG_TABLE_SCHEMA quoted with %I. The linked audit IDs are bound with USING; the functions pin search_path to pg_catalog and pg_temp. All statements only read or lock, and none writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
+    count: 6,
+    reason:
+      "Six dynamic SELECTs in the v5 stage guard lock or read the fixed v4 stage, count its slots and terminal/recovery audits, and read the linked recovery and stop audit rows. Each uses TG_TABLE_SCHEMA quoted with %I, the variable stop ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
   },
   {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
