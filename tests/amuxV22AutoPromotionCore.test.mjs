@@ -31,6 +31,10 @@ test("v22 tick maps receipts and refusals to the orchestrator v20 wire contract"
     reason: "outcome_unknown", receiptId: "uncertain" }), {
     status: 409, body: { promoted: false, reason: "outcome_unknown", expired: 0 },
   });
+  assert.equal(amuxV22TickWireResult({ promoted: false,
+    reason: "audit_key_missing" }).status, 503);
+  assert.equal(amuxV22TickWireResult({ promoted: false,
+    reason: "audit_unbound" }).status, 500);
   const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
   assert.match(route, /const wire = amuxV22TickWireResult\(result\)/);
   assert.match(route, /reason: "apply_disabled", expired: 0/);
