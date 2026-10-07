@@ -20,6 +20,7 @@ const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_unknown_close_conflict",
 ]);
 const bodySchema = z.object({
+  stageId: z.literal("prompt-refiner-vnext-one-shot-v5").optional(),
   requestId: z.string().regex(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
   slotIndex: z.number().int().min(0).max(79),
   runApprovalAuditLogId: z.string().min(1).max(128),

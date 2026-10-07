@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 import { build, version as esbuildVersion } from "esbuild";
+import { builtinOnlyRequireBanner } from
+  "./prompt-refiner-vnext-one-shot-runner-banner.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const version = "0.1.0-candidate.3";
@@ -58,7 +60,7 @@ const bundle = await build({
   alias: { "@": root },
   packages: "bundle",
   legalComments: "inline",
-  banner: { js: `/* eslint-disable */\n// ${name}; candidate only.\n` },
+  banner: { js: `/* eslint-disable */\n// ${name}; candidate only.\n${builtinOnlyRequireBanner}\n` },
   write: false,
   metafile: true,
   logLevel: "silent",

@@ -332,6 +332,17 @@ test("a migration that creates only a function names that function", async () =>
   assert.deepEqual(presenceDeclarationIn(sql), { kind: "function", function: created });
 });
 
+test("the B07 v5 stage guard is detectable before migration deployment", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS,
+    "20261006160000_prompt_refiner_one_shot_post_unknown_v5", "migration.sql"),
+  "utf8");
+  const created = /CREATE FUNCTION "([a-z0-9_]+)"\(/.exec(sql)?.[1];
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function", function: created,
+  });
+});
+
 test("the AMUX chunk deadline migration pins the exact previous function body", async () => {
   const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
   const sql = readFileSync(
