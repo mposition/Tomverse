@@ -20,12 +20,15 @@ export type IdeaOnlyTransferPreviewRequest = {
   reasoningEffort: "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
   approvalId: string;
   approvalVersion: number;
+  /** v1 omitted this field. v2 binds a later, owner-reviewed output page. */
+  chunkIndex?: number;
 };
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
 const FIELDS = ["version", "previewId", "ideaId", "provider", "modelId",
   "reasoningEffort", "approvalId", "approvalVersion"];
+const CONTINUATION_FIELDS = [...FIELDS, "chunkIndex"];
 
 export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
   | { ok: true; request: IdeaOnlyTransferPreviewRequest }
@@ -39,9 +42,13 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
     return { ok: false, code: "schema_rejected" };
   }
   const value = parsed as Record<string, unknown>;
-  if (Object.keys(value).length !== FIELDS.length ||
-      !FIELDS.every((field) => Object.hasOwn(value, field)) ||
-      value.version !== 1 ||
+  const initial = value.version === 1;
+  const expected = initial ? FIELDS : CONTINUATION_FIELDS;
+  if ((value.version !== 1 && value.version !== 2) ||
+      Object.keys(value).length !== expected.length ||
+      !expected.every((field) => Object.hasOwn(value, field)) ||
+      (!initial && (!Number.isSafeInteger(value.chunkIndex) ||
+        Number(value.chunkIndex) < 1 || Number(value.chunkIndex) >= 2_147_483_647)) ||
       typeof value.previewId !== "string" || !isAmuxIdeaRequestId(value.previewId) ||
       typeof value.ideaId !== "string" || !isAmuxIdeaRequestId(value.ideaId) ||
       (value.provider !== "openai" && value.provider !== "anthropic") ||
@@ -56,5 +63,6 @@ export function inspectIdeaOnlyTransferPreviewRequest(raw: string):
     provider: value.provider, modelId: value.modelId,
     reasoningEffort: value.reasoningEffort as IdeaOnlyTransferPreviewRequest["reasoningEffort"],
     approvalId: value.approvalId, approvalVersion: value.approvalVersion as number,
+    chunkIndex: initial ? 0 : value.chunkIndex as number,
   } };
 }

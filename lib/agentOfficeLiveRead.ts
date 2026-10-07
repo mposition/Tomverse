@@ -16,7 +16,12 @@
 
 import "server-only";
 
-import type { AgentOfficeLiveRooms, AgentOfficeResearchState } from "@/lib/agentOffice/live";
+import type {
+  AgentOfficeLiveRooms,
+  AgentOfficeQaState,
+  AgentOfficeResearchState,
+} from "@/lib/agentOffice/live";
+import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { prisma } from "@/lib/prisma";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
@@ -25,6 +30,7 @@ import {
   latestProductResearchSuccess,
 } from "@/lib/productResearchObservationStore";
 import { slotForInstant } from "@/lib/productResearchObservationRunnerCore.mjs";
+import { QA_RELEASE_ROUTE_SECRET_ENV } from "@/lib/qaReleaseRouteAuthCore";
 
 const parseInstant = (value: string | null | undefined) => {
   if (!value) return null;
@@ -65,6 +71,47 @@ async function readResearch(now: Date): Promise<AgentOfficeResearchState> {
   }
 }
 
+/**
+ * QA and release: the newest control revision's number and switch, when the
+ * newest digest was stored, and whether the merge lane is latched. The digest
+ * body is not selected -- the office says whether a digest arrived, never
+ * what it says.
+ */
+async function readQa(): Promise<AgentOfficeQaState> {
+  try {
+    const [control, latest, latch] = await Promise.all([
+      prisma.qaReleaseOperatorControl.findFirst({
+        orderBy: { revision: "desc" },
+        select: { revision: true, digestEnabled: true },
+      }),
+      prisma.agentDigestItem.findFirst({
+        where: { agentKey: "qa-release" },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+      prisma.qaReleaseMergeLaneLatch.findFirst({
+        orderBy: { sequence: "desc" },
+        select: { latched: true },
+      }),
+    ]);
+    return agentOfficeQaState({
+      // Usable means the same 32-character floor the monitor applies; the
+      // value is never read beyond its length.
+      digestSecretConfigured: (process.env[QA_RELEASE_ROUTE_SECRET_ENV.digest] ?? "").length >= 32,
+      control,
+      latestDigestAt: latest?.createdAt ?? null,
+      mergeLaneLatched: latch?.latched === true,
+      // Taken after the reads: a digest stored while they ran must not be
+      // dated after the clock it is judged against.
+      now: new Date(),
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "qa_release" });
+    return { kind: "unread" };
+  }
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  return { readAt: now.toISOString(), research: await readResearch(now) };
+  const [research, qa] = await Promise.all([readResearch(now), readQa()]);
+  return { readAt: now.toISOString(), research, qa };
 }

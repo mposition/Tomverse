@@ -428,6 +428,12 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-05, AMUX v4 settlement: four more scoped actions are added to the
 // same audit helper. The 228-entry count and position-free inventory still
 // match origin/develop; only source positions moved.
+// 2026-10-07, AMUX v22 worker claim: one named system actor shifts positions
+// in the already-reviewed audit module. The 228-entry count and position-free
+// inventory still match; this repins positions only.
+// 2026-10-07, AMUX v22 integration: the webhook pipeline fingerprint note in
+// marketingAutomationAccess.ts shifts positions of its existing computed
+// accesses. The count and position-free digest remain unchanged.
 // 2026-10-07, A06 analysis claim, result and retention actions extend that
 // helper again. The position-free 228-entry inventory is unchanged; only
 // source line positions in the reviewed closure move.
@@ -435,6 +441,10 @@ const compilerOptions = parsedConfig.options;
 // `lib/marketingAutomationAccess.ts` gains a note, above that file's seven
 // accesses, for `lib/deploymentEnvironment.ts` listing `dev`. No access is
 // added; count 228 and the position-free inventory are unchanged.
+// 2026-10-07, A12 merge: the A09/A12 notes and shared audit-helper lines
+// move source positions only; count 228 and position-free digest stay fixed.
+// 2026-10-07, A15 merge: the same 228 computed accesses retain their
+// position-free digest; A13-A15 additions move reviewed source positions.
 // 2026-10-07, AMUX Decision Maker switch store (S1b): three actor names join
 // the existing line of `SYSTEM_AUDIT_ACTORS` in `lib/adminAuditSystemActors.ts`
 // and their array is declared at the end of that file, so none of its
@@ -445,8 +455,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a13e5ce9d1d41d0af5ef233edb05ff0a",
-  "bc475816e144d8909910d12a8e4db128",
+  "c2722e4fbc2a062b36d807ccc0a770be",
+  "62cb36833e62ba24ca774b0358040e7f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

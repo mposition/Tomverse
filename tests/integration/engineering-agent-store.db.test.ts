@@ -38,6 +38,7 @@ import {
   settleEngineeringAgentWorkItem,
 } from "@/lib/engineeringAgentStore";
 import { readEngineeringAgentLastLook } from "@/lib/engineeringAgentLastLook";
+import { openEngineeringAgentV22Product } from "@/lib/engineeringAgentV22ProductStore";
 import { runIdempotentEngineeringAgentRequest } from "@/lib/engineeringAgentRouteAuth";
 import { prisma } from "@/lib/prisma";
 
@@ -256,6 +257,49 @@ const commitFields = (runId: string, cardRef: string) => ({
   baseCommitterDate: "1759000000 +1000",
   runId,
   cardRef,
+});
+
+test("v22 publish and its capability commit together, or neither commits", async () => {
+  const run = await startRun();
+  const patch = { text: "patch", sha256: sha256("patch"), baseSha: sha1("base") };
+  const product = await inTx((tx) => openEngineeringAgentV22Product(tx, {
+    runId: run.runId, taskId: run.cardId, patch, publish: true,
+    candidate: { expectedTreeId: sha1("tree"),
+      baseCommitterDate: "1759000000 +1000" },
+  }));
+  assert.equal(product.kind, "publish");
+  const capability = await prisma.engineeringAgentCapability.findFirstOrThrow({
+    where: { unconsumedWorkItemId: product.id },
+  });
+  assert.equal(capability.consumedAt, null);
+  const claim = await inTx((tx) => claimEngineeringAgentWorkItem(tx, {
+    workItemId: product.id, mode: "write", leaseMs: 60_000,
+  }));
+  const bound = await settleAndBind(product.id, claim.fencingToken, run.runId);
+  await inTx((tx) => endEngineeringAgentRun(tx, {
+    runId: run.runId, amuxAttemptId: run.amuxAttemptId,
+    outcome: "t1_queued", halt: "none",
+  }));
+  await retireBinding(bound.bindingId);
+
+  const rejectedRun = await startRun();
+  await assert.rejects(
+    inTx((tx) => openEngineeringAgentV22Product(tx, {
+      runId: rejectedRun.runId, taskId: rejectedRun.cardId,
+      patch, publish: true,
+      candidate: { expectedTreeId: sha1("tree"),
+        baseCommitterDate: "1759000000 +1000" },
+    }, { open: openEngineeringAgentWorkItem,
+      issue: async () => { throw new Error("injected_capability_failure"); } })),
+    /injected_capability_failure/,
+  );
+  assert.equal(await prisma.engineeringAgentWorkItem.count({
+    where: { causeKey: `publish:${rejectedRun.runId}` },
+  }), 0);
+  await inTx((tx) => endEngineeringAgentRun(tx, {
+    runId: rejectedRun.runId, amuxAttemptId: rejectedRun.amuxAttemptId,
+    outcome: "no_change", halt: "none",
+  }));
 });
 
 test("a publish consumes its one capability on the write claim, and settles where the core says", async () => {

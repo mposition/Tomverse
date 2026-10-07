@@ -449,9 +449,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
     tableMentions: 3,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
-      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the sixteen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose.",
+      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the seventeen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose, including the read-only v22 run lock.",
   },
   {
     path: "lib/marketingStore.ts",
@@ -566,6 +566,38 @@ export const RAW_SQL_ALLOWLIST = [
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
   },
   {
+    path: "prisma/migrations/20261005100000_amux_v4_derivation_groups/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 33,
+    reason:
+      "The derivation group has a restrictive audit foreign key and its insert guard SELECTs the exact owner audit row under a share lock. Every write verb in this migration creates or constrains derivation tables; none inserts, updates or deletes AdminAuditLog. The canonical audit is written by lib/adminAudit.ts in the same transaction.",
+  },
+  {
+    path: "prisma/migrations/20261005110000_amux_v4_portfolio_scoring/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 35,
+    reason:
+      "The portfolio assessment and score tables each have a restrictive AdminAuditLog foreign key and an INSERT guard that SELECTs the exact actor, action, target and chain hash under a share lock. The migration writes only its new tables and triggers; it never inserts, updates or deletes AdminAuditLog. Both application writers call writeAdminAuditLog in the same transaction.",
+  },
+  {
+    path: "prisma/migrations/20261006100000_amux_v22_auto_promotion/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 32,
+    reason:
+      "The v22 evidence tables hold restrictive audit foreign keys and the receipt guard reads the exact canonical system audit row and its hash before accepting a Task pointer. The migration does not insert, update or delete AdminAuditLog; the application writes it through lib/adminAudit.ts in the promotion transaction.",
+  },
+  {
+    path: "prisma/migrations/20261006110000_amux_v22_worker_assignment/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 32,
+    reason:
+      "The A13 lane and assignment tables hold restrictive audit foreign keys. Deferred guards only read the canonical human or system audit row and its hash before accepting a lane or worker pointer. This migration never inserts, updates or deletes AdminAuditLog; its only audit writers use lib/adminAudit.ts in the same transaction.",
+  },
+  {
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,
@@ -668,7 +700,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 19,
+    writeVerbs: 20,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -921,7 +953,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentWorkItem",
     tableMentions: 7,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
@@ -929,7 +961,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentCapability",
     tableMentions: 5,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
@@ -937,17 +969,17 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentBinding",
     tableMentions: 2,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRun",
-    tableMentions: 4,
-    writeVerbs: 16,
+    tableMentions: 6,
+    writeVerbs: 17,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "lib/supportTriageRetention.ts",
@@ -996,6 +1028,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 76,
     reason:
       "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the closed EngineeringAgentRun outcome CHECK to admit private_result. It does not write rows or change guard triggers; the exact SQL counts remain pinned.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
@@ -1148,6 +1188,46 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 10,
     reason:
       "The v4 one-shot recovery migration reads linked historical audit rows and counts forbidden audit actions in schema-qualified SELECTs. Its DDL replaces stage guards and creates a v4 guard; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005040000_amux_v4_registration_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The v4 registration consistency triggers read two already-written canonical audit rows at COMMIT. Their write verbs define guards for AmuxIdeaUnitDecision and AmuxWorkItem; they never write AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005050000_amux_v4_task_cost_catalog_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "The Task price-catalog migration reads approval and revocation audit rows in its immutable catalog guard. Its write verbs create and protect AmuxV4TaskCostCatalogApproval only; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005060000_amux_v4_rejection_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred rejection guard reads the already-written canonical consume audit and checks the matching rejected draft at COMMIT. Its trigger creation writes no AdminAuditLog rows.",
+  },
+  {
+    path: "prisma/migrations/20261005070000_amux_v4_node_link_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred node-link guard reads a prior canonical human consume audit and checks its approved draft and v4 target. It creates no AdminAuditLog rows.",
+  },
+  {
+    path: "prisma/migrations/20261005080000_amux_v4_card_link_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred card-link guard only reads the canonical human consume audit and checks the approved draft and target card. It creates no AdminAuditLog rows.",
   },
   {
     path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",

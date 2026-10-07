@@ -108,16 +108,23 @@ card, "SIMULATION" and "SIM CLOCK" where the original said real-time. Its
 approve button advances the demo and nothing else; there is no publish link.
 The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record, and a team with no such page
-is drawn as waiting on a link instead of being given a status. A LIVE room
-reads that team's operating state on the server and the demo leaves it
-alone: for product research, the app switch, the latest scheduled slot
-(recorded, failed, or not yet, and whether its window is open), the newest
-success and the agent's own silence verdict, all in UTC -- never its
-observations, which
+is drawn as waiting on a link instead of being given a status; a linked team
+the demo day has no script for stays waiting rather than being reported as
+done. A LIVE room reads that team's operating state on the server and the
+demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
+one the operator calls), and its staff say only the record's line. For product research that is the app
+switch, the latest scheduled slot (recorded, failed, or not yet, and whether
+its window is open), the newest success and the agent's own silence verdict,
+all in UTC -- never its observations, which
 `docs/policy/product-research-agent.md §4` and
-`docs/policy/product-research-agent.md §8` keep to its own section.
-That read is read-only (it looks the silence anchor up rather than creating
-it), and a read that fails is drawn as unread, never as a state
+`docs/policy/product-research-agent.md §8` keep to its own section. For QA
+and release it is the agent's own digest freshness verdict
+(`lib/qaReleaseDigestFreshnessCore.ts`, with the digest secret seen only as a
+length), when the newest digest was stored, the operator control revision and
+whether the merge lane is latched -- never what a digest says, which
+`docs/policy/qa-release-agent.md §4` keeps to the common digest area.
+Those reads are read-only (the silence anchor is looked up rather than
+created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
 `tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
 and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it

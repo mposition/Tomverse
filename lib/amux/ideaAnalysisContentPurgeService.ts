@@ -48,9 +48,12 @@ export async function commitAmuxDueTransferPayloadPurge(tx: Prisma.TransactionCl
   `;
   const row = await tx.amuxIdeaTransferPreview.findUnique({ where: { id: previewId } });
   const now = await dbNow(tx);
+  const unused = row && ["prepared", "confirmed", "provider_failed"]
+    .includes(row.state);
+  const dueAt = row && (unused ? row.expiresAt : row.payloadPurgeAfter);
   if (!row || row.ideaId !== found.ideaId || row.payloadCiphertext === null ||
       row.payloadPurgedAt !== null || !row.payloadPurgeAfter ||
-      now < row.payloadPurgeAfter) return "skipped";
+      !dueAt || now < dueAt) return "skipped";
   const idea = await tx.amuxIdeaSubmission.findUnique({
     where: { id: row.ideaId },
     select: { state: true, analysisDeadlineAt: true },
@@ -68,7 +71,9 @@ export async function commitAmuxDueTransferPayloadPurge(tx: Prisma.TransactionCl
   const changed = await tx.amuxIdeaTransferPreview.updateMany({
     where: { id: previewId, ideaId: row.ideaId,
       payloadCiphertext: { not: null }, payloadPurgedAt: null,
-      payloadPurgeAfter: { lte: now } },
+      OR: [{ state: { in: ["prepared", "confirmed", "provider_failed"] },
+        expiresAt: { lte: now } },
+      { payloadPurgeAfter: { lte: now } }] },
     data: { payloadCiphertext: null, payloadKeyId: null,
       payloadKeyVersion: null, payloadPurgedAt: now },
   });
@@ -202,15 +207,19 @@ export async function purgeDueAmuxAnalysisContent() {
   const [previews, chunks, units] = await Promise.all([
     prisma.amuxIdeaTransferPreview.findMany({
       where: { payloadCiphertext: { not: null }, payloadPurgedAt: null,
-        payloadPurgeAfter: { lte: now[0].now },
-        OR: [{ state: { not: "in_flight" } },
-          { idea: { OR: [{ state: { not: "analyzing" } },
-            { analysisDeadlineAt: { lte: now[0].now } }] } }],
+        AND: [
+          { OR: [{ state: { in: ["prepared", "confirmed", "provider_failed"] },
+            expiresAt: { lte: now[0].now } },
+          { payloadPurgeAfter: { lte: now[0].now } }] },
+          { OR: [{ state: { not: "in_flight" } },
+            { idea: { OR: [{ state: { not: "analyzing" } },
+              { analysisDeadlineAt: { lte: now[0].now } }] } }] },
+        ],
         idea: { retentionHolds: { none: { releasedAt: null,
           expiresAt: { gt: now[0].now } } } } },
       orderBy: [{ payloadPurgeAfter: "asc" }, { id: "asc" }],
-      take: BATCH_SIZE, select: { id: true, ideaId: true,
-        payloadPurgeAfter: true },
+      take: BATCH_SIZE, select: { id: true, ideaId: true, state: true,
+        expiresAt: true, payloadPurgeAfter: true },
     }),
     prisma.amuxIdeaAnalysisChunk.findMany({
       where: { freeformCiphertext: { not: null }, freeformPurgedAt: null,
@@ -236,7 +245,9 @@ export async function purgeDueAmuxAnalysisContent() {
   const due: Due[] = [
     ...previews.filter((row) => row.payloadPurgeAfter).map((row) => ({
       target: { ideaId: row.ideaId, purpose: "transfer_payload" as const,
-        subjectId: row.id }, dueAt: row.payloadPurgeAfter!,
+        subjectId: row.id },
+      dueAt: ["prepared", "confirmed", "provider_failed"].includes(row.state)
+        ? row.expiresAt : row.payloadPurgeAfter!,
       apply: (tx: Prisma.TransactionClient) =>
         commitAmuxDueTransferPayloadPurge(tx, row.id),
     })),

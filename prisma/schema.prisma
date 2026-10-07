@@ -2277,6 +2277,14 @@ model AdminAuditLog {
   amuxV4RetentionHoldApprovals AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldApprovalAudit")
   amuxV4RetentionHoldReleases AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldReleaseAudit")
   amuxV4RetentionHoldNotices AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldNoticeAudit")
+  amuxV4DerivationGroups AmuxIdeaDerivationGroup[] @relation("AmuxV4DerivationApprovalAudit")
+  amuxPortfolioAssessments AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentAudit")
+  amuxPortfolioScoreSnapshots AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreSnapshotAudit")
+  amuxV22PromotionControls AmuxV22PromotionControl[] @relation("AmuxV22PromotionControlAudit")
+  amuxV22PromotionReceipts AmuxV22PromotionReceipt[] @relation("AmuxV22PromotionReceiptAudit")
+  amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
+  amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
+  amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
   amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
 
   /// No actor relation on purpose: see
@@ -7109,6 +7117,8 @@ model AmuxWorkItem {
   executionBriefDigest  String?
   /// Only new admin-idea-v4 cards use these fields. Existing rows remain NULL.
   cardType              String?
+  /// For v4 Stories only: Bug is a Story subtype, not an executable card.
+  storyKind             String?
   parentFeatureNodeId   String?
   parentStoryCardId     String?
   v4TitleCiphertext     Bytes?
@@ -7116,6 +7126,12 @@ model AmuxWorkItem {
   v4TitleKeyVersion     Int?
   v4TitleDigest         String?
   v4TitleDigestKeyId    String?
+  v4BodyCiphertext      Bytes?
+  v4BodyKeyId           String?
+  v4BodyKeyVersion      Int?
+  v4BodyDigest          String?
+  v4BodyDigestKeyId     String?
+  v4BodyPurgedAt        DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
   v4BriefKeyVersion     Int?
@@ -7124,7 +7140,8 @@ model AmuxWorkItem {
   v4BriefPurgedAt       DateTime?
   v4TerminalAt          DateTime?
   v4SourceApprovalId    String?
-  v22ReceiptId          String?   @unique
+  v22ReceiptId          String?   @unique @db.Uuid
+  v22AssignmentId       String?   @unique @db.Uuid
   taskRole              String?
   executionGrade        String?
   createdAt             DateTime  @default(now())
@@ -7137,6 +7154,8 @@ model AmuxWorkItem {
   amuxV4RegisteredDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionRegisteredCard")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedCard")
   executionAttempts AmuxExecutionAttempt[]
+  v22TaskResults    AmuxV22TaskResult[]
+  v22TaskPatches    AmuxV22TaskPatch[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -7157,6 +7176,13 @@ model AmuxWorkItem {
   parentFeatureNode AmuxPortfolioNode? @relation(fields: [parentFeatureNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   parentStoryCard   AmuxWorkItem?       @relation("AmuxStoryTasks", fields: [parentStoryCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   storyChildTasks   AmuxWorkItem[]      @relation("AmuxStoryTasks")
+  portfolioAssessments AmuxPortfolioAssessment[]
+  portfolioScoreSnapshots AmuxPortfolioScoreSnapshot[]
+  v22PromotionReceipt AmuxV22PromotionReceipt? @relation("AmuxV22PromotionCard")
+  v22AcceptedReceipt AmuxV22PromotionReceipt? @relation("AmuxV22AcceptedReceipt", fields: [v22ReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22Assignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentCard")
+  v22AcceptedAssignment AmuxV22WorkerAssignment? @relation("AmuxV22AcceptedAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22LaneDecisions AmuxV22LaneDecision[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -7219,6 +7245,11 @@ model AmuxExecutionAttempt {
   delivery          AmuxWorkDelivery?
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
+  cliUsageEvents    AmuxCliUsageEvent[]
+  v22TaskResult     AmuxV22TaskResult?
+  v22TaskPatch      AmuxV22TaskPatch?
+  v22AssignmentId   String? @unique @db.Uuid
+  v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, taskId])
   @@unique([taskId, attemptNumber])
@@ -7226,6 +7257,60 @@ model AmuxExecutionAttempt {
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
   engineeringAgentRun EngineeringAgentRun?
+}
+
+/// One encrypted, reviewable text result per v22 attempt. The sidecar keeps
+/// plaintext only in memory for a bounded transfer window; the journal keeps
+/// only a digest and cannot recreate the body after a sidecar restart.
+model AmuxV22TaskResult {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  sourceSha256    String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+  patch           AmuxV22TaskPatch?
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
+}
+
+/// A bounded patch candidate, not a publication grant. The Publisher may
+/// consume it only after independent app-side T1 verification.
+model AmuxV22TaskPatch {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  patchSha256     String
+  baseSha         String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+
+  result  AmuxV22TaskResult @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22TaskPatch_result_fkey")
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -7246,6 +7331,90 @@ model AmuxCostLedgerEntry {
   @@unique([attemptId, scope, resourceKey, kind])
   @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
   @@index([taskId, createdAt])
+}
+
+/// Content-free per-invocation CLI usage, not a bill or a user-credit entry.
+/// Missing observations remain NULL; no caller may turn them into zero.
+model AmuxCliUsageEvent {
+  id                         String   @id @default(cuid())
+  invocationId               String   @unique
+  receiptDigest              String
+  bindingKind                String
+  attemptId                  String?
+  analysisHoldId             String?
+  taskId                     String?
+  worker                     String
+  cli                        String
+  provider                   String
+  selectedModelId            String
+  actualModelId              String?
+  cliVersion                 String?
+  authentication             String
+  startedAt                  DateTime
+  endedAt                    DateTime
+  status                     String
+  completeness               String
+  source                     String
+  inputTokens                BigInt?
+  outputTokens               BigInt?
+  cacheReadInputTokens       BigInt?
+  cacheCreationInputTokens   BigInt?
+  reasoningOutputTokens      BigInt?
+  inputTokensIncludeCacheRead  Boolean
+  inputTokensIncludeCacheWrite Boolean?
+  reasoningOutputIncludedInOutput Boolean?
+  completedTurns             Int
+  pricingVersion             String?
+  projectedApiCostMicrousd   BigInt?
+  actualApiCostMicrousd      BigInt?
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  attempt      AmuxExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  analysisHold AmuxIdeaAnalysisBudgetHold? @relation(fields: [analysisHoldId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([worker, createdAt])
+  @@index([actualModelId, createdAt])
+  @@index([retentionUntil])
+}
+
+/// One immutable finalization witness for a closed UTC calendar year.
+/// It can contain zero published cells when all provider cohorts have <5 calls.
+model AmuxCliUsageAggregateCohort {
+  cohortYear     Int      @id
+  publishedCells Int
+  createdAt      DateTime @default(now())
+  retentionUntil DateTime
+  cells          AmuxCliUsageAggregate[]
+
+  @@index([retentionUntil])
+}
+
+/// A non-overlapping, k>=5 long-term cell. No card, task, run, attempt,
+/// worker identity, invocation ID, prompt, or secret is retained here.
+model AmuxCliUsageAggregate {
+  id                         String   @id
+  cohortYear                 Int
+  provider                   String
+  grain                      String
+  periodStart                DateTime @db.Date
+  model                      String?
+  role                       String?
+  calls                      Int
+  reportedCalls              Int
+  inputTokens                BigInt
+  outputTokens               BigInt
+  cacheReadInputTokens       BigInt
+  cacheCreationInputTokens   BigInt
+  projectedApiCostMicrousd   BigInt
+  projectedCalls             Int
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict, map: "AmuxCliUsageAggregate_cohort_fkey")
+
+  @@index([retentionUntil])
 }
 
 model AmuxHumanEscalation {
@@ -8860,12 +9029,15 @@ model AmuxIdeaSubmission {
   currentSourcePlanRevisionId String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  v22TaskResults      AmuxV22TaskResult[]
+  v22TaskPatches      AmuxV22TaskPatch[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
   confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
   chunks            AmuxIdeaAnalysisChunk[]
   draftUnits        AmuxIdeaDraftUnit[]
+  derivationGroups  AmuxIdeaDerivationGroup[]
   unitDecisions     AmuxIdeaUnitDecision[]
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
   contentKeyRetirements AmuxIdeaContentKeyRetirement[]
@@ -9127,6 +9299,7 @@ model AmuxIdeaAnalysisBudgetHold {
   window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_window_fkey")
   preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_preview_fkey")
   priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_priceVersion_fkey")
+  cliUsageEvents AmuxCliUsageEvent[]
 
   @@index([namespace, monthStart, status], map: "AmuxIdeaAnalysisBudgetHold_window_status_idx")
   @@index([priceVersionId])
@@ -9207,6 +9380,8 @@ model AmuxIdeaDraftUnit {
   localRef          String?
   unitKind          String
   state             String
+  /// Owner-authored split/merge output; null for model-authored units.
+  derivationGroupId String?
   expiresAt         DateTime
   bodyCiphertext    Bytes?
   bodyKeyId         String?
@@ -9222,6 +9397,9 @@ model AmuxIdeaDraftUnit {
   idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   decisions AmuxIdeaUnitDecision[]
+  derivationGroup AmuxIdeaDerivationGroup? @relation("AmuxV4DerivedDrafts", fields: [derivationGroupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDraftUnit_derivation_group_fkey")
+  derivationSources AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationSource")
+  derivationTargets AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationTarget")
 
   @@unique([ideaId, chunkIndex, unitIndex])
   @@unique([id, ideaId, actorUserId, chunkIndex])
@@ -9229,6 +9407,46 @@ model AmuxIdeaDraftUnit {
   @@index([actorUserId, ideaId])
   /// The due/expiry partial indexes live only in the SQL migration; Prisma
   /// schema cannot express their WHERE predicates.
+}
+
+/// Owner-approved split/merge provenance. Contains keyed commitments, never
+/// source or derived proposal text. One group may contain several edges.
+model AmuxIdeaDerivationGroup {
+  id                    String   @id
+  ideaId                String
+  actorUserId           String
+  requestId             String   @unique @db.Uuid
+  operation             String
+  sourceCount           Int
+  targetCount           Int
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  reasonDigest          String
+  reasonDigestKeyId     String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_idea_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxV4DerivationApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_audit_fkey")
+  derivedDrafts AmuxIdeaDraftUnit[] @relation("AmuxV4DerivedDrafts")
+  edges AmuxIdeaDerivationEdge[]
+
+  @@index([ideaId, actorUserId], map: "AmuxIdeaDerivationGroup_idea_actor_idx")
+}
+
+/// Immutable source-to-derived-unit edge; original proposal rows stay intact.
+model AmuxIdeaDerivationEdge {
+  id           String @id
+  groupId      String
+  sourceUnitId String
+  targetUnitId String
+
+  group AmuxIdeaDerivationGroup @relation(fields: [groupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_group_fkey")
+  source AmuxIdeaDraftUnit @relation("AmuxV4DerivationSource", fields: [sourceUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_source_fkey")
+  target AmuxIdeaDraftUnit @relation("AmuxV4DerivationTarget", fields: [targetUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_target_fkey")
+
+  @@unique([groupId, sourceUnitId, targetUnitId], map: "AmuxIdeaDerivationEdge_tuple_key")
+  @@index([targetUnitId], map: "AmuxIdeaDerivationEdge_target_idx")
 }
 
 /// One owner-confirmed decision on one v4 proposal unit. This additive table
@@ -9251,6 +9469,9 @@ model AmuxIdeaUnitDecision {
   unitDigestKeyId            String
   confirmationDigest         String
   confirmationDigestKeyId    String
+  /// Non-body owner-reviewed selection and cost receipt. Immutable after prepare;
+  /// the plaintext proposal and idea source are never copied here.
+  confirmationSnapshot       Json?
   sourcePreviewId            String
   sourcePreviewDigest        String
   sourcePreviewDigestKeyId   String
@@ -9332,6 +9553,7 @@ model AmuxPortfolioNode {
   amuxV4BaseDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionBaseNode")
   amuxV4ResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionResolvedNode")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedNode")
+  portfolioAssessments AmuxPortfolioAssessment[]
 
   @@index([parentId, level, state])
   @@index([level, state, createdAt])
@@ -9357,6 +9579,219 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
+/// Owner-confirmed evidence for one v4 hierarchy node or Story/Task. Model
+/// suggestions are not an authority: only an owner approval becomes a row.
+/// Evidence refs are opaque IDs; no source excerpt or explanation text lives here.
+model AmuxPortfolioAssessment {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  nodeId                String?
+  cardId                String?
+  subjectKind           String
+  subjectRevision       Int
+  subjectDigest         String
+  subjectDigestKeyId    String
+  assessmentVersion     Int
+  metrics               Json
+  uncertainty           String
+  evidenceRefs          Json
+  evidenceAsOf          DateTime
+  reasonCode            String
+  modelProposalDigest   String?
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  priorAssessmentId     String?  @db.Uuid
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  node AmuxPortfolioNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_node_fkey")
+  card AmuxWorkItem? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_card_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioAssessmentAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prior AmuxPortfolioAssessment? @relation("AmuxPortfolioAssessmentPrior", fields: [priorAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  successors AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentPrior")
+  initiativeScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreInitiative")
+  epicScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreEpic")
+  featureScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreFeature")
+  storyScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreStory")
+  taskScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreTask")
+
+  @@unique([nodeId, assessmentVersion], map: "AmuxPortfolioAssessment_node_version_key")
+  @@unique([cardId, assessmentVersion], map: "AmuxPortfolioAssessment_card_version_key")
+  @@index([nodeId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_node_approved_idx")
+  @@index([cardId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_card_approved_idx")
+  @@index([evidenceAsOf], map: "AmuxPortfolioAssessment_evidence_idx")
+}
+
+/// One owner-confirmed, append-only calculation from exact assessment rows.
+/// It has no status, SEV1, Todo, claim or execution authority.
+model AmuxPortfolioScoreSnapshot {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  taskId                String
+  taskRevision          Int
+  sourceApprovalId      String
+  initiativeAssessmentId String  @db.Uuid
+  epicAssessmentId      String   @db.Uuid
+  featureAssessmentId   String   @db.Uuid
+  storyAssessmentId     String?  @db.Uuid
+  taskAssessmentId      String   @db.Uuid
+  scoreVersion          String
+  scoreTotal            Int
+  components            Json
+  inputDigest           String
+  inputDigestKeyId      String
+  evidenceAsOf          DateTime
+  activeStaleAt         DateTime
+  baselineStaleAt       DateTime
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  computedAt            DateTime
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioScoreSnapshotAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22PromotionReceipts AmuxV22PromotionReceipt[]
+  initiativeAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreInitiative", fields: [initiativeAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  epicAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreEpic", fields: [epicAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  featureAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreFeature", fields: [featureAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  storyAssessment AmuxPortfolioAssessment? @relation("AmuxPortfolioScoreStory", fields: [storyAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  taskAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreTask", fields: [taskAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, computedAt(sort: Desc)], map: "AmuxPortfolioScoreSnapshot_task_computed_idx")
+  @@index([activeStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_active_idx")
+  @@index([baselineStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_baseline_idx")
+}
+
+/// Owner activation is separate from the v8 grant switch. No row is seeded.
+model AmuxV22PromotionControl {
+  id                      String   @id
+  active                  Boolean
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  activatedAt             DateTime
+  updatedAt               DateTime @updatedAt
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionControlAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Append-only evidence for one v4 Task's backlog-to-unassigned-todo move.
+/// It is not a worker claim, v8 grant, or authorization to run a CLI.
+model AmuxV22PromotionReceipt {
+  id                      String   @id @db.Uuid
+  workItemId              String   @unique
+  sourceApprovalId        String
+  sourceApprovalDigest    String
+  briefDigest             String
+  parentFeatureNodeId     String
+  parentStoryCardId       String?
+  taskRevision            Int
+  scoreSnapshotId         String   @db.Uuid
+  scoreVersion            String
+  scoreTotal              Int
+  capacityWipLimit        Int
+  capacityOccupied        Int
+  verifiedWorkerCount     Int
+  queueLimit              Int
+  normalLimit             Int
+  parallelReserved        Int
+  sev1Reserved            Int
+  costCents               Int
+  policyVersion           Int
+  authorizationAuditLogId String   @unique
+  promotedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22PromotionCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedReceipt")
+  scoreSnapshot AmuxPortfolioScoreSnapshot @relation(fields: [scoreSnapshotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionReceiptAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
+}
+
+/// A lost result is never blindly retried. The shared v8 halt still applies.
+model AmuxV22PromotionUnknown {
+  id                      String   @id @db.Uuid
+  workItemId              String?
+  receiptFound            Boolean
+  authorizationAuditLogId String   @unique
+  recordedAt              DateTime
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionUnknownAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([recordedAt])
+}
+
+/// Owner decisions are append-only. The latest sequence is the effective lane;
+/// normal clears a prior SEV1 or parallel declaration without rewriting it.
+model AmuxV22LaneDecision {
+  sequence                BigInt   @id @default(autoincrement())
+  workItemId              String
+  lane                    String
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  decidedAt               DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22LaneAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
+
+  @@index([workItemId, sequence])
+}
+
+/// A Todo assignment, not execution authority. A15 must establish its own
+/// attempt and execution-cost fence before any v4 Task can enter doing.
+model AmuxV22WorkerAssignment {
+  id                      String   @id @db.Uuid
+  workItemId              String
+  promotionReceiptId      String   @db.Uuid
+  laneDecisionSequence    BigInt?
+  lane                    String
+  taskRevision            Int
+  workerName              String
+  workerInstanceId        String
+  workerGeneration        Int
+  provider                String
+  modelId                 String
+  role                    String
+  grade                   String
+  routeId                 String
+  routePolicyDigest       String
+  catalogApprovalId       String
+  catalogVersion          String
+  costReceiptDigest       String
+  perAttemptMicroUsd      BigInt
+  authorizationAuditLogId String   @unique
+  assignedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22AssignmentCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedAssignment")
+  promotionReceipt AmuxV22PromotionReceipt @relation(fields: [promotionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  laneDecision AmuxV22LaneDecision? @relation(fields: [laneDecisionSequence], references: [sequence], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22AssignmentAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executionAttempt AmuxExecutionAttempt? @relation("AmuxV22ExecutionAssignment")
+
+  @@index([workItemId, assignedAt])
+}
+
+/// Owner-approved, versioned Agent worker/model ceiling inputs. These are
+/// separate from Chat pricing and user credit entitlement.
+model AmuxV4TaskCostCatalogApproval {
+  id                   String    @id
+  version              Int       @unique
+  status               String
+  catalogVersion       String    @unique
+  pricingVersion       String
+  catalog              Json
+  catalogDigest        String
+  evidenceDigest       String
+  approvedByUserId     String
+  approvalAuditLogId   String    @unique
+  approvedAt           DateTime
+  revokedAt            DateTime?
+  revocationAuditLogId String?   @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 }
 
 /// A person's support-triage decision (docs/policy/support-triage.md §5, §6):

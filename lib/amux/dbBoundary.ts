@@ -145,6 +145,12 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
+  deliveryKeyRead: {
+    operation: "delivery_key_read",
+    // setup + queued delivery + source metadata + read fence
+    prismaCallCeiling: 4,
+    isolation: "read",
+  },
   deliveryAck: {
     operation: "delivery_ack",
     prismaCallCeiling: 11,

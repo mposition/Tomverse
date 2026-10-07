@@ -49,6 +49,7 @@ const DECLARATION =
   /^--[ \t]*baseline-check:[ \t]*present-if-(relation|function)[ \t]+"([^"]*)"[ \t]*$/;
 const REPLACEMENT_DECLARATION =
   /^--[ \t]*baseline-check:[ \t]*replace-function-if-body-sha256[ \t]+"([^"]*)"[ \t]+"([0-9a-f]{64})"[ \t]*$/;
+const TEXT_FUNCTION_SIGNATURE = /^([A-Za-z_][A-Za-z0-9_]{0,62})\((text(?:,text){0,15})\)$/;
 
 /** The comment lines before the first statement; blank lines are skipped. */
 const headerLines = (sql) => {
@@ -66,7 +67,7 @@ const headerLines = (sql) => {
  * The object or replacement a migration declares, or why it declares none.
  *
  * `none`: no declaration in the header. `invalid`: more than one, or one that is
- * not exactly the form above with a plain identifier. Both mean the guard cannot
+ * not exactly the approved plain identifier or typed function signature. Both mean the guard cannot
  * prove this migration absent.
  */
 export const presenceDeclarationIn = (sql) => {
@@ -76,10 +77,12 @@ export const presenceDeclarationIn = (sql) => {
   if (declarations.length > 1) return { kind: "invalid" };
   const replacement = REPLACEMENT_DECLARATION.exec(declarations[0]);
   if (replacement) {
-    if (!RELATION_NAME.test(replacement[1])) return { kind: "invalid" };
+    const signature = TEXT_FUNCTION_SIGNATURE.exec(replacement[1]);
+    if (!RELATION_NAME.test(replacement[1]) && !signature) return { kind: "invalid" };
     return {
       kind: "function-replacement",
-      function: replacement[1],
+      function: signature?.[1] ?? replacement[1],
+      ...(signature ? { functionArgs: signature[2].split(",") } : {}),
       previousBodySha256: replacement[2],
     };
   }
@@ -110,18 +113,22 @@ export const functionPresenceQuery = (name) => ({
   rowMode: "array",
 });
 
-/** Read only the existing zero-argument trigger function body for a replacement. */
-export const functionBodyQuery = (name) => ({
-  text:
-    "SELECT p.prosrc FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 AND p.pronargs = 0 AND p.prorettype = 'pg_catalog.trigger'::regtype",
-  values: [name],
-  rowMode: "array",
-});
+/** Read only the exact existing function body for a replacement. */
+export const functionBodyQuery = (name, functionArgs = []) =>
+  functionArgs.length === 0 ? {
+    text:
+      "SELECT p.prosrc FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 AND p.pronargs = 0 AND p.prorettype = 'pg_catalog.trigger'::regtype",
+    values: [name], rowMode: "array",
+  } : {
+    text:
+      "SELECT p.prosrc FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 AND p.oid = pg_catalog.to_regprocedure($2)",
+    values: [name, `public."${name}"(${functionArgs.join(",")})`], rowMode: "array",
+  };
 
 /** The fixed question for one probe from `pendingProbes`. */
 export const presenceQueryFor = (probe) =>
   probe.previousBodySha256 !== undefined
-    ? functionBodyQuery(probe.function)
+    ? functionBodyQuery(probe.function, probe.functionArgs)
     : probe.function !== undefined
       ? functionPresenceQuery(probe.function)
       : presenceQuery(probe.relation);
@@ -165,6 +172,7 @@ export const pendingProbes = (pending, sqlOf) => {
       probes.push({
         name,
         function: declaration.function,
+        ...(declaration.functionArgs ? { functionArgs: declaration.functionArgs } : {}),
         previousBodySha256: declaration.previousBodySha256,
       });
     }

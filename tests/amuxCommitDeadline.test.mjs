@@ -84,6 +84,25 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261004190000_amux_v4_content_key_retirement",
   "20261004190100_amux_v4_retention_hold",
   "20261004190200_amux_v4_content_no_resurrection",
+  "20261005010000_amux_v4_story_kind",
+  // A09: immutable, non-body owner confirmation metadata.
+  "20261005030000_amux_v4_unit_confirmation_snapshot",
+  "20261005040000_amux_v4_registration_consistency",
+  "20261005050000_amux_v4_task_cost_catalog_approval",
+  "20261005060000_amux_v4_rejection_consistency",
+  "20261005070000_amux_v4_node_link_consistency",
+  "20261005080000_amux_v4_card_link_consistency",
+  "20261005090000_amux_v4_unit_actor_scope",
+  "20261005100000_amux_v4_derivation_groups",
+  "20261005110000_amux_v4_portfolio_scoring",
+  "20261005120000_amux_v4_task_dag_guard",
+  // A12: v22-only receipt and a separate, still-dark promotion gate.
+  "20261006100000_amux_v22_auto_promotion",
+  "20261006110000_amux_v22_worker_assignment",
+  "20261006130000_amux_cli_usage_event",
+  "20261006140000_amux_v22_execution_binding",
+  "20261006150000_amux_v22_task_result",
+  "20261006234000_amux_v22_task_patch",
   // AMUX Decision Maker policy version 1, S1b: the append-only switch events.
   "20261007130000_amux_decision_maker_switch",
 ]);
@@ -326,17 +345,24 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("only reviewed AMUX internal routes open their own bounded transactions", () => {
+test("only the named AMUX receipt and admission routes open direct transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The tasks route upserts catalog cards and records no execution success,
-  // so it has no deadline to keep and is outside the commit deadline check.
+  // The analysis admission routes predate A09 and own their explicit
+  // reconciliation contracts; the commit-deadline boundary still governs
+  // orchestration task execution.
+  assert.deepEqual(direct, [
+    "app/api/internal/amux/cli-usage/route.ts",
+    "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v22/execution/result/route.ts",
+    "app/api/internal/amux/v4/analysis-claim/route.ts",
+    "app/api/internal/amux/v4/analysis-result/route.ts",
+  ]);
+  // The analysis routes keep their writes dark and bound both write and
+  // receipt-read transactions independently of execution commit deadlines.
   const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
   const result = "app/api/internal/amux/v4/analysis-result/route.ts";
-  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts", claim, result]);
-  // The two analysis routes pre-load external content keys before the DB
-  // transaction, keep writes dark, and bound both write and receipt reads.
   for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
     const source = withoutComments(read(path));
     assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));

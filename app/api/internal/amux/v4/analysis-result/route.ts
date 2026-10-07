@@ -66,8 +66,30 @@ export async function POST(request: Request): Promise<Response> {
         where: { id: body.previewId }, select: { ideaId: true, chunkIndex: true },
       });
     } catch { return amuxJsonNoStore({ error: "key_preflight_unavailable" }, 503); }
-    if (!preview || preview.ideaId !== body.ideaId || preview.chunkIndex !== 0) {
+    if (!preview || preview.ideaId !== body.ideaId) {
       return amuxJsonNoStore({ error: "not_ready" }, 409);
+    }
+    let preceding: { currentPreviewId: string | null } | null = null;
+    let previousUnits: Array<{ id: string }> = [];
+    try {
+      if (preview.chunkIndex > 0) {
+        preceding = await prisma.amuxIdeaAnalysisChunk.findUnique({ where: {
+          ideaId_chunkIndex: { ideaId: body.ideaId,
+            chunkIndex: preview.chunkIndex - 1 },
+        }, select: { currentPreviewId: true } });
+        previousUnits = await prisma.amuxIdeaDraftUnit.findMany({ where: {
+          ideaId: body.ideaId, chunkIndex: preview.chunkIndex - 1,
+          derivationGroupId: null,
+        }, select: { id: true }, take: 41 });
+      }
+    } catch {
+      return amuxJsonNoStore({ error: "key_preflight_unavailable" }, 503);
+    }
+    if (preview.chunkIndex > 0 && !preceding?.currentPreviewId) {
+      return amuxJsonNoStore({ error: "not_ready" }, 409);
+    }
+    if (previousUnits.length > 40) {
+      return amuxJsonNoStore({ error: "integrity_unavailable" }, 409);
     }
     let count = 0;
     try {
@@ -78,7 +100,16 @@ export async function POST(request: Request): Promise<Response> {
     } catch { /* Invalid model output is settled as a failed invocation. */ }
     unitIds = Array.from({ length: count }, () => randomUUID());
     const existing: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
-      purpose: "transfer_payload", subjectId: body.previewId }];
+      purpose: "transfer_payload", subjectId: body.previewId },
+    ...(preceding?.currentPreviewId ? [{ ideaId: body.ideaId,
+      purpose: "analysis_freeform" as const,
+      subjectId: amuxAnalysisFreeformSubjectId(body.ideaId,
+        preceding.currentPreviewId) }] : []),
+    ...(preceding?.currentPreviewId ? [{ ideaId: body.ideaId,
+      purpose: "transfer_payload" as const,
+      subjectId: preceding.currentPreviewId }] : []),
+    ...previousUnits.map((unit) => ({ ideaId: body.ideaId,
+      purpose: "analysis_draft" as const, subjectId: unit.id }))];
     const created: AmuxContentKeyIdentity[] = [{ ideaId: body.ideaId,
       purpose: "analysis_freeform",
       subjectId: amuxAnalysisFreeformSubjectId(body.ideaId, body.previewId) },

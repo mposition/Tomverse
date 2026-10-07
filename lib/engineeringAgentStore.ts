@@ -45,6 +45,11 @@ import { z } from "zod";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  amuxV22EngineeringPublicationEnabled } from
+  "@/lib/amux/v22TaskExecutionCore";
+import { readAmuxV22PublicPrConsent } from
+  "@/lib/amux/v22PublicPrConsent";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
 import { REGISTRATION_CAPS } from "@/lib/engineeringAgentRegistrationGuard";
 import { decideMismatchAction, type MismatchAction } from "@/lib/engineeringAgentStateMismatch";
@@ -155,6 +160,21 @@ export async function runEngineeringAgentTransaction<T>(
  */
 export function engineeringAgentTransactionInAmux(tx: AmuxAttachedTransaction): EngineeringAgentTransaction {
   return tx as unknown as EngineeringAgentTransaction;
+}
+
+/** Read-lock the run while a v22 Task chooses its one private/public product.
+ * AMUX attempt and card locks must already be held in the cross lock order. */
+export async function lockEngineeringAgentV22Run(
+  tx: EngineeringAgentTransaction, attemptId: string,
+): Promise<{ id: string; cardId: string; baseSha: string;
+  status: string; modeAtStart: string } | null> {
+  const rows = await tx.$queryRaw<Array<{ id: string; cardId: string;
+    baseSha: string; status: string; modeAtStart: string }>>`
+    SELECT "id", "cardId", "baseSha", "status", "modeAtStart"
+    FROM "EngineeringAgentRun" WHERE "amuxAttemptId" = ${attemptId}
+    FOR UPDATE
+  `;
+  return rows[0] ?? null;
 }
 
 /** A write refused before it reached the database. The code is an enum, never text from outside. */
@@ -799,6 +819,23 @@ const lockWorkItem = async (tx: EngineeringAgentTransaction, id: string): Promis
   return rows[0] ?? refuse("work_item_not_found");
 };
 
+/** A v22 public-write permission is checked again before both issuing and
+ * consuming a capability. The code latch defaults closed independently of
+ * the older engineering-agent operating mode. */
+async function requireV22PublicationAllowed(
+  tx: EngineeringAgentTransaction, runId: string | null,
+): Promise<void> {
+  if (!runId) return;
+  const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId },
+    select: { cardId: true, card: { select: { sourceSystem: true } } },
+  });
+  if (run?.card.sourceSystem !== "admin-idea-v4") return;
+  if (!amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ||
+      !(await readAmuxV22PublicPrConsent(run.cardId, tx)))
+    refuse("v22_publication_disabled");
+}
+
 type LockedCapability = {
   id: string;
   verifierVersion: number;
@@ -891,6 +928,7 @@ export async function claimEngineeringAgentWorkItem(
   if (input.mode === "lookup") {
     context = { event: "claim", mode: "lookup", capabilityConsumed: false };
   } else if (kind === "publish") {
+    await requireV22PublicationAllowed(tx, item.runId);
     // A halt stops a write claim here, in the function that spends the
     // capability, and under the lock every halt is written under (§12).
     await lockEngineeringAgentHalt(tx);
@@ -991,6 +1029,8 @@ export async function claimNextEngineeringAgentPublishWork(
   // below checks again in the function that spends it. Lookups continue.
   await lockEngineeringAgentHalt(tx);
   const publishAllowed = switches.publishAllowed && !engineeringAgentHalted(await readEngineeringAgentHaltState(tx));
+  const v22PublicationEnabled = amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]);
   const now = await databaseNow(tx);
   const candidates = await tx.$queryRaw<Array<{ id: string; state: string }>>`
     SELECT w."id", w."state"
@@ -1000,6 +1040,12 @@ export async function claimNextEngineeringAgentPublishWork(
         w."state" IN ('needs_lookup', 'outcome_unknown')
         OR (
           ${publishAllowed} AND w."state" = 'queued'
+          AND (${v22PublicationEnabled} OR NOT EXISTS (
+            SELECT 1 FROM "EngineeringAgentRun" r
+            JOIN "AmuxWorkItem" card ON card."id" = r."cardId"
+            WHERE r."id" = w."runId"
+              AND card."sourceSystem" = 'admin-idea-v4'
+          ))
           AND EXISTS (
             SELECT 1 FROM "EngineeringAgentCapability" c
             WHERE c."unconsumedWorkItemId" = w."id" AND c."expiresAt" > ${now}
@@ -1176,6 +1222,7 @@ export async function issueEngineeringAgentCapability(
 ): Promise<{ capabilityId: string; commitDigest: string; expiresAt: Date }> {
   const item = await lockWorkItem(tx, input.workItemId);
   if (item.kind !== "publish" || item.state !== "queued") refuse("work_item_not_a_queued_publish");
+  await requireV22PublicationAllowed(tx, item.runId);
   if (item.patchDigest !== input.capability.patchDigest || item.baseSha !== input.capability.baseSha) {
     refuse("capability_does_not_match_item");
   }

@@ -238,6 +238,17 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // AMUX v4/v22 receipts, retention and patch boundaries must execute in CI.
+    "tests/integration/amuxCliUsageLedger.db.test.mjs",
+    "tests/integration/amuxCliUsageRetention.db.test.mjs",
+    "tests/integration/amuxCliUsageWriter.db.test.mjs",
+    "tests/integration/amuxV22AutoPromotion.db.test.mjs",
+    "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
+    "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4PortfolioScore.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the
     // idempotency prefix, rows born with their body, and the expiry and purge
     // that are the only update and delete.
@@ -364,6 +375,12 @@ run(
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
+    // v22 Task edges must equal the owner receipt and remain acyclic;
+    // pre-v4 cards retain their historical dependency behavior.
+    "tests/integration/amuxV4TaskDag.db.test.mjs",
+    // Keep A08's approved hierarchy/overlap catalog regression in the lane;
+    // the DB coverage guard found this pre-existing suite was never listed.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
     "tests/integration/amuxV4SourcePlan.db.test.mjs",
     "tests/integration/amux-v4-frontier-model.db.test.mjs",
     // Dark Frontier owner decisions must bind model eligibility, canonical
@@ -382,6 +399,12 @@ run(
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards are
+    // real DB contracts; they must run in the CI agent lane.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // sre-ops transition ledger: a row per advance in its own transaction, no
     // skipped generation, the signed audit entry's hash, append-only with
     // seven-year checkpoint-bound deletion, no late COMMIT.

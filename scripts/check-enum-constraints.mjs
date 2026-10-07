@@ -736,10 +736,27 @@ const REGISTRY = {
     reason:
       "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
   },
+  AmuxPortfolioAssessment_uncertainty_check: {
+    owner: "database",
+    reason:
+      "Owner-confirmed portfolio evidence has exactly low, medium or high uncertainty; the score uses the worst uncertainty across the hierarchy.",
+  },
+  AmuxPortfolioAssessment_reasonCode_check: {
+    owner: "database",
+    reason:
+      "The append-only portfolio assessment records why the operator entered a new evidence version or override; it never edits a prior score.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
+  },
+  AmuxV22LaneDecision_lane_check: {
+    owner: "list",
+    module: "lib/amux/v22WorkerClaimCore.ts",
+    list: "AMUX_V22_CLAIM_LANES",
+    reason:
+      "The owner-declared normal, parallel and SEV1 worker-assignment lanes are a closed v22 capacity contract. A fourth value must update the guard and owner route together.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",
