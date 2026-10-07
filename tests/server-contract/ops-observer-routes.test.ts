@@ -24,10 +24,10 @@ class TestApiSecurityError extends Error {
 }
 class TestLateError extends Error {}
 
-type Call = { fn: string; input: unknown };
+type Call = { fn: string; input: unknown; rest: unknown[] };
 const world: { calls: Call[]; next: unknown; throws: unknown } = { calls: [], next: null, throws: null };
-const storeFn = (fn: string) => async (input: unknown) => {
-  world.calls.push({ fn, input });
+const storeFn = (fn: string) => async (input: unknown, ...rest: unknown[]) => {
+  world.calls.push({ fn, input, rest });
   if (world.throws) throw world.throws;
   return world.next;
 };
@@ -81,7 +81,7 @@ beforeEach(() => {
 const deadline = () => new Date(Date.now() + 60_000).toISOString();
 const DELIVERY = "11111111-1111-4111-8111-111111111111";
 const bodies: Record<string, () => unknown> = {
-  state: () => ({ runDeadline: deadline() }),
+  state: () => ({ runDeadline: deadline(), ownerDate: "2026-10-07" }),
   confirm: () => ({ runDeadline: deadline(), deliveryId: DELIVERY, runId: "run-1" }),
   advance: () => ({
     runDeadline: deadline(),
@@ -123,10 +123,10 @@ test("a wrong bearer is 401, the digest service on advance and confirm is 403", 
 });
 
 test("an oversized or malformed body is refused before the store", async () => {
-  const big = await post("state", PAGE, JSON.stringify({ runDeadline: deadline(), pad: "x".repeat(17_000) }));
+  const big = await post("state", PAGE, JSON.stringify({ runDeadline: deadline(), ownerDate: "2026-10-07", pad: "x".repeat(17_000) }));
   assert.equal(big.status, 413);
   assert.deepEqual(await big.json(), { refused: "too_large" });
-  const late = await post("state", PAGE, { runDeadline: new Date(Date.now() - 1).toISOString() });
+  const late = await post("state", PAGE, { runDeadline: new Date(Date.now() - 1).toISOString(), ownerDate: "2026-10-07" });
   assert.deepEqual([late.status, await late.json()], [400, { refused: "deadline_invalid" }]);
   const extra = await post("confirm", PAGE, { ...(bodies.confirm() as object), status: "confirmed" });
   assert.deepEqual([extra.status, await extra.json()], [400, { refused: "shape" }]);
@@ -157,6 +157,12 @@ test("each route hands the store its parsed request and passes its answer throug
   world.calls = [];
   await post("state", PAGE);
   assert.ok((world.calls[0].input as Date) instanceof Date);
+  // The owner date reaches the store as the budget date (the client is the default).
+  assert.deepEqual(world.calls[0].rest, [undefined, "2026-10-07"]);
+  world.calls = [];
+  assert.equal((await post("state", PAGE, { runDeadline: deadline() })).status, 400);
+  assert.equal((await post("state", PAGE, { runDeadline: deadline(), ownerDate: "2026-02-30" })).status, 400);
+  assert.deepEqual(world.calls, []);
 });
 
 test("a late run is 409, and a failure is a 500 that logs no message", async () => {
