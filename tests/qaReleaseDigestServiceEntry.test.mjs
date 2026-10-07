@@ -64,3 +64,13 @@ test("run for real: switched off it exits 0 without running anything", { skip: p
   assert.equal(off.status, 0, off.stderr);
   assert.deepEqual(JSON.parse(off.stdout.trim().split("\n").pop()), { exitCode: 0, outcome: "disabled" });
 });
+
+test("the entry stops itself and its report child at the 15-minute hard timeout (policy section 10)", async () => {
+  const { QA_RELEASE_DIGEST_HARD_TIMEOUT_MS } = await import("../lib/qaReleaseDigestServiceCore.ts");
+  assert.equal(QA_RELEASE_DIGEST_HARD_TIMEOUT_MS, 15 * 60 * 1000);
+  assert.match(SOURCE, /const supervisor = setTimeout\(\(\) => \{[\s\S]*?process\.kill\(-pid, "SIGKILL"\)[\s\S]*?outcome: "hard_timeout"[\s\S]*?process\.exit\(1\);\s*\}, QA_RELEASE_DIGEST_HARD_TIMEOUT_MS\);/);
+  // Armed before any work starts, and every child is tracked until it closes.
+  assert.ok(SOURCE.indexOf("const supervisor = setTimeout") < SOURCE.indexOf("await runQaReleaseDigestService"));
+  assert.match(SOURCE, /activeChildren\.add\(child\.pid\)/);
+  assert.equal([...SOURCE.matchAll(/activeChildren\.delete\(child\.pid\)/g)].length, 2);
+});

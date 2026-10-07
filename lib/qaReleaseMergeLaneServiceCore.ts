@@ -26,7 +26,7 @@ import {
 } from "../scripts/merge-train-core.mjs";
 import { type QaReleaseExclusion, judgeQaReleaseMergeLaneExclusion, type QaReleaseExclusionInput } from "./qaReleaseMergeLaneExclusionCore.ts";
 import { type QaReleaseLanePullRequest, pickQaReleaseLaneCandidate } from "./qaReleaseMergeLaneCandidateCore.ts";
-import type { QaReleaseDeployObservation, QaReleaseMergeReport } from "./qaReleaseMergeLaneReportCore.ts";
+import { type QaReleaseDeployObservation, type QaReleaseMergeReport, qaReleaseDeployObservation } from "./qaReleaseMergeLaneReportCore.ts";
 import { judgeQaReleaseMergeLanding } from "./qaReleaseMergeLaneRoundCore.ts";
 import { decideQaReleaseServiceStart } from "./qaReleaseServiceEnvCore.ts";
 
@@ -104,19 +104,37 @@ export type QaReleaseMergeLaneRoundOutcome =
   | { exitCode: 0; outcome: "merged"; pullRequestNumber: number }
   | { exitCode: 1; outcome: "refused_to_start" | "state_unknown" | "report_not_recorded" | "candidates_unknown" };
 
+/**
+ * A service name in the report's closed form: characters outside it become
+ * "_", and a name that would not start with a letter or digit gets one.
+ */
+const observedServiceName = (name: string): string => {
+  const cleaned = name.replace(/[^A-Za-z0-9 ._-]/gu, "_");
+  return (/^[A-Za-z0-9]/.test(cleaned) ? cleaned : `s${cleaned}`).slice(0, 64);
+};
+
+/**
+ * What the lane saw, for the Admin screen only -- never the judgement, which
+ * deploymentOutcome makes from the raw list. Every entry is put in the
+ * report's closed form (lib/qaReleaseMergeLaneReportCore.ts), and an entry
+ * that still does not fit -- a Railway status outside the closed set -- is
+ * left out: the route refuses a whole report whose list does not validate,
+ * and a refused report would leave the attempt neither latched nor closed.
+ */
 const observationOf = (deployments: QaReleaseDeployment[], sha: string): QaReleaseDeployObservation[] =>
   deployments
     .filter((deployment) => (deployment.meta?.commitHash ?? "").toLowerCase() === sha.toLowerCase() || deployment.meta?.branch === "develop")
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     .filter((deployment, index, all) => all.findIndex((other) => other.serviceId === deployment.serviceId) === index)
-    .slice(0, 20)
     .map((deployment) => ({
-      service: deployment.serviceName.slice(0, 64),
+      service: observedServiceName(deployment.serviceName),
       status: deployment.status,
       commitSha: /^[0-9a-f]{40}$/.test((deployment.meta?.commitHash ?? "").toLowerCase())
         ? (deployment.meta?.commitHash ?? "").toLowerCase()
         : null,
-    }));
+    }))
+    .filter((entry) => qaReleaseDeployObservation([entry]) !== null)
+    .slice(0, 20);
 
 async function sendReport(ports: QaReleaseMergeLanePorts, attemptId: string, report: QaReleaseMergeReport, detail: string): Promise<QaReleaseMergeLaneRoundOutcome> {
   try {

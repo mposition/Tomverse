@@ -272,6 +272,21 @@ test("with the lane switch off (S-M1) the round names the pull request it would 
   for (const name of ["consume", "merge", "report"]) assert.equal(names(shadow.calls).includes(name), false, name);
 });
 
+test("a status or service name outside the report's closed form never stops the deploy report from being recorded", async () => {
+  const { qaReleaseDeployObservation } = await import("../lib/qaReleaseMergeLaneReportCore.ts");
+  const odd = { ...deployment("MIGRATING"), serviceId: "svc-odd", serviceName: "web" };
+  const named = { ...deployment("SUCCESS"), serviceName: "🚀 web/api (prod)" };
+  const run = ports({ state: awaiting(), deployments: [named, odd] });
+  await runQaReleaseMergeLaneRound(ENV, run.ports);
+  const [report] = reports(run.calls);
+  // The judgement comes from the raw list: an unknown status reads as unknown, which latches.
+  assert.equal(report.kind, "deploy");
+  assert.equal(report.outcome, "unknown");
+  // The observation the route validates holds only entries in its closed form.
+  assert.notEqual(qaReleaseDeployObservation(report.observation), null);
+  assert.deepEqual(report.observation, [{ service: "s_ web_api _prod_", status: "SUCCESS", commitSha: MERGE }]);
+});
+
 test("a merge refused because someone else merged it meanwhile is followed through the re-read, not closed as refused", async () => {
   const merged = ports({
     merge: { result: "refused" },
