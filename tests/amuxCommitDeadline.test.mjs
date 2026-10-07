@@ -81,6 +81,9 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261003110000_amux_v4_analysis_budget_total_check",
   "20261003120000_amux_v4_analysis_price_versions",
   "20261003130000_amux_v4_chunk_completion_deadline",
+  "20261004190000_amux_v4_content_key_retirement",
+  "20261004190100_amux_v4_retention_hold",
+  "20261004190200_amux_v4_content_no_resurrection",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -321,13 +324,24 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("no AMUX internal route opens its own transaction except the catalog tasks route", () => {
+test("only reviewed AMUX internal routes open their own bounded transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
   // The tasks route upserts catalog cards and records no execution success,
   // so it has no deadline to keep and is outside the commit deadline check.
-  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts"]);
+  const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
+  const result = "app/api/internal/amux/v4/analysis-result/route.ts";
+  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts", claim, result]);
+  // The two analysis routes pre-load external content keys before the DB
+  // transaction, keep writes dark, and bound both write and receipt reads.
+  for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
+    const source = withoutComments(read(path));
+    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));
+    assert.match(source, /maxWait: 5_000, timeout: 15_000/);
+    assert.match(source, /maxWait: 5_000, timeout: 10_000/);
+    assert.match(source, /callbackReturned = true/);
+  }
 });
 
 test("the push harnesses install the migration's own function and trigger, idempotently", () => {

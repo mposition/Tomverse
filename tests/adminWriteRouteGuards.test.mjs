@@ -82,6 +82,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/ideaCrypto.ts",
   "lib/amux/ideaInputCore.ts",
   "lib/amux/ideaKeyConfig.ts",
+  "lib/amux/ideaKeyStore.ts",
   "lib/amux/ideaSourceScopeCore.ts",
   SOURCE_SCOPE_CORE,
   SOURCE_SCOPE_SERVICE,
@@ -89,7 +90,7 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "0889238334dbed4afd78dde96f3205c82c1c5bd290726aab0899ff5e9353c37a";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "14fe6b44afea195aeba17384235f1208a1e67a3d3d608aad67e3b532172ed217";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map()) => {
