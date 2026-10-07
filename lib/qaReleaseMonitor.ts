@@ -57,8 +57,8 @@ const ALERT_LIMITS = QA_RELEASE_STALE_WRITE_LIMITS;
 /** Carries the late answer out of the transaction it rolls back (both writes). */
 class StaleAlertLate extends Error {}
 
-/** What a round found that needs an operator: closed names only. */
-export type QaReleaseAttentionReason = "control_mismatch" | "control_revision_mismatch";
+/** What a round or the digest intake found that needs an operator: closed names only. */
+export type QaReleaseAttentionReason = "control_mismatch" | "control_revision_mismatch" | "digest_conflict";
 
 /**
  * The daily alerts a round may queue. A round reaches at most one of them
@@ -149,6 +149,28 @@ async function enqueueDailyAlert(
     },
     { maxWait: 5_000, timeout: ALERT_LIMITS.prismaMs },
   );
+}
+
+/**
+ * The digest intake's needs-a-check alert (policy sections 6 and 7): a
+ * submission refused because it carried another operator control revision
+ * than the newest, or a second, different digest for a day that already has
+ * one. The Monitor cannot see either -- it checks its own revision and the
+ * newest digest's age -- so the intake queues the same daily row and audit
+ * entry itself, in its own transaction after the refusal is decided. A
+ * failure here never changes the intake's answer.
+ */
+export async function queueQaReleaseIntakeAttention(
+  reason: "control_revision_mismatch" | "digest_conflict",
+): Promise<"queued" | "already_queued" | "failed"> {
+  try {
+    const rows = await prisma.$queryRaw<{ dbNowMs: bigint }[]>`SELECT floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowMs"`;
+    const dbNowMs = Number(rows[0]?.dbNowMs);
+    if (!Number.isFinite(dbNowMs)) return "failed";
+    return await enqueueDailyAlert({ which: "attention", reason }, dbNowMs, new Date(dbNowMs + ALERT_LIMITS.transactionMs));
+  } catch {
+    return "failed";
+  }
 }
 
 /**
