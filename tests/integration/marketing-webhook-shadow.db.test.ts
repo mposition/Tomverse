@@ -42,6 +42,7 @@ const saved: Record<string, string | undefined> = {};
 const reset = async () => {
   await resetTestFixture(prisma, `TRUNCATE TABLE "MarketingReport" RESTART IDENTITY CASCADE`);
   // Clear the audit-linked fixtures in the same disposable test database.
+  // Keep the v4 foreign-key closure explicit; these dark tables are empty here.
   await resetTestFixture(prisma, `
     TRUNCATE TABLE
       "PromptRefinerShadowAttempt",
@@ -52,7 +53,6 @@ const reset = async () => {
       "AmuxIdeaAnalysisBudgetHold",
       "AmuxIdeaAnalysisPriceVersion",
       "EngineeringAgentApproval",
-      -- Keep the v4 foreign-key closure explicit; these dark tables are empty here.
       "AmuxIdeaUnitDecision",
       "AmuxIdeaDraftUnit",
       "AmuxIdeaTransferPreview",
