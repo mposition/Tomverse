@@ -47,7 +47,8 @@ export async function GET(request: Request) {
     return receipt ? json(receipt) : json({ error: "not_found" }, 404);
   } catch (error) {
     if (isAdminReauthenticationError(error))
-      return json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }, 428);
+      return NextResponse.json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" },
+        { status: 428, headers });
     const security = apiSecurityResponse(error);
     if (security) { security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security; }
@@ -78,7 +79,8 @@ export async function POST(request: Request) {
     return json(result, result.replay ? 200 : 201);
   } catch (error) {
     if (isAdminReauthenticationError(error))
-      return json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" }, 428);
+      return NextResponse.json({ error: "ADMIN_REAUTHENTICATION_REQUIRED" },
+        { status: 428, headers });
     if (error instanceof AmuxV22OutcomeRefusal)
       return json({ error: error.code }, error.status);
     const security = apiSecurityResponse(error);
