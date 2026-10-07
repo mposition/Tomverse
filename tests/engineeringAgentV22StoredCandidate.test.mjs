@@ -16,6 +16,7 @@ const candidate = { ok: true, baseRootTreeId: "d".repeat(40),
   changes: [], baseTree: [], baseCommitterDate: "1791336934 +1000" };
 const tier = { tier: "T2", findings: [{
   reason: "slice_analysis_failed", path: null }] };
+const imageProofDigest = "f".repeat(64);
 
 function ports(overrides = {}) {
   return { readSnapshot: async () => snapshot,
@@ -23,7 +24,7 @@ function ports(overrides = {}) {
     readSwitch: async () => true,
     publicationEnabled: () => true,
     loadCandidate: async () => candidate,
-    readTier: async () => tier, ...overrides };
+    readTier: async () => ({ tier, imageProofDigest }), ...overrides };
 }
 
 test("stored v22 patch reaches the pinned candidate loader only with consent", async () => {
@@ -37,7 +38,8 @@ test("stored v22 patch reaches the pinned candidate loader only with consent", a
     } }));
   assert.equal(called, 1);
   assert.deepEqual(value, { ok: true, ...snapshot,
-    patchBody: patch.text, patchDigest: patch.sha256, candidate, tier });
+    patchBody: patch.text, patchDigest: patch.sha256, candidate,
+    tier, imageProofDigest });
   assert.deepEqual(engineeringAgentV22CandidateSummary(value), {
     verified: true, queued: false, baseSha: snapshot.baseSha,
     patchDigest: patch.sha256, baseTreeId: candidate.baseRootTreeId,

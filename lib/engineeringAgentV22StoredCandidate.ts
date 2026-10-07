@@ -27,22 +27,25 @@ type Ports = {
   publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
   readTier: (baseSha: string, candidate: Extract<Candidate,
-    { ok: true }>) => Promise<TierVerdict>;
+    { ok: true }>) => Promise<{ tier: TierVerdict;
+      imageProofDigest: string | null }>;
 };
 
 async function readTier(baseSha: string,
-  candidate: Extract<Candidate, { ok: true }>): Promise<TierVerdict> {
-  const excluded = await readEngineeringAgentV22ImageExclusion(baseSha);
+  candidate: Extract<Candidate, { ok: true }>): Promise<{
+    tier: TierVerdict; imageProofDigest: string | null }> {
+  const image = await readEngineeringAgentV22ImageExclusion(baseSha);
   const evidence = await loadEngineeringAgentV22BaseEvidence({
-    tree: candidate.baseTree, excludedPrefixes: excluded,
+    tree: candidate.baseTree,
+    excludedPrefixes: image.excludedPrefixes,
   });
-  if (!evidence) return { tier: "T2", findings: [{
+  if (!evidence) return { tier: { tier: "T2", findings: [{
     reason: "slice_analysis_failed", path: null,
-  }] };
-  return decideEngineeringAgentV22Tier({
+  }] }, imageProofDigest: null };
+  return { tier: decideEngineeringAgentV22Tier({
     changes: candidate.changes, ...evidence,
-    deployExcludedPrefixes: excluded,
-  });
+    deployExcludedPrefixes: image.excludedPrefixes,
+  }), imageProofDigest: image.proofDigest };
 }
 
 async function readSnapshot(attemptId: string): Promise<Snapshot> {
@@ -87,7 +90,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
     { ok: true; runId: string; taskId: string; baseSha: string;
       patchBody: string; patchDigest: string;
       candidate: Extract<Candidate, { ok: true }>;
-      tier: TierVerdict } |
+      tier: TierVerdict; imageProofDigest: string | null } |
     { ok: false; reason: string }
   > {
   const first = await ports.readSnapshot(attemptId);
@@ -101,7 +104,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const candidate = await ports.loadCandidate({ baseSha: first.baseSha,
     files: patch.files });
   if (!candidate.ok) return { ok: false, reason: candidate.reason };
-  const tier = await ports.readTier(first.baseSha, candidate);
+  const tierEvidence = await ports.readTier(first.baseSha, candidate);
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||
@@ -109,7 +112,9 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_state_changed" };
   return { ok: true, ...first, patchBody: patch.text,
-    patchDigest: patch.sha256, candidate, tier };
+    patchDigest: patch.sha256, candidate,
+    tier: tierEvidence.tier,
+    imageProofDigest: tierEvidence.imageProofDigest };
 }
 
 /** The internal preflight may report identifiers and digests, never the

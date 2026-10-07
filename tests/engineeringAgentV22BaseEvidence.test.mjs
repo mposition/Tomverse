@@ -11,12 +11,15 @@ const source = new Map([
   ["package-lock.json", '{"packages":{"node_modules/next":{"version":"16.3.8"}}}'],
   ["x.yml", "name: CI\non: pull_request\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps: []\n"],
   ["sample.json", '{"value":1}\n'],
+  ["security-regression-check.mjs",
+    'read("tests/e2e/support/canonical-visual.ts");\n'],
 ]);
 const tree = [
   ["tsconfig.json", "tsconfig.json"],
   ["package-lock.json", "package-lock.json"],
   [".github/workflows/x.yml", "x.yml"],
   ["tests/fixtures/sample.json", "sample.json"],
+  ["scripts/security-regression-check.mjs", "security-regression-check.mjs"],
 ].map(([path, key]) => ({ path, mode: "100644", type: "blob",
   oid: gitObjectId("blob", Buffer.from(source.get(key))),
 }));
@@ -40,6 +43,8 @@ test("base evidence admits exact image bytes and known missing tests", async () 
   assert.equal(result.baseFiles.find((file) =>
     file.path === "tests/fixtures/sample.json").text, "");
   assert.equal(result.installedVersions.next, "16.3.8");
+  assert.ok(result.policyDocuments.some((text) =>
+    text.includes("tests/e2e/support/canonical-visual.ts")));
 });
 
 test("missing source or mismatched bytes fail closed", async () => {

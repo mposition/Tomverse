@@ -65,6 +65,8 @@ import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
 import { openEngineeringAgentV22Product } from
   "@/lib/engineeringAgentV22ProductStore";
+import { currentEngineeringAgentV22ImageProofDigest } from
+  "@/lib/engineeringAgentV22ImageEvidence";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
 
@@ -1199,6 +1201,8 @@ export async function settleAmuxV22TaskExecution(input: {
             modeAtStart: run.modeAtStart, runId: run.id,
             taskId: task.id, baseSha: patch.baseSha,
             patchDigest: patch.sha256, publication,
+            currentImageProofDigest:
+              currentEngineeringAgentV22ImageProofDigest(),
           }) &&
             amuxV22EngineeringPublicationEnabled(
               process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
@@ -1248,7 +1252,9 @@ export async function settleAmuxV22TaskExecution(input: {
         metadata: { attemptId: attempt.id, outcome: input.outcome,
           toStatus: next, invocationIds: expectedIds,
           receiptsComplete, reservedCostMicrousd:
-            attempt.reservedCostMicrousd.toString() },
+            attempt.reservedCostMicrousd.toString(),
+          imageProofDigest: product?.kind === "publish" &&
+            publication?.ok ? publication.imageProofDigest : null },
       });
       if (run?.status === "active") {
         await endEngineeringAgentRun(

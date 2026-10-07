@@ -1,14 +1,29 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
+import { listEngineeringAgentImagePaths,
+  summarizeEngineeringAgentImagePaths } from
+  "@/scripts/report-engineering-agent-image-proof-core.mjs";
 
 export const ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV =
   "ENGINEERING_AGENT_V22_IMAGE_PROOF";
+
+/** Cheap transaction-time recheck: the exact proof used in the preflight
+ * must still be installed before a capability is created. */
+export function currentEngineeringAgentV22ImageProofDigest(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const raw = env[ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV];
+  return raw && Buffer.byteLength(raw, "utf8") <= 2_048 ?
+    createHash("sha256").update(raw).digest("hex") : null;
+}
 
 type Proof = {
   sourceCommit: string;
   deploymentId: string;
   imageDigest: string;
+  completePathCount: number;
   completePathListSha256: string;
   testsPathCount: number;
   approvedBy: string;
@@ -27,6 +42,8 @@ export function decideEngineeringAgentV22ImageExclusion(input: {
   baseSha: string;
   runtimeSourceSha: string | undefined;
   runtimeDeploymentId: string | undefined;
+  runtimeManifest: { completePathCount: number;
+    completePathListSha256: string; testsPathCount: number };
   testsExist: boolean;
   adminPlaywrightConfigExists: boolean;
 }): readonly string[] {
@@ -42,6 +59,11 @@ export function decideEngineeringAgentV22ImageExclusion(input: {
       !/^sha256:[0-9a-f]{64}$/.test(proof.imageDigest) ||
       typeof proof.completePathListSha256 !== "string" ||
       !SHA256.test(proof.completePathListSha256) ||
+      !Number.isSafeInteger(proof.completePathCount) ||
+      proof.completePathCount !== input.runtimeManifest.completePathCount ||
+      proof.completePathListSha256 !==
+        input.runtimeManifest.completePathListSha256 ||
+      input.runtimeManifest.testsPathCount !== 0 ||
       proof.testsPathCount !== 0 ||
       proof.approvedBy !== "mposition" ||
       typeof proof.approvedAt !== "string" ||
@@ -60,25 +82,42 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+let imageManifestPromise: Promise<ReturnType<
+  typeof summarizeEngineeringAgentImagePaths>> | null = null;
+const runtimeImageManifest = () => {
+  imageManifestPromise ??= listEngineeringAgentImagePaths("/app")
+    .then(summarizeEngineeringAgentImagePaths);
+  return imageManifestPromise;
+};
+
 /** An absent or malformed proof is T2, never a guessed exclusion. */
 export async function readEngineeringAgentV22ImageExclusion(
   baseSha: string,
   env: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<readonly string[]> {
-  if (process.cwd() !== "/app") return [];
+): Promise<{ excludedPrefixes: readonly string[];
+  proofDigest: string | null }> {
+  const refused = { excludedPrefixes: [], proofDigest: null } as const;
+  if (process.cwd() !== "/app") return refused;
   const raw = env[ENGINEERING_AGENT_V22_IMAGE_PROOF_ENV];
-  if (!raw || Buffer.byteLength(raw, "utf8") > 2_048) return [];
+  if (!raw || Buffer.byteLength(raw, "utf8") > 2_048) return refused;
   let proof: unknown;
   try { proof = JSON.parse(raw); }
-  catch { return []; }
+  catch { return refused; }
   try {
-    const [testsExist, adminPlaywrightConfigExists] = await Promise.all([
+    const [testsExist, adminPlaywrightConfigExists, runtimeManifest] =
+      await Promise.all([
       exists("/app/tests"),
       exists("/app/playwright.admin.config.ts"),
+      runtimeImageManifest(),
     ]);
-    return decideEngineeringAgentV22ImageExclusion({ proof, baseSha,
+    const excludedPrefixes = decideEngineeringAgentV22ImageExclusion({ proof, baseSha,
       runtimeSourceSha: env.RAILWAY_GIT_COMMIT_SHA,
       runtimeDeploymentId: env.RAILWAY_DEPLOYMENT_ID,
+      runtimeManifest,
       testsExist, adminPlaywrightConfigExists });
-  } catch { return []; }
+    return excludedPrefixes.length === 0 ? refused : {
+      excludedPrefixes,
+      proofDigest: currentEngineeringAgentV22ImageProofDigest(env),
+    };
+  } catch { return refused; }
 }
