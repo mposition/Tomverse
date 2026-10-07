@@ -5,10 +5,23 @@
 // with which code, and whether anything it prints carries a credential.
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import process from "node:process";
 import test from "node:test";
+
+import {
+  buildObservationPayload,
+  summariseObservation,
+} from "../lib/productResearchObservationCore.mjs";
+import {
+  REPORT_MAX_BUFFER_BYTES,
+  readReport,
+  reportArgv,
+} from "../lib/productResearchObservationStepCore.mjs";
 
 const RUNNER = join(process.cwd(), "scripts", "agents", "product-research-observation.mjs");
 
@@ -81,24 +94,6 @@ test("an undeclared variable stops the run before it plans a slot", () => {
   assert.equal(/planned for slot/.test(result.stdout), false);
 });
 
-test("a planned run exits 1 while the observation step does not exist", () => {
-  // The honest outcome for now. Exiting 0 here would make every slot look
-  // answered, and the silence check would then never fire on a run that writes
-  // nothing.
-  const result = run({
-    PRODUCT_RESEARCH_AGENT_ENABLED: "true",
-    PRODUCT_RESEARCH_INGEST_URL: "https://tomverse.app/api/internal/product-research/observations",
-    PRODUCT_RESEARCH_INGEST_SECRET: SECRET,
-    PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN,
-    RAILPACK_DEPLOY_APT_PACKAGES: "git",
-  });
-  assert.equal(result.status, 1);
-  assert.match(result.stdout, /no observation step built yet/);
-  // And it exits rather than sitting on its 15-minute timer: a process kept
-  // alive by its own watchdog is the hang the watchdog exists to end.
-  assert.equal(result.signal, null);
-});
-
 test("the probe reports what the image can do and submits nothing", () => {
   const result = run({ PRODUCT_RESEARCH_GITHUB_READ_TOKEN: TOKEN }, ["--probe"]);
   assert.match(result.stdout, /git available: (true|false)/);
@@ -140,6 +135,157 @@ const reportedNames = (output) => [
   ),
 ].map((match) => match[1]);
 
+/**
+ * The runner as a process this one can wait for without blocking.
+ *
+ * `spawnSync` cannot be used for a test with a server in it: it blocks this
+ * process's event loop, so the server never accepts the connection and the
+ * run's submission times out against a listener that is simply not listening.
+ * That cost forty seconds a test before it was understood.
+ */
+const runAsync = (env = {}, argv = []) =>
+  new Promise((resolve) => {
+    const child = spawn(process.execPath, [RUNNER, ...argv], {
+      env: {
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        TEMP: process.env.TEMP,
+        ...env,
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+
+/**
+ * A PATH with node on it and no `git`.
+ *
+ * The run's first IO is a clone, so a test that let it find git would clone
+ * this repository from GitHub -- a unit test with a network dependency and a
+ * minute of wall clock. Removing git instead exercises the failure path for
+ * real: `spawnSync` reports `ENOENT`, and what the run does with that is the
+ * thing worth holding.
+ */
+const PATH_WITHOUT_GIT = dirname(process.execPath);
+
+/** A stand-in for the ingest route that records what reached it. */
+const ingestServer = async (reply = { status: 200 }) => {
+  const received = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      received.push({
+        method: request.method,
+        authorization: request.headers.authorization,
+        contentType: request.headers["content-type"],
+        body,
+      });
+      response.writeHead(reply.status, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify(
+          reply.status === 200
+            ? { recorded: true, observationId: "obs-2026-10-07-abcdef12" }
+            : { refused: "unauthorized" },
+        ),
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  return {
+    received,
+    url: `http://127.0.0.1:${port}/api/internal/product-research/observations`,
+    close: () => new Promise((resolve) => server.close(resolve)),
+  };
+};
+
+test("a run that cannot clone records a failed slot carrying no content", async () => {
+  const ingest = await ingestServer();
+  try {
+    const result = await runAsync({
+      ...SERVICE_ENV,
+      PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      PATH: PATH_WITHOUT_GIT,
+    });
+
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /answering for slot \d{4}-\d{2}-\d{2}T21:30:00\.000Z/);
+    assert.match(result.stdout, /clone_failed: the clone did not complete/);
+    // Non-zero, and the row exists: the deploy log is red so an operator sees
+    // it, and the slot is answered so the silence check does not also fire.
+    assert.match(result.stdout, /recorded obs-2026-10-07-abcdef12: failed at clone_failed/);
+
+    assert.equal(ingest.received.length, 1, "the slot got one answer, not none and not two");
+    const [sent] = ingest.received;
+    assert.equal(sent.method, "POST");
+    assert.equal(sent.authorization, `Bearer ${SECRET}`);
+    assert.equal(sent.contentType, "application/json");
+    // Exactly the four keys a failed slot has. The route refuses a failure
+    // carrying content and the table refuses it again, but the run never
+    // builds one: a half-observation stored as a success is the defect.
+    assert.deepEqual(Object.keys(JSON.parse(sent.body)).sort(), [
+      "failureStage",
+      "outcome",
+      "schemaVersion",
+      "slot",
+    ]);
+    assert.deepEqual(JSON.parse(sent.body).outcome, "failed");
+    assert.deepEqual(JSON.parse(sent.body).failureStage, "clone_failed");
+  } finally {
+    await ingest.close();
+  }
+});
+
+test("a refused submission is reported and never retried", async () => {
+  const ingest = await ingestServer({ status: 401 });
+  try {
+    const result = await runAsync({
+      ...SERVICE_ENV,
+      PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      PATH: PATH_WITHOUT_GIT,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /submission: the route answered 401 unauthorized/);
+    // One attempt. A second is how one slot gets two different answers, and
+    // the restart policy is NEVER precisely so a failed run stays failed.
+    assert.equal(ingest.received.length, 1);
+    assert.equal(/recorded/.test(result.stdout), false);
+  } finally {
+    await ingest.close();
+  }
+});
+
+test("nothing a failing run prints carries the secret or the token", async () => {
+  const ingest = await ingestServer({ status: 401 });
+  try {
+    for (const [label, env] of [
+      ["clone refused", { PATH: PATH_WITHOUT_GIT }],
+      ["submission refused", { PATH: PATH_WITHOUT_GIT }],
+    ]) {
+      const result = await runAsync({
+        ...SERVICE_ENV,
+        PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+        ...env,
+      });
+      const output = `${result.stdout}${result.stderr}`;
+      assert.equal(output.includes(SECRET), false, `${label}: the secret was printed`);
+      assert.equal(output.includes(TOKEN), false, `${label}: the token was printed`);
+    }
+  } finally {
+    await ingest.close();
+  }
+});
+
 test("npm's own variables are not what stops a run", () => {
   // The IaC starts this service with `npm run`, and npm puts twenty-odd of its
   // own variables into the child. Spawning node directly -- as every test above
@@ -172,11 +318,69 @@ test("the deployed start command plans its slot", { skip: process.platform === "
   // have -- declaring those to make this pass here would widen the check for
   // the platform that actually runs it. The Linux CI runner is where it holds.
   const result = runThroughNpm({
-    PATH: process.env.PATH,
+    // No git on it: the point here is the environment npm builds, not a clone
+    // of this repository from GitHub inside a unit test.
+    PATH: PATH_WITHOUT_GIT,
     HOME: process.env.HOME,
     ...SERVICE_ENV,
   });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   assert.deepEqual(reportedNames(output), [], output);
-  assert.match(output, /no observation step built yet/);
+  assert.match(output, /answering for slot/);
+});
+
+test("the report's own output is what the payload builder accepts", () => {
+  // The link no unit test can reach by reading either side: the report prints
+  // its own shape and `buildObservationPayload` refuses anything it does not
+  // recognise, down to a signal field it has not been told about. A new signal
+  // kind on one side and a `schema_invalid` row on the other is the failure
+  // this holds shut, and it would otherwise appear for the first time at 21:30.
+  //
+  // This repository is the clone, and HEAD stands in for both release branch
+  // tips: the report only needs them to be commits it can read, and pinning
+  // them to HEAD keeps the test independent of which branches a checkout has.
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(head.status, 0, "this test needs a git checkout");
+  const sha = head.stdout.trim();
+
+  const directory = mkdtempSync(join(tmpdir(), "product-research-report-"));
+  try {
+    const issuesFile = join(directory, "open-issues.json");
+    const issues = [
+      { number: 1, title: "an issue the tracker may be behind on", body: "", labels: [] },
+      { number: 999999, title: "an issue nothing references", body: "", labels: [] },
+    ];
+    writeFileSync(issuesFile, JSON.stringify(issues), "utf8");
+
+    const child = spawnSync(
+      process.execPath,
+      reportArgv({
+        cli: join(process.cwd(), "scripts", "report-issue-backlog.mjs"),
+        repository: process.cwd(),
+        issuesFile,
+        develop: sha,
+        main: sha,
+      }),
+      { cwd: process.cwd(), encoding: "utf8", timeout: 300_000, maxBuffer: REPORT_MAX_BUFFER_BYTES },
+    );
+
+    const read = readReport(child);
+    assert.equal(read.stage, undefined, `${child.status}: ${child.stderr}`);
+
+    const built = buildObservationPayload(read.report);
+    assert.equal(built.failure, undefined, JSON.stringify(built.failure));
+    // Every issue given becomes exactly one row, whatever the verdict was.
+    assert.deepEqual(
+      built.payload.issues.map((row) => row.id),
+      ["1", "999999"],
+    );
+    // And the counts are rederivable from the rows, which is the property the
+    // route re-checks before it stores them.
+    assert.deepEqual(summariseObservation(built.payload.issues), {
+      counts: built.payload.counts,
+      blindSpots: built.payload.blindSpots,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
