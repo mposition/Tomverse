@@ -736,6 +736,16 @@ const REGISTRY = {
     reason:
       "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
   },
+  AmuxPortfolioAssessment_uncertainty_check: {
+    owner: "database",
+    reason:
+      "Owner-confirmed portfolio evidence has exactly low, medium or high uncertainty; the score uses the worst uncertainty across the hierarchy.",
+  },
+  AmuxPortfolioAssessment_reasonCode_check: {
+    owner: "database",
+    reason:
+      "The append-only portfolio assessment records why the operator entered a new evidence version or override; it never edits a prior score.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:

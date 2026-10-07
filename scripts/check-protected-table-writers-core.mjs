@@ -554,6 +554,22 @@ export const RAW_SQL_ALLOWLIST = [
       "The derivation group has a restrictive audit foreign key and its insert guard SELECTs the exact owner audit row under a share lock. Every write verb in this migration creates or constrains derivation tables; none inserts, updates or deletes AdminAuditLog. The canonical audit is written by lib/adminAudit.ts in the same transaction.",
   },
   {
+    path: "prisma/migrations/20261005110000_amux_v4_portfolio_scoring/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 35,
+    reason:
+      "The portfolio assessment and score tables each have a restrictive AdminAuditLog foreign key and an INSERT guard that SELECTs the exact actor, action, target and chain hash under a share lock. The migration writes only its new tables and triggers; it never inserts, updates or deletes AdminAuditLog. Both application writers call writeAdminAuditLog in the same transaction.",
+  },
+  {
+    path: "prisma/migrations/20261006100000_amux_v22_auto_promotion/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 32,
+    reason:
+      "The v22 evidence tables hold restrictive audit foreign keys and the receipt guard reads the exact canonical system audit row and its hash before accepting a Task pointer. The migration does not insert, update or delete AdminAuditLog; the application writes it through lib/adminAudit.ts in the promotion transaction.",
+  },
+  {
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,

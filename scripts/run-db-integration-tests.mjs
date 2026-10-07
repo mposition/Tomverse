@@ -354,6 +354,12 @@ run(
     // AMUX v4 inert schema still has privacy ownership, hierarchy and source
     // integrity invariants. Exercise its database guards in the CI lane.
     "tests/integration/amuxV4Schema.db.test.mjs",
+    // v22 Task edges must equal the owner receipt and remain acyclic;
+    // pre-v4 cards retain their historical dependency behavior.
+    "tests/integration/amuxV4TaskDag.db.test.mjs",
+    // Keep A08's approved hierarchy/overlap catalog regression in the lane;
+    // the DB coverage guard found this pre-existing suite was never listed.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
     "tests/integration/amuxV4SourcePlan.db.test.mjs",
     "tests/integration/amux-v4-frontier-model.db.test.mjs",
     // Dark Frontier owner decisions must bind model eligibility, canonical
