@@ -312,6 +312,8 @@ run(
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
+    // Mode off closes the whole gate, and a closed gate still records a
+    // publisher's pull request on the engineering side only.
     "tests/integration/engineering-agent-amux-adapter.db.test.ts",
     // Engineering agent store: every change commits with its audit entry
     // under the right actor, and results go where the core says. It closes
