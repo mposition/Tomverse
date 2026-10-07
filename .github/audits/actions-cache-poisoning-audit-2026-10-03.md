@@ -1,5 +1,12 @@
 # GitHub Actions 캐시 오염 경로 감사 (2026-10-03)
 
+> **줄 번호는 조사 시점의 것입니다.** `path:line` 인용은 2026-10-03의 트리를
+> 가리키며, 그 뒤 여러 변경이 workflow를 편집해 일부가 밀렸습니다. 2026-10-04에
+> 두 건이 실제로 틀린 곳을 가리키는 것이 독립 검토에서 발견돼 고쳤고(§6의 sha512
+> 핀 둘), 그 자리에는 **step 이름을 함께** 적었습니다 — 이름은 밀리지 않으므로,
+> 번호와 이름이 어긋나면 번호가 낡은 것입니다. 나머지 인용은 전수 재검증하지
+> 않았습니다.
+>
 > **상태: 조사 완료, 독립 검토 1회 반영(rev 2), 조치 없음.** 이 감사는
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
 > 각 항목에 승인·검토 요건을 적었습니다.
@@ -357,6 +364,13 @@ v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은
 
 ### 4.3 실제로 자격증명을 들고 캐시를 복원하는 11건 — 전부 `npm` cacache 하나뿐
 
+> **지금은 0건입니다**(2026-10-04). 아래 11건은 **감사 시점의 관측**이고, 10장의
+> 소유자 결정에 따라 그 job들이 선언하던 npm 캐시를 거뒀습니다(P7이 먼저 1건,
+> 이 변경이 나머지 10건). `npm run check:credential-cache-separation`이 0건을,
+> `npm run check:agent-pr-cache-isolation`이 에이전트 이벤트가 닿는 8개 workflow의
+> 자격증명 job 5건 중 0건을 보고합니다. 비용은 0으로 측정됐습니다 — 그 scope에는
+> 아무도 쓸 수 없어 복원이 이미 확정적 miss였습니다(run `37162314395`).
+
 §16에 따라 **job 이름과 secret 매핑은 싣지 않습니다**(4.1). 남기는 것은 분리의
 모양과 수치입니다.
 
@@ -398,8 +412,9 @@ v6는 `package-manager-cache` 입력의 기본값이 `true`이고, 그 설명은
 lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 — 그리고 둘 다
 이미 명시적 sha512 핀을 갖고 있습니다.
 
-- `cron-auto-fix.yml:218-225` — `CLAUDE_CODE_INTEGRITY` 대조 후 `npm install -g`
-- `feedback-autofix.yml:146-154` — 같은 패턴
+- `cron-auto-fix.yml:235-247`(step `Install Claude Code CLI`) — `CLAUDE_CODE_INTEGRITY`
+  대조 후 `npm install -g`
+- `feedback-autofix.yml:160-172`(step `Install Claude Code CLI (pinned)`) — 같은 패턴
 
 `package.json`의 `postinstall`은 `prisma generate` 하나입니다.
 
@@ -541,7 +556,8 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 `actions/setup-node@v6`, `actions/checkout@v6`, `gitleaks/gitleaks-action@v3`.
 태그는 움직일 수 있으므로 "제3자 코드가 `main` scope job에서 실행된다"는 F3의
 전제를 캐시 없이도 성립시킵니다. 가장 위험한 두 job은 **이미 SHA로 핀했습니다**
-(`cron-auto-fix.yml:179`·`:207`, `feedback-autofix.yml:108`·`:116`). 이 감사의
+(`cron-auto-fix.yml:189`·`:217`, `feedback-autofix.yml:115`·`:123` — 각 파일의
+`actions/checkout`·`actions/setup-node`). 이 감사의
 세 축이 아니므로 권고하지 않고, 별도 판단 대상으로만 적습니다.
 
 ## 6. 이미 맞게 되어 있는 것 — 완화 PR이 되돌리면 안 되는 결정
@@ -549,14 +565,14 @@ types:[closed], branches:[develop]`로 돌지만, 그 job의 `if:`가 head ref�
 | 결정 | 위치 |
 |---|---|
 | 자격증명 job이 Playwright 캐시를 복원하지 않고 매번 새로 내려받음 | `cron-auto-fix.yml:320`, `visual-baseline-record.yml:74` |
-| lockfile 밖 설치에 명시적 sha512 핀 | `cron-auto-fix.yml:218-225`, `feedback-autofix.yml:146-154` |
-| 가장 위험한 두 job의 action SHA 핀 | `cron-auto-fix.yml:179`·`:207`, `feedback-autofix.yml:108`·`:116` |
+| lockfile 밖 설치에 명시적 sha512 핀 | `cron-auto-fix.yml:235-247`, `feedback-autofix.yml:160-172` (step `Install Claude Code CLI`) |
+| 가장 위험한 두 job의 action SHA 핀 | `cron-auto-fix.yml:189`·`:217`, `feedback-autofix.yml:115`·`:123` (`checkout`·`setup-node`) |
 | `--ignore-scripts` | `pr-fast-gate.yml:684` |
 | `Linux-next-` fallback 제거 | `pr-fast-gate.yml:809-810`, `:1014-1015` |
 | 이미지 빌드에 secret·캐시 없음 | `engineering-agent-image.yml:4`, `:46-48` |
 | `npm ci`를 일부러 하지 않음 | `deployed-commit-drift.yml:114-116` |
 | 캐시 표면 0 | `secret-history-scan.yml`, `back-merge-main-to-develop.yml`, `codeql.yml` |
-| secret을 한 step으로 좁힘 | `feedback-autofix.yml:157` ("LLM key only in this step") |
+| secret을 한 step으로 좁힘 | `feedback-autofix.yml:174` (step `Attempt the fix (LLM key only in this step)`) |
 | Rust 캐시에 restore-keys 없음 | `orchestrator-rust.yml:54` |
 
 ## 7. 권고 — 우선순위 순
@@ -706,6 +722,48 @@ miss입니다.** 비용은 측정 가능한 것으로만 적습니다 — Next b
 **warming을 되살리는 길은 셋이고, 전부 운영자 행위가 필요하거나 별도 설계입니다.**
 "검증 범위는 되돌릴 수 없는 것에 비례합니다"에 따라 경로를 닫는 것이 기본이므로
 닫은 상태로 두고, 선택은 넘깁니다.
+
+> **소유자 결정 (2026-10-04): 지금은 셋 중 아무것도 하지 않습니다.** 측정이 그
+> 설계 비용을 정당화하지 않습니다.
+>
+> p50(성공 run), 변경 전 2026-09-28~10-02 대 변경 후 2026-10-03 07:04Z 이후:
+>
+> | workflow | 전 | 후 |
+> |---|---|---|
+> | Admin Console E2E | 11분 (7–21, n=100) | **12분** (8–31, n=100) |
+> | Orchestrator Rust | 11분 (1–21, n=100) | 1분 (0–18, n=100) |
+> | E2E (Chromium) | 36분 (27–66, n=49) | 28분 (26–46, n=5) |
+>
+> 뒤의 둘은 **빨라졌습니다** — vendor scope 판정과 6-shard 분할·가중치 때문이고
+> 캐시와 무관합니다. 이 창에서는 다른 CI 작업이 효과를 지배하므로, 캐시에
+> 귀속할 수 있는 신호는 Admin Console E2E의 **+1분(~9%)** 하나입니다. 그마저
+> 작은 이유는 v2 키 회전 뒤 main scope 항목이 애초에 없었고 아무도 다시 데우지
+> 않았기 때문입니다.
+>
+> 되찾을 수 있는 **상한**도 단계별로 쟀습니다(main push run, 전부 cold):
+> `npm ci` 39초 + Next build 135초 + Chromium 설치 23초 = **약 3분 17초**. warm
+> 캐시가 `npm ci`나 build를 공짜로 만들지는 않으므로 현실적 회수는 run당 1.5~2.5
+> 분이고, 이 job 시간의 대부분인 suite 504초는 그대로입니다.
+>
+> **다시 볼 조건**(하나라도 성립하면 1번을 꺼냅니다):
+> Admin Console E2E p50가 **15분 초과**(오늘 12분, job 상한 25분에 대한 여유가
+> 줄어드는 지점) · E2E 샤드 중 하나의 p50가 **30분 초과** · Playwright나 Next
+> 캐시를 쓰는 workflow가 새로 추가되어 cold 비용이 곱해짐.
+
+> **아직 열려 있는 것 — 기존 항목.** 위 3번("기존 항목은 전환만으로 사라지지
+> 않습니다")은 **실행되지 않았습니다.** 2026-10-04에 캐시 API를 읽은 결과, 활성
+> 항목 20개 10,167 MB 중 널리 읽히는 scope에 있는 것은 **정확히 1개**입니다 —
+> `gitleaks-cache-8.24.3-linux-x64`, 5 MB, 생성 2026-10-03T05:16(쓰기가 열려
+> 있던 창), 최근 접근 2026-10-04T07:46. 매일 접근되므로 퇴출되지 않습니다.
+>
+> 그 항목은 이 문서의 규칙이 보지 못하는 모양입니다. `gitleaks/gitleaks-action@v3`
+> 가 **자기 키로** Actions 캐시를 내부에서 쓰고 복원한 **바이너리를 실행**하며,
+> `npm run check:ci-cache-keys`는 workflow YAML에 선언된 `actions/cache*` 단계만
+> 읽습니다(이 모듈의 머리 주석이 그 한계를 적고 있습니다). 즉 F3이 말한 모양이
+> 서드파티 action 안에 한 건 남아 있습니다.
+>
+> 일회성 삭제는 운영자 행위입니다. 삭제 후 그 scope에는 아무도 쓸 수 없으므로
+> 항목은 다시 생기지 않고, 비용은 daily audit run마다 5 MB 재다운로드입니다.
 
 1. **writer 하나, reader 여럿** — 캐시 scope는 **ref 단위이고 workflow 단위가
    아니므로**, PR 전용 writer가 쓴 항목은 같은 PR ref에서 도는 다른 workflow가
@@ -916,6 +974,34 @@ Playwright 바이너리 해시 핀은 브라우저 버전마다 바뀌어 유지
 
 ### P7. 후속 — P4가 쓰려는 기록의 세 번째 조건에는 유지 장치가 없습니다
 
+> **구현 완료.** `npm run check:agent-pr-cache-isolation`이 그 장치입니다 —
+> **에이전트가 일으키는 이벤트에 걸리는 workflow의 자격증명 job은 어떤 cache도
+> 복원하지 않는다**를 묻고, `verified_package_manager`까지 거절합니다. 판정은
+> `lib/agentCredentialReachability.ts`가 새로 보고하는 `reachedWorkflows`와 cache
+> 이유의 교차이며(P3대로 판정기를 둘로 만들지 않았습니다), 판정 코드는
+> `scripts/agent-pr-cache-isolation-policy.mjs`, 고정은
+> `tests/agentPrCacheIsolation.test.mjs`입니다. PR Fast Gate static 단계에서 돕니다.
+>
+> **아래가 설계를 요구한 지점 — 조건식 — 은 분석기가 읽지 않습니다.**
+> `docs/policy/engineering-agent.md` §5의 제약을 그대로 두고, 대신 조건을 면제가
+> 아니라 사실로 만들었습니다(소유자 결정, 2026-10-03). 실측에서 cache 이유 11건
+> 중 도달 workflow 안에 있던 것은 **1건**이고, 그 job의 `if:`가 에이전트 branch를
+> 배제하지만 그것을 근거로 쓰지 않고 그 job에서 npm cache를 뗐습니다. 그래서
+> 검사는 도달 workflow 8개의 자격증명 job 5개에 대해 복원 0으로 통과합니다.
+> cache 이유는 11 → 10이 되었고 전부 도달하지 않는 workflow에 있으며, §5는
+> 그것들에 대해 여전히 모든 변경을 금지합니다.
+>
+> `docs/policy/engineering-agent.md`에 §5.2가 생기고, §5 기록 3번과 §5.1의
+> "장치가 아직 없다"가 그것을 가리키도록 바뀌었습니다. **기록 자체를 쓰는
+> 것(`cacheIsolationRecorded: true`)은 여전히 소유자의 행위이고 이 변경에
+> 포함되지 않습니다** — 호출자 둘 다 `false`로 남아 있습니다.
+>
+> 독립 검토: 검토 서버 job `r-20261003-015621-25b789`, contract 경로이므로
+> reviewer 2명(Codex `openai`, Cursor `xai`), 양쪽 **accept**, finding 0.
+> 검토 뒤에 주석 두 곳의 문구만 줄였습니다 — §16이 금지하는 "현재 실패하고 있는
+> 대상의 이름"에 걸리지 않도록, 특정 job이 자격증명을 갖고 도달한다고 단정하던
+> 문장을 규칙 서술로 바꾼 것이고 판정 코드는 바뀌지 않았습니다.
+
 **이 항목은 감사의 원래 권고가 아니라 P4를 구현하는 동안 독립 검토가 찾아낸
 선행 조건입니다.** 분모에 넣지 않고 여기에 기록해 잃지 않게 합니다.
 
@@ -935,6 +1021,10 @@ workflow의 자격증명 job은 어떤 cache도 복원하지 않는다.** 그것
 
 **그 장치가 없는 동안 정책은 기록 작성을 막습니다.** 그것이 지금의 안전한
 상태이고, 이 항목은 기록을 쓰고 싶어질 때 먼저 해야 할 일입니다.
+
+장치가 생긴 뒤에도 **정책은 기록을 자동으로 열어 주지 않습니다.** 검사가 통과하는
+것은 3번 조건이 오늘 참이라는 사실일 뿐이고, 1번·2번의 근거와 함께 날짜 있는
+기록을 쓰는 것은 소유자의 행위로 남습니다.
 
 ## 8. 이 감사가 증명하지 못한 것
 
@@ -1120,10 +1210,41 @@ AGENTS.md "검증 범위는 되돌릴 수 없는 것에 비례합니다"의 기�
   commit을 unreachable로 만들기)은 **하지 않았습니다.** 공개 저장소의 이력을
   고치는 것은 되돌릴 수 없고 다른 사람의 clone을 깨뜨리므로 소유자의
   결정입니다. 선택지와 비용은 운영자에게 보고했습니다.
-- 비공개 설계서(`H:\Project\tomverse-private-docs`)로 목록을 **옮기지
-  않았습니다.** 다른 저장소에 쓰는 것은 이 과제의 범위 밖이고, 그 repo의
-  경로·구조를 공개 문서가 인용해서도 안 됩니다(AGENTS.md 9번). 옮길지는
-  소유자의 결정입니다.
+- 비공개 설계서로 목록을 **옮기지 않았습니다.** 다른 저장소에 쓰는 것은 이
+  과제의 범위 밖이고, 그 repo의 경로·구조를 공개 문서가 인용해서도 안 됩니다
+  (AGENTS.md 9번). 옮길지는 소유자의 결정입니다.
+
+### 소유자 결정 (2026-10-04)
+
+**이력은 고치지 않고, 목록을 틀리게 만듭니다.**
+
+확인된 사실부터. 게시한 commit 4건은 **develop 이력에만** 있습니다. main은 한
+번도 담은 적이 없습니다 — main으로 간 경로가 7.9.1 선택 릴리스의 cherry-pick이
+라 새 commit이 만들어졌기 때문입니다. 두 branch의 현재 트리는 모두 수정판이고,
+남아 있는 `workflow # job` 행은 전부 3.3절(복원 → 실행 경로)이며 §16이 보호하는
+목록이 아닙니다.
+
+**하지 않는 것 — 이력 재작성.** develop은 열려 있는 모든 PR의 base이고,
+force push는 merge train과 다른 세션의 브랜치 전부를 rebase로 끌고 갑니다. 그리고
+force push만으로는 지워지지 않습니다 — 도달 불가가 된 객체도 GitHub가
+garbage-collect할 때까지 옛 SHA로 제공되며, 그것을 강제하려면 별도 지원 요청이
+필요합니다. 비용은 크고 효과는 부분적입니다.
+
+**하는 것 — 공개된 매핑이 설명하는 상태를 없앱니다.** 그 목록의 값은 "이 job들이
+이 secret을 들고 캐시를 복원한다"입니다. P1a가 이미 그 절반을 없앴고(그 scope에서
+캐시 **쓰기**가 사라졌습니다), 나머지 절반을 이 변경이 없앱니다 — 자격증명을 가진
+job 10건이 선언하던 npm 캐시를 거뒀습니다. 이제
+`npm run check:credential-cache-separation`이 **0건**을 보고합니다.
+
+**비용은 0으로 측정됐습니다.** 그 10건은 널리 읽히는 scope의 workflow에 있고,
+그 scope에는 아무도 쓸 수 없으므로 복원은 이미 확정적 miss였습니다 —
+`daily-security-audit` run `37162314395`(변경 후 schedule 실행)이
+`npm cache is not found`와 `cache write denied: token has no writable scopes`를
+함께 남겼습니다. 선언을 거두는 것은 동작을 바꾸지 않고 사실만 바꿉니다.
+
+이것으로 공개가 회수되는 것은 **아닙니다.** 공개는 되돌릴 수 없고, 이 조치가
+하는 일은 그 내용을 **낡은 것으로 만드는 것**입니다. 숨기기에 의존하지 않는
+유일한 완화라는 점이 이 선택의 근거입니다.
 
 ### 왜 일어났는가
 
