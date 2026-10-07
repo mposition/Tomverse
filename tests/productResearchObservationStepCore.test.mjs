@@ -11,6 +11,7 @@ import {
   OBSERVATION_FAILURE_STAGES,
   OBSERVATION_ROW_LIMIT,
   OBSERVED_BRANCHES,
+  TITLE_MAX_CODE_POINTS,
 } from "../lib/productResearchObservationCore.mjs";
 import { DEFAULT_RUN_TIMINGS } from "../lib/productResearchObservationRunnerCore.mjs";
 import {
@@ -101,14 +102,39 @@ test("a pull request is not backlog and never becomes a row", () => {
   );
 });
 
-test("only the fields the report needs are held", () => {
+test("only the two fields the report reads are held", () => {
   const admitted = admitIssuePage(
-    [issue(1, { assignee: { login: "someone" }, user: { login: "author" }, state: "open" })],
+    [
+      issue(1, {
+        assignee: { login: "someone" },
+        user: { login: "author" },
+        state: "open",
+        body: "x".repeat(5_000),
+        labels: [{ name: "bug" }],
+      }),
+    ],
     [],
   );
-  // The author is a person, and the policy stores no issue field but the title.
-  // Dropping the rest here means it is never written to the child's input file.
-  assert.deepEqual(Object.keys(admitted.issues[0]).sort(), ["body", "labels", "number", "title"]);
+  // The report maps its input to `{ number, title }` and discards the rest, so
+  // anything else held is the user's text carried for no reason -- and, when it
+  // was `body`, enough of it to refuse an ordinary backlog.
+  assert.deepEqual(Object.keys(admitted.issues[0]).sort(), ["number", "title"]);
+});
+
+test("a backlog at the row limit fits inside the held byte cap", () => {
+  // The two caps have to agree. They did not: with bodies held, eleven real
+  // issues came to 52,769 bytes and the byte cap would have fired at about
+  // twenty, so the 200-row limit named by the policy could never be reached and
+  // an ordinary backlog would have been refused as `issue_input_too_large`.
+  const longest = Array.from({ length: OBSERVATION_ROW_LIMIT }, (_unused, index) =>
+    issue(index + 1, { title: "t".repeat(TITLE_MAX_CODE_POINTS) }),
+  );
+  const admitted = admitIssuePage(longest, []);
+  assert.equal(admitted.issues?.length, OBSERVATION_ROW_LIMIT, admitted.stage);
+  assert.ok(
+    admitted.bytes < ISSUE_INPUT_MAX_BYTES,
+    `${admitted.bytes} of ${ISSUE_INPUT_MAX_BYTES} bytes at the row limit`,
+  );
 });
 
 test("a page that is not issues stops the run rather than being skipped", () => {
@@ -123,7 +149,10 @@ test("a page that is not issues stops the run rather than being skipped", () => 
 
 test("too many bytes and too many issues are each refused whole", () => {
   // A truncated observation is a wrong one, so neither case keeps what it read.
-  const fat = [issue(1, { body: "x".repeat(ISSUE_INPUT_MAX_BYTES) })];
+  // The weight is in the title because the title is one of the two fields held;
+  // a long body is dropped before it is measured, which is the point of holding
+  // only what the report reads.
+  const fat = [issue(1, { title: "x".repeat(ISSUE_INPUT_MAX_BYTES) })];
   const tooBig = admitIssuePage(fat, []);
   assert.equal(tooBig.stage, "issue_input_too_large");
   assert.equal(tooBig.issues, undefined);
