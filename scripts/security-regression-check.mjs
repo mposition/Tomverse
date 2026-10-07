@@ -1327,8 +1327,9 @@ const checks = [
         source.includes("resolveDeploymentEnvironment()") &&
         body.includes('deployment === "production"') &&
         body.includes('deployment === "staging"') &&
-        // The production branch still demands live, and staging still refuses
-        // it: a live key in staging bills real cards from test flows.
+        body.includes('deployment === "dev"') &&
+        // The production branch still demands live, and staging and dev still
+        // refuse it: a live key there bills real cards from test flows.
         body.includes("=== true") &&
         body.includes("=== false") &&
         !/!production\s*\|\|\s*stripeKeyLiveMode/.test(source)
@@ -4039,7 +4040,11 @@ const checks = [
         "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
         "ENGINEERING_AGENT_RUNNER_SECRET",
       ];
-      return JSON.stringify(declared) === JSON.stringify(allowed) && !/staging:/.test(block);
+      return (
+        JSON.stringify(declared) === JSON.stringify(allowed) &&
+        !/staging:/.test(block) &&
+        !/dev:/.test(block)
+      );
     },
   },
   {

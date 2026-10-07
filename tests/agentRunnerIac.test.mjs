@@ -113,9 +113,11 @@ test("the observation runner's declared variables are the ones the run checks fo
   }
 });
 
-test("the probe holds no means of submitting, and exists only in staging", () => {
+test("the probe holds no means of submitting, and never runs in production", () => {
   const probe = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_probe");
-  assert.deepEqual(Object.keys(probe.environments), ["staging"]);
+  // It goes where develop lands: staging until the lane switch, and dev.
+  assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "staging"]);
+  assert.deepEqual([...probe.environments.dev].sort(), [...probe.environments.staging].sort());
   // S0 measures what the image can do. Nothing about that needs the ability to
   // write a row, so the variables that would allow one are absent -- a probe
   // that could submit is a second writer for the same slot.
@@ -235,8 +237,10 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   for (const [script, project] of [
     ["agents:use:staging", AGENT_RAILWAY_PROJECT],
     ["agents:use:production", AGENT_RAILWAY_PROJECT],
+    ["agents:use:dev", AGENT_RAILWAY_PROJECT],
     ["use:staging", "Tomverse"],
     ["use:production", "Tomverse"],
+    ["use:dev", "Tomverse"],
   ]) {
     assert.match(iac.scripts[script], new RegExp(`--project "?${project}"?`), script);
   }
@@ -246,12 +250,26 @@ test("the agents' scripts plan the agents' file, and the default scripts do not"
   for (const script of [
     "railway:agents:use-staging",
     "railway:agents:use-production",
+    "railway:agents:use-dev",
     "railway:agents:plan",
     "railway:agents:apply",
   ]) {
     assert.ok(root.scripts[script], `package.json has no "${script}" script`);
     assert.match(root.scripts[script], /npm run --prefix \.railway agents:/, script);
   }
+});
+
+test("services that can only reach staging or production are not declared in dev", () => {
+  // The QA-release digest and monitor submit through an endpoint table naming
+  // staging and production only, and billing-finance-ops through a run
+  // endpoint table of the same two. In dev each would start and refuse every
+  // run, so dev does not get them until their tables name dev.
+  for (const key of ["qa_release_digest", "qa_release_monitor", "billing_finance_ops_deadline", "qa_release_merge_lane"]) {
+    const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === key);
+    assert.equal(runner.environments.dev, undefined, key);
+  }
+  const observation = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "product_research_observation");
+  assert.deepEqual([...observation.environments.dev].sort(), [...observation.environments.staging].sort());
 });
 
 test("the QA-release services declare exactly the variables their start check accepts", async () => {

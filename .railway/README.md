@@ -29,10 +29,17 @@ bash, with Node 22 and a Railway CLI 5.42.1+ that is logged in
 
 ```
 npm run railway:iac:install
-npm run railway:iac:use-staging     # or railway:iac:use-production
+npm run railway:iac:use-staging     # or railway:iac:use-production / railway:iac:use-dev
 npm run railway:iac:plan
 npm run railway:iac:apply
 ```
+
+The Railway environment for develop must be named exactly `dev` in both
+projects: the link scripts, both tables and `lib/deploymentEnvironment.ts` read
+that name, and any other name fails closed (here, and in the app, where it
+resolves to production). dev is opt-in per cron job -- a job with no `dev` list
+is not declared there -- so an environment made by duplicating staging keeps
+copies of the jobs dev leaves out, unowned; delete those in the dashboard.
 
 ## The Agent project is a second, separate thing
 
@@ -54,7 +61,7 @@ applies here too, and rule 2 is stronger: a service missing from
 `agent-runners.ts` is deleted, and so is anything else in that project.
 
 ```
-npm run railway:agents:use-staging     # or railway:agents:use-production
+npm run railway:agents:use-staging     # or railway:agents:use-production / railway:agents:use-dev
 npm run railway:agents:plan
 npm run railway:agents:apply
 ```

@@ -36,16 +36,19 @@ const buildCopyText = (
     .join("\n");
 };
 
+// The deployed environments that are not production. Each says its own name,
+// so a tester on dev cannot mistake it for the release candidate on staging.
 export function BuildStagingBadge() {
   const buildInfo = useBuildInfo();
   const { lang } = useLanguage();
-  if (buildInfo?.environment !== "staging") return null;
+  const environment = buildInfo?.environment;
+  if (environment !== "staging" && environment !== "dev") return null;
   return (
     <span
       data-testid="build-staging-badge"
       className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
     >
-      {buildInfoCopy[lang].environmentNames.staging}
+      {buildInfoCopy[lang].environmentNames[environment]}
     </span>
   );
 }
