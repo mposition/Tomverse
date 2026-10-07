@@ -379,12 +379,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-04, merge current main: marketing, account email and AMUX edits
 // coexist in the fixed closure. Count and position-free inventory remain
 // unchanged; the digest below is repinned for source positions only.
+//
+// 2026-10-07, selective release of marketing S2e onto main: the S2e
+// pipeline additions in `lib/marketingAutomationAccess.ts` move source
+// positions only. Count 228 and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "85ae07cfdcfee63c96d4fcc372512109",
-  "f994beda99a4926404a72a4257179780",
+  "d31be2bc00ae8ca136e7f157b32bd9d9",
+  "9987452f7477e981ec2d590d67fa1826",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

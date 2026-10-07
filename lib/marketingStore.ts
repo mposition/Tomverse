@@ -85,6 +85,7 @@ import {
 import {
   MARKETING_AUDIT_PROBLEMS,
   MARKETING_POST_AUDIT_TARGET_TYPE,
+  MARKETING_REPORT_AUDIT_TARGET_TYPE,
   verifyMarketingAuditEvidence,
   verifyMarketingSystemAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
@@ -389,6 +390,21 @@ export const MARKETING_S2D2_ACTIONS = Object.freeze({
   pollPublished: "marketing_post.poll_published",
   pollVerified: "marketing_post.poll_verified",
   pollRemovedByPlatform: "marketing_post.poll_removed_by_platform",
+} as const);
+
+/**
+ * S2e's audit actions, exactly as the plan's inventory names them.
+ *
+ * Two are a person's (`shadow_changed`, `fault_arm_set`), written through the
+ * admin mutation runner; two are the receiver's, as system actor
+ * `marketing-webhook`. All four are staging-only: production and an unknown
+ * environment refuse each of them before anything is written.
+ */
+export const MARKETING_S2E_ACTIONS = Object.freeze({
+  shadowChanged: "marketing_webhook.shadow_changed",
+  faultArmSet: "marketing_webhook.fault_arm_set",
+  shadowRecorded: "marketing_webhook.shadow_recorded",
+  faultArmConsumed: "marketing_webhook.fault_arm_consumed",
 } as const);
 
 /**
@@ -4314,6 +4330,88 @@ export async function insertMarketingReport(
       sourceVersion: input.sourceVersion,
     },
   });
+}
+
+/**
+ * One staging shadow report of a signed webhook event, with its audit entry.
+ *
+ * The report and the system audit commit together or not at all. A second
+ * delivery of the same event fails the insert on
+ * `MarketingReport_webhook_shadow_event_key` and the transaction rolls back --
+ * so a duplicate leaves no report and no audit entry. The caller recognises
+ * that unique violation and answers the delivery as already recorded; nothing
+ * here asks first, because asking first is a race the index does not have.
+ *
+ * Shadow means shadow: no post is read for update and none is changed.
+ */
+export async function recordMarketingWebhookShadow(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly eventIdDigest: string;
+    readonly eventType: string;
+    readonly channelId: string;
+    readonly derivedStatus: string;
+    readonly statusQueryMatch: boolean;
+  },
+): Promise<{ readonly reportId: string }> {
+  const input = {
+    eventIdDigest: String(rawInput.eventIdDigest),
+    eventType: String(rawInput.eventType),
+    channelId: String(rawInput.channelId),
+    derivedStatus: String(rawInput.derivedStatus),
+    statusQueryMatch: rawInput.statusQueryMatch === true,
+  };
+  // The audit chain first, as every writer here takes it.
+  await takeAuditChainLock(database);
+  const now = await marketingDatabaseNow(database);
+  const report = await insertMarketingReport(database, {
+    kind: "webhook_shadow",
+    periodStart: now,
+    periodEnd: now,
+    // Parsed against the strict `webhook_shadow` schema inside: a digest that
+    // is not lowercase SHA-256 or a status off the closed list is refused here.
+    payload: input,
+    sourceVersion: "marketing-webhook-shadow-v1",
+  });
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-webhook",
+    action: MARKETING_S2E_ACTIONS.shadowRecorded,
+    targetType: MARKETING_REPORT_AUDIT_TARGET_TYPE,
+    targetId: report.id,
+    summary: "Recorded a signed webhook event in shadow, without applying it.",
+    metadata: {
+      eventIdDigest: input.eventIdDigest,
+      eventType: input.eventType,
+      channelId: input.channelId,
+      derivedStatus: input.derivedStatus,
+      statusQueryMatch: input.statusQueryMatch,
+    },
+  });
+  return { reportId: report.id };
+}
+
+/**
+ * Whether a shadow report of this event already exists.
+ *
+ * Asked after an insert failed, not before one: the index is what refuses a
+ * duplicate, and this only tells a caller whether the failure it caught was
+ * that refusal. Matching on the stored digest rather than on how Prisma
+ * describes an expression index in its error keeps the answer about the row,
+ * not about an error format nobody here controls.
+ */
+export async function marketingWebhookShadowExists(
+  database: MarketingDatabase,
+  eventIdDigest: string,
+): Promise<boolean> {
+  const found = await database.marketingReport.findFirst({
+    where: {
+      kind: "webhook_shadow",
+      payload: { path: ["eventIdDigest"], equals: String(eventIdDigest) },
+    },
+    select: { id: true },
+  });
+  return found !== null;
 }
 
 // ---------------------------------------------------------------------------

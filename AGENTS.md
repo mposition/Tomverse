@@ -1157,6 +1157,31 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`은 route와,
+  운영자가 staging에서 실행하는 검증 기록 생성기의 서명 변조 probe에서만 읽습니다(값은 출력하지
+  않고 HMAC 계산에만 씁니다, 운영자 승인 2026-10-02). 게시물은 바꾸지 않습니다 — 적용은 S2f이고
+  staging 서명 이후입니다.
+- **S2e-verification(검증 기록과 서명)**: `lib/marketingWebhookRecordDraft.ts`,
+  `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
+  `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
+  답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
+  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
+  강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
+  2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
 
 # 엔지니어링 Agent
 
