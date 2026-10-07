@@ -1,6 +1,7 @@
 -- The original dark unit trigger named the legacy AMUX orchestrator for
 -- housekeeping. v4 policy assigns this source its own scoped system actor.
 -- Keep the trigger's call sites stable, but require that actor at audit time.
+-- baseline-check: present-if-function "amux_v4_unit_audit_matches"
 CREATE OR REPLACE FUNCTION amux_v4_unit_audit_matches(
     audit_id text, decision_id text, actor_id text,
     expected_action text, expected_system_actor text

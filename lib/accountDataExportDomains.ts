@@ -644,7 +644,7 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
-    domain: "amuxV4TaskCostCatalogApproval",
+    domain: "amuxTaskCostCatalogApproval",
     publicName: "amux_v4_task_cost_catalog_approvals",
     prismaModel: "AmuxV4TaskCostCatalogApproval",
     state: "unverified",

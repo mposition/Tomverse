@@ -1495,7 +1495,7 @@ domains:
       one-way; account deletion, retention and unified export are not yet
       resolved. A price approval alone never enables a live model call.
 
-  - domain: amuxV4TaskCostCatalogApproval
+  - domain: amuxTaskCostCatalogApproval
     prismaModel: AmuxV4TaskCostCatalogApproval
     userLinkageRole: actor
     owner: security-privacy
