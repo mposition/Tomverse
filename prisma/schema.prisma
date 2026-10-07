@@ -7381,7 +7381,7 @@ model AmuxCliUsageAggregate {
   createdAt                  DateTime @default(now())
   retentionUntil             DateTime
 
-  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict)
+  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict, map: "AmuxCliUsageAggregate_cohort_fkey")
 
   @@index([retentionUntil])
 }
