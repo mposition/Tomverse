@@ -571,7 +571,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noWorkers: "The worker catalog has no active worker",
         summary: (connected: number, total: number, busy: number, attention: number) =>
           `${connected}/${total} connected · ${busy} busy · ${attention} need a look`,
-        more: (count: number) => `${count} more workers not drawn here`,
+        more: (count: number) =>
+          count === 1 ? "1 more worker not drawn here" : `${count} more workers not drawn here`,
         heartbeat: (time: string) => `last heartbeat ${time}`,
         noHeartbeat: "no heartbeat recorded",
         readAt: (time: string) => `read ${time}`,
