@@ -173,7 +173,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
               typeof freeformValue.remainingScope !== "string" ||
               !amuxAnalysisTextSafe(freeformValue.remainingScope))) ||
             (needsOwnerInput && (freeformValue.coverageStatus !== "needs_owner_input" ||
-              freeformValue.continuationKind !== "input" ||
+              (freeformValue.continuationKind !== "input" &&
+                freeformValue.continuationKind !== null) ||
               typeof freeformValue.ownerQuestion !== "string" ||
               !amuxAnalysisTextSafe(freeformValue.ownerQuestion)))) {
           throw new Error("freeform identity mismatch");
@@ -232,8 +233,10 @@ export async function readAmuxFirstIdeaAnalysisResult(
         });
         if (!inspected.ok || inspected.chunk.coverageStatus !==
               (needsOwnerInput ? "needs_owner_input" : partial ? "more" : "complete") ||
-            inspected.chunk.continuationKind !==
-              (needsOwnerInput ? "input" : partial ? "output" : null) ||
+            (needsOwnerInput ?
+              inspected.chunk.continuationKind !== "input" &&
+                inspected.chunk.continuationKind !== null :
+              inspected.chunk.continuationKind !== (partial ? "output" : null)) ||
             inspected.chunk.outcome !== meta!.outcome) {
           throw new Error("proposal mismatch");
         }
