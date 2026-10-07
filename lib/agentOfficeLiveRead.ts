@@ -17,12 +17,19 @@
 import "server-only";
 
 import type {
+  AgentOfficeEngineeringState,
   AgentOfficeLiveRooms,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
+import {
+  AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
+  agentOfficeEngineeringState,
+} from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
+import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
 import {
@@ -111,7 +118,53 @@ async function readQa(): Promise<AgentOfficeQaState> {
   }
 }
 
+/**
+ * Engineering: the switch settings, the agent's own halt reading, open owner
+ * items counted by kind, how many runs are in progress and since when, and the
+ * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
+ * how the agent stands, never what it worked on (docs/policy/engineering-agent.md §11).
+ */
+async function readEngineering(): Promise<AgentOfficeEngineeringState> {
+  try {
+    const [settings, haltState, owner, active, lastRun] = await Promise.all([
+      prisma.appSetting.findMany({
+        where: { key: { in: AGENT_OFFICE_ENGINEERING_SETTING_KEYS } },
+        select: { key: true, value: true },
+      }),
+      readEngineeringAgentHaltState(prisma),
+      prisma.engineeringAgentWorkItem.groupBy({
+        by: ["kind"],
+        where: { kind: { in: [...OWNER_ITEM_KINDS] }, state: "open" },
+        _count: { _all: true },
+      }),
+      prisma.engineeringAgentRun.aggregate({
+        where: { status: "active" },
+        _count: { _all: true },
+        _min: { startedAt: true },
+      }),
+      // Ended runs only, by their end: with two runs at once, the newest to
+      // start is not the one that last finished.
+      prisma.engineeringAgentRun.findFirst({
+        where: { status: { in: ["finished", "abandoned"] }, endedAt: { not: null } },
+        orderBy: [{ endedAt: "desc" }, { id: "desc" }],
+        select: { status: true, outcome: true, startedAt: true, endedAt: true },
+      }),
+    ]);
+    return agentOfficeEngineeringState({
+      settings,
+      killSwitch: process.env[ENGINEERING_AGENT_KILL_SWITCH_ENV],
+      halt: currentEngineeringAgentHalt(haltState),
+      openOwnerItems: owner.map((row) => ({ kind: row.kind, count: row._count._all })),
+      active: { count: active._count._all, since: active._min.startedAt },
+      lastRun,
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "engineering" });
+    return { kind: "unread" };
+  }
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa] = await Promise.all([readResearch(now), readQa()]);
-  return { readAt: now.toISOString(), research, qa };
+  const [research, qa, engineering] = await Promise.all([readResearch(now), readQa(), readEngineering()]);
+  return { readAt: now.toISOString(), research, qa, engineering };
 }

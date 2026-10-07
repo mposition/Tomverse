@@ -16,6 +16,11 @@
  * operator control revision it runs under and whether its merge lane is
  * latched -- never what a digest says (docs/policy/qa-release-agent.md §4 keeps
  * that to the common digest area).
+ *
+ * Engineering shows its switches, the agent's own halt verdict, how many
+ * decisions wait for a person and its newest run's status -- enums, counts and
+ * times only. Patch bodies, reasons and card text stay on its own screen
+ * (docs/policy/engineering-agent.md §11).
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
@@ -67,11 +72,52 @@ export type AgentOfficeQaState =
       mergeLaneLatched: boolean;
     };
 
+/** The engineering agent's halt values (lib/engineeringAgentCore.ts HALT_VALUES). */
+export type AgentOfficeEngineeringHalt =
+  | "none"
+  | "config_missing"
+  | "circuit_open"
+  | "unbound_app_pr"
+  | "unbound_app_ref"
+  | "state_mismatch";
+
+export type AgentOfficeEngineeringState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** The effective mode: unset, unknown or killed reads as off. */
+      mode: "off" | "shadow" | "t1";
+      frozen: boolean;
+      killSwitch: boolean;
+      /** The halt the agent tells its services (currentEngineeringAgentHalt). */
+      halt: AgentOfficeEngineeringHalt;
+      /** Open items waiting for a person (policy §12). */
+      pending: { t2Draft: number; decision: number; stateMismatch: number };
+      activeRuns: number;
+      /** When the earliest run still in progress started (UTC ISO), or null when none is. */
+      activeSince: string | null;
+      /**
+       * The newest run that ended, by its end: status and outcome enums, its
+       * times (UTC ISO), and whether it needs a look -- anything the agent's
+       * own settlement did not hand to a person as a result.
+       */
+      lastRun: {
+        status: string;
+        outcome: string | null;
+        startedAt: string;
+        endedAt: string;
+        needsLook: boolean;
+      } | null;
+      runnerLastFinishAt: string | null;
+      publisherLastFinishAt: string | null;
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
+  engineering: AgentOfficeEngineeringState;
 };
 
 /** What a live room hands the demo engine: its colour and its lines, already in the console's language. */
@@ -257,5 +303,108 @@ export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCo
   }
   if (state.mergeLaneLatched) facts.push(copy.latched);
   facts.push(read);
+  return { status, badge, line, detail: facts.join(" · ") };
+}
+
+const pendingTotal = (pending: { t2Draft: number; decision: number; stateMismatch: number }) =>
+  pending.t2Draft + pending.decision + pending.stateMismatch;
+
+/**
+ * The engineering room's colour, from the agent's own verdicts. A halt, a
+ * decision waiting for a person and a latest run that needs a look come
+ * first, because a switched-off agent can still hold all three; an agent
+ * switched off, killed or frozen is waiting; a run in progress is working;
+ * otherwise the room is clear.
+ */
+export function engineeringTone(state: AgentOfficeEngineeringState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (state.halt !== "none" || pendingTotal(state.pending) > 0 || state.lastRun?.needsLook) return "attention";
+  if (state.killSwitch || state.mode === "off" || state.frozen) return "waiting";
+  if (state.activeRuns > 0) return "working";
+  return state.lastRun ? "done" : "waiting";
+}
+
+type EngineeringCopy = {
+  badges: {
+    halted: string;
+    decisions: string;
+    lastRunLook: string;
+    killSwitch: string;
+    off: string;
+    frozen: string;
+    running: string;
+    clear: string;
+    noRun: string;
+    unread: string;
+  };
+  unread: string;
+  halt: (reason: string) => string;
+  halts: Record<Exclude<AgentOfficeEngineeringHalt, "none">, string>;
+  decisions: (count: number) => string;
+  killSwitch: string;
+  off: string;
+  frozen: string;
+  running: (time: string) => string;
+  runningMany: (count: number, time: string) => string;
+  lastRun: (result: string, time: string) => string;
+  noRun: string;
+  mode: (mode: string) => string;
+  pending: (t2Draft: number, decision: number, stateMismatch: number) => string;
+  runnerFinish: (time: string) => string;
+  runnerNever: string;
+  publisherFinish: (time: string) => string;
+  publisherNever: string;
+  readAt: (time: string) => string;
+};
+
+/** The engineering room's line and detail, from its state and the console's copy. */
+export function engineeringLiveDept(
+  state: AgentOfficeEngineeringState,
+  readAt: string,
+  copy: EngineeringCopy
+): AgentOfficeLiveDept {
+  const read = copy.readAt(utcStamp(readAt));
+  const status = engineeringTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+
+  const waiting = pendingTotal(state.pending);
+  const last = state.lastRun;
+  const lastLine = last ? copy.lastRun(last.outcome ?? last.status, utcStamp(last.endedAt)) : copy.noRun;
+  const since = state.activeSince ? utcStamp(state.activeSince) : "—";
+  const runningLine = state.activeRuns === 1 ? copy.running(since) : copy.runningMany(state.activeRuns, since);
+
+  const [badge, line]: [string, string] =
+    state.halt !== "none"
+      ? [copy.badges.halted, copy.halt(copy.halts[state.halt])]
+      : waiting > 0
+        ? [copy.badges.decisions, copy.decisions(waiting)]
+        : last?.needsLook
+          ? [copy.badges.lastRunLook, lastLine]
+          : state.killSwitch
+            ? [copy.badges.killSwitch, copy.killSwitch]
+            : state.mode === "off"
+              ? [copy.badges.off, copy.off]
+              : state.frozen
+                ? [copy.badges.frozen, copy.frozen]
+                : state.activeRuns > 0
+                  ? [copy.badges.running, runningLine]
+                  : last
+                    ? [copy.badges.clear, lastLine]
+                    : [copy.badges.noRun, copy.noRun];
+
+  const facts = [copy.mode(state.mode)];
+  if (waiting > 0) facts.push(copy.pending(state.pending.t2Draft, state.pending.decision, state.pending.stateMismatch));
+  // The latest ended run is named once: in the line when the room is clear or
+  // it needs a look, otherwise here -- including beside runs in progress,
+  // which are other runs than it.
+  if (last && line !== lastLine) facts.push(lastLine);
+  // Runs in progress are a fact even when a halt, a decision or a failed run
+  // takes the line.
+  if (state.activeRuns > 0 && line !== runningLine) facts.push(runningLine);
+  facts.push(
+    state.runnerLastFinishAt ? copy.runnerFinish(utcStamp(state.runnerLastFinishAt)) : copy.runnerNever,
+    state.publisherLastFinishAt ? copy.publisherFinish(utcStamp(state.publisherLastFinishAt)) : copy.publisherNever,
+    read
+  );
   return { status, badge, line, detail: facts.join(" · ") };
 }
