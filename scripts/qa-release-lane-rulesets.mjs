@@ -82,7 +82,7 @@ try {
   for (const body of [bodies.update, bodies.develop]) {
     const created = await call("POST", "/rulesets", body);
     if (created.status !== 201) {
-      const details = (Array.isArray(created.json?.errors) ? created.json.errors.slice(0, 5) : []).map((e) => (typeof e === "string" ? e : [e?.field, e?.code, e?.message].filter((v) => typeof v === "string").join(" ")));
+      const details = (Array.isArray(created.json?.errors) ? created.json.errors.slice(0, 5) : []).map((e) => (typeof e === "string" ? e : [e?.resource, e?.field, e?.code, e?.message].filter((v) => typeof v === "string").join(" ")));
       fail(`creating "${body.name}" answered ${created.status}: ${[created.json?.message ?? "", ...details].filter(Boolean).join(" | ").slice(0, 600)}`);
     }
     console.log(`created ruleset ${created.json.id}: ${body.name}`);
