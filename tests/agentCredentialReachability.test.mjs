@@ -35,6 +35,18 @@ test("a read-only pull request workflow forbids nothing", () => {
   assert.deepEqual(result.pathRules, []);
 });
 
+test("a hyphenated needs job name does not become an unknown expression context", () => {
+  const text = READ_ONLY_PR.replace(
+    "    steps:\n",
+    "    needs: [static-and-unit]\n    if: ${{ needs.static-and-unit.result == 'success' }}\n    steps:\n",
+  );
+  const result = analyse([wf("ci", text)]);
+  assert.equal(result.status, "analysed");
+  assert.equal(result.forbidsAll, false);
+  const unknown = text.replace("needs.static-and-unit.result", "unknownContext.value");
+  assert.equal(analyse([wf("ci", unknown)]).forbidsAll, true);
+});
+
 test("every way a job gets a writable credential is caught", () => {
   const variants = {
     "a secret": `      - run: deploy\n        env:\n          TOKEN: \${{ secrets.DEPLOY_TOKEN }}\n`,
@@ -313,6 +325,7 @@ test("any agent branch a filter could name is reached; only a covering ignore ru
     "    branches: ['main', 'release/*']",
     "    branches: ['agent/review/*']",
     "    branches: ['agent/engineering/x']",
+    "    branches: ['to-develop/**', '**/to-develop/**']",
     "    branches-ignore: ['agent/**']",
     "    branches-ignore: ['agent/engineering/*']",
     "    branches-ignore: ['**']",
