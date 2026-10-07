@@ -379,12 +379,17 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-04, merge current main: marketing, account email and AMUX edits
 // coexist in the fixed closure. Count and position-free inventory remain
 // unchanged; the digest below is repinned for source positions only.
+//
+// 2026-10-07, QA-release merge lane selective release: two QA-release system
+// actors are added to `lib/adminAuditSystemActors.ts`, already listed. Count and
+// position-free inventory are unchanged; only source positions moved (the
+// marketing pipeline fingerprint repin moved them too).
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "85ae07cfdcfee63c96d4fcc372512109",
-  "f994beda99a4926404a72a4257179780",
+  "eb0ff046f9ca088c033ce89f3b3b2ccc",
+  "1ef4ecd679e6bcaeadf50175ab49dceb",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

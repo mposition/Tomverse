@@ -1,6 +1,6 @@
 /**
  * The approval check every agent policy names (docs/policy/qa-release-agent.md
- * and docs/policy/product-research-agent.md, the table under "승인 판정";
+ * and the other agent policies, the table under "승인 판정";
  * docs/policy/agent-operator-allowlist.md section 3 for the allowlist's own
  * changes): steps 0 to 6, judged from git and GitHub records only.
  *

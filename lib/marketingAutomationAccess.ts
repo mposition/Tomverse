@@ -389,9 +389,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * AMUX analysis tables and their relations to the watched Prisma schema.
  * No marketing model, webhook input, descriptor or admission decision changes.
  * The closed digest is repinned over this merged schema, not either parent.
+ *
+ * 2026-10-07: the QA-release merge lane selective release adds the shared
+ * AgentDigestItem table and the three QA-release tables to the watched Prisma
+ * schema. None is a marketing model or a webhook input; descriptor and
+ * admission decisions are unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5433f1b23444c3d9781148ac3ec0dba0053b8c2b4c43964ddfd5ca26243747cd";
+  "9c66f153c768947facaa405985c54ad434688ac4ce3efaa57111a709316ec1cf";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
