@@ -1,0 +1,111 @@
+"use client";
+
+import { useState } from "react";
+
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
+import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { parseAmuxIdeaAnalysisResultView,
+  type AmuxIdeaAnalysisResultView } from "@/lib/amux/ideaAnalysisResultReadCore";
+
+const list = (values: string[]) => <ul className="list-disc pl-5">
+  {values.map((value, index) => <li key={`${index}:${value}`}>{value}</li>)}
+</ul>;
+
+/** Owner-only page section. All model-derived text is rendered as React text,
+ * never as HTML. No approval, registration, or model request originates here. */
+export function AmuxIdeaAnalysisResultPanel({ ideaId }: { ideaId: string }) {
+  const m = useAdminMessages(adminAmuxIdeaInputMessages);
+  const [loading, setLoading] = useState(false);
+  const [view, setView] = useState<AmuxIdeaAnalysisResultView | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [needsReauthentication, setNeedsReauthentication] = useState(false);
+
+  const refresh = async () => {
+    if (loading) return;
+    setLoading(true);
+    setUnavailable(false);
+    setNeedsReauthentication(false);
+    try {
+      const params = new URLSearchParams({ ideaId });
+      const response = await adminFetch(`/api/admin/amux/ideas/analysis-result?${params}`,
+        { cache: "no-store" });
+      if (response.status === 428) {
+        setView(null);
+        setNeedsReauthentication(true);
+        return;
+      }
+      const parsed = parseAmuxIdeaAnalysisResultView(response.status,
+        await response.json(), ideaId);
+      if (!parsed) { setView(null); setUnavailable(true); }
+      else setView(parsed);
+    } catch { setView(null); setUnavailable(true); }
+    finally { setLoading(false); }
+  };
+
+  return <section className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800"
+    aria-labelledby="amux-v4-analysis-result-heading">
+    <h3 id="amux-v4-analysis-result-heading" className="font-semibold text-zinc-900 dark:text-zinc-100">
+      {m.analysisResultTitle}
+    </h3>
+    <p className="text-zinc-700 dark:text-zinc-300">{m.analysisResultHint}</p>
+    <button type="button" onClick={() => void refresh()} disabled={loading}
+      className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">
+      {m.analysisResultRefresh}
+    </button>
+    {loading ? <p role="status">{m.analysisResultLoading}</p> : null}
+    {needsReauthentication ? <a className="underline"
+      href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}>
+      {m.analysisResultReauth}
+    </a> : null}
+    {unavailable ? <p role="alert">{m.analysisResultUnavailable}</p> : null}
+    {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
+    {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
+    {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
+    {view?.state === "ready" ? <div className="space-y-3">
+      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+        {view.completedAt} · {view.previewId}
+      </p>
+      <p>{view.coveredScope ?? m.analysisResultScopeExpired}</p>
+      {view.outcome === "reject" ? <p role="status">{m.analysisResultRejected}</p> : null}
+      <ol className="space-y-2">
+        {view.units.map((unit) => <li key={unit.id}
+          className="rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+            {unit.localRef} · {unit.decisionState}
+          </p>
+          {!unit.proposal ? <p>{m.analysisResultBodyExpired}</p> : null}
+          {unit.proposal?.kind === "node" ? <div className="space-y-1">
+            <h4 className="font-semibold">{unit.proposal.title}</h4>
+            <p>{unit.proposal.level} · {unit.proposal.parentRef ?? "root"}</p>
+            <p className="whitespace-pre-wrap">{unit.proposal.description}</p>
+          </div> : null}
+          {unit.proposal?.kind === "card" ? <div className="space-y-2">
+            <h4 className="font-semibold">{unit.proposal.title}</h4>
+            <p>{unit.proposal.cardType} · {unit.proposal.featureRef}</p>
+            <div><p className="font-medium">{m.analysisResultProblem}</p>
+              <p className="whitespace-pre-wrap">{unit.proposal.problem}</p></div>
+            <div><p className="font-medium">{m.analysisResultScopeIn}</p>
+              {list(unit.proposal.scopeIn)}</div>
+            <div><p className="font-medium">{m.analysisResultScopeOut}</p>
+              {unit.proposal.scopeOut.length ? list(unit.proposal.scopeOut) : <p>—</p>}</div>
+            <div><p className="font-medium">{m.analysisResultCriteria}</p>
+              {list(unit.proposal.completionCriteria)}</div>
+            {unit.proposal.executionBrief ? <div>
+              <p className="font-medium">{m.analysisResultExecution}</p>
+              <p>{unit.proposal.taskRole} · {unit.proposal.executionGrade}</p>
+              <p className="whitespace-pre-wrap">{unit.proposal.executionBrief}</p>
+            </div> : null}
+          </div> : null}
+          {unit.proposal?.kind === "evidence" ? <div className="space-y-1">
+            <h4 className="font-semibold">{unit.proposal.evidenceType}</h4>
+            <p className="whitespace-pre-wrap">{unit.proposal.summary}</p>
+            <p className="text-xs">{unit.proposal.cardRef}</p>
+          </div> : null}
+        </li>)}
+      </ol>
+      <p className="text-xs text-zinc-600 dark:text-zinc-400">{m.analysisResultNoApproval}</p>
+    </div> : null}
+  </section>;
+}

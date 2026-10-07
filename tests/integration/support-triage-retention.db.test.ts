@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import { invalidateClosedReportSuggestions, runSupportTriageRetention } from "@/lib/supportTriageRetention";
 
 // One retention run (docs/policy/support-triage.md §5).
@@ -30,7 +31,7 @@ const reset = async () => {
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageGroup"`);
   await prisma.$executeRawUnsafe(`DELETE FROM "SupportTriageDecisionRecord"`);
   await prisma.feedback.deleteMany({ where: { id: { startsWith: "fb-ret-" } } });
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
+  await resetTestFixture(prisma, `TRUNCATE TABLE "AdminAuditLog" RESTART IDENTITY CASCADE`);
 };
 
 /** Inserts finished worker rows aged past the 30-day boundary by `extra`. */

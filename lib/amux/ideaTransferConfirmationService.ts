@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { matchesIdeaTransferBrowserDigest } from "./ideaTransferBrowserCore.ts";
 import { type AmuxContentKeys, openAmuxContent,
   verifyAmuxContentDigest } from "./ideaCrypto.ts";
-import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { loadAmuxContentKeyRing } from "./ideaKeyStore.ts";
 import { type IdeaTransferConfirmationRequest,
   AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV,
   transferConfirmWritePermitted } from "./ideaTransferConfirmationCore.ts";
@@ -181,14 +181,22 @@ export async function commitIdeaTransferConfirmation(tx: Prisma.TransactionClien
 
 export async function confirmIdeaTransferPreview(session: Session, request: Request,
   choice: IdeaTransferConfirmationRequest, browserNonce: string) {
-  ownerId(session);
+  const actorUserId = ownerId(session);
   if (!transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV])) {
     throw new IdeaTransferConfirmationError("confirmation_disabled");
   }
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaTransferConfirmationError("integrity_unavailable");
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const owned = await prisma.amuxIdeaSubmission.findFirst({
+    where: { id: choice.ideaId, actorUserId }, select: { id: true },
+  });
+  if (!owned) throw new IdeaTransferConfirmationError("not_found");
+  let keys: AmuxContentKeys;
+  try {
+    keys = await loadAmuxContentKeyRing([{ ideaId: choice.ideaId,
+      purpose: "transfer_payload", subjectId: choice.previewId }]);
+  } catch { throw new IdeaTransferConfirmationError("integrity_unavailable"); }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {
