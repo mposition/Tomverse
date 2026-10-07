@@ -42,10 +42,12 @@ import {
 } from "../../lib/productResearchObservationCore.mjs";
 import {
   ISSUE_FETCH_MAX_REQUESTS,
+  ISSUE_RECEIVED_MAX_BYTES,
   OBSERVED_REPOSITORY,
   REPORT_MAX_BUFFER_BYTES,
   STEP_TIMINGS,
   admitIssuePage,
+  admitReceivedBytes,
   branchTipArgv,
   childFailureStage,
   cloneArgv,
@@ -53,6 +55,7 @@ import {
   issuesHeaders,
   issuesUrl,
   readBranchTip,
+  readLimitedBody,
   readReport,
   reportArgv,
   submissionBody,
@@ -154,6 +157,7 @@ const resolveBranches = (directory) => {
 const readIssues = async (token) => {
   let held = [];
   let bytes = 0;
+  let received = 0;
   for (let page = 1; page <= ISSUE_FETCH_MAX_REQUESTS; page += 1) {
     let response;
     try {
@@ -170,9 +174,22 @@ const readIssues = async (token) => {
       // The status is a fact about the API, not about the token's value.
       return { stage: "issue_fetch_failed", detail: `page ${page} answered ${response.status}` };
     }
+
+    const body = await readLimitedBody(response, ISSUE_RECEIVED_MAX_BYTES - received);
+    if (body.tooLarge !== undefined) {
+      return {
+        stage: "issue_input_too_large",
+        detail: `page ${page} passed the ${ISSUE_RECEIVED_MAX_BYTES}-byte receive limit`,
+      };
+    }
+    if (body.problem) return { stage: "issue_fetch_failed", detail: `page ${page}: ${body.problem}` };
+    const allowance = admitReceivedBytes(received, body.bytes);
+    if (allowance.stage) return allowance;
+    received = allowance.received;
+
     let parsed;
     try {
-      parsed = await response.json();
+      parsed = JSON.parse(body.text);
     } catch {
       return { stage: "issue_fetch_failed", detail: `page ${page} was not JSON` };
     }

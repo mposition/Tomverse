@@ -17,8 +17,10 @@ import {
   ISSUE_FETCH_MAX_REQUESTS,
   ISSUE_FETCH_PER_PAGE,
   ISSUE_INPUT_MAX_BYTES,
+  ISSUE_RECEIVED_MAX_BYTES,
   GIT_CALLS_PER_RUN,
   admitIssuePage,
+  admitReceivedBytes,
   branchTipArgv,
   childFailureStage,
   cloneArgv,
@@ -26,6 +28,7 @@ import {
   issuesHeaders,
   issuesUrl,
   readBranchTip,
+  readLimitedBody,
   readReport,
   reportArgv,
   submissionBody,
@@ -266,4 +269,82 @@ test("a killed child is a timeout and a missing binary is not", () => {
   assert.equal(childFailureStage({ signal: "SIGTERM" }, "clone_failed"), "timeout");
   assert.equal(childFailureStage({ status: null, error: { code: "ENOENT" } }, "clone_failed"), "clone_failed");
   assert.equal(childFailureStage({ status: 1, signal: null }, "issue_backlog_failed"), "issue_backlog_failed");
+});
+
+test("a full page is not the last one because a pull request was in it", () => {
+  // The defect this holds shut: `done` read from the filtered list meant one
+  // pull request among a hundred entries ended the paging, and the run then
+  // submitted a successful row missing every issue behind it. A success that
+  // silently drops backlog is worse than a failed slot.
+  const full = [
+    { ...issue(1), pull_request: { url: "x" } },
+    ...Array.from({ length: ISSUE_FETCH_PER_PAGE - 1 }, (_unused, i) => issue(i + 2)),
+  ];
+  assert.equal(full.length, ISSUE_FETCH_PER_PAGE);
+  const admitted = admitIssuePage(full, []);
+  assert.equal(admitted.issues.length, ISSUE_FETCH_PER_PAGE - 1, "the pull request is not backlog");
+  assert.equal(admitted.done, false, "a full page might have another behind it");
+
+  // And a page the API actually ended short is still the last one.
+  const short = Array.from({ length: ISSUE_FETCH_PER_PAGE - 1 }, (_unused, i) => issue(i + 1));
+  assert.equal(admitIssuePage(short, []).done, true);
+});
+
+test("the bytes received are bounded separately from the bytes held", () => {
+  // Two different questions. The held cap is about what is written for the
+  // child; this one is about what is read into memory, and a cap checked after
+  // `response.json()` has bounded nothing -- which is what the first version
+  // of this did.
+  assert.ok(ISSUE_RECEIVED_MAX_BYTES > ISSUE_INPUT_MAX_BYTES);
+  assert.deepEqual(admitReceivedBytes(0, 1024), { received: 1024 });
+  assert.deepEqual(admitReceivedBytes(ISSUE_RECEIVED_MAX_BYTES, 0), {
+    received: ISSUE_RECEIVED_MAX_BYTES,
+  });
+  const over = admitReceivedBytes(ISSUE_RECEIVED_MAX_BYTES, 1);
+  assert.equal(over.stage, "issue_input_too_large");
+  assert.equal(over.received, undefined);
+  assert.ok(OBSERVATION_FAILURE_STAGES.includes(over.stage));
+});
+
+test("an entry the page reader cannot read stops the run", () => {
+  // Not skipped. A non-object entry dropped quietly would report a backlog
+  // smaller than the real one while looking exactly like a correct read.
+  for (const entry of [null, 7, "an issue", []]) {
+    const admitted = admitIssuePage([issue(1), entry], []);
+    assert.equal(admitted.stage, "issue_fetch_failed", JSON.stringify(entry));
+    assert.equal(admitted.issues, undefined);
+  }
+});
+
+test("a body past its allowance is refused before it is parsed", async () => {
+  const chunked = (parts) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const part of parts) controller.enqueue(new TextEncoder().encode(part));
+          controller.close();
+        },
+      }),
+    );
+
+  // Within the allowance: read whole, with the byte count the caller adds to
+  // its running total.
+  const small = await readLimitedBody(chunked(['[{"number":1}]']), 1024);
+  assert.equal(small.text, '[{"number":1}]');
+  assert.equal(small.bytes, 14);
+
+  // Past it: refused at the chunk that crossed the line, so the rest of the
+  // body is never read and never held. The text is not returned at all --
+  // returning what fitted is how a truncated observation would get parsed.
+  const big = await readLimitedBody(chunked(["0123456789", "0123456789"]), 15);
+  assert.equal(big.tooLarge, 20);
+  assert.equal(big.text, undefined);
+
+  // Exactly the allowance is not past it.
+  const exact = await readLimitedBody(chunked(["0123456789"]), 10);
+  assert.equal(exact.text, "0123456789");
+
+  // A response with no body is a fetch problem, not an empty issue list.
+  assert.match((await readLimitedBody({ body: null }, 1024)).problem, /no body/);
+  assert.match((await readLimitedBody(undefined, 1024)).problem, /no body/);
 });
