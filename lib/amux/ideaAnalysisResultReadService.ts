@@ -132,9 +132,11 @@ export async function readAmuxFirstIdeaAnalysisResult(
         throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
       }
     }
-    const freeformVisibleUntil = new Date(
-      chunk.analysisCompletedAt.getTime() + 24 * 60 * 60_000);
+    const freeformVisibleUntil = idea.analysisCompletedAt
+      ? new Date(idea.analysisCompletedAt.getTime() + 24 * 60 * 60_000)
+      : chunk.freeformPurgeAfter;
     if (!chunk.freeformPurgeAfter ||
+        !freeformVisibleUntil ||
         (!chunk.freeformCiphertext && chunk.freeformPurgedAt === null &&
           now < freeformVisibleUntil)) {
       throw new AmuxIdeaAnalysisResultReadError("integrity_unavailable");
