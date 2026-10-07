@@ -11,6 +11,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
+  engineeringLiveDept,
   qaLiveDept,
   researchLiveDept,
   type AgentOfficeLiveDept,
@@ -78,10 +79,11 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
  * The Agent office: a pixel office for the eight agent teams, after the
  * original AI OFFICE UI by godseng.mom.
  *
- * A shell. The day it plays is a demo scenario run in this browser tab; it
- * reads no agent's record, and its approve button advances the demo and
- * nothing else. The only facts on the screen are the record links, which
- * point at the console pages each team already has.
+ * A shell. The day it plays is a demo scenario run in this browser tab, and
+ * its approve button advances the demo and nothing else. The facts on the
+ * screen are the record links, which point at the console pages each team
+ * already has, and the rooms marked LIVE, whose state the server read and
+ * the demo leaves alone.
  */
 export function AgentOfficePanel({ view, live }: { view: View; live: AgentOfficeLiveRooms }) {
   const m = useAdminMessages(adminAgentOfficeMessages);
@@ -92,6 +94,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => ({
       research: researchLiveDept(live.research, live.readAt, m.real.research),
       qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
+      engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
     }),
     [live, m]
   );
@@ -316,6 +319,32 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   );
 }
 
+const ENGINEERING_RECORD_HREF = agentOfficeDept("engineering")?.recordHref ?? null;
+
+/**
+ * The approval card while the engineering room reads its real record: the
+ * demo plays no draft and no approval, and real decisions are made on the
+ * engineering agent's own screen, never here.
+ */
+function LiveDecisionNote({ m }: { m: OfficeCopy }) {
+  return (
+    <>
+      <div className={cx("approval-top")}>
+        <span className={cx("approval-chips")}>
+          <em className={cx("live-chip")}>{m.real.chip}</em>
+        </span>
+      </div>
+      <h3>{m.approval.liveTitle}</h3>
+      <p>{m.approval.liveBody}</p>
+      {ENGINEERING_RECORD_HREF ? (
+        <Link href={ENGINEERING_RECORD_HREF} className={cx("btn")} data-testid="agent-office-engineering-record">
+          {m.approval.liveLink}
+        </Link>
+      ) : null}
+    </>
+  );
+}
+
 function LiveView({
   m,
   engine,
@@ -341,6 +370,7 @@ function LiveView({
 }) {
   const progress = Math.round((snap.phaseIndex / (PHASE_COUNT - 1)) * 100);
   const waitingNames = engine.approverNames();
+  const engineeringLive = engine.liveDept("engineering") !== null;
 
   return (
     <>
@@ -459,6 +489,8 @@ function LiveView({
                     {m.approval.approve}
                   </button>
                 </>
+              ) : engineeringLive ? (
+                <LiveDecisionNote m={m} />
               ) : (
                 <>
                   <div className={cx("approval-top")}>
@@ -835,6 +867,7 @@ function DashboardView({
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
+  const engineeringLive = engine.liveDept("engineering") !== null;
 
   return (
     <>
@@ -1026,27 +1059,33 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body approval-body")}>
-                <div className={cx("approval-top")}>
-                  <span className={cx("approval-chips")}>
-                    <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                    <span className={cx("mini-badge yellow")}>{m.approval.dashboardBadge}</span>
-                  </span>
-                  <span className={cx("score")}>{m.approval.dashboardScore}</span>
-                </div>
-                <h3>{m.approval.title}</h3>
-                <p>{m.approval.dashboardBody}</p>
-                <button
-                  type="button"
-                  className={cx("btn approve-button", snap.approved && "approved")}
-                  onClick={onApprove}
-                  disabled={!snap.approvalPending}
-                >
-                  {snap.approved
-                    ? m.approval.approvedButton
-                    : snap.approvalPending
-                      ? m.approval.approve
-                      : m.approval.noneButton}
-                </button>
+                {engineeringLive && !snap.approvalPending ? (
+                  <LiveDecisionNote m={m} />
+                ) : (
+                  <>
+                    <div className={cx("approval-top")}>
+                      <span className={cx("approval-chips")}>
+                        <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
+                        <span className={cx("mini-badge yellow")}>{m.approval.dashboardBadge}</span>
+                      </span>
+                      <span className={cx("score")}>{m.approval.dashboardScore}</span>
+                    </div>
+                    <h3>{m.approval.title}</h3>
+                    <p>{m.approval.dashboardBody}</p>
+                    <button
+                      type="button"
+                      className={cx("btn approve-button", snap.approved && "approved")}
+                      onClick={onApprove}
+                      disabled={!snap.approvalPending}
+                    >
+                      {snap.approved
+                        ? m.approval.approvedButton
+                        : snap.approvalPending
+                          ? m.approval.approve
+                          : m.approval.noneButton}
+                    </button>
+                  </>
+                )}
               </div>
             </section>
 
@@ -1067,7 +1106,11 @@ function DashboardView({
                   </li>
                   <li>
                     <span className={cx("dot", snap.approvalPending ? "yellow" : "green")} />
-                    {snap.approvalPending ? m.dashboard.briefApprovalNeeded : m.dashboard.briefNoApproval}
+                    {snap.approvalPending
+                      ? m.dashboard.briefApprovalNeeded
+                      : engineeringLive
+                        ? m.dashboard.decisionLive
+                        : m.dashboard.briefNoApproval}
                   </li>
                   {snap.stats.attention > 0 ? (
                     <li>
@@ -1087,7 +1130,9 @@ function DashboardView({
                       ? m.dashboard.decisionPending
                       : snap.approved
                         ? m.dashboard.decisionDone
-                        : m.dashboard.decisionNone}
+                        : engineeringLive
+                          ? m.dashboard.decisionLive
+                          : m.dashboard.decisionNone}
                   </strong>
                 </div>
               </div>

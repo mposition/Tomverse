@@ -122,7 +122,15 @@ and release it is the agent's own digest freshness verdict
 (`lib/qaReleaseDigestFreshnessCore.ts`, with the digest secret seen only as a
 length), when the newest digest was stored, the operator control revision and
 whether the merge lane is latched -- never what a digest says, which
-`docs/policy/qa-release-agent.md §4` keeps to the common digest area.
+`docs/policy/qa-release-agent.md §4` keeps to the common digest area. For
+engineering it is the mode the agent acts on (its own switch resolution, the
+kill switch seen only as engaged or not), the halt it tells its services, how
+many decisions wait for a person, and the newest run's status, outcome and
+times -- never a patch, a reason or a card, which
+`docs/policy/engineering-agent.md §11` keeps to its own record. While
+engineering is live the demo plays no draft and no approval: its decisions
+are real and are made on its own screen, and the office's approval windows
+say so and link there instead of offering a demo approval.
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
