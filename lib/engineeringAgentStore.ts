@@ -45,6 +45,11 @@ import { z } from "zod";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import type { EngineeringAgentSystemAuditActor } from "@/lib/adminAuditSystemActors";
 import type { AmuxAttachedTransaction } from "@/lib/amux/dbBoundary";
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  amuxV22EngineeringPublicationEnabled } from
+  "@/lib/amux/v22TaskExecutionCore";
+import { readAmuxV22PublicPrConsent } from
+  "@/lib/amux/v22PublicPrConsent";
 import { writeEngineeringAgentSystemAudit as systemAudit } from "@/lib/engineeringAgentAudit";
 import { REGISTRATION_CAPS } from "@/lib/engineeringAgentRegistrationGuard";
 import { decideMismatchAction, type MismatchAction } from "@/lib/engineeringAgentStateMismatch";
@@ -814,6 +819,23 @@ const lockWorkItem = async (tx: EngineeringAgentTransaction, id: string): Promis
   return rows[0] ?? refuse("work_item_not_found");
 };
 
+/** A v22 public-write permission is checked again before both issuing and
+ * consuming a capability. The code latch defaults closed independently of
+ * the older engineering-agent operating mode. */
+async function requireV22PublicationAllowed(
+  tx: EngineeringAgentTransaction, runId: string | null,
+): Promise<void> {
+  if (!runId) return;
+  const run = await tx.engineeringAgentRun.findUnique({ where: { id: runId },
+    select: { cardId: true, card: { select: { sourceSystem: true } } },
+  });
+  if (run?.card.sourceSystem !== "admin-idea-v4") return;
+  if (!amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ||
+      !(await readAmuxV22PublicPrConsent(run.cardId, tx)))
+    refuse("v22_publication_disabled");
+}
+
 type LockedCapability = {
   id: string;
   verifierVersion: number;
@@ -906,6 +928,7 @@ export async function claimEngineeringAgentWorkItem(
   if (input.mode === "lookup") {
     context = { event: "claim", mode: "lookup", capabilityConsumed: false };
   } else if (kind === "publish") {
+    await requireV22PublicationAllowed(tx, item.runId);
     // A halt stops a write claim here, in the function that spends the
     // capability, and under the lock every halt is written under (§12).
     await lockEngineeringAgentHalt(tx);
@@ -1191,6 +1214,7 @@ export async function issueEngineeringAgentCapability(
 ): Promise<{ capabilityId: string; commitDigest: string; expiresAt: Date }> {
   const item = await lockWorkItem(tx, input.workItemId);
   if (item.kind !== "publish" || item.state !== "queued") refuse("work_item_not_a_queued_publish");
+  await requireV22PublicationAllowed(tx, item.runId);
   if (item.patchDigest !== input.capability.patchDigest || item.baseSha !== input.capability.baseSha) {
     refuse("capability_does_not_match_item");
   }

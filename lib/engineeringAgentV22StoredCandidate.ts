@@ -1,5 +1,8 @@
 import "server-only";
 
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  amuxV22EngineeringPublicationEnabled } from
+  "@/lib/amux/v22TaskExecutionCore";
 import { readAmuxV22TaskPatchEvidence } from "@/lib/amux/v22TaskResultStore";
 import { readAmuxV22PublicPrConsent } from "@/lib/amux/v22PublicPrConsent";
 import { loadEngineeringAgentV22Candidate } from
@@ -14,6 +17,7 @@ type Ports = {
   readPatch: typeof readAmuxV22TaskPatchEvidence;
   readConsent: typeof readAmuxV22PublicPrConsent;
   readSwitch: () => Promise<boolean>;
+  publicationEnabled: () => boolean;
   loadCandidate: typeof loadEngineeringAgentV22Candidate;
 };
 
@@ -45,6 +49,8 @@ const livePorts: Ports = {
   readConsent: readAmuxV22PublicPrConsent,
   readSwitch: async () =>
     (await readEngineeringAgentSwitches(prisma)).publishAllowed,
+  publicationEnabled: () => amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
   loadCandidate: loadEngineeringAgentV22Candidate,
 };
 
@@ -59,7 +65,8 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
     { ok: false; reason: string }
   > {
   const first = await ports.readSnapshot(attemptId);
-  if (!first || !(await ports.readSwitch()) ||
+  if (!first || !ports.publicationEnabled() ||
+      !(await ports.readSwitch()) ||
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_not_authorized" };
   const patch = await ports.readPatch(attemptId, first.taskId);
@@ -71,7 +78,7 @@ export async function loadEngineeringAgentV22StoredCandidate(attemptId: string,
   const current = await ports.readSnapshot(attemptId);
   if (!current || current.runId !== first.runId ||
       current.taskId !== first.taskId || current.baseSha !== first.baseSha ||
-      !(await ports.readSwitch()) ||
+      !ports.publicationEnabled() || !(await ports.readSwitch()) ||
       !(await ports.readConsent(first.taskId)))
     return { ok: false, reason: "publication_state_changed" };
   return { ok: true, ...first, patchBody: patch.text,

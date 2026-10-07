@@ -19,6 +19,7 @@ function ports(overrides = {}) {
   return { readSnapshot: async () => snapshot,
     readPatch: async () => patch, readConsent: async () => true,
     readSwitch: async () => true,
+    publicationEnabled: () => true,
     loadCandidate: async () => candidate, ...overrides };
 }
 
@@ -60,6 +61,21 @@ test("stored v22 patch refuses a changed run or revoked consent after GitHub I/O
     ports({ readConsent: async () => ++consents === 1 }));
   assert.deepEqual(revoked, { ok: false,
     reason: "publication_state_changed" });
+  let checks = 0;
+  const closedDuringRead = await loadEngineeringAgentV22StoredCandidate(
+    attemptId, ports({ publicationEnabled: () => ++checks === 1 }));
+  assert.deepEqual(closedDuringRead, { ok: false,
+    reason: "publication_state_changed" });
+});
+
+test("stored v22 patch refuses while the separate publication latch is closed", async () => {
+  let patchReads = 0;
+  const refused = await loadEngineeringAgentV22StoredCandidate(attemptId,
+    ports({ publicationEnabled: () => false,
+      readPatch: async () => { patchReads++; return patch; } }));
+  assert.deepEqual(refused, { ok: false,
+    reason: "publication_not_authorized" });
+  assert.equal(patchReads, 0);
 });
 
 test("stored v22 patch refuses missing files, base drift and candidate errors", async () => {
