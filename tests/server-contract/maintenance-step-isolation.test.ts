@@ -183,6 +183,17 @@ mock.module(mod("lib/promptRefinerShadowRunStore.ts"), {
   },
 });
 
+// The shared AgentDigestItem retention (docs/policy/qa-release-agent.md
+// section 4). Mocked as a store for the same reason: the model name appears only
+// inside lib/agentDigestStore.ts, so the stub guard below cannot see it. One
+// short batch each, so each step stops after its first call.
+mock.module(mod("lib/agentDigestStore.ts"), {
+  namedExports: {
+    AGENT_DIGEST_RETENTION_BATCH: 200,
+    expireAgentDigestBodies: async () => ({ expired: 37 }),
+    purgeAgentDigestMeta: async () => ({ purged: 41 }),
+  },
+});
 // Every remaining collaborator returns a distinct number, so an assertion can
 // name which step produced which figure rather than matching on a shared 0.
 mock.module(mod("lib/creditLedger.ts"), {
@@ -365,6 +376,8 @@ test("a step that throws does not skip the steps behind it", async () => {
   // is the assertion the change exists for.
   assert.deepEqual(deletedAccountIds, ["user-past-its-grace-period"]);
   assert.equal(result.scheduledAccountsDeleted, 1);
+  assert.equal(result.agentDigestBodiesExpired, 37);
+  assert.equal(result.agentDigestMetaPurged, 41);
 
   // So did everything after it, all the way to the last step.
   assert.equal(result.sessions, 2);

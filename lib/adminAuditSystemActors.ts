@@ -73,6 +73,9 @@ export const SYSTEM_AUDIT_ACTORS = [
   // Scoped to the dark initial source-plan writer below.
   AMUX_V4_IDEA_SYSTEM_ACTOR,
   ...ENGINEERING_AGENT_SYSTEM_AUDIT_ACTORS,
+  "qa-release-intake",
+  "qa-release-merge-lane",
+  "agent-digest-retention",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

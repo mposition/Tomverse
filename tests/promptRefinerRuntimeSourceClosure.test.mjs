@@ -383,12 +383,18 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-07, selective release of marketing S2e onto main: the S2e
 // pipeline additions in `lib/marketingAutomationAccess.ts` move source
 // positions only. Count 228 and the position-free inventory are unchanged.
+//
+// 2026-10-07, QA-release merge lane selective release merged over that: two
+// QA-release system actors and the shared agent-digest retention actor in
+// `lib/adminAuditSystemActors.ts` and the
+// marketing pipeline fingerprint repin move source positions only. Count and
+// position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "d31be2bc00ae8ca136e7f157b32bd9d9",
-  "9987452f7477e981ec2d590d67fa1826",
+  "958f053e86c94c6f7fa813a73f8ef5b9",
+  "0c096082e9afc3bb75be1ebfa98ee7f7",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -899,6 +899,34 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  QaReleaseMergeAttempt_state_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_STATES",
+    reason:
+      "The merge lane attempt's lifecycle (docs/policy/qa-release-agent.md version 4, section 8 item 5): issued, consumed, awaiting_deploy, closed. The migration's trigger enforces the core's transition table; tests/integration/qa-release-merge-attempt.db.test.ts checks the two against each other.",
+  },
+  QaReleaseMergeLaneLatch_reason_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeLaneLatchCore.ts",
+    list: "QA_RELEASE_MERGE_LANE_LATCH_REASONS",
+    reason:
+      "Why the merge lane latched (docs/policy/qa-release-agent.md version 4, section 8 item 5). A set event carries one; a person's release carries none.",
+  },
+  QaReleaseMergeAttempt_outcome_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_OUTCOMES",
+    reason:
+      "Why a closed attempt closed, each naming who decided it: the lane from what it read, or a person through the latch release from what they confirmed. Set exactly when the state becomes closed.",
+  },
+  AgentDigestItem_agent_key_check: {
+    owner: "list",
+    module: "lib/agentDigestContract.ts",
+    list: "AGENT_DIGEST_AGENT_KEYS",
+    reason:
+      "The agents that may store digests in the shared AgentDigestItem table. Adding an agent is a reviewed migration that also gives it a kind list and a body retention; an unknown key would be a write no agent owns.",
+  },
   AmuxOrchestratorWrite_call_kind_check: {
     owner: "list",
     module: "lib/amux/orchestratorHaltCore.ts",

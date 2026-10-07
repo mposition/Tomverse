@@ -179,6 +179,30 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AgentDigestItem",
+    delegate: "agentDigestItem",
+    writers: ["lib/agentDigestStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §4",
+  },
+  {
+    table: "QaReleaseOperatorControl",
+    delegate: "qaReleaseOperatorControl",
+    writers: ["lib/qaReleaseOperatorControlStore.ts"],
+    contract: "docs/policy/qa-release-agent.md §6",
+  },
+  {
+    table: "QaReleaseMergeAttempt",
+    delegate: "qaReleaseMergeAttempt",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
+    table: "QaReleaseMergeLaneLatch",
+    delegate: "qaReleaseMergeLaneLatch",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -470,6 +494,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
   },
   {
+    path: "lib/agentDigestStore.ts",
+    table: "AgentDigestItem",
+    tableMentions: 7,
+    writeVerbs: 4,
+    reason:
+      "The table's sole writer. Its raw SQL is the two retention batches (docs/policy/qa-release-agent.md section 4): a constant UPDATE that sets an expired body to NULL and a constant DELETE of rows past the meta retention, each bounded and audited, and each also refused by the table's own update and delete triggers outside those conditions. No table name is interpolated.",
+  },
+  {
     path: "scripts/report-issue-backlog-core.mjs",
     table: "AdminAuditLog",
     tableMentions: 2,
@@ -484,6 +516,105 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 94,
     reason:
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
+  },
+  {
+    path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 12,
+    writeVerbs: 4,
+    reason:
+      "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 3,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 10,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 5,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 19,
+    writeVerbs: 13,
+    reason:
+      "Creates the attempt table, its partial unique index and the triggers that constrain its insert and update and refuse delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The latch table's foreign key names the attempt an event concerns, and its insert trigger accepts an audit row that targets that attempt. It writes no attempt row; its write verbs constrain or refuse the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 12,
+    writeVerbs: 9,
+    reason:
+      "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      "The latch insert trigger reads the audit row this transaction wrote (id, target, actor, xmin) to bind each latch event to it. It never writes AdminAuditLog; its write verbs refuse or constrain the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The attempt table's triggers read the audit row this transaction wrote (id, target, actor, xmin) to bind every attempt write to it. It never writes AdminAuditLog; its write verbs refuse or constrain the attempt table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "Creates the merge-lane attempt table, whose foreign key names the operator control revision it was issued under. It names write verbs to refuse or constrain them on the attempt table and writes no control row.",
+  },
+  {
+    path: "scripts/check-enum-constraints.mjs",
+    table: "AgentDigestItem",
+    tableMentions: 1,
+    writeVerbs: 19,
+    reason:
+      "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
   {
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",
@@ -826,6 +957,22 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The initial source-plan migration adds one restrictive foreign key from creationAuditLogId to the existing audit row. Its write verbs create and constrain AmuxIdeaSourcePlanRevision and AmuxIdeaAnalysisChunk only; it never writes AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 11,
+    writeVerbs: 4,
+    reason:
+      "Creates the QA-release operator control table and the triggers that number its revisions, bind each to a same-transaction audit row and refuse every update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 4,
+    reason:
+      "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
@@ -847,6 +994,24 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 7,
     reason:
       "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the latch insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseMergeLaneLatch event, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    count: 4,
+    reason:
+      "Four EXECUTE calls, all over a name built from TG_TABLE_SCHEMA and a constant name, because every function pins search_path to pg_catalog, pg_temp. One, in the audit helper, checks the AdminAuditLog row this transaction wrote with SELECT EXISTS; three, in the attempt insert and update triggers, call that helper schema-qualified. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the operator control insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseOperatorControl revision, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",

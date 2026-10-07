@@ -232,6 +232,37 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // The shared AgentDigestItem table: closed agent and kind lists, the
+    // idempotency prefix, rows born with their body, and the expiry and purge
+    // that are the only update and delete.
+    "tests/integration/agent-digest-item.db.test.ts",
+    // Its single writer: one row and one system audit entry in one transaction,
+    // a replay or a conflict writes neither, and a refusal never opens one.
+    "tests/integration/agent-digest-store.db.test.ts",
+    // The QA-release operator control record: consecutive revisions, each
+    // audited by a person in its own transaction, and nothing ever changed.
+    "tests/integration/qa-release-operator-control.db.test.ts",
+    // The digest intake: secret, control revision and switch, closed schema,
+    // then the single writer; one digest per UTC day.
+    "tests/integration/qa-release-digest-intake.db.test.ts",
+    // The Monitor silence check: its own secret, the control revision, then
+    // the freshness verdict over the database clock.
+    "tests/integration/qa-release-monitor.db.test.ts",
+    // The merge lane's attempts: one open per lane, the core's lifecycle and
+    // nothing else, every write audited by the right actor, no removal.
+    "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
+    // The merge lane service's three app calls: its own secret, the revision
+    // it carries, a strict body, then the single writer.
+    "tests/integration/qa-release-merge-lane-routes.db.test.ts",
+    // The Admin Agent digest reader: counts and codes, expired and
+    // unreadable bodies shown as such.
+    "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
