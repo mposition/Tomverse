@@ -1780,24 +1780,6 @@ domains:
       Its expiry and key retirement do not by themselves decide account
       deletion or unified export; a public develop PR needs separate consent.
 
-  - domain: amuxIdeaDerivationGroup
-    prismaModel: AmuxIdeaDerivationGroup
-    userLinkageRole: actor
-    owner: security-privacy
-    deletionAction: unverified
-    retentionPolicy: unverified
-    implementationStatus: planned
-    plannedWorkRef: >-
-      docs/policy/amux-intake.md v4, split-merge provenance deletion and export gate
-    subjectReference:
-      kind: parent_row
-      parentColumn: ideaId
-      parentModel: AmuxIdeaSubmission
-    inUnifiedExport: unverified
-    note: >-
-      The group holds actor identity and keyed decision digests, not proposal
-      text. Account deletion and export treatment remain unverified.
-
   - domain: amuxPortfolioAssessment
     prismaModel: AmuxPortfolioAssessment
     userLinkageRole: actor
@@ -1861,22 +1843,6 @@ domains:
     note: >-
       The append-only decision links a task to an approving operator and audit
       entry. Account-deletion and export treatment remain unverified.
-
-  - domain: amuxTaskCostCatalogApproval
-    prismaModel: AmuxV4TaskCostCatalogApproval
-    userLinkageRole: actor
-    owner: security-privacy
-    deletionAction: unverified
-    retentionPolicy: unverified
-    implementationStatus: planned
-    plannedWorkRef: >-
-      docs/policy/amux-intake.md v4, task-cost catalog deletion and export gate
-    subjectReference:
-      kind: none
-    inUnifiedExport: unverified
-    note: >-
-      The approved catalog row records operator and audit identifiers, not
-      idea or Task bodies. Account-deletion and export remain unverified.
 
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft
