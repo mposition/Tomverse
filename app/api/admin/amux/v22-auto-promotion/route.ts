@@ -72,7 +72,10 @@ export async function POST(request: Request) {
         { status: error.httpStatus, headers: noStore });
     }
     const security = apiSecurityResponse(error);
-    if (security) return security;
+    if (security) {
+      security.headers.set("Cache-Control", noStore["Cache-Control"]);
+      return security;
+    }
     throw error;
   }
 }

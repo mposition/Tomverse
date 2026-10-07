@@ -103,8 +103,8 @@ export async function POST(request: Request) {
         if (result.claimed || result.reason === "outcome_unknown" ||
             (!v22Enabled && !legacyEnabled)) {
           return Response.json(v22WorkerClaimTickWire(result), {
-            status: !result.claimed && result.reason === "outcome_unknown" ?
-              409 : 200, headers: noStore,
+            status: result.claimed ? 200 : autoTickHttpStatus(result.reason),
+            headers: noStore,
           });
         }
       }
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
         if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
             !legacyEnabled) {
           return Response.json(v22PromotionTickWire(result), {
-            status: !result.promoted && result.reason === "outcome_unknown" ? 409 : 200,
+            status: result.promoted ? 200 : autoTickHttpStatus(result.reason),
             headers: noStore,
           });
         }

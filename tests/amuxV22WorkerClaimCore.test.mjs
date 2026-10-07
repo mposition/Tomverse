@@ -99,6 +99,8 @@ test("v22 tick wire never disguises a receipt as a v8 grant", () => {
   const route = readFileSync("app/api/internal/amux/auto-promotion/tick/route.ts", "utf8");
   assert.match(route, /Response\.json\(v22PromotionTickWire\(result\)/);
   assert.match(route, /Response\.json\(v22WorkerClaimTickWire\(result\)/);
+  assert.match(route, /status: result\.claimed \? 200 : autoTickHttpStatus\(result\.reason\)/);
+  assert.match(route, /status: result\.promoted \? 200 : autoTickHttpStatus\(result\.reason\)/);
   assert.match(route, /reason: "apply_disabled", expired: 0/);
   assert.doesNotMatch(route, /orchestrator_identity_required/);
 });
