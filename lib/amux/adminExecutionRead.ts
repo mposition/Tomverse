@@ -6,7 +6,7 @@ import { amuxCanonicalJson } from "./boardImportCore.ts";
 import { openAmuxContent, verifyAmuxContentDigest } from "./ideaCrypto.ts";
 import { loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { readAmuxV22TaskResultForOwner } from "./v22TaskResultStore.ts";
-import { projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
+import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
   rollupAmuxTaskFeedback } from
   "./v22TaskFeedbackCore.ts";
 import { AMUX_V22_OUTCOME_ACTION, AMUX_V22_OUTCOME_TARGET,
@@ -92,7 +92,8 @@ async function cardSummaries(rows: CardRow[]) {
     ` : [],
     storyIds.length ? prisma.amuxWorkItem.groupBy({
       by: ["parentStoryCardId", "status"],
-      where: { parentStoryCardId: { in: storyIds }, cardType: "task" },
+      where: { parentStoryCardId: { in: storyIds }, cardType: "task",
+        archivedAt: null },
       _count: { _all: true },
     }) : [],
   ]);
@@ -266,6 +267,7 @@ async function nodeIndicators(rows: NodeRow[]) {
       FROM descendants d
       LEFT JOIN "AmuxWorkItem" card ON card."parentFeatureNodeId" = d."id"
         AND card."cardType" = 'task'
+        AND card."archivedAt" IS NULL
       GROUP BY d."rootId"
     `,
   ]);
@@ -562,11 +564,7 @@ export async function readAmuxExecutionFeedback(parent: {
       select: { cardType: true, archivedAt: true } });
     if (!story || story.cardType !== "story" || story.archivedAt) return null;
   }
-  const where = parent.kind === "story" ? { cardType: "task",
-    parentStoryCardId: parent.id, archivedAt: null } : {
-    cardType: "task", parentFeatureNodeId: { in: featureIds },
-    archivedAt: null,
-  };
+  const where = amuxFeedbackTaskWhere(parent, featureIds);
   const cards = await prisma.amuxWorkItem.findMany({ where,
     take: 501, orderBy: { id: "asc" }, select: { id: true, revision: true,
       status: true,

@@ -1,6 +1,17 @@
 /** Read-only outcome projection. Unknown observations must never become zero. */
 import type { AmuxV22Observation } from "./v22OutcomeObservationCore.ts";
 
+/** Both Story and node rollups use the same active-card boundary as the
+ * hierarchy list; historical archived cards remain in the audit, not totals. */
+export function amuxFeedbackTaskWhere(parent: { kind: "story" | "node";
+  id: string }, featureIds: string[]) {
+  return parent.kind === "story" ?
+    { cardType: "task" as const, parentStoryCardId: parent.id,
+      archivedAt: null } :
+    { cardType: "task" as const, parentFeatureNodeId: { in: featureIds },
+      archivedAt: null };
+}
+
 export type AmuxFeedbackAttempt = {
   id: string;
   startedAt: Date;

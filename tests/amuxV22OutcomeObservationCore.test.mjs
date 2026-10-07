@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inspectAmuxV22OutcomeRequest,
+import { classifyAmuxV22OutcomeError, inspectAmuxV22OutcomeRequest,
   readAmuxV22ObservationMetadata } from
   "../lib/amux/v22OutcomeObservationCore.ts";
 
@@ -25,6 +25,13 @@ test("owner observations accept only exact enumerated content", () => {
   "checks");
   assert.equal(inspectAmuxV22OutcomeRequest(request({ kind: "checks",
     outcome: "passed", findingCount: 1, evidenceDigest: "a".repeat(64) })), null);
+});
+
+test("write failures distinguish stale state, request conflict, and unavailable", () => {
+  assert.equal(classifyAmuxV22OutcomeError("task_state_changed"), "stale");
+  assert.equal(classifyAmuxV22OutcomeError("owner_decision_missing"), "stale");
+  assert.equal(classifyAmuxV22OutcomeError("request_id_conflict"), "conflict");
+  assert.equal(classifyAmuxV22OutcomeError("unrecognized"), "unavailable");
 });
 
 test("audit metadata cannot manufacture an invalid owner outcome", () => {

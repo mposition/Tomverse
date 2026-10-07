@@ -26,6 +26,8 @@ test("owner outcome write stays separate from the read-only execution board", as
   assert.match(form, /outcome_unknown/);
   assert.doesNotMatch(form, /method: "(PUT|PATCH|DELETE)"/);
   assert.match(activation, /activationAuthorized: false/);
-  assert.match(read, /parentStoryCardId: parent\.id, archivedAt: null/);
+  assert.match(read, /amuxFeedbackTaskWhere\(parent, featureIds\)/);
+  assert.match(read, /card\."archivedAt" IS NULL/);
+  assert.match(read, /parentStoryCardId: \{ in: storyIds \}, cardType: "task",\s+archivedAt: null/);
   assert.match(read, /const currentDecision = feedbackDecisions\.find/);
 });

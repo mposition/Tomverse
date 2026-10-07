@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
+import { amuxFeedbackTaskWhere, projectAmuxTaskFeedback, readAmuxV4ApprovedCeiling,
   rollupAmuxTaskFeedback } from
   "../lib/amux/v22TaskFeedbackCore.ts";
 
@@ -130,4 +130,12 @@ test("an earlier attempt's observation is not reported as current", () => {
       observedAt: end.toISOString(), taskRevision: 3 },
   ] }));
   assert.equal(feedback.observed.userOutcome, null);
+});
+
+test("Story and node feedback queries exclude archived Tasks", () => {
+  assert.deepEqual(amuxFeedbackTaskWhere({ kind: "story", id: "story-1" }, []),
+    { cardType: "task", parentStoryCardId: "story-1", archivedAt: null });
+  assert.deepEqual(amuxFeedbackTaskWhere({ kind: "node", id: "node-1" },
+    ["feature-1"]), { cardType: "task",
+    parentFeatureNodeId: { in: ["feature-1"] }, archivedAt: null });
 });
