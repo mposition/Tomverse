@@ -64,7 +64,7 @@ import { loadEngineeringAgentV22SettlementPatch } from
   "@/lib/engineeringAgentV22SettlementPatch";
 import { loadEngineeringAgentV22StoredCandidate } from
   "@/lib/engineeringAgentV22StoredCandidate";
-import { v22PublishCandidateMatches } from
+import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
   "@/lib/engineeringAgentV22PublicationDecision";
 import { readAmuxV22PublicPrConsent } from
   "@/lib/amux/v22PublicPrConsent";
@@ -1101,8 +1101,12 @@ export async function settleAmuxV22TaskExecution(input: {
   // Tier work and GitHub reads happen outside the short settlement transaction.
   // Any missing evidence keeps the result private; it never becomes a worker
   // assertion that the patch is T1.
-  const publication = patch && amuxV22EngineeringPublicationEnabled(
-    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ?
+  const publication = v22PublishPreflightEligible({
+    policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+    patchPresent: patch !== null,
+    publicationEnabled: amuxV22EngineeringPublicationEnabled(
+      process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
+  }) ?
     await loadEngineeringAgentV22StoredCandidate(input.attemptId)
       .catch(() => null) : null;
   return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,

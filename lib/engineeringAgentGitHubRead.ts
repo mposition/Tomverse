@@ -291,9 +291,14 @@ export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
   const verification = record(commit?.verification);
   const payload = verification?.verified === true &&
     typeof verification.payload === "string" ? verification.payload : null;
-  const baseCommitterDate = payload?.startsWith(`tree ${rootTreeId}\n`) ?
-    /^committer [^\r\n]+ <[^<>\r\n]+> (\d{1,12} [+-]\d{4})$/m.exec(
-      payload)?.[1] ?? null : null;
+  const headerEnd = payload?.indexOf("\n\n") ?? -1;
+  const header = payload?.startsWith(`tree ${rootTreeId}\n`) &&
+    headerEnd > 0 ? payload.slice(0, headerEnd) : null;
+  const committerLines = header?.split("\n").filter((line) =>
+    line.startsWith("committer ")) ?? [];
+  const baseCommitterDate = committerLines.length === 1 ?
+    /^committer [^\r\n]+ <[^<>\r\n]+> (\d{1,12} [+-]\d{4})$/.exec(
+      committerLines[0])?.[1] ?? null : null;
   const tree = record(await githubJson(`/git/trees/${rootTreeId}?recursive=1`,
     resolved, MAX_TREE_JSON_BYTES));
   if (!tree || tree.sha !== rootTreeId || tree.truncated !== false ||

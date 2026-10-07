@@ -1,6 +1,15 @@
 /** The pre-transaction evidence is only a candidate. The writer compares its
  * immutable bindings again under the AMUX/engineering locks, then separately
  * reads the live switch and owner consent inside that same transaction. */
+export function v22PublishPreflightEligible(input: {
+  policyVersion: number;
+  patchPresent: boolean;
+  publicationEnabled: boolean;
+}): boolean {
+  return input.policyVersion >= 4 && input.patchPresent &&
+    input.publicationEnabled;
+}
+
 export function v22PublishCandidateMatches(input: {
   policyVersion: number;
   modeAtStart: string;

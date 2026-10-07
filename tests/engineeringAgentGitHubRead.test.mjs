@@ -87,6 +87,13 @@ test("v22 base tree is complete, self-consistent and read from the fixed repo", 
           payload: null } }),
     }).fetchImpl });
   assert.equal(unsigned.baseCommitterDate, null);
+  const messageSpoof = await readEngineeringAgentPinnedBaseTree(PIN, { env,
+    fetchImpl: fakeFetch({ ...routes,
+      [`/git/commits/${PIN}`]: () => ({ sha: PIN,
+        tree: { sha: treeId }, verification: { verified: true,
+          payload: `tree ${treeId}\nauthor A <a@example.com> 1791336934 +1000\n\ncommitter Spoof <s@example.com> 1791336934 +1000\n` } }),
+    }).fetchImpl });
+  assert.equal(messageSpoof.baseCommitterDate, null);
   await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN, { env,
     fetchImpl: fakeFetch({ ...routes,
       [`/git/trees/${treeId}`]: () => ({ sha: treeId, truncated: true,
