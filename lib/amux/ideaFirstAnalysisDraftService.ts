@@ -108,7 +108,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       preview.consumedAt === null || preview.outcomeUnknownAt !== null ||
       preview.payloadPurgedAt !== null || !preview.payloadCiphertext ||
       !preview.payloadKeyId || !preview.payloadKeyVersion ||
-      !preview.payloadPurgeAfter || now >= preview.payloadPurgeAfter ||
+      !preview.payloadPurgeAfter ||
       hold.previewId !== preview.id || hold.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
       hold.modelId !== preview.modelId || hold.status !== "succeeded" ||
       hold.dispatchedAt === null || hold.closedAt === null ||
@@ -211,12 +211,10 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     outputPending: false,
   };
   const nextCursor = prepared.decision === "ready" ? prepared.nextCursor : null;
-  const nextDay = new Date(now.getTime() + DAY_MS);
   const nextMonth = new Date(now.getTime() + 30 * DAY_MS);
   const finishesAnalysis = nextCursor === null && !needsOwnerInput;
   const activeAnalysisPurgeAfter = new Date(idea.analysisDeadlineAt.getTime() + DAY_MS);
-  const payloadPurgeAfter = new Date(Math.min(
-    (finishesAnalysis ? nextDay : activeAnalysisPurgeAfter).getTime(),
+  const payloadPurgeAfter = new Date(Math.min(now.getTime(),
     preview.payloadPurgeAfter.getTime()));
   const auditId = await writeSystemAuditLog({
     tx, systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
@@ -257,7 +255,7 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
       freeformCiphertext: Uint8Array.from(prepared.draft.freeform.ciphertext),
       freeformKeyId: prepared.draft.freeform.keyId,
       freeformKeyVersion: prepared.draft.freeform.keyVersion,
-      freeformPurgeAfter: finishesAnalysis ? nextDay : activeAnalysisPurgeAfter,
+      freeformPurgeAfter: finishesAnalysis ? now : activeAnalysisPurgeAfter,
       coveredStartOrdinal: page.coveredStartOrdinal,
       coveredEndOrdinal: page.coveredEndOrdinal,
       remainingStartOrdinal: page.remainingStartOrdinal,
@@ -319,12 +317,12 @@ export async function commitAmuxFirstIdeaAnalysisDraft(
     // The database allows deadlines to move earlier, never later.
     await tx.amuxIdeaAnalysisChunk.updateMany({ where: { ideaId: idea.id,
       chunkIndex: { lt: chunkIndex }, freeformCiphertext: { not: null },
-      freeformPurgeAfter: { gt: nextDay } },
-    data: { freeformPurgeAfter: nextDay } });
+      freeformPurgeAfter: { gt: now } },
+    data: { freeformPurgeAfter: now } });
     await tx.amuxIdeaTransferPreview.updateMany({ where: { ideaId: idea.id,
       payloadCiphertext: { not: null },
-      payloadPurgeAfter: { gt: nextDay } },
-    data: { payloadPurgeAfter: nextDay } });
+      payloadPurgeAfter: { gt: now } },
+    data: { payloadPurgeAfter: now } });
   }
   return { ideaId: idea.id, previewId: preview.id,
     unitCount: prepared.draft.units.length,

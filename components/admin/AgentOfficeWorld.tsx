@@ -325,8 +325,9 @@ export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onS
                   <b>
                     {room.icon} {roomName(room.id)}
                   </b>
+                  {engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
-                    <i className={cx("rm-dot", status)} title={m.deptStatus[status]} />
+                    <i className={cx("rm-dot", status)} title={engine.liveDept(room.id)?.badge ?? m.deptStatus[status]} />
                   ) : null}
                 </span>
                 <span className={cx("rm-code")}>{room.short}</span>

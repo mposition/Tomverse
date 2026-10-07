@@ -51,6 +51,13 @@ export async function commitAmuxDueTransferPayloadPurge(tx: Prisma.TransactionCl
   if (!row || row.ideaId !== found.ideaId || row.payloadCiphertext === null ||
       row.payloadPurgedAt !== null || !row.payloadPurgeAfter ||
       now < row.payloadPurgeAfter) return "skipped";
+  const idea = await tx.amuxIdeaSubmission.findUnique({
+    where: { id: row.ideaId },
+    select: { state: true, analysisDeadlineAt: true },
+  });
+  if (!idea) throw new AmuxContentRetirementError("integrity_unavailable");
+  if (row.state === "in_flight" && idea.state === "analyzing" &&
+      now < idea.analysisDeadlineAt) return "skipped";
   if (await amuxIdeaHasActiveRetentionHold(tx, row.ideaId, now)) return "skipped";
   const target: AmuxRetirableContent = { ideaId: row.ideaId,
     purpose: "transfer_payload", subjectId: previewId };
@@ -196,6 +203,9 @@ export async function purgeDueAmuxAnalysisContent() {
     prisma.amuxIdeaTransferPreview.findMany({
       where: { payloadCiphertext: { not: null }, payloadPurgedAt: null,
         payloadPurgeAfter: { lte: now[0].now },
+        OR: [{ state: { not: "in_flight" } },
+          { idea: { OR: [{ state: { not: "analyzing" } },
+            { analysisDeadlineAt: { lte: now[0].now } }] } }],
         idea: { retentionHolds: { none: { releasedAt: null,
           expiresAt: { gt: now[0].now } } } } },
       orderBy: [{ payloadPurgeAfter: "asc" }, { id: "asc" }],

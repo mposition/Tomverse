@@ -2,7 +2,7 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 /**
  * Copy for the Agent office (/admin/office): the pixel office shell for the
- * seven agent teams, after the original AI OFFICE UI by godseng.mom.
+ * eight agent teams, after the original AI OFFICE UI by godseng.mom.
  *
  * Everything the office says is here, including its staff and its demo day,
  * because the console is written in English and Korean and nothing else
@@ -26,7 +26,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     shell: {
       chip: "SHELL · DEMO",
       notice:
-        "This is a shell. Every character, status, line and approval in this office is a demo scenario: none of it is read from an agent's record, and nothing here approves, merges, posts or sends anything. Each team's real record opens from its profile.",
+        "This is a shell. Every character, status, line and approval in this office is a demo scenario, except in a room marked LIVE: that room reads the team's real operating state (whether its latest scheduled run was recorded, its last success), never what it produced. Nothing here approves, merges, posts or sends anything. Each team's real record opens from its profile.",
     },
     company: {
       titlePrefix: "Tomverse",
@@ -87,6 +87,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         report: "Only the prices with a deadline coming up.",
         blockReason:
           "Billing & finance ops has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
+      },
+      trust: {
+        name: "Trust & safety",
+        task: "Privacy-request (DSR) deadlines, counted",
+        report: "I count deadlines. I never declare compliance or breach.",
+        blockReason:
+          "Trust & safety has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
       },
       research: {
         name: "Product research",
@@ -198,6 +205,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         role: "Ledger match",
         thoughts: ["I never invent a number.", "Only what was read gets recorded."],
       },
+      "trust-lead": {
+        name: "Eunseo Ko",
+        role: "Trust & safety lead",
+        callsign: "Shield",
+        thoughts: ["I never declare compliance or breach.", "Legal holds stay in the count."],
+      },
+      "trust-m1": {
+        name: "Jihu An",
+        role: "DSR deadlines",
+        thoughts: ["Counting requests near their deadline.", "I never open an email address."],
+      },
+      "trust-m2": {
+        name: "Hayoon Oh",
+        role: "Dead-man ping",
+        thoughts: ["Only a successful run pings.", "One signal with no body is enough."],
+      },
       "research-lead": {
         name: "Haeun Yoo",
         role: "Research lead",
@@ -230,6 +253,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       done: "Done",
       working: "Working",
       approval: "Awaiting you",
+      attention: "Needs a look",
       blocked: "Waiting on a link",
       waiting: "Idle",
     },
@@ -284,6 +308,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       onDuty: (count: number) => `On duty ${count}`,
       done: (count: number) => `Done ${count}`,
       working: (count: number) => `Working ${count}`,
+      attention: (count: number) => `Needs a look ${count}`,
       blocked: (count: number) => `Waiting on a link ${count}`,
       toastStart: (count: number) => `07:00 — ${count} AI staff are coming in ✨`,
       toastApproved: "Approved in the demo. Engineering is preparing the PR",
@@ -353,7 +378,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       dialogLabel: "Digest desk briefing",
       dateLine: (clock: string, name: string) => `${clock} · final briefing from ${name}`,
       title: "Operator, today's work is wrapped up.",
-      done: (count: number) => `Done: ${count} teams — digest, observation, draft, PR preparation and Guard`,
+      done: (count: number) => `Done: ${count} ${count === 1 ? "room" : "rooms"}`,
+      attention: (count: number) =>
+        `Needs a look: ${count} ${count === 1 ? "room" : "rooms"} — a real record has a problem`,
       approved: "One decision applied — the T2 draft went to the publisher",
       blocked: (count: number) => `Waiting on a link: ${count} teams — they need a record screen first`,
       decisionLabel: "What you decide today",
@@ -373,11 +400,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       metricDone: "Done",
       metricWorking: "Working",
       metricApproval: "Awaiting you",
+      metricAttention: "Needs a look",
       metricBlocked: "Waiting on a link",
       stampStaff: "STAFF",
       stampDone: "DONE",
       stampWorking: "WORKING",
       stampApproval: "APPROVAL",
+      stampAttention: "CHECK",
       stampBlocked: "NO LINK",
       scheduleTitle: "⚡ automation.status",
       scheduleLabel: "SCHEDULE",
@@ -385,8 +414,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       scheduleBody: "The demo runs only when you press start",
       scheduleOff: "OFF",
       recordsTitle: "🔗 records.link",
-      liveLink: "Live link",
-      liveLinkStatus: "Not linked",
+      liveLink: "Rooms reading a real record",
+      liveLinkStatus: (count: number) => (count === 0 ? "None" : count === 1 ? "1 room" : `${count} rooms`),
+      recordLive: "LIVE · open record",
       recordOpen: "Open record",
       recordNone: "No record screen",
       boardTitle: "🏢 team_office.board",
@@ -401,6 +431,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefPhase: (phase: string, done: number) => `${phase} in progress — ${done} teams done`,
       briefApprovalNeeded: "A T2 draft needs your decision",
       briefNoApproval: "Nothing waiting for a decision",
+      briefAttention: (count: number) =>
+        count === 1 ? "1 real record needs a look" : `${count} real records need a look`,
       briefBlocked: "Some teams are waiting on a record screen",
       decisionLabel: "The one thing you decide today",
       decisionPending: "Decide whether this T2 draft may become a pull request.",
@@ -417,6 +449,37 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         "No outputs are linked. This shell does not read any agent's output, so the store stays empty instead of showing examples.",
       note: (operator: string, teams: number, staff: number) =>
         `${operator} · ${teams} agent teams and the digest desk, ${staff} AI staff · this view shares the live office's simulation.`,
+    },
+    real: {
+      chip: "LIVE",
+      boxLabel: "Real record",
+      contentElsewhere: "What it observed is shown only in its own section.",
+      research: {
+        badges: {
+          ok: "Recorded",
+          failed: "Failed",
+          duplicate: "Recorded twice",
+          missingOpen: "Window open",
+          missing: "Not recorded",
+          silent: "Silent",
+          disabled: "Switch off",
+          unread: "Unread",
+        },
+        unread: "Could not read its record",
+        disabled: "App switch is off: it records nothing",
+        ok: (slot: string) => `Latest run recorded · ${slot}`,
+        failed: (slot: string, stage: string) => `Latest run failed · ${slot} · ${stage}`,
+        duplicate: (slot: string) => `Latest run recorded more than once · ${slot}`,
+        missingOpen: (slot: string) => `Latest run ${slot}: window open, nothing recorded yet`,
+        missing: (slot: string) => `Latest run ${slot}: nothing recorded`,
+        lastSuccess: (time: string) => `last success ${time}`,
+        noSuccess: "no success recorded yet",
+        silent: (hours: number) => `no success for ${hours} hours`,
+        anchorMissing: "silence anchor not recorded yet",
+        readAt: (time: string) => `read ${time}`,
+      },
+      log: (room: string, line: string) => `${room} (real record): ${line}`,
+      console: (line: string) => `This room shows its real record. ${line}.`,
     },
     world: {
       fit: "🗺️ Whole office",
@@ -471,8 +534,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefWalk: "Every report is in. Heading to the operator.",
       briefSay: "Operator, there's nothing left to decide today.",
       briefOperator: "Thanks, everyone ✨",
-      briefLog: (done: number, blocked: number) =>
-        `Digest desk briefing done — ${done} teams done · ${blocked} waiting on a link`,
+      briefLog: (done: number, attention: number, blocked: number) =>
+        `Digest desk briefing done — ${done} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link`,
       dayOver: "Demo day over. Staff are heading to the lounge.",
       deptStarted: (room: string, label: string) => `${room} started — ${label}`,
       deptDone: (room: string, report: string) => `${room} done — ${report}`,
@@ -500,8 +563,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       statusDayDone: "Today's work is all done.",
       statusMeeting: (title: string) => `Meeting in progress — ${title}`,
       statusGap: "A hand-off between steps is in progress. The next team starts shortly.",
-      statusCounts: (done: number, blocked: number, onDuty: number) =>
-        `${done} teams done · ${blocked} waiting on a link · ${onDuty} on duty.`,
+      statusCounts: (done: number, attention: number, blocked: number, onDuty: number) =>
+        `${done} ${done === 1 ? "room" : "rooms"} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link · ${onDuty} on duty.`,
       statusNext: (phase: string) => `Next up: “${phase}”.`,
       delayApproval: (names: string, seconds: number) =>
         `One cause: your decision. ${names} have been waiting in the approval room for ${seconds}s.`,
@@ -564,7 +627,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     shell: {
       chip: "껍데기 · 데모",
       notice:
-        "껍데기 화면입니다. 이 오피스의 직원·상태·대사·결재는 모두 데모 시나리오이고, 어떤 에이전트의 기록도 읽지 않으며, 여기서 승인·병합·게시·발송되는 것은 없습니다. 각 팀의 실제 기록은 프로필에서 열 수 있어요.",
+        "껍데기 화면입니다. 이 오피스의 직원·상태·대사·결재는 모두 데모 시나리오입니다. 단, '실제' 표시가 붙은 방은 그 팀의 실제 운영 상태(직전 회차 기록 여부, 마지막 성공)를 읽어요. 산출물 내용은 읽지 않습니다. 여기서 승인·병합·게시·발송되는 것은 없으며, 각 팀의 실제 기록은 프로필에서 열 수 있어요.",
     },
     company: {
       titlePrefix: "Tomverse",
@@ -625,6 +688,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         report: "기한이 다가오는 가격만 추려요.",
         blockReason:
           "과금·재무 운영팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
+      },
+      trust: {
+        name: "신뢰·안전팀",
+        task: "개인정보 요청(DSR) 기한 관측",
+        report: "기한을 셀 뿐, 준수·위반은 판정하지 않아요.",
+        blockReason:
+          "신뢰·안전팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
       },
       research: {
         name: "제품 리서치팀",
@@ -736,6 +806,22 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         role: "원장 대조",
         thoughts: ["숫자는 지어내지 않아요.", "읽은 것만 기록합니다."],
       },
+      "trust-lead": {
+        name: "고은서",
+        role: "신뢰·안전 리드",
+        callsign: "고실드",
+        thoughts: ["준수·위반은 제가 판정하지 않아요.", "legal hold도 분모에서 빼지 않아요."],
+      },
+      "trust-m1": {
+        name: "안지후",
+        role: "DSR 기한 관측",
+        thoughts: ["기한 임박 건을 세는 중이에요.", "이메일 주소는 열어 보지 않아요."],
+      },
+      "trust-m2": {
+        name: "오하윤",
+        role: "dead-man ping",
+        thoughts: ["성공한 회차만 ping해요.", "본문 없는 신호 하나면 충분해요."],
+      },
       "research-lead": {
         name: "유하은",
         role: "리서치 리드",
@@ -768,6 +854,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       done: "완료",
       working: "진행 중",
       approval: "승인 대기",
+      attention: "확인 필요",
       blocked: "연동 대기",
       waiting: "대기",
     },
@@ -822,6 +909,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       onDuty: (count: number) => `근무 ${count}`,
       done: (count: number) => `완료 ${count}`,
       working: (count: number) => `진행 ${count}`,
+      attention: (count: number) => `확인 필요 ${count}`,
       blocked: (count: number) => `연동대기 ${count}`,
       toastStart: (count: number) => `07:00 — AI 직원 ${count}명이 출근합니다 ✨`,
       toastApproved: "데모 승인 완료! 엔지니어링팀이 PR을 준비해요",
@@ -891,7 +979,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       dialogLabel: "다이제스트실 브리핑",
       dateLine: (clock: string, name: string) => `${clock} · ${name} 최종 브리핑`,
       title: "운영자님, 오늘 업무가 정리됐어요.",
-      done: (count: number) => `완료 ${count}팀 — digest·관측·초안·PR 준비·Guard까지 마쳤어요`,
+      done: (count: number) => `완료 ${count}개 방`,
+      attention: (count: number) => `확인 필요 ${count}개 방 — 실제 기록에 문제가 있어요`,
       approved: "운영자 결정 1건 반영 — T2 초안을 퍼블리셔에 넘겼어요",
       blocked: (count: number) => `연동 대기 ${count}팀 — 기록 화면 연결이 먼저 필요해요`,
       decisionLabel: "오늘 운영자님이 결정할 것",
@@ -911,11 +1000,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       metricDone: "완료",
       metricWorking: "진행 중",
       metricApproval: "운영자 확인",
+      metricAttention: "확인 필요",
       metricBlocked: "연동 대기",
       stampStaff: "직원",
       stampDone: "완료",
       stampWorking: "진행",
       stampApproval: "결재",
+      stampAttention: "확인",
       stampBlocked: "미연결",
       scheduleTitle: "⚡ automation.status",
       scheduleLabel: "SCHEDULE",
@@ -923,8 +1014,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       scheduleBody: "시작 버튼을 눌렀을 때만 데모가 돌아요",
       scheduleOff: "OFF",
       recordsTitle: "🔗 records.link",
-      liveLink: "라이브 연결",
-      liveLinkStatus: "미연결",
+      liveLink: "실제 기록을 읽는 방",
+      liveLinkStatus: (count: number) => (count === 0 ? "없음" : `${count}개`),
+      recordLive: "실제 · 기록 열기",
       recordOpen: "기록 열기",
       recordNone: "기록 화면 없음",
       boardTitle: "🏢 team_office.board",
@@ -939,6 +1031,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefPhase: (phase: string, done: number) => `${phase} 진행 중 — 완료 ${done}팀`,
       briefApprovalNeeded: "T2 초안에 운영자 결정 필요",
       briefNoApproval: "대기 중인 결재 없음",
+      briefAttention: (count: number) => `확인이 필요한 실제 기록 ${count}개`,
       briefBlocked: "기록 화면 연결을 기다리는 팀이 있어요",
       decisionLabel: "운영자님이 오늘 결정할 1개",
       decisionPending: "이 T2 초안을 PR로 올려도 될지 결정해 주세요.",
@@ -955,6 +1048,37 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         "연결된 결과물이 없어요. 껍데기 화면이라 어떤 에이전트의 산출물도 읽지 않으므로, 예시를 채우지 않고 비워 둡니다.",
       note: (operator: string, teams: number, staff: number) =>
         `${operator} · 에이전트 ${teams}개 팀과 다이제스트실, AI 직원 ${staff}명 · 이 화면은 라이브 오피스와 같은 시뮬레이션 상태를 공유해요.`,
+    },
+    real: {
+      chip: "실제",
+      boxLabel: "실제 기록",
+      contentElsewhere: "관측 내용은 그 팀의 섹션에서만 보여요.",
+      research: {
+        badges: {
+          ok: "기록됨",
+          failed: "실패",
+          duplicate: "중복 기록",
+          missingOpen: "제출 창 열림",
+          missing: "기록 없음",
+          silent: "침묵",
+          disabled: "스위치 꺼짐",
+          unread: "읽지 못함",
+        },
+        unread: "기록을 읽지 못함",
+        disabled: "앱 스위치 꺼짐: 기록하지 않음",
+        ok: (slot: string) => `직전 회차 기록됨 · ${slot}`,
+        failed: (slot: string, stage: string) => `직전 회차 실패 · ${slot} · ${stage}`,
+        duplicate: (slot: string) => `직전 회차가 두 번 이상 기록됨 · ${slot}`,
+        missingOpen: (slot: string) => `직전 회차 ${slot}: 제출 창 열림, 아직 기록 없음`,
+        missing: (slot: string) => `직전 회차 ${slot}: 기록 없음`,
+        lastSuccess: (time: string) => `마지막 성공 ${time}`,
+        noSuccess: "아직 성공 기록 없음",
+        silent: (hours: number) => `${hours}시간째 성공 없음`,
+        anchorMissing: "침묵 판정 기준 시각 미기록",
+        readAt: (time: string) => `읽은 시각 ${time}`,
+      },
+      log: (room: string, line: string) => `${room}(실제 기록): ${line}`,
+      console: (line: string) => `이 방은 실제 기록을 보여 드려요. ${line}.`,
     },
     world: {
       fit: "🗺️ 전체 보기",
@@ -1009,8 +1133,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefWalk: "전사 보고 취합했어요. 운영자님께 갑니다.",
       briefSay: "운영자님, 오늘 결정할 건 이제 없어요.",
       briefOperator: "고생했어요 ✨",
-      briefLog: (done: number, blocked: number) =>
-        `다이제스트실 최종 브리핑 완료 — 완료 ${done}팀 · 연동 대기 ${blocked}팀`,
+      briefLog: (done: number, attention: number, blocked: number) =>
+        `다이제스트실 최종 브리핑 완료 — 완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀`,
       dayOver: "데모 하루 종료. 직원들이 라운지로 이동합니다.",
       deptStarted: (room: string, label: string) => `${room} 업무 시작 — ${label}`,
       deptDone: (room: string, report: string) => `${room} 완료 — ${report}`,
@@ -1038,8 +1162,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       statusDayDone: "오늘 업무는 모두 끝났어요.",
       statusMeeting: (title: string) => `회의 진행 중 — ${title}`,
       statusGap: "지금은 앞 단계 결과를 넘기는 중이라 잠깐 비어 있어요. 곧 다음 팀이 붙습니다.",
-      statusCounts: (done: number, blocked: number, onDuty: number) =>
-        `완료 ${done}팀 · 연동 대기 ${blocked}팀 · 근무 인원 ${onDuty}명.`,
+      statusCounts: (done: number, attention: number, blocked: number, onDuty: number) =>
+        `완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀 · 근무 인원 ${onDuty}명.`,
       statusNext: (phase: string) => `다음 순서는 ‘${phase}’입니다.`,
       delayApproval: (names: string, seconds: number) =>
         `원인은 하나예요 — 운영자님 결정 대기입니다. 승인 회의실에서 ${names}가 ${seconds}초째 기다리고 있어요.`,

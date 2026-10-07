@@ -26,6 +26,7 @@ import { commitAmuxIdeaAnalysisBudgetReservation as commitReservationWithOwnerAu
   AmuxIdeaAnalysisReservationError } from "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { listAmuxV4AnalysisCandidates } from "@/lib/amux/ideaAnalysisQueueService";
 import { commitAmuxIdeaOnlyAnalysisClaim,
+  enforceAmuxV4DailyClaimLimit,
   AmuxIdeaAnalysisClaimError } from "@/lib/amux/ideaAnalysisClaimService";
 import { commitAmuxIdeaAnalysisResult,
   readAmuxIdeaAnalysisResultReceipt,
@@ -91,6 +92,24 @@ process.env.AMUX_V4_CONTENT_DIGEST_KEY_ID = keys.digestKeyId;
 process.env.AMUX_V4_CONTENT_DIGEST_KEY_B64 = keys.digestKey.toString("base64");
 
 after(async () => { await prisma.$disconnect(); });
+
+test("daily claim key is the database UTC date regardless of process or session timezone", async () => {
+  const priorTz = process.env.TZ;
+  try {
+    process.env.TZ = "Pacific/Auckland";
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL TIME ZONE 'Pacific/Auckland'`;
+      const expected = await tx.$queryRaw<Array<{ dayUtc: string }>>`
+        SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+          AS "dayUtc"
+      `;
+      assert.equal(await enforceAmuxV4DailyClaimLimit(tx), expected[0]?.dayUtc);
+    });
+  } finally {
+    if (priorTz === undefined) delete process.env.TZ;
+    else process.env.TZ = priorTz;
+  }
+});
 
 async function confirmedPreviewId(modelId: string,
   frontierApprovalId = randomUUID()): Promise<string> {
@@ -1239,6 +1258,10 @@ test("a complete first result saves independent encrypted units and closes only 
   }), /rollback synthetic payload tamper/);
   assert.equal(await prisma.amuxIdeaDraftUnit.count({ where: { ideaId } }), 0);
 
+  // A claim made before preview expiry may finish after the original purge
+  // eligibility time. The in-flight body remains protected until settlement.
+  await prisma.amuxIdeaTransferPreview.update({ where: { id: previewId },
+    data: { payloadPurgeAfter: new Date(Date.now() - 1_000) } });
   const saved = await prisma.$transaction((tx) =>
     commitAmuxFirstIdeaAnalysisDraft(tx, input));
   assert.equal(saved.unitCount, 4);
@@ -1260,6 +1283,12 @@ test("a complete first result saves independent encrypted units and closes only 
   assert.ok(preview.payloadPurgeAfter && completedPreview.payloadPurgeAfter &&
     completedPreview.payloadPurgeAfter <= preview.payloadPurgeAfter,
   "finishing analysis cannot postpone the original payload purge deadline");
+  assert.ok(completedPreview.payloadPurgeAfter &&
+    completedPreview.payloadPurgeAfter <= idea.analysisCompletedAt!,
+  "completed transfer text is eligible for the next purge tick");
+  assert.ok(chunk.freeformPurgeAfter &&
+    chunk.freeformPurgeAfter <= idea.analysisCompletedAt!,
+  "completed freeform text is eligible for the next purge tick");
   assert.equal(units.length, 4);
   assert.deepEqual(units.map((unit) => unit.localRef),
     ["c0:node-0", "c0:node-1", "c0:node-2", "c0:card-0"]);

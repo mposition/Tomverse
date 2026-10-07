@@ -153,6 +153,41 @@ test("payload and freeform bodies retire their different external keys", async (
   assert.deepEqual(deleted, ["transfer_payload", "analysis_freeform"]);
 });
 
+test("an in-flight payload waits for its live analysis, then purges after cancellation", async () => {
+  const ideaId = await idea({ due: false, submittedAgeDays: 1 });
+  const previewId = randomUUID();
+  const actorUserId = `synthetic-retention-${ideaId}`;
+  await prisma.amuxIdeaSubmission.update({ where: { id: ideaId },
+    data: { state: "analyzing" } });
+  await prisma.amuxIdeaAnalysisChunk.create({ data: { ideaId, actorUserId,
+    chunkIndex: 0, state: "pending", attempt: 0, leaseGeneration: 0 } });
+  const confirmedAt = new Date(Date.now() - 3 * 60_000);
+  const expiresAt = new Date(Date.now() - 60_000);
+  await prisma.amuxIdeaTransferPreview.create({ data: {
+    id: previewId, ideaId, chunkIndex: 0, attempt: 1, state: "in_flight",
+    modelId: "synthetic-model", templateVersion: "synthetic-template",
+    payloadCiphertext: Buffer.from("synthetic encrypted payload"),
+    payloadKeyId: amuxContentUnitKeyId({ ideaId,
+      purpose: "transfer_payload", subjectId: previewId }),
+    payloadKeyVersion: 1, payloadDigest: "b".repeat(64),
+    payloadDigestKeyId: "synthetic-digest",
+    confirmedAt, confirmExpiresAt: expiresAt,
+    confirmedByUserId: actorUserId, confirmationAuditLogId: randomUUID(),
+    consumedAt: new Date(confirmedAt.getTime() + 30_000),
+    expiresAt, payloadPurgeAfter: expiresAt,
+  } });
+  await prisma.amuxIdeaAnalysisChunk.update({ where: { ideaId_chunkIndex: {
+    ideaId, chunkIndex: 0 } }, data: { state: "in_flight", attempt: 1,
+    leaseGeneration: 1, currentPreviewId: previewId } });
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueTransferPayloadPurge(tx, previewId)), "skipped");
+  const cancelledAt = new Date();
+  await prisma.amuxIdeaSubmission.update({ where: { id: ideaId },
+    data: { state: "cancelled", cancelledAt, rawPurgeAfter: cancelledAt } });
+  assert.equal(await prisma.$transaction((tx) =>
+    commitAmuxDueTransferPayloadPurge(tx, previewId)), "purged");
+});
+
 test("an expired proposal unit purges only its own body and key", async () => {
   const ideaId = await idea({ submittedAgeDays: 32, completedAgeDays: 31 });
   const actorUserId = `synthetic-retention-${ideaId}`;

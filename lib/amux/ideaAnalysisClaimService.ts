@@ -10,8 +10,8 @@ import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from
   "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
-import { AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT,
-  amuxV4AnalysisUtcDayKey } from "./ideaAnalysisInvocationLimitsCore.ts";
+import { AMUX_V4_ANALYSIS_DAILY_CLAIM_LIMIT } from
+  "./ideaAnalysisInvocationLimitsCore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from
   "./ideaAnalysisPriceVersionRead.ts";
 import { openAmuxContent, verifyAmuxContentDigest,
@@ -32,11 +32,14 @@ export class AmuxIdeaAnalysisClaimError extends Error {
 export async function enforceAmuxV4DailyClaimLimit(
   tx: Prisma.TransactionClient,
 ): Promise<string> {
-  const rows = await tx.$queryRaw<Array<{ now: Date }>>`
-    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+  const rows = await tx.$queryRaw<Array<{ dayUtc: string }>>`
+    SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+      AS "dayUtc"
   `;
-  const dayUtc = amuxV4AnalysisUtcDayKey(rows[0]?.now);
-  if (!dayUtc) throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+  const dayUtc = rows[0]?.dayUtc;
+  if (!dayUtc || !/^\d{4}-\d{2}-\d{2}$/.test(dayUtc)) {
+    throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
+  }
   const count = await tx.adminAuditLog.count({ where: {
     action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
     targetType: AMUX_V4_ANALYSIS_CLAIM_TARGET,
@@ -138,8 +141,7 @@ export async function readAmuxIdeaAnalysisClaimReceipt(
  * caller must read back by previewId and must not claim again. */
 export async function commitAmuxIdeaOnlyAnalysisClaim(
   tx: Prisma.TransactionClient,
-  input: { requestId: string; previewId: string; keys: AmuxContentKeys;
-    expectedClaimDayUtc?: string },
+  input: { requestId: string; previewId: string; keys: AmuxContentKeys },
 ): Promise<{ previewId: string; ideaId: string; holdId: string;
   leaseGeneration: 1; provider: "openai" | "anthropic"; modelId: string;
   reasoningEffort: string; prompt: string; auditId: string }> {
@@ -203,11 +205,6 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
   if (!(now instanceof Date) || !Number.isFinite(now.getTime()) ||
       !idea || !chunk || !preview || !hold) {
     throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
-  }
-  const claimDayUtc = amuxV4AnalysisUtcDayKey(now);
-  if (!claimDayUtc || (input.expectedClaimDayUtc &&
-      input.expectedClaimDayUtc !== claimDayUtc)) {
-    throw new AmuxIdeaAnalysisClaimError("not_ready");
   }
   if (idea.state !== (identity.chunkIndex === 0 ? "submitted" : "analyzing") ||
       idea.cancelledAt !== null ||
@@ -387,6 +384,12 @@ export async function commitAmuxIdeaOnlyAnalysisClaim(
         holdLock.length !== 1) {
       throw new AmuxIdeaAnalysisClaimError("integrity_unavailable");
     }
+    // The audit-chain lock above serializes every claim, including direct
+    // service callers. PostgreSQL returns the day as text so process TZ cannot
+    // shift the 12-per-UTC-day admission boundary. If midnight passes since
+    // the earlier readiness clock, counting the claim on the later day is
+    // conservative and does not permit an extra claim on the earlier day.
+    const claimDayUtc = await enforceAmuxV4DailyClaimLimit(tx);
     const auditId = await writeSystemAuditLog({ tx,
       systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
       action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
