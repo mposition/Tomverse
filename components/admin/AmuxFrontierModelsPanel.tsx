@@ -36,11 +36,12 @@ const receiptStore = (): Storage | null => {
 
 export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, ideaId, planReady,
-  declaredExternalSources, operatorId }: {
+  declaredExternalSources, operatorId, chunkIndex = 0 }: {
   available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
+  chunkIndex?: number;
 }) {
   const m = useAdminMessages(adminAmuxIdeaInputMessages);
   const { locale } = useAdminLocale();
@@ -97,7 +98,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         return;
       }
       const parsed = readPreparedIdeaTransferPreview(response.status, body, pendingId, ideaId ?? "",
-        model, effort);
+        model, effort, chunkIndex);
       if (parsed) {
         setPreview({ kind: "prepared", value: parsed });
         if (confirmAvailable) {
@@ -130,7 +131,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       }
       setPreview({ kind: "unknown" });
     } catch { setPreview({ kind: "unknown" }); }
-  }, [confirmAvailable, ideaId, locale, m.transferPreviewUnknown, operatorId, readConfirmation]);
+  }, [chunkIndex, confirmAvailable, ideaId, locale, m.transferPreviewUnknown,
+    operatorId, readConfirmation]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     if (!available) return;
@@ -169,7 +171,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   useEffect(() => {
     if (!ideaId || !previewAvailable) return;
-    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId,
+      chunkIndex);
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -181,7 +184,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       }
     });
     return () => { active = false; };
-  }, [ideaId, operatorId, previewAvailable, readBack]);
+  }, [chunkIndex, ideaId, operatorId, previewAvailable, readBack]);
 
   const refresh = () => {
     setLoading(true);
@@ -230,7 +233,7 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     const effort = selectedEffort;
     const previewId = crypto.randomUUID();
     if (!reservePreviewReceipt(receiptStore(), operatorId, ideaId, previewId,
-      model, effort)) {
+      model, effort, chunkIndex)) {
       setPreview({ kind: "recovery_unavailable" });
       return;
     }
@@ -238,14 +241,15 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     try {
       const response = await adminFetch("/api/admin/amux/ideas/transfer-preview", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ version: 1, previewId, ideaId,
+        body: JSON.stringify({ version: chunkIndex === 0 ? 1 : 2, previewId, ideaId,
+          ...(chunkIndex > 0 ? { chunkIndex } : {}),
           provider: model.provider, modelId: model.modelId,
           reasoningEffort: effort, approvalId: model.approvalId,
           approvalVersion: model.approvalVersion }),
       });
       const body: unknown = await response.json();
       const parsed = readPreparedIdeaTransferPreview(response.status, body,
-        previewId, ideaId, model, effort);
+        previewId, ideaId, model, effort, chunkIndex);
       if (parsed) { setPreview({ kind: "prepared", value: parsed }); return; }
       await readBack(previewId, model, effort);
     } catch { await readBack(previewId, model, effort); }
@@ -253,7 +257,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
 
   const recoverPreview = () => {
     if (!ideaId) return;
-    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId);
+    const receipt = readPreviewReceipt(receiptStore(), operatorId, ideaId,
+      chunkIndex);
     if (receipt.kind !== "present") {
       setPreview({ kind: "recovery_unavailable" });
       return;
@@ -405,7 +410,8 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
       {confirmation.kind === "unknown" ? <div className="space-y-2">
         <p role="alert">{m.transferConfirmUnknown}</p>
         <button type="button" onClick={() => {
-          const receipt = ideaId ? readPreviewReceipt(receiptStore(), operatorId, ideaId) : null;
+          const receipt = ideaId ? readPreviewReceipt(receiptStore(), operatorId,
+            ideaId, chunkIndex) : null;
           const attempt = receipt?.kind === "present" && ideaId ?
             readConfirmationAttemptForPreview(receiptStore(), operatorId,
               receipt.previewId, ideaId) : null;

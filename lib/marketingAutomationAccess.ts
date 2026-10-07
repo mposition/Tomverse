@@ -517,7 +517,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * watched file; no marketing actor changes.
  *
  * 2026-10-08: AMUX v4 analysis budget, expiry, settlement, unknown-outcome,
- * auto-cancel, claim, result and retention add scoped system-audit actions.
+ * auto-cancel, claim, result, retention and A09 add scoped audit actions.
  * The webhook receiver's behavior is unchanged; repin this closure digest
  * after assembling the AMUX-only release tree.
  */

@@ -68,7 +68,24 @@ export function sealAmuxAnalysisDraft(input: InspectionInput & {
   const inspected = inspectAmuxAnalysisChunk(input);
   if (!inspected.ok) return { ok: false, code: inspected.code };
 
-  const { chunk } = inspected;
+  return sealInspectedAmuxAnalysisDraft({ ...input, inspected });
+}
+
+/** Seal the exact normalized object already admitted by the continuation
+ * guard. Do not re-read a mutable model response or target-ref array after
+ * range validation. The caller still has to bind DB source/preview proofs. */
+export function sealInspectedAmuxAnalysisDraft(input: {
+  ideaId: string; keys: AmuxContentKeys; unitIds?: readonly string[];
+  inspected: Extract<AmuxAnalysisChunkInspection, { ok: true }>;
+}):
+  | { ok: false; code: "metadata_incomplete" | "idea_id_invalid" }
+  | { ok: true; draft: SealedAmuxAnalysisDraft } {
+  if (typeof input?.ideaId !== "string" ||
+      !/^[A-Za-z0-9:_-]{1,100}$/.test(input.ideaId)) {
+    return { ok: false, code: "idea_id_invalid" };
+  }
+
+  const { chunk } = input.inspected;
   if (input.unitIds && (input.unitIds.length !== chunk.units.length ||
       new Set(input.unitIds).size !== input.unitIds.length ||
       input.unitIds.some((id) => !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)))) {

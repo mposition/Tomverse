@@ -317,6 +317,11 @@ run(
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",
     "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

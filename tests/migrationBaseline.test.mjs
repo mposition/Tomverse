@@ -196,6 +196,12 @@ CREATE FUNCTION f_x();`),
 CREATE OR REPLACE FUNCTION f_x();`),
     { kind: "function-replacement", function: "f_x", previousBodySha256: digest },
   );
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: replace-function-if-body-sha256 "f_x(text,text)" "${digest}"
+CREATE OR REPLACE FUNCTION f_x(text, text);`),
+    { kind: "function-replacement", function: "f_x", functionArgs: ["text", "text"],
+      previousBodySha256: digest },
+  );
   for (const [label, sql] of [
     // SQL instead of a name: the guard asks its own fixed question, so a
     // declaration that tries to supply one is not a declaration at all.
@@ -215,6 +221,8 @@ CREATE INDEX x;`],
     ["replacement bad digest", `-- baseline-check: replace-function-if-body-sha256 "f_x" "abc"
 CREATE INDEX x;`],
     ["replacement schema-qualified", `-- baseline-check: replace-function-if-body-sha256 "other.f" "${digest}"
+CREATE INDEX x;`],
+    ["replacement unsafe signature", `-- baseline-check: replace-function-if-body-sha256 "f_x(text);DELETE" "${digest}"
 CREATE INDEX x;`],
     ["too long", `-- baseline-check: present-if-relation "${"a".repeat(64)}"
 CREATE INDEX x;`],
@@ -251,6 +259,11 @@ test("the guard asks one fixed question with the name bound, and accepts one boo
   assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x", previousBodySha256: "a".repeat(64) }), functionBodyQuery("f_x"));
   assert.deepEqual(functionBodyQuery("f_x").values, ["f_x"]);
   assert.match(functionBodyQuery("f_x").text, /p\.pronargs = 0/);
+  const typed = functionBodyQuery("f_x", ["text", "text"]);
+  assert.deepEqual(typed.values, ["f_x", 'public."f_x"(text,text)']);
+  assert.match(typed.text, /pg_catalog\.to_regprocedure\(\$2\)/);
+  assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x",
+    functionArgs: ["text", "text"], previousBodySha256: "a".repeat(64) }), typed);
   const oldBody = "BEGIN RETURN NEW; END;";
   const oldHash = createHash("sha256").update(oldBody).digest("hex");
   assert.equal(replacementAnswer([[oldBody]], oldHash), false);
@@ -328,5 +341,26 @@ test("the AMUX chunk deadline migration pins the exact previous function body", 
     kind: "function-replacement",
     function: created,
     previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+});
+test("the AMUX unit actor replacement pins its five-text-argument predecessor", async () => {
+  const { presenceDeclarationIn, pendingProbes } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS,
+    "20261005090000_amux_v4_unit_actor_scope", "migration.sql"), "utf8");
+  const previousSql = readFileSync(join(MIGRATIONS,
+    "20261001102600_amux_v4_unit_decisions", "migration.sql"), "utf8");
+  const previousBody = /CREATE FUNCTION amux_v4_unit_audit_matches\([\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  const declaration = {
+    kind: "function-replacement",
+    function: "amux_v4_unit_audit_matches",
+    functionArgs: ["text", "text", "text", "text", "text"],
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  };
+  assert.deepEqual(presenceDeclarationIn(sql), declaration);
+  assert.deepEqual(pendingProbes(["replacement"], () => sql), {
+    probes: [{ name: "replacement", function: declaration.function,
+      functionArgs: declaration.functionArgs,
+      previousBodySha256: declaration.previousBodySha256 }], undeclared: [],
   });
 });

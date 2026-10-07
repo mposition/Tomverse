@@ -26,6 +26,10 @@ import {
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+  AMUX_V4_UNIT_DECISION_TARGET,
+  AMUX_V4_UNIT_HOUSEKEEPING_SCOPE,
+  AMUX_V4_UNIT_INVALIDATE_ACTION,
+  AMUX_V4_UNIT_UNKNOWN_ACTION,
   SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   auditRowActorKind,
@@ -93,6 +97,16 @@ test("the system actor list is closed and changes only by review", () => {
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_INVALIDATE_ACTION, "AmuxWorkItem"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_UNIT_UNKNOWN_ACTION,
+    targetType: AMUX_V4_UNIT_DECISION_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_UNIT_HOUSEKEEPING_SCOPE },
+  })), "system");
   assert.equal(auditRowActorKind(row({
     action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
     targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,

@@ -90,6 +90,12 @@ export const AMUX_V4_CONTENT_KEY_DELETE_SCOPE = "idea-content-key-delete-v1" as 
 export const AMUX_V4_RETENTION_HOLD_NOTICE_ACTION = "amux.v4.retention_hold.notice_sent" as const;
 export const AMUX_V4_RETENTION_HOLD_NOTICE_TARGET = "AmuxIdeaRetentionHold" as const;
 export const AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE = "idea-retention-hold-notice-v1" as const;
+/** A09 receipt housekeeping is never a human approval or worker action. */
+export const AMUX_V4_UNIT_UNKNOWN_ACTION = "amux.v4.unit.outcome_unknown" as const;
+export const AMUX_V4_UNIT_INVALIDATE_ACTION = "amux.v4.unit.invalidate" as const;
+export const AMUX_V4_UNIT_EXPIRE_ACTION = "amux.v4.unit.expire" as const;
+export const AMUX_V4_UNIT_DECISION_TARGET = "AmuxIdeaUnitDecision" as const;
+export const AMUX_V4_UNIT_HOUSEKEEPING_SCOPE = "unit-decision-housekeeping-v1" as const;
 /** One authenticated source collector claims one already owner-approved file. */
 
 /**
@@ -185,6 +191,12 @@ export const amuxV4SystemAuditScope = (action: unknown, targetType: unknown): st
   if (action === AMUX_V4_RETENTION_HOLD_NOTICE_ACTION &&
       targetType === AMUX_V4_RETENTION_HOLD_NOTICE_TARGET) {
     return AMUX_V4_RETENTION_HOLD_NOTICE_SCOPE;
+  }
+  if (targetType === AMUX_V4_UNIT_DECISION_TARGET &&
+      (action === AMUX_V4_UNIT_UNKNOWN_ACTION ||
+       action === AMUX_V4_UNIT_INVALIDATE_ACTION ||
+       action === AMUX_V4_UNIT_EXPIRE_ACTION)) {
+    return AMUX_V4_UNIT_HOUSEKEEPING_SCOPE;
   }
   return null;
 };

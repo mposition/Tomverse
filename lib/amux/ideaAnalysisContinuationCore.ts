@@ -143,6 +143,17 @@ export function inspectAmuxAnalysisContinuation(
   if (!parsed.ok) return { ok: false, stage: "chunk", code: parsed.code };
 
   const { continuationKind, coverageStatus } = parsed.chunk;
+  // A human question closes this source-plan run rather than producing an
+  // executable next cursor. In particular, a question on the final source
+  // ordinal cannot satisfy the ordinary completed-range cursor equation.
+  if (coverageStatus === "needs_owner_input") {
+    return fields.coveredStartOrdinal >= 0 &&
+      fields.coveredStartOrdinal <= fields.coveredEndOrdinal &&
+      fields.coveredEndOrdinal < fields.sourceUnitCount
+      ? { ok: false, stage: "owner_input",
+        reason: "new_source_plan_required", parsed }
+      : { ok: false, stage: "cursor", reason: "remaining_mismatch" };
+  }
   const remainingStartOrdinal = continuationKind === "output" ? fields.coveredEndOrdinal :
     continuationKind === "input" ? fields.coveredEndOrdinal + 1 : null;
   const remainingEndOrdinal = continuationKind === null ? null : fields.sourceUnitCount - 1;
@@ -169,8 +180,5 @@ export function inspectAmuxAnalysisContinuation(
     candidate: localCandidate,
   });
   if (cursor.decision === "hold") return { ok: false, stage: "cursor", reason: cursor.reason };
-  if (coverageStatus === "needs_owner_input") {
-    return { ok: false, stage: "owner_input", reason: "new_source_plan_required", parsed };
-  }
   return { ok: true, parsed, cursor: { ...cursor, candidate } };
 }

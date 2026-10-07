@@ -1463,6 +1463,24 @@ domains:
       one-way; account deletion, retention and unified export are not yet
       resolved. A price approval alone never enables a live model call.
 
+  - domain: amuxTaskCostCatalogApproval
+    prismaModel: AmuxV4TaskCostCatalogApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, AMUX v4 Task cost-catalog account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId identifies the operator without a User foreign key.
+      The versioned catalog contains worker/model ceiling inputs and audit
+      references, not idea text. Approval and revocation do not yet settle
+      account deletion, retention, or unified export.
+
   - domain: amuxIdeaSubmission
     prismaModel: AmuxIdeaSubmission
     userLinkageRole: actor
@@ -1552,6 +1570,26 @@ domains:
       unified export still need writers and monitoring. Both RESTRICT foreign
       keys require a child-first account-deletion decision. Live draft writes
       remain disabled until those gates pass.
+
+  - domain: amuxIdeaDerivationGroup
+    prismaModel: AmuxIdeaDerivationGroup
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, AMUX v4 split/merge account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      An operator-approved split or merge keeps actorUserId, keyed reason and
+      confirmation digests, and an audit reference without proposal text.
+      Restrictive parent and audit references mean neither account deletion
+      nor unified export follows automatically from the idea purge clock.
 
   - domain: amuxIdeaUnitDecision
     prismaModel: AmuxIdeaUnitDecision

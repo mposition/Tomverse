@@ -636,6 +636,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskCostCatalogApproval",
+    publicName: "amux_v4_task_cost_catalog_approvals",
+    prismaModel: "AmuxV4TaskCostCatalogApproval",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaSubmission",
     publicName: "amux_idea_submissions",
     prismaModel: "AmuxIdeaSubmission",
@@ -657,6 +663,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaDraftUnit",
     publicName: "amux_idea_draft_units",
     prismaModel: "AmuxIdeaDraftUnit",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaDerivationGroup",
+    publicName: "amux_idea_derivation_groups",
+    prismaModel: "AmuxIdeaDerivationGroup",
     state: "unverified",
   },
   {

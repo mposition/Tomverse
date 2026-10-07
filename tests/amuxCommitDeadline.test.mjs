@@ -84,6 +84,16 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261004190000_amux_v4_content_key_retirement",
   "20261004190100_amux_v4_retention_hold",
   "20261004190200_amux_v4_content_no_resurrection",
+  "20261005010000_amux_v4_story_kind",
+  // A09: immutable, non-body owner confirmation metadata.
+  "20261005030000_amux_v4_unit_confirmation_snapshot",
+  "20261005040000_amux_v4_registration_consistency",
+  "20261005050000_amux_v4_task_cost_catalog_approval",
+  "20261005060000_amux_v4_rejection_consistency",
+  "20261005070000_amux_v4_node_link_consistency",
+  "20261005080000_amux_v4_card_link_consistency",
+  "20261005090000_amux_v4_unit_actor_scope",
+  "20261005100000_amux_v4_derivation_groups",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
