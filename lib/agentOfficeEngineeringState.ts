@@ -8,10 +8,16 @@
  * agent tells its services (`currentEngineeringAgentHalt`), computed by the
  * caller from the agent's own halt reading. A setting that could not be read
  * is not passed here as "off": the caller draws the whole room as unread.
+ *
+ * Whether the latest ended run needs a look is the agent's own settlement of
+ * its outcome (`AMUX_SETTLEMENT_FOR_OUTCOME`): `review` hands a result to a
+ * person; `retry`, `blocked` and a lease AMUX recovers did not, and an
+ * outcome the table does not know is treated the same way.
  */
 
 import type { AgentOfficeEngineeringHalt, AgentOfficeEngineeringState } from "@/lib/agentOffice/live";
 import {
+  AMUX_SETTLEMENT_FOR_OUTCOME,
   ENGINEERING_AGENT_FREEZE_SETTING_KEY,
   ENGINEERING_AGENT_MODE_SETTING_KEY,
   ENGINEERING_AGENT_PUBLISHER_LAST_FINISH_SETTING_KEY,
@@ -19,7 +25,13 @@ import {
   killSwitchEngaged,
   parseSettingInstant,
   resolveEngineeringAgentSwitches,
+  type RunOutcome,
 } from "@/lib/engineeringAgentCore";
+
+const settledForReview = (outcome: string | null) =>
+  outcome !== null &&
+  Object.hasOwn(AMUX_SETTLEMENT_FOR_OUTCOME, outcome) &&
+  AMUX_SETTLEMENT_FOR_OUTCOME[outcome as RunOutcome] === "review";
 
 /** The settings the office reads: the switches and each service's last finished cycle. */
 export const AGENT_OFFICE_ENGINEERING_SETTING_KEYS = [
@@ -36,7 +48,9 @@ export function agentOfficeEngineeringState(input: {
   halt: AgentOfficeEngineeringHalt;
   /** Open owner items by kind (t2_draft, decision, state_mismatch). */
   openOwnerItems: ReadonlyArray<{ kind: string; count: number }>;
-  activeRuns: number;
+  /** Runs still in progress, and when the earliest of them started. */
+  active: { count: number; since: Date | null };
+  /** The newest run that ended, by its end. */
   lastRun: { status: string; outcome: string | null; startedAt: Date; endedAt: Date | null } | null;
 }): AgentOfficeEngineeringState {
   const setting = (key: string) => input.settings.find((row) => row.key === key)?.value ?? null;
@@ -56,13 +70,15 @@ export function agentOfficeEngineeringState(input: {
     killSwitch: killSwitchEngaged(input.killSwitch),
     halt: input.halt,
     pending: { t2Draft: count("t2_draft"), decision: count("decision"), stateMismatch: count("state_mismatch") },
-    activeRuns: input.activeRuns,
+    activeRuns: input.active.count,
+    activeSince: input.active.count > 0 ? (input.active.since?.toISOString() ?? null) : null,
     lastRun: input.lastRun
       ? {
           status: input.lastRun.status,
           outcome: input.lastRun.outcome,
           startedAt: input.lastRun.startedAt.toISOString(),
-          endedAt: input.lastRun.endedAt?.toISOString() ?? null,
+          endedAt: (input.lastRun.endedAt ?? input.lastRun.startedAt).toISOString(),
+          needsLook: !settledForReview(input.lastRun.outcome),
         }
       : null,
     runnerLastFinishAt: instant(ENGINEERING_AGENT_RUNNER_LAST_FINISH_SETTING_KEY),

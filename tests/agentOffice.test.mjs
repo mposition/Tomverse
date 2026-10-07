@@ -654,10 +654,10 @@ const engInput = (overrides = {}) => ({
   killSwitch: undefined,
   halt: "none",
   openOwnerItems: [],
-  activeRuns: 0,
+  active: { count: 0, since: null },
   lastRun: {
     status: "finished",
-    outcome: "no_change",
+    outcome: "private_result",
     startedAt: at("2026-10-07T21:00:00Z"),
     endedAt: at("2026-10-07T21:30:00Z"),
   },
@@ -674,11 +674,13 @@ test("the engineering room reads the mode the agent acts on, through its own swi
     halt: "none",
     pending: { t2Draft: 0, decision: 0, stateMismatch: 0 },
     activeRuns: 0,
+    activeSince: null,
     lastRun: {
       status: "finished",
-      outcome: "no_change",
+      outcome: "private_result",
       startedAt: "2026-10-07T21:00:00.000Z",
       endedAt: "2026-10-07T21:30:00.000Z",
+      needsLook: false,
     },
     runnerLastFinishAt: "2026-10-07T21:40:00.000Z",
     publisherLastFinishAt: null,
@@ -720,6 +722,24 @@ test("the engineering room reads the mode the agent acts on, through its own swi
   );
 });
 
+test("whether the latest run needs a look is the agent's own settlement of its outcome", () => {
+  const needsLook = (outcome, status = "finished") =>
+    agentOfficeEngineeringState(
+      engInput({ lastRun: { status, outcome, startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") } })
+    ).lastRun.needsLook;
+  // Settled for review: a result went to a person.
+  for (const outcome of ["t1_queued", "t2_draft", "private_result"]) assert.equal(needsLook(outcome), false, outcome);
+  // Retried, blocked or recovered by AMUX: no result went to a person.
+  for (const outcome of ["no_change", "agent_failed", "schema_invalid", "scope_violation", "secret_detected"]) {
+    assert.equal(needsLook(outcome), true, outcome);
+  }
+  assert.equal(needsLook("abandoned", "abandoned"), true);
+  // An outcome the table does not know, or none at all, is not a clean run.
+  assert.equal(needsLook("something_new"), true);
+  assert.equal(needsLook(null), true);
+  assert.equal(needsLook("toString"), true, "an inherited property is not an outcome");
+});
+
 test("the engineering room says how the agent stands: halts and decisions first, then switches, then runs", () => {
   const copy = adminAgentOfficeMessages.ko.real.engineering;
   const readAt = "2026-10-07T22:05:00.000Z";
@@ -728,16 +748,24 @@ test("the engineering room says how the agent stands: halts and decisions first,
   const clear = room({});
   assert.equal(clear.status, "done");
   assert.equal(clear.badge, "이상 없음");
-  assert.equal(clear.line, "직전 회차 no_change · 10-07 21:30 UTC");
+  assert.equal(clear.line, "직전 회차 private_result · 10-07 21:30 UTC");
   assert.equal(
     clear.detail,
     "모드 t1 · 실행기 마지막 완료 10-07 21:40 UTC · 게시기 완료 기록 없음 · 읽은 시각 10-07 22:05 UTC"
   );
 
+  // A failed latest run is not clear, whatever its line says.
+  const failed = room({
+    lastRun: { status: "finished", outcome: "agent_failed", startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") },
+  });
+  assert.equal(failed.status, "attention");
+  assert.equal(failed.badge, "확인 필요");
+  assert.equal(failed.line, "직전 회차 agent_failed · 10-07 21:30 UTC");
+
   const halted = room({ halt: "circuit_open", killSwitch: "1" });
   assert.equal(halted.status, "attention", "a halt needs a look even while the agent is switched off");
   assert.equal(halted.line, "정지: 반복 실패로 차단기 열림");
-  assert.match(halted.detail, /직전 회차 no_change · 10-07 21:30 UTC/);
+  assert.match(halted.detail, /직전 회차 private_result · 10-07 21:30 UTC/);
 
   const deciding = room({ openOwnerItems: [{ kind: "t2_draft", count: 1 }, { kind: "decision", count: 1 }] });
   assert.equal(deciding.status, "attention");
@@ -757,13 +785,14 @@ test("the engineering room says how the agent stands: halts and decisions first,
   assert.equal(frozen.status, "waiting");
   assert.equal(frozen.line, copy.frozen);
 
-  const running = room({
-    activeRuns: 1,
-    lastRun: { status: "active", outcome: null, startedAt: at("2026-10-07T22:00:00Z"), endedAt: null },
-  });
+  // A run in progress is named by its own start, and the run that ended
+  // later -- possible with two runs at once -- keeps its own outcome.
+  const running = room({ active: { count: 1, since: at("2026-10-07T20:00:00Z") } });
   assert.equal(running.status, "working");
-  assert.equal(running.line, "작업 중 · 10-07 22:00 UTC 시작");
-  assert.doesNotMatch(running.detail, /직전 회차/, "the run in progress is named once");
+  assert.equal(running.line, "작업 중 · 10-07 20:00 UTC 시작");
+  assert.match(running.detail, /직전 회차 private_result · 10-07 21:30 UTC/);
+  const two = room({ active: { count: 2, since: at("2026-10-07T20:00:00Z") } });
+  assert.equal(two.line, "작업 중 2건 · 가장 이른 시작 10-07 20:00 UTC");
 
   const fresh = room({ lastRun: null });
   assert.equal(fresh.status, "waiting");
@@ -790,34 +819,68 @@ test("with engineering live the demo plays no decision, and the day still reache
     engineering: { status: "attention", badge: "Decisions waiting", line: "2 decisions waiting for you", detail: "" },
   };
   const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  const skipped = [PHASE.draftSummary, PHASE.approval, PHASE.prPrep];
+  assert.deepEqual(office.snapshot().skippedPhases, skipped);
   office.speed = 10;
   office.start();
   let everPending = false;
   let engineeringMoved = false;
   let handoverHeld = false;
+  let askedAtEngineering = false;
+  const spokenByNarrator = new Set();
+  const narrator = office.agents.find((agent) => agent.id === AGENT_OFFICE_NARRATOR_ID);
   const watch = () => {
     if (office.approvalPending) everPending = true;
+    if (narrator.speech) spokenByNarrator.add(narrator.speech);
     if (office.snapshot().meetingTitle === adminAgentOfficeMessages.en.sim.handoverTitle) handoverHeld = true;
     for (const agent of office.agents) {
       if (agent.deptId !== "engineering") continue;
       if (agent.status === "working" || agent.status === "meeting" || agent.progress > 0) engineeringMoved = true;
+    }
+    // The status report names the next phase that will actually play.
+    if (!askedAtEngineering && office.phaseIndex === PHASE.engineering) {
+      askedAtEngineering = true;
+      office.command("Status?");
+      const answer = office.chat.at(-1).text;
+      assert.ok(answer.includes(adminAgentOfficeMessages.en.phases[PHASE.marketing]), answer);
+      assert.ok(!answer.includes(adminAgentOfficeMessages.en.phases[PHASE.draftSummary]), answer);
     }
   };
   runUntil(office, () => {
     watch();
     return office.dayComplete;
   });
+  assert.ok(askedAtEngineering, "the day never reached the engineering phase");
   assert.equal(everPending, false, "the demo asked the operator to approve something");
   assert.equal(office.approved, false);
   assert.equal(engineeringMoved, false, "the engineering room was given demo work or a meeting seat");
   // The real record keeps its own status; the demo never set it to approval or done.
   assert.equal(office.deptStatus.engineering, "attention");
   assert.ok(office.log.some((entry) => entry.text.includes("(real record): 2 decisions waiting for you")));
-  // With nobody left to hand over, no hand-off meeting was held.
   assert.equal(handoverHeld, false, "a hand-off meeting was held with nobody to hand over");
+  // The narrator does not claim there is nothing to decide; it says where the decisions are.
+  assert.ok(spokenByNarrator.has(adminAgentOfficeMessages.en.sim.briefSayLive), [...spokenByNarrator].join(" | "));
+  assert.ok(!spokenByNarrator.has(adminAgentOfficeMessages.en.sim.briefSay));
   // approve() outside a decision does nothing.
   office.approve();
   assert.equal(office.approved, false);
+  // Without a live engineering room nothing is skipped.
+  assert.deepEqual(new AgentOffice(adminAgentOfficeMessages.en).snapshot().skippedPhases, []);
+});
+
+test("a live room at work is named by its record, not by a demo progress figure", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.en, {
+    engineering: { status: "working", badge: "Running", line: "Run in progress · started 10-07 20:00 UTC", detail: "" },
+  });
+  office.speed = 10;
+  office.start();
+  runUntil(office, () => office.phaseIndex >= PHASE.research);
+  office.command("Status?");
+  const status = office.chat.at(-1).text;
+  assert.match(status, /Engineering: Run in progress · started 10-07 20:00 UTC/);
+  assert.doesNotMatch(status, /Engineering 0%/);
+  office.command("Why is it slow?");
+  assert.match(office.chat.at(-1).text, /Engineering: Run in progress/);
 });
 
 test("the office reads the engineering agent's state, never what it worked on", () => {
@@ -831,7 +894,9 @@ test("the office reads the engineering agent's state, never what it worked on", 
   // The agent's own halt verdict, not a restatement of it.
   assert.match(engineering, /halt: currentEngineeringAgentHalt\(haltState\)/);
   assert.match(engineering, /readEngineeringAgentHaltState\(prisma\)/);
-  // Run rows for their enums and times; owner items only counted.
+  // Ended runs by their end, for their enums and times; owner items only counted.
+  assert.match(engineering, /where: \{ status: \{ in: \["finished", "abandoned"\] \}, endedAt: \{ not: null \} \}/);
+  assert.match(engineering, /orderBy: \[\{ endedAt: "desc" \}, \{ id: "desc" \}\]/);
   assert.match(engineering, /select: \{ status: true, outcome: true, startedAt: true, endedAt: true \}/);
   assert.doesNotMatch(engineering, /patchBody|patchDigest|reason|causeKey|cardId|baseSha|findMany\(\{\s*where: \{ kind/);
   // The kill switch is passed on raw and kept only as engaged or not.
@@ -840,11 +905,18 @@ test("the office reads the engineering agent's state, never what it worked on", 
   assert.match(readFileSync("lib/agentOfficeEngineeringState.ts", "utf8"), /killSwitch: killSwitchEngaged\(input\.killSwitch\)/);
   assert.match(engineering, /read: "engineering"/);
 
-  // While engineering is live both approval windows point at its own screen and offer no approve button.
+  // While engineering is live every decision surface points at its own screen
+  // and none offers an approve button.
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.equal((panel.match(/<LiveDecisionNote m=\{m\} \/>/g) || []).length, 2);
   const note = panel.slice(panel.indexOf("function LiveDecisionNote"), panel.indexOf("function LiveView"));
   assert.doesNotMatch(note, /onApprove|approve-button/);
+  const briefing = panel.slice(panel.indexOf("function BriefingModal"), panel.indexOf("function DashboardView"));
+  assert.match(briefing, /engineeringLive \? m\.dashboard\.decisionLive : m\.briefing\.decisionNone/);
+  assert.match(panel, /engineeringLive \? m\.live\.skipToEnd : m\.live\.skip/);
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].sim.briefSayLive, /nothing left to decide|결정할 건 이제 없어요/);
+  }
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {
