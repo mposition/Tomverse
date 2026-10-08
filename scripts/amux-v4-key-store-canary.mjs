@@ -10,7 +10,7 @@ const STAGING_ENVIRONMENT_ID = "9347d760-66f6-430b-8f2f-36fd5dbef333";
 
 export async function verifyStagingKeyCanary({ env = process.env,
   create = createAmuxContentUnitKeys, load = loadAmuxContentUnitKeys,
-  remove = deleteAmuxContentUnitKey } = {}) {
+  remove = deleteAmuxContentUnitKey, onProgress = () => {} } = {}) {
   if (env.RAILWAY_ENVIRONMENT_ID !== STAGING_ENVIRONMENT_ID ||
       env.AMUX_V4_STAGING_KEY_CANARY !== "approved") {
     return { kind: "refused", runtimeActivated: false };
@@ -32,8 +32,12 @@ export async function verifyStagingKeyCanary({ env = process.env,
   let loadedKeys;
   let beforeDelete;
   const plain = Buffer.from("AMUX_V4_SYNTHETIC_KEY_DELETION_CANARY", "utf8");
-  let result = { kind: "outcome_unknown", canaryId: ideaId, runtimeActivated: false };
+  let result = { kind: "outcome_unknown", canaryId: ideaId,
+    mayHaveOrphanKey: true, runtimeActivated: false };
   try {
+    // An uncertain PUT may have persisted. Record only the synthetic identity;
+    // never blindly retry deletion or conceal the possible orphan from recovery.
+    onProgress(result);
     createdKeys = await create(identity, isolatedEnv);
     const backupEnvelope = sealAmuxContent(plain, identity.purpose, ideaId, createdKeys);
     loadedKeys = await load(identity, isolatedEnv);
@@ -44,6 +48,8 @@ export async function verifyStagingKeyCanary({ env = process.env,
     createdKeys.masterKey.fill(0);
     loadedKeys.masterKey.fill(0);
     await remove(identity, isolatedEnv); // Includes HEAD + complete version listing.
+    result = { ...result, mayHaveOrphanKey: false };
+    onProgress(result);
     try {
       const unexpected = await load(identity, isolatedEnv);
       unexpected.masterKey.fill(0);
@@ -52,6 +58,7 @@ export async function verifyStagingKeyCanary({ env = process.env,
       if (error?.code !== "missing") return result;
     }
     result = { kind: "verified", canaryId: ideaId,
+      mayHaveOrphanKey: false,
       readableBeforeDeletion: true, unitKeyMissingAfterDeletion: true,
       oldEnvelopeKeyReloadRefused: true, runtimeActivated: false };
     return result;
@@ -66,11 +73,12 @@ export async function verifyStagingKeyCanary({ env = process.env,
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // A hung transport cannot turn this probe into an unbounded local process.
+  let progress = { kind: "outcome_unknown", runtimeActivated: false };
   const deadline = setTimeout(() => {
-    process.stdout.write('{"kind":"outcome_unknown","runtimeActivated":false}\n');
+    process.stdout.write(`${JSON.stringify(progress)}\n`);
     process.exit(2);
   }, 30000);
-  const result = await verifyStagingKeyCanary();
+  const result = await verifyStagingKeyCanary({ onProgress: value => { progress = value; } });
   clearTimeout(deadline);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.kind !== "verified") process.exitCode = 2;
