@@ -796,6 +796,51 @@ test("owner proof of non-execution releases a claimed hold as zero and fences la
     "resolution returns only to the owner preview boundary, never blind dispatch");
 });
 
+test("insufficient evidence consumes the full reported-unknown reservation", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+    requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+    leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
+    inputTokens: null, outputTokens: null, keys,
+  }));
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "outcome_unknown");
+  assert.ok(readback.resultRequestId);
+  assert.deepEqual([readback.resultOutcome, readback.resultEffectiveOutcome,
+    readback.resultFailureReason, readback.zeroReleaseEligible],
+  ["outcome_unknown", "outcome_unknown", null, false]);
+  const evidenceDigest = randomBytes(32).toString("hex");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "not_started_proven" })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "not_resolvable");
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest,
+      disposition: "evidence_insufficient" }));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+    [readback.reservedMicroUsd, "0"]);
+  const [hold, window] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+  ]);
+  assert.equal(hold.status, "owner_consumed");
+  assert.equal(window.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(window.spentMicroUsd,
+    before.spentMicroUsd + BigInt(readback.reservedMicroUsd));
+});
+
 test("a usage-unverified receipt forbids zero release and consumes the full reservation", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
   const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,

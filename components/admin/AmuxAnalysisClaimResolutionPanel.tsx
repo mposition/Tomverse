@@ -20,7 +20,7 @@ type Readback = { holdId: string; previewId: string; ideaId: string;
   resultDigest: string | null;
   resultOutcome: "verified_success" | "invocation_failed" | "outcome_unknown" | null;
   resultEffectiveOutcome: "outcome_unknown" | null;
-  resultFailureReason: "usage_unverified" | "invocation_unverified" | null;
+  resultFailureReason: "usage_unverified" | null;
   zeroReleaseEligible: boolean; readbackDigest: string };
 
 function parseReadback(value: unknown): Readback | null {
@@ -32,17 +32,25 @@ function parseReadback(value: unknown): Readback | null {
   const data = row as Record<string, unknown>;
   const strings = ["holdId", "previewId", "ideaId", "reservedMicroUsd",
     "holdStatus", "claimRequestId", "payloadDigest", "readbackDigest"];
+  const resultTupleValid =
+    (data.resultRequestId === null && data.resultDigest === null &&
+      data.resultOutcome === null && data.resultEffectiveOutcome === null &&
+      data.resultFailureReason === null && data.zeroReleaseEligible === true) ||
+    (typeof data.resultRequestId === "string" &&
+      typeof data.resultDigest === "string" &&
+      data.resultOutcome === "outcome_unknown" &&
+      data.resultEffectiveOutcome === "outcome_unknown" &&
+      data.resultFailureReason === null && data.zeroReleaseEligible === false) ||
+    (typeof data.resultRequestId === "string" &&
+      typeof data.resultDigest === "string" &&
+      ["verified_success", "invocation_failed"].includes(
+        String(data.resultOutcome)) &&
+      data.resultEffectiveOutcome === "outcome_unknown" &&
+      data.resultFailureReason === "usage_unverified" &&
+      data.zeroReleaseEligible === false);
   return strings.every((key) => typeof data[key] === "string") &&
     Number.isSafeInteger(data.chunkIndex) && data.leaseGeneration === 1 &&
-    (data.resultRequestId === null || typeof data.resultRequestId === "string") &&
-    (data.resultDigest === null || typeof data.resultDigest === "string") &&
-    (data.resultOutcome === null || ["verified_success", "invocation_failed",
-      "outcome_unknown"].includes(String(data.resultOutcome))) &&
-    (data.resultEffectiveOutcome === null ||
-      data.resultEffectiveOutcome === "outcome_unknown") &&
-    (data.resultFailureReason === null || ["usage_unverified",
-      "invocation_unverified"].includes(String(data.resultFailureReason))) &&
-    typeof data.zeroReleaseEligible === "boolean"
+    resultTupleValid
     ? data as Readback : null;
 }
 

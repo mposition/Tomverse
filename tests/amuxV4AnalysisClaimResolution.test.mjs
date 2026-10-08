@@ -24,7 +24,7 @@ test("claim read-back digest is deterministic and binds the result receipt", () 
   assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
     resultDigest: "c".repeat(64) }), digest);
   assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
-    resultFailureReason: "invocation_unverified" }), digest);
+    resultFailureReason: null }), digest);
   assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
     zeroReleaseEligible: true }), digest);
 });

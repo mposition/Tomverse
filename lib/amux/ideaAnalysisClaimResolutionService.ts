@@ -98,7 +98,7 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
   const resultData = result && record(result.metadata);
   const resultOutcome = resultData?.outcome;
   const expectedFailureReason = resultOutcome === "outcome_unknown"
-    ? "invocation_unverified" : "usage_unverified";
+    ? null : "usage_unverified";
   if (result && (!result.entryHash || auditRowActorKind(result) !== "system" ||
       !resultData || typeof resultData.requestId !== "string" ||
       !ID.test(resultData.requestId) || typeof resultData.resultDigest !== "string" ||
