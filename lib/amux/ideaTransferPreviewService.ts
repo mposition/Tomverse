@@ -311,10 +311,13 @@ export async function commitIdeaOnlyTransferPreview(tx: Prisma.TransactionClient
       where: { previewId: chunk.currentPreviewId! },
       select: { status: true, closedAt: true },
     });
+    const ownerResolved = previous?.state === "owner_resolved" &&
+      ["owner_consumed", "owner_released_unstarted"].includes(settled?.status ?? "");
     if (!previous || previous.ideaId !== idea.id ||
         previous.chunkIndex !== chunkIndex || previous.attempt !== chunk.attempt ||
-        previous.state !== "provider_failed" || !previous.consumedAt ||
-        settled?.status !== "failed" || !settled.closedAt) {
+        !previous.consumedAt || !settled?.closedAt ||
+        !((previous.state === "provider_failed" && settled.status === "failed") ||
+          ownerResolved)) {
       throw new IdeaTransferPreviewError("not_ready");
     }
   }

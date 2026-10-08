@@ -41,6 +41,11 @@ import { commitAmuxKnownIdeaAnalysisSettlement,
   AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
+import { commitAmuxIdeaAnalysisClaimResolution,
+  readAmuxIdeaAnalysisClaimResolution,
+  readAmuxIdeaAnalysisClaimResolutionReceipt,
+  AmuxIdeaAnalysisClaimResolutionError } from
+  "@/lib/amux/ideaAnalysisClaimResolutionService";
 import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
 import { readAmuxFirstIdeaAnalysisResult,
@@ -727,6 +732,101 @@ async function syntheticFirstClaim() {
     commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys }));
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
+
+test("owner proof of non-execution releases a claimed hold as zero and fences late results", async () => {
+  const { claim, previewId, holdId, selectedModelId,
+    frontierApprovalId } = await syntheticFirstClaim();
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "in_flight");
+  assert.equal(readback.claimRequestId.length > 0, true);
+  const resolutionRequestId = randomUUID();
+  const input = { session, request, resolutionRequestId, holdId,
+    readbackDigest: readback.readbackDigest,
+    evidenceDigest: randomBytes(32).toString("hex"),
+    disposition: "not_started_proven" as const };
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, input));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd, closed.duplicate],
+    ["0", readback.reservedMicroUsd, false]);
+  const [hold, preview, chunk, idea, after, receipt] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+    prisma.$transaction((tx) => readAmuxIdeaAnalysisClaimResolutionReceipt(tx,
+      { session, resolutionRequestId })),
+  ]);
+  assert.deepEqual([hold.status, hold.settledMicroUsd, preview.state,
+    chunk.state, chunk.leaseGeneration, idea.state],
+  ["owner_released_unstarted", BigInt(0), "owner_resolved",
+    "awaiting_preview", 0, "submitted"]);
+  assert.equal(after.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(after.spentMicroUsd, before.spentMicroUsd);
+  assert.equal(receipt.status, "committed");
+  assert.equal((await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, input))).duplicate, true);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { ...input,
+      evidenceDigest: randomBytes(32).toString("hex") })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "conflict");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
+      outcome: "invocation_failed", rawModelOutput: null,
+      inputTokens: 0, outputTokens: 0, keys })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
+    error.code === "not_ready");
+  const nextPreviewId = randomUUID();
+  const prepared = await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: { previewId: nextPreviewId, ideaId: claim.ideaId,
+      provider: "openai", modelId: selectedModelId, reasoningEffort: "high",
+      approvalId: frontierApprovalId, approvalVersion: 1 }, keys, browserNonce }));
+  assert.equal(prepared.previewId, nextPreviewId,
+    "resolution returns only to the owner preview boundary, never blind dispatch");
+});
+
+test("insufficient evidence consumes the full unknown-outcome reservation", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+    requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+    leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
+    inputTokens: null, outputTokens: null, keys,
+  }));
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "outcome_unknown");
+  assert.ok(readback.resultRequestId);
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "evidence_insufficient" }));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+    [readback.reservedMicroUsd, "0"]);
+  const [hold, window] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+  ]);
+  assert.equal(hold.status, "owner_consumed");
+  assert.equal(window.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(window.spentMicroUsd,
+    before.spentMicroUsd + BigInt(readback.reservedMicroUsd));
+});
 
 test("seventeen idea-only cards remain three bounded pages without an idea-wide cap", async () => {
   const { claim, previewId, holdId, selectedModelId,
