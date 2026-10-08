@@ -8869,6 +8869,8 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
 /// One scheduled observation slot of the product-research agent, written once
 /// and never changed (docs/policy/product-research-agent.md §4).
 ///
