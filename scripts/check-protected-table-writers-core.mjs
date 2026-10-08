@@ -1138,7 +1138,7 @@ export const RAW_SQL_ALLOWLIST = [
       "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is two constant SELECTs (the newest event of every scope, and of one scope) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
   },
   {
-    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_isolation/migration.sql",
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
     writeVerbs: 2,
@@ -1146,7 +1146,7 @@ export const RAW_SQL_ALLOWLIST = [
       "Replaces the Decision Maker switch event guard's body with the same body plus a READ COMMITTED check (docs/policy/amux-decision-maker.md §8). Its two AdminAuditLog mentions are the guard's two SELECT EXISTS reads, unchanged from 20261008030000. It never writes AdminAuditLog; its two verbs are the 'INSERT' the guard compares TG_OP with and one word of a comment inside the function body.",
   },
   {
-    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_isolation/migration.sql",
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
     table: "AmuxDecisionMakerSwitchEvent",
     tableMentions: 3,
     writeVerbs: 2,
@@ -1176,6 +1176,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 18,
     reason:
       "Creates the request event table, its CHECKs, its partial unique indexes and foreign keys, the guard that holds the transition graph and refuses every update and delete, and the deferred constraint trigger that refuses a late COMMIT. The guard and the commit check read the request's events; nothing here writes one.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 2,
+    writeVerbs: 18,
+    reason:
+      "The request guard and the event guard read the switch store's newest kill switch and instance events, under the switch gate taken shared, to refuse a DM routing, a transmission intent or a proposal the switches do not allow (docs/policy/amux-decision-maker.md §6, §8). Both are SELECTs in EXECUTE; nothing here writes a switch event, and the write verbs are the ledger tables' own DDL and trigger events.",
   },
   {
     path: "lib/amux/decisionMakerRequestStore.ts",
@@ -1432,16 +1440,16 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
-    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_isolation/migration.sql",
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
     count: 3,
     reason:
-      "The same three reads of the Decision Maker switch event guard, in its replaced body with the READ COMMITTED check: EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, values bound with USING. They read and never write.",
+      "The same three reads of the Decision Maker switch event guard, in its replaced body with the READ COMMITTED check and the exclusive switch gate: EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, values bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
-    count: 6,
+    count: 8,
     reason:
-      "Six reads in the Decision Maker request ledger's functions, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp: the request guard's SELECT EXISTS on AdminAuditLog; the event guard's read of the request row, its aggregate of the request's events after the per-request advisory lock, and its SELECT EXISTS on AdminAuditLog; and the commit check's read of the assignment deadline or the result deadline. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+      "Eight reads in the Decision Maker request ledger's functions, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp: the request guard's newest kill switch and instance events (under the shared switch gate, for a dm_proposal row) and its SELECT EXISTS on AdminAuditLog; the event guard's read of the request row, its aggregate of the request's events after the per-request advisory lock, its newest kill switch and instance events (under the shared switch gate), and its SELECT EXISTS on AdminAuditLog; and the commit check's read of the assignment deadline or the result deadline. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",

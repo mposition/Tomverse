@@ -1,29 +1,45 @@
 -- baseline-check: replace-function-if-body-sha256 "amux_decision_maker_switch_event_guard" "d26f196a8474c90d48a4dd4cd45ac6d3fe1c05d558aea14a98fc52d678510be5"
 -- AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
--- section 8: the switch store of stage S1b, one correction from its review.
--- Replaces one function body; no table, column, constraint, trigger or row
--- changes.
+-- sections 6 and 8: the switch store of stage S1b, serialized with the
+-- request ledger of stage S1c. Replaces one function body; no table, column,
+-- constraint, trigger or row changes.
 --
--- The switch event guard (20261008030000_amux_decision_maker_switch) takes a
--- per-scope advisory lock and then reads the scope's newest event in a
--- separate statement, so that a transaction the lock waited for is seen once
--- it has committed. That holds only under READ COMMITTED, where each statement
--- takes a new snapshot. Under REPEATABLE READ or SERIALIZABLE the snapshot is
--- the transaction's first, taken before the lock wait, so the read can miss a
--- latch committed meanwhile: a person's change would then pass as
--- amux.decision.mode where the first change after a latch must be
--- amux.decision.latch_release, and the sequence comparison would look at a
--- stale newest event. The guard now refuses an insert under any other
--- isolation level (AMUX_DM_SWITCH_ISOLATION). The application writes it only
--- under READ COMMITTED -- the AMUX mutation boundary's level and PostgreSQL's
--- default -- so nothing it does today changes.
+-- Two additions to the switch event guard
+-- (20261008030000_amux_decision_maker_switch), and nothing else:
+--
+-- 1. READ COMMITTED only (AMUX_DM_SWITCH_ISOLATION). The guard takes a
+--    per-scope advisory lock and then reads the scope's newest event in a
+--    separate statement, so that a transaction the lock waited for is seen
+--    once it has committed. That holds only under READ COMMITTED, where each
+--    statement takes a new snapshot. Under REPEATABLE READ or SERIALIZABLE the
+--    snapshot is the transaction's first, taken before the lock wait, so the
+--    read can miss a latch committed meanwhile: a person's change would then
+--    pass as amux.decision.mode where the first change after a latch must be
+--    amux.decision.latch_release, and the sequence comparison would look at a
+--    stale newest event. The application writes the table only under READ
+--    COMMITTED -- the AMUX mutation boundary's level and PostgreSQL's default.
+--
+-- 2. The Decision Maker switch gate, an exclusive transaction advisory lock
+--    taken before the per-scope lock. The request ledger
+--    (20261008090100_amux_decision_maker_request_ledger) takes the same gate,
+--    shared, before it reads the switches to refuse a DM routing, a
+--    transmission intent or a stored proposal under the kill switch or an
+--    `off` instance (section 6's table). Shared against exclusive: a switch
+--    change waits for every ledger write already reading the switches to
+--    commit, and a ledger write waits for a switch change in flight and then
+--    reads it -- so no intent or proposal is ever recorded against a switch
+--    state that a committed change had already replaced. Ledger writes do not
+--    wait for each other on the gate. Lock order, in every Decision Maker
+--    write: the audit chain lock (lib/adminAudit.ts, taken first by every
+--    store path), then this gate, then the per-scope or per-request lock.
 --
 -- The refusal of UPDATE and DELETE comes first, as before, whatever the level.
 -- Every other line of the function is the S1b body unchanged.
 --
 -- Rollback: re-run the CREATE OR REPLACE FUNCTION of migration
 -- 20261008030000_amux_decision_maker_switch, which restores the body without
--- the isolation check.
+-- the isolation check and the gate. The ledger's triggers then still take the
+-- gate shared, which no longer excludes anything.
 
 BEGIN;
 
@@ -47,6 +63,11 @@ BEGIN
     IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'AMUX_DM_SWITCH_ISOLATION';
     END IF;
+    -- The switch gate, exclusive: no request ledger write that reads the
+    -- switches is in flight while a switch changes.
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtext('tomverse-amux-decision-maker-switch-gate')
+    );
 
     -- One insert per scope at a time, so the newest event read below is still
     -- the newest when this one commits. The writer already holds the audit

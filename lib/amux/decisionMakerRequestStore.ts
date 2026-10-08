@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
+import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
 import {
   DM_REQUEST_BINDING_KEYS,
   DM_VENDOR_FOR_INSTANCE,
@@ -13,10 +14,12 @@ import {
   dmRequestStateFromRow,
   dmTransmitSwitchRefusal,
   dmResultLookup,
+  parseDmCard,
   dmResultSubmissionOutcome,
   isDmDeadlineResultKind,
   isDmDigest,
   isDmRequestId,
+  parseDmRequestBinding,
   parseDmRequestRecord,
   parseDmResultSubmission,
   parseDmTransmission,
@@ -33,7 +36,12 @@ import {
   writeDecisionMakerEventAudit,
   writeDecisionMakerRouteAudit,
 } from "@/lib/amux/decisionMakerRequestSystemAudit";
-import { isDmInstanceScope, type DmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
+import {
+  dmSwitchRoutingInput,
+  isDmInstanceScope,
+  type DmInstanceScope,
+} from "@/lib/amux/decisionMakerSwitchCore";
+import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerRequest` and
@@ -56,17 +64,24 @@ import { isDmInstanceScope, type DmInstanceScope } from "@/lib/amux/decisionMake
  * rows that pass them, so the caller gets an answer rather than an aborted
  * transaction. The trigger re-checks every one under its own per-request lock.
  *
- * The two deadline writes -- an assignment and a DM output -- take the
- * caller's `requireLeaseAt`, which in `withAmuxDbBoundary` lowers the commit
- * fence's deadline D to the window's end less the commit reserve
- * (lib/amux/dbBoundary.ts, the AmuxCommitDeadline device, §9). The ledger's own
- * deferred constraint trigger refuses the same COMMIT at the same D, so the
- * database holds the deadline even for a caller outside the boundary.
+ * The three deadline writes -- an assignment, a transmission intent and a DM
+ * output -- take the caller's `requireLeaseAt`, which in `withAmuxDbBoundary`
+ * lowers the commit fence's deadline D to the window's end less the commit
+ * reserve (lib/amux/dbBoundary.ts, the AmuxCommitDeadline device, §9). The
+ * ledger's own deferred constraint trigger refuses the same COMMIT at the same
+ * D, so the database holds the deadline even for a caller outside the boundary.
  *
- * The switch state, throughput and the routing decision are the caller's to
- * read and pass in; this module does not read the switch store. It refuses a
- * transmission intent under the kill switch or an `off` instance, and records
- * a proposal under the kill switch as rejected, on the values it is given.
+ * The switches are never the caller's to pass in (§6, §8). A routing, a
+ * transmission intent and a result read them here, with the switch store's own
+ * reader, after the audit chain lock -- the lock every switch change also takes
+ * before it writes -- and decide on that read in the same transaction, so a
+ * switch change either committed before the read or waits for this write to
+ * commit. The ledger's triggers read the switches again under the Decision
+ * Maker switch gate, which the switch guard takes exclusive, so the database
+ * refuses the same writes even for a caller that skipped this module. Lock
+ * order: the audit chain lock, the switch gate (in the triggers), then the
+ * per-request or per-scope lock.
+ *
  * No card text, prompt, proposal or free text is written by it.
  */
 
@@ -97,8 +112,8 @@ const isoOf = (epochMs: number) => new Date(epochMs).toISOString();
 /**
  * Requests routed to `instance` for a proposal in the trailing hour and day,
  * by the database clock, in one statement: the throughput input of
- * `routeDmQuestion()` (§3-6). Call it after `takeAuditChainLock()` in the
- * routing transaction, so two routings of the same instance count each other.
+ * `routeDmQuestion()` (§3-6). `recordDecisionMakerRequest()` reads it after
+ * the audit chain lock, so two routings of the same instance count each other.
  */
 export async function readDecisionMakerThroughput(
   client: LedgerReader,
@@ -198,6 +213,8 @@ export type DecisionMakerRequestRecord = {
   created: boolean;
   route: DmRequestRoute;
   instance: DmInstanceScope | null;
+  /** The router's refusals, in its order; empty for a proposal. */
+  refusalCodes: string[];
   /** On an existing request, whether its stored binding equals the one given now. */
   sameBinding: boolean;
   createdAt: string;
@@ -208,45 +225,59 @@ type ExistingRequestRow = Record<string, unknown> & {
   id: string;
   route: string;
   instance: string | null;
+  refusalCodes: unknown;
   createdAtEpochMs: bigint | number;
   assignmentDeadlineAtEpochMs: bigint | number;
 };
 
 /**
- * Records one routed question (§2-2, §9). In the caller's transaction, in this
- * order: the audit chain lock, the request already recorded for this (card,
- * question revision), if any -- returned as it is, since a request is one per
- * question revision and the first stands -- and otherwise the router's
- * `amux.decision.route` audit and the request naming it. The database sets
- * `createdAt` and the assignment deadline (creation + 2 min) from its clock.
+ * Routes one typed ask and records it (§2-2, §3, §9), in the caller's
+ * transaction, in this order: the audit chain lock; the request already
+ * recorded for this (card, question revision), if any -- returned as it is,
+ * since a request is one per question revision and the first stands; the
+ * switches, by the switch store's reader; the instance's throughput, when the
+ * provider has an instance; `routeDmQuestion()` on those reads and the card;
+ * and the router's `amux.decision.route` audit and the request naming it. The
+ * database sets `createdAt` and the assignment deadline (creation + 2 min)
+ * from its clock, and refuses a `dm_proposal` row the switches do not allow.
  *
- * `decision` is `routeDmQuestion()`'s, made by the caller on the switch,
- * throughput and card it read in the same transaction.
+ * The decision is made here, on reads taken after the lock that every switch
+ * change and every other routing also takes, so neither a stale switch nor a
+ * concurrent routing of the same instance can let a question through. The
+ * card is routed and never stored.
  *
- * Statements: 1 lock, 1 read -- 2 for an existing request; then the system
- * writer's 3 (4 with an integrity key) and 1 insert -- 6, or 7.
+ * Statements: 1 lock, 1 read -- 2 for an existing request; then the switch
+ * read, the throughput read (none for a provider without an instance), the
+ * system writer's 3 (4 with an integrity key) and 1 insert -- 8, or 9 (7, or
+ * 8, without an instance).
  */
 export async function recordDecisionMakerRequest(
   tx: Prisma.TransactionClient,
-  input: { binding: unknown; decision: unknown },
+  input: { binding: unknown; card: unknown },
 ): Promise<DecisionMakerRequestRecord> {
-  const record = parseDmRequestRecord(input.binding, input.decision);
-  if (!record) throw new DecisionMakerRequestWriteError("invalid_input");
+  const binding = parseDmRequestBinding(input.binding);
+  const card = parseDmCard(input.card);
+  if (!binding || !card) throw new DecisionMakerRequestWriteError("invalid_input");
 
   await takeAuditChainLock(tx);
   const existing = await tx.$queryRaw<ExistingRequestRow[]>`
     SELECT
       "id", "cardId", "questionRevision", "askingWorkerId", "amuxSessionId", "amuxSessionAttempt",
       "askingProvider", "optionSetDigest", "termListVersion", "classificationVersion", "scannerVersion",
-      "route", "instance",
+      "route", "instance", "refusalCodes",
       floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs",
       floor(extract(epoch FROM "assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
     FROM "AmuxDecisionMakerRequest"
-    WHERE "cardId" = ${record.cardId} AND "questionRevision" = ${record.questionRevision}
+    WHERE "cardId" = ${binding.cardId} AND "questionRevision" = ${binding.questionRevision}
   `;
   const found = existing[0];
   if (found) {
-    if ((found.route !== "operator" && found.route !== "dm_proposal") || (found.instance !== null && !isDmInstanceScope(found.instance))) {
+    if (
+      (found.route !== "operator" && found.route !== "dm_proposal") ||
+      (found.instance !== null && !isDmInstanceScope(found.instance)) ||
+      !Array.isArray(found.refusalCodes) ||
+      !found.refusalCodes.every((code) => typeof code === "string")
+    ) {
       throw new DecisionMakerRequestWriteError("state_unreadable");
     }
     return {
@@ -254,11 +285,26 @@ export async function recordDecisionMakerRequest(
       created: false,
       route: found.route,
       instance: found.instance as DmInstanceScope | null,
-      sameBinding: DM_REQUEST_BINDING_KEYS.every((key) => found[key] === record[key]),
+      refusalCodes: [...(found.refusalCodes as string[])],
+      sameBinding: DM_REQUEST_BINDING_KEYS.every((key) => found[key] === binding[key]),
       createdAt: isoOf(safeInteger(found.createdAtEpochMs, "clock")),
       assignmentDeadlineAt: isoOf(safeInteger(found.assignmentDeadlineAtEpochMs, "clock")),
     };
   }
+
+  const switches = await readDecisionMakerSwitches(tx);
+  const instance = dmInstanceForProvider(binding.askingProvider);
+  const throughput = isDmInstanceScope(instance)
+    ? await readDecisionMakerThroughput(tx, instance)
+    : { lastHour: 0, lastDay: 0 };
+  const decision = routeDmQuestion({
+    ...dmSwitchRoutingInput(switches, instance),
+    card,
+    askingProvider: binding.askingProvider,
+    throughput,
+  });
+  const record = parseDmRequestRecord(binding, decision);
+  if (!record) throw new Error("AMUX Decision Maker routing produced a decision the ledger refuses");
 
   const requestId = randomUUID();
   const auditLogId = await writeDecisionMakerRouteAudit(tx, {
@@ -293,6 +339,7 @@ export async function recordDecisionMakerRequest(
     created: true,
     route: record.route,
     instance: record.instance,
+    refusalCodes: [...record.refusalCodes],
     sameBinding: true,
     createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
     assignmentDeadlineAt: isoOf(safeInteger(row.assignmentDeadlineAtEpochMs, "clock")),
@@ -431,6 +478,7 @@ export async function assignDecisionMakerRequest(
   input: { requestId: unknown; requireLeaseAt: (deadline: Date) => void },
 ): Promise<DecisionMakerEventWrite> {
   const requestId = requireRequestId(input.requestId);
+  if (typeof input.requireLeaseAt !== "function") throw new DecisionMakerRequestWriteError("invalid_input");
   const state = await lockAndRead(tx, requestId);
   if (!state) return { recorded: false, reason: "unknown_request" };
   const refusal = dmEventRefusal(state, { kind: "assign" });
@@ -460,13 +508,17 @@ export async function discardDecisionMakerAssignment(
  * starts -- the instance, its vendor, the input payload digest and the
  * snapshot (state, target SHA and manifest digest, the last two only when the
  * state is not `none`). One per request; the broker starts the process only
- * on a recorded intent.
+ * on a recorded intent, and the card is never sent again.
  *
- * `switches` is the caller's read of the switch store for this instance
- * (`dmSwitchRoutingInput()`): with the kill switch on, the instance `off`, or
- * either unreadable, nothing is written and no process may start (§6, §8).
+ * The switches are read here, after the lock: with the kill switch on, the
+ * instance `off`, or the switch store unreadable, nothing is written and no
+ * process may start (§6, §8). The result deadline is given to
+ * `requireLeaseAt`, and the database refuses an intent whose COMMIT reaches
+ * it, as it does a late DM output.
  *
- * Statements: none for a switch refusal; 2 for a ledger refusal; 6, or 7.
+ * Statements: 1 lock, 1 state read -- 2 for an unknown request or a ledger
+ * refusal; then the switch read -- 3 for a switch refusal; then the system
+ * writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8.
  */
 export async function recordDecisionMakerTransmitIntent(
   tx: Prisma.TransactionClient,
@@ -474,28 +526,25 @@ export async function recordDecisionMakerTransmitIntent(
     requestId: unknown;
     instance: unknown;
     transmission: unknown;
-    switches: { killSwitch: boolean | null; instanceMode: "off" | "proposal" | null };
+    requireLeaseAt: (deadline: Date) => void;
   },
 ): Promise<DecisionMakerEventWrite | { recorded: false; reason: DmTransmitSwitchRefusal }> {
   const requestId = requireRequestId(input.requestId);
   const instance = requireInstance(input.instance);
   const transmission = parseDmTransmission(input.transmission);
-  const switches = input.switches as { killSwitch?: unknown; instanceMode?: unknown } | undefined;
-  if (
-    !transmission ||
-    switches === null ||
-    typeof switches !== "object" ||
-    (switches.killSwitch !== null && typeof switches.killSwitch !== "boolean") ||
-    (switches.instanceMode !== null && switches.instanceMode !== "off" && switches.instanceMode !== "proposal")
-  ) {
+  if (!transmission || typeof input.requireLeaseAt !== "function") {
     throw new DecisionMakerRequestWriteError("invalid_input");
   }
-  const switchRefusal = dmTransmitSwitchRefusal(input.switches);
-  if (switchRefusal) return { recorded: false, reason: switchRefusal };
   const state = await lockAndRead(tx, requestId);
   if (!state) return { recorded: false, reason: "unknown_request" };
   const refusal = dmEventRefusal(state, { kind: "transmit_intent", instance });
   if (refusal) return { recorded: false, reason: refusal };
+  const switchRefusal = dmTransmitSwitchRefusal(
+    dmSwitchRoutingInput(await readDecisionMakerSwitches(tx), instance),
+  );
+  if (switchRefusal) return { recorded: false, reason: switchRefusal };
+  if (state.resultDeadlineAtMs === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  input.requireLeaseAt(new Date(state.resultDeadlineAtMs));
   return {
     recorded: true,
     event: await appendEvent(tx, requestId, {
@@ -552,29 +601,29 @@ export type DecisionMakerResultSubmission =
  * terminal result or as a rejection with its reason
  * (`dmResultSubmissionOutcome()`): a different digest after a result, a
  * closed request, a binding value that changed, a DM output at its deadline
- * less the reserve, and a proposal while `killSwitch` is not false.
- * `killSwitch` is the switch store's read, passed by the caller; null
- * (unreadable) counts as on.
+ * less the reserve, and a proposal while the kill switch is on.
  *
- * A DM output's result deadline is given to `requireLeaseAt`, so the commit
- * fence and, at COMMIT, the database refuse a late one.
+ * The kill switch is read here, after the lock, never taken from the caller
+ * (§6's table: "진행 중 결과의 제안 저장 — 거부"); an unreadable switch store
+ * writes nothing. A DM output's result deadline is given to `requireLeaseAt`,
+ * so the commit fence and, at COMMIT, the database refuse a late one.
  *
- * Statements: 2 when nothing is written (existing pair, unknown request,
- * another instance); 6, or 7 with an integrity key, for a result or a
- * rejection.
+ * Statements: 1 lock, 1 state read -- 2 when nothing is written (an existing
+ * pair, an unknown request, another instance); then the switch read, the
+ * system writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8, for a
+ * result or a rejection.
  */
 export async function submitDecisionMakerResult(
   tx: Prisma.TransactionClient,
   input: {
     requestId: unknown;
     submission: unknown;
-    killSwitch: boolean | null;
     requireLeaseAt: (deadline: Date) => void;
   },
 ): Promise<DecisionMakerResultSubmission> {
   const requestId = requireRequestId(input.requestId);
   const submission = parseDmResultSubmission(input.submission);
-  if (!submission || (input.killSwitch !== null && typeof input.killSwitch !== "boolean")) {
+  if (!submission || typeof input.requireLeaseAt !== "function") {
     throw new DecisionMakerRequestWriteError("invalid_input");
   }
   const state = await lockAndRead(tx, requestId, submission.resultDigest);
@@ -582,13 +631,19 @@ export async function submitDecisionMakerResult(
   // Nothing can be recorded for another instance: the trigger binds every
   // result event to the request's own.
   if (state.instance !== submission.instance) return { status: "instance_mismatch" };
+  const recorded = dmResultLookup(state, submission.resultDigest);
+  if (recorded.status === "accepted") {
+    return { status: "existing", eventId: recorded.eventId, resultKind: recorded.resultKind };
+  }
+  if (recorded.status === "rejected") return { status: "already_rejected", reason: recorded.reason };
 
-  const decision = dmResultSubmissionOutcome(state, submission, input.killSwitch);
+  const { killSwitch } = await readDecisionMakerSwitches(tx);
+  if (killSwitch === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  const decision = dmResultSubmissionOutcome(state, submission, killSwitch);
   switch (decision.outcome) {
     case "existing_result":
-      return { status: "existing", eventId: decision.eventId, resultKind: decision.resultKind };
     case "existing_rejection":
-      return { status: "already_rejected", reason: decision.reason };
+      throw new Error("AMUX Decision Maker result pair was settled before the switch read");
     case "reject": {
       const event = await appendEvent(tx, requestId, {
         ...NO_COLUMNS,

@@ -345,7 +345,7 @@ test("events are never updated or deleted", async () => {
 });
 
 test("an event under any isolation level but READ COMMITTED is refused, by the store and by the guard", async () => {
-  // 20261008090000_amux_decision_maker_switch_isolation: the guard reads the
+  // 20261008090000_amux_decision_maker_switch_serialization: the guard reads the
   // scope's newest event after its lock, which sees a transaction the lock
   // waited for only under READ COMMITTED. Under REPEATABLE READ a latch
   // committed meanwhile could be missed and the first change after it written

@@ -10,9 +10,15 @@ import { withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   DM_COMMIT_RESERVE_MS,
   dmEventRefusal,
+  dmEventSwitchRefusal,
   type DmEventAttempt,
   type DmEventRefusal,
 } from "@/lib/amux/decisionMakerRequestCore";
+import { dmSwitchRoutingInput } from "@/lib/amux/decisionMakerSwitchCore";
+import {
+  readDecisionMakerSwitches,
+  recordDecisionMakerSwitchByOperator,
+} from "@/lib/amux/decisionMakerSwitchStore";
 import {
   assignDecisionMakerRequest,
   discardDecisionMakerAssignment,
@@ -68,14 +74,30 @@ const requireDedicatedAmuxTestDatabase = () => {
 };
 requireDedicatedAmuxTestDatabase();
 
-// Both tables refuse DELETE; TRUNCATE fires no row trigger, so each test
-// starts from an empty ledger.
+// The three tables refuse DELETE; TRUNCATE fires no row trigger, so each test
+// starts from an empty ledger and empty switches.
 const resetLedger = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest" RESTART IDENTITY`,
+    `TRUNCATE TABLE "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
   );
 
-beforeEach(resetLedger);
+const switchOperator = () =>
+  ({ user: { id: `dm-operator-${randomUUID()}`, email: "operator@example.test" }, expires: "2099-01-01T00:00:00.000Z" }) as Session;
+
+/** A person sets one switch through the switch store, in a transaction of its own. */
+const setSwitch = (
+  scope: "kill_switch" | "decision-maker-openai" | "decision-maker-anthropic",
+  value: "on" | "off" | "proposal",
+) => prisma.$transaction((tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope, value }));
+
+// With no switch event both instances are off (§8: "기본 off"), which routes
+// nothing to a DM; every test starts with both in proposal mode and the kill
+// switch off, and the switch tests change that themselves.
+beforeEach(async () => {
+  await resetLedger();
+  await setSwitch("decision-maker-openai", "proposal");
+  await setSwitch("decision-maker-anthropic", "proposal");
+});
 
 after(async () => {
   await resetLedger();
@@ -359,8 +381,22 @@ const binding = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const noLease = () => {};
-/** The switch store read for an instance in proposal mode with the kill switch off. */
-const SWITCHES_ON = { killSwitch: false, instanceMode: "proposal" as const };
+/** A typed ask the router sends to a DM: no irreversible term, no secret, within every limit. */
+const CARD = {
+  askType: "decision",
+  resolution: null,
+  type: "task",
+  tags: [],
+  title: "Pick a cache key layout",
+  question: "Should the cache key include the locale or only the model id?",
+  options: [
+    { id: "a", label: "Model id only" },
+    { id: "b", label: "Model id and locale" },
+  ],
+  unblocks: "The cache module can be finished.",
+  context: "Both layouts pass the current tests.",
+  contextPaths: ["lib/cache.ts"],
+};
 
 /** The binding a result submission repeats: everything but the provider, which its instance already is. */
 const withoutProvider = (value: Record<string, unknown>) => {
@@ -376,7 +412,11 @@ const withoutProvider = (value: Record<string, unknown>) => {
 test("a request's route, instance and refusal codes are closed and agree with each other", async () => {
   for (const [overrides, constraint] of [
     [{ route: "autonomous" }, /AmuxDecisionMakerRequest_route_check|route_refusals_check/],
-    [{ instance: "decision-maker-gemini" }, /AmuxDecisionMakerRequest_(instance_check|provider_instance_check)/],
+    // An instance with no switch is off, so the switch read may refuse it first.
+    [
+      { instance: "decision-maker-gemini" },
+      /AmuxDecisionMakerRequest_(instance_check|provider_instance_check)|AMUX_DM_REQUEST_SWITCH/,
+    ],
     // §7: the other vendor's DM, none for a verified provider, one for an unverified one.
     [{ instance: ANTHROPIC }, /AmuxDecisionMakerRequest_provider_instance_check/],
     [{ instance: null, route: "operator", refusalCodes: ["provider_unverified"] }, /AmuxDecisionMakerRequest_provider_instance_check/],
@@ -457,14 +497,11 @@ test("createdAt and the assignment deadline are the database's, whatever the wri
 test("one request per card question revision; the store returns the first", async () => {
   const shared = binding();
   const first = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
+    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
   );
   assert.equal(first.created, true);
   const again = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, {
-      binding: { ...shared, amuxSessionAttempt: 2 },
-      decision: { route: "operator", instance: OPENAI, refusals: ["instance_off"] },
-    }),
+    recordDecisionMakerRequest(tx, { binding: { ...shared, amuxSessionAttempt: 2 }, card: { ...CARD, title: "Deploy it" } }),
   );
   assert.deepEqual(again, { ...first, created: false, sameBinding: false });
   const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { targetId: first.requestId, action: "amux.decision.route" } });
@@ -482,10 +519,7 @@ test("one request per card question revision; the store returns the first", asyn
   );
   // The next revision of the same card is a new request.
   const next = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, {
-      binding: { ...shared, questionRevision: shared.questionRevision + 1 },
-      decision: { route: "dm_proposal", instance: OPENAI, refusals: [] },
-    }),
+    recordDecisionMakerRequest(tx, { binding: { ...shared, questionRevision: shared.questionRevision + 1 }, card: CARD }),
   );
   assert.equal(next.created, true);
   assert.notEqual(next.requestId, first.requestId);
@@ -672,13 +706,17 @@ const ATTEMPTS: Record<string, { row: EventRow; attempt: DmEventAttempt }> = {
   ),
 };
 
+type GraphRefusal = DmEventRefusal | "kill_switch_on" | "instance_off";
+
 /** The trigger's message for each clause the core can name. */
-const triggerMessageFor = (refusal: DmEventRefusal): RegExp =>
+const triggerMessageFor = (refusal: GraphRefusal): RegExp =>
   refusal === "instance_mismatch"
     ? /AMUX_DM_REQUEST_EVENT_INSTANCE/
     : refusal === "deadline_passed"
       ? /AMUX_DM_REQUEST_EVENT_DEADLINE/
-      : /AMUX_DM_REQUEST_EVENT_TRANSITION/;
+      : refusal === "kill_switch_on" || refusal === "instance_off"
+        ? /AMUX_DM_REQUEST_EVENT_SWITCH/
+        : /AMUX_DM_REQUEST_EVENT_TRANSITION/;
 
 const STATE_BUILDERS: Record<string, () => Promise<string>> = {
   fresh: () => insertRequest(),
@@ -728,59 +766,97 @@ const STATE_BUILDERS: Record<string, () => Promise<string>> = {
   stale: () => backdatedRequest(30 * 24 * 60 * MINUTE + MINUTE),
 };
 
-test("the trigger and dmEventRefusal() agree on every state and every event, and the graph refuses what it must", async () => {
-  const seen = new Map<string, DmEventRefusal | null>();
-  for (const [stateName, build] of Object.entries(STATE_BUILDERS)) {
-    const requestId = await build();
-    for (const [attemptName, { row, attempt }] of Object.entries(ATTEMPTS)) {
-      const state = await readDecisionMakerRequestState(prisma, requestId, DIGEST_D);
-      assert.ok(state, stateName);
-      const expected = dmEventRefusal(state, attempt);
-      seen.set(`${stateName} + ${attemptName}`, expected);
-      const refusal = await tryEvent(requestId, row);
-      if (expected === null) {
-        assert.equal(refusal, null, `${stateName} + ${attemptName}: the core accepts, the trigger refused: ${String(refusal)}`);
-      } else {
-        assert.ok(refusal !== null, `${stateName} + ${attemptName}: the core refuses (${expected}), the trigger accepted`);
-        const record = refusal as { meta?: unknown; cause?: unknown };
-        assert.match(
-          [String(refusal), JSON.stringify(record.meta ?? null), String(record.cause ?? "")].join(" "),
-          triggerMessageFor(expected),
-          `${stateName} + ${attemptName}`,
-        );
+test("the trigger and the core agree on every state, every event and every switch setting, and the graph refuses what it must", async () => {
+  // Every state is built while both instances propose and the kill switch is
+  // off; each is then probed under three switch settings, against
+  // dmEventRefusal() and then dmEventSwitchRefusal() on the switches read back.
+  const requests = new Map<string, string>();
+  for (const [stateName, build] of Object.entries(STATE_BUILDERS)) requests.set(stateName, await build());
+  const seen = new Map<string, GraphRefusal | null>();
+  const settings: Array<[string, () => Promise<unknown>]> = [
+    ["permissive", async () => {}],
+    ["kill", () => setSwitch("kill_switch", "on")],
+    [
+      "instanceOff",
+      async () => {
+        await setSwitch("kill_switch", "off");
+        await setSwitch("decision-maker-openai", "off");
+      },
+    ],
+  ];
+  for (const [settingName, apply] of settings) {
+    await apply();
+    const switches = dmSwitchRoutingInput(await readDecisionMakerSwitches(prisma), OPENAI);
+    for (const [stateName, requestId] of requests) {
+      for (const [attemptName, { row, attempt }] of Object.entries(ATTEMPTS)) {
+        const state = await readDecisionMakerRequestState(prisma, requestId, DIGEST_D);
+        assert.ok(state, stateName);
+        const expected: GraphRefusal | null = dmEventRefusal(state, attempt) ?? dmEventSwitchRefusal(attempt, switches);
+        const key = `${settingName}: ${stateName} + ${attemptName}`;
+        seen.set(key, expected);
+        const refusal = await tryEvent(requestId, row);
+        if (expected === null) {
+          assert.equal(refusal, null, `${key}: the core accepts, the trigger refused: ${String(refusal)}`);
+        } else {
+          assert.ok(refusal !== null, `${key}: the core refuses (${expected}), the trigger accepted`);
+          const record = refusal as { meta?: unknown; cause?: unknown };
+          assert.match(
+            [String(refusal), JSON.stringify(record.meta ?? null), String(record.cause ?? "")].join(" "),
+            triggerMessageFor(expected),
+            key,
+          );
+        }
       }
     }
   }
+  // The switches, against the trigger.
+  for (const [key, expected] of [
+    ["permissive: assigned + transmit_intent", null],
+    ["kill: assigned + transmit_intent", "kill_switch_on"],
+    ["instanceOff: assigned + transmit_intent", "instance_off"],
+    ["kill: transmitted + proposal", "kill_switch_on"],
+    ["kill: transmitted + escalate", null],
+    ["kill: transmitted + timeout", null],
+    ["instanceOff: transmitted + proposal", null],
+    ["permissive: transmitted + rejected_kill_switch", "reason_inconsistent"],
+    ["kill: transmitted + rejected_kill_switch", null],
+    ["instanceOff: transmitted + rejected_kill_switch", "reason_inconsistent"],
+    ["kill: transmitted + transmit_receipt", null],
+    ["kill: discarded + transmit_intent", "closed"],
+    ["kill: fresh + assign", null],
+  ] as const) {
+    assert.equal(seen.get(key), expected, key);
+  }
   // Not vacuous: the graph's defining refusals were exercised against the trigger.
   for (const [key, expected] of [
-    ["fresh + assign", null],
-    ["fresh + transmit_intent", "not_assigned"],
-    ["operator + assign", "not_routed_to_dm"],
-    ["operator + rejected_request_closed", null],
-    ["assigned + assign", "already_assigned"],
-    ["assigned + proposal_without_payload", "not_transmitted"],
-    ["assigned + unavailable_before_intent", null],
-    ["transmitted + transmit_intent", "already_transmitted"],
-    ["transmitted + proposal", null],
-    ["transmitted + proposal_without_payload", "payload_mismatch"],
-    ["transmitted + assign_discarded", "already_transmitted"],
-    ["receipted + transmit_unknown", "transmit_outcome_recorded"],
-    ["terminal + proposal", "result_recorded"],
-    ["terminal + transmit_receipt", null],
-    ["terminal + rejected_terminal_exists", null],
-    ["resultUnknown + timeout", "result_unknown_recorded"],
-    ["discarded + transmit_intent", "closed"],
-    ["discarded + stale_close", "closed"],
-    ["assignmentLate + assign", "deadline_passed"],
-    ["transmittedLate + proposal", "deadline_passed"],
-    ["transmittedLate + escalate", "deadline_passed"],
-    ["transmittedLate + timeout", null],
-    ["transmittedLate + rejected_deadline_passed", null],
-    ["staleClosed + transmit_receipt", null],
-    ["staleClosed + proposal", "closed"],
-    ["stale + stale_close", null],
-    ["fresh + stale_close", "not_stale"],
-    ["transmitted + rejected_request_closed", "reason_inconsistent"],
+    ["permissive: fresh + assign", null],
+    ["permissive: fresh + transmit_intent", "not_assigned"],
+    ["permissive: operator + assign", "not_routed_to_dm"],
+    ["permissive: operator + rejected_request_closed", null],
+    ["permissive: assigned + assign", "already_assigned"],
+    ["permissive: assigned + proposal_without_payload", "not_transmitted"],
+    ["permissive: assigned + unavailable_before_intent", null],
+    ["permissive: transmitted + transmit_intent", "already_transmitted"],
+    ["permissive: transmitted + proposal", null],
+    ["permissive: transmitted + proposal_without_payload", "payload_mismatch"],
+    ["permissive: transmitted + assign_discarded", "already_transmitted"],
+    ["permissive: receipted + transmit_unknown", "transmit_outcome_recorded"],
+    ["permissive: terminal + proposal", "result_recorded"],
+    ["permissive: terminal + transmit_receipt", null],
+    ["permissive: terminal + rejected_terminal_exists", null],
+    ["permissive: resultUnknown + timeout", "result_unknown_recorded"],
+    ["permissive: discarded + transmit_intent", "closed"],
+    ["permissive: discarded + stale_close", "closed"],
+    ["permissive: assignmentLate + assign", "deadline_passed"],
+    ["permissive: transmittedLate + proposal", "deadline_passed"],
+    ["permissive: transmittedLate + escalate", "deadline_passed"],
+    ["permissive: transmittedLate + timeout", null],
+    ["permissive: transmittedLate + rejected_deadline_passed", null],
+    ["permissive: staleClosed + transmit_receipt", null],
+    ["permissive: staleClosed + proposal", "closed"],
+    ["permissive: stale + stale_close", null],
+    ["permissive: fresh + stale_close", "not_stale"],
+    ["permissive: transmitted + rejected_request_closed", "reason_inconsistent"],
   ] as const) {
     assert.equal(seen.get(key), expected, key);
   }
@@ -888,7 +964,6 @@ test("a DM output after the result deadline is refused at the insert and at COMM
   const submitted = await prisma.$transaction((tx) =>
     submitDecisionMakerResult(tx, {
       requestId: late,
-      killSwitch: false,
       requireLeaseAt: noLease,
       submission: {
         instance: OPENAI,
@@ -934,7 +1009,7 @@ test("a DM output after the result deadline is refused at the insert and at COMM
 test("through the AMUX boundary, the store's result commits on time and its deadline reaches the fence", async () => {
   const shared = binding();
   const recorded = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
+    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
   );
   const requestBinding = withoutProvider(shared);
   const boundary = { operation: "dm_ledger_test", prismaCallCeiling: 12, isolation: "mutation" as const };
@@ -944,14 +1019,13 @@ test("through the AMUX boundary, the store's result commits on time and its dead
   assert.equal(assigned.recorded, true);
   const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
   const intent = await withAmuxDbBoundary(boundary, (tx) =>
-    recordDecisionMakerTransmitIntent(tx, { requestId: recorded.requestId, instance: OPENAI, transmission, switches: SWITCHES_ON }),
+    recordDecisionMakerTransmitIntent(tx, { requestId: recorded.requestId, instance: OPENAI, transmission, requireLeaseAt: noLease }),
   );
   assert.equal(intent.recorded, true);
   const leases: Date[] = [];
   const submitted = await withAmuxDbBoundary(boundary, (tx, context) =>
     submitDecisionMakerResult(tx, {
       requestId: recorded.requestId,
-      killSwitch: false,
       requireLeaseAt: (deadline) => {
         leases.push(deadline);
         context.requireLeaseAt(deadline);
@@ -977,25 +1051,25 @@ test("through the AMUX boundary, the store's result commits on time and its dead
 test("a request has one terminal result; its pair returns it, another digest is recorded as rejected", async () => {
   const shared = binding();
   const recorded = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
+    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
   );
   const requestId = recorded.requestId;
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
   const transmission = { snapshotState: "worker_head", snapshotTargetSha: SHA, snapshotManifestDigest: DIGEST_D, inputPayloadDigest: DIGEST_B };
-  // No transmission while the kill switch is on or the instance is off (§6, §8).
-  for (const [switches, reason] of [
-    [{ killSwitch: true, instanceMode: "proposal" }, "kill_switch_on"],
-    [{ killSwitch: false, instanceMode: "off" }, "instance_off"],
-  ] as const) {
-    assert.deepEqual(
-      await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, switches })),
-      { recorded: false, reason },
-    );
-  }
+  // No transmission while the kill switch is on or the instance is off (§6,
+  // §8): the store reads the switch store itself, after the lock.
+  const intent = () =>
+    prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: noLease }));
+  await setSwitch("kill_switch", "on");
+  assert.deepEqual(await intent(), { recorded: false, reason: "kill_switch_on" });
+  await setSwitch("kill_switch", "off");
+  await setSwitch("decision-maker-openai", "off");
+  assert.deepEqual(await intent(), { recorded: false, reason: "instance_off" });
+  await setSwitch("decision-maker-openai", "proposal");
   // The transmission is recorded before any DM process; a second is refused.
-  assert.equal((await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, switches: SWITCHES_ON }))).recorded, true);
+  assert.equal((await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: noLease }))).recorded, true);
   assert.deepEqual(
-    await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, switches: SWITCHES_ON })),
+    await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: noLease })),
     { recorded: false, reason: "already_transmitted" },
   );
   const requestBinding = withoutProvider(shared);
@@ -1003,8 +1077,7 @@ test("a request has one terminal result; its pair returns it, another digest is 
     prisma.$transaction((tx) =>
       submitDecisionMakerResult(tx, {
         requestId,
-        killSwitch: false,
-        requireLeaseAt: noLease,
+          requireLeaseAt: noLease,
         submission: {
           instance: OPENAI,
           resultKind: "proposal",
@@ -1071,11 +1144,11 @@ test("a request has one terminal result; its pair returns it, another digest is 
 test("an unknown result hands the request to the operator; no later result is accepted", async () => {
   const shared = binding({ askingProvider: "codex" });
   const { requestId } = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, decision: { route: "dm_proposal", instance: ANTHROPIC, refusals: [] } }),
+    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
   );
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
   const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
-  await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: ANTHROPIC, transmission, switches: SWITCHES_ON }));
+  await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: ANTHROPIC, transmission, requireLeaseAt: noLease }));
   assert.deepEqual(await lookupDecisionMakerResult(prisma, { requestId, resultDigest: DIGEST_C }), { status: "not_recorded" });
   const unknown = await prisma.$transaction((tx) =>
     recordDecisionMakerResultUnknown(tx, { requestId, instance: ANTHROPIC, resultDigest: DIGEST_C }),
@@ -1085,7 +1158,6 @@ test("an unknown result hands the request to the operator; no later result is ac
   const late = await prisma.$transaction((tx) =>
     submitDecisionMakerResult(tx, {
       requestId,
-      killSwitch: false,
       requireLeaseAt: noLease,
       submission: {
         instance: ANTHROPIC,
@@ -1108,22 +1180,19 @@ test("an unknown result hands the request to the operator; no later result is ac
 
 test("a discarded assignment closes the request; a request routed to the operator is closed from its creation", async () => {
   const { requestId } = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: binding(), decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
+    recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }),
   );
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
   assert.equal((await prisma.$transaction((tx) => discardDecisionMakerAssignment(tx, { requestId }))).recorded, true);
   const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
   assert.deepEqual(
-    await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, switches: SWITCHES_ON })),
+    await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: noLease })),
     { recorded: false, reason: "closed" },
   );
   assert.equal((await readDecisionMakerRequestState(prisma, requestId))!.closing, "assign_discarded");
 
   const operator = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, {
-      binding: binding(),
-      decision: { route: "operator", instance: OPENAI, refusals: ["kill_switch_on", "irreversible_term"] },
-    }),
+    recordDecisionMakerRequest(tx, { binding: binding(), card: { ...CARD, title: "Deploy the cache to production" } }),
   );
   assert.equal((await readDecisionMakerRequestState(prisma, operator.requestId))!.closing, "routed_to_operator");
   assert.deepEqual(
@@ -1165,4 +1234,292 @@ test("throughput counts requests routed to one instance for a proposal in the tr
   await insertRequest(requestRow({ askingProvider: "codex", instance: ANTHROPIC }));
   assert.deepEqual(await readDecisionMakerThroughput(prisma, OPENAI), { lastHour: 2, lastDay: 3 });
   assert.deepEqual(await readDecisionMakerThroughput(prisma, ANTHROPIC), { lastHour: 1, lastDay: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// The switches (§6's table, §8), one transaction at a time and racing
+// ---------------------------------------------------------------------------
+
+test("a transmission intent whose COMMIT reaches the database after the result deadline is refused at COMMIT", async () => {
+  // The intent row is the authorization to send the card, which is never sent
+  // again: an intent that commits late would send a card whose answer the
+  // ledger can no longer accept.
+  const requestId = await insertRequest();
+  await backdatedAssignment(requestId, 1_500, false);
+  await commitAfterDeadline(requestId, INTENT, await resultDeadlineMs(requestId));
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign"]);
+  // The store hands the same deadline to the fence.
+  const onTime = await insertRequest();
+  await insertEvent(onTime, { kind: "assign" });
+  const leases: Date[] = [];
+  const recorded = await prisma.$transaction((tx) =>
+    recordDecisionMakerTransmitIntent(tx, {
+      requestId: onTime,
+      instance: OPENAI,
+      transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+      requireLeaseAt: (deadline) => leases.push(deadline),
+    }),
+  );
+  assert.equal(recorded.recorded, true);
+  assert.deepEqual(leases.map((lease) => lease.getTime()), [await resultDeadlineMs(onTime)]);
+});
+
+test("the database refuses a DM routing, an intent and a proposal under the kill switch, and a routing and an intent with the instance off", async () => {
+  const assigned = await STATE_BUILDERS.assigned!();
+  const transmitted = await STATE_BUILDERS.transmitted!();
+  const stillTransmitted = await STATE_BUILDERS.transmitted!();
+
+  await setSwitch("kill_switch", "on");
+  await rejectsWith(insertRequest(), /AMUX_DM_REQUEST_SWITCH/);
+  // The operator route is what the router records instead, and it is accepted.
+  await insertRequest(requestRow({ route: "operator", refusalCodes: ["kill_switch_on"] }));
+  await rejectsWith(insertEvent(assigned, INTENT), /AMUX_DM_REQUEST_EVENT_SWITCH/);
+  await rejectsWith(insertEvent(transmitted, PROPOSAL), /AMUX_DM_REQUEST_EVENT_SWITCH/);
+  // A rejection may cite the kill switch now, and a result that is not a proposal still stands.
+  await insertEvent(transmitted, { kind: "result_rejected", instance: OPENAI, resultDigest: DIGEST_C, rejectionReason: "kill_switch" });
+  await insertEvent(transmitted, { ...PROPOSAL, resultKind: "escalate", resultDigest: DIGEST_D });
+  // The router, reading the switches itself, routes to the operator.
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }));
+  assert.deepEqual([routed.route, routed.refusalCodes], ["operator", ["kill_switch_on"]]);
+
+  await setSwitch("kill_switch", "off");
+  // A rejection cannot cite a kill switch that is off.
+  await rejectsWith(
+    insertEvent(stillTransmitted, { kind: "result_rejected", instance: OPENAI, resultDigest: DIGEST_A, rejectionReason: "kill_switch" }),
+    /AMUX_DM_REQUEST_EVENT_TRANSITION/,
+  );
+  await setSwitch("decision-maker-openai", "off");
+  await rejectsWith(insertRequest(), /AMUX_DM_REQUEST_SWITCH/);
+  await rejectsWith(insertEvent(assigned, INTENT), /AMUX_DM_REQUEST_EVENT_SWITCH/);
+  // An instance off stops routing and process start only (§8): a result already running stands.
+  await insertEvent(stillTransmitted, PROPOSAL);
+  // The other instance is not touched.
+  await insertRequest(requestRow({ askingProvider: "codex", instance: ANTHROPIC }));
+  assert.deepEqual((await rowsOf(assigned)).map((row) => row.kind), ["assign"]);
+});
+
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
+/**
+ * Two transactions at once: `first` runs to the point where it holds its
+ * locks and then waits; `second` starts and must not finish until `first`
+ * commits. Returns the second's outcome (value or error) after both settle.
+ * On PostgreSQL the two run on two pool connections; the local PGlite harness
+ * has one backend, where the second simply waits for the first's connection.
+ */
+const race = async (
+  first: (tx: Prisma.TransactionClient) => Promise<unknown>,
+  second: () => Promise<unknown>,
+) => {
+  const holding = deferred();
+  const reached = deferred();
+  const firstDone = prisma.$transaction(
+    async (tx) => {
+      await first(tx);
+      reached.resolve();
+      await holding.promise;
+    },
+    { timeout: 20_000, maxWait: 10_000 },
+  );
+  await reached.promise;
+  let settled = false;
+  const secondDone = second().then(
+    (value) => ({ value, error: null as unknown }),
+    (error: unknown) => ({ value: null as unknown, error }),
+  );
+  void secondDone.then(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(settled, false, "the second transaction finished while the first held its locks");
+  holding.resolve();
+  await firstDone;
+  return secondDone;
+};
+
+const OPEN = { timeout: 20_000, maxWait: 15_000 };
+const NONE = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+
+test("a kill switch committed while an intent waits on the lock is the one the intent reads", async () => {
+  const requestId = await STATE_BUILDERS.assigned!();
+  const outcome = await race(
+    (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "kill_switch", value: "on" }),
+    () =>
+      prisma.$transaction(
+        (tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission: NONE, requireLeaseAt: noLease }),
+        OPEN,
+      ),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  assert.deepEqual(outcome.value, { recorded: false, reason: "kill_switch_on" });
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign"]);
+});
+
+test("an instance turned off while an intent waits is the one the intent reads", async () => {
+  const requestId = await STATE_BUILDERS.assigned!();
+  const outcome = await race(
+    (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "decision-maker-openai", value: "off" }),
+    () =>
+      prisma.$transaction(
+        (tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission: NONE, requireLeaseAt: noLease }),
+        OPEN,
+      ),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  assert.deepEqual(outcome.value, { recorded: false, reason: "instance_off" });
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign"]);
+});
+
+test("a kill switch committed while a proposal waits turns the proposal into a recorded rejection", async () => {
+  const requestId = await STATE_BUILDERS.transmitted!();
+  const state = await readDecisionMakerRequestState(prisma, requestId);
+  assert.ok(state);
+  const requestBinding = withoutProvider(state.binding);
+  const outcome = await race(
+    (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "kill_switch", value: "on" }),
+    () =>
+      prisma.$transaction(
+        (tx) =>
+          submitDecisionMakerResult(tx, {
+            requestId,
+            requireLeaseAt: noLease,
+            submission: {
+              instance: OPENAI,
+              resultKind: "proposal",
+              resultDigest: DIGEST_D,
+              binding: { ...requestBinding, transmission: state.transmission },
+            },
+          }),
+        OPEN,
+      ),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  const value = outcome.value as { status: string; reason?: string };
+  assert.deepEqual([value.status, value.reason], ["rejected", "kill_switch"]);
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign", "transmit_intent", "result_rejected"]);
+});
+
+test("a kill switch committed while a routing waits sends the question to the operator", async () => {
+  const outcome = await race(
+    (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "kill_switch", value: "on" }),
+    () => prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }), OPEN),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  const value = outcome.value as { route: string; refusalCodes: string[] };
+  assert.deepEqual([value.route, value.refusalCodes], ["operator", ["kill_switch_on"]]);
+});
+
+const newestKillSwitchAtMs = async () =>
+  Number(
+    (
+      await prisma.$queryRaw<Array<{ createdAtMs: bigint }>>`
+        SELECT floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtMs"
+        FROM "AmuxDecisionMakerSwitchEvent" WHERE "scope" = 'kill_switch' ORDER BY "sequence" DESC LIMIT 1
+      `
+    )[0]!.createdAtMs,
+  );
+
+const intentAtMs = async (requestId: string) =>
+  Number(
+    (
+      await prisma.$queryRaw<Array<{ createdAtMs: bigint }>>`
+        SELECT floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtMs"
+        FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} AND "kind" = 'transmit_intent'
+      `
+    )[0]!.createdAtMs,
+  );
+
+test("a switch change waits for an intent in flight, and commits after it", async () => {
+  const requestId = await STATE_BUILDERS.assigned!();
+  const outcome = await race(
+    (tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission: NONE, requireLeaseAt: noLease }),
+    () =>
+      prisma.$transaction(
+        (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "kill_switch", value: "on" }),
+        OPEN,
+      ),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign", "transmit_intent"]);
+  assert.ok((await newestKillSwitchAtMs()) >= (await intentAtMs(requestId)), "the switch change was written after the intent");
+  assert.equal((await readDecisionMakerSwitches(prisma)).killSwitch, true);
+});
+
+/**
+ * An audit row with no entry hash, written straight to the table. The chain
+ * trigger takes the audit chain lock only for a hashed row
+ * (20260918090000_admin_audit_log_append_only), so a writer that used this --
+ * the application never does -- holds no chain lock, and only the switch
+ * gate stands between its switch change and a ledger write.
+ */
+const unchainedAudit = async (
+  tx: Prisma.TransactionClient,
+  entry: { action: string; targetType: string; targetId: string; actorUserId?: string; systemActor?: string },
+) => {
+  const id = `unchained-${randomUUID()}`;
+  const metadata = JSON.stringify(entry.systemActor ? { systemActor: entry.systemActor } : {});
+  await tx.$executeRaw`
+    INSERT INTO "AdminAuditLog" ("id", "actorUserId", "action", "targetType", "targetId", "summary", "metadata")
+    VALUES (${id}, ${entry.actorUserId ?? null}, ${entry.action}, ${entry.targetType}, ${entry.targetId}, 'test', ${metadata}::jsonb)
+  `;
+  return id;
+};
+
+const unchainedKillSwitch = async (tx: Prisma.TransactionClient, value: "on" | "off") => {
+  const id = randomUUID();
+  const userId = `dm-operator-${randomUUID()}`;
+  const auditLogId = await unchainedAudit(tx, {
+    action: "amux.decision.mode",
+    targetType: "AmuxDecisionMakerSwitchEvent",
+    targetId: id,
+    actorUserId: userId,
+  });
+  await tx.$executeRaw`
+    INSERT INTO "AmuxDecisionMakerSwitchEvent" ("id", "scope", "value", "reasonCode", "actorKind", "actorUserId", "auditLogId")
+    VALUES (${id}, 'kill_switch', ${value}, 'operator', 'human', ${userId}, ${auditLogId})
+  `;
+};
+
+const unchainedIntent = async (tx: Prisma.TransactionClient, requestId: string) => {
+  const id = randomUUID();
+  const auditLogId = await unchainedAudit(tx, {
+    action: "amux.decision.transmit_intent",
+    targetType: EVENT,
+    targetId: id,
+    systemActor: "amux-decision-maker-openai",
+  });
+  await insertEventRow(tx, id, requestId, INTENT, auditLogId);
+};
+
+test("without the audit chain lock, the switch gate alone keeps an intent from a stale switch read", async () => {
+  const requestId = await STATE_BUILDERS.assigned!();
+  const outcome = await race(
+    (tx) => unchainedKillSwitch(tx, "on"),
+    () => prisma.$transaction((tx) => unchainedIntent(tx, requestId), OPEN),
+  );
+  assert.ok(outcome.error, "the intent was accepted against a kill switch committed while it waited");
+  const record = outcome.error as { meta?: unknown; cause?: unknown };
+  assert.match(
+    [String(outcome.error), JSON.stringify(record.meta ?? null), String(record.cause ?? "")].join(" "),
+    /AMUX_DM_REQUEST_EVENT_SWITCH/,
+  );
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign"]);
+});
+
+test("without the audit chain lock, a switch change still waits for an intent in flight", async () => {
+  const requestId = await STATE_BUILDERS.assigned!();
+  const outcome = await race(
+    (tx) => unchainedIntent(tx, requestId),
+    () => prisma.$transaction((tx) => unchainedKillSwitch(tx, "on"), OPEN),
+  );
+  assert.equal(outcome.error, null, String(outcome.error));
+  assert.deepEqual((await rowsOf(requestId)).map((row) => row.kind), ["assign", "transmit_intent"]);
+  assert.ok((await newestKillSwitchAtMs()) >= (await intentAtMs(requestId)), "the switch change was written after the intent");
+  assert.equal((await readDecisionMakerSwitches(prisma)).killSwitch, true);
 });

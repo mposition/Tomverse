@@ -2,6 +2,7 @@ import {
   DM_POLICY_VERSION,
   dmInstanceForProvider,
   isSnapshotTargetSha,
+  type DmCard,
   type DmRoutingRefusal,
 } from "./decisionMakerCore.ts";
 import {
@@ -270,6 +271,59 @@ export const parseDmRequestRecord = (binding: unknown, decision: unknown): DmReq
     instance,
     refusalCodes: [...refusals] as DmRoutingRefusal[],
   };
+};
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+const CARD_KEYS = [
+  "askType",
+  "resolution",
+  "type",
+  "tags",
+  "title",
+  "question",
+  "options",
+  "unblocks",
+  "context",
+  "contextPaths",
+] as const satisfies ReadonlyArray<keyof DmCard>;
+
+/**
+ * The typed ask `routeDmQuestion()` reads, checked for shape only: strings,
+ * string lists and `{ id, label }` options, nothing else. Sizes, terms,
+ * paths and secrets are the router's own checks, which send an oversize or
+ * unsafe card to the operator rather than refuse it here. The card is routed
+ * and never stored (§10: "본문은 원장에 넣지 않는다").
+ */
+export const parseDmCard = (value: unknown): DmCard | null => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!ownKeysAre(value, CARD_KEYS)) return null;
+  const card = value as Record<string, unknown>;
+  if (
+    typeof card.askType !== "string" ||
+    (card.resolution !== null && typeof card.resolution !== "string") ||
+    typeof card.type !== "string" ||
+    !isStringArray(card.tags) ||
+    typeof card.title !== "string" ||
+    typeof card.question !== "string" ||
+    !Array.isArray(card.options) ||
+    !card.options.every(
+      (option) =>
+        option !== null &&
+        typeof option === "object" &&
+        !Array.isArray(option) &&
+        ownKeysAre(option, ["id", "label"]) &&
+        typeof (option as { id: unknown }).id === "string" &&
+        typeof (option as { label: unknown }).label === "string",
+    ) ||
+    typeof card.unblocks !== "string" ||
+    typeof card.context !== "string" ||
+    !isStringArray(card.contextPaths)
+  ) {
+    return null;
+  }
+  return card as unknown as DmCard;
 };
 
 // ---------------------------------------------------------------------------
@@ -558,6 +612,8 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
             return state.transmission === null;
           case "deadline_passed":
             return state.assigned && deadlineReached(state.dbNowMs, state.resultDeadlineAtMs);
+          // The kill switch half is dmEventSwitchRefusal()'s; the binding is
+          // the submission's, which the ledger does not keep.
           case "binding_mismatch":
           case "kill_switch":
             return true;
@@ -582,7 +638,9 @@ export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): 
  * §6, §8: no DM process starts while the kill switch is on or the instance is
  * `off`, and an unreadable switch counts as both (S1b's read is fail-closed).
  * The transmission intent is the gate before any process start (§10), so the
- * writer refuses it here; nothing is recorded for a refusal.
+ * writer refuses it on its own read of the switch store, taken after the lock
+ * every switch change also takes; nothing is recorded for a refusal. The
+ * ledger trigger refuses the same intent under the switch gate.
  */
 export type DmTransmitSwitchRefusal = "settings_unreadable" | "kill_switch_on" | "instance_off";
 
@@ -594,6 +652,35 @@ export const dmTransmitSwitchRefusal = (switches: {
   if (switches.killSwitch) return "kill_switch_on";
   if (switches.instanceMode !== "proposal") return "instance_off";
   return null;
+};
+
+/**
+ * The switch clause of the event trigger, which runs after the graph and the
+ * deadlines (`dmEventRefusal()`), on the switch store's newest events read
+ * under the switch gate: a transmission intent needs the kill switch off and
+ * the instance in proposal mode; a proposal needs the kill switch off; a
+ * rejection that cites the kill switch needs it on. Instance `off` stops only
+ * routing and process start (§8), so it never refuses a result. An unreadable
+ * switch (null) counts as on, and cannot be cited as on. The trigger raises
+ * `reason_inconsistent` as its transition refusal and the other two as its
+ * switch refusal.
+ */
+export const dmEventSwitchRefusal = (
+  attempt: DmEventAttempt,
+  switches: { killSwitch: boolean | null; instanceMode: "off" | "proposal" | null },
+): "kill_switch_on" | "instance_off" | "reason_inconsistent" | null => {
+  const killOn = switches.killSwitch !== false;
+  switch (attempt.kind) {
+    case "transmit_intent":
+      if (killOn) return "kill_switch_on";
+      return switches.instanceMode === "proposal" ? null : "instance_off";
+    case "result":
+      return attempt.resultKind === "proposal" && killOn ? "kill_switch_on" : null;
+    case "result_rejected":
+      return attempt.rejectionReason === "kill_switch" && switches.killSwitch !== true ? "reason_inconsistent" : null;
+    default:
+      return null;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -684,7 +771,10 @@ export type DmResultSubmissionOutcome =
  * - anything else is accepted as the request's one terminal result.
  *
  * The submission's instance must be the request's; the store refuses one that
- * is not before this is reached, since nothing can be recorded for it.
+ * is not before this is reached, since nothing can be recorded for it. The
+ * store passes its own read of the kill switch, taken after the lock every
+ * switch change also takes, and never null: it writes nothing when the switch
+ * store is unreadable.
  */
 export const dmResultSubmissionOutcome = (
   state: DmRequestState,

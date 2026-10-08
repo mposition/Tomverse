@@ -931,7 +931,7 @@ test("the sre-ops digest registration pins the billing migration's insert trigge
 test("the Decision Maker switch isolation check pins the S1b switch guard body", async () => {
   const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
   const sql = readFileSync(
-    join(MIGRATIONS, "20261008090000_amux_decision_maker_switch_isolation", "migration.sql"),
+    join(MIGRATIONS, "20261008090000_amux_decision_maker_switch_serialization", "migration.sql"),
     "utf8",
   );
   const previousSql = readFileSync(
@@ -950,7 +950,7 @@ test("the Decision Maker switch isolation check pins the S1b switch guard body",
     .filter(
       (name) =>
         name > "20261008030000_amux_decision_maker_switch" &&
-        name < "20261008090000_amux_decision_maker_switch_isolation",
+        name < "20261008090000_amux_decision_maker_switch_serialization",
     )
     .filter((name) => {
       try {

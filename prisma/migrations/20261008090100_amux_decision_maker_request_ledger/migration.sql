@@ -40,7 +40,8 @@
 --     assign_discarded  assigned, open, nothing since; closes the request;
 --     transmit_intent   assigned, open, not yet transmitted, no result, no
 --                       unknown result, before the result deadline less the
---                       reserve; one per request (§10: never sent again);
+--                       reserve, and the switches allow it (below); one per
+--                       request (§10: never sent again);
 --     transmit_receipt / transmit_unknown
 --                       after the intent, one of the two, even once closed;
 --     result            assigned, open, no result, no unknown result; every
@@ -49,7 +50,8 @@
 --                       validation_failure) only before the result deadline
 --                       less the reserve; one per request (§6, §9);
 --     result_rejected   any time, from the request's instance, with a reason
---                       the ledger's state bears out where it can;
+--                       the ledger's state or the switches bear out where
+--                       they can (all but binding_mismatch);
 --     result_unknown    assigned, open, no result, no earlier unknown;
 --     stale_close       open, 30 days after creation; closes the request.
 --   A request routed to the operator is closed from its creation, so only a
@@ -59,17 +61,33 @@
 --   deferred constraint trigger raises SQLSTATE AX001 -- the AmuxCommitDeadline
 --   device's code (20260929200000_amux_commit_deadline_check), so the AMUX
 --   boundary reads it as a deadline refusal -- once the clock at COMMIT has
---   reached the assignment deadline, or for a DM output the result deadline,
---   less the 200 ms reserve. The writer also hands the same deadline to the
---   boundary's fence, which records D for that device; this trigger is what
---   holds a writer outside the boundary to it (§9: "검사 시점에 마감을 넘긴
---   결과는 DB가 제안으로 기록하지 않는다").
+--   reached the assignment deadline, or for a transmission intent or a DM
+--   output the result deadline, less the 200 ms reserve. The intent is held
+--   to it because its row is the authorization to send the card, which is
+--   never sent again: an intent that commits after the result deadline would
+--   send a card whose answer can no longer be accepted. The writer also hands
+--   the same deadline to the boundary's fence, which records D for that
+--   device; this trigger is what holds a writer outside the boundary to it
+--   (§9: "검사 시점에 마감을 넘긴 결과는 DB가 제안으로 기록하지 않는다").
+-- * The switches, section 6's table and section 8: nothing that would let a
+--   DM run or a proposal stand is recorded while the kill switch is on or the
+--   instance is not in proposal mode, by the switch store's own newest events
+--   (no event: kill switch off, instance off). A request routed dm_proposal
+--   and a transmission intent need the kill switch off and the instance in
+--   proposal; a proposal result needs the kill switch off; a rejection that
+--   cites the kill switch needs it on. Both guards read the switches under the
+--   Decision Maker switch gate, taken shared, which the switch guard takes
+--   exclusive (20261008090000_amux_decision_maker_switch_serialization): a
+--   switch change and these writes commit one after the other, never on a
+--   stale read. Lock order: the audit chain lock (every store path takes it
+--   first), the gate, then the per-request lock.
 -- * Both guards, and an event's "sequence" above every earlier event of its
---   request, as in the switch store. The event guard reads the request's
---   events after its lock, so it refuses any isolation level but READ
---   COMMITTED (20261008090000_amux_decision_maker_switch_isolation explains
---   why). The request guard and the commit check read only rows that cannot
---   change, so they need no such check.
+--   request, as in the switch store. Both guards read after a lock -- the
+--   gate, and for events the per-request lock -- so both refuse any isolation
+--   level but READ COMMITTED
+--   (20261008090000_amux_decision_maker_switch_serialization explains why).
+--   The commit check reads only rows that cannot change, so it needs no such
+--   check.
 -- * UPDATE and DELETE are refused on both tables. TRUNCATE is not, for the
 --   reasons the switch store gives (20261008030000_amux_decision_maker_switch):
 --   the DB integration suites reset AdminAuditLog with TRUNCATE ... CASCADE,
@@ -303,15 +321,41 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     audited BOOLEAN;
+    kill_switch_value TEXT;
+    instance_mode TEXT;
 BEGIN
     IF TG_OP <> 'INSERT' THEN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_IMMUTABLE';
+    END IF;
+    -- The switches below are read after the gate. Only READ COMMITTED gives
+    -- that read a snapshot taken after the gate was granted.
+    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'AMUX_DM_REQUEST_ISOLATION';
     END IF;
     -- routeDmQuestion() records each refusal once. A NULL element is not
     -- counted here; the refusal codes CHECK refuses it.
     IF (SELECT pg_catalog.count(code) FROM pg_catalog.unnest(NEW."refusalCodes") AS code)
        <> (SELECT pg_catalog.count(DISTINCT code) FROM pg_catalog.unnest(NEW."refusalCodes") AS code) THEN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_REFUSALS';
+    END IF;
+
+    -- Section 6, section 8: no question is routed to a DM while the kill
+    -- switch is on or its instance is not in proposal mode. The switch store's
+    -- newest events, read under the gate the switch guard takes exclusive; a
+    -- scope with no event is the kill switch off and an instance off.
+    IF NEW."route" = 'dm_proposal' THEN
+        PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+            pg_catalog.hashtext('tomverse-amux-decision-maker-switch-gate')
+        );
+        EXECUTE pg_catalog.format(
+            'SELECT (SELECT "value" FROM %1$I.%2$I WHERE "scope" = ''kill_switch'' ORDER BY "sequence" DESC LIMIT 1),'
+            || ' (SELECT "value" FROM %1$I.%2$I WHERE "scope" = $1 ORDER BY "sequence" DESC LIMIT 1)',
+            TG_TABLE_SCHEMA,
+            'AmuxDecisionMakerSwitchEvent'
+        ) INTO kill_switch_value, instance_mode USING NEW."instance";
+        IF coalesce(kill_switch_value, 'off') <> 'off' OR coalesce(instance_mode, 'off') <> 'proposal' THEN
+            RAISE EXCEPTION 'AMUX_DM_REQUEST_SWITCH';
+        END IF;
     END IF;
 
     EXECUTE pg_catalog.format(
@@ -357,14 +401,27 @@ DECLARE
     allowed BOOLEAN;
     expected_actor TEXT;
     audited BOOLEAN;
+    kill_switch_value TEXT;
+    instance_mode TEXT;
+    kill_on BOOLEAN := false;
+    switch_refused BOOLEAN := false;
 BEGIN
     IF TG_OP <> 'INSERT' THEN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_IMMUTABLE';
     END IF;
-    -- The request's events are read after a lock. Only READ COMMITTED gives
-    -- that read a snapshot taken after the lock was granted.
+    -- The request's events and the switches are read after locks. Only READ
+    -- COMMITTED gives those reads a snapshot taken after the locks were granted.
     IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_ISOLATION';
+    END IF;
+
+    -- The switch gate, shared, before the per-request lock (the lock order of
+    -- every Decision Maker write). A switch change takes it exclusive, so the
+    -- switches read below cannot change before this event commits.
+    IF NEW."kind" IN ('transmit_intent', 'result', 'result_rejected') THEN
+        PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+            pg_catalog.hashtext('tomverse-amux-decision-maker-switch-gate')
+        );
     END IF;
 
     -- One event per request at a time, so the state read below is still the
@@ -416,6 +473,26 @@ BEGIN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_INSTANCE';
     END IF;
 
+    -- Section 6's table and section 8, by the switch store's newest events (no
+    -- event: the kill switch off, the instance off): a transmission intent
+    -- needs the kill switch off and the instance in proposal mode, a proposal
+    -- needs the kill switch off, and a rejection citing the kill switch needs
+    -- it on.
+    IF NEW."kind" = 'transmit_intent'
+       OR (NEW."kind" = 'result' AND NEW."resultKind" = 'proposal')
+       OR (NEW."kind" = 'result_rejected' AND NEW."rejectionReason" = 'kill_switch') THEN
+        EXECUTE pg_catalog.format(
+            'SELECT (SELECT "value" FROM %1$I.%2$I WHERE "scope" = ''kill_switch'' ORDER BY "sequence" DESC LIMIT 1),'
+            || ' (SELECT "value" FROM %1$I.%2$I WHERE "scope" = $1 ORDER BY "sequence" DESC LIMIT 1)',
+            TG_TABLE_SCHEMA,
+            'AmuxDecisionMakerSwitchEvent'
+        ) INTO kill_switch_value, instance_mode USING request_instance;
+        kill_on := coalesce(kill_switch_value, 'off') <> 'off';
+        switch_refused :=
+            (NEW."kind" = 'transmit_intent' AND (kill_on OR coalesce(instance_mode, 'off') <> 'proposal'))
+            OR (NEW."kind" = 'result' AND kill_on);
+    END IF;
+
     allowed := CASE NEW."kind"
         WHEN 'assign' THEN
             request_route = 'dm_proposal' AND NOT closed AND NOT assigned
@@ -439,8 +516,9 @@ BEGIN
                 WHEN 'not_transmitted' THEN NOT transmitted
                 WHEN 'deadline_passed' THEN
                     assigned AND now_at >= result_deadline - INTERVAL '200 milliseconds'
-                -- binding_mismatch and kill_switch are decided from values
-                -- outside the ledger: the submission and the switch store.
+                WHEN 'kill_switch' THEN kill_on
+                -- binding_mismatch is decided from the submission, which the
+                -- ledger does not keep.
                 ELSE true
             END
         WHEN 'result_unknown' THEN
@@ -462,6 +540,9 @@ BEGIN
          AND now_at >= result_deadline - INTERVAL '200 milliseconds'
        ) THEN
         RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_DEADLINE';
+    END IF;
+    IF switch_refused THEN
+        RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_SWITCH';
     END IF;
 
     expected_actor := CASE
@@ -490,10 +571,11 @@ CREATE TRIGGER "amux_decision_maker_request_event_guard"
     BEFORE INSERT OR UPDATE OR DELETE ON "AmuxDecisionMakerRequestEvent"
     FOR EACH ROW EXECUTE FUNCTION "amux_decision_maker_request_event_guard"();
 
--- At COMMIT, before the commit record is written: an assignment or a DM
--- output whose transaction reaches COMMIT at or after its deadline less the
--- reserve fails with AX001 and PostgreSQL rolls the whole transaction back.
--- Reads only the request row and the assignment, neither of which can change.
+-- At COMMIT, before the commit record is written: an assignment, a
+-- transmission intent or a DM output whose transaction reaches COMMIT at or
+-- after its deadline less the reserve fails with AX001 and PostgreSQL rolls
+-- the whole transaction back. Reads only the request row and the assignment,
+-- neither of which can change.
 CREATE OR REPLACE FUNCTION "amux_decision_maker_request_event_commit_check"()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -527,7 +609,7 @@ CREATE CONSTRAINT TRIGGER "amux_decision_maker_request_event_commit_check"
     DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW
     WHEN (
-        NEW."kind" = 'assign'
+        NEW."kind" IN ('assign', 'transmit_intent')
         OR (NEW."kind" = 'result' AND NEW."resultKind" IN ('proposal', 'escalate', 'validation_failure'))
     )
     EXECUTE FUNCTION "amux_decision_maker_request_event_commit_check"();

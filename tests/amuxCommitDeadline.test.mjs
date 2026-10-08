@@ -108,7 +108,7 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261008030000_amux_decision_maker_switch",
   // S1c: the switch guard's READ COMMITTED check, and the request ledger,
   // whose own deferred check uses this migration's SQLSTATE (AX001).
-  "20261008090000_amux_decision_maker_switch_isolation",
+  "20261008090000_amux_decision_maker_switch_serialization",
   "20261008090100_amux_decision_maker_request_ledger",
 ]);
 

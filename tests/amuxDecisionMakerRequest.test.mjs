@@ -43,6 +43,7 @@ import {
   dmEventAuditActor,
   dmEventAuditMetadata,
   dmEventRefusal,
+  dmEventSwitchRefusal,
   dmRequestAuditMetadata,
   dmRequestStateFromRow,
   dmResultLookup,
@@ -74,8 +75,10 @@ const read = (path) => readFileSync(join(root, path), "utf8");
 const STORE = "lib/amux/decisionMakerRequestStore.ts";
 const AUDIT_MODULE = "lib/amux/decisionMakerRequestSystemAudit.ts";
 const LEDGER_MIGRATION = "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql";
-const ISOLATION_MIGRATION = "prisma/migrations/20261008090000_amux_decision_maker_switch_isolation/migration.sql";
+const SERIALIZATION_MIGRATION = "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql";
 const SWITCH_MIGRATION = "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql";
+// The one key the switch guard takes exclusive and the ledger guards take shared.
+const SWITCH_GATE = "tomverse-amux-decision-maker-switch-gate";
 
 const withoutSqlComments = (sql) =>
   sql
@@ -297,16 +300,39 @@ test("the ledger migration is additive, and its triggers hold the core's rules",
   assert.match(requestGuard, /NEW\."createdAt" := pg_catalog\.clock_timestamp\(\);/);
   assert.match(requestGuard, /NEW\."assignmentDeadlineAt" := NEW\."createdAt" \+ INTERVAL '2 minutes';/);
   assert.equal((requestGuard.match(/xmin = pg_catalog\.pg_current_xact_id\(\)::xid/g) ?? []).length, 1);
+  // A routing to a DM reads the switches under the gate, READ COMMITTED only.
+  const requestOrder = [
+    "RAISE EXCEPTION 'AMUX_DM_REQUEST_IMMUTABLE'",
+    "current_setting('transaction_isolation') <> 'read committed'",
+    `IF NEW."route" = 'dm_proposal' THEN`,
+    `pg_advisory_xact_lock_shared(\n            pg_catalog.hashtext('${SWITCH_GATE}')`,
+    "'AmuxDecisionMakerSwitchEvent'",
+    "RAISE EXCEPTION 'AMUX_DM_REQUEST_SWITCH'",
+  ].map((needle) => requestGuard.indexOf(needle));
+  assert.ok(requestOrder.every((position) => position >= 0), JSON.stringify(requestOrder));
+  assert.deepEqual([...requestOrder].sort((a, b) => a - b), requestOrder);
+  assert.ok(
+    requestGuard.includes(
+      `IF coalesce(kill_switch_value, 'off') <> 'off' OR coalesce(instance_mode, 'off') <> 'proposal' THEN`,
+    ),
+  );
 
   const eventGuard = functionBody(sql, "amux_decision_maker_request_event_guard");
   assert.match(eventGuard, /SET search_path = pg_catalog, pg_temp/);
-  // Immutability first, then the isolation check, then the lock, then the reads.
+  // Immutability first, then the isolation check, then the switch gate
+  // (shared), then the per-request lock, then the reads, then the switches,
+  // and the switch refusal only after the graph and the deadlines.
   const order = [
     "RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_IMMUTABLE'",
     "current_setting('transaction_isolation') <> 'read committed'",
+    `pg_advisory_xact_lock_shared(\n            pg_catalog.hashtext('${SWITCH_GATE}')`,
     "pg_advisory_xact_lock(",
     "'AmuxDecisionMakerRequest'",
     "FROM %I.%I WHERE \"requestId\" = $1',",
+    "'AmuxDecisionMakerSwitchEvent'",
+    "RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_TRANSITION'",
+    "RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_DEADLINE'",
+    "RAISE EXCEPTION 'AMUX_DM_REQUEST_EVENT_SWITCH'",
   ].map((needle) => eventGuard.indexOf(needle));
   assert.ok(order.every((position) => position >= 0), JSON.stringify(order));
   assert.deepEqual([...order].sort((a, b) => a - b), order);
@@ -320,41 +346,64 @@ test("the ledger migration is additive, and its triggers hold the core's rules",
   assert.match(eventGuard, /NEW\."resultDeadlineAt" := NEW\."createdAt" \+ INTERVAL '30 minutes';/);
   assert.equal((eventGuard.match(/INTERVAL '200 milliseconds'/g) ?? []).length, 3);
   assert.ok(eventGuard.includes(`NEW."resultKind" IN ('${DM_DEADLINE_RESULT_KINDS.join("', '")}')`));
-  for (const reason of DM_RESULT_REJECTION_REASONS.slice(0, 5)) {
+  for (const reason of DM_RESULT_REJECTION_REASONS.filter((reason) => reason !== "binding_mismatch")) {
     assert.ok(eventGuard.includes(`WHEN '${reason}' THEN`), reason);
   }
+  // §6's table and §8, on the switch store's newest events.
+  assert.ok(eventGuard.includes(`IF NEW."kind" IN ('transmit_intent', 'result', 'result_rejected') THEN`));
+  assert.ok(eventGuard.includes(`OR (NEW."kind" = 'result' AND NEW."resultKind" = 'proposal')`));
+  assert.ok(
+    eventGuard.includes(
+      `(NEW."kind" = 'transmit_intent' AND (kill_on OR coalesce(instance_mode, 'off') <> 'proposal'))\n            OR (NEW."kind" = 'result' AND kill_on);`,
+    ),
+  );
+  assert.ok(eventGuard.includes(`WHEN 'kill_switch' THEN kill_on`));
 
   // The deferred commit check: the AmuxCommitDeadline device's SQLSTATE, the
-  // same reserve, and only the assignment and a DM output.
+  // same reserve, and only the assignment, the transmission intent and a DM
+  // output.
   const commitCheck = functionBody(sql, "amux_decision_maker_request_event_commit_check");
   assert.match(commitCheck, /pg_catalog\.clock_timestamp\(\) >= deadline - INTERVAL '200 milliseconds'/);
   assert.match(commitCheck, /RAISE EXCEPTION 'AMUX_DM_LATE_COMMIT' USING ERRCODE = 'AX001';/);
   assert.match(
     sql,
     new RegExp(
-      `CREATE CONSTRAINT TRIGGER "amux_decision_maker_request_event_commit_check"\\s+AFTER INSERT ON "AmuxDecisionMakerRequestEvent"\\s+DEFERRABLE INITIALLY DEFERRED\\s+FOR EACH ROW\\s+WHEN \\(\\s+NEW\\."kind" = 'assign'\\s+OR \\(NEW\\."kind" = 'result' AND NEW\\."resultKind" IN \\('${DM_DEADLINE_RESULT_KINDS.join("', '")}'\\)\\)\\s+\\)`,
+      `CREATE CONSTRAINT TRIGGER "amux_decision_maker_request_event_commit_check"\\s+AFTER INSERT ON "AmuxDecisionMakerRequestEvent"\\s+DEFERRABLE INITIALLY DEFERRED\\s+FOR EACH ROW\\s+WHEN \\(\\s+NEW\\."kind" IN \\('assign', 'transmit_intent'\\)\\s+OR \\(NEW\\."kind" = 'result' AND NEW\\."resultKind" IN \\('${DM_DEADLINE_RESULT_KINDS.join("', '")}'\\)\\)\\s+\\)`,
     ),
   );
 });
 
-test("the isolation migration is the S1b switch guard plus a READ COMMITTED check, and nothing else", () => {
+test("the serialization migration is the S1b switch guard plus a READ COMMITTED check and the exclusive gate, and nothing else", () => {
   const before = functionBody(read(SWITCH_MIGRATION), "amux_decision_maker_switch_event_guard");
-  const after = functionBody(read(ISOLATION_MIGRATION), "amux_decision_maker_switch_event_guard");
+  const after = functionBody(read(SERIALIZATION_MIGRATION), "amux_decision_maker_switch_event_guard");
   const immutable = "        RAISE EXCEPTION 'AMUX_DM_SWITCH_IMMUTABLE';\n    END IF;\n";
   const check =
     "    -- The newest event below is read after a lock. Only READ COMMITTED gives\n" +
     "    -- that read a snapshot taken after the lock was granted.\n" +
     "    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN\n" +
     "        RAISE EXCEPTION 'AMUX_DM_SWITCH_ISOLATION';\n" +
-    "    END IF;\n";
+    "    END IF;\n" +
+    "    -- The switch gate, exclusive: no request ledger write that reads the\n" +
+    "    -- switches is in flight while a switch changes.\n" +
+    "    PERFORM pg_catalog.pg_advisory_xact_lock(\n" +
+    `        pg_catalog.hashtext('${SWITCH_GATE}')\n` +
+    "    );\n";
   assert.ok(before.includes(immutable));
   assert.equal(after, before.replace(immutable, `${immutable}${check}`));
-  const statements = withoutSqlComments(read(ISOLATION_MIGRATION));
+  // One gate key: exclusive in the switch guard only, shared in both ledger guards.
+  const gate = (sql, mode) =>
+    (sql.match(new RegExp(`pg_advisory_xact_lock${mode}\\(\\s*pg_catalog\\.hashtext\\('${SWITCH_GATE}'\\)`, "g")) ?? []).length;
+  const ledger = withoutSqlComments(read(LEDGER_MIGRATION));
+  assert.equal(gate(after, ""), 1);
+  assert.equal(gate(after, "_shared"), 0);
+  assert.equal(gate(ledger, "_shared"), 2);
+  assert.equal(gate(ledger, ""), 0);
+  const statements = withoutSqlComments(read(SERIALIZATION_MIGRATION));
   assert.equal((statements.match(/^CREATE OR REPLACE FUNCTION /gm) ?? []).length, 1);
   assert.doesNotMatch(statements, /^CREATE TABLE |^CREATE TRIGGER |^ALTER TABLE |\bDROP\b|\bTRUNCATE\b/m);
   // Both migrations apply after the switch store's, in this order.
-  assert.ok("20261008090000_amux_decision_maker_switch_isolation" > "20261008030000_amux_decision_maker_switch");
-  assert.ok("20261008090100_amux_decision_maker_request_ledger" > "20261008090000_amux_decision_maker_switch_isolation");
+  assert.ok("20261008090000_amux_decision_maker_switch_serialization" > "20261008030000_amux_decision_maker_switch");
+  assert.ok("20261008090100_amux_decision_maker_request_ledger" > "20261008090000_amux_decision_maker_switch_serialization");
 });
 
 // ---------------------------------------------------------------------------
@@ -970,11 +1019,25 @@ test("one store module reads and writes both tables; nothing else in the applica
   assert.doesNotMatch(withoutComments(store), /UPDATE "AmuxDecisionMakerRequest|DELETE FROM "AmuxDecisionMakerRequest/);
 });
 
+
 // ---------------------------------------------------------------------------
 // Statements per operation (§9: 12 at most including setup and fence, pinned exactly)
 // ---------------------------------------------------------------------------
 
-const recordingTx = ({ state: row = stateRow(), existing = [], failRead = false } = {}) => {
+const PERMISSIVE_SWITCHES = [
+  { scope: "kill_switch", value: "off" },
+  { scope: "decision-maker-openai", value: "proposal" },
+  { scope: "decision-maker-anthropic", value: "proposal" },
+];
+
+const recordingTx = ({
+  state: row = stateRow(),
+  existing = [],
+  failRead = false,
+  switches = PERMISSIVE_SWITCHES,
+  failSwitchRead = false,
+  throughput = { lastHour: 3n, lastDay: 7n },
+} = {}) => {
   const sent = [];
   const tx = {
     $executeRaw: (strings, ...values) => {
@@ -993,8 +1056,11 @@ const recordingTx = ({ state: row = stateRow(), existing = [], failRead = false 
         return Promise.resolve([{ createdAtEpochMs: BigInt(NOW), assignmentDeadlineAtEpochMs: BigInt(NOW + DM_ASSIGNMENT_WINDOW_MS) }]);
       }
       if (sql.includes("CROSS JOIN LATERAL")) return Promise.resolve(row === null ? [] : [row]);
+      if (sql.includes('SELECT DISTINCT ON ("scope")')) {
+        return failSwitchRead ? Promise.reject(new Error("switch read failed")) : Promise.resolve(switches);
+      }
       if (sql.includes('WHERE "cardId" =')) return Promise.resolve(existing);
-      if (sql.includes('count(*) FILTER')) return Promise.resolve([{ lastHour: 3n, lastDay: 7n }]);
+      if (sql.includes("count(*) FILTER")) return Promise.resolve([throughput]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
     adminAuditLog: {
@@ -1026,12 +1092,27 @@ const withIntegrityKey = async (key, work) => {
   }
 };
 
-const SWITCHES_ON = { killSwitch: false, instanceMode: "proposal" };
-
 const leases = () => {
   const seen = [];
   return { seen, requireLeaseAt: (deadline) => seen.push(deadline.toISOString()) };
 };
+
+const routedCard = (overrides = {}) => ({
+  askType: "decision",
+  resolution: null,
+  type: "task",
+  tags: [],
+  title: "Pick a cache key layout",
+  question: "Should the cache key include the locale or only the model id?",
+  options: [
+    { id: "a", label: "Model id only" },
+    { id: "b", label: "Model id and locale" },
+  ],
+  unblocks: "The cache module can be finished.",
+  context: "Both layouts pass the current tests.",
+  contextPaths: ["lib/cache.ts"],
+  ...overrides,
+});
 
 // The route transaction around each operation adds the boundary's setup and
 // commit fence (lib/amux/dbBoundary.ts): two more statements.
@@ -1040,6 +1121,8 @@ const WITH_KEY = 1;
 
 const kindsOf = (sent) => sent.map((statement) => statement.kind);
 const auditOf = (sent) => sent.find((statement) => statement.kind === "create").data;
+const LOCK = /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/;
+const SWITCH_READ = /SELECT DISTINCT ON \("scope"\) "scope", "value"\s+FROM "AmuxDecisionMakerSwitchEvent"/;
 
 test("the reads are one statement each", async () => {
   {
@@ -1081,19 +1164,22 @@ for (const [label, key] of [
   const extra = key === null ? 0 : WITH_KEY;
   const auditKinds = key === null ? ["execute", "query", "create"] : ["execute", "query", "findFirst", "create"];
 
-  test(`recording a request sends ${6 + extra} statements ${label} an integrity key, and an existing one 2`, async () => {
+  test(`routing a question sends ${8 + extra} statements ${label} an integrity key (${7 + extra} without an instance), and an existing one 2`, async () => {
     await withIntegrityKey(key, async () => {
       const { tx, sent } = recordingTx();
-      const result = await recordDecisionMakerRequest(tx, {
-        binding: binding(),
-        decision: { route: "dm_proposal", instance: OPENAI, refusals: [] },
-      });
-      assert.equal(sent.length, 6 + extra);
+      const result = await recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard() });
+      assert.equal(sent.length, 8 + extra);
+      // The whole routing transaction, with the boundary's setup and fence, within §9's 12.
       assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
-      assert.deepEqual(kindsOf(sent), ["execute", "query", ...auditKinds, "query"]);
-      assert.match(sent[0].sql, /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/);
+      assert.deepEqual(kindsOf(sent), ["execute", "query", "query", "query", ...auditKinds, "query"]);
+      // The lock first, then the existing request, then the switches and the
+      // throughput -- both read after the lock every switch change takes.
+      assert.match(sent[0].sql, LOCK);
       assert.match(sent[1].sql, /WHERE "cardId" = \$ AND "questionRevision" = \$/);
       assert.deepEqual(sent[1].values, ["card-41", 3]);
+      assert.match(sent[2].sql, SWITCH_READ);
+      assert.match(sent[3].sql, /count\(\*\) FILTER/);
+      assert.deepEqual(sent[3].values, [OPENAI]);
       const audit = auditOf(sent);
       assert.equal(audit.action, "amux.decision.route");
       assert.equal(audit.targetType, "AmuxDecisionMakerRequest");
@@ -1132,10 +1218,21 @@ for (const [label, key] of [
         created: true,
         route: "dm_proposal",
         instance: OPENAI,
+        refusalCodes: [],
         sameBinding: true,
         createdAt: new Date(NOW).toISOString(),
         assignmentDeadlineAt: new Date(NOW + DM_ASSIGNMENT_WINDOW_MS).toISOString(),
       });
+
+      // A provider with no instance has no throughput to read.
+      const unverified = recordingTx();
+      const gemini = await recordDecisionMakerRequest(unverified.tx, {
+        binding: binding({ askingProvider: "gemini" }),
+        card: routedCard(),
+      });
+      assert.equal(unverified.sent.length, 7 + extra);
+      assert.deepEqual(kindsOf(unverified.sent), ["execute", "query", "query", ...auditKinds, "query"]);
+      assert.deepEqual([gemini.route, gemini.instance, gemini.refusalCodes], ["operator", null, ["provider_unverified"]]);
 
       const again = recordingTx({
         existing: [
@@ -1144,15 +1241,13 @@ for (const [label, key] of [
             ...binding({ askingWorkerId: "worker.claude-2" }),
             route: "operator",
             instance: OPENAI,
+            refusalCodes: ["kill_switch_on"],
             createdAtEpochMs: BigInt(NOW - 1),
             assignmentDeadlineAtEpochMs: BigInt(NOW - 1 + DM_ASSIGNMENT_WINDOW_MS),
           },
         ],
       });
-      const existing = await recordDecisionMakerRequest(again.tx, {
-        binding: binding(),
-        decision: { route: "dm_proposal", instance: OPENAI, refusals: [] },
-      });
+      const existing = await recordDecisionMakerRequest(again.tx, { binding: binding(), card: routedCard() });
       assert.equal(again.sent.length, 2);
       // The first request of a question revision stands (§9).
       assert.deepEqual(existing, {
@@ -1160,6 +1255,7 @@ for (const [label, key] of [
         created: false,
         route: "operator",
         instance: OPENAI,
+        refusalCodes: ["kill_switch_on"],
         sameBinding: false,
         createdAt: new Date(NOW - 1).toISOString(),
         assignmentDeadlineAt: new Date(NOW - 1 + DM_ASSIGNMENT_WINDOW_MS).toISOString(),
@@ -1167,7 +1263,7 @@ for (const [label, key] of [
     });
   });
 
-  test(`each event write sends ${6 + extra} statements ${label} an integrity key, in order, and a refusal 2`, async () => {
+  test(`each event write sends its pinned statements ${label} an integrity key, in order`, async () => {
     await withIntegrityKey(key, async () => {
       const cases = [
         {
@@ -1190,16 +1286,19 @@ for (const [label, key] of [
         {
           name: "transmit_intent",
           row: STATES.assigned,
-          run: (tx) =>
+          switchRead: true,
+          run: (tx, lease) =>
             recordDecisionMakerTransmitIntent(tx, {
               requestId: REQUEST_ID,
               instance: OPENAI,
-              switches: SWITCHES_ON,
               transmission: { snapshotState: "worker_head", snapshotTargetSha: SHA, snapshotManifestDigest: DIGEST_C, inputPayloadDigest: DIGEST_B },
+              requireLeaseAt: lease,
             }),
           action: "amux.decision.transmit_intent",
           actor: "amux-decision-maker-openai",
           values: [OPENAI, "openai", DIGEST_B, "worker_head", SHA, DIGEST_C, null, null, null],
+          // The intent is held to the result deadline, at the fence and at COMMIT.
+          lease: [new Date(NOW + 20 * 60_000).toISOString()],
         },
         {
           name: "transmit_receipt",
@@ -1220,36 +1319,47 @@ for (const [label, key] of [
         {
           name: "result",
           row: STATES.transmitted,
-          run: (tx, lease) =>
-            submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), killSwitch: false, requireLeaseAt: lease }),
+          switchRead: true,
+          run: (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease }),
           action: "amux.decision.result",
           actor: "amux-decision-maker-openai",
           values: [OPENAI, null, DIGEST_B, null, null, null, "proposal", DIGEST_D, null],
           lease: [new Date(NOW + 20 * 60_000).toISOString()],
         },
         {
-          name: "result (timeout, no lease)",
+          name: "result (timeout under the kill switch, no lease)",
           row: STATES.transmittedLate,
+          switches: [{ scope: "kill_switch", value: "on" }],
+          switchRead: true,
           run: (tx, lease) =>
-            submitDecisionMakerResult(tx, {
-              requestId: REQUEST_ID,
-              submission: submission({ resultKind: "timeout" }),
-              killSwitch: true,
-              requireLeaseAt: lease,
-            }),
+            submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ resultKind: "timeout" }), requireLeaseAt: lease }),
           action: "amux.decision.result",
           actor: "amux-decision-maker-openai",
           values: [OPENAI, null, DIGEST_B, null, null, null, "timeout", DIGEST_D, null],
           lease: [],
         },
         {
-          name: "result_rejected",
+          name: "result_rejected (another digest)",
           row: STATES.terminal,
-          run: (tx, lease) =>
-            submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), killSwitch: false, requireLeaseAt: lease }),
+          switchRead: true,
+          run: (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease }),
           action: "amux.decision.result_rejected",
           actor: "amux-decision-maker-openai",
           values: [OPENAI, null, null, null, null, null, null, DIGEST_D, "terminal_exists"],
+          lease: [],
+        },
+        {
+          name: "result_rejected (a proposal under the kill switch)",
+          row: STATES.transmitted,
+          switches: [
+            { scope: "kill_switch", value: "on" },
+            { scope: "decision-maker-openai", value: "proposal" },
+          ],
+          switchRead: true,
+          run: (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease }),
+          action: "amux.decision.result_rejected",
+          actor: "amux-decision-maker-openai",
+          values: [OPENAI, null, null, null, null, null, null, DIGEST_D, "kill_switch"],
           lease: [],
         },
         {
@@ -1270,14 +1380,23 @@ for (const [label, key] of [
         },
       ];
       for (const entry of cases) {
-        const { tx, sent } = recordingTx({ state: entry.row });
+        const { tx, sent } = recordingTx({ state: entry.row, switches: entry.switches });
         const lease = leases();
         const result = await entry.run(tx, lease.requireLeaseAt);
-        assert.equal(sent.length, 6 + extra, entry.name);
+        // 6 (7) without a switch read, 7 (8) with one; 9 (10) at most with the boundary.
+        const expected = (entry.switchRead ? 7 : 6) + extra;
+        assert.equal(sent.length, expected, entry.name);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12, entry.name);
-        assert.deepEqual(kindsOf(sent), ["execute", "query", ...auditKinds, "query"], entry.name);
-        assert.match(sent[0].sql, /pg_advisory_xact_lock\(hashtext\('tomverse-admin-audit-chain'\)\)/, entry.name);
+        assert.deepEqual(
+          kindsOf(sent),
+          ["execute", "query", ...(entry.switchRead ? ["query"] : []), ...auditKinds, "query"],
+          entry.name,
+        );
+        assert.match(sent[0].sql, LOCK, entry.name);
         assert.match(sent[1].sql, /CROSS JOIN LATERAL/, entry.name);
+        // The switches are read after the lock, by the switch store's reader.
+        if (entry.switchRead) assert.match(sent[2].sql, SWITCH_READ, entry.name);
+        else assert.ok(!sent.some((statement) => SWITCH_READ.test(statement.sql)), entry.name);
         const audit = auditOf(sent);
         const eventId = result.event?.eventId;
         assert.ok(eventId, entry.name);
@@ -1300,63 +1419,135 @@ for (const [label, key] of [
   });
 }
 
-test("a refusal, an existing pair or an unknown request sends 2 statements and writes nothing", async () => {
+test("the router decides on the switches and the throughput it reads after the lock", async () => {
+  const routed = async (options, bindingOverrides = {}) => {
+    const { tx } = recordingTx(options);
+    return recordDecisionMakerRequest(tx, { binding: binding(bindingOverrides), card: routedCard() });
+  };
+  assert.deepEqual((await routed({ switches: [{ scope: "kill_switch", value: "on" }, ...PERMISSIVE_SWITCHES.slice(1)] })).refusalCodes, [
+    "kill_switch_on",
+  ]);
+  // No event for the instance reads as off.
+  assert.deepEqual((await routed({ switches: [{ scope: "kill_switch", value: "off" }] })).refusalCodes, ["instance_off"]);
+  assert.deepEqual((await routed({ failSwitchRead: true })).refusalCodes, ["settings_unreadable"]);
+  assert.deepEqual((await routed({ throughput: { lastHour: 20n, lastDay: 20n } })).refusalCodes, ["throughput_exceeded"]);
+  assert.deepEqual((await routed({}, { askingProvider: "codex" })).instance, "decision-maker-anthropic");
+});
+
+test("a refusal, an existing pair or an unknown request writes nothing, in 2 statements -- 3 after a switch read", async () => {
   const cases = [
-    ["assign twice", STATES.assigned, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "already_assigned" }],
-    ["assign late", STATES.assignmentLate, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "deadline_passed" }],
-    ["assign an operator request", STATES.operator, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "not_routed_to_dm" }],
-    ["assign unknown", null, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "unknown_request" }],
-    ["discard after intent", STATES.transmitted, (tx) => discardDecisionMakerAssignment(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "already_transmitted" }],
+    ["assign twice", STATES.assigned, 2, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "already_assigned" }],
+    ["assign late", STATES.assignmentLate, 2, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "deadline_passed" }],
+    ["assign an operator request", STATES.operator, 2, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "not_routed_to_dm" }],
+    ["assign unknown", null, 2, (tx, lease) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID, requireLeaseAt: lease }), { recorded: false, reason: "unknown_request" }],
+    ["discard after intent", STATES.transmitted, 2, (tx) => discardDecisionMakerAssignment(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "already_transmitted" }],
     [
       "second intent",
       STATES.transmitted,
-      (tx) =>
+      2,
+      (tx, lease) =>
         recordDecisionMakerTransmitIntent(tx, {
           requestId: REQUEST_ID,
           instance: OPENAI,
-          switches: SWITCHES_ON,
           transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+          requireLeaseAt: lease,
         }),
       { recorded: false, reason: "already_transmitted" },
     ],
-    ["second receipt", STATES.receipted, (tx) => recordDecisionMakerTransmitOutcome(tx, { requestId: REQUEST_ID, instance: OPENAI, outcome: "unknown" }), { recorded: false, reason: "transmit_outcome_recorded" }],
-    ["same pair", STATES.terminal, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ resultDigest: DIGEST_C }), killSwitch: false, requireLeaseAt: lease }), { status: "existing", eventId: TERMINAL_EVENT_ID, resultKind: "proposal" }],
-    ["same pair rejected", { ...STATES.transmitted, probedRejection: "kill_switch" }, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), killSwitch: false, requireLeaseAt: lease }), { status: "already_rejected", reason: "kill_switch" }],
-    ["other instance", STATES.transmitted, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ instance: "decision-maker-anthropic" }), killSwitch: false, requireLeaseAt: lease }), { status: "instance_mismatch" }],
-    ["result unknown request", null, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), killSwitch: false, requireLeaseAt: lease }), { status: "unknown_request" }],
-    ["unknown after accept", STATES.terminal, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_C }), { recorded: false, reason: "already_accepted" }],
-    ["unknown after another result", STATES.terminal, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_D }), { recorded: false, reason: "result_recorded" }],
-    ["unknown after rejection", { ...STATES.transmitted, probedRejection: "binding_mismatch" }, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_D }), { recorded: false, reason: "already_rejected" }],
-    ["stale too early", STATES.fresh, (tx) => staleCloseDecisionMakerRequest(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "not_stale" }],
+    ["second receipt", STATES.receipted, 2, (tx) => recordDecisionMakerTransmitOutcome(tx, { requestId: REQUEST_ID, instance: OPENAI, outcome: "unknown" }), { recorded: false, reason: "transmit_outcome_recorded" }],
+    ["same pair", STATES.terminal, 2, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ resultDigest: DIGEST_C }), requireLeaseAt: lease }), { status: "existing", eventId: TERMINAL_EVENT_ID, resultKind: "proposal" }],
+    ["same pair rejected", { ...STATES.transmitted, probedRejection: "kill_switch" }, 2, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease }), { status: "already_rejected", reason: "kill_switch" }],
+    ["other instance", STATES.transmitted, 2, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ instance: "decision-maker-anthropic" }), requireLeaseAt: lease }), { status: "instance_mismatch" }],
+    ["result unknown request", null, 2, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease }), { status: "unknown_request" }],
+    ["unknown after accept", STATES.terminal, 2, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_C }), { recorded: false, reason: "already_accepted" }],
+    ["unknown after another result", STATES.terminal, 2, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_D }), { recorded: false, reason: "result_recorded" }],
+    ["unknown after rejection", { ...STATES.transmitted, probedRejection: "binding_mismatch" }, 2, (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: DIGEST_D }), { recorded: false, reason: "already_rejected" }],
+    ["stale too early", STATES.fresh, 2, (tx) => staleCloseDecisionMakerRequest(tx, { requestId: REQUEST_ID }), { recorded: false, reason: "not_stale" }],
   ];
-  for (const [name, row, run, expected] of cases) {
+  for (const [name, row, statements, run, expected] of cases) {
     const { tx, sent } = recordingTx({ state: row });
     const lease = leases();
     assert.deepEqual(await run(tx, lease.requireLeaseAt), expected, name);
-    assert.equal(sent.length, 2, name);
+    assert.equal(sent.length, statements, name);
     assert.deepEqual(kindsOf(sent), ["execute", "query"], name);
     assert.deepEqual(lease.seen, [], name);
   }
 });
 
+test("no transmission intent is recorded while the kill switch is on, the instance is off, or the switch store is unreadable", async () => {
+  const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+  for (const [options, reason] of [
+    [{ switches: [{ scope: "kill_switch", value: "on" }, ...PERMISSIVE_SWITCHES.slice(1)] }, "kill_switch_on"],
+    [{ switches: [{ scope: "decision-maker-openai", value: "off" }, { scope: "decision-maker-anthropic", value: "proposal" }] }, "instance_off"],
+    // No event for the instance is its default, off.
+    [{ switches: [{ scope: "decision-maker-anthropic", value: "proposal" }] }, "instance_off"],
+    [{ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] }, "settings_unreadable"],
+    [{ failSwitchRead: true }, "settings_unreadable"],
+  ]) {
+    const { tx, sent } = recordingTx({ state: STATES.assigned, ...options });
+    const lease = leases();
+    assert.deepEqual(
+      await recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: OPENAI, transmission, requireLeaseAt: lease.requireLeaseAt }),
+      { recorded: false, reason },
+      JSON.stringify(options),
+    );
+    // Lock, state, switches -- and nothing written.
+    assert.equal(sent.length, 3, JSON.stringify(options));
+    assert.match(sent[2].sql, SWITCH_READ);
+    assert.deepEqual(lease.seen, []);
+  }
+  assert.equal(dmTransmitSwitchRefusal({ killSwitch: false, instanceMode: "proposal" }), null);
+  assert.equal(dmTransmitSwitchRefusal({ killSwitch: null, instanceMode: "proposal" }), "settings_unreadable");
+  assert.equal(dmTransmitSwitchRefusal({ killSwitch: false, instanceMode: null }), "settings_unreadable");
+});
+
+test("a result writes nothing when the switch store is unreadable", async () => {
+  for (const options of [{ failSwitchRead: true }, { switches: [{ scope: "kill_switch", value: "maybe" }] }]) {
+    const { tx, sent } = recordingTx({ state: STATES.transmitted, ...options });
+    await assert.rejects(
+      submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: () => assert.fail("no lease") }),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "state_unreadable",
+    );
+    assert.equal(sent.length, 3);
+    assert.ok(!sent.some((statement) => statement.kind === "create"));
+  }
+});
+
+test("the switches cannot be handed to the writers", () => {
+  const store = read(STORE);
+  // The writers take no switch value, and read the switch store themselves.
+  assert.doesNotMatch(store, /killSwitch:\s*(boolean|unknown)|switches:\s*\{/);
+  assert.equal((store.match(/await readDecisionMakerSwitches\(tx\)/g) ?? []).length, 3);
+});
+
 test("a malformed input sends nothing at all", async () => {
   const noLease = () => assert.fail("no lease for a refused input");
   const cases = [
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding({ cardId: "" }), decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), decision: { route: "dm_proposal", instance: "decision-maker-anthropic", refusals: [] } }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding({ cardId: "" }), card: routedCard() }),
+    // The decision is the store's own; a caller's is not an input.
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard({ options: [{ id: "a" }] }) }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: { ...routedCard(), extra: true } }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard({ tags: "needs:you" }) }),
     (tx) => assignDecisionMakerRequest(tx, { requestId: "not-a-uuid", requireLeaseAt: noLease }),
-    (tx) => recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: "decision-maker-gemini", transmission: null, switches: SWITCHES_ON }),
+    (tx) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID }),
+    (tx) => recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: "decision-maker-gemini", transmission: null, requireLeaseAt: noLease }),
     (tx) =>
       recordDecisionMakerTransmitIntent(tx, {
         requestId: REQUEST_ID,
         instance: OPENAI,
-        switches: SWITCHES_ON,
         transmission: { snapshotState: "none", snapshotTargetSha: SHA, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+        requireLeaseAt: noLease,
+      }),
+    (tx) =>
+      recordDecisionMakerTransmitIntent(tx, {
+        requestId: REQUEST_ID,
+        instance: OPENAI,
+        transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
       }),
     (tx) => recordDecisionMakerTransmitOutcome(tx, { requestId: REQUEST_ID, instance: OPENAI, outcome: "maybe" }),
-    (tx) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ resultKind: "approve" }), killSwitch: false, requireLeaseAt: noLease }),
-    // The kill switch must be read and passed; leaving it out is not "off".
-    (tx) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: noLease }),
+    (tx) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission({ resultKind: "approve" }), requireLeaseAt: noLease }),
+    (tx) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission() }),
     (tx) => recordDecisionMakerResultUnknown(tx, { requestId: REQUEST_ID, instance: OPENAI, resultDigest: "x" }),
     (tx) => staleCloseDecisionMakerRequest(tx, { requestId: null }),
     (tx) => readDecisionMakerThroughput(tx, "decision-maker-gemini"),
@@ -1369,32 +1560,27 @@ test("a malformed input sends nothing at all", async () => {
   }
 });
 
-test("no transmission intent is recorded while the kill switch is on, the instance is off, or either is unreadable", async () => {
-  const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
-  for (const [switches, reason] of [
-    [{ killSwitch: true, instanceMode: "proposal" }, "kill_switch_on"],
-    [{ killSwitch: false, instanceMode: "off" }, "instance_off"],
-    [{ killSwitch: null, instanceMode: "proposal" }, "settings_unreadable"],
-    [{ killSwitch: false, instanceMode: null }, "settings_unreadable"],
-    [{ killSwitch: true, instanceMode: null }, "settings_unreadable"],
+test("the switch clause of the event trigger: an intent needs both on, a proposal the kill switch off", () => {
+  const on = { killSwitch: false, instanceMode: "proposal" };
+  const killed = { killSwitch: true, instanceMode: "proposal" };
+  const instanceOff = { killSwitch: false, instanceMode: "off" };
+  const unreadable = { killSwitch: null, instanceMode: null };
+  const rejected = (rejectionReason) => ({ kind: "result_rejected", instance: OPENAI, resultDigest: DIGEST_D, rejectionReason });
+  for (const [attempt, expected] of [
+    [ATTEMPTS.transmit_intent, [null, "kill_switch_on", "instance_off", "kill_switch_on"]],
+    [ATTEMPTS.proposal, [null, "kill_switch_on", null, "kill_switch_on"]],
+    [{ ...ATTEMPTS.proposal, resultKind: "escalate" }, [null, null, null, null]],
+    [ATTEMPTS.timeout, [null, null, null, null]],
+    [rejected("kill_switch"), ["reason_inconsistent", null, "reason_inconsistent", "reason_inconsistent"]],
+    [rejected("binding_mismatch"), [null, null, null, null]],
+    [ATTEMPTS.assign, [null, null, null, null]],
+    [ATTEMPTS.transmit_receipt, [null, null, null, null]],
+    [ATTEMPTS.result_unknown, [null, null, null, null]],
   ]) {
-    assert.equal(dmTransmitSwitchRefusal(switches), reason, JSON.stringify(switches));
-    const { tx, sent } = recordingTx({ state: STATES.assigned });
     assert.deepEqual(
-      await recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: OPENAI, transmission, switches }),
-      { recorded: false, reason },
+      [on, killed, instanceOff, unreadable].map((switches) => dmEventSwitchRefusal(attempt, switches)),
+      expected,
+      JSON.stringify(attempt),
     );
-    assert.equal(sent.length, 0, JSON.stringify(switches));
-  }
-  assert.equal(dmTransmitSwitchRefusal(SWITCHES_ON), null);
-  // The read must be passed; leaving it out is not "on".
-  for (const switches of [undefined, null, {}, { killSwitch: "no", instanceMode: "proposal" }, { killSwitch: false, instanceMode: "autonomous" }]) {
-    const { tx, sent } = recordingTx({ state: STATES.assigned });
-    await assert.rejects(
-      recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: OPENAI, transmission, switches }),
-      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input",
-      JSON.stringify(switches),
-    );
-    assert.equal(sent.length, 0);
   }
 });
