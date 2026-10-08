@@ -304,16 +304,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               onSelect={(id) => setSelectedId(id)}
             />
           )}
-
-          <footer className={cx("credit")}>
-            {m.credit.line}
-            <br />
-            <a href="https://www.instagram.com/godseng.mom/" target="_blank" rel="noreferrer">
-              {m.credit.link}
-            </a>
-            <br />
-            {m.credit.terms}
-          </footer>
         </div>
       </div>
 

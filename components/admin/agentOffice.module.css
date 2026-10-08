@@ -420,8 +420,6 @@ a.integration-row:hover { border-color: var(--accent); }
 .result-row.header { min-height: 34px; background: var(--surface-3); color: var(--text-soft); font-size: 10px; font-weight: 800; }
 .storage-empty { margin: 0; padding: 14px 12px; color: var(--text-soft); font-size: 12px; line-height: 1.7; }
 
-.credit { margin-top: 26px; color: var(--text-faint); font-size: 12px; line-height: 1.9; text-align: center; }
-.credit a { color: var(--accent-text); font-weight: 800; text-decoration: none; }
 .modal-backdrop { position: fixed; z-index: 60; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(9, 9, 11, .5); }
 .team-modal { width: min(450px, 100%); animation: pop .18s ease both; }
 .window-close { margin-left: auto; width: 32px; min-height: 28px; border: 1px solid rgba(255, 255, 255, .3); border-radius: 6px; background: transparent; color: var(--bar-text); cursor: pointer; }
