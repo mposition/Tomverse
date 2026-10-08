@@ -116,8 +116,9 @@ test("a record link is kept only while the console has its page and tab", () => 
     assert.ok(AGENT_OFFICE_DEPTS.find((dept) => dept.id === id)?.recordHref, `${id} lost its link`);
   }
   // Every link on screen is the declared one filtered by that predicate, and
-  // every declared link is a well-formed console address, so a typo cannot
-  // pass for a screen a branch does not carry yet.
+  // every declared link is a well-formed console address. A well-formed typo
+  // still reads as a screen this branch does not carry -- which is why the
+  // teams every branch has are asserted linked above.
   for (const dept of AGENT_OFFICE_DEPTS) {
     const declared = AGENT_OFFICE_DECLARED_RECORD_HREFS[dept.id];
     assert.equal(dept.recordHref, declared !== null && consoleHasRecord(declared) ? declared : null, dept.id);
