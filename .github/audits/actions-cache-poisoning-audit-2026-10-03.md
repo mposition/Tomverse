@@ -23,7 +23,22 @@
 > 다른 감사 문서(`pr-fast-gate-performance-audit.md`)로의 인용은 번호를
 > 유지합니다 — 그쪽은 날짜가 박힌 기록이고 움직이지 않습니다.
 >
-> **상태: 조사 완료, 독립 검토 1회 반영(rev 2), 조치 없음.** 이 감사는
+> **2026-10-08 추가 회차.** 위에서 "확인하지 않았다"고 적은 나머지 중, **2장의
+> trigger·key 표(줄 참조 76건)를 뺀 전부**를 트리에서 되읽었습니다. 표 밖에서
+> 번호로 남은 것은 `cron-auto-fix.yml`·`feedback-autofix.yml`의 설치·핀 인용과
+> `pr-fast-gate-performance-audit.md` 세 건이며, 이번에 다시 읽어 **그대로
+> 맞습니다.** 괄호 안 번호 형태는 읽어 본 것이 전부 밀려 있었고(한 건은
+> `e2e.yml`의 trigger와 그 주석이 **서로 바뀌어** 있었습니다) 모두 이름으로
+> 바꿨습니다. **2장의 표는 아직 확인하지 않았습니다.**
+>
+> 이 회차가 찾은 것은 번호만이 아닙니다. **3.2와 3.3의 주장 자체가 낡았습니다** —
+> 캐시 key가 workflow마다 구획된 뒤로 그 두 절이 전제한 공유 항목과 broad
+> fallback이 존재하지 않습니다. 3.2 앞의 갱신 주석에 전수 수집 결과를 표로
+> 넣었습니다. 4.2의 분석기 셈도 그 뒤 판정이 세분화됐으므로 1a장의 측정이
+> 최신입니다. **번호가 밀린 것과 주장이 바뀐 것은 다른 사건이고, 번호만 고치면
+> 뒤쪽을 놓칩니다.**
+>
+> **상태: 조사 완료, 독립 검토 반영(rev 3 — 2026-10-08 인용 회차와 3.2·3.3·F1·F2 갱신), 조치 없음.** 이 감사는
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
 > 각 항목에 승인·검토 요건을 적었습니다.
 >
@@ -147,7 +162,8 @@ script입니다(`Cargo.lock`·`vendor/amux/Cargo.lock`이 정하는 의존성). 
 | `e2e.yml` | `workflow_dispatch` :51 | 고른 ref | `.next/cache` → `Linux-next-main-*` :193-199, ms-playwright → `Linux-playwright-<lock>-chromium` :212-217 | `npm ci` :202 |
 
 `e2e.yml`은 2026-10-02부터 `push: main`이 아니라 `pull_request: branches:[main]`
-입니다(:47-50, 그 위 :56-88의 주석이 변경 이유를 적습니다). 따라서 그 PR run은
+입니다(`on:`의 `pull_request:` 아래 `branches:`가 `main` 하나이고, 그 바로 위
+주석이 draft PR과 release PR의 check suite 때문임을 적습니다). 따라서 그 PR run은
 PR scope에만 씁니다. `main` scope에 쓰는 경로는 `workflow_dispatch`를 `main`에서
 돌릴 때만 남습니다 — 이 감사의 과제 설명에 있던 "`e2e.yml` push main"은 더 이상
 맞지 않습니다.
@@ -180,11 +196,11 @@ PR scope에만 씁니다. `main` scope에 쓰는 경로는 `workflow_dispatch`�
 
 | workflow | 근거 |
 |---|---|
-| `secret-history-scan.yml` | `setup-node` 자체가 없습니다(:51 checkout, :54 gitleaks뿐). `push: main` + `schedule`인데도 캐시 표면이 0입니다. |
+| `secret-history-scan.yml` | `setup-node` 자체가 없습니다 — job의 step은 `actions/checkout`과 `gitleaks/gitleaks-action` 둘뿐입니다. `push: main` + `schedule`인데도 캐시 표면이 0입니다. |
 | `back-merge-main-to-develop.yml` | `push: main`. `setup-node` :281에 `cache:` 입력이 없습니다. `back-merge` job(`GH_AUTOMATION_PAT` :110, :119)은 `setup-node`조차 없습니다. |
 | `deployed-commit-drift.yml` | `schedule`. `setup-node` :110에 `cache:` 없음. :114-116 주석이 `npm ci`를 **일부러** 하지 않는다고 적습니다. |
 | `engineering-agent-image.yml` | `push: main` + `packages: write`. :4 주석이 "no repository secret, no cache"를 명시하고 :46-48이 `docker build --pull --no-cache`입니다. |
-| `codeql.yml` | `push: main` + `schedule` + `security-events: write`. `setup-node`가 없습니다(:65 주석이 그 생략을 설명). CodeQL action 자신의 bundle 캐시는 GitHub가 관리하며 이 감사 범위 밖입니다. |
+| `codeql.yml` | `push: main` + `schedule` + `security-events: write`. `setup-node`가 없습니다(`actions/setup-node`를 이름 대며 그 생략을 설명하는 주석이 있습니다). CodeQL action 자신의 bundle 캐시는 GitHub가 관리하며 이 감사 범위 밖입니다. |
 | `auto-pr-to-develop.yml` | `GH_AUTOMATION_PAT` :46를 들지만 `actions/checkout` :50 하나뿐입니다. |
 
 ## 3. 축 2 — 복원하고, 실행하거나 신뢰하는 job
@@ -212,11 +228,40 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 
 **Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml`의 step `Restore the downloaded crates`가
 `~/.cargo/registry`, `~/.cargo/git`, `target`, `vendor/amux/target`을 한 항목에
-담습니다. restore-keys가 없는 것(:54, primary key 하나뿐)은 올바른 선택이지만,
+담습니다. restore-keys가 없는 것(그 step은 `key:` 하나만 갖습니다)은 올바른 선택이지만,
 `target/` 안의 build script 바이너리에는 검증이 없습니다. `push: main`과
 `push: develop` 양쪽에서 씁니다.
 
 ### 3.2 키 공유 — 한 exact 항목을 6개 job이, 그리고 그 둘이 서로의 fallback
+
+> **2026-10-08 갱신 — 이 절이 서술하는 지형은 더 이상 트리의 상태가 아닙니다.**
+> 이 절은 2026-10-03의 트리를 적었고 기록으로 남깁니다. 그 뒤 `pr-fast-gate`만
+> 갖고 있던 `v2-<namespace>-` 구획이 **캐시를 쓰는 모든 workflow로** 확장됐고,
+> 그래서 아래 사실 A와 사실 B가 전제한 **공유 항목이 존재하지 않습니다.**
+>
+> 2026-10-08에 `.github/workflows/*.yml`의 `key`·`restore-keys`를 전수 수집한
+> 결과입니다(`${{ runner.os }}`를 `OS`, lockfile 해시를 `LOCK`으로 줄여 적습니다).
+>
+> | workflow | playwright primary key | `.next/cache` restore-keys가 멈추는 곳 |
+> |---|---|---|
+> | `admin-console-e2e` | `OS-playwright-v2-admin-e2e-LOCK-chromium` | `OS-next-v2-admin-e2e-LOCK-` |
+> | `daily-security-audit` | `OS-playwright-v2-daily-LOCK-chromium-webkit` | `OS-next-v2-daily-LOCK-` |
+> | `e2e` | `OS-playwright-v2-main-LOCK-chromium` | `OS-next-v2-main-LOCK-` |
+> | `nightly-visual-regression` | `OS-playwright-v2-visual-LOCK-chromium` | `OS-next-v2-visual-LOCK-` |
+> | `pr-fast-gate` | `OS-playwright-v2-pr-LOCK-chromium` | `OS-next-v2-pr-LOCK-` |
+> | `review-parity-shadow` | `OS-playwright-v2-parity-LOCK-chromium` | `OS-next-v2-parity-LOCK-` |
+>
+> 읽는 법은 셋입니다. **exact 공유가 없습니다** — 여섯 개의 primary key가 모두
+> 다른 문자열이므로 한 항목을 두 workflow가 집어 쓸 수 없습니다. **교차 fallback도
+> 없습니다** — 모든 `restore-keys`가 자기 namespace 안에서 멈추므로
+> `-chromium`과 `-chromium-webkit`이 서로의 후보가 되지 않습니다. 그리고
+> **broad `OS-next-` fallback은 한 곳도 남지 않았습니다**(3.3이 다섯 곳을 셌던 그
+> 항목입니다).
+>
+> 이 갱신은 범위를 줄이지 않습니다. 1장의 신뢰 경계(항목에 서명도 해시 핀도 없고
+> 내용을 대조할 기대값도 없다)와 `~/.cache/ms-playwright`가 실행 가능한 바이너리를
+> 담는다는 사실은 그대로이며, 구획은 **누가 누구의 항목에 닿는가**만 좁힙니다.
+> 쓰기 권한 자체는 `cache-mode`가 정합니다(7장의 P1a).
 
 여기에는 서로 다른 두 사실이 있고, 섞으면 틀립니다.
 
@@ -230,14 +275,19 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 
 `Linux-playwright-<lock>-chromium`을 primary key로 쓰는 여섯 job:
 
+여섯 곳 모두 step `Restore Playwright Chromium cache`이고, `pr-fast-gate.yml`은
+job `build-and-e2e`와 `ui-risk`가 각각 하나씩 갖습니다. 줄 번호를 적지 않는 것은
+이 감사 이후 여섯 파일 전부가 움직여 그 숫자가 빈 줄과 주석을 가리키게 됐기
+때문이고(2026-10-08 확인), step 이름은 그 사이 바뀌지 않았습니다.
+
 ```
-admin-console-e2e.yml:178          pr-fast-gate.yml:841   (build-and-e2e)
-e2e.yml:215                        pr-fast-gate.yml:1033  (ui-risk)
-nightly-visual-regression.yml:88   review-parity-shadow.yml:128
+admin-console-e2e.yml   pr-fast-gate.yml (build-and-e2e)
+e2e.yml                 pr-fast-gate.yml (ui-risk)
+nightly-visual-regression.yml   review-parity-shadow.yml
 ```
 
 그리고 **모두** restore-keys `${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-`
-를 갖습니다(:180, :217, :90, :843, :1035, :130). 이 prefix는
+를 갖습니다(같은 step의 `restore-keys` 블록). 이 prefix는
 `daily-security-audit.yml`의 `-chromium-webkit`로 끝나는 키 두 개에도 맞으므로
 사실 B가 성립합니다.
 
@@ -256,10 +306,15 @@ lockfile이 바뀌어 `-chromium` 항목이 아직 없는 창에서만 닿습니
 `-admin-e2e-`, `-main-`, `-parity-`, `-pr-`). 그런데 다섯 곳이 그 경계를 지우는
 broad fallback을 갖습니다.
 
+broad fallback이 **있던** 다섯 곳이며, 전부 step `Restore Next.js build cache`
+입니다(`daily-security-audit.yml`은 두 job이 각각 하나씩 갖습니다). 줄 번호는 위와
+같은 이유로 적지 않고, 2026-10-08 현재 이 다섯 곳의 `restore-keys`는 모두 자기
+namespace에서 멈추므로 **아래 목록은 당시의 기록입니다**(3.2의 갱신 주석).
+
 ```
-admin-console-e2e.yml:163          daily-security-audit.yml:79, :281
-e2e.yml:199                        nightly-visual-regression.yml:75
-review-parity-shadow.yml:103
+admin-console-e2e.yml   daily-security-audit.yml (두 job)
+e2e.yml                 nightly-visual-regression.yml
+review-parity-shadow.yml
 ```
 
 `${{ runner.os }}-next-` 는 다른 모든 `Linux-next-*` 항목에 맞습니다.
@@ -324,7 +379,7 @@ Next·Playwright 열여섯 곳입니다.
 ### 4.1 저장소 자신의 분석기가 이미 이 규칙을 갖고 있습니다
 
 `lib/agentCredentialReachability.ts`는 `credential_job_restores_cache`라는
-판정을 갖습니다(:61). 계약은 `docs/policy/engineering-agent.md` §5의 캐시 경로 항목입니다.
+판정을 갖습니다(`reason: "credential_job_restores_cache"`). 계약은 `docs/policy/engineering-agent.md` §5의 캐시 경로 항목입니다.
 
 > **cache 경로**: 자격증명을 가진 job이 Actions cache를 복원하면, 그 job은
 > trigger·path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push
@@ -355,8 +410,12 @@ npm run report:engineering-agent-tiers
 
 ### 4.2 분석기의 "restores" 3건은 보수적 과대추정입니다
 
-`restoresCache`(:267-289)는 `actions/setup-*`를 "`cache`가 명시적으로 꺼져
-있지 않으면 복원한다"로 봅니다(:283-286). 14건 중 **3건**은 `setup-node`에
+`restoresCache`는 `actions/setup-*`를 "`cache`가 명시적으로 꺼져 있지 않으면
+복원한다"로 봤습니다. **그 뒤 그 판정이 세분화됐습니다** — 지금은
+`VERIFIED_SETUP_CACHES`가 어느 action의 어느 캐시를 검증된 것으로 볼지 정하고,
+`AUTOMATIC_PACKAGE_MANAGER_CACHE`가 `cache:` 입력 없이도 복원하는 것은
+`actions/setup-node` v6뿐임을 적습니다. 아래 셈은 그 세분화 이전의 것이고, 열 개
+job에서 선언을 뺀 뒤의 측정은 1a장에 있습니다. 14건 중 **3건**은 `setup-node`에
 `cache:` 입력이 없어 **현재 트리에서는** 실제 복원자가 아닙니다 — fail-closed
 설계의 의도된 과대추정입니다. 어느 셋인지는 §16에 따라 적지 않습니다(4.1).
 
@@ -445,6 +504,12 @@ lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 
 
 ### F1 — `main` scope에서 쓰인 Playwright 항목 하나를 6개 job이 exact key로 공유합니다
 
+> **2026-10-08: 이 발견의 전제가 더 이상 성립하지 않습니다.** 여섯 job의
+> primary key가 모두 자기 `v2-<namespace>-`를 갖게 되어 공유되는 항목이
+> 없습니다(3.2 앞의 갱신 주석에 전수 표). 아래 분석은 2026-10-03의 트리에 대한
+> 기록이며, **권고 1순위라는 표시는 그 시점의 것입니다.** 캐시 항목 자체에 여전히
+> 서명도 해시 핀도 없다는 1장의 사실은 바뀌지 않았습니다.
+
 근거: 3.2의 사실 A·B, `scripts/ci/install-playwright.sh`(캐시 적중 시 무검증
 no-op), `.github/audits/pr-fast-gate-performance-audit.md:348`·`:355`.
 
@@ -464,6 +529,10 @@ repository write 자격증명도 없기 때문입니다(4.3). 차단 사유가 �
 경로로 통과하면 그쪽 기준으로 복구 불가일 수 있습니다.
 
 ### F2 — `.next/cache`의 broad restore-key가 workflow 경계를 지웁니다
+
+> **2026-10-08: 이 발견이 이름 댄 broad restore-key는 한 곳도 남지 않았습니다.**
+> 다섯 곳 모두 `restore-keys`가 자기 `OS-next-v2-<namespace>-LOCK-`에서 멈춥니다
+> (3.2 앞의 갱신 주석). 아래는 2026-10-03의 기록입니다.
 
 근거: 3.4의 열여섯 단계가 `continue-on-error: true`이므로 복원 실패가 job을
 멈추지 않습니다. 반례이자 증거: `pr-fast-gate.yml`의 두 `restore-keys` — 그
@@ -925,7 +994,7 @@ scope로만 감) **run의 ref가 기본 branch이거나 `develop`일 때만** �
 **자격증명을 가진 job은 `cache: npm` 외의 Actions 캐시를 복원하지 않는다.**
 
 구현은 새 스크립트가 **아니라** `lib/agentCredentialReachability.ts`의
-`restoresCache`(:267-289)를 캐시 종류별로 나누고, 그 판정을 PR Fast Gate static
+`restoresCache`를 캐시 종류별로 나누고, 그 판정을 PR Fast Gate static
 단계의 검사로 올리는 것입니다. 두 번째 판정기를 만들면 숫자가 어긋납니다 —
 AGENTS.md가 PACKAGE-01 지표에 대해 같은 것을 요구합니다("ESLint 자체 API로
 셉니다. 별도 scanner를 만들어 두 숫자가 어긋나게 하지 않습니다").
