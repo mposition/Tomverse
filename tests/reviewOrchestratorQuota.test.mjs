@@ -78,6 +78,9 @@ test("quota record is local-only and status exposes the recorded balance state",
   try {
     const recorded = run("quota", "record", "cursor", "0", "percent");
     assert.equal(recorded.status, 0, recorded.stderr);
+    const checked = run("quota", "check", "cursor");
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.deepEqual(JSON.parse(checked.stdout), { cursor: { state: "exhausted", remaining: 0, unit: "percent" } });
     const status = run("status");
     assert.equal(status.status, 0, status.stderr);
     assert.deepEqual(JSON.parse(status.stdout).providers[0], {

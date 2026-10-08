@@ -129,24 +129,67 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 `account/rateLimits/read`를 조회합니다. 각 창의 남은 비율이 0이면 배정하지
 않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
 
-Cursor CLI의 대화형 [`/usage`](https://cursor.com/docs/cli/changelog)는 플랜의
-포함 사용량과 추가 지출을 보여 주지만, 비대화형 잔액 API/JSON 출력은 확인되지
-않았습니다. Copilot SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)는
-`premium_interactions` 할당량을 반환하지만 서버에서 쓰는 AI Credits 잔액과 같은
-기준인지는 확인되지 않았습니다. GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)는
-별도 `Plan` 읽기 권한의 토큰이 필요하고 소비량만 반환합니다. 두 provider는
-`quotaProbe: "manual"`로 두고 **review 서버에 로그인된 바로 그 계정**의 사용량
-화면을 확인해 기록합니다. Cursor는 해당 모델에 적용되는 잔여 비율을, Copilot은
-AI Credits 잔액을 기록합니다. 적용 범위가 모호하면 0으로 기록해 배정을 멈춥니다.
-`--max-ai-credits 50`은 한 검토의 제한이며 계정 잔액 조회가 아닙니다.
+`quotaProbe: "cursor"`는 Cursor CLI 2026.10.01의 [`/usage`](https://cursor.com/docs/cli/changelog)가
+쓰는 `DashboardService/GetCurrentPeriodUsage`를 조회합니다. Ubuntu에서는
+`~review/.config/cursor/auth.json`의 로그인 access token을 사용하며, `CURSOR_API_KEY`를
+reviewer에게 전달하는 설정이면 저장된 토큰이 그 API key의 계정과 일치해야 합니다.
+보고된 포함 사용량 pool 중 하나라도 소진됐으면 Cursor 배정을 보류합니다.
+이 경로는 공개 Admin API가 아닌 CLI 내부 API이므로 응답이 바뀌거나 로그인 토큰이
+만료되면 `unknown`으로 보류하며, probe는 로그인·토큰 갱신을 하지 않습니다.
+추가 지출 한도가 남아 있어도 포함 사용량 소진 뒤 새 검토를 시작하지 않습니다.
+
+`quotaProbe: "copilot"`는 reviewer와 같은 CLI를 `--headless --stdio`로 띄워 공식
+SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)를
+호출합니다. 검토 세션이나 모델 호출 없이 같은 `COPILOT_GITHUB_TOKEN`으로 현재
+계정의 남은 할당량을 읽습니다. `quotaKey`는 기본 `premium_interactions`이고,
+서버의 실제 응답에서 다른 계정 quota key를 확인했다면 설정으로 지정할 수 있습니다.
+남은 비율이 0이면 추가 과금이 허용된 계정도 새 배정을 보류합니다. 이 수치를 AI Credits
+금액으로 변환하지 않으며, `--max-ai-credits 50`은 별도의 한 검토 제한입니다.
+GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)는
+별도 `Plan` 읽기 권한이 필요해 기존 reviewer 토큰의 권한을 넓히지 않았습니다.
+
+자동 probe는 60초마다 갱신하고 `status`는 데몬의 최근 관측 파일만 읽습니다.
+Cursor 내부 API와 Copilot CLI quota 응답은 운영 서버의 `review` 계정으로 실측한 뒤
+가동합니다. 확인 불가한 계정은 `unknown`이 되어 대기하며 검토를 시험 호출하지 않습니다.
 
 **Ubuntu 검토 서버의 관리 계정 bash, 저장소 clone 위치와 무관.** Node 22와
 `review` 서비스 계정으로 실행할 권한이 필요합니다. production 앱 자격증명은
-필요 없습니다. 아래 명령은 `review` 계정의 상태 폴더에 관측값을 쓰며,
-0으로 다시 기록하면 배정을 멈출 수 있습니다. 변수는 이 셸에서만 유지됩니다.
+필요 없습니다. 아래 명령은 계정 사용량만 조회하며 검토 배정·모델 호출·설정 변경을
+하지 않습니다. 변수는 이 셸에서만 유지됩니다.
 
 ```bash
 RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
+$RO quota check cursor
+$RO status
+```
+
+`quota check`는 비활성 provider도 읽기 전용으로 확인할 수 있으며 그 provider의
+배정을 활성화하지 않습니다. Copilot 토큰을 systemd `EnvironmentFile`에서 받는
+설정이면 같은 서비스 환경에서 실행해야 합니다. 토큰을 명령 인자에 붙이지 않습니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 저장소 clone 위치와 무관.** 위의 권한과 Node 22가
+필요하며 production 앱 자격증명은 필요 없습니다. 현재 검토 서버의 Copilot 환경 파일을
+읽는 일회성 서비스를 만들고 계정 사용량만 조회한 뒤 제거합니다. 계정·배정·설정은
+변경하지 않으며 토큰 값은 인자나 출력에 넣지 않습니다.
+
+```bash
+sudo systemd-run --wait --pipe --collect \
+  --property=User=review \
+  --property=EnvironmentFile=/home/review/.config/review-orchestrator/copilot.env \
+  --setenv=REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json \
+  --setenv=PATH=/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs quota check copilot
+```
+
+자동 조회가 없는 계정의 fallback은 `quotaProbe: "manual"`입니다. 그 설정을 먼저
+지정한 provider에만 아래 명령을 쓰며, **review 서버에 로그인된 바로 그 계정**의
+사용량 화면에서 확인한 잔액을 기록합니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 위의 `RO`를 설정한 같은 셸.** production 앱
+자격증명은 필요 없습니다. 아래 명령은 `review` 계정의 상태 폴더에 관측값을 쓰며,
+0으로 다시 기록하면 배정을 멈출 수 있습니다.
+
+```bash
 $RO quota record cursor 25 percent
 $RO quota record copilot 100 credits
 $RO status

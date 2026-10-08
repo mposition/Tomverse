@@ -3,6 +3,9 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { release, tryAcquire, writeJsonAtomic } from "./fsutil.mjs";
+import { reviewerEnv } from "./env.mjs";
+import { cursorQuota } from "./cursor-quota.mjs";
+import { copilotQuota } from "./copilot-quota.mjs";
 
 const PROBE_TIMEOUT_MS = 12_000;
 const CACHE_MS = 60_000;
@@ -60,7 +63,7 @@ async function claudeQuota(provider) {
     credential = { accessToken: process.env.CLAUDE_CODE_OAUTH_TOKEN };
   } else {
     try {
-    credential = JSON.parse(readFileSync(join(process.env.HOME ?? homedir(), ".claude", ".credentials.json"), "utf8"))
+      credential = JSON.parse(readFileSync(join(process.env.HOME ?? homedir(), ".claude", ".credentials.json"), "utf8"))
         .claudeAiOauth;
     } catch {
       return unknown;
@@ -88,9 +91,7 @@ function codexQuota(provider) {
   return new Promise((resolve) => {
     const child = spawn(provider.command, ["app-server", "--stdio", "--disable", "remote_control"], {
       stdio: ["pipe", "pipe", "ignore"],
-      env: Object.fromEntries(["PATH", "HOME", "USER", "LOGNAME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
-        ...(provider.passEnv?.includes("CODEX_HOME") ? ["CODEX_HOME"] : [])]
-        .filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]])),
+      env: reviewerEnv(provider),
     });
     let settled = false;
     let output = "";
@@ -141,10 +142,12 @@ export async function probeProviderQuota(provider, stateDir, now = Date.now()) {
       return unknown;
     }
   }
-  if (provider.quotaProbe !== "claude" && provider.quotaProbe !== "codex") return unknown;
+  const probes = { claude: claudeQuota, codex: codexQuota, cursor: cursorQuota, copilot: copilotQuota };
+  if (!Object.hasOwn(probes, provider.quotaProbe)) return unknown;
   const cached = cache.get(provider.id);
   if (cached && now - cached.at < CACHE_MS && now >= cached.at) return cached.result;
-  const result = provider.quotaProbe === "claude" ? await claudeQuota(provider) : await codexQuota(provider);
+  let result;
+  try { result = await probes[provider.quotaProbe](provider); } catch { result = unknown; }
   cache.set(provider.id, { at: now, result });
   return result;
 }

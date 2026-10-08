@@ -48,7 +48,7 @@
     {
       "id": "cursor",
       "vendor": "xai",
-      "quotaProbe": "manual",
+      "quotaProbe": "cursor",
       "enabled": true,
       "maxConcurrent": 2,
       "model": "grok-4.7-xhigh",
@@ -75,7 +75,8 @@
     {
       "id": "copilot",
       "vendor": "moonshot",
-      "quotaProbe": "manual",
+      "quotaProbe": "copilot",
+      "quotaKey": "premium_interactions",
       "enabled": true,
       "priority": 1,
       "maxConcurrent": 2,

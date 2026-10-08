@@ -85,8 +85,12 @@ export function validateConfig(raw) {
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
     }
-    if (provider.quotaProbe !== undefined && !["claude", "codex", "manual"].includes(provider.quotaProbe)) {
-      errors.push(`${label}: quotaProbe must be claude, codex or manual`);
+    if (provider.quotaProbe !== undefined && !["claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be claude, codex, cursor, copilot or manual`);
+    }
+    if (provider.quotaKey !== undefined && (provider.quotaProbe !== "copilot" ||
+        typeof provider.quotaKey !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(provider.quotaKey))) {
+      errors.push(`${label}: quotaKey must name a Copilot account quota snapshot`);
     }
     if (provider.promptNote !== undefined && !(typeof provider.promptNote === "string" && provider.promptNote.length <= 4000)) {
       errors.push(`${label}: promptNote must be a string of at most 4000 characters`);

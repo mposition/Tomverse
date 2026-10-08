@@ -7,6 +7,7 @@
  *   review-orchestrator daemon                 the scheduling loop (systemd)
  *   review-orchestrator status [jobId]         local inspection
  *   review-orchestrator quota record <id> <remaining> <percent|credits|usd>   local only
+ *   review-orchestrator quota check [id]      local only: read account usage without a review
  *   review-orchestrator drain on|off|wait      local only: stop new assignments for an update
  *   review-orchestrator cancel <jobId>...      local only: close a job's queued slots
  *
@@ -224,6 +225,14 @@ async function main(argv) {
   if (command === "rpc") return handle(config, decodeRpc(rest[0]));
   if (command === "ssh-dispatch") return handle(config, decodeRpc(tokenFromSshCommand(process.env.SSH_ORIGINAL_COMMAND)));
   if (command === "status") return handle(config, { command: "status", jobId: rest[0] });
+  if (command === "quota" && rest[0] === "check" && rest.length <= 2) {
+    const providers = rest[1] ? config.providers.filter((provider) => provider.id === rest[1]) : config.providers;
+    if (providers.length === 0) throw new UsageError("quota_provider_invalid");
+    // A local account check may inspect a disabled provider without enabling its assignments.
+    print(await probeProviderQuotas({ ...config,
+      providers: providers.map((provider) => ({ ...provider, enabled: true })) }));
+    return 0;
+  }
   if (command === "quota" && rest[0] === "record" && rest.length === 4) {
     const remaining = Number(rest[2]);
     if (rest[2].trim() === "" || !Number.isFinite(remaining)) throw new UsageError("remaining_quota_invalid");
@@ -250,7 +259,7 @@ async function main(argv) {
     print(result);
     return 0;
   }
-  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon, status, quota record, drain or cancel");
+  throw new UsageError("command_unknown", "use rpc, ssh-dispatch, daemon, status, quota check, quota record, drain or cancel");
 }
 
 // Compare real paths: a symlinked launcher must still run main, not exit 0 silently.
