@@ -435,6 +435,82 @@ export const dmEraseRefusal = (
 };
 
 // ---------------------------------------------------------------------------
+// A proposal as a person's judgment reads it (stage S1e)
+// ---------------------------------------------------------------------------
+
+/**
+ * What this store holds of a request's proposal when a person judges it (§6:
+ * the confirmation stands only while "Admin이 보여 준 제안 본문과 스냅샷 정보의
+ * digest가 저장된 값과 같을 때"): the terminal result's detail, the keyed
+ * digests of the DM's answer and rationale and of an operator's answer, the
+ * bytes the request's bodies hold, and the registry entry of the request's key
+ * period. Never a body's text.
+ */
+export type DmProposalForJudgment = {
+  /** The result event the detail belongs to; null when no detail is stored. */
+  resultEventId: string | null;
+  resultKind: string | null;
+  detail: DmResultDetail | null;
+  answerDigest: string | null;
+  rationaleDigest: string | null;
+  operatorAnswerDigest: string | null;
+  bodyBytes: number;
+  /** The key check value registered for the request's period; null when none is. */
+  keyCheck: string | null;
+  keyDestroyed: boolean;
+};
+
+const PROPOSAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const PROPOSAL_DIGEST = /^[0-9a-f]{64}$/;
+const nullableDigest = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && PROPOSAL_DIGEST.test(value));
+
+/** Null when the row holds anything the tables' CHECKs could not have produced. */
+export const dmProposalForJudgmentFromRow = (row: unknown): DmProposalForJudgment | null => {
+  if (row === null || typeof row !== "object") return null;
+  const r = row as Record<string, unknown>;
+  const bodyBytes = count(r.bodyBytes);
+  if (bodyBytes === null || typeof r.keyDestroyed !== "boolean") return null;
+  if (!nullableDigest(r.answerDigest) || !nullableDigest(r.rationaleDigest) || !nullableDigest(r.operatorAnswerDigest)) {
+    return null;
+  }
+  if (!nullableDigest(r.keyCheck)) return null;
+  let detail: DmResultDetail | null = null;
+  if (r.resultEventId !== null) {
+    if (typeof r.resultEventId !== "string" || !PROPOSAL_UUID.test(r.resultEventId) || typeof r.resultKind !== "string") {
+      return null;
+    }
+    const candidate: DmResultDetail = {
+      outputKind: (r.outputKind ?? null) as DmOutputKind | null,
+      optionId: (r.optionId ?? null) as string | null,
+      irreversible: (r.irreversible ?? null) as boolean | null,
+    };
+    if (
+      !(candidate.outputKind === null || isOneOf(DM_OUTPUT_KINDS, candidate.outputKind)) ||
+      !(candidate.optionId === null || typeof candidate.optionId === "string") ||
+      !(candidate.irreversible === null || typeof candidate.irreversible === "boolean") ||
+      !dmResultDetailShapeValid(r.resultKind, candidate)
+    ) {
+      return null;
+    }
+    detail = candidate;
+  } else if (r.resultKind !== null || r.outputKind !== null || r.optionId !== null || r.irreversible !== null) {
+    return null;
+  }
+  return {
+    resultEventId: r.resultEventId as string | null,
+    resultKind: (r.resultKind ?? null) as string | null,
+    detail,
+    answerDigest: r.answerDigest,
+    rationaleDigest: r.rationaleDigest,
+    operatorAnswerDigest: r.operatorAnswerDigest,
+    bodyBytes,
+    keyCheck: r.keyCheck,
+    keyDestroyed: r.keyDestroyed,
+  };
+};
+
+// ---------------------------------------------------------------------------
 // The key registry
 // ---------------------------------------------------------------------------
 

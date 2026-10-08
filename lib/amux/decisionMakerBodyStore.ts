@@ -15,6 +15,7 @@ import {
   dmBodiesRefusal,
   dmBodyAuditMetadata,
   dmBodyDigest,
+  dmBodyRefusal,
   dmBodyRetentionStateFromRow,
   dmDigestKeyCheck,
   dmDigestKeyDestroyRefusal,
@@ -28,6 +29,7 @@ import {
   dmKeyPeriodStartMs,
   dmOptionSetDigest,
   dmOutputBodies,
+  dmProposalForJudgmentFromRow,
   dmPurgeRefusal,
   dmRequestDigestKey,
   dmResultDetail,
@@ -42,6 +44,7 @@ import {
   type DmDigestKeyRotateRefusal,
   type DmEraseRefusal,
   type DmHoldRefusal,
+  type DmProposalForJudgment,
   type DmPurgeRefusal,
   type DmResultDetail,
 } from "@/lib/amux/decisionMakerBodyCore";
@@ -73,8 +76,11 @@ import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  * tests/amuxDecisionMakerBody.test.mjs and `npm run
  * check:protected-table-writers` fail on another writer. The one other writer
  * is the database itself: the ledger's closing events (assign_discarded,
- * stale_close) write the request's `retention_set` through a trigger, so a
- * request cannot close without its retention starting.
+ * stale_close, and since stage S1e a person's judgment -- confirm,
+ * edit_confirm, reject) write the request's `retention_set` through a
+ * trigger, so a request cannot close without its retention starting. Since
+ * stage S1e it also reads a proposal for a person's judgment and stores the
+ * person's edited answer, both for lib/amux/decisionMakerJudgmentStore.ts.
  *
  * It reads the request ledger only through lib/amux/decisionMakerRequestStore.ts,
  * the ledger's one reader, and composes two of that module's writes with
@@ -897,4 +903,109 @@ export async function readDecisionMakerResultDetail(
     keyPeriod: safeInteger(row.keyPeriod, "key period"),
     createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
   };
+}
+
+// ---------------------------------------------------------------------------
+// A person's judgment (stage S1e)
+// ---------------------------------------------------------------------------
+
+/**
+ * A request's proposal as the judgment store reads it (§6: a confirmation
+ * stands only while "Admin이 보여 준 제안 본문과 스냅샷 정보의 digest가 저장된
+ * 값과 같을 때"), in one statement: its terminal result's detail, the keyed
+ * digests of its DM answer, rationale and operator answer bodies, the bytes
+ * all its bodies hold, and the registry entry of `keyPeriod` -- the request's
+ * own, which the caller derives from the request's database-clock creation.
+ * Never a body's text. Reads only.
+ */
+export async function readDecisionMakerProposalForJudgment(
+  client: BodyReader,
+  input: { requestId: string; keyPeriod: number },
+): Promise<DmProposalForJudgment> {
+  if (!isDmRequestId(input.requestId) || !isDmKeyPeriod(input.keyPeriod)) {
+    throw new DecisionMakerBodyWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<unknown[]>`
+    SELECT
+      d."resultEventId", d."resultKind", d."outputKind", d."optionId", d."irreversible",
+      b."answerDigest", b."rationaleDigest", b."operatorAnswerDigest", b."bodyBytes",
+      k."keyCheck", k."keyDestroyed"
+    FROM (SELECT 1) AS "probe"
+    LEFT JOIN "AmuxDecisionMakerResultDetail" d ON d."requestId" = ${input.requestId}
+    CROSS JOIN LATERAL (
+      SELECT
+        max(x."digest") FILTER (WHERE x."field" = 'dm_answer') AS "answerDigest",
+        max(x."digest") FILTER (WHERE x."field" = 'dm_rationale') AS "rationaleDigest",
+        max(x."digest") FILTER (WHERE x."field" = 'operator_answer') AS "operatorAnswerDigest",
+        coalesce(sum(octet_length(x."text")), 0) AS "bodyBytes"
+      FROM "AmuxDecisionMakerBody" x
+      WHERE x."requestId" = ${input.requestId}
+    ) b
+    CROSS JOIN LATERAL (
+      SELECT
+        max(e."keyCheck") FILTER (WHERE e."kind" = 'rotate') AS "keyCheck",
+        coalesce(bool_or(e."kind" = 'destroy'), false) AS "keyDestroyed"
+      FROM "AmuxDecisionMakerDigestKeyEvent" e
+      WHERE e."keyPeriod" = ${input.keyPeriod}::integer
+    ) k
+  `;
+  const proposal = dmProposalForJudgmentFromRow(rows[0]);
+  if (!proposal) throw new DecisionMakerBodyWriteError("state_unreadable");
+  return proposal;
+}
+
+/**
+ * §6: "운영자가 고친 답은 새 본문 행이 되고 그 digest가 판정에 기록된다". A
+ * person's edited answer is stored under the `amux.decision.edit_confirm`
+ * audit the judgment store has written in this transaction, keyed under the
+ * request's key like every other body, and only while the registry holds that
+ * key undestroyed. One statement. The caller checked the text with
+ * `dmBodyRefusal()` (the secret scan included) before writing anything; a text
+ * that fails it here is a programming error. Without the period's key in the
+ * ring, or under a key the registry does not hold, nothing is stored and this
+ * throws `digest_key_unavailable`, so the caller's transaction -- which already
+ * holds the audit row -- rolls back.
+ *
+ * The trigger allows the row only for an open request routed to a DM, under a
+ * person's edit_confirm of this transaction that targets the request and names
+ * it in its metadata; the judgment written next in the same transaction closes
+ * the request, after which no operator answer can be added.
+ */
+export async function storeDecisionMakerOperatorAnswer(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; requestCreatedAtMs: number; text: string; auditLogId: string; keyRing: DmDigestKeyRing },
+): Promise<{ digest: string; keyPeriod: number }> {
+  if (
+    !isDmRequestId(input.requestId) ||
+    !Number.isSafeInteger(input.requestCreatedAtMs) ||
+    input.requestCreatedAtMs < 0 ||
+    typeof input.auditLogId !== "string" ||
+    input.auditLogId.length === 0 ||
+    !(input.keyRing instanceof Map) ||
+    dmBodyRefusal("operator_answer", input.text) !== null
+  ) {
+    throw new DecisionMakerBodyWriteError("invalid_input");
+  }
+  const keyPeriod = dmKeyPeriodOf(input.requestCreatedAtMs);
+  const periodKey = decisionMakerPeriodKey(input.keyRing, keyPeriod);
+  if (!periodKey) throw new DecisionMakerBodyWriteError("digest_key_unavailable");
+  const keyCheck = dmDigestKeyCheck(periodKey);
+  const digest = dmBodyDigest(dmRequestDigestKey(periodKey, input.requestId), "operator_answer", input.text);
+  const rows = await tx.$queryRaw<Array<{ digest: string }>>`
+    INSERT INTO "AmuxDecisionMakerBody"
+      ("id", "requestId", "field", "text", "keyPeriod", "keyCheck", "digest", "auditLogId")
+    SELECT ${randomUUID()}, ${input.requestId}, 'operator_answer', ${input.text}, ${keyPeriod}::integer, ${keyCheck},
+           ${digest}, ${input.auditLogId}
+    WHERE EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+        WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'rotate' AND k."keyCheck" = ${keyCheck}
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+        WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'destroy'
+      )
+    RETURNING "digest"
+  `;
+  if (rows.length !== 1 || rows[0]!.digest !== digest) throw new DecisionMakerBodyWriteError("digest_key_unavailable");
+  return { digest, keyPeriod };
 }
