@@ -182,7 +182,7 @@ const performs = (source, name) => {
 
 /** The `@/lib` modules a route imports, as text. One level, not transitive. */
 const importedSources = (routeSource) =>
-  [...routeSource.matchAll(/from "@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+  [...routeSource.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
     .map((match) => `${LIB_DIR}${match[1]}.ts`)
     .filter((path) => existsSync(path))
     .map((path) => withoutComments(readFileSync(path, "utf8")));
@@ -480,6 +480,25 @@ test("every admin write route writes an audit entry", () => {
     `${unaudited.join(", ")} mutate without calling writeAdminAuditLog(). ` +
       `An administrator action nobody can reconstruct is the failure the audit log exists to prevent.`
   );
+});
+
+test("multiline AMUX service imports remain in the audit sweep", () => {
+  const serviceAuditedRoutes = [
+    "amux/ideas/analysis-prices/route.ts",
+    "amux/ideas/analysis-reservations/route.ts",
+    "amux/ideas/retention-holds/route.ts",
+    "amux/ideas/unit-decisions/cancel/route.ts",
+    "amux/ideas/unit-decisions/no-commit/route.ts",
+    "amux/portfolio/route.ts",
+    "amux/task-cost-catalog/route.ts",
+    "amux/v22-lane/route.ts",
+  ];
+  for (const name of serviceAuditedRoutes) {
+    const route = routes.find((candidate) => candidate.name === name);
+    assert.ok(route, `${name} is included in the admin route sweep`);
+    assert.equal(route.reaches("writeAdminAuditLog"), true,
+      `${name} reaches its canonical audit writer through the imported service`);
+  }
 });
 
 test("a route that can queue an approval can also answer the step-up refusal", () => {
