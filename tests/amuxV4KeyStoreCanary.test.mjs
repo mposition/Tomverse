@@ -16,7 +16,7 @@ test("production, missing target and missing explicit gate never touch storage",
   }
 });
 
-test("one synthetic create/delete plus missing reload verifies the storage boundary", async () => {
+test("deleted unit refuses both reload and opening the retained backup with its wrapping master", async () => {
   let loads = 0, creates = 0, deletes = 0;
   let createdKey;
   const result = await verifyStagingKeyCanary({ env: staging,
@@ -34,6 +34,8 @@ test("one synthetic create/delete plus missing reload verifies the storage bound
   });
   assert.equal(result.kind, "verified");
   assert.equal(result.mayHaveOrphanKey, false);
+  assert.equal(result.oldEnvelopeKeyReloadRefused, true);
+  assert.equal(result.oldEnvelopeOpenRefused, true);
   assert.equal(result.runtimeActivated, false);
   assert.equal(creates, 1); assert.equal(deletes, 1); assert.equal(loads, 2);
   assert.equal(createdKey.masterKey.equals(Buffer.alloc(32)), true);
