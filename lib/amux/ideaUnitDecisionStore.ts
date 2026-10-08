@@ -28,9 +28,9 @@ import { checkAmuxIdeaUnitConsume,
 import type { V4TaskCostCeilingResult } from "./v4TaskCostCeilingCore.ts";
 import { amuxCanonicalJson } from "./boardImportCore.ts";
 
-/** A09's protected writer remains unreachable from a route while its hard
- * code latch is false. Its transaction bodies exist for synthetic DB tests. */
-export const AMUX_V4_UNIT_WRITE_CODE_ENABLED = false;
+/** A09's protected writer still requires the dedicated environment gate and
+ * the route's owner approval before its transaction body is reachable. */
+export const AMUX_V4_UNIT_WRITE_CODE_ENABLED = true;
 export const AMUX_V4_UNIT_WRITE_ENV = "TOMVERSE_AMUX_V4_UNIT_WRITE";
 export const amuxV4UnitWriteEnabled = (value: string | undefined) =>
   AMUX_V4_UNIT_WRITE_CODE_ENABLED && value === "enabled";

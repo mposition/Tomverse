@@ -42,8 +42,8 @@ const base = (overrides = {}) => ({
   ...overrides,
 });
 
-test("A08 preview remains dark even when the environment requests it", () => {
-  assert.equal(amuxV4ResolutionPreviewEnabled("enabled"), false);
+test("A08 preview requires its dedicated environment value", () => {
+  assert.equal(amuxV4ResolutionPreviewEnabled("enabled"), true);
   assert.equal(amuxV4ResolutionPreviewEnabled(undefined), false);
 });
 

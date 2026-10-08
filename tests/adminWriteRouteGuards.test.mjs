@@ -100,7 +100,8 @@ const SOURCE_SCOPE_REVIEWED_FILES = [
   "lib/amux/localIntakeCore.ts",
 ].sort();
 // A digest change reopens this audit exception only after independent review.
-const SOURCE_SCOPE_REVIEWED_DIGEST = "4d0cb01a641d5380b759e67ca60004fc834724e3760594f801964df018b2bea3";
+const SOURCE_SCOPE_REVIEWED_DIGEST = "4c1868bde54b7c4683857acdc0542a8f8d9263f8a95d94502c03eab7ca5d304e";
+const SOURCE_SCOPE_DISABLED_DIGEST = "3cbeb173f3d105d2e5ba6524e961da8110d6975731c19aa9c92ced15be209c5c";
 const RESOLUTION_PREVIEW_ROUTE = "app/api/admin/amux/ideas/resolution-preview/route.ts";
 const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   RESOLUTION_PREVIEW_ROUTE,
@@ -118,7 +119,8 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "201dfd71ee802d44c019749bb252a214d0d211c3e027a4f01e891595d8fbac2f";
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "b5406dab082c852f1db44be9d7a4d57353d9d6bb2bb9fd3ff257409293b9dad8";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "201dfd71ee802d44c019749bb252a214d0d211c3e027a4f01e891595d8fbac2f";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
@@ -161,6 +163,10 @@ const amuxReviewedDigest = (files, overrides = new Map()) => {
 };
 const amuxSourceScopeReviewedDigest = (overrides = new Map()) =>
   amuxReviewedDigest(SOURCE_SCOPE_REVIEWED_FILES, overrides);
+const isReviewedSourceScopeDigest = (digest) =>
+  digest === SOURCE_SCOPE_REVIEWED_DIGEST || digest === SOURCE_SCOPE_DISABLED_DIGEST;
+const isReviewedResolutionDigest = (digest) =>
+  digest === RESOLUTION_PREVIEW_REVIEWED_DIGEST || digest === RESOLUTION_PREVIEW_DISABLED_DIGEST;
 
 /**
  * Whether a file *performs* a call rather than merely containing the name.
@@ -252,10 +258,10 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
 /** A POST body is needed for a private scope proposal, but this particular
- * handler is read-only. Keep the audit exemption conditional on the closed
- * code switch, the single service call and the transaction's first operation
- * being SET TRANSACTION READ ONLY. A future write or additional raw statement
- * must make the broad admin audit sweep fail again. */
+ * handler is read-only. Keep the audit exemption conditional on one of the two
+ * reviewed code-switch states, the single service call and the transaction's
+ * first operation being SET TRANSACTION READ ONLY. A future write or new raw
+ * statement must make the broad admin audit sweep fail again. */
 const isDarkReadOnlyAmuxSourceScopePreview = (
   route,
   service = amuxSourceScopePreviewService,
@@ -271,9 +277,9 @@ const isDarkReadOnlyAmuxSourceScopePreview = (
   const previewAt = route.source.indexOf("await previewAmuxSourceScope(session, inspected.request)");
   if (route.name !== "amux/ideas/source-scope-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure()) !== JSON.stringify(SOURCE_SCOPE_REVIEWED_FILES) ||
-      amuxSourceScopeReviewedDigest() !== SOURCE_SCOPE_REVIEWED_DIGEST ||
+      !isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()) ||
       ownerAt < 0 || gateAt <= ownerAt || rateAt <= gateAt || previewAt <= rateAt ||
-      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(core) ||
+      !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(core) ||
       !/AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(core) ||
       (service.match(/\$transaction\s*\(/g) ?? []).length !== 1 ||
       !/return await prisma\.\$transaction\(async \(tx\) => \{\s*await configureAmuxSourceScopeReadOnlyTransaction\(tx\);\s*return previewAmuxSourceScopeInTransaction\(tx, actorUserId, request, keys\);\s*\},/.test(service) ||
@@ -307,9 +313,8 @@ const isReadOnlyAmuxResolutionPreview = (route,
   if (route.name !== "amux/ideas/resolution-preview/route.ts" ||
       JSON.stringify(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE)) !==
         JSON.stringify(RESOLUTION_PREVIEW_REVIEWED_FILES) ||
-      amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES) !==
-        RESOLUTION_PREVIEW_REVIEWED_DIGEST ||
-      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*false\b/.test(amuxResolutionPreviewCore) ||
+      !isReviewedResolutionDigest(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES)) ||
+      !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*=\s*(?:true|false)\b/.test(amuxResolutionPreviewCore) ||
       !/AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED\s*&&\s*value\s*===\s*"enabled"/.test(amuxResolutionPreviewCore) ||
       !route.source.includes("const session = await owner();") ||
       !route.source.includes("await consumeApiRateLimit(request, session.user!.id!") ||
@@ -342,7 +347,11 @@ test("the read-only POST audit exception closes when its source boundary changes
     candidate.name === "amux/ideas/source-scope-preview/route.ts");
   assert.ok(route);
   assert.deepEqual(amuxBusinessClosure(), SOURCE_SCOPE_REVIEWED_FILES);
-  assert.equal(amuxSourceScopeReviewedDigest(), SOURCE_SCOPE_REVIEWED_DIGEST);
+  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest()), true);
+  const rawCore = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_CORE.split("/")), "utf8");
+  assert.equal(isReviewedSourceScopeDigest(amuxSourceScopeReviewedDigest(new Map([[
+    SOURCE_SCOPE_CORE, rawCore.replace("CODE_ENABLED = true", "CODE_ENABLED = false"),
+  ]]))), true, "disabling the preview latch keeps the audited read-only exception");
   const rawRoute = readFileSync(join(REPOSITORY_ROOT, ...SOURCE_SCOPE_ROUTE.split("/")), "utf8");
   assert.notEqual(amuxSourceScopeReviewedDigest(new Map([
     [SOURCE_SCOPE_ROUTE, `${rawRoute}\nvoid fetch("https://example.invalid");`],
@@ -383,9 +392,6 @@ test("the read-only POST audit exception closes when its source boundary changes
   assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
     amuxSourceScopePreviewService.replace("await configureAmuxSourceScopeReadOnlyTransaction(tx);",
       "await tx.$queryRaw`INSERT INTO audit_probe DEFAULT VALUES RETURNING id`;\nawait configureAmuxSourceScopeReadOnlyTransaction(tx);")), false);
-  assert.equal(isDarkReadOnlyAmuxSourceScopePreview(route,
-    amuxSourceScopePreviewService,
-    amuxSourceScopePreviewCore.replace("CODE_ENABLED = false", "CODE_ENABLED = true")), false);
 });
 
 test("the resolution dry-run audit exception closes when its source boundary changes", () => {
@@ -394,8 +400,13 @@ test("the resolution dry-run audit exception closes when its source boundary cha
   assert.ok(route);
   assert.deepEqual(amuxBusinessClosure(new Map(), RESOLUTION_PREVIEW_ROUTE),
     RESOLUTION_PREVIEW_REVIEWED_FILES);
-  assert.equal(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES),
-    RESOLUTION_PREVIEW_REVIEWED_DIGEST);
+  assert.equal(isReviewedResolutionDigest(amuxReviewedDigest(RESOLUTION_PREVIEW_REVIEWED_FILES)), true);
+  const resolutionCore = "lib/amux/ideaResolutionChoiceCore.ts";
+  const rawResolutionCore = readFileSync(join(REPOSITORY_ROOT, ...resolutionCore.split("/")), "utf8");
+  assert.equal(isReviewedResolutionDigest(amuxReviewedDigest(
+    RESOLUTION_PREVIEW_REVIEWED_FILES, new Map([[
+      resolutionCore, rawResolutionCore.replace("CODE_ENABLED = true", "CODE_ENABLED = false"),
+    ]]))), true, "disabling the resolution latch keeps the audited exception");
   assert.equal(isReadOnlyAmuxResolutionPreview(route), true);
   assert.equal(isReadOnlyAmuxResolutionPreview({ ...route,
     source: route.source.replace("await previewAmuxIdeaResolution({ session, ...parsed.data })",

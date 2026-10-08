@@ -30,12 +30,14 @@ test("submission parser accepts only a bounded exact v4 envelope", () => {
   assert.deepEqual(inspectAmuxIdeaSubmission("{").code, "schema_rejected");
 });
 
-test("new submission writer remains hard closed regardless of environment", () => {
-  assert.equal(AMUX_V4_IDEA_SUBMISSION_CODE_LATCH, false);
+test("v4 submission and read-back require their separate environment gates", () => {
+  assert.equal(AMUX_V4_IDEA_SUBMISSION_CODE_LATCH, true);
   assert.equal(ideaSubmissionWritePermitted(undefined), false);
-  assert.equal(ideaSubmissionWritePermitted("enabled"), false);
-  assert.equal(AMUX_V4_IDEA_READBACK_CODE_LATCH, false);
-  assert.equal(ideaSubmissionReadBackPermitted("enabled"), false);
+  assert.equal(ideaSubmissionWritePermitted("disabled"), false);
+  assert.equal(ideaSubmissionWritePermitted("enabled"), true);
+  assert.equal(AMUX_V4_IDEA_READBACK_CODE_LATCH, true);
+  assert.equal(ideaSubmissionReadBackPermitted(undefined), false);
+  assert.equal(ideaSubmissionReadBackPermitted("enabled"), true);
 });
 
 test("only a request-id unique conflict is labeled already seen", () => {
