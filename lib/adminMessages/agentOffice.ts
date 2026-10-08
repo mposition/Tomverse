@@ -47,6 +47,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       lounge: "AI lounge",
       amux: "AMUX execution room",
       amuxRecord: "Open the AMUX execution record",
+      review: "Independent review room",
       screen: "T2 DRAFT",
       entrance: "ENTRANCE",
     },
@@ -585,6 +586,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         publisherNever: "no publisher finish recorded",
         readAt: (time: string) => `read ${time}`,
       },
+      review: {
+        states: { reviewing: "Reviewing", idle: "Idle", off: "Off", lost: "No report" },
+        unread: "Could not read the review server's report",
+        notReporting: "The review server has not reported yet",
+        unreadable: "The stored report cannot be read",
+        stale: (time: string) => `No report since ${time}`,
+        draining: "Draining for an update: nothing new starts",
+        summary: (pending: number, accept: number, reject: number, unknown: number) =>
+          `${pending} waiting · last 24h ${accept} accept · ${reject} reject · ${unknown} unknown`,
+        lastReport: (time: string) => `last report ${time}`,
+        load: (running: number, max: number) => `${running}/${max} running`,
+        readAt: (time: string) => `read ${time}`,
+      },
       amux: {
         states: {
           ready: "Ready",
@@ -781,6 +795,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       lounge: "AI 라운지",
       amux: "AMUX 실행실",
       amuxRecord: "AMUX 실행 기록 열기",
+      review: "독립 검토실",
       screen: "T2 초안",
       entrance: "ENTRANCE",
     },
@@ -1313,6 +1328,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         runnerNever: "실행기 완료 기록 없음",
         publisherFinish: (time: string) => `게시기 마지막 완료 ${time}`,
         publisherNever: "게시기 완료 기록 없음",
+        readAt: (time: string) => `읽은 시각 ${time}`,
+      },
+      review: {
+        states: { reviewing: "검토 중", idle: "대기", off: "꺼짐", lost: "보고 없음" },
+        unread: "검토 서버 보고를 읽지 못함",
+        notReporting: "검토 서버가 아직 보고하지 않음",
+        unreadable: "저장된 보고를 읽을 수 없음",
+        stale: (time: string) => `${time} 이후 보고 없음`,
+        draining: "업데이트를 위해 비우는 중: 새 검토를 시작하지 않음",
+        summary: (pending: number, accept: number, reject: number, unknown: number) =>
+          `대기 ${pending} · 최근 24시간 accept ${accept} · reject ${reject} · unknown ${unknown}`,
+        lastReport: (time: string) => `마지막 보고 ${time}`,
+        load: (running: number, max: number) => `실행 ${running}/${max}`,
         readAt: (time: string) => `읽은 시각 ${time}`,
       },
       amux: {
