@@ -767,6 +767,8 @@ test("owner proof of non-execution releases a claimed hold as zero and fences la
     chunk.state, chunk.leaseGeneration, idea.state],
   ["owner_released_unstarted", BigInt(0), "owner_resolved",
     "awaiting_preview", 0, "submitted"]);
+  assert.deepEqual(await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys),
+    { state: "needs_new_preview" });
   assert.equal(after.reservedMicroUsd,
     before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
   assert.equal(after.spentMicroUsd, before.spentMicroUsd);
@@ -794,12 +796,17 @@ test("owner proof of non-execution releases a claimed hold as zero and fences la
     "resolution returns only to the owner preview boundary, never blind dispatch");
 });
 
-test("insufficient evidence consumes the full unknown-outcome reservation", async () => {
+test("a usage-unverified receipt forbids zero release and consumes the full reservation", async () => {
   const { claim, previewId, holdId } = await syntheticFirstClaim();
+  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "reject", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The synthetic idea was reviewed.", remainingScope: null,
+    units: [] });
   await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
     requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
-    leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
-    inputTokens: null, outputTokens: null, keys,
+    leaseGeneration: 1, outcome: "verified_success", rawModelOutput,
+    inputTokens: 1_000_001, outputTokens: 0, keys,
   }));
   const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
     where: { namespace_monthStart: { namespace, monthStart } },
@@ -808,11 +815,30 @@ test("insufficient evidence consumes the full unknown-outcome reservation", asyn
     readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
   assert.equal(readback.holdStatus, "outcome_unknown");
   assert.ok(readback.resultRequestId);
+  assert.deepEqual([readback.resultOutcome, readback.resultEffectiveOutcome,
+    readback.resultFailureReason, readback.zeroReleaseEligible],
+  ["verified_success", "outcome_unknown", "usage_unverified", false]);
+  const evidenceDigest = randomBytes(32).toString("hex");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "not_started_proven" })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "not_resolvable");
+  const afterRefusal = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  assert.deepEqual([afterRefusal.reservedMicroUsd, afterRefusal.spentMicroUsd],
+    [before.reservedMicroUsd, before.spentMicroUsd]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.analysis_claim.owner_resolved", targetId: holdId,
+  } }), 0);
   const closed = await prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
       resolutionRequestId: randomUUID(), holdId,
       readbackDigest: readback.readbackDigest,
-      evidenceDigest: randomBytes(32).toString("hex"),
+      evidenceDigest,
       disposition: "evidence_insufficient" }));
   assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
     [readback.reservedMicroUsd, "0"]);

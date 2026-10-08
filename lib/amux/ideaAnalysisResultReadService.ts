@@ -68,6 +68,8 @@ export async function readAmuxFirstIdeaAnalysisResult(
         });
         if (preview?.ideaId === ideaId && preview.attempt === chunk.attempt &&
             preview.state === "provider_failed") return { state: "provider_failed" };
+        if (preview?.ideaId === ideaId && preview.attempt === chunk.attempt &&
+            preview.state === "owner_resolved") return { state: "needs_new_preview" };
       }
       return { state: "pending" };
     }
@@ -78,7 +80,18 @@ export async function readAmuxFirstIdeaAnalysisResult(
     const chunk = await tx.amuxIdeaAnalysisChunk.findUnique({
       where: { ideaId_chunkIndex: { ideaId, chunkIndex } },
     });
-    if (!chunk || chunk.state !== "draft_ready") return { state: "pending" };
+    if (!chunk) return { state: "pending" };
+    if (chunk.state === "awaiting_preview" && chunk.currentPreviewId) {
+      const preview = await tx.amuxIdeaTransferPreview.findUnique({
+        where: { id: chunk.currentPreviewId },
+        select: { ideaId: true, chunkIndex: true, attempt: true, state: true },
+      });
+      if (preview?.ideaId === ideaId && preview.chunkIndex === chunkIndex &&
+          preview.attempt === chunk.attempt && preview.state === "owner_resolved") {
+        return { state: "needs_new_preview" };
+      }
+    }
+    if (chunk.state !== "draft_ready") return { state: "pending" };
     const partial = chunk.coverageStatus === "more" &&
       chunk.continuationKind === "output";
     const needsOwnerInput = chunk.coverageStatus === "needs_owner_input" &&

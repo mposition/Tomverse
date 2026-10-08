@@ -96,12 +96,19 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
   }
   const result = results[0] ?? null;
   const resultData = result && record(result.metadata);
+  const resultOutcome = resultData?.outcome;
+  const expectedFailureReason = resultOutcome === "outcome_unknown"
+    ? "invocation_unverified" : "usage_unverified";
   if (result && (!result.entryHash || auditRowActorKind(result) !== "system" ||
       !resultData || typeof resultData.requestId !== "string" ||
       !ID.test(resultData.requestId) || typeof resultData.resultDigest !== "string" ||
       !DIGEST.test(resultData.resultDigest) || resultData.ideaId !== idea.id ||
       resultData.holdId !== hold.id || resultData.leaseGeneration !== 1 ||
-      resultData.state !== "outcome_unknown")) {
+      !["verified_success", "invocation_failed", "outcome_unknown"].includes(
+        String(resultOutcome)) || resultData.effectiveOutcome !== "outcome_unknown" ||
+      resultData.failureReason !== expectedFailureReason ||
+      resultData.state !== "outcome_unknown" ||
+      resultData.retryAutomatically !== false)) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
   }
   return {
@@ -113,6 +120,12 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
     payloadDigest: preview.payloadDigest,
     resultRequestId: resultData?.requestId as string | undefined ?? null,
     resultDigest: resultData?.resultDigest as string | undefined ?? null,
+    resultOutcome: resultOutcome as AmuxIdeaAnalysisClaimReadback["resultOutcome"] ?? null,
+    resultEffectiveOutcome: resultData?.effectiveOutcome as
+      AmuxIdeaAnalysisClaimReadback["resultEffectiveOutcome"] ?? null,
+    resultFailureReason: resultData?.failureReason as
+      AmuxIdeaAnalysisClaimReadback["resultFailureReason"] ?? null,
+    zeroReleaseEligible: result === null,
   };
 }
 
@@ -249,6 +262,10 @@ export async function commitAmuxIdeaAnalysisClaimResolution(
   if (amuxIdeaAnalysisClaimReadbackDigest(snapshot) !== input.readbackDigest) {
     throw new AmuxIdeaAnalysisClaimResolutionError("conflict");
   }
+  if (input.disposition === "not_started_proven" &&
+      !snapshot.zeroReleaseEligible) {
+    throw new AmuxIdeaAnalysisClaimResolutionError("not_resolvable");
+  }
   const hold = await tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({
     where: { id: input.holdId },
   });
@@ -273,6 +290,10 @@ export async function commitAmuxIdeaAnalysisClaimResolution(
       ideaId: snapshot.ideaId, chunkIndex: snapshot.chunkIndex,
       claimRequestId: snapshot.claimRequestId,
       resultRequestId: snapshot.resultRequestId,
+      resultOutcome: snapshot.resultOutcome,
+      resultEffectiveOutcome: snapshot.resultEffectiveOutcome,
+      resultFailureReason: snapshot.resultFailureReason,
+      zeroReleaseEligible: snapshot.zeroReleaseEligible,
       reservedMicroUsd: snapshot.reservedMicroUsd,
       settledMicroUsd: settled.toString(), releasedMicroUsd: released.toString(),
       retryAutomatically: false, userCreditLedgerTouched: false },

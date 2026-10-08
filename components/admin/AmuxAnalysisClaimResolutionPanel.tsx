@@ -9,13 +9,19 @@ import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from
   "@/lib/adminMessages/amuxAnalysisBudget";
+import { isAmuxClaimResolutionWriteOutcomeUnknown } from
+  "@/lib/amux/ideaAnalysisClaimResolutionUiCore";
 
 type Disposition = "not_started_proven" | "evidence_insufficient";
 type Readback = { holdId: string; previewId: string; ideaId: string;
   chunkIndex: number; leaseGeneration: number; reservedMicroUsd: string;
   holdStatus: "in_flight" | "outcome_unknown"; claimRequestId: string;
   payloadDigest: string; resultRequestId: string | null;
-  resultDigest: string | null; readbackDigest: string };
+  resultDigest: string | null;
+  resultOutcome: "verified_success" | "invocation_failed" | "outcome_unknown" | null;
+  resultEffectiveOutcome: "outcome_unknown" | null;
+  resultFailureReason: "usage_unverified" | "invocation_unverified" | null;
+  zeroReleaseEligible: boolean; readbackDigest: string };
 
 function parseReadback(value: unknown): Readback | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -29,7 +35,14 @@ function parseReadback(value: unknown): Readback | null {
   return strings.every((key) => typeof data[key] === "string") &&
     Number.isSafeInteger(data.chunkIndex) && data.leaseGeneration === 1 &&
     (data.resultRequestId === null || typeof data.resultRequestId === "string") &&
-    (data.resultDigest === null || typeof data.resultDigest === "string")
+    (data.resultDigest === null || typeof data.resultDigest === "string") &&
+    (data.resultOutcome === null || ["verified_success", "invocation_failed",
+      "outcome_unknown"].includes(String(data.resultOutcome))) &&
+    (data.resultEffectiveOutcome === null ||
+      data.resultEffectiveOutcome === "outcome_unknown") &&
+    (data.resultFailureReason === null || ["usage_unverified",
+      "invocation_unverified"].includes(String(data.resultFailureReason))) &&
+    typeof data.zeroReleaseEligible === "boolean"
     ? data as Readback : null;
 }
 
@@ -59,6 +72,9 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
       const parsed = parseReadback(await response.json());
       if (!parsed) throw new Error("invalid_readback");
       setReadback(parsed);
+      if (!parsed.zeroReleaseEligible) {
+        setDisposition((current) => current === "not_started_proven" ? null : current);
+      }
     } catch {
       setFailure({ message: m.readFailed, tone: "error",
         requiresReauthentication: false, approvalId: null });
@@ -79,7 +95,11 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
           readbackDigest: readback.readbackDigest, evidenceDigest, disposition }),
       });
       if (!response.ok) {
-        if (response.status >= 500) { setUnknown(true); return; }
+        const errorBody = await response.clone().json().catch(() => null) as
+          { error?: unknown } | null;
+        if (isAmuxClaimResolutionWriteOutcomeUnknown(response.status, errorBody)) {
+          setUnknown(true); return;
+        }
         setFailure(await readAdminApiFailure(response, { fallback: m.writeFailed, locale }));
         return;
       }
@@ -133,6 +153,10 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
       <div><dt className="inline font-semibold">{m.reservation}: </dt><dd className="inline font-mono">{readback.reservedMicroUsd}</dd></div>
       {readback.resultRequestId ? <div><dt className="inline font-semibold">{m.result}: </dt><dd className="inline font-mono break-all">{readback.resultRequestId}</dd></div> : null}
       {readback.resultDigest ? <div><dt className="inline font-semibold">{m.resultDigest}: </dt><dd className="inline font-mono break-all">{readback.resultDigest}</dd></div> : null}
+      {readback.resultOutcome ? <div><dt className="inline font-semibold">{m.resultOutcome}: </dt><dd className="inline font-mono">{readback.resultOutcome}</dd></div> : null}
+      {readback.resultEffectiveOutcome ? <div><dt className="inline font-semibold">{m.effectiveOutcome}: </dt><dd className="inline font-mono">{readback.resultEffectiveOutcome}</dd></div> : null}
+      {readback.resultFailureReason ? <div><dt className="inline font-semibold">{m.failureReason}: </dt><dd className="inline font-mono">{readback.resultFailureReason}</dd></div> : null}
+      <div><dt className="inline font-semibold">{m.zeroRelease}: </dt><dd className="inline">{readback.zeroReleaseEligible ? m.eligible : m.ineligible}</dd></div>
       <div><dt className="inline font-semibold">{m.readback}: </dt><dd className="inline font-mono break-all">{readback.readbackDigest}</dd></div>
     </dl> : null}
     {readback && !unknown ? <>
@@ -141,8 +165,10 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
           spellCheck={false} placeholder={m.digestPlaceholder}
           className="mt-1 min-h-11 w-full rounded-lg border border-zinc-500 bg-transparent px-3 font-mono text-xs" /></label>
       <label className="flex gap-2"><input type="radio" name={`resolution-${holdId}`}
+        disabled={!readback.zeroReleaseEligible}
         checked={disposition === "not_started_proven"}
         onChange={() => setDisposition("not_started_proven")} />{m.notStarted}</label>
+      {!readback.zeroReleaseEligible ? <p role="status">{m.notStartedIneligible}</p> : null}
       <label className="flex gap-2"><input type="radio" name={`resolution-${holdId}`}
         checked={disposition === "evidence_insufficient"}
         onChange={() => setDisposition("evidence_insufficient")} />{m.insufficient}</label>
