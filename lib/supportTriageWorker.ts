@@ -245,6 +245,13 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
       SELECT c."id", c."feedbackId", c."inputDigest"
         FROM unnest(${newIds}::text[], ${feedbackIds}::text[], ${digests}::text[])
              AS c("id", "feedbackId", "inputDigest")
+       -- A current input already live or decided (claimed, ready, accepted,
+       -- rejected, expired, failed) is not proposed again; only one whose
+       -- rows are all superseded or invalidated is.
+       WHERE NOT EXISTS (
+         SELECT 1 FROM "SupportTriageSuggestion" x
+          WHERE x."feedbackId" = c."feedbackId" AND x."inputDigest" = c."inputDigest"
+            AND x."state" = ANY(${[...SETTLING_STATES]}::text[]))
       ON CONFLICT ("feedbackId", "inputDigest") WHERE "state" IN ('pending', 'claimed', 'ready') DO NOTHING`;
     const token = randomUUID();
     const claimed = await tx.$queryRaw<{ id: string; feedbackId: string; inputDigest: string }[]>`

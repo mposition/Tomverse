@@ -8969,8 +8969,8 @@ model OpsObserverTransition {
   @@id([genesisId, generation])
 }
 
-/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). One
-/// row per (report, input digest): a proposed lane and keyword-flag codes,
+/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). At most one
+/// open row per (report, input digest); terminal rows may repeat it: a proposed lane and keyword-flag codes,
 /// never the text of the report. Migration
 /// 20261004010000_support_triage_suggestion holds the state machine, the
 /// lease and the display stamp.

@@ -220,3 +220,24 @@ test("a result for an input changed after the claim is not written; the next pas
   const live = (await suggestions()).filter((s) => s.state === "ready");
   assert.deepEqual(live.map((s) => s.lane), ["trust_safety_human"]);
 });
+
+test("an input that comes back after it was decided or failed is not proposed again", async () => {
+  await report("a");
+  await runSupportTriageWorker();
+  // A person accepts the proposal for input A.
+  await prisma.supportTriageSuggestion.updateMany({ where: { feedbackId: "fb-w-a" }, data: { state: "accepted" } });
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "feature" } });
+  await runSupportTriageWorker();
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "bug" } });
+  const result = await runSupportTriageWorker();
+  // B's proposal is superseded; A is already decided, so nothing new opens.
+  assert.equal(result.superseded, 1);
+  assert.equal(result.ready, 0);
+  assert.deepEqual(
+    (await suggestions()).map((s) => [s.state, s.lane]),
+    [
+      ["accepted", "bug_unverified"],
+      ["superseded", "feature_request"],
+    ]
+  );
+});

@@ -1,10 +1,8 @@
 -- Support-triage: one open suggestion per (report, input), not one row ever.
 --
--- baseline-check: present-if-relation "SupportTriageSuggestion_open_input_key"
---
--- schema.prisma cannot express a partial index, so the deploy guard cannot tell
--- from `migrate diff` whether this one is in place; the line above names the
--- relation it asks about (scripts/baseline-presence-core.mjs).
+-- schema.prisma cannot express the partial index, but this migration also
+-- drops a unique index and creates a plain one that `migrate diff` does see,
+-- so the deploy guard needs no presence declaration here.
 --
 -- The unique (feedbackId, inputDigest) covered terminal rows too. When a
 -- report's input returned to an earlier value (A, then B, then A again), A's
