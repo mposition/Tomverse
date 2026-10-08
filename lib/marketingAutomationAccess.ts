@@ -515,9 +515,6 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * admission decisions are unchanged. The same release adds the
  * agent-digest-retention system actor to lib/adminAuditSystemActors.ts, a
  * watched file; no marketing actor changes.
- */
-export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "3270010d1d8818cdcdce1b605bbddc87921932c62b49069c19855a494311db4c";
  * 2026-10-02: the product-research agent's observation table is added
  * (docs/policy/product-research-agent.md §4) -- one new model with its own
  * triggers. Not a marketing model and not a webhook input; the digest moves
@@ -527,7 +524,7 @@ export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
  * state the file is committed in.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "5218bbda50e63a75bcb73a5766dce4bd0b77357037f605d1b8be6fbacdc1d526";
+  "557ba98e30eb90b28d8b6e42ed84ce2f5f3772727eace2e962e99901af8b40df";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

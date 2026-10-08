@@ -968,6 +968,8 @@ export async function cleanupExpiredData() {
       if (result.purged < AGENT_DIGEST_RETENTION_BATCH) break;
     }
     return purged;
+  });
+
   // The product-research agent's two app-side duties
   // (docs/policy/product-research-agent.md §4). Separate steps because they
   // answer different questions and one must not hide the other: a sweep that

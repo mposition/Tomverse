@@ -201,7 +201,8 @@ mock.module(mod("lib/agentDigestStore.ts"), {
 mock.module(mod("lib/productResearchObservationStore.ts"), {
   namedExports: {
     sweepProductResearchObservations: async () => ({ removed: 31 }),
-    latestProductResearchSuccess: async () => new Date("2026-10-02T21:30:00.000Z"),
+    // Keep the unrelated silence check inside its 26-hour window on every run.
+    latestProductResearchSuccess: async () => new Date(Date.now() - 60 * 60 * 1000),
     readProductResearchEnabledSince: async () => new Date("2026-09-01T00:00:00.000Z"),
   },
 });
