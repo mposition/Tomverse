@@ -75,7 +75,10 @@ for (const kind of SUPPORT_TRIAGE_SERVICE_KINDS) {
     ]);
     const prod = answering(200, { result: "ok" });
     await runSupportTriageService(kind, { ...envFor(kind), RAILWAY_ENVIRONMENT_NAME: "production" }, prod.post);
-    assert.ok(prod.calls[0].url.startsWith("https://tomverse.app/api/internal/support-triage/"));
+    assert.equal(
+      prod.calls[0].url,
+      `https://tomverse.app/api/internal/support-triage/${kind === "worker" ? "run" : "retention"}`
+    );
 
     for (const [status, result] of [[429, "daily_cap_exceeded"], [401, "unauthorized"], [500, "internal_error"], [503, "transaction_refused"]]) {
       assert.deepEqual(await runSupportTriageService(kind, envFor(kind), answering(status, { result }).post), {
