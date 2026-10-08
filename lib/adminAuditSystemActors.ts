@@ -113,6 +113,19 @@ export const AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS = [
   "amux-intake-retention",
   "amux-portfolio-scorer",
 ] as const;
+/**
+ * The product-research agent's actors
+ * (docs/policy/product-research-agent.md §5). Two actions and no more: a slot
+ * recorded, and rows removed once past the retention period. Neither is a
+ * person, so neither is approval evidence -- and this agent has nothing to
+ * approve, because it decides nothing.
+ */
+export const PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS = [
+  "product-research-observer",
+  "product-research-retention",
+] as const;
+export type ProductResearchSystemAuditActor =
+  (typeof PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS)[number];
 
 export const SYSTEM_AUDIT_ACTORS = [
   "marketing-publisher",
@@ -129,6 +142,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake",
   "qa-release-merge-lane",
   "agent-digest-retention",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS,
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 

@@ -194,6 +194,26 @@ mock.module(mod("lib/agentDigestStore.ts"), {
     purgeAgentDigestMeta: async () => ({ purged: 41 }),
   },
 });
+// The product-research agent's two app-side duties. Its store is mocked rather
+// than its Prisma model stubbed, because the model name appears only inside the
+// store and so the stub guard below cannot see it -- which is how this file
+// broke a third time.
+mock.module(mod("lib/productResearchObservationStore.ts"), {
+  namedExports: {
+    sweepProductResearchObservations: async () => ({ removed: 31 }),
+    // Keep the unrelated silence check inside its 26-hour window on every run.
+    latestProductResearchSuccess: async () => new Date(Date.now() - 60 * 60 * 1000),
+    readProductResearchEnabledSince: async () => new Date("2026-09-01T00:00:00.000Z"),
+  },
+});
+mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
+  namedExports: {
+    // On, so the silence step does its reads: off would make it report
+    // `disabled` and prove nothing about the step being wired in.
+    isProductResearchRouteEnabled: () => true,
+  },
+});
+
 // Every remaining collaborator returns a distinct number, so an assertion can
 // name which step produced which figure rather than matching on a shared 0.
 mock.module(mod("lib/creditLedger.ts"), {

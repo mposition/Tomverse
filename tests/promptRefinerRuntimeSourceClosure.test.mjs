@@ -392,12 +392,44 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-08, the AMUX-only release adds scoped budget, settlement, expiry,
 // unknown-outcome, auto-cancel, claim, result and retention audit actions.
 // Repin the source-position digest after assembling the release tree.
+//
+// 2026-10-08, the product-research selective release onto main: two audit
+// actor names are added to
+// `lib/adminAuditSystemActors.ts` as their own exported array
+// (docs/policy/product-research-agent.md §5), and one dated record is added to
+// `lib/marketingAutomationAccess.ts` above that file's accesses. Both files are
+// listed, so the file set stays 190.
+//
+// What the unchanged count and position-free digest establish -- both asserted
+// separately, just below -- is that the multiset of (path, access text) is the
+// same: no access was added, removed or rewritten. They do not say which nodes
+// moved, and no prose can determine the position-sensitive hash; that value is
+// a measurement, and the assertion below is what verifies it. What the record
+// is for is saying why a change of it is a reposition rather than a new access.
+//
+// Here the two listed files that moved are: `adminAuditSystemActors.ts`, where
+// the new array is declared above the file's one non-static element access (the
+// metadata read in `auditRowActorKind()`, which it does not rebind), and
+// `marketingAutomationAccess.ts`, where the record sits above that file's seven
+// (`env[name]` twice on one line, `right[index]`, `snapshot.envDigests[name]`,
+// `snapshot.appSettings[name]`, `result[feature]` twice). The
+// `(typeof ...)[number]` in the new code is an indexed access TYPE and never
+// enters the inventory.
+//
+// The value below moved twice within this one change, because the second
+// fingerprint repin in `marketingAutomationAccess.ts` extended that record and
+// pushed its seven accesses down again. A commit that touches no listed file
+// can therefore still be the one that repins this, which is the sequencing to
+// watch. What moves the digest is anything that changes an inventory access's
+// line or column -- a declaration above one, as here, or a comment above one.
+// Text added *below* every access in a file moves nothing. The check belongs
+// at the end of a change, not the start.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "50971f87de6df2f1bb080a3e4d1e6342",
-  "b997d6c267c31546cc93517587957cd6",
+  "a1cf5224d93dcd87156cb0c5bbdd400f",
+  "0bb8b09336c509f33a8e512b339f4622",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

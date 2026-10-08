@@ -117,6 +117,19 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The services' image and their operating runbook (§8, §12).
   "docker/**",
   "docs/ops/engineering-agent*",
+  // The product-research agent's own gates, state and runbook
+  // (docs/policy/product-research-agent.md). Its judgement modules decide what
+  // may be stored and how a phase window is counted, so no agent may change
+  // them -- the same reason the engineering agent cannot change its own.
+  "lib/productResearch*",
+  "lib/adminMessages/productResearch*",
+  "docs/ops/product-research-agent*",
+  "tests/productResearch*",
+  // The two backlog tests this agent owns, named one by one:
+  // tests/issueBacklog.test.mjs is the existing report's own product test, and
+  // a glob would take it too.
+  "tests/issueBacklogShaMode.test.mjs",
+  "tests/issueBacklogPartialClone.test.mjs",
   "tests/agent*",
   "tests/engineeringAgent*",
   "tests/support/engineeringAgentV22PublicationCheckHarness.mjs",

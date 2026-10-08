@@ -245,6 +245,12 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/prompt-refiner-observability.md §12",
   },
   {
+    table: "ProductResearchObservation",
+    delegate: "productResearchObservation",
+    writers: ["lib/productResearchObservationStore.ts"],
+    contract: "docs/policy/product-research-agent.md §4",
+  },
+  {
     table: "EngineeringAgentRun",
     delegate: "engineeringAgentRun",
     writers: ["lib/engineeringAgentStore.ts"],
@@ -892,6 +898,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "prisma/migrations/20261002150000_product_research_observation/migration.sql",
+    table: "ProductResearchObservation",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "The migration creates ProductResearchObservation, its CHECK constraints and its one guard trigger -- insert-only, inside the slot window, deletable only past the retention period; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",

@@ -62,6 +62,16 @@ import {
 import { deleteTomverseAccount } from "@/lib/accountDeletion";
 import { createMaintenanceStepRunner } from "@/lib/maintenanceStepsCore";
 import { AGENT_DIGEST_RETENTION_BATCH, expireAgentDigestBodies, purgeAgentDigestMeta } from "@/lib/agentDigestStore";
+import {
+  OBSERVATION_SILENCE_HOURS,
+  observationSilenceVerdict,
+} from "@/lib/productResearchObservationCore.mjs";
+import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
+import {
+  latestProductResearchSuccess,
+  readProductResearchEnabledSince,
+  sweepProductResearchObservations,
+} from "@/lib/productResearchObservationStore";
 import { purgeExpiredRenderSnapshots } from "@/lib/emailSnapshotRetention";
 import { retentionCutoff } from "@/lib/retentionPolicyCore";
 import {
@@ -960,6 +970,57 @@ export async function cleanupExpiredData() {
     return purged;
   });
 
+  // The product-research agent's two app-side duties
+  // (docs/policy/product-research-agent.md §4). Separate steps because they
+  // answer different questions and one must not hide the other: a sweep that
+  // throws would otherwise take the silence check with it, and a silent agent
+  // is exactly the state nobody notices.
+  const productResearchObservations = await step(
+    "product_research_observations",
+    () => sweepProductResearchObservations(now),
+  );
+
+  const productResearchSilence = await step("product_research_silence", async () => {
+    const enabled = isProductResearchRouteEnabled();
+    // Read only when the switch is on: a dark feature has no last success and
+    // asking the database every fifteen minutes to confirm that is noise.
+    const lastSuccessAt = enabled ? await latestProductResearchSuccess() : null;
+    // The anchor outlives the rows, which is the whole reason it exists: an
+    // agent that has never succeeded has no last success to go stale, and one
+    // silent for longer than the retention period has no rows left. Keyed on
+    // the last success alone the alarm would stop exactly when the silence got
+    // long enough to matter. This read writes the anchor the first time the
+    // switch is seen on.
+    const enabledSince = enabled ? await readProductResearchEnabledSince(now) : null;
+    const verdict = observationSilenceVerdict({
+      enabled,
+      lastSuccessAt: lastSuccessAt?.getTime() ?? null,
+      enabledSince: enabledSince?.getTime() ?? null,
+      now: now.getTime(),
+    });
+    if (verdict.state === "silent") {
+      // Railway's cron skips the next run while one is still going and never
+      // ends the one that hung, so one hung run stops every run after it. With
+      // no alarm the table simply stops growing, which looks settled.
+      await reportOperationalIncident({
+        code: "PRODUCT_RESEARCH_OBSERVATION_SILENT",
+        title: "No product-research observation has been recorded recently",
+        severity: "warning",
+        context: {
+          component: "product-research-agent",
+          silenceHours: OBSERVATION_SILENCE_HOURS,
+          sinceHours: Math.round(verdict.sinceHours ?? 0),
+          // Which reference point the hours were counted from: a never-working
+          // agent and a stalled one are different faults with the same symptom.
+          measuredFrom: verdict.measuredFrom,
+          lastSuccessAt: lastSuccessAt?.toISOString() ?? null,
+          enabledSince: enabledSince?.toISOString() ?? null,
+        },
+      });
+    }
+    return verdict;
+  });
+
   // `null` reads as "this step did not report", which is what a step that threw
   // did. It is deliberately distinct from the `0` of a step that ran and found
   // nothing, and the callers that sum these numbers skip it rather than
@@ -1020,6 +1081,8 @@ export async function cleanupExpiredData() {
     scheduledAccountsDeleted,
     agentDigestBodiesExpired,
     agentDigestMetaPurged,
+    productResearchObservations: productResearchObservations?.removed ?? null,
+    productResearchSilence: productResearchSilence?.state ?? null,
     failedSteps: failures,
   };
 }

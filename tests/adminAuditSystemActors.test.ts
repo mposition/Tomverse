@@ -82,6 +82,12 @@ test("the system actor list is closed and changes only by review", () => {
     // The shared AgentDigestItem body expiry and meta purge, for every agent
     // (docs/policy/qa-release-agent.md section 4).
     "agent-digest-retention",
+    // The product-research agent's two actions and no more
+    // (docs/policy/product-research-agent.md §5): a slot recorded, and rows
+    // removed once past the retention period. Neither is a person, and this
+    // agent has nothing to approve because it decides nothing.
+    "product-research-observer",
+    "product-research-retention",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

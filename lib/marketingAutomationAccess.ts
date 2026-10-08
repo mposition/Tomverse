@@ -520,9 +520,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * auto-cancel, claim, result, retention and A09 add scoped audit actions.
  * The webhook receiver's behavior is unchanged; repin this closure digest
  * after assembling the AMUX-only release tree.
+ *
+ * 2026-10-08: the product-research selective release adds the observation table
+ * (docs/policy/product-research-agent.md §4) -- one new model with its own
+ * triggers. Not a marketing model and not a webhook input; the digest moves
+ * because the whole Prisma schema is deliberately watched. Descriptor and
+ * admission decisions are unchanged. The value below is computed with that
+ * model's columns aligned the way `prisma format` aligns them, which is the
+ * state the file is committed in.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4a1fe4429502bd92924a6c9273b59e82955e5a3d08d87a51c1ef6e342fd451ac";
+  "18efce8aa0c113e07187d9b6f0497500374c07f06cdd80adfc0f1d71f9bd4e6f";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
