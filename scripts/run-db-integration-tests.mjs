@@ -321,6 +321,13 @@ run(
     // insert and at COMMIT, one terminal result idempotent on its pair, each
     // event audited by the router or its instance, READ COMMITTED only.
     "tests/integration/amux-decision-maker-request.db.test.ts",
+    // AMUX Decision Maker body store (docs/policy/amux-decision-maker.md
+    // §10): the five fields within their caps, each bound to its own
+    // transaction's audit and its request's registered key period, the
+    // retention set at the close, holds, the expiry purge and the privacy
+    // erase, the key destroyed only once nothing of its period remains, and
+    // all of it allowed under the kill switch.
+    "tests/integration/amux-decision-maker-body.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

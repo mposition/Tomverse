@@ -41,26 +41,41 @@ import { writeDecisionMakerLatchAudit } from "@/lib/amux/decisionMakerSwitchSyst
 type SwitchReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 /**
+ * The switch state from the newest event of each scope, in one statement, for
+ * a writer that goes on to write in the same transaction. A row the mapping
+ * does not accept is the unreadable state (every field null), as below. A
+ * statement that fails is not caught: in PostgreSQL it has aborted the
+ * transaction, so no later statement of the caller could run, and the caller
+ * must learn that the read failed rather than receive a state it would go on
+ * to act on (the S1c review minor, 2026-10-08).
+ */
+export async function readDecisionMakerSwitchesOrThrow(
+  client: SwitchReader,
+): Promise<DecisionMakerSwitchState> {
+  const rows = await client.$queryRaw<Array<{ scope: string; value: string }>>`
+    SELECT DISTINCT ON ("scope") "scope", "value"
+    FROM "AmuxDecisionMakerSwitchEvent"
+    ORDER BY "scope", "sequence" DESC
+  `;
+  return decisionMakerSwitchStateFromRows(rows);
+}
+
+/**
  * The switch state from the newest event of each scope, in one statement.
  * Any error, and any row the mapping does not accept, is the unreadable state
  * (every field null), which `routeDmQuestion()` turns into
  * `settings_unreadable` and the operator. Inside a transaction an error has
- * also aborted that transaction, so the caller cannot go on to write anything.
+ * also aborted that transaction, so the caller cannot go on to write anything;
+ * a writer uses `readDecisionMakerSwitchesOrThrow()` instead.
  */
 export async function readDecisionMakerSwitches(
   client: SwitchReader,
 ): Promise<DecisionMakerSwitchState> {
-  let rows: unknown;
   try {
-    rows = await client.$queryRaw<Array<{ scope: string; value: string }>>`
-      SELECT DISTINCT ON ("scope") "scope", "value"
-      FROM "AmuxDecisionMakerSwitchEvent"
-      ORDER BY "scope", "sequence" DESC
-    `;
+    return await readDecisionMakerSwitchesOrThrow(client);
   } catch {
     return unreadableDecisionMakerSwitches();
   }
-  return decisionMakerSwitchStateFromRows(rows);
 }
 
 export class DecisionMakerSwitchWriteError extends Error {

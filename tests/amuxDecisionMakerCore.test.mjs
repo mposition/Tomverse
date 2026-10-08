@@ -256,3 +256,37 @@ test("DM output validation failures: schema, unknown option, secret", () => {
   assert.deepEqual(failure({ kind: "escalate", reason: key }), { outcome: "validation_failure", failure: "secret_detected" });
   assert.deepEqual(failure({ kind: "free_text", answer: "ok", rationale: key, irreversible: false }), { outcome: "validation_failure", failure: "secret_detected" });
 });
+
+// 2026-10-08, the S1d review: an option id is a short token, so the stored
+// proposal's chosen option cannot carry free text.
+test("an option id is a short token, and a card with another or a repeated one is not sent to a DM", async () => {
+  const { DM_OPTION_ID_PATTERN, isDmOptionId, dmCardOptionsWellFormed } = await import("../lib/amux/decisionMakerCore.ts");
+  assert.equal(String(DM_OPTION_ID_PATTERN), String(/^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/));
+  for (const id of ["a", "B", "opt-1", "option_2", "x".repeat(32)]) assert.equal(isDmOptionId(id), true, id);
+  for (const id of ["", "-a", "_a", "a b", "a.b", "x".repeat(33), "가", "a\n", 1]) assert.equal(isDmOptionId(id), false, String(id));
+  // No m flag: $ is the end of the string, not the place before a trailing line
+  // terminator, so no terminator gets in -- at the end, before it, or alone.
+  assert.equal(DM_OPTION_ID_PATTERN.flags, "");
+  for (const id of ["a\n", "a\r\n", "a\r", "a\u2028", "a\u2029", "\n", "x".repeat(32) + "\n", "x".repeat(31) + "\n", "a\nb"]) {
+    assert.equal(isDmOptionId(id), false, JSON.stringify(id));
+    assert.equal(dmCardOptionsWellFormed([{ id }]), false, JSON.stringify(id));
+    assert.deepEqual(validateDmOutput({ kind: "select", optionId: id, rationale: "r", irreversible: false }, [id]), {
+      outcome: "validation_failure",
+      failure: "schema",
+    });
+  }
+  assert.equal(dmCardOptionsWellFormed([{ id: "a" }, { id: "b" }]), true);
+  assert.equal(dmCardOptionsWellFormed([{ id: "a" }, { id: "a" }]), false);
+  assert.equal(dmCardOptionsWellFormed([]), true);
+  for (const options of [
+    [{ id: "Use the model id only", label: "x" }],
+    [{ id: "a", label: "x" }, { id: "a", label: "y" }],
+  ]) {
+    assert.deepEqual(routeDmQuestion(input({ card: card({ options }) })).refusals, ["input_limit_exceeded"]);
+  }
+  // The DM's select names a token too; prose there is a schema failure.
+  assert.deepEqual(validateDmOutput({ kind: "select", optionId: "Use the model id only", rationale: "r", irreversible: false }, ["a"]), {
+    outcome: "validation_failure",
+    failure: "schema",
+  });
+});

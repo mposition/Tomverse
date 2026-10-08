@@ -57,6 +57,7 @@ import {
 import {
   DecisionMakerRequestWriteError,
   assignDecisionMakerRequest,
+  countOpenDecisionMakerRequestsCreatedBetween,
   discardDecisionMakerAssignment,
   lookupDecisionMakerResult,
   readDecisionMakerRequestState,
@@ -69,6 +70,7 @@ import {
   submitDecisionMakerResult,
 } from "../lib/amux/decisionMakerRequestStore.ts";
 import { DM_INSTANCE_SCOPES, DM_SWITCH_LATCH_ACTOR_FOR_INSTANCE } from "../lib/amux/decisionMakerSwitchCore.ts";
+import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "../lib/amux/decisionMakerBodyCore.ts";
 
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), "utf8");
@@ -1030,6 +1032,30 @@ const PERMISSIVE_SWITCHES = [
   { scope: "decision-maker-anthropic", value: "proposal" },
 ];
 
+/** The routing read's request columns when the card revision has no request. */
+const NO_REQUEST = Object.fromEntries(
+  [
+    "id", "cardId", "questionRevision", "askingWorkerId", "amuxSessionId", "amuxSessionAttempt", "askingProvider",
+    "optionSetDigest", "termListVersion", "classificationVersion", "scannerVersion", "route", "instance", "refusalCodes",
+    "createdAtEpochMs", "assignmentDeadlineAtEpochMs",
+  ].map((key) => [key, null]),
+);
+
+// The routing store keys the option set digest itself (stage S1d): a key for
+// the period of the clock it reads, and one more on each side.
+const ROUTING_KEY = Buffer.alloc(32, 5);
+const RING = new Map([
+  [dmKeyPeriodOf(NOW) - 1, Buffer.alloc(32, 4)],
+  [dmKeyPeriodOf(NOW), ROUTING_KEY],
+  [dmKeyPeriodOf(NOW) + 1, Buffer.alloc(32, 6)],
+]);
+/** A routing caller's binding: every value but the option set digest, which the store computes. */
+const routingBinding = (overrides = {}) => {
+  const value = binding(overrides);
+  delete value.optionSetDigest;
+  return value;
+};
+
 const recordingTx = ({
   state: row = stateRow(),
   existing = [],
@@ -1037,6 +1063,7 @@ const recordingTx = ({
   switches = PERMISSIVE_SWITCHES,
   failSwitchRead = false,
   throughput = { lastHour: 3n, lastDay: 7n },
+  createdAtMs = NOW,
 } = {}) => {
   const sent = [];
   const tx = {
@@ -1053,13 +1080,15 @@ const recordingTx = ({
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: BigInt(NOW + 5), resultDeadlineAtEpochMs: null }]);
       }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerRequest"')) {
-        return Promise.resolve([{ createdAtEpochMs: BigInt(NOW), assignmentDeadlineAtEpochMs: BigInt(NOW + DM_ASSIGNMENT_WINDOW_MS) }]);
+        return Promise.resolve([{ createdAtEpochMs: BigInt(createdAtMs), assignmentDeadlineAtEpochMs: BigInt(createdAtMs + DM_ASSIGNMENT_WINDOW_MS) }]);
       }
       if (sql.includes("CROSS JOIN LATERAL")) return Promise.resolve(row === null ? [] : [row]);
       if (sql.includes('SELECT DISTINCT ON ("scope")')) {
         return failSwitchRead ? Promise.reject(new Error("switch read failed")) : Promise.resolve(switches);
       }
-      if (sql.includes('WHERE "cardId" =')) return Promise.resolve(existing);
+      if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
+        return Promise.resolve([existing[0] ? { dbNowEpochMs: BigInt(NOW), ...existing[0] } : { ...NO_REQUEST, dbNowEpochMs: BigInt(NOW) }]);
+      }
       if (sql.includes("count(*) FILTER")) return Promise.resolve([throughput]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
@@ -1167,7 +1196,7 @@ for (const [label, key] of [
   test(`routing a question sends ${8 + extra} statements ${label} an integrity key (${7 + extra} without an instance), and an existing one 2`, async () => {
     await withIntegrityKey(key, async () => {
       const { tx, sent } = recordingTx();
-      const result = await recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard() });
+      const result = await recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard(), keyRing: RING });
       assert.equal(sent.length, 8 + extra);
       // The whole routing transaction, with the boundary's setup and fence, within §9's 12.
       assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
@@ -1175,7 +1204,9 @@ for (const [label, key] of [
       // The lock first, then the existing request, then the switches and the
       // throughput -- both read after the lock every switch change takes.
       assert.match(sent[0].sql, LOCK);
-      assert.match(sent[1].sql, /WHERE "cardId" = \$ AND "questionRevision" = \$/);
+      // The routing read carries the database clock, whose period keys the option set digest.
+      assert.match(sent[1].sql, /floor\(extract\(epoch FROM clock_timestamp\(\)\) \* 1000\)::bigint AS "dbNowEpochMs"/);
+      assert.match(sent[1].sql, /ON r\."cardId" = \$ AND r\."questionRevision" = \$/);
       assert.deepEqual(sent[1].values, ["card-41", 3]);
       assert.match(sent[2].sql, SWITCH_READ);
       assert.match(sent[3].sql, /count\(\*\) FILTER/);
@@ -1203,7 +1234,8 @@ for (const [label, key] of [
         "session:9",
         1,
         "claude",
-        DIGEST_A,
+        // The store's own keyed digest of the card's options, never the caller's.
+        dmOptionSetDigest(dmRequestDigestKey(ROUTING_KEY, result.requestId), routedCard().options),
         DM_POLICY_VERSION,
         "v1",
         "authority-manifest-1",
@@ -1227,8 +1259,9 @@ for (const [label, key] of [
       // A provider with no instance has no throughput to read.
       const unverified = recordingTx();
       const gemini = await recordDecisionMakerRequest(unverified.tx, {
-        binding: binding({ askingProvider: "gemini" }),
+        binding: routingBinding({ askingProvider: "gemini" }),
         card: routedCard(),
+        keyRing: RING,
       });
       assert.equal(unverified.sent.length, 7 + extra);
       assert.deepEqual(kindsOf(unverified.sent), ["execute", "query", "query", ...auditKinds, "query"]);
@@ -1247,7 +1280,7 @@ for (const [label, key] of [
           },
         ],
       });
-      const existing = await recordDecisionMakerRequest(again.tx, { binding: binding(), card: routedCard() });
+      const existing = await recordDecisionMakerRequest(again.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING });
       assert.equal(again.sent.length, 2);
       // The first request of a question revision stands (§9).
       assert.deepEqual(existing, {
@@ -1260,6 +1293,24 @@ for (const [label, key] of [
         createdAt: new Date(NOW - 1).toISOString(),
         assignmentDeadlineAt: new Date(NOW - 1 + DM_ASSIGNMENT_WINDOW_MS).toISOString(),
       });
+      // The same binding and the same options, recomputed under that request's own key.
+      const storedRow = {
+        id: REQUEST_ID,
+        ...binding({ optionSetDigest: dmOptionSetDigest(dmRequestDigestKey(ROUTING_KEY, REQUEST_ID), routedCard().options) }),
+        route: "dm_proposal",
+        instance: OPENAI,
+        refusalCodes: [],
+        createdAtEpochMs: BigInt(NOW - 1),
+        assignmentDeadlineAtEpochMs: BigInt(NOW - 1 + DM_ASSIGNMENT_WINDOW_MS),
+      };
+      const same = recordingTx({ existing: [storedRow] });
+      assert.equal((await recordDecisionMakerRequest(same.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })).sameBinding, true);
+      // Another label is another option set; without that period's key the set cannot be confirmed.
+      const otherOptions = routedCard({ options: [{ id: "a", label: "Model id only" }, { id: "b", label: "Locale only" }] });
+      const relabelled = recordingTx({ existing: [storedRow] });
+      assert.equal((await recordDecisionMakerRequest(relabelled.tx, { binding: routingBinding(), card: otherOptions, keyRing: RING })).sameBinding, false);
+      const keyless = recordingTx({ existing: [storedRow] });
+      assert.equal((await recordDecisionMakerRequest(keyless.tx, { binding: routingBinding(), card: routedCard(), keyRing: new Map() })).sameBinding, false);
     });
   });
 
@@ -1419,19 +1470,72 @@ for (const [label, key] of [
   });
 }
 
+test("routing without the key of its period writes nothing, and a routing that crosses a period is refused", async () => {
+  const missing = recordingTx();
+  await assert.rejects(
+    recordDecisionMakerRequest(missing.tx, { binding: routingBinding(), card: routedCard(), keyRing: new Map() }),
+    (error) => error instanceof DecisionMakerRequestWriteError && error.code === "digest_key_unavailable",
+  );
+  // The lock and the routing read, and nothing after them.
+  assert.deepEqual(kindsOf(missing.sent), ["execute", "query"]);
+
+  // The row's createdAt lands in the next period: its key would differ from the digest's.
+  const crossing = recordingTx({ createdAtMs: (dmKeyPeriodOf(NOW) + 1) * 30 * 24 * 60 * 60 * 1000 });
+  await assert.rejects(
+    recordDecisionMakerRequest(crossing.tx, { binding: routingBinding(), card: routedCard(), keyRing: RING }),
+    (error) => error instanceof DecisionMakerRequestWriteError && error.code === "key_period_changed",
+  );
+});
+
 test("the router decides on the switches and the throughput it reads after the lock", async () => {
   const routed = async (options, bindingOverrides = {}) => {
     const { tx } = recordingTx(options);
-    return recordDecisionMakerRequest(tx, { binding: binding(bindingOverrides), card: routedCard() });
+    return recordDecisionMakerRequest(tx, { binding: routingBinding(bindingOverrides), card: routedCard(), keyRing: RING });
   };
   assert.deepEqual((await routed({ switches: [{ scope: "kill_switch", value: "on" }, ...PERMISSIVE_SWITCHES.slice(1)] })).refusalCodes, [
     "kill_switch_on",
   ]);
   // No event for the instance reads as off.
   assert.deepEqual((await routed({ switches: [{ scope: "kill_switch", value: "off" }] })).refusalCodes, ["instance_off"]);
-  assert.deepEqual((await routed({ failSwitchRead: true })).refusalCodes, ["settings_unreadable"]);
+  // A row the switch store could not have written reads as unreadable and is
+  // recorded as such: the transaction is intact.
+  assert.deepEqual((await routed({ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] })).refusalCodes, [
+    "settings_unreadable",
+  ]);
   assert.deepEqual((await routed({ throughput: { lastHour: 20n, lastDay: 20n } })).refusalCodes, ["throughput_exceeded"]);
   assert.deepEqual((await routed({}, { askingProvider: "codex" })).instance, "decision-maker-anthropic");
+});
+
+// The S1c review minor (2026-10-08): a switch read that fails has aborted the
+// PostgreSQL transaction, so nothing after it can run. Each writer stops at
+// the failed read with a typed settings_unreadable and sends nothing more; the
+// caller's transaction rolls back with nothing written.
+test("a switch read that fails stops every writer at that read, with settings_unreadable", async () => {
+  const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+  const cases = [
+    ["routing", stateRow(), (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard(), keyRing: RING })],
+    [
+      "intent",
+      STATES.assigned,
+      (tx, lease) => recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: OPENAI, transmission, requireLeaseAt: lease }),
+    ],
+    ["result", STATES.transmitted, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease })],
+  ];
+  for (const [name, row, run] of cases) {
+    const { tx, sent } = recordingTx({ state: row, failSwitchRead: true });
+    const lease = leases();
+    await assert.rejects(
+      run(tx, lease.requireLeaseAt),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
+      name,
+    );
+    // Lock, the request (or the routed card's existing request), the failed switch read -- and nothing after it.
+    assert.equal(sent.length, 3, name);
+    assert.deepEqual(kindsOf(sent), ["execute", "query", "query"], name);
+    assert.match(sent[2].sql, SWITCH_READ, name);
+    assert.ok(!sent.some((statement) => statement.kind === "create"), name);
+    assert.deepEqual(lease.seen, [], name);
+  }
 });
 
 test("a refusal, an existing pair or an unknown request writes nothing, in 2 statements -- 3 after a switch read", async () => {
@@ -1482,7 +1586,6 @@ test("no transmission intent is recorded while the kill switch is on, the instan
     // No event for the instance is its default, off.
     [{ switches: [{ scope: "decision-maker-anthropic", value: "proposal" }] }, "instance_off"],
     [{ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] }, "settings_unreadable"],
-    [{ failSwitchRead: true }, "settings_unreadable"],
   ]) {
     const { tx, sent } = recordingTx({ state: STATES.assigned, ...options });
     const lease = leases();
@@ -1506,7 +1609,7 @@ test("a result writes nothing when the switch store is unreadable", async () => 
     const { tx, sent } = recordingTx({ state: STATES.transmitted, ...options });
     await assert.rejects(
       submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: () => assert.fail("no lease") }),
-      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "state_unreadable",
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
     );
     assert.equal(sent.length, 3);
     assert.ok(!sent.some((statement) => statement.kind === "create"));
@@ -1515,20 +1618,52 @@ test("a result writes nothing when the switch store is unreadable", async () => 
 
 test("the switches cannot be handed to the writers", () => {
   const store = read(STORE);
-  // The writers take no switch value, and read the switch store themselves.
+  // The writers take no switch value, and read the switch store themselves --
+  // through the reader that lets a failed read through, never the fail-closed
+  // one, whose unreadable state would let a writer go on in an aborted
+  // transaction.
   assert.doesNotMatch(store, /killSwitch:\s*(boolean|unknown)|switches:\s*\{/);
-  assert.equal((store.match(/await readDecisionMakerSwitches\(tx\)/g) ?? []).length, 3);
+  assert.equal((store.match(/await readSwitchesForWrite\(tx\)/g) ?? []).length, 3);
+  assert.equal((store.match(/await readDecisionMakerSwitchesOrThrow\(tx\)/g) ?? []).length, 1);
+  assert.doesNotMatch(store, /readDecisionMakerSwitches\(/);
+});
+
+test("the open requests of a key period are counted in one statement, from [from, to) by the database clock", async () => {
+  const sent = [];
+  const tx = {
+    $queryRaw: (strings, ...values) => {
+      sent.push({ sql: strings.join("$"), values });
+      return Promise.resolve([{ open: 2n }]);
+    },
+  };
+  assert.equal(await countOpenDecisionMakerRequestsCreatedBetween(tx, { fromMs: 1_000, toMs: 2_000 }), 2);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].values, [1_000, 2_000]);
+  assert.match(sent[0].sql, /r\."route" = 'dm_proposal'/);
+  assert.match(sent[0].sql, /"createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
+  assert.match(sent[0].sql, /"createdAt" < 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
+  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close'\)/);
+  for (const input of [{ fromMs: -1, toMs: 5 }, { fromMs: 5, toMs: 5 }, { fromMs: 1.5, toMs: 5 }, { fromMs: 0, toMs: Number.MAX_VALUE }]) {
+    await assert.rejects(
+      countOpenDecisionMakerRequestsCreatedBetween(tx, input),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input",
+    );
+  }
+  assert.equal(sent.length, 1);
 });
 
 test("a malformed input sends nothing at all", async () => {
   const noLease = () => assert.fail("no lease for a refused input");
   const cases = [
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding({ cardId: "" }), card: routedCard() }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding({ cardId: "" }), card: routedCard(), keyRing: RING }),
     // The decision is the store's own; a caller's is not an input.
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), decision: { route: "dm_proposal", instance: OPENAI, refusals: [] } }),
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard({ options: [{ id: "a" }] }) }),
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: { ...routedCard(), extra: true } }),
-    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard({ tags: "needs:you" }) }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), decision: { route: "dm_proposal", instance: OPENAI, refusals: [] }, keyRing: RING }),
+    // So is the option set digest (stage S1d).
+    (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard(), keyRing: RING }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard() }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard({ options: [{ id: "a" }] }), keyRing: RING }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), card: { ...routedCard(), extra: true }, keyRing: RING }),
+    (tx) => recordDecisionMakerRequest(tx, { binding: routingBinding(), card: routedCard({ tags: "needs:you" }), keyRing: RING }),
     (tx) => assignDecisionMakerRequest(tx, { requestId: "not-a-uuid", requireLeaseAt: noLease }),
     (tx) => assignDecisionMakerRequest(tx, { requestId: REQUEST_ID }),
     (tx) => recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: "decision-maker-gemini", transmission: null, requireLeaseAt: noLease }),

@@ -555,9 +555,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * back relations to `AdminAuditLog` in the watched schema. No actor,
  * descriptor, webhook writer or admission decision changes; the bytes moved,
  * so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker body store (S1d, per
+ * docs/policy/amux-decision-maker.md §10) adds its body, retention event and
+ * digest-key event back relations to `AdminAuditLog` in the watched schema.
+ * No actor, descriptor, webhook writer or admission decision changes; the
+ * bytes moved, so evidence is stale.
+ * 2026-10-08, the S1d review: the body store adds the result detail's back
+ * relation to `AdminAuditLog` in the watched schema. Nothing else changes; the
+ * bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "99df7c4f775416214346354d005d3077fc55eb0dc7b2a5071059f458aeed68ab";
+  "8d9faae2d39f9a92fc61a5a9daba9253ab6acdebfec4591bffe88326de064288";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
