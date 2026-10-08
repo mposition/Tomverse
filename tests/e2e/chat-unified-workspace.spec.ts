@@ -957,8 +957,24 @@ async function chooseModel(page: Page, modelId: string) {
 }
 
 async function chooseConversation(page: Page, conversationId: string) {
-  const mobileShell = page.getByTestId("mobile-chat-shell");
-  if (await mobileShell.isVisible()) {
+  // ChatPageClient chooses its shell from a `(max-width: 767px)` media query,
+  // so a caller that resizes across that boundary immediately before this still
+  // has the outgoing shell mounted. Asking "is the mobile shell visible?" once
+  // could therefore be answered for the shell on its way out: on a resize down
+  // to mobile it opened no drawer, then spent the whole timeout clicking the
+  // unmounting desktop sidebar's item, which Playwright reported as "element
+  // was detached from the DOM, retrying". Instrumenting the helper showed the
+  // mobile branch had never run at all. So wait for the shell the current
+  // viewport implies, and for the other one to be gone -- while both are
+  // mounted the item below matches twice.
+  const mobile = (page.viewportSize()?.width ?? 0) <= 767;
+  await expect(
+    page.getByTestId(mobile ? "mobile-chat-shell" : "desktop-chat-shell")
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(mobile ? "desktop-chat-shell" : "mobile-chat-shell")
+  ).toHaveCount(0);
+  if (mobile) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
@@ -2730,6 +2746,14 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         content: `Review answer ${index + 1}.`, status: "normal" },
     ] as QaConversationMessage[])).flat();
     const state = await openChat(page, {
+      // Opened at the desktop viewport on every project, because what this test
+      // forces is a remount, and the resizes below only produce one by crossing
+      // the shell's `(max-width: 767px)` boundary. Starting at the project's own
+      // viewport made that a different number of crossings per project: from
+      // desktop it is two, from mobile the first resize is a no-op and the one
+      // crossing that remains refetched nothing, so the third cursored read this
+      // test waits for never arrived and mobile-safari failed every night.
+      viewport: DESKTOP_VIEWPORT,
       legacyReview: true,
       selectedModels: [MODEL_A, MODEL_B],
       messages: savedMessages,
@@ -2741,8 +2765,14 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
     await page.getByTestId("model-only-send").first().click();
     await expect.poll(state.messageSaveStarted).toBe(true);
+    // Each swap is waited for rather than assumed. Two resizes back to back are
+    // coalesced in WebKit, so the mobile shell never rendered, the panes never
+    // remounted, and not one further history read followed -- the third cursored
+    // read below could not arrive and mobile-safari failed every night.
     await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
 
     state.releaseMessageSave();
