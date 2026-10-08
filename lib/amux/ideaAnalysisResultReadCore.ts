@@ -17,6 +17,14 @@ export type AmuxVisibleAnalysisUnit = {
 
 export type AmuxIdeaAnalysisResultView =
   | { state: "pending" | "cancelled" | "provider_failed" }
+  | { state: "partial"; ideaId: string; previewId: string;
+      completedAt: string; outcome: "propose";
+      coveredScope: string | null; remainingScope: string | null;
+      nextChunkIndex: number; units: AmuxVisibleAnalysisUnit[] }
+  | { state: "needs_owner_input"; ideaId: string; previewId: string;
+      completedAt: string; outcome: "needs_information";
+      coveredScope: string | null; remainingScope: string | null;
+      ownerQuestion: string | null; units: AmuxVisibleAnalysisUnit[] }
   | { state: "ready"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose" | "reject";
       coveredScope: string | null; units: AmuxVisibleAnalysisUnit[] };
@@ -62,17 +70,35 @@ export function parseAmuxIdeaAnalysisResultView(
       body.state === "provider_failed") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }
-  if (body.state !== "ready" || !keys(body, ["state", "ideaId", "previewId",
-    "completedAt", "outcome", "coveredScope", "units"]) ||
+  const partial = body.state === "partial";
+  const ownerInput = body.state === "needs_owner_input";
+  if ((!partial && !ownerInput && body.state !== "ready") || !keys(body, partial
+    ? ["state", "ideaId", "previewId", "completedAt", "outcome",
+      "coveredScope", "remainingScope", "nextChunkIndex", "units"]
+    : ownerInput ? ["state", "ideaId", "previewId", "completedAt", "outcome",
+      "coveredScope", "remainingScope", "ownerQuestion", "units"]
+    : ["state", "ideaId", "previewId", "completedAt", "outcome",
+      "coveredScope", "units"]) ||
       body.ideaId !== expectedIdeaId || typeof body.previewId !== "string" ||
       !ID.test(body.previewId) || typeof body.completedAt !== "string" ||
       !Number.isFinite(Date.parse(body.completedAt)) ||
-      (body.outcome !== "propose" && body.outcome !== "reject") ||
+      (ownerInput ? body.outcome !== "needs_information" :
+        partial ? body.outcome !== "propose" :
+        body.outcome !== "propose" && body.outcome !== "reject") ||
       (body.coveredScope !== null && !text(body.coveredScope)) ||
       !Array.isArray(body.units) || body.units.length > 40 ||
-      (body.outcome === "reject" ? body.units.length !== 0 : body.units.length === 0)) {
+      (body.outcome === "reject" ? body.units.length !== 0 :
+        body.outcome === "propose" && body.units.length === 0)) {
     return null;
   }
+  if (partial && ((body.remainingScope !== null && !text(body.remainingScope)) ||
+      typeof body.nextChunkIndex !== "number" ||
+      !Number.isSafeInteger(body.nextChunkIndex) || body.nextChunkIndex < 1 ||
+      body.nextChunkIndex >= 2_147_483_647)) {
+    return null;
+  }
+  if (ownerInput && ((body.remainingScope !== null && !text(body.remainingScope)) ||
+      (body.ownerQuestion !== null && !text(body.ownerQuestion)))) return null;
   const ids = new Set<string>();
   const refs = new Set<string>();
   for (const value of body.units) {

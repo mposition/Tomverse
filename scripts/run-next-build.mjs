@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
+  nodeOptionsForBuild,
 } from "./run-next-build-core.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,7 +40,8 @@ const runBuild = () =>
         "build",
         ...forwardedArgs,
       ],
-      { cwd: repoRoot, stdio: ["inherit", "pipe", "pipe"] }
+      { cwd: repoRoot, stdio: ["inherit", "pipe", "pipe"],
+        env: { ...process.env, NODE_OPTIONS: nodeOptionsForBuild(process.env) } }
     );
 
     let output = "";

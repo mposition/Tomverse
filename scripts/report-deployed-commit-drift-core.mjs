@@ -43,6 +43,24 @@
 // it lived in a fetch call rather than in a function anything could test. It
 // lives here now, for the same reason the comparison does.
 
+/**
+ * Each environment, the address it answers on and the branch it deploys from.
+ *
+ * The addresses are public, not configuration -- the overrides exist so a
+ * review app or a renamed host does not need a code change. staging (shown to
+ * people as Test) deploys `test`, which only the promotion script moves; every
+ * develop merge lands on dev (.github/RELEASE_CHECKLIST.md 7.9). Comparing
+ * staging against develop would report every merge since the release candidate
+ * as a lag nobody is meant to close.
+ */
+export function driftEnvironments(env = {}) {
+  return [
+    { name: "production", url: env.PRODUCTION_APP_URL || "https://tomverse.app", branch: "main" },
+    { name: "staging", url: env.STAGING_APP_URL || "https://staging.tomverse.app", branch: "test" },
+    { name: "dev", url: env.DEV_APP_URL || "https://dev.tomverse.app", branch: "develop" },
+  ];
+}
+
 /** Deployed commit matches the branch head. */
 export const IN_SYNC = "in_sync";
 /** Branch head has commits the deployed commit does not. */

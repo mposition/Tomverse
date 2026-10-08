@@ -8,6 +8,9 @@ import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadata
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
+import { AmuxTaskCostCatalogApprovalPanel } from
+  "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
+import { AmuxPortfolioPanel } from "@/components/admin/AmuxPortfolioPanel";
 import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
@@ -52,6 +55,12 @@ import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
+import { AMUX_V4_TASK_CATALOG_WRITE_ENV,
+  amuxV4TaskCatalogWriteEnabled } from
+  "@/lib/amux/v4TaskCostCatalogApprovalService";
+import { AMUX_V4_PORTFOLIO_WRITE_ENV,
+  amuxV4PortfolioWriteEnabled } from
+  "@/lib/amux/portfolioAssessmentService";
 
 const TABS = adminNavItemTabs("amux-backlog");
 
@@ -116,6 +125,11 @@ export default async function AdminAmuxBacklogPage({
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
       {tab.id === "ideas" ? (
+        <>
+        <AmuxTaskCostCatalogApprovalPanel approvalAvailable={
+          amuxV4TaskCatalogWriteEnabled(process.env[AMUX_V4_TASK_CATALOG_WRITE_ENV])} />
+        <AmuxPortfolioPanel writeAvailable={amuxV4PortfolioWriteEnabled(
+          process.env[AMUX_V4_PORTFOLIO_WRITE_ENV])} />
         <AmuxIdeaInputPanel submissionAvailable={ideaSubmissionAvailable}
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
@@ -130,6 +144,7 @@ export default async function AdminAmuxBacklogPage({
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
             process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"}
           operatorId={session.user.id} />
+        </>
       ) : tab.id === "import" ? (
         <AmuxBoardImportPanel />
       ) : tab.id === "reconciliation" ? (

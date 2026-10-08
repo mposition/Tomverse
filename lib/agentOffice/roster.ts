@@ -61,7 +61,7 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/qa-release-agent.md",
     recordHref: "/admin/agent-digests?tab=qa-release",
   },
-  { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: null },
+  { id: "sre", icon: "📟", policy: "docs/policy/sre-ops.md", recordHref: "/admin/sre-ops" },
   { id: "support", icon: "🎧", policy: "docs/policy/support-triage.md", recordHref: null },
   {
     id: "marketing",
@@ -69,7 +69,12 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/marketing-automation.md",
     recordHref: "/admin/marketing",
   },
-  { id: "finance", icon: "🧾", policy: "docs/policy/billing-finance-ops.md", recordHref: null },
+  {
+    id: "finance",
+    icon: "🧾",
+    policy: "docs/policy/billing-finance-ops.md",
+    recordHref: "/admin/agent-digests?tab=billing-finance-ops",
+  },
   // Its policy is not on develop yet, so there is no path to name.
   { id: "trust", icon: "🛡️", policy: null, recordHref: null },
   {
@@ -165,3 +170,24 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
   ["trust", ["신뢰", "안전", "trust", "safety", "컴플라이언스", "compliance", "dsr", "개인정보 요청"]],
   ["digest", ["다이제스트", "digest", "비서"]],
 ];
+
+/** The AMUX execution room's record screen. */
+export const AGENT_OFFICE_AMUX_RECORD_HREF = "/admin/amux-execution";
+
+/**
+ * Clothes for the AMUX workers, by desk: the office's palette, not the
+ * original's pink. [hair, shirt, accent].
+ */
+export const AGENT_OFFICE_WORKER_COLORS: readonly (readonly [string, string, string])[] = [
+  ["#2c2638", "#bae6fd", "#93c5fd"],
+  ["#463227", "#b8f0dd", "#b8f0dd"],
+  ["#313b56", "#fde68a", "#fde68a"],
+  ["#2d4b46", "#e4e4e7", "#bae6fd"],
+  ["#4a3a2a", "#93c5fd", "#b8f0dd"],
+  ["#334a3a", "#cbd5e1", "#fde68a"],
+  ["#3b3b49", "#b8f0dd", "#93c5fd"],
+  ["#2f2a3d", "#fde68a", "#bae6fd"],
+];
+
+/** Skin tones for the AMUX workers, by desk. */
+export const AGENT_OFFICE_WORKER_SKINS: readonly string[] = ["#ffdcc4", "#f7cdae", "#ffe3cf", "#eec39f"];

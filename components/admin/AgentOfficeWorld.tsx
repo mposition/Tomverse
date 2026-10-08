@@ -2,12 +2,20 @@
 
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
+import type { AgentOfficeAmuxView, AgentOfficeAmuxWorkerView } from "@/lib/agentOffice/live";
+import {
+  AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_WORKER_COLORS,
+  AGENT_OFFICE_WORKER_SKINS,
+} from "@/lib/agentOffice/roster";
 import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
 import {
+  AMUX_ROOM,
   ENTRANCE,
   ENTRANCE_MAT,
   MEETING_ROOM,
@@ -22,6 +30,8 @@ import {
 
 type Props = {
   engine: AgentOffice;
+  /** The AMUX execution room, read from the real record. */
+  amux: AgentOfficeAmuxView;
   snap: Snapshot;
   selectedId: string | null;
   follow: boolean;
@@ -92,6 +102,59 @@ const AgentLayer = memo(function AgentLayer({
   );
 });
 
+/**
+ * The AMUX workers, seated at their desks. Not engine agents: they never walk,
+ * meet or take a demo task, and what each says is its real state.
+ */
+const WorkerLayer = memo(function WorkerLayer({ workers }: { workers: AgentOfficeAmuxWorkerView[] }) {
+  return (
+    <>
+      {workers.slice(0, AMUX_ROOM.desks.length).map((worker, i) => {
+        const seat = AMUX_ROOM.desks[i].seat;
+        const [hair, shirt, accent] = AGENT_OFFICE_WORKER_COLORS[i % AGENT_OFFICE_WORKER_COLORS.length];
+        return (
+          <div
+            key={worker.name}
+            className={cx("ag", "f-up", "a-sit", "r-member", "wk", worker.dim && "wk-off")}
+            title={worker.title}
+            data-testid="agent-office-amux-worker"
+            data-worker-state={worker.state}
+            style={
+              {
+                transform: `translate3d(${(seat.x + 0.5) * TILE}px, ${(seat.y + 0.9) * TILE}px, 0)`,
+                zIndex: 200 + seat.y,
+                "--cloth-hair": hair,
+                "--cloth-shirt": shirt,
+                "--cloth-accent": accent,
+                "--cloth-skin": AGENT_OFFICE_WORKER_SKINS[i % AGENT_OFFICE_WORKER_SKINS.length],
+              } as CSSProperties
+            }
+          >
+            <span className={cx("ag-bubble", "on")}>{worker.label}</span>
+            <span className={cx("ag-body")}>
+              <i className={cx("p-shadow")} />
+              <i className={cx("p-leg l")} />
+              <i className={cx("p-leg r")} />
+              <i className={cx("p-torso")} />
+              <i className={cx("p-arm l")} />
+              <i className={cx("p-arm r")} />
+              <i className={cx("p-head")}>
+                <b className={cx("p-eye l")} />
+                <b className={cx("p-eye r")} />
+              </i>
+              <i className={cx("p-hair")} />
+            </span>
+            <span className={cx("ag-tag")}>
+              <i className={cx("rm-dot", worker.status)} />
+              {worker.name}
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+});
+
 const PropLayer = memo(function PropLayer({
   screenLabel,
   entranceLabel,
@@ -137,7 +200,7 @@ const PropLayer = memo(function PropLayer({
  * follows whatever is happening. Ported from the original AI OFFICE
  * OfficeWorld; a demo of the agent teams, not a reading of them.
  */
-export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onSelect }: Props) {
+export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follow, onSelect }: Props) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -311,7 +374,8 @@ export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onS
           <div className={cx("world-floor")} />
 
           {ROOMS.map((room) => {
-            const status = snap.deptStatus[room.id];
+            const isAmux = room.kind === "amux";
+            const status = isAmux ? amux.status : snap.deptStatus[room.id];
             return (
               <div
                 key={room.id}
@@ -325,14 +389,33 @@ export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onS
               >
                 <span className={cx("rm-head")}>
                   <b>
-                    {room.icon} {roomName(room.id)}
+                    {room.icon} {isAmux ? m.rooms.amux : roomName(room.id)}
                   </b>
-                  {engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
+                  {isAmux || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
-                    <i className={cx("rm-dot", status)} title={engine.liveDept(room.id)?.badge ?? m.deptStatus[status]} />
+                    <i
+                      className={cx("rm-dot", status)}
+                      title={isAmux ? amux.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
+                    />
+                  ) : null}
+                  {isAmux ? (
+                    <Link
+                      href={AGENT_OFFICE_AMUX_RECORD_HREF}
+                      className={cx("rm-link")}
+                      aria-label={m.rooms.amuxRecord}
+                      title={amux.summary}
+                      data-testid="agent-office-amux-record"
+                    >
+                      ↗
+                    </Link>
                   ) : null}
                 </span>
                 <span className={cx("rm-code")}>{room.short}</span>
+                {isAmux && amux.note ? (
+                  <span className={cx("rm-note")} data-testid="agent-office-amux-note">
+                    {amux.note}
+                  </span>
+                ) : null}
                 {room.doors.map((door) => (
                   <span
                     key={`${door.x}-${door.y}`}
@@ -345,6 +428,7 @@ export default function AgentOfficeWorld({ engine, snap, selectedId, follow, onS
           })}
 
           <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
+          <WorkerLayer workers={amux.workers} />
           <AgentLayer
             agents={engine.agents}
             register={register}

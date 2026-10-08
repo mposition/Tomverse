@@ -531,6 +531,8 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * The AMUX expiry, settlement, unknown-outcome and auto-cancel audit scopes
  * move those same helper bytes again. Existing signed staging evidence becomes
  * stale; the receiver's own admission and write path remain unchanged.
+ * 2026-10-07: v22 worker claim adds a closed system-audit actor in the same
+ * imported helper closure. Re-pin after the AMUX source changes are verified.
  * 2026-10-07: A06 adds analysis claim, result, retention and key-retirement
  * audit scopes. The receiver still uses the same audit entry path; its shared
  * actor helper and watched schema bytes changed, so prior evidence is stale.
@@ -539,9 +541,23 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * receiver's staging test still needs both signals to say staging, and dev
  * resolves to dev, so dev never reaches the shadow writer; descriptor and
  * admission decisions are unchanged. Prior evidence is stale.
+ * 2026-10-07: A09 adds closed AMUX audit actors in the same imported helper closure.
+ * The receiver's admission and write path are unchanged.
+ * 2026-10-07: A12 portfolio and promotion work extends the watched schema
+ * and shared audit helper. The receiver's own admission stays unchanged.
+ * 2026-10-07: the AMUX Decision Maker switch store, per
+ * docs/policy/amux-decision-maker.md §10, adds three system actors to
+ * `lib/adminAuditSystemActors.ts` and its switch events' back relation to
+ * `AdminAuditLog` in the watched schema. The receiver's calls, descriptor and
+ * admission decisions are unchanged; the bytes moved, so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker request ledger (S1c, per
+ * docs/policy/amux-decision-maker.md §10) adds its request and request event
+ * back relations to `AdminAuditLog` in the watched schema. No actor,
+ * descriptor, webhook writer or admission decision changes; the bytes moved,
+ * so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "4bf726b34d1ac8147ff57678b77338c770ba2309dbe20290e32424cdd9b19ddc";
+  "99df7c4f775416214346354d005d3077fc55eb0dc7b2a5071059f458aeed68ab";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

@@ -13,11 +13,23 @@ import {
   AGENT_OFFICE_OPERATOR,
   AGENT_OFFICE_STAFF,
   AGENT_OFFICE_TEAM_IDS,
+  AGENT_OFFICE_WORKER_COLORS,
 } from "../lib/agentOffice/roster.ts";
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
-import { researchLiveDept, researchTone } from "../lib/agentOffice/live.ts";
+import {
+  amuxRoomView,
+  engineeringLiveDept,
+  qaLiveDept,
+  qaTone,
+  researchLiveDept,
+  researchTone,
+} from "../lib/agentOffice/live.ts";
+import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { agentOfficeEngineeringState } from "../lib/agentOfficeEngineeringState.ts";
+import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
+  AMUX_ROOM,
   DEPT_ROOMS,
   ENTRANCE,
   LOUNGE_ROOM,
@@ -147,9 +159,16 @@ test("the demo day stops at the operator's decision and only goes on after it", 
   assert.equal(snap.phaseIndex, PHASE.dayOver);
   assert.equal(snap.briefingReady, true);
   assert.equal(snap.stats.blocked, AGENT_OFFICE_BLOCKED_DEPTS.size);
-  assert.equal(snap.stats.done, AGENT_OFFICE_DEPT_IDS.length - AGENT_OFFICE_BLOCKED_DEPTS.size);
   for (const id of AGENT_OFFICE_BLOCKED_DEPTS) {
     assert.equal(snap.deptStatus[id], "blocked", `${id} was reported as something it did not do`);
+  }
+  // Only the rooms the demo day gives work to finish it. A linked team the day
+  // has no script for stays waiting rather than being reported as done.
+  const scripted = ["qa", "research", "engineering", "marketing", "digest"];
+  assert.equal(snap.stats.done, scripted.length);
+  for (const id of AGENT_OFFICE_DEPT_IDS) {
+    const expected = scripted.includes(id) ? "done" : AGENT_OFFICE_BLOCKED_DEPTS.has(id) ? "blocked" : "waiting";
+    assert.equal(snap.deptStatus[id], expected, id);
   }
 });
 
@@ -468,6 +487,650 @@ test("the office reads the research agent's state, never its content, and writes
   assert.doesNotMatch(source, /payload: true|issueCount: true|title/);
 });
 
+// ── QA and release ────────────────────────────────────────────────────────
+
+const qaInput = (overrides = {}) => ({
+  digestSecretConfigured: true,
+  control: { revision: 4, digestEnabled: true },
+  latestDigestAt: at("2026-10-07T06:00:00Z"),
+  mergeLaneLatched: false,
+  now: at("2026-10-07T22:00:00Z"),
+  ...overrides,
+});
+
+test("the QA room's verdict is the agent's own freshness judgement", () => {
+  const fresh = agentOfficeQaState(qaInput());
+  assert.deepEqual(fresh, {
+    kind: "observed",
+    verdict: "fresh",
+    latestDigestAt: "2026-10-07T06:00:00.000Z",
+    controlRevision: 4,
+    mergeLaneLatched: false,
+  });
+  // 28 hours is the line, as the monitor draws it.
+  const verdictAt = (iso) => agentOfficeQaState(qaInput({ now: at(iso) })).verdict;
+  assert.equal(verdictAt("2026-10-08T09:59:59Z"), "fresh");
+  assert.equal(verdictAt("2026-10-08T10:00:00Z"), "stale");
+  // A digest dated after the clock is not healthy.
+  assert.equal(verdictAt("2026-10-07T05:00:00Z"), "stale");
+  // A secret and no digest ever stored: nothing to be fresh against.
+  assert.equal(agentOfficeQaState(qaInput({ latestDigestAt: null })).verdict, "stale");
+  // Recorded off is quiet whatever else is true.
+  assert.equal(
+    agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false }, digestSecretConfigured: false })).verdict,
+    "operator_disabled"
+  );
+  // No secret: quiet if never recorded as on, a mismatch if it was.
+  assert.equal(agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false })).verdict, "dark_not_configured");
+  assert.equal(agentOfficeQaState(qaInput({ digestSecretConfigured: false })).verdict, "control_mismatch");
+});
+
+test("the QA room says whether a digest arrived, in UTC, and a latched lane needs a look", () => {
+  const copy = adminAgentOfficeMessages.ko.real.qa;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const fresh = qaLiveDept(agentOfficeQaState(qaInput()), readAt, copy);
+  assert.equal(fresh.status, "done");
+  assert.equal(fresh.badge, "수신됨");
+  assert.equal(fresh.line, "최근 digest 수신 · 10-07 06:00 UTC");
+  assert.equal(fresh.detail, "제어 기록 4번 · 읽은 시각 10-07 22:05 UTC");
+
+  const silent = qaLiveDept(agentOfficeQaState(qaInput({ now: at("2026-10-08T12:00:00Z") })), readAt, copy);
+  assert.equal(silent.status, "attention");
+  assert.equal(silent.line, "digest 침묵 · 마지막 수신 10-07 06:00 UTC");
+  assert.equal(qaLiveDept(agentOfficeQaState(qaInput({ latestDigestAt: null })), readAt, copy).line, copy.staleNever);
+
+  const latched = qaLiveDept(agentOfficeQaState(qaInput({ mergeLaneLatched: true })), readAt, copy);
+  assert.equal(latched.status, "attention");
+  assert.equal(latched.badge, "레인 잠김");
+  assert.match(latched.detail, /병합 레인 잠김/);
+
+  const mismatch = qaLiveDept(agentOfficeQaState(qaInput({ digestSecretConfigured: false })), readAt, copy);
+  assert.equal(mismatch.status, "attention");
+  assert.equal(mismatch.line, copy.mismatch);
+
+  // Switched off, or never configured here: waiting, not a failure.
+  const off = agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false } }));
+  assert.equal(qaTone(off), "waiting");
+  assert.equal(qaLiveDept(off, readAt, copy).line, copy.disabled);
+  // A digest stored before it was switched off is still named.
+  assert.equal(qaLiveDept(off, readAt, copy).detail, "제어 기록 5번 · 마지막 digest 10-07 06:00 UTC · 읽은 시각 10-07 22:05 UTC");
+  assert.match(mismatch.detail, /마지막 digest 10-07 06:00 UTC/);
+  const dark = agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false, latestDigestAt: null }));
+  assert.equal(qaTone(dark), "waiting");
+  assert.equal(qaLiveDept(dark, readAt, copy).detail, "제어 기록 없음 · 읽은 시각 10-07 22:05 UTC");
+
+  // A read that failed is not a state.
+  const unread = qaLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.qa;
+    assert.match(words.fresh("x"), /x/);
+    assert.match(words.stale("x"), /x/);
+    // The room says nothing about what a digest contains.
+    for (const value of Object.values(words).filter((v) => typeof v === "string")) {
+      assert.doesNotMatch(value, /pass|fail|gate|통과|실패|게이트/i, `${locale}: "${value}"`);
+    }
+  }
+});
+
+test("with research and QA both live the demo day still reaches its end, and QA is never handed work", () => {
+  const live = {
+    research: { status: "done", badge: "Recorded", line: "Latest run recorded · 10-07 21:30 UTC", detail: "" },
+    qa: { status: "attention", badge: "Silent", line: "Digest silent · last received 10-06 06:00 UTC", detail: "" },
+  };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  office.speed = 10;
+  office.start();
+  let qaWorked = false;
+  let qaInMeeting = false;
+  const spoken = new Set();
+  const watch = () => {
+    for (const agent of office.agents) {
+      if (agent.deptId !== "qa") continue;
+      if (agent.speech) spoken.add(agent.speech);
+      if (agent.status === "working" || agent.progress > 0) qaWorked = true;
+      if (agent.status === "meeting") qaInMeeting = true;
+    }
+  };
+  runUntil(office, () => {
+    watch();
+    return office.approvalPending;
+  });
+  // The approval card names only the people who are actually in the room.
+  assert.ok(!office.approverNames().includes(office.deptLead.qa.name));
+  assert.ok(office.approverNames().includes(office.deptLead.engineering.name));
+  office.approve();
+  runUntil(office, () => {
+    watch();
+    return office.dayComplete;
+  });
+  // QA's lead is second in room order, so a meeting the operator calls would
+  // reach it first if live rooms were not left out.
+  office.command("Call a meeting with every team");
+  for (let i = 0; i < 4000; i += 1) {
+    office.tick(0.05);
+    watch();
+  }
+  assert.ok(office.log.some((entry) => entry.text.startsWith("Operator order: urgent meeting")), "the meeting was not called");
+  assert.equal(qaWorked, false, "the QA room was given scripted work");
+  assert.equal(qaInMeeting, false, "the QA lead sat in a meeting");
+  assert.deepEqual([...spoken].filter((line) => line !== live.qa.line), []);
+  assert.equal(office.deptStatus.qa, "attention");
+  assert.ok(office.log.some((entry) => entry.text.includes("(real record): Digest silent")));
+  // The PR log no longer claims QA classified CI.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].sim.prLog, /CI/);
+  }
+});
+
+test("the office reads the QA agent's state, never a digest's content", () => {
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const start = source.indexOf("async function readQa");
+  const end = source.indexOf("async function readEngineering");
+  assert.ok(start >= 0 && end > start, "readQa not found");
+  const qa = source.slice(start, end);
+  // The digest row is read for when it was stored, nothing else.
+  assert.match(qa, /agentDigestItem\.findFirst\(\{[\s\S]*?select: \{ createdAt: true \}/);
+  assert.doesNotMatch(qa, /payload|sizeBytes|kind: true|idempotencyKey/);
+  assert.match(qa, /select: \{ revision: true, digestEnabled: true \}/);
+  assert.match(qa, /select: \{ latched: true \}/);
+  assert.doesNotMatch(qa, /reason: true|attemptId: true/);
+  // The secret is seen only as a length, never passed on.
+  assert.match(qa, /\(process\.env\[QA_RELEASE_ROUTE_SECRET_ENV\.digest\] \?\? ""\)\.length >= 32/);
+  assert.equal((qa.match(/process\.env/g) || []).length, 1);
+  assert.match(qa, /read: "qa_release"/);
+  // The verdict's clock is taken after the reads, not handed in before them.
+  assert.match(qa, /async function readQa\(\)/);
+  assert.ok(qa.indexOf("now: new Date()") > qa.indexOf("await Promise.all"));
+});
+
+// ── Engineering ───────────────────────────────────────────────────────────
+
+const engInput = (overrides = {}) => ({
+  settings: [
+    { key: "feature.engineeringAgentMode", value: "t1" },
+    { key: "engineeringAgent.runnerLastFinishAt", value: "2026-10-07T21:40:00.000Z" },
+  ],
+  killSwitch: undefined,
+  halt: "none",
+  openOwnerItems: [],
+  active: { count: 0, since: null },
+  lastRun: {
+    status: "finished",
+    outcome: "private_result",
+    startedAt: at("2026-10-07T21:00:00Z"),
+    endedAt: at("2026-10-07T21:30:00Z"),
+  },
+  ...overrides,
+});
+
+test("the engineering room reads the mode the agent acts on, through its own switch resolution", () => {
+  const clear = agentOfficeEngineeringState(engInput());
+  assert.deepEqual(clear, {
+    kind: "observed",
+    mode: "t1",
+    frozen: false,
+    killSwitch: false,
+    halt: "none",
+    pending: { t2Draft: 0, decision: 0, stateMismatch: 0 },
+    activeRuns: 0,
+    activeSince: null,
+    lastRun: {
+      status: "finished",
+      outcome: "private_result",
+      startedAt: "2026-10-07T21:00:00.000Z",
+      endedAt: "2026-10-07T21:30:00.000Z",
+      needsLook: false,
+    },
+    runnerLastFinishAt: "2026-10-07T21:40:00.000Z",
+    publisherLastFinishAt: null,
+  });
+  // An engaged kill switch is off whatever the mode setting says.
+  const killed = agentOfficeEngineeringState(engInput({ killSwitch: "1" }));
+  assert.equal(killed.mode, "off");
+  assert.equal(killed.killSwitch, true);
+  assert.equal(agentOfficeEngineeringState(engInput({ killSwitch: "false" })).killSwitch, false);
+  // Unset or unknown is off.
+  assert.equal(agentOfficeEngineeringState(engInput({ settings: [] })).mode, "off");
+  assert.equal(
+    agentOfficeEngineeringState(engInput({ settings: [{ key: "feature.engineeringAgentMode", value: "on" }] })).mode,
+    "off"
+  );
+  assert.equal(
+    agentOfficeEngineeringState(
+      engInput({
+        settings: [
+          { key: "feature.engineeringAgentMode", value: "shadow" },
+          { key: "feature.engineeringAgentFreeze", value: "true" },
+        ],
+      })
+    ).frozen,
+    true
+  );
+  // An instant not in the agent's own stored form is no record.
+  assert.equal(
+    agentOfficeEngineeringState(
+      engInput({ settings: [{ key: "engineeringAgent.publisherLastFinishAt", value: "yesterday" }] })
+    ).publisherLastFinishAt,
+    null
+  );
+  assert.deepEqual(
+    agentOfficeEngineeringState(
+      engInput({ openOwnerItems: [{ kind: "t2_draft", count: 1 }, { kind: "state_mismatch", count: 2 }] })
+    ).pending,
+    { t2Draft: 1, decision: 0, stateMismatch: 2 }
+  );
+});
+
+test("whether the latest run needs a look is the agent's own settlement of its outcome", () => {
+  const needsLook = (outcome, status = "finished") =>
+    agentOfficeEngineeringState(
+      engInput({ lastRun: { status, outcome, startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") } })
+    ).lastRun.needsLook;
+  // Settled for review: a result went to a person.
+  for (const outcome of ["t1_queued", "t2_draft", "private_result"]) assert.equal(needsLook(outcome), false, outcome);
+  // Retried, blocked or recovered by AMUX: no result went to a person.
+  for (const outcome of ["no_change", "agent_failed", "schema_invalid", "scope_violation", "secret_detected"]) {
+    assert.equal(needsLook(outcome), true, outcome);
+  }
+  assert.equal(needsLook("abandoned", "abandoned"), true);
+  // An outcome the table does not know, or none at all, is not a clean run.
+  assert.equal(needsLook("something_new"), true);
+  assert.equal(needsLook(null), true);
+  assert.equal(needsLook("toString"), true, "an inherited property is not an outcome");
+});
+
+test("the engineering room says how the agent stands: halts and decisions first, then switches, then runs", () => {
+  const copy = adminAgentOfficeMessages.ko.real.engineering;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const room = (overrides) => engineeringLiveDept(agentOfficeEngineeringState(engInput(overrides)), readAt, copy);
+
+  const clear = room({});
+  assert.equal(clear.status, "done");
+  assert.equal(clear.badge, "이상 없음");
+  assert.equal(clear.line, "직전 회차 private_result · 10-07 21:30 UTC");
+  assert.equal(
+    clear.detail,
+    "모드 t1 · 실행기 마지막 완료 10-07 21:40 UTC · 게시기 완료 기록 없음 · 읽은 시각 10-07 22:05 UTC"
+  );
+
+  // A failed latest run is not clear, whatever its line says.
+  const failed = room({
+    lastRun: { status: "finished", outcome: "agent_failed", startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") },
+  });
+  assert.equal(failed.status, "attention");
+  assert.equal(failed.badge, "확인 필요");
+  assert.equal(failed.line, "직전 회차 agent_failed · 10-07 21:30 UTC");
+
+  const halted = room({ halt: "circuit_open", killSwitch: "1" });
+  assert.equal(halted.status, "attention", "a halt needs a look even while the agent is switched off");
+  assert.equal(halted.line, "정지: 반복 실패로 차단기 열림");
+  assert.match(halted.detail, /직전 회차 private_result · 10-07 21:30 UTC/);
+
+  const deciding = room({ openOwnerItems: [{ kind: "t2_draft", count: 1 }, { kind: "decision", count: 1 }] });
+  assert.equal(deciding.status, "attention");
+  assert.equal(deciding.badge, "결정 대기");
+  assert.equal(deciding.line, "결정 대기 2건");
+  assert.match(deciding.detail, /T2 초안 1 · 결정 1 · 불일치 0/);
+
+  assert.equal(room({ killSwitch: "1" }).status, "waiting");
+  assert.equal(room({ killSwitch: "1" }).line, copy.killSwitch);
+  assert.equal(room({ settings: [] }).line, copy.off);
+  const frozen = room({
+    settings: [
+      { key: "feature.engineeringAgentMode", value: "t1" },
+      { key: "feature.engineeringAgentFreeze", value: "true" },
+    ],
+  });
+  assert.equal(frozen.status, "waiting");
+  assert.equal(frozen.line, copy.frozen);
+
+  // A run in progress is named by its own start, and the run that ended
+  // later -- possible with two runs at once -- keeps its own outcome.
+  const running = room({ active: { count: 1, since: at("2026-10-07T20:00:00Z") } });
+  assert.equal(running.status, "working");
+  assert.equal(running.line, "작업 중 · 10-07 20:00 UTC 시작");
+  assert.match(running.detail, /직전 회차 private_result · 10-07 21:30 UTC/);
+  assert.doesNotMatch(running.detail, /작업 중/, "the runs in progress are named once");
+  // Runs in progress stay on screen when a failed run, a halt or a decision takes the line.
+  const failedWhileRunning = room({
+    active: { count: 2, since: at("2026-10-07T20:00:00Z") },
+    lastRun: { status: "finished", outcome: "agent_failed", startedAt: at("2026-10-07T21:00:00Z"), endedAt: at("2026-10-07T21:30:00Z") },
+  });
+  assert.equal(failedWhileRunning.status, "attention");
+  assert.equal(failedWhileRunning.line, "직전 회차 agent_failed · 10-07 21:30 UTC");
+  assert.match(failedWhileRunning.detail, /작업 중 2건 · 가장 이른 시작 10-07 20:00 UTC/);
+  assert.match(
+    room({ halt: "state_mismatch", active: { count: 1, since: at("2026-10-07T20:00:00Z") } }).detail,
+    /작업 중 · 10-07 20:00 UTC 시작/
+  );
+  assert.match(
+    room({ openOwnerItems: [{ kind: "decision", count: 1 }], active: { count: 1, since: at("2026-10-07T20:00:00Z") } }).detail,
+    /작업 중 · 10-07 20:00 UTC 시작/
+  );
+  const two = room({ active: { count: 2, since: at("2026-10-07T20:00:00Z") } });
+  assert.equal(two.line, "작업 중 2건 · 가장 이른 시작 10-07 20:00 UTC");
+
+  const fresh = room({ lastRun: null });
+  assert.equal(fresh.status, "waiting");
+  assert.equal(fresh.line, copy.noRun);
+
+  const unread = engineeringLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+
+  // Every halt the agent can report has words in both languages.
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.engineering;
+    for (const halt of ["config_missing", "circuit_open", "unbound_app_pr", "unbound_app_ref", "state_mismatch"]) {
+      assert.ok(words.halts[halt], `${locale}: ${halt}`);
+    }
+  }
+});
+
+test("with engineering live the demo plays no decision, and the day still reaches its end", () => {
+  const line = (text) => ({ status: "done", badge: "", line: text, detail: "" });
+  const live = {
+    research: line("Latest run recorded · 10-07 21:30 UTC"),
+    qa: line("Latest digest received · 10-07 06:00 UTC"),
+    engineering: { status: "attention", badge: "Decisions waiting", line: "2 decisions waiting for you", detail: "" },
+  };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  const skipped = [PHASE.draftSummary, PHASE.approval, PHASE.prPrep];
+  assert.deepEqual(office.snapshot().skippedPhases, skipped);
+  office.speed = 10;
+  office.start();
+  let everPending = false;
+  let engineeringMoved = false;
+  let handoverHeld = false;
+  let askedAtEngineering = false;
+  const spokenByNarrator = new Set();
+  const narrator = office.agents.find((agent) => agent.id === AGENT_OFFICE_NARRATOR_ID);
+  const watch = () => {
+    if (office.approvalPending) everPending = true;
+    if (narrator.speech) spokenByNarrator.add(narrator.speech);
+    if (office.snapshot().meetingTitle === adminAgentOfficeMessages.en.sim.handoverTitle) handoverHeld = true;
+    for (const agent of office.agents) {
+      if (agent.deptId !== "engineering") continue;
+      if (agent.status === "working" || agent.status === "meeting" || agent.progress > 0) engineeringMoved = true;
+    }
+    // The status report names the next phase that will actually play.
+    if (!askedAtEngineering && office.phaseIndex === PHASE.engineering) {
+      askedAtEngineering = true;
+      office.command("Status?");
+      const answer = office.chat.at(-1).text;
+      assert.ok(answer.includes(adminAgentOfficeMessages.en.phases[PHASE.marketing]), answer);
+      assert.ok(!answer.includes(adminAgentOfficeMessages.en.phases[PHASE.draftSummary]), answer);
+    }
+  };
+  runUntil(office, () => {
+    watch();
+    return office.dayComplete;
+  });
+  assert.ok(askedAtEngineering, "the day never reached the engineering phase");
+  assert.equal(everPending, false, "the demo asked the operator to approve something");
+  assert.equal(office.approved, false);
+  assert.equal(engineeringMoved, false, "the engineering room was given demo work or a meeting seat");
+  // The real record keeps its own status; the demo never set it to approval or done.
+  assert.equal(office.deptStatus.engineering, "attention");
+  assert.ok(office.log.some((entry) => entry.text.includes("(real record): 2 decisions waiting for you")));
+  assert.equal(handoverHeld, false, "a hand-off meeting was held with nobody to hand over");
+  // The narrator does not claim there is nothing to decide; it says where the decisions are.
+  assert.ok(spokenByNarrator.has(adminAgentOfficeMessages.en.sim.briefSayLive), [...spokenByNarrator].join(" | "));
+  assert.ok(!spokenByNarrator.has(adminAgentOfficeMessages.en.sim.briefSay));
+  // approve() outside a decision does nothing.
+  office.approve();
+  assert.equal(office.approved, false);
+  // Without a live engineering room nothing is skipped.
+  assert.deepEqual(new AgentOffice(adminAgentOfficeMessages.en).snapshot().skippedPhases, []);
+});
+
+test("a live room at work is named by its record, not by a demo progress figure", () => {
+  // As in the real office: research, QA and engineering all read their records.
+  const line = (text) => ({ status: "done", badge: "", line: text, detail: "" });
+  const office = new AgentOffice(adminAgentOfficeMessages.en, {
+    research: line("Latest run recorded"),
+    qa: line("Latest digest received"),
+    engineering: { status: "working", badge: "Running", line: "Run in progress · started 10-07 20:00 UTC", detail: "" },
+  });
+  const s = adminAgentOfficeMessages.en.sim;
+  office.speed = 10;
+  office.start();
+  runUntil(office, () => office.phaseIndex >= PHASE.research);
+  office.command("Status?");
+  let status = office.chat.at(-1).text;
+  assert.match(status, /Engineering: Run in progress · started 10-07 20:00 UTC/);
+  assert.doesNotMatch(status, /Engineering 0%/);
+  assert.ok(!status.includes(s.statusGap), status);
+  office.command("Why is it slow?");
+  assert.match(office.chat.at(-1).text, /Engineering: Run in progress/);
+  // At the end of the demo day a real run in progress is not "all done".
+  runUntil(office, () => office.dayComplete);
+  office.command("Status?");
+  status = office.chat.at(-1).text;
+  assert.ok(!status.includes(s.statusDayDone), status);
+  assert.match(status, /Engineering: Run in progress/);
+  // With no live room at work the demo's own summaries still apply.
+  const plain = new AgentOffice(adminAgentOfficeMessages.en);
+  plain.speed = 10;
+  plain.start();
+  runUntil(plain, () => plain.approvalPending);
+  plain.approve();
+  runUntil(plain, () => plain.dayComplete);
+  plain.command("Status?");
+  assert.ok(plain.chat.at(-1).text.includes(s.statusDayDone));
+});
+
+test("the office reads the engineering agent's state, never what it worked on", () => {
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const start = source.indexOf("async function readEngineering");
+  const end = source.indexOf("async function readAmuxWorkers");
+  assert.ok(start >= 0 && end > start, "readEngineering not found");
+  const engineering = source.slice(start, end);
+  // The agent's own halt verdict, not a restatement of it.
+  assert.match(engineering, /halt: currentEngineeringAgentHalt\(haltState\)/);
+  assert.match(engineering, /readEngineeringAgentHaltState\(prisma\)/);
+  // Ended runs by their end, for their enums and times; owner items only counted.
+  assert.match(engineering, /where: \{ status: \{ in: \["finished", "abandoned"\] \}, endedAt: \{ not: null \} \}/);
+  assert.match(engineering, /orderBy: \[\{ endedAt: "desc" \}, \{ id: "desc" \}\]/);
+  assert.match(engineering, /select: \{ status: true, outcome: true, startedAt: true, endedAt: true \}/);
+  assert.doesNotMatch(engineering, /patchBody|patchDigest|reason|causeKey|cardId|baseSha|findMany\(\{\s*where: \{ kind/);
+  // The kill switch is passed on raw and kept only as engaged or not.
+  assert.equal((engineering.match(/process\.env/g) || []).length, 1);
+  assert.match(engineering, /process\.env\[ENGINEERING_AGENT_KILL_SWITCH_ENV\]/);
+  assert.match(readFileSync("lib/agentOfficeEngineeringState.ts", "utf8"), /killSwitch: killSwitchEngaged\(input\.killSwitch\)/);
+  assert.match(engineering, /read: "engineering"/);
+
+  // While engineering is live every decision surface points at its own screen
+  // and none offers an approve button.
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.equal((panel.match(/<LiveDecisionNote m=\{m\} \/>/g) || []).length, 2);
+  const note = panel.slice(panel.indexOf("function LiveDecisionNote"), panel.indexOf("function LiveView"));
+  assert.doesNotMatch(note, /onApprove|approve-button/);
+  const briefing = panel.slice(panel.indexOf("function BriefingModal"), panel.indexOf("function DashboardView"));
+  assert.match(briefing, /engineeringLive \? m\.dashboard\.decisionLive : m\.briefing\.decisionNone/);
+  assert.match(panel, /engineeringLive \? m\.live\.skipToEnd : m\.live\.skip/);
+  // No copy shown while engineering is live claims there is nothing to decide.
+  for (const locale of ["en", "ko"]) {
+    const c = adminAgentOfficeMessages[locale];
+    for (const value of [
+      c.sim.briefSayLive,
+      c.sim.skipLogDayEnd,
+      c.live.skipToEnd,
+      c.live.skipToEndHint,
+      c.dashboard.decisionLive,
+      c.approval.liveTitle,
+      c.approval.liveBody,
+    ]) {
+      assert.doesNotMatch(
+        value,
+        /nothing (left )?to decide|nothing comes to you|결정할 (건|일이?) (이제 )?(없|올라오지)/,
+        `${locale}: ${value}`
+      );
+    }
+  }
+});
+
+// ── AMUX execution room ───────────────────────────────────────────────────
+
+const catalogRow = (name, overrides = {}) => ({
+  worker_name: name,
+  provider: "anthropic",
+  archived: false,
+  paused: false,
+  isolated: false,
+  blocked: false,
+  ...overrides,
+});
+const runtimeRow = (name, overrides = {}) => ({
+  workerName: name,
+  status: "idle",
+  dispatchReady: true,
+  heartbeatAt: at("2026-10-07T22:04:30Z"),
+  leaseExpiresAt: at("2026-10-07T22:06:00Z"),
+  ...overrides,
+});
+const amuxNow = at("2026-10-07T22:05:00Z");
+
+test("the AMUX room sits under the teams, with a desk for every worker and a way in from the lobby", () => {
+  assert.ok(AMUX_ROOM.desks.length >= 8, "fewer desks than the catalog's workers");
+  assert.ok(AMUX_ROOM.y > DEPT_ROOMS.reduce((bottom, room) => Math.max(bottom, room.y + room.h), 0));
+  for (const desk of AMUX_ROOM.desks) assert.ok(reaches(desk.seat), `AMUX seat ${desk.seat.x},${desk.seat.y}`);
+  for (const door of AMUX_ROOM.doors) assert.ok(walkable(door.x, door.y), "the AMUX room's door is walled in");
+  // The entrance is in the lobby, not in the AMUX room.
+  assert.ok(ENTRANCE.x >= AMUX_ROOM.x + AMUX_ROOM.w, "the entrance opens into the AMUX room");
+});
+
+test("each AMUX worker's state is its catalog row read against its runtime the way AMUX reads it", () => {
+  const state = (catalog, runtime, now = amuxNow) =>
+    agentOfficeAmuxState({ catalog: [catalog], runtimes: runtime ? [runtime] : [], now }).workers[0].state;
+  const w = (overrides) => catalogRow("w1", overrides);
+  const r = (overrides) => runtimeRow("w1", overrides);
+  assert.equal(state(w(), r()), "ready");
+  assert.equal(state(w(), r({ dispatchReady: false })), "idle");
+  assert.equal(state(w(), r({ status: "busy", dispatchReady: false })), "busy");
+  assert.equal(state(w(), r({ status: "starting" })), "starting");
+  assert.equal(state(w(), r({ status: "error" })), "error");
+  assert.equal(state(w(), r({ status: "stopped" })), "stopped");
+  assert.equal(state(w(), r({ status: "something_new" })), "error", "an unknown runtime status is not healthy");
+  assert.equal(state(w(), null), "not_running");
+  // A lease that has run out is a lost heartbeat, whatever the status said.
+  assert.equal(state(w(), r({ status: "busy", leaseExpiresAt: amuxNow })), "lost");
+  // The operator's exclusions win, as they do when AMUX hands out work.
+  assert.equal(state(w({ paused: true }), r({ status: "busy" })), "paused");
+  assert.equal(state(w({ isolated: true }), r()), "isolated");
+  assert.equal(state(w({ blocked: true, paused: true }), r()), "blocked");
+
+  const observed = agentOfficeAmuxState({
+    catalog: [catalogRow("b"), catalogRow("old", { archived: true }), catalogRow("a")],
+    runtimes: [runtimeRow("a"), runtimeRow("old")],
+    now: amuxNow,
+  });
+  assert.deepEqual(
+    observed.workers.map((worker) => [worker.name, worker.state, worker.heartbeatAt]),
+    [
+      ["b", "not_running", null],
+      ["a", "ready", "2026-10-07T22:04:30.000Z"],
+    ],
+    "an archived worker is left out and catalog order is kept"
+  );
+  assert.deepEqual(agentOfficeAmuxState({ catalog: null, runtimes: [], now: amuxNow }), { kind: "no_catalog" });
+});
+
+test("the AMUX room's colour and summary come from its workers, and a missing record is not a state", () => {
+  const copy = adminAgentOfficeMessages.ko.real.amux;
+  const readAt = "2026-10-07T22:05:00.000Z";
+  const view = (workers, desks = 12) =>
+    amuxRoomView({ kind: "observed", workers }, readAt, desks, copy);
+  const worker = (name, state) => ({ name, provider: "openai", state, heartbeatAt: "2026-10-07T22:04:30.000Z" });
+
+  const mixed = view([worker("a", "ready"), worker("b", "busy"), worker("c", "lost"), worker("d", "stopped")]);
+  assert.equal(mixed.status, "attention");
+  assert.equal(mixed.summary, "연결 2/4 · 작업 중 1 · 확인 필요 1 · 읽은 시각 10-07 22:05 UTC");
+  assert.deepEqual(
+    mixed.workers.map((w) => [w.name, w.status, w.label, w.dim]),
+    [
+      ["a", "done", "배정 가능", false],
+      ["b", "working", "작업 중", false],
+      ["c", "attention", "연결 끊김", false],
+      ["d", "waiting", "정지", true],
+    ]
+  );
+  assert.equal(mixed.workers[0].title, "a · openai · 배정 가능 · 마지막 heartbeat 10-07 22:04 UTC");
+  assert.equal(view([worker("a", "busy"), worker("b", "ready")]).status, "working");
+  assert.equal(view([worker("a", "ready")]).status, "done");
+  assert.equal(view([worker("a", "paused"), worker("b", "not_running")]).status, "waiting");
+  assert.equal(view([]).status, "waiting");
+  assert.equal(mixed.note, null);
+  // When they do not all fit, the ones that need a look are drawn, and the
+  // room says in words how many are not.
+  const crowded = view([worker("a", "ready"), worker("b", "busy"), worker("c", "error")], 1);
+  assert.equal(crowded.workers[0].name, "c");
+  assert.equal(crowded.note, "여기 그리지 못한 worker 2개");
+  assert.match(crowded.summary, /여기 그리지 못한 worker 2개/);
+  // It says the workers are not drawn, not where else they are: one not
+  // running has no runtime row for any other screen to list.
+  for (const locale of ["en", "ko"]) {
+    assert.doesNotMatch(adminAgentOfficeMessages[locale].real.amux.more(2), /page|화면/);
+  }
+  assert.equal(adminAgentOfficeMessages.en.real.amux.more(1), "1 more worker not drawn here");
+  assert.equal(adminAgentOfficeMessages.en.real.amux.more(3), "3 more workers not drawn here");
+  assert.equal(view([]).note, copy.noWorkers);
+
+  const unread = amuxRoomView({ kind: "unread" }, readAt, 12, copy);
+  assert.equal(unread.status, "attention");
+  assert.deepEqual(unread.workers, []);
+  assert.match(unread.summary, /worker 기록을 읽지 못함/);
+  assert.equal(unread.note, copy.unread, "a failed read is said in the room, not only in a tooltip");
+  const none = amuxRoomView({ kind: "no_catalog" }, readAt, 12, copy);
+  assert.equal(none.status, "waiting");
+  assert.match(none.summary, /카탈로그가 없음/);
+  assert.equal(none.note, copy.noCatalog);
+
+  for (const locale of ["en", "ko"]) {
+    const states = adminAgentOfficeMessages[locale].real.amux.states;
+    for (const key of ["ready", "idle", "busy", "starting", "error", "lost", "stopped", "not_running", "paused", "isolated", "blocked"]) {
+      assert.ok(states[key], `${locale}: ${key}`);
+    }
+  }
+});
+
+test("the office reads AMUX workers' runtime state, never their work, and draws them outside the demo", () => {
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const start = source.indexOf("async function readAmuxWorkers");
+  const end = source.indexOf("export async function readAgentOfficeLiveRooms");
+  assert.ok(start >= 0 && end > start, "readAmuxWorkers not found");
+  const amux = source.slice(start, end);
+  assert.match(amux, /getConfiguredAmuxWorkerCatalog\(\)/);
+  assert.match(
+    amux,
+    /select: \{ workerName: true, status: true, dispatchReady: true, heartbeatAt: true, leaseExpiresAt: true \}/
+  );
+  assert.doesNotMatch(amux, /amuxWorkItem|amuxExecutionAttempt|amuxRouteDecision|title|process\.env/);
+  assert.ok(
+    amux.indexOf("now: new Date()") > amux.indexOf("await prisma"),
+    "the lease must be judged against a clock taken after the read"
+  );
+  assert.match(amux, /read: "amux_workers"/);
+
+  // Workers are drawn by their own layer: not engine agents, so the demo can
+  // neither move them nor give them a line.
+  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  const layer = world.slice(world.indexOf("const WorkerLayer"), world.indexOf("const PropLayer"));
+  assert.doesNotMatch(layer, /onPointerUp|onPick|engine/);
+  assert.match(world, /<WorkerLayer workers=\{amux\.workers\} \/>/);
+  assert.match(world, /isAmux && amux\.note \?/);
+  assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
+});
+
 test("a record that needs a look is counted on its own, never as a decision", () => {
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
@@ -532,6 +1195,9 @@ test("the staff wear the office's palette, not the original's pink", () => {
   }
   for (const [key, colour] of Object.entries(AGENT_OFFICE_OPERATOR)) {
     assert.ok(!pinks.includes(colour), `the operator's ${key} is still ${colour}`);
+  }
+  for (const colours of AGENT_OFFICE_WORKER_COLORS) {
+    for (const colour of colours) assert.ok(!pinks.includes(colour), `an AMUX worker wears ${colour}`);
   }
 });
 

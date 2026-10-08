@@ -26,6 +26,10 @@ import {
   AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
   AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+  AMUX_V4_UNIT_DECISION_TARGET,
+  AMUX_V4_UNIT_HOUSEKEEPING_SCOPE,
+  AMUX_V4_UNIT_INVALIDATE_ACTION,
+  AMUX_V4_UNIT_UNKNOWN_ACTION,
   SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   auditRowActorKind,
@@ -64,6 +68,8 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-vnext-one-shot-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
+    "amux-v22-auto-admit",
+    "amux-v22-worker-claim",
     "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
@@ -90,23 +96,46 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-merge-lane",
     // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
     "ops-observer",
+    // docs/policy/amux-decision-maker.md §10: the routing route and one actor
+    // per DM instance. A DM writes proposals, never approvals (§1).
+    "amux-decision-router",
+    "amux-decision-maker-openai",
+    "amux-decision-maker-anthropic",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
+  assert.equal(isSystemAuditActor("amux-v22-auto-admit"), true);
   // Only explicitly scoped v4 actions use the intake identity. The
   // remaining candidate actors have no audit-writer authority.
   assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
     "amux-intake-supervisor",
     "amux-intake-retention",
     "amux-portfolio-scorer",
-    "amux-v22-auto-admit",
   ]);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.v22.auto_promotion.consumed", "AmuxV22PromotionReceipt"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.v22.auto_promotion.outcome_unknown", "AmuxV22PromotionUnknown"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.auto_promotion.halted", "AmuxRecommendationAutoHalt"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.claim.assigned", "AmuxWorkItem"), false);
   assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
   assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
   assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_INVALIDATE_ACTION, "AmuxWorkItem"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_UNIT_UNKNOWN_ACTION,
+    targetType: AMUX_V4_UNIT_DECISION_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_UNIT_HOUSEKEEPING_SCOPE },
+  })), "system");
   assert.equal(auditRowActorKind(row({
     action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
     targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,

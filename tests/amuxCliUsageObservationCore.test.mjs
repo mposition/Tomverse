@@ -31,6 +31,10 @@ test("Codex 0.155.1 single fresh turn preserves cache-write and reasoning catego
   const observer = createCodexCliUsageObserver();
   observer.observeLine("");
   observer.observeLine(JSON.stringify({ type: "thread.started", thread_id: "opaque" }));
+  // A rollout turn_context names the configured model, not the provider's
+  // served model. Even if it appears in the event stream, it is not proof.
+  observer.observeLine(JSON.stringify({ type: "turn_context",
+    payload: { model: "gpt-6-astra" } }));
   observer.observeLine(JSON.stringify({ type: "turn.started" }));
   observer.observeLine(codexTurn({
     ...codexUsage(100, 40, 10, 3), cache_write_input_tokens: 12,

@@ -123,6 +123,46 @@ export function AdminProductResearchPanel({ initial }: { initial: ProductResearc
               {initial.latest.slot} · {SHORT_SHA(initial.latest.developSha)} /{" "}
               {SHORT_SHA(initial.latest.mainSha)} · {SHORT_SHA(initial.latest.payloadDigest)}
             </p>
+            {/*
+              The distribution, because counting a column of up to 200 rows by
+              eye is work a screen can do. Recounted from the rows rendered
+              below rather than read off the payload, so what is counted is
+              what is shown; `summary` is null when the stored payload cannot
+              say, and an unknown count renders nothing rather than a zero.
+            */}
+            {initial.latest.summary === null ? null : (
+              <div className="mt-3 rounded border border-zinc-200 p-3 dark:border-zinc-800">
+                <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  {m.summaryHeading}
+                </h3>
+                <dl className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2">
+                  {initial.latest.summary.verdicts.map((entry) => (
+                    <div key={entry.verdict} className="flex min-w-0 justify-between gap-3">
+                      <dt className="min-w-0 text-sm text-zinc-600 dark:text-zinc-400">
+                        {entry.label ?? entry.verdict}
+                      </dt>
+                      <dd className="font-mono text-sm tabular-nums text-zinc-900 dark:text-zinc-100">
+                        {entry.count}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  {fill(m.summaryBlindSpots, {
+                    noSignal: initial.latest.summary.blindSpots.noSignalIssues,
+                    oneBranch: initial.latest.summary.blindSpots.oneBranchOnly,
+                  })}
+                </p>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  {fill(m.summaryNote, { count: initial.latest.summary.issueCount })}
+                </p>
+                {initial.latest.summary.storedCountsAgree ? null : (
+                  <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                    {m.summaryMismatch}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[42rem] text-left text-sm">
                 <thead className="text-xs uppercase text-zinc-500 dark:text-zinc-400">

@@ -50,6 +50,29 @@ test("a pending receipt survives a lost reply and cannot be overwritten", () => 
   assert.deepEqual(readPreviewReceipt(null, "operator", ideaId), { kind: "unavailable" });
 });
 
+test("later page preview and recovery are bound to their exact chunk", () => {
+  const later = { ...reply, payload: { ...reply.payload, version: 2, chunkIndex: 1 } };
+  assert.ok(readPreparedIdeaTransferPreview(201, later, previewId, ideaId,
+    model, "high", 1));
+  assert.equal(readPreparedIdeaTransferPreview(201, later, previewId, ideaId,
+    model, "high", 2), null);
+  assert.equal(readPreparedIdeaTransferPreview(201, reply, previewId, ideaId,
+    model, "high", 1), null);
+  const values = new Map();
+  const storage = { getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => { values.set(key, value); } };
+  assert.equal(reservePreviewReceipt(storage, "operator", ideaId, previewId,
+    model, "high", 1), true);
+  assert.deepEqual(readPreviewReceipt(storage, "operator", ideaId, 0),
+    { kind: "absent" });
+  assert.equal(readPreviewReceipt(storage, "operator", ideaId, 1).kind,
+    "present");
+  assert.equal(reservePreviewReceipt(storage, "operator", ideaId, ideaId,
+    model, "high", 1), false);
+  assert.equal(reservePreviewReceipt(storage, "operator", ideaId, ideaId,
+    model, "high", 2), true);
+});
+
 test("Admin UI gates preparation on an observed idea-only plan and provides exact-ID read-back", () => {
   const panel = readFileSync(new URL("../components/admin/AmuxFrontierModelsPanel.tsx", import.meta.url), "utf8");
   const input = readFileSync(new URL("../components/admin/AmuxIdeaInputPanel.tsx", import.meta.url), "utf8");

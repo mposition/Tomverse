@@ -26,7 +26,7 @@ cache-mode: read
 # providers down with it.
 #
 # Both branches, because they answer different questions. `main` is what bills
-# real users and is the one that matters. `develop` is what staging runs and
+# real users and is the one that matters. `develop` is what dev runs and
 # what becomes main next, so checking it is how a drift is caught before a
 # deploy rather than after one -- which is the entire point of a drift check.
 # A branch where the model is still held reports `skipped` and passes, so the

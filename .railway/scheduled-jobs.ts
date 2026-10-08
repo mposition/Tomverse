@@ -43,16 +43,16 @@ export const RAILWAY_REPOSITORY = "mposition/Tomverse";
  * The branch each Railway environment deploys.
  *
  * dev takes every develop merge, so that staging (shown to people as Test) can
- * hold one release candidate while develop keeps moving. staging still follows
- * develop beside it until the lane switch, which moves staging to the `test`
- * branch; before dev exists and is proven, that move would leave develop
- * deploying nowhere.
+ * hold one release candidate while develop keeps moving. staging deploys the
+ * `test` branch, which only the promotion script moves (`npm run promote:test`,
+ * .github/RELEASE_CHECKLIST.md 7.9). An apply here reconnects staging's cron
+ * services to `test`, so the branch must exist before the first apply.
  */
 export const RAILWAY_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
 > = {
   production: "main",
-  staging: "develop",
+  staging: "test",
   dev: "develop",
 };
 

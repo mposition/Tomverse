@@ -44,11 +44,11 @@ cache-mode: read
 # it off the deployment's critical path. The note below that called moving it
 # "the real fix" is the change made here.
 #
-# Not while the pull request is a draft. A release PR's head is develop's
-# head, so its checks join every develop commit's check suite -- and Railway's
-# Wait for CI holds the *staging* deployment for them too. A release PR kept
-# open as a draft while develop moves would hold every staging deploy for this
-# run. Drafts skip both jobs (a skipped run fails nothing, and a draft cannot
+# Not while the pull request is a draft. A release PR's head is a develop
+# commit, so its checks join that commit's check suite -- and Railway's Wait
+# for CI holds every deployment of that commit for them too (dev's for a
+# develop-head PR, Test's for the release candidate). A release PR kept open as
+# a draft would hold those deploys for this run. Drafts skip both jobs (a skipped run fails nothing, and a draft cannot
 # merge); `ready_for_review` starts the run that the merge then needs.
 on:
   pull_request:

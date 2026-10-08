@@ -632,6 +632,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one orchestrator halt, not customer data. The cleared-by id is the administrator who cleared the halt and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed reason code and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxDecisionMakerSwitchEvent",
+    publicName: "amux_decision_maker_switch_events",
+    prismaModel: "AmuxDecisionMakerSwitchEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker switch change or latch, not customer data. The actor id is the administrator who set the switch and is intentionally not a User foreign key, so account deletion cannot rewrite it; a latch carries no person. The row stores a closed scope, value and reason code and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIdeaFrontierModelApproval",
     publicName: "amux_idea_frontier_model_approvals",
     prismaModel: "AmuxIdeaFrontierModelApproval",
@@ -641,6 +649,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaAnalysisPriceVersion",
     publicName: "amux_idea_analysis_price_versions",
     prismaModel: "AmuxIdeaAnalysisPriceVersion",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskCostCatalogApproval",
+    publicName: "amux_v4_task_cost_catalog_approvals",
+    prismaModel: "AmuxV4TaskCostCatalogApproval",
     state: "unverified",
   },
   {
@@ -668,6 +682,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaDerivationGroup",
+    publicName: "amux_idea_derivation_groups",
+    prismaModel: "AmuxIdeaDerivationGroup",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaUnitDecision",
     publicName: "amux_idea_unit_decisions",
     prismaModel: "AmuxIdeaUnitDecision",
@@ -692,9 +712,45 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxTaskResult",
+    publicName: "amux_v22_task_results",
+    prismaModel: "AmuxV22TaskResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskPatch",
+    publicName: "amux_v22_task_patches",
+    prismaModel: "AmuxV22TaskPatch",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaRetentionHold",
     publicName: "amux_idea_retention_holds",
     prismaModel: "AmuxIdeaRetentionHold",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioAssessment",
+    publicName: "amux_portfolio_assessments",
+    prismaModel: "AmuxPortfolioAssessment",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioScoreSnapshot",
+    publicName: "amux_portfolio_score_snapshots",
+    prismaModel: "AmuxPortfolioScoreSnapshot",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPromotionControl",
+    publicName: "amux_v22_promotion_controls",
+    prismaModel: "AmuxV22PromotionControl",
+    state: "unverified",
+  },
+  {
+    domain: "amuxWorkerLaneDecision",
+    publicName: "amux_v22_lane_decisions",
+    prismaModel: "AmuxV22LaneDecision",
     state: "unverified",
   },
   {

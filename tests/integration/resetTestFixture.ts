@@ -1,12 +1,17 @@
 import type { PrismaClient } from "@prisma/client";
 
-/** Clear a disposable integration fixture without weakening production's append-only triggers. */
+/**
+ * Clear a disposable integration fixture without weakening production's
+ * append-only triggers. TRUNCATE ... CASCADE can reach unrelated protected
+ * history tables through audit foreign keys, even when they are empty.
+ */
 export async function resetTestFixture(
   prisma: PrismaClient,
   statement: string,
 ): Promise<void> {
   const raw = process.env.TEST_DATABASE_URL?.trim();
-  if (!raw || raw !== process.env.DATABASE_URL?.trim()) {
+  const active = process.env.DATABASE_URL?.trim();
+  if (!raw || !active || raw !== active) {
     throw new Error("Fixture reset requires the exact test database URL");
   }
   const target = new URL(raw);
@@ -18,22 +23,23 @@ export async function resetTestFixture(
   );
   if (!["localhost", "127.0.0.1", "[::1]"].includes(target.hostname) ||
       !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(name) ||
-      // Unlike the runner, this trigger-bypass helper needs a named test DB
-      // and refuses query options that can override the connection target.
       target.search !== "" ||
       !truncate.test(statement.trim())) {
     throw new Error("Fixture reset is limited to loopback test databases and TRUNCATE CASCADE");
   }
   try {
     await prisma.$transaction(async (tx) => {
-      // Confirm the database on the same connection before disabling triggers.
+      // Verify the database name on this exact connection. The URL guard
+      // excludes connection overrides, while this catches a client configured
+      // for a differently named database.
       const [backend] = await tx.$queryRawUnsafe<Array<{ database: string }>>(
         'SELECT current_database() AS "database"',
       );
       if (!backend || backend.database !== name) {
         throw new Error("Fixture reset requires the exact test database backend");
       }
-      // SET LOCAL reverts automatically when this transaction ends.
+      // SET LOCAL reverts automatically at COMMIT/ROLLBACK. It is not inherited
+      // by any later assertion, including tests of the append-only guards.
       await tx.$executeRawUnsafe("SET LOCAL session_replication_role = replica");
       await tx.$executeRawUnsafe(statement);
     }, { timeout: 30_000 });

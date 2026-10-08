@@ -57,10 +57,13 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
     reviewDiffDigest: "Diff SHA-256",
+    reviewResultSha256: "Worker result SHA-256",
     reviewContentMissing:
       "No review subject with a verifiable digest is available. Decision proposals are unavailable.",
     reviewContentTruncated:
       "The stored description exceeds the protected display limit. Only Block is available until the source is shortened and reviewed again.",
+    reviewDisplayMismatch:
+      "Approval is closed because the source contains hidden or normalized characters. Correct the source and run the Task again, or Block it; the displayed text cannot stand in for the original.",
     approveUnavailable:
       "Approval is unavailable until a verifiable result artifact and its source can be reviewed.",
     noAllowedOutcome: "No task-review decision is currently permitted.",
@@ -193,10 +196,13 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
     reviewBaseSha: "Base SHA",
     reviewHeadSha: "Head SHA",
     reviewDiffDigest: "Diff SHA-256",
+    reviewResultSha256: "Worker 결과 SHA-256",
     reviewContentMissing:
       "검증 가능한 digest를 가진 검토 대상이 없습니다. 결정 제안을 만들 수 없습니다.",
     reviewContentTruncated:
       "저장된 설명이 보호 화면 표시 한도를 넘었습니다. 원천 내용을 줄여 다시 검토하기 전에는 차단만 가능합니다.",
+    reviewDisplayMismatch:
+      "원문에 화면에서 숨겨지거나 정규화되는 문자가 있어 완료 승인을 닫았습니다. 원문을 고쳐 Task를 다시 실행하거나 차단하세요. 표시 문구를 원문 동의로 간주하지 않습니다.",
     approveUnavailable:
       "검증 가능한 결과물과 출처를 검토할 수 있을 때까지 완료 승인은 사용할 수 없습니다.",
     noAllowedOutcome: "현재 허용된 작업 검토 결정이 없습니다.",

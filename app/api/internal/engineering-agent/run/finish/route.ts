@@ -10,7 +10,7 @@ import {
   finishEngineeringAgentRun,
   engineeringAgentAmuxAdapterPermittedNow,
 } from "@/lib/engineeringAgentAmuxAdapter";
-import { RUNNER_REPORTABLE_HALTS, RUN_OUTCOMES, isRunId } from "@/lib/engineeringAgentCore";
+import { RUNNER_REPORTABLE_HALTS, RUNNER_REPORTABLE_OUTCOMES, isRunId } from "@/lib/engineeringAgentCore";
 import {
   engineeringAgentErrorResponse,
   engineeringAgentJson,
@@ -24,11 +24,6 @@ import {
 // one table, so the runner never chooses an AMUX status and never `done`. The
 // attempt settles and the run ends in one AMUX transaction, or neither.
 
-const RUNNER_OUTCOMES = RUN_OUTCOMES.filter((outcome) => outcome !== "abandoned") as [
-  Exclude<(typeof RUN_OUTCOMES)[number], "abandoned">,
-  ...Exclude<(typeof RUN_OUTCOMES)[number], "abandoned">[],
-];
-
 const requestSchema = z
   .object({
     requestKey: z.string().regex(/^[A-Za-z0-9_-]{16,128}$/),
@@ -37,8 +32,8 @@ const requestSchema = z
     runId: z.string().refine(isRunId),
     attemptId: z.string().uuid(),
     taskRevision: z.number().int().min(0).max(AMUX_MAX_EXPECTED_REVISION),
-    // `abandoned` is AMUX recovery's to record, never the runner's.
-    outcome: z.enum(RUNNER_OUTCOMES),
+    // `abandoned` is recovery's; `private_result` requires v22 result proof.
+    outcome: z.enum(RUNNER_REPORTABLE_OUTCOMES),
     // What only the runner can see; the app adds the circuit and mismatches.
     halt: z.enum(RUNNER_REPORTABLE_HALTS),
     // The run's model spend in micro-USD as the provider reported it; null when

@@ -39,8 +39,11 @@ const FAILED_DEPLOYMENT_STATUSES = new Set(["FAILED", "CRASHED"]);
 // merges a minute apart, and deployed with #1969 half an hour later.
 export const SKIPPED_RUN_FAILURE = 3;
 
+// staging is no lane: it deploys the `test` branch, which the promotion script
+// moves to a release candidate a person chose (scripts/promote-test.mjs). The
+// train never merges into `test`.
 export const LANES = [
-  { branch: "develop", environment: "staging" },
+  { branch: "develop", environment: "dev" },
   { branch: "main", environment: "production" },
 ];
 

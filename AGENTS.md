@@ -256,6 +256,20 @@ gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지
 - 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
   job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
 
+## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
+
+2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
+staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
+사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
+
+- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
+  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
+- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
+- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
+  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
@@ -1285,6 +1299,36 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   단계의 PR이 이 절에 추가합니다.
 - **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
   I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
+- **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
+  `lib/amux/decisionMakerSwitchSystemAudit.ts`,
+  `prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql`,
+  `tests/amuxDecisionMakerSwitch.test.mjs`, `tests/integration/amux-decision-maker-switch.db.test.ts`.
+  스위치는 append-only 사건 표이고 scope마다 가장 새 사건이 상태입니다. **값은 DB CHECK가 닫습니다** —
+  인스턴스는 `off`·`proposal`, kill switch는 `on`·`off`뿐이고, 시스템은 인스턴스를 `off`로 latch만
+  합니다. 사건마다 같은 트랜잭션의 감사 행을 trigger가 요구하며, latch 뒤 사람의 첫 변경은
+  `amux.decision.latch_release`입니다. 읽기 실패나 목록 밖의 행은 전부 `null`(fail-closed)이고,
+  `routeDmQuestion()`이 `settings_unreadable`로 운영자에게 보냅니다. 표를 읽고 쓰는 곳은 store
+  하나이며, 시스템 감사는 별도 모듈이 씁니다(한 파일이 두 writer를 부르지 않습니다). route·Admin
+  화면·DM 호출은 없습니다.
+- **S1c(요청 원장)**: `lib/amux/decisionMakerRequestCore.ts`, `lib/amux/decisionMakerRequestStore.ts`,
+  `lib/amux/decisionMakerRequestSystemAudit.ts`,
+  `prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql`,
+  `prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql`,
+  `tests/amuxDecisionMakerRequest.test.mjs`, `tests/integration/amux-decision-maker-request.db.test.ts`.
+  요청은 (카드 id, 질문 revision)당 한 행이고 고칠 수 없으며, 상태는 append-only 사건 표의 합입니다.
+  **전이 그래프는 trigger가 강제하고 `dmEventRefusal()`·`dmEventSwitchRefusal()`이 같은 그래프를
+  옮깁니다** — 한쪽만 바꾸지 않습니다. 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)은 DB 시계이고,
+  배정·전송 의도·DM 출력(제안·이관·검증 실패)은 삽입 때와 COMMIT 때(`AX001`) 모두 마감에서 commit
+  예비시간 200 ms를 뺀 D로 거부되며, writer는 같은 마감을 `requireLeaseAt`으로 fence에 넘깁니다. 종결
+  결과는 요청당 하나이고 (요청, 결과 digest) 쌍으로 멱등입니다. 사건마다 같은 트랜잭션의 감사 행을
+  요구합니다 — 배정·종료는 router, 전송·결과는 요청의 인스턴스 actor입니다.
+  **스위치 값은 호출자가 넘기지 않습니다.** 라우팅·전송 의도·결과는 store가 audit chain lock(모든
+  스위치 변경도 먼저 잡는 lock) 뒤에 S1b reader로 직접 읽고, trigger는 스위치 gate(스위치 trigger는
+  배타, 원장 trigger는 공유)를 잡은 뒤 다시 읽어 kill switch on·인스턴스 off에서 DM 라우팅·전송
+  의도를, kill switch on에서 제안을 거부합니다. lock 순서는 audit chain lock → 스위치 gate →
+  요청·scope lock입니다. 원장 trigger와 S1b 스위치 trigger는 lock 뒤에 읽으므로 READ COMMITTED가
+  아니면 거부합니다. 운영자 직접 답의 종료, 본문, 보존, digest 키, 판정, 전달, route·Admin 화면·DM
+  호출은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

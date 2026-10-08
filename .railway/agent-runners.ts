@@ -52,14 +52,14 @@ export const AGENT_RAILWAY_REGION = "asia-southeast1-eqsg3a";
 
 /**
  * The branch each Railway environment deploys, as in the cron table: dev takes
- * every develop merge, and staging follows develop beside it until the lane
- * switch moves it to the `test` branch.
+ * every develop merge, and staging deploys the `test` branch the promotion
+ * script moves to a release candidate.
  */
 export const AGENT_ENVIRONMENT_BRANCHES: Readonly<
   Record<RailwayEnvironment, string>
 > = {
   production: "main",
-  staging: "develop",
+  staging: "test",
   dev: "develop",
 };
 
@@ -145,6 +145,22 @@ const BILLING_FINANCE_OPS_VARIABLES = [
  * start; the IaC test holds the two equal.
  */
 const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
+
+/**
+ * The sre-ops page service's variables at S1b (docs/policy/sre-ops.md §7, §8):
+ * the page service's list in scripts/ops-observer/runtime-variables-core.mjs
+ * without OPS_OBSERVER_PAGE_WEBHOOK_URL, which exists from S2 only. The
+ * supervisor refuses to start on any other name; the IaC test holds the two
+ * lists to that difference. RAILWAY_DOCKERFILE_PATH points the build at
+ * docker/ops-observer.Dockerfile, which the operator sets.
+ */
+const OPS_OBSERVER_PAGE_S1B_VARIABLES = [
+  "OPS_OBSERVER_SECRET",
+  "OPS_OBSERVER_HEARTBEAT_URL",
+  "OPS_OBSERVER_ENABLED",
+  "OPS_OBSERVER_APP_URL",
+  "RAILWAY_DOCKERFILE_PATH",
+] as const;
 
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
@@ -237,12 +253,30 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   {
+    // docs/policy/sre-ops.md §1 item 1, §8 S1b: every ten minutes, built from
+    // docker/ops-observer.Dockerfile. The start command replaces the image's
+    // ENTRYPOINT in exec form, so it names the supervisor and its service
+    // argument itself, with no shell and nothing npm would add.
+    // Production only: the supervisor refuses any app URL but production's
+    // (scripts/ops-observer/supervise.mjs), and §3 rule 9's no-restart policy
+    // is the deploy setting below. The digest service is declared with its
+    // runner.
+    key: "ops_observer_page",
+    service: "Ops Observer",
+    startCommand: "node scripts/ops-observer/supervise.mjs page",
+    cronSchedule: "*/10 * * * *",
+    environments: {
+      production: OPS_OBSERVER_PAGE_S1B_VARIABLES,
+    },
+  },
+  {
     key: "product_research_probe",
     service: "Product Research Probe",
     startCommand: "npm run agent:product-research-observation -- --probe",
     cronSchedule: null,
     // dev is where develop lands, so the probe goes with it. staging keeps its
-    // copy until the lane switch, when staging stops following develop.
+    // copy: it runs the release candidate, and the probe answers for that
+    // image.
     environments: {
       staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
       dev: PRODUCT_RESEARCH_PROBE_VARIABLES,

@@ -35,6 +35,7 @@ import {
   observationLabel,
   observationSilenceVerdict,
   observationSlotSeries,
+  observationSummaryView,
   p1WindowJudgement,
   p2WindowJudgement,
   summariseObservation,
@@ -677,4 +678,133 @@ test("a failed or missing slot does not get an earlier success's rows", () => {
   // of is that the stored state is wrong.
   const duplicated = [{ slot: END_SLOT, state: "duplicate" }];
   assert.equal(displayableObservationSlot(duplicated, { everRecorded: true }).slot, null);
+});
+
+test("the slot summary counts every verdict the screen can name, zeroes included", () => {
+  // The number this exists to stop a person computing: the first staging slot
+  // had eleven rows and the only thing separating four from seven was a commit
+  // signal, so the distribution is what says the clone's history was readable.
+  // At the 200-row limit nobody counts that column by eye.
+  const row = (id, verdict) => ({
+    id,
+    title: `issue ${id}`,
+    verdict,
+    resolvedOn: [],
+    missingFrom: [],
+    blockedOnPresent: false,
+    signals: {
+      probe: { develop: "none", main: "none" },
+      pricing: { develop: "none", main: "none" },
+      commits: { develop: false, main: false },
+    },
+  });
+  const issues = [
+    ...Array.from({ length: 4 }, (_unused, i) => row(String(i + 1), "landed_but_unverified")),
+    ...Array.from({ length: 7 }, (_unused, i) => row(String(i + 5), "open_work")),
+  ];
+  const payload = { issues, ...summariseObservation(issues) };
+
+  const view = observationSummaryView(payload);
+  assert.equal(view.issueCount, 11);
+  assert.equal(view.storedCountsAgree, true);
+  assert.deepEqual(
+    view.verdicts.map((entry) => [entry.verdict, entry.count]),
+    Object.keys(OBSERVATION_LABELS.verdict).map((verdict) => [
+      verdict,
+      verdict === "landed_but_unverified" ? 4 : verdict === "open_work" ? 7 : 0,
+    ]),
+  );
+  // Zeroes are kept. A distribution with them dropped cannot be compared with
+  // another one -- "this verdict did not occur" and "this verdict is not in
+  // that build" would look the same, and that comparison is the P2 gate.
+  assert.equal(view.verdicts.length, Object.keys(OBSERVATION_LABELS.verdict).length);
+  // Every row is nameable, so the screen never prints a source enum.
+  assert.equal(view.verdicts.every((entry) => typeof entry.label === "string"), true);
+  assert.deepEqual(view.blindSpots, { noSignalIssues: 11, oneBranchOnly: 0 });
+});
+
+test("stored counts that stopped matching their own rows are reported, not shown", () => {
+  const issues = [
+    {
+      id: "1",
+      title: "one",
+      verdict: "open_work",
+      resolvedOn: [],
+      missingFrom: [],
+      blockedOnPresent: false,
+      signals: {
+        probe: { develop: "none", main: "none" },
+        pricing: { develop: "none", main: "none" },
+        commits: { develop: false, main: false },
+      },
+    },
+  ];
+  const honest = observationSummaryView({ issues, ...summariseObservation(issues) });
+  assert.equal(honest.storedCountsAgree, true);
+
+  // The route refuses a submission whose counts do not rederive, so this is a
+  // stored row that stopped matching -- the figures shown are the recount, and
+  // the disagreement is said rather than hidden behind one of the two.
+  const drifted = observationSummaryView({
+    issues,
+    counts: { byVerdict: { open_work: 99 } },
+    blindSpots: { noSignalIssues: 0, oneBranchOnly: 0 },
+  });
+  assert.equal(drifted.storedCountsAgree, false);
+  assert.equal(drifted.verdicts.find((entry) => entry.verdict === "open_work").count, 1);
+  assert.deepEqual(drifted.blindSpots, { noSignalIssues: 1, oneBranchOnly: 0 });
+});
+
+test("a payload that cannot say is null rather than a screen full of zeroes", () => {
+  // An unknown count is not a zero: six zeroes beside eleven rows would be read
+  // as a measurement.
+  for (const payload of [null, undefined, {}, { issues: "none" }, { issues: [{}] }, 7]) {
+    assert.equal(observationSummaryView(payload), null, JSON.stringify(payload) ?? "undefined");
+  }
+});
+
+test("a verdict the vocabulary does not have is not a screen of zeroes", () => {
+  // `undefined + 1` is NaN and `typeof NaN` is "number", so a shape check that
+  // only asks for numbers lets this through: the six known verdicts all read
+  // zero beside a non-zero row count, and an empty stored record agrees with
+  // them, so the screen would show a measurement nobody made.
+  const row = (verdict) => ({
+    id: "1",
+    title: "one",
+    verdict,
+    resolvedOn: [],
+    missingFrom: [],
+    blockedOnPresent: false,
+    signals: {
+      probe: { develop: "none", main: "none" },
+      pricing: { develop: "none", main: "none" },
+      commits: { develop: false, main: false },
+    },
+  });
+
+  const unknown = [row("not_a_verdict")];
+  // The recount itself does produce the NaN, which is what the guard is for.
+  assert.equal(
+    Number.isNaN(summariseObservation(unknown).counts.byVerdict.not_a_verdict),
+    true,
+  );
+  assert.equal(
+    observationSummaryView({ issues: unknown, counts: { byVerdict: {} }, blindSpots: {} }),
+    null,
+  );
+  assert.equal(observationSummaryView({ issues: unknown, ...summariseObservation(unknown) }), null);
+
+  // A count that is not a count is refused the same way, from either side.
+  const known = [row("open_work")];
+  assert.ok(observationSummaryView({ issues: known, ...summariseObservation(known) }));
+  for (const byVerdict of [{ open_work: 1.5 }, { open_work: -1 }, { open_work: Number.NaN }]) {
+    const view = observationSummaryView({
+      issues: known,
+      counts: { byVerdict },
+      blindSpots: { noSignalIssues: 1, oneBranchOnly: 0 },
+    });
+    // The recount is still sound, so the section renders -- it is the stored
+    // figure that is refused, and that is what the warning is for.
+    assert.equal(view.storedCountsAgree, false, JSON.stringify(byVerdict));
+  }
 });

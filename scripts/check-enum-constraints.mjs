@@ -736,10 +736,27 @@ const REGISTRY = {
     reason:
       "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
   },
+  AmuxPortfolioAssessment_uncertainty_check: {
+    owner: "database",
+    reason:
+      "Owner-confirmed portfolio evidence has exactly low, medium or high uncertainty; the score uses the worst uncertainty across the hierarchy.",
+  },
+  AmuxPortfolioAssessment_reasonCode_check: {
+    owner: "database",
+    reason:
+      "The append-only portfolio assessment records why the operator entered a new evidence version or override; it never edits a prior score.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
+  },
+  AmuxV22LaneDecision_lane_check: {
+    owner: "list",
+    module: "lib/amux/v22WorkerClaimCore.ts",
+    list: "AMUX_V22_CLAIM_LANES",
+    reason:
+      "The owner-declared normal, parallel and SEV1 worker-assignment lanes are a closed v22 capacity contract. A fourth value must update the guard and owner route together.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",
@@ -1004,6 +1021,90 @@ const REGISTRY = {
     list: "AMUX_ORCHESTRATOR_HALT_REASON_CODES",
     reason:
       "The six halt reasons of policy version 20, section 2. The first four carry the write's request id as the halt key; contract_violation and selection_read_failures carry none. The orchestrator's Rust list is pinned to the same six by tests/amuxOrchestratorHaltCore.test.mjs.",
+  },
+  AmuxDecisionMakerSwitchEvent_scope_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_SCOPES",
+    reason:
+      "The Decision Maker kill switch and the two DM instances (docs/policy/amux-decision-maker.md sections 7 and 8). The instances are the S1a router's own, pinned to it by tests/amuxDecisionMakerSwitch.test.mjs; a third vendor is a policy version.",
+  },
+  AmuxDecisionMakerSwitchEvent_value_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_VALUES",
+    reason:
+      "on, off and proposal, and a second CHECK pairs them with the scope: the kill switch takes on or off, an instance off or proposal (section 8). There is no autonomous value; version 1 is proposal-only, and an autonomous mode is a v2 policy and a schema change, never a stored string.",
+  },
+  AmuxDecisionMakerSwitchEvent_reason_code_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_REASON_CODES",
+    reason:
+      "operator for a person's change; validation_latch (three consecutive DM validation failures, section 8) and cleanup_latch (a request directory whose removal could not be confirmed, section 5) for the system, which may only turn an instance off.",
+  },
+  AmuxDecisionMakerSwitchEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_ACTOR_KINDS",
+    reason:
+      "human or system. The guard trigger binds each to its own audit entry of the same transaction: a person's under amux.decision.mode or amux.decision.latch_release, a latch under amux.decision.latch by the instance's own system actor.",
+  },
+  AmuxDecisionMakerRequest_route_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_REQUEST_ROUTES",
+    reason:
+      "routeDmQuestion()'s two results (docs/policy/amux-decision-maker.md section 3). There is no autonomous route in policy version 1; a third value would be a v2 policy and a schema change. Further CHECKs tie the route to the refusal codes: dm_proposal carries none, operator at least one.",
+  },
+  AmuxDecisionMakerRequest_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The two DM instances, the switch store's own list (section 7), or NULL for a provider the router does not verify. A separate CHECK pairs the instance with the asking provider: claude to decision-maker-openai, codex to decision-maker-anthropic.",
+  },
+  AmuxDecisionMakerRequestEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_REQUEST_EVENT_KINDS",
+    reason:
+      "The request lifecycle of stage S1c, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>). The trigger also holds the transition graph that dmEventRefusal() mirrors. Operator judgments, deliveries, retention and body events are later stages and are not values here.",
+  },
+  AmuxDecisionMakerRequestEvent_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The instance a transmission, result or rejection event comes from; NULL on the router's assignment and closing events. The guard trigger also requires it to be the request's own instance.",
+  },
+  AmuxDecisionMakerRequestEvent_vendor_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_VENDORS",
+    reason:
+      "The vendor a transmission intent records (section 10), paired with the instance by a second CHECK: openai with decision-maker-openai, anthropic with decision-maker-anthropic. The writer derives it from the instance.",
+  },
+  AmuxDecisionMakerRequestEvent_snapshot_state_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_SNAPSHOT_STATES",
+    reason:
+      "Section 5's three snapshot states, recorded on the transmission intent: none (card only), worker_head and develop. A second CHECK requires the target SHA and the manifest digest exactly when the state is not none.",
+  },
+  AmuxDecisionMakerRequestEvent_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "Section 6's five terminal results. A partial unique index keeps one per request; the first three are DM output and are held to the result deadline when recorded and at COMMIT, timeout and unavailable only hand the question to the operator.",
+  },
+  AmuxDecisionMakerRequestEvent_rejection_reason_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_REJECTION_REASONS",
+    reason:
+      "Why an arriving result was recorded as rejected (sections 6 and 9). The guard trigger checks the first five against the ledger's own state; binding_mismatch and kill_switch are decided from the submission and the switch store, outside the ledger.",
   },
   AmuxIntakeDraft_status_check: {
     owner: "list",
