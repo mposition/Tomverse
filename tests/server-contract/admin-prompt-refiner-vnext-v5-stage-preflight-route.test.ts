@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import test, { mock } from "node:test";
+import test, { beforeEach, mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
@@ -15,6 +15,10 @@ let owner = true;
 let recent = true;
 let validOrigin = true;
 let bindingFailure: string | null = null;
+let predecessorValid = true;
+let priceReadFailure = false;
+let priceMatches = true;
+let auditKeysPresent = true;
 let prepared = 0;
 let readbacks = 0;
 const pins = {
@@ -35,6 +39,9 @@ mock.module(mod("node_modules/next-auth/next/index.js"), { namedExports: {
   getServerSession: async () => ({ user: { id: "synthetic-owner" } }),
 } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
+  adminAuditIntegrityKeys: () => auditKeysPresent ? ["synthetic-test-key"] : [],
+} });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
   isAdminSession: () => true,
   getAdminRole: () => owner ? "owner" : "ops",
@@ -73,16 +80,18 @@ mock.module(mod("lib/promptRefinerVnextOneShotStageAdmission.ts"), { namedExport
     return { id: "prompt-refiner-vnext-one-shot-v5" };
   },
 } });
-mock.module(mod("lib/promptRefinerVnextOneShotV5StageWriter.ts"), { namedExports: {
+mock.module(mod("lib/promptRefinerVnextOneShotV5PredecessorReadback.ts"), { namedExports: {
   inspectPromptRefinerVnextOneShotV5Predecessor: async () => {
     readbacks++;
-    return { stopAuditLogId: "synthetic-stop" };
+    return predecessorValid ? { stopAuditLogId: "synthetic-stop" } : null;
   },
 } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotPrice: async () => ({
-    pricePinMatchesRegistry: true, problems: [],
-  }) },
+  namedExports: { readPromptRefinerVnextOneShotPrice: async () => {
+    if (priceReadFailure) throw new Error("vnext_one_shot_price_read_failed");
+    return { pricePinMatchesRegistry: priceMatches,
+      problems: priceMatches ? [] : ["price_pin_mismatch"] };
+  } },
 });
 mock.module(mod("lib/readOnlySnapshotTransaction.ts"), { namedExports: {
   readOnlySnapshotTransaction: async (callback: (tx: unknown) => Promise<unknown>) =>
@@ -97,6 +106,19 @@ const request = (body: object = pins) => new Request(
   "http://127.0.0.1:3100/api/admin/prompt-refiner/vnext-v5-stage-preflight",
   { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify(body) });
+
+beforeEach(() => {
+  owner = true;
+  recent = true;
+  validOrigin = true;
+  bindingFailure = null;
+  predecessorValid = true;
+  priceReadFailure = false;
+  priceMatches = true;
+  auditKeysPresent = true;
+  prepared = 0;
+  readbacks = 0;
+});
 
 test("preflight requires a recently authenticated owner and strict pins", async () => {
   const route = await loadRoute();
@@ -140,10 +162,53 @@ test("preflight reads predecessor and price without creating stage or slots", as
   assert.equal(body.bindingValid, true);
   assert.equal(body.predecessorValid, true);
   assert.equal(body.priceValid, true);
+  assert.equal(body.priceReadAvailable, true);
+  assert.equal(body.auditKeyAvailable, true);
+  assert.equal(body.stageWriteEnabled, false);
   assert.equal(body.v5Absent, true);
   assert.deepEqual(body.controls, controls);
   assert.equal(body.dispatchAuthorized, false);
   assert.equal(JSON.stringify(body).includes(pins.manifestRoot), false);
-  assert.equal(prepared, 2);
+  assert.equal(prepared, 1);
   assert.equal(readbacks, 1);
+});
+
+test("preflight distinguishes predecessor and price refusal from read failure", async () => {
+  const route = await loadRoute();
+  predecessorValid = false;
+  priceMatches = false;
+  let response = await route.POST(request());
+  let body = await response.json();
+  assert.equal(body.predecessorValid, false);
+  assert.equal(body.priceValid, false);
+  assert.equal(body.priceReadAvailable, true);
+  priceMatches = true;
+  priceReadFailure = true;
+  response = await route.POST(request());
+  body = await response.json();
+  assert.equal(body.priceValid, false);
+  assert.equal(body.priceReadAvailable, false);
+  assert.equal(body.retryAuthorized, false);
+  predecessorValid = true;
+  priceReadFailure = false;
+});
+
+test("preflight reports the stage switch and audit key without disclosing them", async () => {
+  const route = await loadRoute();
+  const prior = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED;
+  try {
+    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED = "1";
+    auditKeysPresent = false;
+    const body = await (await route.POST(request())).json();
+    assert.equal(body.stageWriteEnabled, true);
+    assert.equal(body.auditKeyAvailable, false);
+    assert.equal(body.retryAuthorized, false);
+    assert.equal(JSON.stringify(body).includes("synthetic-test-key"), false);
+  } finally {
+    if (prior === undefined) {
+      delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED;
+    } else {
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED = prior;
+    }
+  }
 });

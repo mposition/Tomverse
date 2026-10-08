@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
+import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import {
   assertRecentAdminAuthentication,
@@ -18,7 +19,8 @@ import { inspectPromptRefinerVnextOneShotStageControls,
 import { readPromptRefinerVnextOneShotPrice } from
   "@/lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback";
 import { inspectPromptRefinerVnextOneShotV5Predecessor } from
-  "@/lib/promptRefinerVnextOneShotV5StageWriter";
+  "@/lib/promptRefinerVnextOneShotV5PredecessorReadback";
+import { V5_STAGE_ID } from "@/lib/promptRefinerVnextOneShotV5Recovery";
 import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
@@ -75,6 +77,9 @@ export async function POST(request: Request) {
       "admin-prompt-refiner-vnext-v5-stage-preflight", { minute: 3, day: 12 });
     const expected = await readLimitedJson(request, 2 * 1024, requestSchema);
     const controls = inspectPromptRefinerVnextOneShotStageControls(expected, "v5");
+    const stageWriteEnabled =
+      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_V5_STAGE_WRITE_ENABLED === "1";
+    const auditKeyAvailable = adminAuditIntegrityKeys(process.env).length > 0;
     let binding;
     try {
       binding = await preparePromptRefinerVnextOneShotStageBinding(expected, "v5");
@@ -84,23 +89,37 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ status: "diagnostic_only",
         bindingValid: false, bindingFailureClass: error.message,
-        controls, predecessorValid: null, priceValid: null, v5Absent: null,
+        controls, stageWriteEnabled, auditKeyAvailable,
+        predecessorValid: null, priceValid: null, priceReadAvailable: null,
+        v5Absent: null,
         retryAuthorized: false, dispatchAuthorized: false }, { headers });
     }
     const readback = await readOnlySnapshotTransaction(async (tx) => {
       const predecessor = await inspectPromptRefinerVnextOneShotV5Predecessor(
         tx, binding, session.user.id);
-      const price = await readPromptRefinerVnextOneShotPrice(tx);
       const v5 = await tx.promptRefinerVnextOneShotStage.findUnique({
-        where: { id: "prompt-refiner-vnext-one-shot-v5" },
+        where: { id: V5_STAGE_ID },
         select: { id: true },
       });
       return { predecessorValid: Boolean(predecessor),
-        priceValid: price.pricePinMatchesRegistry && price.problems.length === 0,
         v5Absent: v5 === null };
     }, { maxWait: 5_000, timeout: 15_000 });
+    let priceValid = false;
+    let priceReadAvailable = false;
+    try {
+      const price = await readOnlySnapshotTransaction(
+        (tx) => readPromptRefinerVnextOneShotPrice(tx),
+        { maxWait: 5_000, timeout: 15_000 });
+      priceReadAvailable = true;
+      priceValid = price.pricePinMatchesRegistry && price.problems.length === 0;
+    } catch (error) {
+      if (!(error instanceof Error) ||
+          error.message !== "vnext_one_shot_price_read_failed") throw error;
+    }
     return NextResponse.json({ status: "diagnostic_only",
-      bindingValid: true, bindingFailureClass: null, controls, ...readback,
+      bindingValid: true, bindingFailureClass: null, controls,
+      stageWriteEnabled, auditKeyAvailable, ...readback,
+      priceValid, priceReadAvailable,
       retryAuthorized: false, dispatchAuthorized: false }, { headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
