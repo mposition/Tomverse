@@ -7,10 +7,14 @@
  * what is the same in both: ids, the room order, colours, ranks and the
  * record screen each team already has.
  *
- * The office is a shell. Nothing here reads an agent's state; the record
- * links are the only facts on the screen, and they point at routes that
- * exist in the route table today.
+ * The office is a shell. Nothing here reads an agent's state. The record
+ * links point at routes in the console's route table, and a link is kept only
+ * while that route -- and its `?tab=` section -- is there: a branch that does
+ * not carry a team's screen yet (`main`, before a release brings it) draws
+ * the team as waiting on a link rather than linking to a page that 404s.
  */
+
+import { ADMIN_NAVIGATION } from "@/lib/adminNavigation";
 
 /**
  * Room order. The eight teams fill the two rows of team rooms in this order; the
@@ -48,7 +52,19 @@ export type AgentOfficeDeptMeta = {
   recordHref: string | null;
 };
 
-export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
+/** Whether the console has the page, and the `?tab=` section, a record link names. */
+export function consoleHasRecord(href: string): boolean {
+  const [path, query] = href.split("?");
+  const item = ADMIN_NAVIGATION.find((entry) => entry.href === path);
+  if (!item) return false;
+  const tab = new URLSearchParams(query ?? "").get("tab");
+  return tab === null || (item.tabs ?? []).some((entry) => entry.id === tab);
+}
+
+const linkIfOnConsole = (href: string | null) => (href !== null && consoleHasRecord(href) ? href : null);
+
+/** Each team's record screen as declared; see AGENT_OFFICE_DEPTS for what is linked. */
+const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
   {
     id: "engineering",
     icon: "🛠️",
@@ -85,6 +101,16 @@ export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = [
   },
   { id: "digest", icon: "📋", policy: null, recordHref: "/admin/agent-digests" },
 ];
+
+/** Each team's declared record link, before the route table is consulted. */
+export const AGENT_OFFICE_DECLARED_RECORD_HREFS: Readonly<Record<string, string | null>> = Object.fromEntries(
+  DECLARED_DEPTS.map((dept) => [dept.id, dept.recordHref])
+);
+
+export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = DECLARED_DEPTS.map((dept) => ({
+  ...dept,
+  recordHref: linkIfOnConsole(dept.recordHref),
+}));
 
 /** Teams with no record screen sit out the demo day as "waiting on a link". */
 export const AGENT_OFFICE_BLOCKED_DEPTS: ReadonlySet<string> = new Set(
@@ -171,8 +197,8 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
   ["digest", ["다이제스트", "digest", "비서"]],
 ];
 
-/** The AMUX execution room's record screen. */
-export const AGENT_OFFICE_AMUX_RECORD_HREF = "/admin/amux-execution";
+/** The AMUX execution room's record screen, while the console has it. */
+export const AGENT_OFFICE_AMUX_RECORD_HREF = linkIfOnConsole("/admin/amux-execution");
 
 /**
  * Clothes for the AMUX workers, by desk: the office's palette, not the

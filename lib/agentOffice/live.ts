@@ -9,7 +9,8 @@
  * agent's operating state -- the app switch, whether its latest scheduled run
  * was recorded, when the last success was, whether it has gone silent -- and never what it
  * observed: docs/policy/product-research-agent.md §4 gives its observations
- * one place to be read, its own section, and §8 keeps issue titles there.
+ * one place to be read, its own section, and docs/policy/product-research-agent.md §8
+ * keeps issue titles there.
  *
  * QA and release reads the same way: whether its daily digest arrived in time
  * (the agent's own freshness verdict), when the newest one was stored, the
