@@ -46,7 +46,9 @@ const NAVIGATION = [
     label: "Engineering agent",
     href: "/admin/engineering-agent",
   },
+  { group: "Operations", label: "SRE agent", href: "/admin/sre-ops" },
   { group: "Operations", label: "Agent digests", href: "/admin/agent-digests" },
+  { group: "Operations", label: "Agent office", href: "/admin/office" },
   { group: "Operations", label: "Platform settings", href: "/admin/platform" },
   // Listed to the owner, who is who this describe block signs in as. Every
   // other role sees Execution alone (the "AMUX group by role" block below).
@@ -632,7 +634,8 @@ test.describe("admin console shell", () => {
 
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(4);
+    await expect(backlog.getByRole("link")).toHaveCount(5);
+    await expect(backlog.locator('a[href$="tab=ideas"]')).toHaveCount(1);
     // Catalog import's code latch ships closed, so its chip reads off in any
     // environment; the chip is read from that latch, not written.
     await expect(

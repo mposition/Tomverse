@@ -174,7 +174,7 @@ function _applyTheme(light) {
   const cb = document.getElementById('theme-checkbox');
   if (cb) cb.checked = light;
   const lbl = document.getElementById('theme-label');
-  if (lbl) lbl.textContent = light ? 'Light mode' : 'Dark mode';
+  if (lbl) lbl.textContent = light ? amuxT('settings.theme.light', 'Light mode') : amuxT('settings.theme.dark', 'Dark mode');
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = light ? '#ffffff' : '#0d1117';
   _hljsApplyTheme(light);
@@ -598,7 +598,7 @@ let _logMatches = {};       // name -> matched snippet string
 let _logSearchTimer = null;
 let _logSearchAbort = null;
 // Filters modal facets (session list). Multi-select within a facet.
-let filterProviders = new Set();   // 'claude' | 'codex' | 'gemini' | 'iterm2'
+let filterProviders = new Set();   // a sessionProvider() value
 let filterStatuses = new Set();    // 'working' | 'blocked' | 'waiting' | 'idle' | 'stopped'
 // Stable status key for filtering: card WORKING = 'active' internally.
 function _sessStatusKey(s) {
@@ -2556,23 +2556,24 @@ function updateConnectionStatus() {
     if (el.id === 'conn-modal-status') el.style.color = '';
     if (readState || _localWriteError) {
       el.className = 'conn-status offline';
-      el.textContent = readState === 'auth' ? 'Access required' : 'Sync error';
+      el.textContent = readState === 'auth' ? amuxT('conn.access_required', 'Access required') : amuxT('conn.sync_error', 'Sync error');
     } else if (!online) {
       el.className = 'conn-status offline';
       const total = offlineQueue.length + drafts.length;
-      el.textContent = total ? total + ' pending' : 'Offline';
+      el.textContent = total ? amuxT('conn.pending', '{n} pending', {n: total}) : amuxT('conn.offline', 'Offline');
     } else if (offlineQueue.some(_outboxNeedsAttention)) {
       el.className = 'conn-status polling';
-      el.textContent = offlineQueue.length + ' pending';
+      el.textContent = amuxT('conn.pending', '{n} pending', {n: offlineQueue.length});
     } else if (_liveSSE) {
       el.className = 'conn-status online';
-      el.textContent = 'Live';
+      el.textContent = amuxT('conn.live', 'Live');
     } else {
       el.className = 'conn-status polling';
-      el.textContent = 'Polling';
+      el.textContent = amuxT('conn.polling', 'Polling');
     }
-    el.setAttribute('aria-label', el.textContent + ' — connection details');
-    if (el.id === 'conn-status') el.title = el.textContent + ' — connection details';
+    const details = amuxT('conn.details', '{state} — connection details', {state: el.textContent});
+    el.setAttribute('aria-label', details);
+    if (el.id === 'conn-status') el.title = details;
   });
   const notice = document.getElementById('session-read-notice');
   if (notice && notice.innerHTML) { notice.innerHTML = ''; notice._noticeHTML = ''; }
@@ -4886,18 +4887,28 @@ function providerLabel(provider) {
   if (provider === 'gemini') return 'Gemini';
   if (provider === 'ollama') return 'Ollama';
   if (provider === 'iterm2') return 'iTerm2';
+  if (provider === 'cursor') return 'Cursor';
+  if (provider === 'copilot') return 'GitHub Copilot';
+  if (provider === 'devin') return 'Devin';
   return 'Claude';
 }
 
+// Every provider the server launches (SESSION_PROVIDERS in session_verbs.rs).
+// Anything else reads as claude, which is what the server falls back to. This
+// list used to stop at iterm2, so devin and cursor workers were labelled,
+// defaulted and yolo-toggled as Claude.
+const SESSION_PROVIDER_IDS = ['claude', 'codex', 'gemini', 'devin', 'iterm2', 'ollama', 'cursor', 'copilot'];
 function sessionProvider(s) {
   const p = ((s && s.provider) || 'claude').toLowerCase();
-  return (p === 'codex' || p === 'gemini' || p === 'ollama' || p === 'iterm2') ? p : 'claude';
+  return SESSION_PROVIDER_IDS.includes(p) ? p : 'claude';
 }
 
 function providerDefaultModel(provider) {
   if (provider === 'codex') return 'gpt-5.5';
-  if (provider === 'gemini') return 'auto';
+  if (provider === 'gemini' || provider === 'cursor' || provider === 'copilot') return 'auto';
   if (provider === 'ollama') return 'qwen3.8:27b';
+  // devin-amux picks its own model; there is no default to show.
+  if (provider === 'devin') return '';
   return window._AMUX_DEFAULT_MODEL || 'sonnet';
 }
 
@@ -4906,9 +4917,11 @@ function sessionConfiguredModel(s) {
   return flagValue((s && s.flags) || '', '--model') || (s && s.active_model) || providerDefaultModel(provider);
 }
 
+// Mirrors provider_yolo_flag in session_verbs.rs.
 function providerYoloFlag(provider) {
   if (provider === 'codex' || provider === 'ollama') return '--dangerously-bypass-approvals-and-sandbox';
-  if (provider === 'gemini') return '--yolo';
+  if (provider === 'gemini' || provider === 'cursor' || provider === 'copilot') return '--yolo';
+  if (provider === 'devin') return '--permission-mode=bypass';
   return '--dangerously-skip-permissions';
 }
 
@@ -4917,6 +4930,7 @@ function stripProviderYoloFlags(flags) {
     .replace(/--dangerously-skip-permissions/g, '')
     .replace(/--dangerously-bypass-approvals-and-sandbox/g, '')
     .replace(/--yolo/g, '')
+    .replace(/--permission-mode=bypass/g, '')
     .replace(/--approval-mode(?:=|\s+)yolo/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -7618,13 +7632,21 @@ function editField(session, field, current, provider) {
       {v:'claude',l:'Claude Code'},
       {v:'codex',l:'Codex'},
       {v:'gemini',l:'Gemini'},
-      {v:'ollama',l:'Ollama (local)'}
+      {v:'ollama',l:'Ollama (local)'},
+      {v:'cursor',l:'Cursor'},
+      {v:'copilot',l:'GitHub Copilot'}
     ];
+    // A provider this list does not offer (devin, iterm2: started outside the
+    // dashboard) is still the worker's provider. Show it and keep it selected;
+    // otherwise the select falls back to its first option and saving rewrites
+    // CC_PROVIDER to Claude.
+    const cur = (current || 'claude').toLowerCase();
+    if (!providers.some(p => p.v === cur)) providers.unshift({v: cur, l: providerLabel(cur)});
     sel.innerHTML = '';
     providers.forEach(p => { const o = document.createElement('option'); o.value = p.v; o.textContent = p.l; sel.appendChild(o); });
     inpWrap.style.display = 'none';
     sel.style.display = 'block';
-    sel.value = (current || 'claude').toLowerCase();
+    sel.value = cur;
   } else if (field === 'model') {
     inpWrap.style.display = 'none';
     sel.style.display = 'block';
@@ -11228,7 +11250,7 @@ async function saveGlobalMemory() {
   }
 }
 
-const APP_VER = '0.9.983';   // bump together with the sw.js CACHE version
+const APP_VER = '0.9.984';   // bump together with the sw.js CACHE version
 // Warm the shared catalog so model-type filters are exact on first use. A
 // failure is non-fatal (custom ids and the open-string fallback still work)
 // and is already reported by _loadModelCatalog.
@@ -23390,13 +23412,16 @@ let _createBranchEdited = false;  // track if user manually changed branch name
 let _createDirIsGit = false;     // track if current dir is a git repo
 
 let _createProvider = 'claude';
+// One selected button among however many providers the dialog lists, so a
+// new provider is one button in index.html and nothing here.
+function _markCreateProvider(p) {
+  document.querySelectorAll('#create-provider-buttons .provider-btn').forEach(b => {
+    b.classList.toggle('selected', b.id === 'create-provider-' + p);
+  });
+}
 function _selectProvider(p) {
   _createProvider = p;
-  document.getElementById('create-provider-claude').classList.toggle('selected', p === 'claude');
-  document.getElementById('create-provider-codex').classList.toggle('selected', p === 'codex');
-  document.getElementById('create-provider-gemini').classList.toggle('selected', p === 'gemini');
-  const _ollamaBtn = document.getElementById('create-provider-ollama');
-  if (_ollamaBtn) _ollamaBtn.classList.toggle('selected', p === 'ollama');
+  _markCreateProvider(p);
   // Hide branch/template/session-name options for non-Claude providers since they use different mechanics
   const isClaude = p === 'claude';
   document.getElementById('create-branch-enabled').closest('.field-group').style.display = isClaude ? '' : 'none';
@@ -23427,13 +23452,9 @@ function _loadModelsForCreate(provider) {
 }
 function openCreate() {
   _createProvider = 'claude';
-  document.getElementById('create-provider-claude').classList.add('selected');
-  document.getElementById('create-provider-codex').classList.remove('selected');
-  document.getElementById('create-provider-gemini').classList.remove('selected');
+  _markCreateProvider('claude');
   const _iso0 = document.getElementById('create-isolated');
   if (_iso0) { _iso0.checked = false; _toggleIsolated(false); }
-  const _ollamaBtn0 = document.getElementById('create-provider-ollama');
-  if (_ollamaBtn0) _ollamaBtn0.classList.remove('selected');
   _loadModelsForCreate('claude');
   document.getElementById('create-branch-enabled').closest('.field-group').style.display = '';
   document.getElementById('create-template-field').style.display = '';
@@ -25330,7 +25351,10 @@ let _boardDragId = null;
 // Stored 'session' values are migrated to the view the user actually chose.
 let boardViewMode = localStorage.getItem('amux_board_view') || 'status';
 if (boardViewMode === 'session') boardViewMode = 'worker';
-let boardOwnerFilter = localStorage.getItem('amux_board_owner') || 'human';
+// The board opens on every card. It used to open on Human, which hid every
+// worker-owned card behind a toggle and read as "My tasks" being the default.
+// A stored choice (the All/Human/Workers toggle) still wins.
+let boardOwnerFilter = localStorage.getItem('amux_board_owner') || 'all';
 // Smart Board: derived display-status data, fetched from /api/board/derived.
 let _smartBoardData = null;
 let _smartBoardFetching = false;
@@ -29131,7 +29155,7 @@ function _boardRenderViews() {
     const on = _boardActiveView === v.id;
     h += '<button class="board-view-chip' + (on ? ' active' : '') + (n ? '' : ' empty') + '"'
       +  ' title="' + esc(v.hint) + ' — ' + esc(v.q) + '"'
-      +  ' onclick="_boardApplyView(\'' + v.id + '\')">' + esc(v.name)
+      +  ' onclick="_boardApplyView(\'' + v.id + '\')">' + esc(amuxT('board.saved.' + v.id, v.name))
       +  (n ? '<span class="bvc-n">' + n + '</span>' : '') + '</button>';
   });
   _boardViews.forEach(v => {
@@ -29499,7 +29523,7 @@ function _boardCtxMenu(e, id) {
     h += '<div class="card-menu-item" onclick="event.stopPropagation();_boardCtxMove(\''
       + escJs(id) + '\',\'' + escJs(st.id) + '\')">'
       + '<span class="mi"><span class="board-status-dot" style="background:' + sty.dot + '"></span></span> '
-      + esc(st.label) + '</div>';
+      + esc(amuxStatusLabel(st)) + '</div>';
   });
   h += '<div class="card-menu-sep"></div>';
   h += '<div class="card-menu-item" onclick="event.stopPropagation();_boardCtxCopy(\''
@@ -30007,11 +30031,11 @@ function _renderBoardColumnsInto(host, items, scope) {
     html += '<div class="board-col-header"' + (isGlobal ? '' : ' style="cursor:default;"') + '>';
     html += '<span class="board-col-identity" style="display:flex;align-items:center;gap:5px;">';
     if (isGlobal) {
-      html += '<button class="board-col-collapse" onclick="toggleColCollapse(\'' + st + '\')" title="' + (collapsed ? 'Expand' : 'Collapse') + '">' + (collapsed ? '&#x25B8;' : '&#x25BE;') + '</button>';
+      html += '<button class="board-col-collapse" onclick="toggleColCollapse(\'' + st + '\')" title="' + (collapsed ? amuxT('board.col.expand', 'Expand') : amuxT('board.col.collapse', 'Collapse')) + '">' + (collapsed ? '&#x25B8;' : '&#x25BE;') + '</button>';
     }
-    html += '<span class="board-col-label" style="color:' + sty.color + '">' + esc(stObj.label) + '</span>';
+    html += '<span class="board-col-label" style="color:' + sty.color + '">' + esc(amuxStatusLabel(stObj)) + '</span>';
     if (stObj.terminal) {
-      html += '<span class="col-terminal-chip" title="Terminal state — cards here are finished">terminal</span>';
+      html += '<span class="col-terminal-chip" title="Terminal state — cards here are finished">' + amuxT('board.col.terminal', 'terminal') + '</span>';
     }
     if (stObj.stray) {
       html += '<span class="col-stray-flag" title="Cards carry the status &quot;' + esc(st)
@@ -30414,14 +30438,16 @@ function renderBoard() {
   if (bvC) bvC.classList.toggle('active', boardViewMode === 'status');
   if (bvL) bvL.classList.toggle('active', boardViewMode === 'list');
   if (bvSm) bvSm.classList.toggle('active', boardViewMode === 'smart');
+  var boAll = document.getElementById('bo-all');
   var boH = document.getElementById('bo-human');
   var boA = document.getElementById('bo-agent');
+  if (boAll) boAll.classList.toggle('active', boardOwnerFilter === 'all');
   if (boH) boH.classList.toggle('active', boardOwnerFilter === 'human');
   if (boA) boA.classList.toggle('active', boardOwnerFilter === 'agent');
 
   // A non-empty query REPLACES the Human/Sessions toggle rather than stacking
   // with it. Stacking made the chip counts lie: "Rotting 5" rendered 0 cards,
-  // because all 5 are agent-owned and the toggle defaults to Human. The count
+  // because all 5 are agent-owned and the toggle was on Human. The count
   // is computed over the same unfiltered set, so a chip that says 5 must show
   // 5. The toggle is the browse default; the query is the filter.
   const _qActive = !!(boardSearchQuery || '').trim();
@@ -30926,7 +30952,7 @@ function openBoardAdd(statusOrDate, prefillDate) {
   const dueTimeEl2 = document.getElementById('be-due-time');
   if (dueTimeEl2) dueTimeEl2.value = '';
   const sel = document.getElementById('be-status');
-  sel.innerHTML = boardStatuses.map(s => '<option value="' + s.id + '">' + esc(s.label) + '</option>').join('');
+  sel.innerHTML = boardStatuses.map(s => '<option value="' + s.id + '">' + esc(amuxStatusLabel(s)) + '</option>').join('');
   sel.value = status;
   _populateSessionSelect('be-session-add', peekSession || '');
   _tagState['be'] = [];
@@ -31716,7 +31742,7 @@ function boardDetailTab(tab) {
 function _renderDetailStatusBtns() {
   const sty = statusStyle(boardDetailStatus);
   document.getElementById('bd-status-row').innerHTML = '<label class="bd-status-control">Status <select id="bd-status-select" aria-label="Task status" style="background:' + sty.bg + ';color:' + sty.color + '" onchange="boardDetailSetStatus(this.value)">'
-    + boardStatuses.map(s => '<option value="' + esc(s.id) + '"' + (boardDetailStatus === s.id ? ' selected' : '') + '>' + esc(s.label) + '</option>').join('')
+    + boardStatuses.map(s => '<option value="' + esc(s.id) + '"' + (boardDetailStatus === s.id ? ' selected' : '') + '>' + esc(amuxStatusLabel(s)) + '</option>').join('')
     + '</select></label><button type="button" class="btn" onclick="boardDetailSave()">Move</button>';
 }
 
@@ -43490,7 +43516,12 @@ else document.addEventListener('DOMContentLoaded', _dpInit);
 let _bdRecordTab = 'preview';
 const _bdSectionOpen = new Map();
 function _boardQuick(query) {
-  boardOwnerFilter = query.includes('owner:human') ? 'human' : 'all';
+  // "All" is also the owner reset: it clears the Human/Workers toggle and is
+  // remembered the way the toggle is, so the next visit opens on every card.
+  // The other chips are queries, and a non-empty query already replaces the
+  // toggle in renderBoard, so they leave the stored choice alone. (My tasks
+  // used to flip the toggle to Human, which outlived the query once cleared.)
+  if (!query) { boardOwnerFilter = 'all'; localStorage.setItem('amux_board_owner', 'all'); }
   boardSearchQuery = query; _boardActiveView = '';
   document.getElementById('board-search').value = query;
   _bfSyncHash(); renderBoard();

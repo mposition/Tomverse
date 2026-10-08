@@ -238,6 +238,17 @@ run(
     // that only a person clears -- each refused by the database, not only by
     // the application, when it is broken.
     "tests/integration/amux-orchestration-halt.db.test.ts",
+    // AMUX v4/v22 receipts, retention and patch boundaries must execute in CI.
+    "tests/integration/amuxCliUsageLedger.db.test.mjs",
+    "tests/integration/amuxCliUsageRetention.db.test.mjs",
+    "tests/integration/amuxCliUsageWriter.db.test.mjs",
+    "tests/integration/amuxV22AutoPromotion.db.test.mjs",
+    "tests/integration/amuxV22TaskPatchSchema.db.test.mjs",
+    "tests/integration/amuxV22TaskResultSchema.db.test.mjs",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4PortfolioScore.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
     // The shared AgentDigestItem table: closed agent and kind lists, the
     // idempotency prefix, rows born with their body, and the expiry and purge
     // that are the only update and delete.
@@ -245,6 +256,16 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // Its two operator writes (W2): the switch and the monitor check, each with
+    // its administrator audit entry in one transaction.
+    "tests/integration/billing-finance-ops-control.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",
@@ -254,12 +275,25 @@ run(
     // The Monitor silence check: its own secret, the control revision, then
     // the freshness verdict over the database clock.
     "tests/integration/qa-release-monitor.db.test.ts",
+    // The merge lane's attempts: one open per lane, the core's lifecycle and
+    // nothing else, every write audited by the right actor, no removal.
+    "tests/integration/qa-release-merge-attempt.db.test.ts",
+    // The merge lane's latch: consecutive events, set by the lane and
+    // released by a person in the same transaction, nothing changed.
+    "tests/integration/qa-release-merge-lane-latch.db.test.ts",
+    // The merge lane's single writer: instruction issue under the app's own
+    // judgement, one open attempt, a late round recorded as nothing.
+    "tests/integration/qa-release-merge-lane-store.db.test.ts",
+    // The merge lane service's three app calls: its own secret, the revision
+    // it carries, a strict body, then the single writer.
+    "tests/integration/qa-release-merge-lane-routes.db.test.ts",
     // The Admin Agent digest reader: counts and codes, expired and
     // unreadable bodies shown as such.
     "tests/integration/agent-digest-console.db.test.ts",
     // AMUX one-person review proposals and decisions must be DB-enforced,
     // append-only, and bound to the task, escalation and audit chain.
     "tests/integration/amux-agent-review-approval.db.test.ts",
+    "tests/integration/amuxV4PrlessReviewGuard.db.test.mjs",
     // Explicit intake registration writes one backlog card, one body-free
     // draft, one consumed approval and one audit row, and leaves execution
     // and credit counts unchanged.
@@ -276,9 +310,29 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // AMUX Decision Maker switches (docs/policy/amux-decision-maker.md §8,
+    // §10): only off/proposal for an instance and on/off for the kill switch,
+    // each event bound to its own transaction's audit by the right actor and
+    // action, the newest event wins, and nothing is changed or removed.
+    "tests/integration/amux-decision-maker-switch.db.test.ts",
+    // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
+    // §2, §6, §9, §10): one request per card revision, the transition graph
+    // against the core's own, the deadlines by the database clock at the
+    // insert and at COMMIT, one terminal result idempotent on its pair, each
+    // event audited by the router or its instance, READ COMMITTED only.
+    "tests/integration/amux-decision-maker-request.db.test.ts",
+    // AMUX Decision Maker body store (docs/policy/amux-decision-maker.md
+    // §10): the five fields within their caps, each bound to its own
+    // transaction's audit and its request's registered key period, the
+    // retention set at the close, holds, the expiry purge and the privacy
+    // erase, the key destroyed only once nothing of its period remains, and
+    // all of it allowed under the kill switch.
+    "tests/integration/amux-decision-maker-body.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
+    // Mode off closes the whole gate, and a closed gate still records a
+    // publisher's pull request on the engineering side only.
     "tests/integration/engineering-agent-amux-adapter.db.test.ts",
     // Engineering agent store: every change commits with its audit entry
     // under the right actor, and results go where the core says. It closes
@@ -299,6 +353,24 @@ run(
     // batches, a cancelling row is skipped and counted, and no progress is
     // reported as such.
     "tests/integration/support-triage-retention.db.test.ts",
+    // Support-triage suggestions: the state machine, the lease and the
+    // display stamp are the guard trigger's, and a report's deletion takes them.
+    "tests/integration/support-triage-suggestion.db.test.ts",
+    // Support-triage groups: one kind per group, members tied to its digest,
+    // members then signals then the group when it ends, and the tombstone.
+    "tests/integration/support-triage-group.db.test.ts",
+    // Support-triage decision records: twelve months by CHECK, never updated,
+    // at least one link at commit, and no record outlives any of its links.
+    "tests/integration/support-triage-decision-record.db.test.ts",
+    // Support-triage retention and heartbeat routes: own secrets, counts only,
+    // non-2xx when retention makes no progress, a fail-closed heartbeat.
+    "tests/integration/support-triage-routes.db.test.ts",
+    // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
+    // supersede on a changed input, nothing for a closed or deleted report.
+    "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage data in a real account deletion: the derived rows go in
+    // that transaction, the reports stay anonymised, nothing is derived again.
+    "tests/integration/support-triage-account-deletion.db.test.ts",
     // Engineering agent state: the triggers refuse a late success, a claim
     // without the next fencing token, a draft closed without its decision, a
     // second capability consumption and a rewritten snapshot, whoever writes.
@@ -310,6 +382,77 @@ run(
     // sre-ops genesis chain and state: chain shape, compare-and-set generation,
     // checkpoint order, trigger stamps, immutability, and no late COMMIT.
     "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
+    // AMUX v4 inert schema still has privacy ownership, hierarchy and source
+    // integrity invariants. Exercise its database guards in the CI lane.
+    "tests/integration/amuxV4Schema.db.test.mjs",
+    // v22 Task edges must equal the owner receipt and remain acyclic;
+    // pre-v4 cards retain their historical dependency behavior.
+    "tests/integration/amuxV4TaskDag.db.test.mjs",
+    // Keep A08's approved hierarchy/overlap catalog regression in the lane;
+    // the DB coverage guard found this pre-existing suite was never listed.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
+    "tests/integration/amuxV4SourcePlan.db.test.mjs",
+    "tests/integration/amux-v4-frontier-model.db.test.mjs",
+    // Dark Frontier owner decisions must bind model eligibility, canonical
+    // audit and versioned revocation without creating executable AMUX work.
+    "tests/integration/amux-v4-frontier-catalog-write.db.test.ts",
+    // Dark v4 submission must bind its owner, request idempotency and audit
+    // atomically without opening collection, analysis or transfer.
+    "tests/integration/amux-v4-idea-submission.db.test.ts",
+    // The idea-only initial source plan is derived without a model call or
+    // external excerpt, and its pointer, immutable row and audit are atomic.
+    "tests/integration/amux-v4-initial-source-plan.db.test.ts",
+    // The analysis-only USD 50 ledger migration must install its namespace,
+    // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
+    "tests/integration/amux-v4-analysis-budget.db.test.ts",
+    // Retention must clear due bodies, preserve the audit trail and retire
+    // external unit keys without silently extending a legal hold.
+    "tests/integration/amux-v4-raw-retention.db.test.ts",
+    "tests/integration/amux-v4-source-scope-preview.db.test.ts",
+    // A08/A09 readback, derivation, cost-catalog and unknown-unit guards are
+    // real DB contracts; they must run in the CI agent lane.
+    "tests/integration/amux-v4-resolution-catalog.db.test.ts",
+    "tests/integration/amuxV4DerivationService.db.test.mjs",
+    "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
+    "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
+    // sre-ops trust check T3a: the migrations' catalogue is exactly the
+    // expected one, and a dropped or re-deferred rule is seen.
+    "tests/integration/ops-observer-catalog.db.test.ts",
+    // sre-ops state read: the trust facts gathered in one bounded transaction,
+    // trusted with the state or the reason only (own throwaway schema).
+    "tests/integration/ops-observer-store-read.db.test.ts",
+    // sre-ops advance: state, checkpoint, audit entry and ledger row in one
+    // transaction; stale base, untrusted chain and unchanged keys write nothing.
+    "tests/integration/ops-observer-store-advance.db.test.ts",
+    // sre-ops advance with a reservation: owed items only, replay, channel
+    // check, the daily cap counted in the store; refusals write nothing.
+    "tests/integration/ops-observer-store-reserve.db.test.ts",
+    // sre-ops confirm: the close decided by the genesis mode, replay, abandoned
+    // and untrusted refusals.
+    "tests/integration/ops-observer-store-confirm.db.test.ts",
+    // sre-ops genesis: the owner's approval bound to the head, the transition
+    // and seven-day rules, and a created chain the state read trusts.
+    "tests/integration/ops-observer-store-genesis.db.test.ts",
+    // sre-ops retention: closed reservations past ninety days deleted in
+    // bounded batches with their items; reserved and recent rows stay.
+    "tests/integration/ops-observer-store-retention.db.test.ts",
+    // sre-ops run guard: born with its claimed deadline, immutable, kept 90 days,
+    // and a late COMMIT rolls the whole transaction back.
+    "tests/integration/ops-observer-run-guard.db.test.ts",
+    // sre-ops digest item read: this agent's kept digest by id, bounded, and an
+    // expired or malformed body shown as absent.
+    "tests/integration/ops-observer-digest-item.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
@@ -652,17 +795,17 @@ run(
 // This suite creates and drops only its own synthetic schema. Give its Prisma
 // client that exact schema rather than letting it see the lane's public tables.
 const oneShotAuditSuite =
-  "tests/integration/prompt-refiner-vnext-one-shot-stage-approval-audit.db.test.ts";
+  "tests/integration/prompt-refiner-vnext-v3-recovery.db.test.ts";
 if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
     !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
   fail("the isolated one-shot audit suite requires a dedicated test database name");
 }
 const oneShotTestUrl = new URL(rawTestDatabaseUrl);
-oneShotTestUrl.searchParams.set("schema", `chat01_a06_test_${process.pid.toString(36)}`);
+oneShotTestUrl.searchParams.set("schema", `chat01_b06_test_${process.pid.toString(36)}`);
 run(
   ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
     oneShotAuditSuite],
-  "Running the isolated one-shot stage/audit/80-slot transaction scenarios",
+  "Running the isolated one-shot v3 recovery/audit/80-slot transaction scenarios",
   { TEST_DATABASE_URL: oneShotTestUrl.toString(),
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },

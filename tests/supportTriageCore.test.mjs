@@ -265,3 +265,136 @@ test("the run-table migration's literals are the core constants", async () => {
   assert.ok(sql.includes(`"batchesCompleted" <= ${core.RETENTION_BATCHES_PER_RUN_MAX})`));
   assert.ok(sql.includes(`CHECK ("kind" IN (${core.SUPPORT_TRIAGE_RUN_KINDS.map((k) => `'${k}'`).join(", ")}))`));
 });
+
+test("the suggestion migration's transitions and lists are the core's", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const sql = readFileSync(
+    new URL("../prisma/migrations/20261004010000_support_triage_suggestion/migration.sql", import.meta.url),
+    "utf8"
+  );
+  const block = /-- transitions: SupportTriageSuggestion state\n([\s\S]*?)-- end transitions/.exec(sql);
+  assert.ok(block, "the transitions block exists");
+  const pairs = [...block[1].matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}->${m[2]}`).sort();
+  assert.deepEqual(pairs, core.SUGGESTION_TRANSITIONS.map(([a, b]) => `${a}->${b}`).sort());
+  const list = (values) => values.map((v) => `'${v}'`).join(", ");
+  assert.ok(sql.includes(`CHECK ("state" IN (${list(core.SUGGESTION_STATES)}))`));
+  assert.ok(sql.includes(`"failureCode" IN (${list(core.SUGGESTION_FAILURE_CODES)})`));
+  assert.ok(sql.includes(`"lane" IN (${list(core.TRIAGE_LANES)})`));
+  assert.ok(sql.includes(`CHECK ("ownerQueueState" IN (${list(core.OWNER_QUEUE_STATES)}))`));
+  assert.ok(sql.includes(`ARRAY[${list(core.KEYWORD_FLAGS)}]::TEXT[]`));
+  assert.ok(sql.includes(`CHECK ("attemptCount" BETWEEN 0 AND ${core.SUGGESTION_MAX_ATTEMPTS})`));
+  assert.ok(sql.includes(`lease CONSTANT INTERVAL := interval '${core.SUGGESTION_LEASE_SECONDS / 60} minutes'`));
+  assert.ok(sql.includes(`OLD."state" IN (${list(core.SUGGESTION_TERMINAL_STATES)})`));
+});
+
+test("no transition leaves a terminal suggestion state", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  for (const [from] of core.SUGGESTION_TRANSITIONS) {
+    assert.ok(!core.SUGGESTION_TERMINAL_STATES.includes(from), from);
+  }
+  assert.equal(core.isSuggestionTransitionAllowed("pending", "claimed"), true);
+  assert.equal(core.isSuggestionTransitionAllowed("failed", "pending"), false);
+  assert.ok(!core.TRIAGE_LANES.includes("account_privacy_human"));
+});
+
+test("the group migration's transitions, lists and limits are the core's", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const sql = readFileSync(
+    new URL("../prisma/migrations/20261004020000_support_triage_group/migration.sql", import.meta.url),
+    "utf8"
+  );
+  const block = /-- transitions: SupportTriageGroup state\n([\s\S]*?)-- end transitions/.exec(sql);
+  assert.ok(block, "the transitions block exists");
+  const pairs = [...block[1].matchAll(/\('([a-z_]+)', '([a-z_]+)'\)/g)].map((m) => `${m[1]}->${m[2]}`).sort();
+  assert.deepEqual(pairs, core.GROUP_TRANSITIONS.map(([a, b]) => `${a}->${b}`).sort());
+  const list = (values) => values.map((v) => `'${v}'`).join(", ");
+  assert.ok(sql.includes(`CHECK ("state" IN (${list(core.GROUP_STATES)}))`));
+  assert.ok(sql.includes(`CHECK ("primaryKind" IN (${list(core.GROUP_KIND_PRIORITY)}))`));
+  assert.ok(sql.includes(`CHECK ("kind" IN (${list(core.GROUP_KIND_PRIORITY)}))`));
+  assert.ok(sql.includes(`"decision" IN (${list(core.GROUP_DECISIONS)})`));
+  assert.ok(sql.includes(`CHECK ("provenanceClass" IN (${list(core.SIGNAL_PROVENANCE_CLASSES)}))`));
+  for (const [kind, provenance] of Object.entries(core.SIGNAL_PROVENANCE)) {
+    assert.ok(sql.includes(`WHEN '${kind}' THEN '${provenance}'`), kind);
+  }
+  assert.ok(sql.includes(`("state" IN (${list(core.GROUP_OPEN_STATES)})) = ("primarySnapshotDigest" IS NOT NULL)`));
+  assert.ok(sql.includes(`OLD."state" IN (${list(core.GROUP_TERMINAL_STATES)})`));
+  assert.ok(sql.includes(`cardinality("retiredMemberIds") <= ${core.GROUP_RETIRED_MEMBER_IDS_MAX}`));
+  assert.ok(sql.includes(`member_cap CONSTANT INTEGER := ${core.GROUP_MEMBER_CAP};`));
+  assert.ok(sql.includes(`BETWEEN 0 AND ${core.GROUP_KEY_RECHECK_DEFERRAL_LIMIT})`));
+  assert.ok(sql.includes(`cooldown CONSTANT INTERVAL := interval '${core.GROUP_KEY_TOMBSTONE_DAYS} days'`));
+});
+
+test("no transition leaves a terminal group state, and every kind has one provenance", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  for (const [from] of core.GROUP_TRANSITIONS) assert.ok(!core.GROUP_TERMINAL_STATES.includes(from), from);
+  assert.deepEqual(
+    [...core.GROUP_OPEN_STATES, ...core.GROUP_TERMINAL_STATES].sort(),
+    [...core.GROUP_STATES].sort()
+  );
+  assert.deepEqual(Object.keys(core.SIGNAL_PROVENANCE).sort(), [...core.GROUP_KIND_PRIORITY].sort());
+  assert.deepEqual(
+    [...new Set(Object.values(core.SIGNAL_PROVENANCE))].sort(),
+    [...core.SIGNAL_PROVENANCE_CLASSES].sort()
+  );
+  assert.equal(core.isGroupTransitionAllowed("candidate", "confirmed"), true);
+  assert.equal(core.isGroupTransitionAllowed("dismissed", "candidate"), false);
+});
+
+test("a retention batch over every class stays inside the lane's round-trip budget", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  // BEGIN, arm, two per class (window read, delete), the closed-report
+  // invalidation, the system audit entry (chain lock, clock, chain head,
+  // insert), the deadline check, COMMIT. Measured at 17 on PostgreSQL 17.
+  const AUDIT_ROUND_TRIPS = 4;
+  const roundTrips = 1 + 1 + 2 * core.RETENTION_CLASSES.length + 1 + AUDIT_ROUND_TRIPS + 1 + 1;
+  assert.equal(roundTrips, 17);
+  assert.ok(roundTrips <= core.RETENTION_BATCH_ROUND_TRIPS, String(roundTrips));
+  assert.equal(core.LANE_TIMEOUTS.retention.maxRoundTrips, core.RETENTION_BATCH_ROUND_TRIPS);
+});
+
+test("the heartbeat bit: retention always, the worker only while triage is enabled, no success is stale", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  const now = new Date("2026-10-07T12:00:00.000Z");
+  const minutesAgo = (m) => new Date(now.getTime() - m * 60_000);
+  const healthy = {
+    latestSuccessAt: minutesAgo(10),
+    latestFinished: { finishedAt: minutesAgo(10), batchesCompleted: 1, overdueRemaining: 0, oldestOverdueAgeSeconds: 0 },
+  };
+  const stale = (enabled, retention, worker) =>
+    core.supportTriageHeartbeatStale({ now, enabled, retention, workerLatestSuccessAt: worker });
+  // flag off + retention late -> stale
+  assert.equal(stale(false, { ...healthy, latestSuccessAt: minutesAgo(81) }, null), true);
+  // retention never succeeded -> stale whatever the flag
+  assert.equal(stale(false, { latestSuccessAt: null, latestFinished: null }, null), true);
+  // flag on + worker never succeeded -> stale
+  assert.equal(stale(true, healthy, null), true);
+  // flag off + no worker record -> not stale
+  assert.equal(stale(false, healthy, null), false);
+  // flag on: the worker threshold is 80 minutes
+  assert.equal(stale(true, healthy, minutesAgo(80)), false);
+  assert.equal(stale(true, healthy, minutesAgo(81)), true);
+});
+
+test("the worker's claim and result transactions stay inside the worker lane's round-trip budget", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  const AUDIT_ROUND_TRIPS = 4;
+  // BEGIN, arm, lock reports, supersede, insert, claim, audit, deadline check, COMMIT.
+  const claim = 1 + 1 + 1 + 1 + 1 + 1 + AUDIT_ROUND_TRIPS + 1 + 1;
+  // BEGIN, arm, lock reports, ready CAS, audit, deadline check, COMMIT.
+  const result = 1 + 1 + 1 + 1 + AUDIT_ROUND_TRIPS + 1 + 1;
+  assert.equal(claim, 12);
+  assert.equal(result, 10);
+  assert.ok(Math.max(claim, result) <= core.LANE_TIMEOUTS.worker.maxRoundTrips);
+  // A batch of 10 and a pass of 50 (design section 5.2).
+  assert.equal(core.WORKER_CLAIM_BATCH_SIZE, 10);
+  assert.equal(core.WORKER_PASS_MAX, 50);
+});
+
+test("the core's deleted-account marker is the one account deletion writes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const deletion = readFileSync(new URL("../lib/accountDeletion.ts", import.meta.url), "utf8");
+  assert.ok(deletion.includes(`message: "${core.DELETED_ACCOUNT_MARKER}"`));
+});

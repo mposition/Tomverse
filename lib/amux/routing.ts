@@ -47,6 +47,8 @@ const workerCatalogEntrySchema = z
       )
       .min(1)
       .max(64),
+    tool_capabilities: z.array(z.string().min(1).max(64)).max(16)
+      .optional().default([]),
 
     // Static operator/lifecycle exclusions only.
     archived: z.boolean().optional().default(false),
@@ -148,6 +150,7 @@ const parseWorkerCatalog = () => {
           entry.routing_roles.map((role) => role.trim().toLowerCase()),
         ),
       ].sort(),
+      tool_capabilities: [...new Set(entry.tool_capabilities)].sort(),
 
       // Static catalog rows are overlaid with the live runtime snapshot below.
       // Start conservatively so a missing or stale runtime cannot be selected.

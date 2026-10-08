@@ -35,8 +35,8 @@
 
 ## The navigation
 
-Seven groups, twenty-seven entries. One page, one job. The owner sees all
-twenty-seven; every other role sees twenty-five, because two AMUX entries are
+Seven groups, twenty-eight entries. One page, one job. The owner sees all
+twenty-eight; every other role sees twenty-six, because two AMUX entries are
 owner-only (rule 14).
 
 | Group | Entry | Route | Sections (`?tab=`) |
@@ -60,6 +60,7 @@ owner-only (rule 14).
 | Operations | Marketing | `/admin/marketing` | `queue`, `published`, `accounts`, `experiments`, `reports`, `comments` |
 | Operations | Engineering agent | `/admin/engineering-agent` | `queue`, `runs`, `pull-requests`, `settings` |
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
+| Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
@@ -98,6 +99,65 @@ drawing a digest that is not there. It carries no badge. Its one control
 records the next operator control revision, offered to owner and ops only;
 its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
+
+**Agent office** is a shell: a pixel office for the eight agent teams and the
+digest desk, after the original AI OFFICE UI by godseng.mom. It plays a demo
+day in the browser, so under rule 8 everything on it that could be read as a
+fact says it is a demo -- a notice above the office, a chip on the approval
+card, "SIMULATION" and "SIM CLOCK" where the original said real-time. Its
+approve button advances the demo and nothing else; there is no publish link.
+The facts on it are the record links and the rooms marked LIVE. Each team
+links to the page above that holds its record while the route table has that
+page and section, and a team without one -- including on a branch that does
+not carry its screen yet -- is drawn as waiting on a link instead of being
+given a status (the teams the demo day gives work to have screens on every
+branch, and a test holds that); a linked team
+the demo day has no script for stays waiting rather than being reported as
+done. A LIVE room reads that team's operating state on the server and the
+demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
+one the operator calls), and its staff say only the record's line. For product research that is the app
+switch, the latest scheduled slot (recorded, failed, or not yet, and whether
+its window is open), the newest success and the agent's own silence verdict,
+all in UTC -- never its observations, which
+`docs/policy/product-research-agent.md §4` and
+`docs/policy/product-research-agent.md §8` keep to its own section. For QA
+and release it is the agent's own digest freshness verdict
+(`lib/qaReleaseDigestFreshnessCore.ts`, with the digest secret seen only as a
+length), when the newest digest was stored, the operator control revision and
+whether the merge lane is latched -- never what a digest says, which
+`docs/policy/qa-release-agent.md §4` keeps to the common digest area. For
+engineering it is the mode the agent acts on (its own switch resolution, the
+kill switch seen only as engaged or not), the halt it tells its services, how
+many decisions wait for a person, how many runs are in progress and since
+when, and the newest ended run's status, outcome and times -- a run needs a
+look unless the agent's own settlement handed its result to a person -- never
+a patch, a reason or a card, which
+`docs/policy/engineering-agent.md §11` keeps to its own record. While
+engineering is live the demo plays no draft and no approval: its decisions
+are real and are made on its own screen, so the office's approval windows and
+the end-of-day briefing say so and link there instead of offering a demo
+approval, and the phases it replaces are marked as replaced, never ticked.
+Under the teams, the AMUX execution room is LIVE as a whole: a desk for each
+worker in the app's AMUX worker catalog (archived ones left out; past twelve,
+the ones that need a look are drawn first and the room says in words how many
+are not drawn, as it does for a failed read or a missing catalog), each worker
+drawn seated with its real state -- the operator's exclusions first, then its
+runtime row read the way AMUX reads it when it hands out work (live while the
+lease has not run out and the status is idle or busy) -- and, while the
+route table has it, a link to the AMUX execution page. Workers are not demo staff: they never walk, meet or
+speak a demo line, and nothing about the cards they work on is read.
+Those reads are read-only (the silence anchor is looked up rather than
+created), and a read that fails is drawn as unread, never as a state
+(`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
+`tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
+and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
+draws its own tab strip, as the original did, and those tabs are links, so
+moving between them keeps the panel and its demo day mounted and brings a
+fresh reading of the LIVE rooms. The console shell owns the page's `h1`, so
+the office's own titles are `h2`s. It wears the console's colours rather than
+the original's pink: role tokens for text, line, surface, the primary blue and
+the room states, set for light and for dark so it follows the console's
+theme; the AI Review gradient is not among them.
 
 **AMUX** is the development-agent work board
 (`docs/policy/development-agent-orchestration.md`). Its eight screens used to

@@ -1,3 +1,5 @@
+import { amuxDatabaseDiagnosticCode } from "@/lib/amux/readFailureCore";
+
 /**
  * Content-free description of a failed AMUX recovery sweep.
  *
@@ -7,7 +9,6 @@
  * failed and what kind of error it was. They never carry the error message,
  * a task id, a worker name or any stored text.
  */
-
 export const AMUX_RECOVER_STEPS = [
   "request",
   "quota_sweep",
@@ -27,7 +28,7 @@ const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 export const amuxRecoverFailureFields = (
   step: AmuxRecoverStep,
   error: unknown,
-): { event: "amux_recover_failed"; step: AmuxRecoverStep; error_name: string; error_code: string | null } => {
+): { event: "amux_recover_failed"; step: AmuxRecoverStep; error_name: string; error_code: string | null; database_error_code: string | null } => {
   const name =
     error instanceof Error && ERROR_NAME.test(error.name) ? error.name : "unknown";
   const rawCode =
@@ -38,5 +39,11 @@ export const amuxRecoverFailureFields = (
     typeof rawCode === "string" && (PRISMA_CODE.test(rawCode) || BOUNDARY_CODES.has(rawCode))
       ? rawCode
       : null;
-  return { event: "amux_recover_failed", step, error_name: name, error_code: code };
+  return {
+    event: "amux_recover_failed",
+    step,
+    error_name: name,
+    error_code: code,
+    database_error_code: amuxDatabaseDiagnosticCode(error),
+  };
 };

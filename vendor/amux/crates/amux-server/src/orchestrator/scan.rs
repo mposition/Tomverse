@@ -17,18 +17,29 @@
 //! Consecutive identical scan results are deduped by content hash — the
 //! Python system's two-scan persistence gate, done once here so every
 //! event consumer inherits it (a rate-limit banner sitting in scrollback
-//! must not re-fire state changes every cycle).
+//! must not re-fire state changes every cycle). A frame showing the worker
+//! generating clears that memory: the yield that ends the working phase is a
+//! new occurrence even when it is byte-identical to the one before it.
+//!
+//! For a hookless lane the scrape is also the turn ledger's only voice
+//! (Invariant 6): its working frames open a turn, and only its own idle
+//! prompt or failure can end it. A turn spans a rate limit or a wait and is
+//! resumed by the next working frame (operator decision 2026-10-08); see
+//! [`apply_scraped_event`].
 
 use crate::backend::{ProcessRef, SessionBackend};
-use crate::db::SharedStore;
+use crate::db::{PendingEvent, SharedStore, WriteOutcome};
 use crate::opencode::AgentProtocol;
 use amux_core::ids::{TurnId, WorkerId};
 use amux_core::provider::ProviderId;
-use amux_core::protocol::{ExitStatus, WaitReason, WorkerEvent};
+use amux_core::protocol::{ExitStatus, TurnResult, WaitReason, WorkerEvent};
+use amux_core::revision::{EntityType, MutationKind};
 use amux_core::worker::WorkerState;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::Digest;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::{OnceLock, RwLock};
@@ -61,8 +72,34 @@ pub struct ScanReport {
     pub process_exit_failures: Vec<String>,
     /// Exit observations rejected atomically because their session ended or changed.
     pub stale_process_exits: BTreeMap<String, StaleProcessExit>,
+    /// Workers whose capture or native report was not applied because the
+    /// session it was read from ended or was replaced before the write (the
+    /// same atomic check as `stale_process_exits`).
+    pub stale_observations: Vec<String>,
     pub events_applied: usize,
     pub capture_failures: Vec<String>,
+}
+
+/// The session a backend observation (a capture, a native status report) was
+/// read from. The observation describes THAT process: once the session has
+/// ended or been replaced, applying it would act on the new process with the
+/// old one's screen, e.g. end the new session's turn on an idle prompt it
+/// never showed and confirm a command it never ran.
+#[derive(Debug, Clone)]
+struct Observed {
+    session: String,
+    backend: String,
+    backend_ref: String,
+}
+
+impl Observed {
+    /// Checked inside the writer transaction, like the exit path: a pre-write
+    /// read would leave the same race open.
+    fn is_live(&self, conn: &Connection, wid: &str) -> rusqlite::Result<bool> {
+        Ok(crate::db::queries::live_session_for(conn, wid)?.is_some_and(|s| {
+            s.id == self.session && s.backend == self.backend && s.backend_ref == self.backend_ref
+        }))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -91,7 +128,7 @@ pub struct ScanState {
     /// worker id -> content hash of the events the scrape last emitted for it.
     /// An identical hash on the next pass means the banner is still on screen,
     /// not a fresh occurrence, so a lane sitting here explains why its state did
-    /// not re-fire.
+    /// not re-fire. A lane whose pane last showed it generating has no entry.
     pub deduped: BTreeMap<String, String>,
 }
 
@@ -126,6 +163,39 @@ impl ScanLoop {
             protocol,
             last_scan: Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// Run `write` in the writer transaction only while `observed` is still the
+    /// worker's live session. `Ok(None)`: the observation was stale and nothing
+    /// was written.
+    async fn write_observed<F>(
+        &self,
+        worker: &WorkerId,
+        observed: &Observed,
+        write: F,
+    ) -> anyhow::Result<Option<crate::db::WriteReply>>
+    where
+        F: FnOnce(&Connection) -> rusqlite::Result<WriteOutcome> + Send + 'static,
+    {
+        let stale = Arc::new(AtomicBool::new(false));
+        let (flag, w, obs) = (stale.clone(), worker.clone(), observed.clone());
+        let reply = self
+            .store
+            .write_async(move |conn| {
+                if !obs.is_live(conn, w.as_str())? {
+                    flag.store(true, Ordering::Relaxed);
+                    return Ok(WriteOutcome { applied: false, events: vec![] });
+                }
+                write(conn)
+            })
+            .await?;
+        if stale.load(Ordering::Relaxed) {
+            tracing::info!(worker = %worker, observed_session = %observed.session,
+                backend_ref = %observed.backend_ref, applied = false,
+                "scan observation belongs to an ended or replaced session");
+            return Ok(None);
+        }
+        Ok(Some(reply))
     }
 
     /// One pass over live terminal sessions.
@@ -177,6 +247,13 @@ impl ScanLoop {
 
         for (wid_str, backend_name, backend_ref, provider, session_id) in targets {
             let Ok(worker) = WorkerId::parse(&wid_str) else { continue };
+            // Every capture and native report below was read from THIS session;
+            // each write re-checks it (write_observed).
+            let source = Observed {
+                session: session_id.clone(),
+                backend: backend_name.clone(),
+                backend_ref: backend_ref.clone(),
+            };
 
             // DEMOTION: a live structured session means the worker speaks
             // for itself. Skip — and SAY so.
@@ -198,33 +275,18 @@ impl ScanLoop {
                 .filter(|status| matches!(status.as_str(), "working" | "blocked" | "idle" | "done"))
             {
                 report.demoted_native.push(wid_str.clone());
-                let event = {
-                    let conn = self.store.read()?;
-                    let prior = crate::db::queries::get_worker(&conn, &wid_str)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.state);
-                    let open_turn = open_turn_id(&conn, &wid_str);
-                    native_status_event(prior.as_ref(), status, open_turn)
-                };
-                if let Some(ev) = event {
-                    let w = worker.clone();
-                    let applied = self
-                        .store
-                        .write_async(move |conn| {
-                            crate::orchestrator::events::apply_event(
-                                conn,
-                                &w,
-                                &ev,
-                                chrono::Utc::now(),
-                            )
-                        })
-                        .await;
-                    match applied {
-                        Ok(_) => report.events_applied += 1,
-                        Err(e) => {
-                            tracing::warn!(worker = %worker, error = %e, "native status event apply failed")
-                        }
+                let (w, status) = (worker.clone(), status.clone());
+                match self
+                    .write_observed(&worker, &source, move |conn| {
+                        apply_status_report(conn, &w, &status, chrono::Utc::now())
+                    })
+                    .await
+                {
+                    Ok(Some(reply)) if reply.applied => report.events_applied += 1,
+                    Ok(Some(_)) => {}
+                    Ok(None) => report.stale_observations.push(wid_str.clone()),
+                    Err(e) => {
+                        tracing::warn!(worker = %worker, error = %e, "native status event apply failed")
                     }
                 }
                 continue;
@@ -306,54 +368,50 @@ impl ScanLoop {
 
             let adapter =
                 crate::backend::adapter::TerminalAdapter::new(ProviderId(provider.clone()));
-            let events = adapter.scan(&captured);
 
-            // ACTIVE via scrape (AMUX-3165). A hookless codex/ollama pane's
-            // "• Working (…esc to interrupt)" is the ONLY signal that reaches
-            // the store that the worker is generating — it has no
-            // Stop/UserPromptSubmit hooks (claude) and no structured session
-            // (opencode), so unlike every other lane its active state has
-            // nowhere else to come from. `scan` cannot carry it (Active needs a
-            // turn id and `scan` is pure), so it is reported as a boolean and
-            // minted here, treated EXACTLY like a backend's native `working`
-            // report: `native_status_event` fires TurnStarted on the
-            // idle->active EDGE only and returns None once Active, so a pane
-            // that stays "• Working" across scans does not mint a turn row +
-            // StatusChanged every pass (Invariant 37, ethos rule 5). Runs
-            // before the empty-events guard because an active pane's scan is
-            // empty by design.
+            // ACTIVE via scrape (AMUX-3165). A hookless pane's working row
+            // ("• Working (…esc to interrupt)" for codex/ollama) is the ONLY
+            // signal that reaches the store that the worker is generating — it
+            // has no Stop/UserPromptSubmit hooks (claude) and no structured
+            // session (opencode), so unlike every other lane its active state
+            // has nowhere else to come from. `scan` cannot carry it (Active
+            // needs a turn id and `scan` is pure), so it is reported as a
+            // boolean and minted here, treated EXACTLY like a backend's native
+            // `working` report: `native_status_event` fires TurnStarted on the
+            // EDGE into Active only and returns None once Active, so a pane
+            // that stays working across scans does not mint a turn row +
+            // StatusChanged every pass (Invariant 37, ethos rule 5).
+            //
+            // The working row is the pane's CURRENT state, so nothing else the
+            // frame shows (a limit banner or an error still in the scrollback
+            // above it) is applied: applying it would flip the lane off Active
+            // and back every pass. And the dedupe memory is cleared, so the
+            // yield that ends this working phase applies even when it is
+            // byte-identical to the one before it (idle -> working -> idle,
+            // limit -> working -> limit). Before this, the pre-turn idle
+            // prompt's hash survived the turn, the identical prompt after it
+            // read as "still on screen", and the worker stayed Active with its
+            // turn open.
             if adapter.generating(&captured) {
-                let event = {
-                    let conn = self.store.read()?;
-                    let prior = crate::db::queries::get_worker(&conn, &wid_str)
-                        .ok()
-                        .flatten()
-                        .map(|r| r.state);
-                    let open_turn = open_turn_id(&conn, &wid_str);
-                    native_status_event(prior.as_ref(), "working", open_turn)
-                };
-                if let Some(ev) = event {
-                    let w = worker.clone();
-                    match self
-                        .store
-                        .write_async(move |conn| {
-                            crate::orchestrator::events::apply_event(
-                                conn,
-                                &w,
-                                &ev,
-                                chrono::Utc::now(),
-                            )
-                        })
-                        .await
-                    {
-                        Ok(_) => report.events_applied += 1,
-                        Err(e) => {
-                            tracing::warn!(worker = %worker, error = %e, "codex active event apply failed")
-                        }
+                self.last_scan.lock().unwrap().remove(&worker);
+                let w = worker.clone();
+                match self
+                    .write_observed(&worker, &source, move |conn| {
+                        apply_status_report(conn, &w, "working", chrono::Utc::now())
+                    })
+                    .await
+                {
+                    Ok(Some(reply)) if reply.applied => report.events_applied += 1,
+                    Ok(Some(_)) => {}
+                    Ok(None) => report.stale_observations.push(wid_str.clone()),
+                    Err(e) => {
+                        tracing::warn!(worker = %worker, error = %e, "scraped working event apply failed")
                     }
                 }
+                continue;
             }
 
+            let events = adapter.scan(&captured);
             if events.is_empty() {
                 continue;
             }
@@ -374,18 +432,21 @@ impl ScanLoop {
             for ev in events {
                 let w = worker.clone();
                 let applied = self
-                    .store
-                    .write_async(move |conn| {
-                        crate::orchestrator::events::apply_event(
-                            conn,
-                            &w,
-                            &ev,
-                            chrono::Utc::now(),
-                        )
+                    .write_observed(&worker, &source, move |conn| {
+                        apply_scraped_event(conn, &w, &ev, chrono::Utc::now())
                     })
                     .await;
                 match applied {
-                    Ok(_) => report.events_applied += 1,
+                    Ok(Some(_)) => report.events_applied += 1,
+                    Ok(None) => {
+                        // The frame belongs to an ended or replaced session:
+                        // drop the rest of it, and forget its hash so the new
+                        // session's own identical frame is not deduped
+                        // against a screen that was never applied.
+                        self.last_scan.lock().unwrap().remove(&worker);
+                        report.stale_observations.push(wid_str.clone());
+                        break;
+                    }
                     Err(e) => {
                         tracing::warn!(worker = %worker, error = %e, "scan event apply failed")
                     }
@@ -425,6 +486,7 @@ impl ScanLoop {
                         || !r.process_exits.is_empty()
                         || !r.process_exit_failures.is_empty()
                         || !r.stale_process_exits.is_empty()
+                        || !r.stale_observations.is_empty()
                         || !r.native_status_failures.is_empty() =>
                 {
                     tracing::debug!(
@@ -435,6 +497,7 @@ impl ScanLoop {
                         process_exits = r.process_exits.len(),
                         process_exit_failures = r.process_exit_failures.len(),
                         stale_process_exits = r.stale_process_exits.len(),
+                        stale_observations = r.stale_observations.len(),
                         events = r.events_applied,
                         failures = r.capture_failures.len(),
                         "terminal scan pass"
@@ -447,28 +510,35 @@ impl ScanLoop {
     }
 }
 
-/// The worker's open turn, if any — the id a native `idle`/`done` report
-/// must close to keep the turn ledger truthful. `None` means the native
-/// report saw the agent finish with no TurnStarted on record (e.g. the
-/// working phase happened while the server was down); the caller
-/// synthesizes one and `apply_event` names the miss in the log.
-fn open_turn_id(conn: &Connection, wid: &str) -> Option<TurnId> {
-    conn.query_row(
-        "SELECT id FROM _amux_turns WHERE worker_id = ?1 AND ended_at IS NULL
-         ORDER BY started_at DESC LIMIT 1",
-        params![wid],
-        |r| r.get::<_, String>(0),
-    )
-    .optional()
-    .ok()
-    .flatten()
-    .and_then(|t| TurnId::parse(&t).ok())
+/// The worker's open turn in its LIVE session, if any — the turn an idle
+/// report must close to keep the turn ledger truthful, and the one a working
+/// report resumes. Scoped to the live session on purpose: a turn left open
+/// by a session that crashed or was replaced is not this process's to resume,
+/// and closing it on this session's idle prompt would confirm a command the
+/// new process never received. `None` means no open turn here: a working
+/// report mints one, and a native idle report synthesizes one so
+/// `apply_event` names the missed TurnStarted in the log (e.g. the working
+/// phase happened while the server was down).
+fn open_turn_id(conn: &Connection, wid: &str) -> rusqlite::Result<Option<TurnId>> {
+    let Some(session) = crate::db::queries::live_session_for(conn, wid)? else {
+        return Ok(None);
+    };
+    Ok(conn
+        .query_row(
+            "SELECT id FROM _amux_turns
+             WHERE worker_id = ?1 AND session_id = ?2 AND ended_at IS NULL
+             ORDER BY started_at DESC LIMIT 1",
+            params![wid, session.id],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()?
+        .and_then(|t| TurnId::parse(&t).ok()))
 }
 
 /// Map a backend-reported agent status (#84: herdr `working|blocked|idle|
 /// done`) onto the WorkerEvent that moves the store toward it, or `None`
 /// when it is already there. Pure so the mapping table is testable
-/// without a DB.
+/// without a DB. The scrape's working frames use the `working` row too.
 ///
 /// Equilibrium returns `None` on purpose: `write_state` writes
 /// unconditionally, so re-applying every tick would push a StatusChanged
@@ -476,6 +546,11 @@ fn open_turn_id(conn: &Connection, wid: &str) -> Option<TurnId> {
 /// `done ≡ idle`: herdr 0.8.0 surfaces `done` and amux has no state for
 /// "the agent process finished but the pane lives" — idle is the honest
 /// reading either way (#84 evidence).
+///
+/// `working` after a yield (blocked, a rate limit, a wait) RESUMES the open
+/// turn instead of minting a second row beside it: the turn spans the yield
+/// and ends once, at idle or failure (operator decision 2026-10-08). Only
+/// with no open turn does a new one start.
 fn native_status_event(
     prior: Option<&WorkerState>,
     status: &str,
@@ -485,7 +560,7 @@ fn native_status_event(
         "working" => match prior {
             Some(WorkerState::Active { .. }) => None,
             _ => Some(WorkerEvent::TurnStarted {
-                turn_id: TurnId::from_ulid(ulid::Ulid::new()),
+                turn_id: open_turn.unwrap_or_else(|| TurnId::from_ulid(ulid::Ulid::new())),
             }),
         },
         "blocked" => match prior {
@@ -511,6 +586,97 @@ fn native_status_event(
     }
 }
 
+/// Apply a status report — a backend's native status, or `working` for a
+/// pane the scrape saw generating — through [`native_status_event`]: a
+/// working report starts a turn or resumes the live session's open one, an
+/// idle report ends it. Decided inside the writer transaction, so the prior
+/// state and open-turn reads cannot race another writer. Equilibrium writes
+/// nothing (Invariant 37).
+fn apply_status_report(
+    conn: &Connection,
+    worker: &WorkerId,
+    status: &str,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<WriteOutcome> {
+    let prior = crate::db::queries::get_worker(conn, worker.as_str())?.map(|r| r.state);
+    let open_turn = open_turn_id(conn, worker.as_str())?;
+    match native_status_event(prior.as_ref(), status, open_turn) {
+        Some(event) => crate::orchestrator::events::apply_event(conn, worker, &event, now),
+        None => Ok(WriteOutcome { applied: false, events: vec![] }),
+    }
+}
+
+/// Apply one scraped event. The scrape is a hookless lane's only voice, so it
+/// is also the only thing that can END the turn its working frames opened
+/// (Invariant 6):
+///
+/// - the idle prompt ends the live session's open turn with `TurnCompleted`,
+///   the one transition that confirms a Delivered command (Invariant 34).
+///   When the worker went idle straight from a rate limit or a wait, with no
+///   resumed work between, it still confirms (operator decision 2026-10-08)
+///   and the outcome says so rather than claiming work nobody observed;
+/// - a failure is applied FIRST, because its attempt record reads the open
+///   turn (tokens, wall clock, start), and the turn is ended after it in the
+///   same transaction. The failure has already moved the command off
+///   Delivered;
+/// - a rate limit or any other wait leaves the turn open for the next
+///   working frame to resume ([`apply_status_report`]).
+fn apply_scraped_event(
+    conn: &Connection,
+    worker: &WorkerId,
+    event: &WorkerEvent,
+    now: DateTime<Utc>,
+) -> rusqlite::Result<WriteOutcome> {
+    use crate::orchestrator::events::apply_event;
+    let wid = worker.as_str();
+    match event {
+        WorkerEvent::Waiting(wait) if wait.reason == "idle_prompt" => {
+            let Some(turn_id) = open_turn_id(conn, wid)? else {
+                return apply_event(conn, worker, event, now);
+            };
+            let outcome = match crate::db::queries::get_worker(conn, wid)?.map(|r| r.state) {
+                Some(WorkerState::RateLimited { .. }) => {
+                    "terminal idle prompt after a rate limit; no resumed work observed".to_string()
+                }
+                Some(WorkerState::Waiting { reason }) => format!(
+                    "terminal idle prompt after waiting ({reason}); no resumed work observed"
+                ),
+                _ => "terminal idle prompt".to_string(),
+            };
+            apply_event(
+                conn,
+                worker,
+                &WorkerEvent::TurnCompleted(TurnResult { turn_id, outcome }),
+                now,
+            )
+        }
+        WorkerEvent::Failed(failure) => {
+            let open_turn = open_turn_id(conn, wid)?;
+            let mut reply = apply_event(conn, worker, event, now)?;
+            if let Some(turn_id) = open_turn {
+                let outcome =
+                    serde_json::json!({ "outcome": format!("failed: {}", failure.reason) });
+                let n = conn.execute(
+                    "UPDATE _amux_turns SET ended_at = ?2, outcome = ?3
+                     WHERE id = ?1 AND ended_at IS NULL",
+                    params![turn_id.as_str(), now.to_rfc3339(), outcome.to_string()],
+                )?;
+                if n > 0 {
+                    reply.events.push(PendingEvent {
+                        entity_type: EntityType::Turn,
+                        entity_id: turn_id.to_string(),
+                        mutation: MutationKind::Updated,
+                        payload: None,
+                    });
+                    reply.applied = true;
+                }
+            }
+            Ok(reply)
+        }
+        _ => apply_event(conn, worker, event, now),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +684,8 @@ mod tests {
     use crate::db::WriteOutcome;
     use crate::opencode::mock::MockProtocol;
     use crate::opencode::AgentState;
+    use amux_core::ids::{CommandId, TaskId};
+    use amux_core::protocol::{CommandState, CommandTransition, DeliveryTiming, WorkerCommand};
     use async_trait::async_trait;
     use rusqlite::params;
 
@@ -531,6 +699,9 @@ mod tests {
         native: BTreeMap<String, String>,
         exits: BTreeMap<String, ExitStatus>,
         exit_probe_fails: bool,
+        /// Runs once, inside the next native-status read: the store changing
+        /// between that report and the write that applies it.
+        during_states: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     }
 
     #[async_trait]
@@ -557,6 +728,10 @@ mod tests {
             Ok(self.frame.clone())
         }
         async fn agent_states(&self) -> crate::backend::Result<BTreeMap<String, String>> {
+            let during = self.during_states.lock().unwrap().take();
+            if let Some(f) = during {
+                f();
+            }
             Ok(self.native.clone())
         }
         async fn process_exits(&self) -> crate::backend::Result<BTreeMap<String, ExitStatus>> {
@@ -588,13 +763,17 @@ mod tests {
     /// A tmux worker whose provider is codex (hookless: the scrape is its only
     /// voice), for the AMUX-3165 active-via-scrape path.
     fn seed_codex_worker(store: &SharedStore, w: &WorkerId) {
-        let (id, sid) = (w.to_string(), format!("ses_{w}"));
+        seed_hookless_worker(store, w, "codex");
+    }
+
+    fn seed_hookless_worker(store: &SharedStore, w: &WorkerId, provider: &str) {
+        let (id, sid, provider) = (w.to_string(), format!("ses_{w}"), provider.to_string());
         store
             .write(move |conn| {
                 conn.execute(
                     "INSERT INTO _amux_workers (id, display_name, provider, created_at, updated_at)
-                     VALUES (?1, 'term', 'codex', 'now', 'now')",
-                    params![id],
+                     VALUES (?1, 'term', ?2, 'now', 'now')",
+                    params![id, provider],
                 )?;
                 conn.execute(
                     "INSERT INTO _amux_sessions (id, worker_id, backend, backend_ref, started_at)
@@ -928,16 +1107,19 @@ mod tests {
         assert!(native_status_event(Some(&idle), "unknown", turn()).is_none());
         assert!(native_status_event(Some(&idle), "somewhere-else", turn()).is_none());
 
-        // working: only from not-Active.
+        // working: only from not-Active. An open turn is resumed under its
+        // own id; with none open, a fresh one starts.
         assert!(native_status_event(Some(&active), "working", turn()).is_none());
-        assert!(matches!(
-            native_status_event(Some(&idle), "working", turn()),
-            Some(WorkerEvent::TurnStarted { .. })
-        ));
-        assert!(matches!(
-            native_status_event(None, "working", turn()),
-            Some(WorkerEvent::TurnStarted { .. })
-        ));
+        for prior in [Some(&idle), Some(&waiting), None] {
+            match native_status_event(prior, "working", turn()) {
+                Some(WorkerEvent::TurnStarted { turn_id }) => assert_eq!(turn_id, turn().unwrap()),
+                other => panic!("working from {prior:?} must resume the open turn, got {other:?}"),
+            }
+            match native_status_event(prior, "working", None) {
+                Some(WorkerEvent::TurnStarted { turn_id }) => assert_ne!(turn_id, turn().unwrap()),
+                other => panic!("working from {prior:?} must start a turn, got {other:?}"),
+            }
+        }
 
         // blocked: only from not-that-Waiting.
         assert!(native_status_event(Some(&waiting), "blocked", turn()).is_none());
@@ -1026,6 +1208,467 @@ mod tests {
             !matches!(worker_state(&store, &w), WorkerState::Active { .. }),
             "an idle codex model bar must not read Active"
         );
+    }
+
+    // ---- a scraped turn ends where the worker yields (Invariant 6) ---------
+    //
+    // Operator decision 2026-10-08: a scraped turn spans a rate limit or a
+    // wait. The next working frame resumes the SAME turn; the turn ends at the
+    // idle prompt (TurnCompleted, which confirms the Delivered command) or at a
+    // failure (after the attempt is recorded). An idle prompt after a limit
+    // with no resumed work still confirms, and its outcome says so.
+
+    // A usage-limit banner above the resting composer: the adapter reads it as
+    // RateLimited (the composer under it is chrome, not idle).
+    const CODEX_LIMIT: &str = "\u{25a0} You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.\n\n\u{203a} Ask Codex to do anything\n\n  gpt-5.5 xhigh \u{b7} ~/Dev/amux";
+    // Codex's own auth-failure marker above the resting composer: Failed.
+    const CODEX_AUTH: &str = "\u{203a} [09:04 AM] Reply only with isolated-ok.\n\n\u{25a0} Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.\n\n\u{203a} Ask Codex to do anything\n  gpt-5.5 xhigh \u{b7} ~/Dev/amux";
+
+    /// A tmux pane the test repaints between passes, so ONE ScanLoop -- and
+    /// its dedupe memory, which is where the defect lived -- sees the whole
+    /// sequence.
+    #[derive(Default)]
+    struct Screen {
+        frame: String,
+        /// Runs once, inside the next capture: the store changing between the
+        /// capture and the write that applies it.
+        during_capture: Option<Box<dyn FnOnce() + Send>>,
+    }
+
+    struct Pane(Arc<Mutex<Screen>>);
+
+    #[async_trait]
+    impl SessionBackend for Pane {
+        fn name(&self) -> &'static str { "tmux" }
+        async fn spawn(&self, _s: &SessionSpec) -> crate::backend::Result<ProcessRef> {
+            Err(BackendError::SpawnFailed("pane".into()))
+        }
+        async fn terminate(&self, _p: &ProcessRef) -> crate::backend::Result<()> { Ok(()) }
+        async fn status(&self, _p: &ProcessRef) -> crate::backend::Result<BackendStatus> {
+            Ok(BackendStatus::Running)
+        }
+        async fn attach_info(&self, _p: &ProcessRef) -> crate::backend::Result<AttachInfo> {
+            Ok(AttachInfo { command: "true".into() })
+        }
+        async fn reconcile(&self) -> crate::backend::Result<Vec<BackendSession>> { Ok(vec![]) }
+        async fn capture(&self, _p: &ProcessRef, _l: u32) -> crate::backend::Result<String> {
+            let during = self.0.lock().unwrap().during_capture.take();
+            if let Some(f) = during {
+                f();
+            }
+            Ok(self.0.lock().unwrap().frame.clone())
+        }
+    }
+
+    /// One `_amux_turns` row: (id, ended_at, outcome text).
+    type TurnRow = (String, Option<String>, Option<String>);
+
+    struct Lane {
+        store: SharedStore,
+        w: WorkerId,
+        cmd: CommandId,
+        screen: Arc<Mutex<Screen>>,
+        scan: ScanLoop,
+    }
+
+    impl Lane {
+        /// A hookless `provider` worker, idle, holding one Delivered command:
+        /// the state the pump leaves after handing it a prompt.
+        fn new(n: u128, provider: &str, command: WorkerCommand) -> Lane {
+            let store = store();
+            let w = wid(n);
+            seed_hookless_worker(&store, &w, provider);
+            let cmd = CommandId::from_ulid(ulid::Ulid::from_parts(1_700_000_000_000, 900 + n));
+            let (id, worker, c) = (cmd.clone(), w.clone(), command);
+            store
+                .write(move |conn| {
+                    let now = chrono::Utc::now();
+                    crate::db::queries::update_worker_state(conn, worker.as_str(),
+                        &WorkerState::Idle { since: now }, &now.to_rfc3339())?;
+                    crate::db::commands::enqueue(conn, id.clone(), &worker, &c, "scan-turn",
+                        &DeliveryTiming::Immediate, None, now)?;
+                    for t in [CommandTransition::Dispatch, CommandTransition::Deliver] {
+                        crate::db::commands::transition(conn, &id, t, 3)?;
+                    }
+                    Ok(WriteOutcome { applied: true, events: vec![] })
+                })
+                .unwrap();
+            let screen = Arc::new(Mutex::new(Screen::default()));
+            let scan = ScanLoop::new(store.clone(), vec![Arc::new(Pane(screen.clone()))], None);
+            Lane { store, w, cmd, screen, scan }
+        }
+
+        async fn pass(&self, frame: &str) -> ScanReport {
+            self.screen.lock().unwrap().frame = frame.to_string();
+            self.scan.scan_once().await.unwrap()
+        }
+
+
+        fn state(&self) -> WorkerState {
+            worker_state(&self.store, &self.w)
+        }
+
+        fn command(&self) -> CommandState {
+            let conn = self.store.read().unwrap();
+            crate::db::commands::by_id(&conn, &self.cmd).unwrap().unwrap().state
+        }
+
+        fn turns(&self) -> Vec<TurnRow> {
+            let conn = self.store.read().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, ended_at, json_extract(outcome, '$.outcome') FROM _amux_turns
+                     WHERE worker_id = ?1 ORDER BY started_at, id",
+                )
+                .unwrap();
+            stmt.query_map(params![self.w.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        }
+
+        /// Exactly one turn row, still open, and the worker Active on it.
+        fn assert_one_open_turn(&self, label: &str) -> String {
+            let turns = self.turns();
+            assert_eq!(turns.len(), 1, "{label}: one turn row, got {turns:?}");
+            assert!(turns[0].1.is_none(), "{label}: the turn must still be open: {turns:?}");
+            turns[0].0.clone()
+        }
+    }
+
+    fn active_on(state: &WorkerState) -> Option<String> {
+        match state {
+            WorkerState::Active { turn } => turn.as_ref().map(|t| t.to_string()),
+            _ => None,
+        }
+    }
+
+    // Copilot CLI 1.0.91 (adapter.rs fixtures): mid-turn running the shell
+    // tool, and the composer at rest with the hints footer.
+    const COPILOT_WORKING: &str = " ❯ Run the shell command `echo amux-copilot-probe` exactly once, then reply with only its output.   23:26
+ $ Shell Run the requested echo command 1 line…
+   echo amux-copilot-probe
+ /tmp/copilot-probe-hpjC                                          Session: 0.19 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ● Working · 106 B esc interrupt                                  Auto → GPT-6 Luna";
+    const COPILOT_IDLE: &str = " ● amux-copilot-probe
+ /tmp/copilot-probe-hpjC                                          Session: 0.21 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ← open sidebar · Interactive · Allow All · / commands · ? help · tab next tab   GPT-5.6 Sol";
+
+    #[tokio::test]
+    async fn scraped_turn_ends_at_the_identical_idle_prompt_after_it() {
+        for (n, provider, idle, working) in [
+            (40, "codex", CODEX_IDLE, CODEX_WORKING),
+            (41, "ollama", CODEX_IDLE, CODEX_WORKING),
+            (49, "copilot", COPILOT_IDLE, COPILOT_WORKING),
+        ] {
+            let lane = Lane::new(n, provider, WorkerCommand::Continue);
+            // The SAME idle frame before and after the turn: the second one was
+            // deduped as "still on screen" and the worker stayed Active.
+            lane.pass(idle).await;
+            lane.pass(working).await;
+            let turn = lane.assert_one_open_turn(provider);
+            assert_eq!(active_on(&lane.state()), Some(turn.clone()), "{provider}");
+            assert_eq!(lane.command(), CommandState::Delivered, "{provider}");
+
+            lane.pass(idle).await;
+            assert!(matches!(lane.state(), WorkerState::Idle { .. }), "{provider}: {:?}", lane.state());
+            let turns = lane.turns();
+            assert_eq!(turns.len(), 1, "{provider}: {turns:?}");
+            assert!(turns[0].1.is_some(), "{provider}: the turn must end at the idle prompt: {turns:?}");
+            assert_eq!(turns[0].2.as_deref(), Some("terminal idle prompt"), "{provider}");
+            assert_eq!(lane.command(), CommandState::Confirmed, "{provider}");
+            // Still idle: nothing more (Invariant 37).
+            assert_eq!(lane.pass(idle).await.events_applied, 0, "{provider}");
+        }
+    }
+
+    #[tokio::test]
+    async fn scraped_turn_spans_limits_and_ends_once_at_idle() {
+        for (n, provider) in [(42, "codex"), (43, "ollama")] {
+            let lane = Lane::new(n, provider, WorkerCommand::Continue);
+            lane.pass(CODEX_WORKING).await;
+            let turn = lane.assert_one_open_turn(provider);
+
+            for round in 1..=2 {
+                // The SAME banner both times: the second must apply again.
+                let r = lane.pass(CODEX_LIMIT).await;
+                assert_eq!(r.events_applied, 1, "{provider} limit {round}: {r:?}");
+                assert!(matches!(lane.state(), WorkerState::RateLimited { .. }),
+                    "{provider} limit {round}: {:?}", lane.state());
+                assert_eq!(lane.assert_one_open_turn(provider), turn, "{provider} limit {round}");
+                assert_eq!(lane.command(), CommandState::Delivered, "{provider} limit {round}");
+                // The banner staying up is not a new occurrence (Invariant 37).
+                assert_eq!(lane.pass(CODEX_LIMIT).await.events_applied, 0, "{provider} limit {round}");
+
+                // Work resumes: the same turn, not a new row.
+                let r = lane.pass(CODEX_WORKING).await;
+                assert_eq!(r.events_applied, 1, "{provider} resume {round}: {r:?}");
+                assert_eq!(lane.assert_one_open_turn(provider), turn, "{provider} resume {round}");
+                assert_eq!(active_on(&lane.state()), Some(turn.clone()), "{provider} resume {round}");
+                assert_eq!(lane.pass(CODEX_WORKING).await.events_applied, 0, "{provider} resume {round}");
+            }
+
+            lane.pass(CODEX_IDLE).await;
+            let turns = lane.turns();
+            assert_eq!(turns.len(), 1, "{provider}: {turns:?}");
+            assert_eq!(turns[0].0, turn);
+            assert!(turns[0].1.is_some(), "{provider}: {turns:?}");
+            assert_eq!(turns[0].2.as_deref(), Some("terminal idle prompt"), "{provider}");
+            assert!(matches!(lane.state(), WorkerState::Idle { .. }), "{provider}");
+            assert_eq!(lane.command(), CommandState::Confirmed, "{provider}");
+        }
+    }
+
+    #[tokio::test]
+    async fn idle_after_a_limit_with_no_resumed_work_confirms_and_says_so() {
+        for (n, provider) in [(44, "codex"), (45, "ollama")] {
+            let lane = Lane::new(n, provider, WorkerCommand::Continue);
+            lane.pass(CODEX_WORKING).await;
+            lane.pass(CODEX_LIMIT).await;
+            assert_eq!(lane.command(), CommandState::Delivered, "{provider}");
+            lane.pass(CODEX_IDLE).await;
+            let turns = lane.turns();
+            assert_eq!(turns.len(), 1, "{provider}: {turns:?}");
+            assert!(turns[0].1.is_some(), "{provider}: {turns:?}");
+            assert_eq!(
+                turns[0].2.as_deref(),
+                Some("terminal idle prompt after a rate limit; no resumed work observed"),
+                "{provider}"
+            );
+            assert_eq!(lane.command(), CommandState::Confirmed, "{provider}");
+            assert!(matches!(lane.state(), WorkerState::Idle { .. }), "{provider}");
+        }
+    }
+
+    #[tokio::test]
+    async fn scraped_failure_records_the_attempt_then_ends_the_turn() {
+        for (n, provider) in [(46, "codex"), (47, "ollama")] {
+            let task = TaskId::from_ulid(ulid::Ulid::from_parts(1_700_000_000_000, 700 + n));
+            let lane = Lane::new(n, provider, WorkerCommand::ExecuteTask(task.clone()));
+            lane.pass(CODEX_WORKING).await;
+            let turn = lane.assert_one_open_turn(provider);
+            // A provider-reported token total on the open turn: the attempt
+            // record can only carry it if it reads the turn BEFORE it ends.
+            let t = turn.clone();
+            lane.store
+                .write(move |conn| {
+                    conn.execute("UPDATE _amux_turns SET tokens = ?2 WHERE id = ?1",
+                        params![t, r#"{"reported_total":1234}"#])?;
+                    Ok(WriteOutcome { applied: true, events: vec![] })
+                })
+                .unwrap();
+
+            lane.pass(CODEX_AUTH).await;
+            assert!(matches!(lane.state(), WorkerState::Error { .. }), "{provider}: {:?}", lane.state());
+            assert!(matches!(lane.command(), CommandState::Failed { .. }), "{provider}");
+            let turns = lane.turns();
+            assert_eq!(turns.len(), 1, "{provider}: {turns:?}");
+            assert!(turns[0].1.is_some(), "{provider}: a failed turn must end: {turns:?}");
+            assert!(turns[0].2.as_deref().is_some_and(|o| o.starts_with("failed: provider authentication required")),
+                "{provider}: {turns:?}");
+            let record: String = {
+                let conn = lane.store.read().unwrap();
+                conn.query_row("SELECT record FROM _amux_attempts WHERE task_id = ?1",
+                    params![task.as_str()], |r| r.get(0)).unwrap()
+            };
+            let record: serde_json::Value = serde_json::from_str(&record).unwrap();
+            assert_eq!(record["tokens_spent"], 1234, "{provider}: {record}");
+            // The failure staying on screen is not a new occurrence.
+            assert_eq!(lane.pass(CODEX_AUTH).await.events_applied, 0, "{provider}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_dead_sessions_open_turn_is_neither_resumed_nor_closed() {
+        let lane = Lane::new(48, "codex", WorkerCommand::Continue);
+        lane.pass(CODEX_WORKING).await;
+        let old = lane.assert_one_open_turn("first session");
+        // The session is replaced; its turn row was never ended.
+        let w = lane.w.to_string();
+        lane.store
+            .write(move |conn| {
+                conn.execute("UPDATE _amux_sessions SET ended_at = 'then' WHERE worker_id = ?1", params![w])?;
+                conn.execute(
+                    "INSERT INTO _amux_sessions (id, worker_id, backend, backend_ref, started_at)
+                     VALUES ('ses_second', ?1, 'tmux', 'amux-cx2', 'now2')",
+                    params![w],
+                )?;
+                Ok(WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+        // The new session's idle prompt says nothing about the old turn, and
+        // must not confirm a command the new session never received.
+        lane.pass(CODEX_IDLE).await;
+        let turns = lane.turns();
+        assert_eq!(turns.len(), 1, "{turns:?}");
+        assert!(turns[0].1.is_none(), "{turns:?}");
+        assert_eq!(lane.command(), CommandState::Delivered);
+        // Its working frame opens its own turn.
+        lane.pass(CODEX_WORKING).await;
+        let turns = lane.turns();
+        assert_eq!(turns.len(), 2, "{turns:?}");
+        let new = active_on(&lane.state()).expect("active on a turn");
+        assert_ne!(new, old);
+    }
+
+    /// The worker's session is replaced by a new one (on `backend`) that has
+    /// already started its own turn on a newly Delivered command, after any
+    /// command the old session held was confirmed. Returns that turn and that
+    /// command.
+    fn replace_session(store: &SharedStore, w: &WorkerId, backend: &str, n: u128) -> (String, CommandId) {
+        let (wid, worker, backend) = (w.to_string(), w.clone(), backend.to_string());
+        let turn = TurnId::from_ulid(ulid::Ulid::from_parts(1_700_000_000_000, 950 + n));
+        let cmd = CommandId::from_ulid(ulid::Ulid::from_parts(1_700_000_000_000, 960 + n));
+        let (t, c) = (turn.clone(), cmd.clone());
+        store
+            .write(move |conn| {
+                while let Some(old) = crate::db::commands::in_flight(conn, &worker)? {
+                    crate::db::commands::transition(conn, &old.id, CommandTransition::Confirm, 3)?;
+                }
+                conn.execute("UPDATE _amux_sessions SET ended_at = 'then' WHERE worker_id = ?1", params![wid])?;
+                conn.execute(
+                    "INSERT INTO _amux_sessions (id, worker_id, backend, backend_ref, started_at)
+                     VALUES ('ses_replacement', ?1, ?2, 'amux-replacement', 'now2')",
+                    params![wid, backend],
+                )?;
+                crate::db::commands::enqueue(conn, c.clone(), &worker, &WorkerCommand::Continue,
+                    "replacement", &DeliveryTiming::Immediate, None, chrono::Utc::now())?;
+                for step in [CommandTransition::Dispatch, CommandTransition::Deliver] {
+                    crate::db::commands::transition(conn, &c, step, 3)?;
+                }
+                conn.execute(
+                    "INSERT INTO _amux_turns (id, session_id, worker_id, started_at)
+                     VALUES (?1, 'ses_replacement', ?2, 'now2')",
+                    params![t.as_str(), wid],
+                )?;
+                let now = chrono::Utc::now();
+                crate::db::queries::update_worker_state(conn, worker.as_str(),
+                    &WorkerState::Active { turn: Some(t) }, &now.to_rfc3339())?;
+                Ok(WriteOutcome { applied: true, events: vec![] })
+            })
+            .unwrap();
+        (turn.to_string(), cmd)
+    }
+
+    fn command_state(store: &SharedStore, cmd: &CommandId) -> CommandState {
+        let conn = store.read().unwrap();
+        crate::db::commands::by_id(&conn, cmd).unwrap().unwrap().state
+    }
+
+    fn turn_ended(store: &SharedStore, turn: &str) -> bool {
+        let conn = store.read().unwrap();
+        conn.query_row("SELECT ended_at IS NOT NULL FROM _amux_turns WHERE id = ?1",
+            params![turn], |r| r.get(0)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_frame_captured_from_a_replaced_session_is_not_applied() {
+        // Review r-20261008-005845-e02935: the idle frame is captured from the
+        // old session; before it is written, the session is replaced and the
+        // new one starts a turn on a new Delivered command. The old screen
+        // must neither end that turn nor confirm that command.
+        let lane = Lane::new(50, "codex", WorkerCommand::Continue);
+        lane.pass(CODEX_WORKING).await;
+        let replaced = Arc::new(Mutex::new(None));
+        let (out, store, w) = (replaced.clone(), lane.store.clone(), lane.w.clone());
+        lane.screen.lock().unwrap().during_capture = Some(Box::new(move || {
+            *out.lock().unwrap() = Some(replace_session(&store, &w, "tmux", 50));
+        }));
+        let r = lane.pass(CODEX_IDLE).await;
+        let (turn, cmd) = replaced.lock().unwrap().take().expect("the capture replaced the session");
+        assert_eq!(r.stale_observations, vec![lane.w.to_string()], "{r:?}");
+        assert_eq!(r.events_applied, 0, "{r:?}");
+        assert!(!turn_ended(&lane.store, &turn), "{:?}", lane.turns());
+        assert_eq!(command_state(&lane.store, &cmd), CommandState::Delivered);
+        assert_eq!(active_on(&lane.state()), Some(turn.clone()));
+
+        // The new session's own idle prompt, identical on screen, still applies:
+        // the stale frame left no dedupe memory behind.
+        let r = lane.pass(CODEX_IDLE).await;
+        assert!(r.stale_observations.is_empty(), "{r:?}");
+        assert!(turn_ended(&lane.store, &turn), "{:?}", lane.turns());
+        assert_eq!(command_state(&lane.store, &cmd), CommandState::Confirmed);
+    }
+
+    #[tokio::test]
+    async fn a_native_report_from_a_replaced_session_is_not_applied() {
+        let store = store();
+        let w = wid(17);
+        seed_herdr_worker(&store, &w, "amux-herdr-1");
+        ScanLoop::new(store.clone(), vec![Arc::new(ScriptedBackend {
+            name: "herdr",
+            native: native("amux-herdr-1", "working"),
+            ..Default::default()
+        })], None)
+        .scan_once()
+        .await
+        .unwrap();
+        // The old session's agent reports idle, and the session is replaced
+        // between that report and its write.
+        let replaced = Arc::new(Mutex::new(None));
+        let (out, s, ww) = (replaced.clone(), store.clone(), w.clone());
+        let r = ScanLoop::new(store.clone(), vec![Arc::new(ScriptedBackend {
+            name: "herdr",
+            native: native("amux-herdr-1", "idle"),
+            during_states: Mutex::new(Some(Box::new(move || {
+                *out.lock().unwrap() = Some(replace_session(&s, &ww, "herdr", 17));
+            }))),
+            ..Default::default()
+        })], None)
+        .scan_once()
+        .await
+        .unwrap();
+        let (turn, cmd) = replaced.lock().unwrap().take().expect("the read replaced the session");
+        assert_eq!(r.stale_observations, vec![w.to_string()], "{r:?}");
+        assert_eq!(r.events_applied, 0, "{r:?}");
+        assert!(!turn_ended(&store, &turn));
+        assert_eq!(command_state(&store, &cmd), CommandState::Delivered);
+    }
+
+    #[tokio::test]
+    async fn native_blocked_then_working_resumes_the_same_turn() {
+        let store = store();
+        let w = wid(16);
+        seed_herdr_worker(&store, &w, "amux-herdr-1");
+        let pass = |status: &'static str| {
+            let store = store.clone();
+            async move {
+                ScanLoop::new(store, vec![Arc::new(ScriptedBackend {
+                    name: "herdr",
+                    native: native("amux-herdr-1", status),
+                    ..Default::default()
+                })], None)
+                .scan_once()
+                .await
+                .unwrap()
+            }
+        };
+        let turns = || -> Vec<(String, Option<String>)> {
+            let conn = store.read().unwrap();
+            let mut stmt = conn
+                .prepare("SELECT id, ended_at FROM _amux_turns WHERE worker_id = ?1")
+                .unwrap();
+            stmt.query_map(params![w.as_str()], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        pass("working").await;
+        pass("blocked").await;
+        pass("working").await;
+        let open = turns();
+        assert_eq!(open.len(), 1, "blocked -> working is the same turn: {open:?}");
+        assert!(open[0].1.is_none());
+        pass("idle").await;
+        let done = turns();
+        assert_eq!(done.len(), 1, "{done:?}");
+        assert!(done[0].1.is_some(), "the one turn ends at idle: {done:?}");
     }
 
     // ---- /api/debug/scan publish (AF-80) -----------------------------------

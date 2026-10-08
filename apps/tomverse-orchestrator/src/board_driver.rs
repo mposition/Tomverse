@@ -63,6 +63,14 @@ pub trait BoardControlPlane: Send + Sync {
         task: &OwnedTodoTask,
         runtime: &RuntimeIdentity,
     ) -> Result<ExecutionStartResponse>;
+
+    async fn execution_readback(
+        &self,
+        _task: &OwnedTodoTask,
+        _runtime: &RuntimeIdentity,
+    ) -> Result<Option<ExecutionStartResponse>> {
+        anyhow::bail!("execution readback unavailable")
+    }
 }
 
 #[allow(async_fn_in_trait)]
@@ -97,8 +105,31 @@ impl BoardControlPlane for TomverseApi {
             &runtime.instance_id,
             runtime.generation,
             task.revision,
+            task.assignment_id.as_deref(),
         )
         .await
+    }
+
+    async fn execution_readback(
+        &self,
+        task: &OwnedTodoTask,
+        runtime: &RuntimeIdentity,
+    ) -> Result<Option<ExecutionStartResponse>> {
+        let Some(assignment_id) = task.assignment_id.as_deref() else {
+            anyhow::bail!("legacy start outcome requires operator readback")
+        };
+        let result = self.v22_execution_readback(assignment_id,
+            &task.owner, &runtime.instance_id, runtime.generation).await?;
+        match result.state.as_deref() {
+            Some("not_started") => Ok(None),
+            Some("started") => Ok(Some(ExecutionStartResponse {
+                started: true, attempt_id: result.attempt_id,
+                task_revision: result.task_revision,
+                lease_expires_at: result.lease_expires_at,
+                reason: None,
+            })),
+            _ => anyhow::bail!("v22 execution readback was terminal or ambiguous"),
+        }
     }
 }
 
@@ -207,6 +238,16 @@ where
                     task_id: task.id.clone(),
                     worker: task.owner.clone(),
                 });
+            }
+            Err(_) if task.assignment_id.is_some() => {
+                match self.control.execution_readback(task, &runtime).await {
+                    Ok(Some(start)) if start.started && start.attempt_id.is_some() &&
+                        start.task_revision.is_some() && start.lease_expires_at.is_some() => start,
+                    Ok(None) => return Ok(DriveOutcome::ExecutionStartDeferred {
+                        task_id: task.id.clone(), worker: task.owner.clone(),
+                    }),
+                    _ => anyhow::bail!("AMUX v22 execution-start outcome unknown"),
+                }
             }
             Err(_) => {
                 tracing::warn!(

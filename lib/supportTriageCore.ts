@@ -301,3 +301,245 @@ export type SupportTriageRunOutcome = (typeof SUPPORT_TRIAGE_RUN_OUTCOMES)[numbe
 
 /** A run row may be deleted only once it is this old; younger rows are immutable evidence. */
 export const SUPPORT_TRIAGE_RUN_RETENTION_DAYS = 30;
+
+/**
+ * `SupportTriageSuggestion` (policy sections 1, 2 and 6). The lists and the
+ * transition table below are the CHECK lists and the `-- transitions:` block
+ * of migration 20261004010000_support_triage_suggestion; tests compare them.
+ */
+export const SUGGESTION_STATES = Object.freeze([
+  "pending",
+  "claimed",
+  "ready",
+  "accepted",
+  "rejected",
+  "expired",
+  "superseded",
+  "invalidated",
+  "failed",
+] as const);
+export type SuggestionState = (typeof SUGGESTION_STATES)[number];
+
+/** No transition leaves a terminal state. */
+export const SUGGESTION_TERMINAL_STATES: readonly SuggestionState[] = Object.freeze([
+  "accepted",
+  "rejected",
+  "expired",
+  "superseded",
+  "invalidated",
+  "failed",
+]);
+
+export const SUGGESTION_TRANSITIONS: readonly (readonly [SuggestionState, SuggestionState])[] =
+  Object.freeze([
+    ["pending", "claimed"],
+    // Lease reclaim: the claim token is cleared and the attempt counted.
+    ["claimed", "pending"],
+    ["claimed", "ready"],
+    ["claimed", "failed"],
+    ["ready", "accepted"],
+    ["ready", "rejected"],
+    ["ready", "expired"],
+    ["ready", "superseded"],
+    ["ready", "invalidated"],
+    ["pending", "superseded"],
+    ["claimed", "superseded"],
+    ["pending", "invalidated"],
+    ["claimed", "invalidated"],
+    // A not_queued suggestion expires seven days after creation whatever its
+    // state (policy section 5); one that never became ready has no lane.
+    ["pending", "expired"],
+    ["claimed", "expired"],
+  ]);
+
+export const isSuggestionTransitionAllowed = (from: SuggestionState, to: SuggestionState) =>
+  SUGGESTION_TRANSITIONS.some(([a, b]) => a === from && b === to);
+
+export const SUGGESTION_FAILURE_CODES = Object.freeze([
+  "config_error",
+  "internal_error",
+  "retry_exhausted",
+] as const);
+
+/** Reclaims allowed before a claimed suggestion must fail as retry_exhausted. */
+export const SUGGESTION_MAX_ATTEMPTS = 3;
+
+/**
+ * The lanes a suggestion proposes. Account and privacy reports go to
+ * `trust_safety_human` with security, legal and self-harm reports
+ * (operator decision 2026-10-03, design section 5.6); there is no separate
+ * account lane.
+ */
+export const TRIAGE_LANES = Object.freeze([
+  "bug_verified",
+  "bug_unverified",
+  "billing_human",
+  "trust_safety_human",
+  "feature_request",
+  "other",
+] as const);
+export type TriageLane = (typeof TRIAGE_LANES)[number];
+
+/** Codes from fixed per-locale keyword lists; a report's text never becomes anything else. */
+export const KEYWORD_FLAGS = Object.freeze([
+  "money",
+  "account_privacy",
+  "security",
+  "legal",
+  "self_harm_threat",
+] as const);
+
+export const OWNER_QUEUE_STATES = Object.freeze(["not_queued", "displayed"] as const);
+
+/** A claim's lease, set by the database when a suggestion is claimed. */
+export const SUGGESTION_LEASE_SECONDS = 5 * 60;
+
+/**
+ * `SupportTriageGroup` (policy section 6, design section 5.4). The lists and
+ * the transition table below are the CHECK lists and the `-- transitions:`
+ * block of migration 20261004020000_support_triage_group; tests compare them.
+ * A group is one equivalence class of one kind (`GROUP_KIND_PRIORITY`).
+ */
+export const GROUP_STATES = Object.freeze([
+  "candidate",
+  "confirmed",
+  "dismissed",
+  "expired",
+  "invalidated",
+] as const);
+export type GroupState = (typeof GROUP_STATES)[number];
+
+/** Open groups hold members, signals and a primary snapshot digest; terminal ones hold none. */
+export const GROUP_OPEN_STATES: readonly GroupState[] = Object.freeze(["candidate", "confirmed"]);
+export const GROUP_TERMINAL_STATES: readonly GroupState[] = Object.freeze([
+  "dismissed",
+  "expired",
+  "invalidated",
+]);
+
+export const GROUP_TRANSITIONS: readonly (readonly [GroupState, GroupState])[] = Object.freeze([
+  // A person's decision.
+  ["candidate", "confirmed"],
+  ["candidate", "dismissed"],
+  // Seven days not_queued, or the primary signal's snapshot expired.
+  ["candidate", "expired"],
+  // Fewer than two members, a key collision lost, or three deferred evaluations in a row.
+  ["candidate", "invalidated"],
+  ["confirmed", "invalidated"],
+]);
+
+export const isGroupTransitionAllowed = (from: GroupState, to: GroupState) =>
+  GROUP_TRANSITIONS.some(([a, b]) => a === from && b === to);
+
+/** A person's decision, kept apart from the state so an invalidated group keeps it. */
+export const GROUP_DECISIONS = Object.freeze(["confirmed", "dismissed"] as const);
+
+/** Where a signal's server value comes from; determined by its kind. */
+export const SIGNAL_PROVENANCE: Readonly<Record<GroupKind, string>> = Object.freeze({
+  server_evidence_match: "server_evidence",
+  same_account: "account_derived",
+  autofix_fingerprint: "autofix_derived",
+});
+
+/** Member ids a terminal group keeps as its key tombstone, at most one group's worth. */
+export const GROUP_RETIRED_MEMBER_IDS_MAX = GROUP_MEMBER_CAP;
+
+/** Consecutive deferred key evaluations that invalidate a group (policy section 6). */
+export const GROUP_KEY_RECHECK_DEFERRAL_LIMIT = 3;
+export const GROUP_KEY_TOMBSTONE_DAYS = 7;
+
+/** The provenance classes a signal can carry; `SIGNAL_PROVENANCE` maps each kind to one. */
+export const SIGNAL_PROVENANCE_CLASSES = Object.freeze([
+  "server_evidence",
+  "account_derived",
+  "autofix_derived",
+] as const);
+
+/**
+ * `SupportTriageDecisionRecord` (policy sections 5 and 6). The kinds are the
+ * CHECK list of migration 20261005010000_support_triage_decision_record.
+ */
+export const DECISION_KINDS = Object.freeze([
+  "suggestion_accepted",
+  "suggestion_rejected",
+  "group_confirmed",
+  "group_dismissed",
+  "sample_judged",
+] as const);
+export type DecisionKind = (typeof DECISION_KINDS)[number];
+
+/** How long a decision record is kept (operator decision X2); a CHECK holds it. */
+export const DECISION_RECORD_RETENTION_MONTHS = 12;
+
+/** Reports one decision can be bound to: a group's members at most. */
+export const DECISION_RECORD_LINKS_MAX = GROUP_MEMBER_CAP;
+
+/**
+ * Retention of the other deletable classes (policy section 5). A terminal
+ * suggestion and a terminal group are kept 30 days after they became
+ * terminal; a decision record carries its own `retentionUntil`.
+ */
+export const TERMINAL_SUGGESTION_RETENTION_DAYS = 30;
+export const TERMINAL_GROUP_RETENTION_DAYS = 30;
+
+/** The classes one retention batch deletes, one statement pair each, in this order. */
+export const RETENTION_CLASSES = Object.freeze(["runs", "suggestions", "groups", "decisionRecords"] as const);
+export type RetentionClass = (typeof RETENTION_CLASSES)[number];
+
+/** Worker liveness (policy section 7): twice the 30-minute cadence plus 20 minutes. */
+export const WORKER_LIVENESS_THRESHOLD_SECONDS = 80 * 60;
+
+/**
+ * The one bit the heartbeat route answers: the retention heartbeat, or, while
+ * triage is enabled, a worker with no successful run within its threshold.
+ * No successful run at all is stale (fail-closed, no grace). With triage
+ * disabled the worker is not judged.
+ */
+export const supportTriageHeartbeatStale = (input: {
+  readonly now: Date;
+  readonly enabled: boolean;
+  readonly retention: { readonly latestSuccessAt: Date | null; readonly latestFinished: RetentionRunFact | null };
+  readonly workerLatestSuccessAt: Date | null;
+}): boolean => {
+  const retention = retentionHeartbeat({ now: input.now, ...input.retention });
+  if (retention.stale) return true;
+  if (!input.enabled) return false;
+  if (input.workerLatestSuccessAt === null) return true;
+  return (
+    (validTime(input.now, "now") - validTime(input.workerLatestSuccessAt, "workerLatestSuccessAt")) / 1_000 >
+    WORKER_LIVENESS_THRESHOLD_SECONDS
+  );
+};
+
+/** Flags that send a report to the person-only trust and safety lane. */
+export const TRUST_SAFETY_FLAGS = Object.freeze(["account_privacy", "security", "legal", "self_harm_threat"] as const);
+
+/**
+ * The lane a report is proposed for (policy section 1). Trust and safety
+ * flags win over money, money or a billing report win over everything else,
+ * and only then does the report's type decide; a bug is verified only when
+ * the server verified its error report.
+ */
+export const triageLaneFor = (input: {
+  readonly type: string;
+  readonly keywordFlags: readonly string[];
+  readonly errorReportVerification: string | null;
+}): TriageLane => {
+  if (input.keywordFlags.some((flag) => (TRUST_SAFETY_FLAGS as readonly string[]).includes(flag))) {
+    return "trust_safety_human";
+  }
+  if (input.keywordFlags.includes("money") || input.type === "billing") return "billing_human";
+  if (input.type === "bug") return input.errorReportVerification === "verified" ? "bug_verified" : "bug_unverified";
+  if (input.type === "feature") return "feature_request";
+  return "other";
+};
+
+/** The worker pass (design section 5.2): claim batches of 10, at most 50 reports per pass. */
+export const WORKER_CLAIM_BATCH_SIZE = 10;
+export const WORKER_PASS_MAX = 50;
+/** Expired claims a pass returns to pending (or fails), at most. */
+export const WORKER_RECLAIM_MAX = 50;
+/** Reports a pass considers: still awaiting an operator. */
+export const TRIAGE_ELIGIBLE_REPORT_STATUSES = Object.freeze(["open", "reviewing"] as const);
+/** The message lib/accountDeletion.ts leaves on a deleted account's report. */
+export const DELETED_ACCOUNT_MARKER = "[deleted account]";

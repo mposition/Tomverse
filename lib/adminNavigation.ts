@@ -608,18 +608,58 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "sre-ops",
+    label: "SRE agent",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
+    group: "Operations",
+    writeRoles: ["owner"],
+    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
+  },
+  {
     id: "agent-digests",
     label: "Agent digests",
     href: "/admin/agent-digests",
     description: "What each agent reported each day, and the operator control it runs under",
     group: "Operations",
     writeRoles: ["owner", "ops"],
-    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision"],
+    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision", "price deadline", "billing-finance-ops"],
     tabs: [
       {
         id: "qa-release",
         label: "QA and release",
         description: "The daily release-readiness digest and the operator control revision",
+      },
+      {
+        id: "billing-finance-ops",
+        label: "Billing and finance",
+        description: "The daily pending-price deadline digest, the agent switch and the monitor check",
+      },
+    ],
+  },
+  {
+    // A shell: a pixel office for the eight agent teams that plays a demo day
+    // and links each team to the page that holds its record. A LIVE room reads
+    // that team's operating state, read only; nothing on the page writes, so
+    // it carries no badge and no writeRoles.
+    id: "office",
+    label: "Agent office",
+    href: "/admin/office",
+    description: "A pixel office shell for the eight agent teams, with a link to each team's record",
+    group: "Operations",
+    aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
+    // The office draws its own tab strip, as the original UI did; its tabs are
+    // links to these sections, and one demo engine runs under both.
+    tabs: [
+      {
+        id: "live",
+        label: "Live office",
+        description: "The office floor, the operator console, the demo approval and the feed",
+      },
+      {
+        id: "dashboard",
+        label: "Dashboard",
+        description: "Team board, demo approval, digest brief and each team's record link",
       },
     ],
   },
@@ -648,13 +688,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Backlog",
     href: "/admin/amux-backlog",
     description:
-      "Card registration, catalog import, source reconciliation and card metadata",
+      "Idea input, card registration, catalog import, source reconciliation and card metadata",
     group: "AMUX",
     writeRoles: ["owner"],
     viewRoles: ["owner"],
     aliases: [
       "amux",
       "intake",
+      "idea analysis",
+      "new idea",
       "register card",
       "catalog import",
       "board import",
@@ -669,6 +711,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "intake",
         label: "Intake",
         description: "Preview one explicit card registration, then register it",
+      },
+      {
+        id: "ideas",
+        label: "Ideas",
+        description: "Check an operator idea before any external transfer",
       },
       {
         id: "import",
@@ -934,6 +981,18 @@ export const ADMIN_DETAIL_ROUTES = [
       "The copy this campaign sends, who has attested to what, and whether it may go out",
     parentLabel: "Email campaigns",
     parentHref: "/admin/email-campaigns",
+    group: "Operations" as const,
+  },
+  {
+    // The ops-observer page message link (docs/policy/sre-ops.md §3 rule 1).
+    // Its path is fixed by scripts/ops-observer/content-guard-core.mjs, so it
+    // lives under /admin/agents rather than beside its parent entry.
+    id: "sre-ops-item",
+    pattern: /^\/admin\/agents\/sre-ops\/items\/[^/]+$/,
+    label: "Ops observer message",
+    description: "What one page message was about: its signals, message kinds and times",
+    parentLabel: "SRE agent",
+    parentHref: "/admin/sre-ops",
     group: "Operations" as const,
   },
   {

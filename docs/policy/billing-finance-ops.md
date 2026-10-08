@@ -1,15 +1,17 @@
 # 과금·재무 운영 Agent 정책
 
-상태: **승인됨 — 단계 W 구현 전.** 버전 1 승인 2026-10-03, 버전 2 승인 2026-10-03.
-approvedBy: mposition · approvedAt: 2026-10-03 · 정책 버전: 2
+상태: **승인됨 — 단계 W 구현 완료, 활성화 전.** 버전 1·2 승인 2026-10-03, 버전 3 승인 2026-10-04, 버전 4 승인 2026-10-07.
+approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 4
 allowlistGenesisCommit: 8e3dbf64452ab75e3c6f080c8f5f531c02ace387
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-10-03 mposition | 최초 승인. 활성 범위(on-demand 로컬 report) 하나 |
 | 2 | 2026-10-03 mposition | 단계 W 추가: 일간 계산과 공통 Agent digest 기록, 앱 소유 스위치, 외부 dead-man monitor와 maintenance 침묵 검사, 공통 `/admin/agents` 읽기 화면, 공통 digest 보존 job(§1.1–§1.4, §4, §7) |
+| 3 | 2026-10-04 mposition | 단계 W의 Admin 화면을 이미 있는 공통 Agent digest 영역 `/admin/agent-digests`의 이 Agent 탭으로 바꾸고, 표시를 원문 JSON 대신 닫힌 스키마로 다시 읽은 값으로(§1.2, §1.4, §7 W2). 다른 계약은 바뀌지 않음 |
+| 4 | 2026-10-07 mposition | dead-man monitor가 받는 데이터에 회차 내용을 담지 않는 고정 User-Agent를 허용(§1.3, §6). 다른 계약은 바뀌지 않음 |
 
-운영자 `mposition`이 2026-10-03 대화 세션에서 버전 1과 버전 2를 각각 승인했습니다. 이 문서는 Claude가 설계하고 교차 vendor 독립 검토(`accept`)를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다.
+운영자 `mposition`이 2026-10-03 대화 세션에서 버전 1과 버전 2를, 2026-10-04 대화 세션에서 버전 3을, 2026-10-07 대화 세션에서 버전 4를 승인했습니다. 이 문서는 Claude가 설계하고 교차 vendor 독립 검토(`accept`)를 받은 비공개 설계서를 공개 계약으로 옮긴 것입니다.
 내용 변경은 운영자 승인과 정책 버전 증가가 필요합니다. 승인은 단계별 착수 조건을 없애지 않으며, 어떤 workflow·
 Railway 서비스·secret·스위치·migration 변경도 그 자체로 허가하지 않습니다.
 
@@ -90,7 +92,7 @@ branch의 자동 판정(결과는 실행한 checkout 하나만 반영합니다),
 - AppSetting `billingFinanceOps.control` 한 행 `{ enabled, revision, enabledAt }`. 처음 배포 때 migration이 꺼진 행으로 만듭니다.
 - reader는 `enabled`·`disabled`·`unreadable`(DB 오류, 행 없음, 형식 불일치) 세 상태를 돌려주고, **`unreadable`을
   `disabled`로 바꾸지 않습니다.** 실행은 `enabled`일 때뿐입니다.
-- 변경은 Admin `/admin/agents`의 route 하나뿐이며 `ops:write` 권한과 최근 로그인을 route 안에서 검사하고, 갱신과
+- 변경은 Admin 공통 Agent digest 영역(`/admin/agent-digests`)의 이 Agent 탭에 있는 route 하나뿐이며 `ops:write` 권한과 최근 로그인을 route 안에서 검사하고, 갱신과
   `writeAdminAuditLog`를 같은 트랜잭션에 씁니다. **켜는 변경은 7일 안의 monitor 확인 기록(§1.3)이 있어야 하고**, 끄는 변경은
   아무것도 요구하지 않습니다. 자동 복귀와 자동 정지 트리거는 없습니다.
 - 서비스의 `BILLING_FINANCE_OPS_AGENT_ENABLED`는 스위치가 아니라 배포 설정입니다(unset이면 아무것도 부르지 않고 exit 0).
@@ -105,16 +107,21 @@ branch의 자동 판정(결과는 실행한 checkout 하나만 반영합니다),
 경보에는 verdict·`modelId`·기한이 실리지 않습니다 — 경보는 기한 통지(단계 N)가 아닙니다. 두 신호가 함께 침묵하는 조합(monitor
 정지와 앱·DB 정지가 겹침)은 막는다고 적지 않습니다.
 
-**monitor의 S0 기록**(켜기 전, 환경마다): 처리자·처리 지역과 monitor가 받는 데이터(신호 시각·발신 IP뿐임을 확인), 보관 기간,
+**monitor의 S0 기록**(켜기 전, 환경마다): 처리자·처리 지역과 monitor가 받는 데이터(신호 시각, 발신 IP, 그리고 HTTP 요청에 붙는 **고정 User-Agent**뿐임을 확인. User-Agent는 런타임이나 서비스가 정한 고정 문자열이어야 하고 회차의 결과·verdict·`modelId`·기한 같은 회차 내용을 담지 않습니다), 보관 기간,
 알림 채널과 재알림 주기(본문이 monitor 이름뿐임을 확인), export와 교체 절차, monitor 자신의 장애를 알 수 있는지, 독립성,
 그리고 **탐지 실험** — 신호를 일부러 멈춘 하루에 운영자 채널로 알림이 실제로 왔다는 수신 관측. 하나라도 비어 있으면 켜지
 않습니다.
 
 ### 1.4 결과를 읽는 곳과 보존
 
-- **공통 Admin 화면 `/admin/agents`**(Admin IA 계약의 세 곳 등록). `agentKey`를 가리지 않고, 키마다 최근 14행의 종류·시각·
-  크기·본문 상태와 본문(escape된 canonical JSON)을 보입니다. 팀 전용 화면은 만들지 않습니다. 이 화면의 변경은 §1.2 스위치와
-  monitor 확인 두 개뿐이며 둘 다 감사됩니다.
+- **공통 Agent digest 영역 `/admin/agent-digests`의 이 Agent 탭.** 그 영역은 이미 있고 Agent마다 탭(`?tab=`) 하나를
+  둡니다(`docs/policy/qa-release-agent.md` §4). 새 Admin 화면을 만들지 않고, 탭 하나를 더합니다(Admin IA 계약의 탭 규칙).
+- **보이는 것은 닫힌 스키마의 값뿐입니다.** 최근 14개 행마다 계산 날짜, 저장 시각, 크기, 본문 상태(있음·만료·읽을 수 없음),
+  그리고 본문이 있으면 verdict, 항목(`modelId`·만료일·남은 일수·mark)과 거절 필드(index·필드 이름). 본문은 이 문서 §1.1의
+  닫힌 스키마로 다시 읽고, 통과하지 못하면 값을 하나도 보이지 않고 "읽을 수 없음"으로 보입니다. 값은 escape된 텍스트로만
+  그리고, 원문 JSON은 보이지 않습니다. 화면은 자기가 보이는 개수(14)를 적습니다. 화면이 보여 주는 것은 기록이지 통지가
+  아닙니다(통지는 단계 N).
+- 이 탭의 변경은 §1.2 스위치와 monitor 확인 두 개뿐이며 둘 다 감사됩니다.
 - **공통 보존 job:** 본문 만료(`retentionUntil`이 지난 행의 본문 삭제)와 메타 삭제(본문이 지워지고 365일이 지난 행)를
   모든 `agentKey`에 대해 maintenance step 두 개로 돌립니다. 배치 200행, 배치마다 시스템 감사 1행. **본문 삭제는 되돌릴 수
   없으므로** 대상이 보존 기간이 지난 행뿐임을 DB 통합 test로 보이고, 기존 trigger가 그 밖을 거절하는 것을 그대로 둡니다.
@@ -254,7 +261,7 @@ provider 예산과 섞지 않습니다. 구조적 상한은 환경당 하루 POS
 않으며, 출력은 실행한 사람의 터미널에만 남습니다. 사용자 콘텐츠·DB 행·결제 데이터를 읽지 않습니다. 후속 단계가 무엇이든
 저장하거나 보내면 그 단계의 정책 개정이 APP 확인값(수집 필요성, 통지, 처리 지역)을 함께 기록합니다.
 
-단계 W도 개인정보를 다루지 않습니다. payload에 `owner`·ticket이 없고, dead-man monitor가 받는 것은 신호 시각과 발신 IP뿐이며
+단계 W도 개인정보를 다루지 않습니다. payload에 `owner`·ticket이 없고, dead-man monitor가 받는 것은 신호 시각, 발신 IP, 회차 내용을 담지 않는 고정 User-Agent뿐이며
 (§1.3 S0 기록이 확인), 알림 주소는 운영자 자신의 것입니다. 그래서 APP 8(국외 이전) 대상이 없습니다.
 
 ## 7. 단계
@@ -267,7 +274,7 @@ provider 예산과 섞지 않습니다. 구조적 상한은 환경당 하루 POS
 | W1b | 판정 core의 구조화 결과, payload 스키마, route와 마감 검사 | 같음 |
 | W1c | Railway 트리거 서비스(IaC, hard timeout, 변수 allowlist)와 dead-man 신호 | 같음 |
 | W1d | maintenance 침묵 검사 | 같음 |
-| W2 | 공통 `/admin/agents` 화면, 앱 스위치 변경 route, monitor 확인 기록 | 같음 |
+| W2 | 공통 Agent digest 영역(`/admin/agent-digests`)의 이 Agent 탭, 앱 스위치 변경 route, monitor 확인 기록 | 이 문서 버전 3의 §0 판정 "승인됨" |
 | W3 | 공통 보존 job 두 개 | 같음. **production에서 켜기 전에 병합** |
 | W-staging | 운영자: Railway apply·secret·변수, monitor 생성과 §1.3 S0 기록, Admin monitor 확인, 앱 스위치 켜기 | W1a–W3 병합과 staging 배포 |
 | W-production | 같은 순서를 production에서 | 아래 관찰 창 충족 |

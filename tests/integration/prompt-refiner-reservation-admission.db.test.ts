@@ -7,6 +7,7 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import { staticModelRegistrySeedRows } from "@/lib/modelRegistryShared";
 import {
   PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
@@ -55,16 +56,26 @@ const request = () =>
   });
 
 const reset = async () => {
-  await prisma.$executeRawUnsafe(`
+  await resetTestFixture(prisma, `
     TRUNCATE TABLE
       "PromptRefinerShadowAttempt",
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaFrontierModelApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaUnitDecision",
       "EngineeringAgentApproval",
       "AdminAuditLog"
-    RESTART IDENTITY
+    RESTART IDENTITY CASCADE
   `);
 };
 

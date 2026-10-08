@@ -1592,7 +1592,13 @@ pub(crate) fn detect_claude_status(raw_output: &str) -> String {
     }
     let n = lines.len();
     let current_start = lines.iter().rposition(|line| {
-        matches!(line.trim(), "❯" | "›") || line.contains("Type your message")
+        let line = line.trim();
+        matches!(line, "❯" | "›")
+            || line.contains("Type your message")
+            // Codex keeps an old update/trust picker in tmux scrollback after
+            // returning to its composer. Start at the newer composer so that
+            // selector text above it cannot block steering indefinitely.
+            || line.starts_with("› Ask Codex to do anything")
     }).unwrap_or(0);
     let current_lines = &lines[current_start..];
     let current = current_lines.join("\n");
@@ -1785,6 +1791,9 @@ fn idle_hook_frame(raw: &str) -> IdleHookFrame {
 }
 
 pub(crate) fn pane_bar_says_generating(raw_output: &str) -> bool {
+    if crate::backend::adapter::codex_pane_generation_state(raw_output) == Some(true) {
+        return true;
+    }
     let clean = strip_ansi(raw_output);
     let nonblank: Vec<&str> = clean.lines().filter(|l| !l.trim().is_empty()).collect();
     let has_esc = nonblank
@@ -3457,8 +3466,8 @@ fn render_transcript_records(records: Vec<Value>, max_chars: usize) -> String {
 // contract).
 // ---------------------------------------------------------------------------
 
-pub const SESSION_PROVIDERS: [&str; 7] =
-    ["claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor"];
+pub const SESSION_PROVIDERS: [&str; 8] =
+    ["claude", "codex", "gemini", "devin", "iterm2", "ollama", "cursor", "copilot"];
 
 /// Resolve a stored provider for AMUX-server's own launcher. Unknown values
 /// fall back to Claude. Externally managed sessions retain their raw provider
@@ -3711,10 +3720,13 @@ fn set_effort_flag(flags: &str, effort: &str) -> Result<String, String> {
 ///
 /// `cursor` shares gemini's `--yolo` spelling — verified via
 /// `cursor-agent --help`: "`--yolo` Alias for `--force` (Run Everything)".
+///
+/// `copilot` too: its CLI reference lists `--yolo` as "Same as `--allow-all`"
+/// (tools, paths and URLs).
 fn provider_yolo_flag(provider: &str) -> &'static str {
     match provider {
         "codex" | "ollama" => "--dangerously-bypass-approvals-and-sandbox",
-        "gemini" | "cursor" => "--yolo",
+        "gemini" | "cursor" | "copilot" => "--yolo",
         "devin" => "--permission-mode=bypass",
         _ => "--dangerously-skip-permissions",
     }
@@ -3840,6 +3852,8 @@ fn default_model_for_provider(provider: &str) -> String {
         "gemini" => "auto".into(),
         "devin" => String::new(),
         "cursor" => "auto".into(),
+        // `--model auto` lets the Copilot service pick (CLI reference).
+        "copilot" => "auto".into(),
         // Ollama runs via `codex --oss --local-provider ollama --model <model>`.
         // Read from the ONE source rather than repeating the literal: this arm
         // and `OllamaAdapter::default` were two spellings of the same fact, and
@@ -3986,6 +4000,8 @@ pub fn launch_base_binary(provider: &str) -> &'static str {
         "devin" => "devin-amux",
         // AMUX_CURSOR_CMD may override this nominal adapter binary at launch.
         "cursor" => "cursor-agent",
+        // AMUX_COPILOT_CMD may override it the same way.
+        "copilot" => "copilot",
         // claude, iterm2, and anything unknown launch via build_claude_cmd,
         // whose default binary is `claude` (overridable by AMUX_CLAUDE_CMD).
         _ => "claude",
@@ -4001,7 +4017,15 @@ fn cursor_cmd_bin() -> String {
     if custom.is_empty() { launch_base_binary("cursor").to_string() } else { custom }
 }
 
-fn cursor_shell_command(bin: &str, opts: &str) -> String {
+/// `copilot`'s launch binary, overridable exactly like `cursor_cmd_bin`.
+fn copilot_cmd_bin() -> String {
+    let custom = std::env::var("AMUX_COPILOT_CMD").unwrap_or_default().trim().to_string();
+    if custom.is_empty() { launch_base_binary("copilot").to_string() } else { custom }
+}
+
+/// An overridable binary followed by already-quoted options. The binary is
+/// one shell word whatever the override contains.
+fn override_shell_command(bin: &str, opts: &str) -> String {
     format!("{}{opts}", sh_quote(bin))
 }
 
@@ -4014,6 +4038,7 @@ fn provider_label(provider: &str) -> &str {
         "iterm2" => "iTerm2",
         "ollama" => "Ollama",
         "cursor" => "Cursor",
+        "copilot" => "GitHub Copilot",
         other => {
             if other.is_empty() {
                 "Claude Code"
@@ -4657,7 +4682,9 @@ fn mint_capture_card(
         conn,
         &crate::db::board_store::NewIssue {
             acceptance_criteria: None,
-            next_action: Some("Read the delivered prompt, carry out its requested work, and record the result on this card".into()),
+            next_action: (capture_status == "doing").then(|| {
+                "Read the linked delivered prompt and carry out its approved task".into()
+            }),
             title,
             desc: captured_desc,
             // Neither Doing nor triggered Backlog is redispatched (AMUX-2613).
@@ -6646,6 +6673,17 @@ fn codex_model_footer_chrome(raw: &str, stripped: &str) -> bool {
     let (identity, location) = (parts[0], parts[1]);
     if !(location == "~" || location.starts_with("~/") || location.starts_with('/')) {
         return false;
+    }
+
+    // Newer Codex versions colour both the model and directory while leaving
+    // the separators undimmed. Require both styled fields: plain user text
+    // resembling a footer must still be treated as unsubmitted input.
+    let raw_parts: Vec<&str> = raw.split('\u{b7}').collect();
+    if raw_parts.len() == parts.len()
+        && raw_parts[0].contains("\u{1b}[38;2;")
+        && raw_parts[1].contains("\u{1b}[38;2;")
+    {
+        return true;
     }
 
     let (plain, dim) = dim_mask(raw);
@@ -8912,6 +8950,124 @@ fn codex_dir_already_known(config_text: &str, dir: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Copilot analog of [`seed_codex_dir_trust`]. `copilot` stops at a "Confirm
+/// folder trust … Do you trust the files in this folder?" dialog the first
+/// time it runs in a directory, and `--yolo` does not skip it. Both were
+/// observed 2026-10-05 against Copilot CLI 1.0.91 in a scratch tmux pane on
+/// the server, as was where the "remember this folder" answer lands: the
+/// `trustedFolders` array in `~/.copilot/config.json`, a JSON object after
+/// two `//` comment lines ("This file is managed automatically.").
+///
+/// Same discipline as codex: fail-open on the spawn path, an existing entry is
+/// left alone, a file that does not parse is never written, and the write is
+/// temp + rename. Unlike codex's TOML this file cannot be appended to, so the
+/// object is re-serialised: the leading comment lines and every other key are
+/// kept, though key order may change.
+///
+/// Because it is a read-merge-write, two copilot workers starting at once
+/// would both read the old list and the second rename would drop the first
+/// folder; with one shared temp name they could also interleave writes into a
+/// file already renamed into place. `session_op_lock` is per session, so it
+/// does not cover this. The whole read-merge-write is therefore serialised by
+/// a process-wide lock (every launch runs in this one server process) and each
+/// write uses its own temp file. A running `copilot` writing the same file is
+/// outside this lock; that is the same exposure codex's seed has.
+fn seed_copilot_dir_trust(work_dir: &str) {
+    if work_dir.is_empty() {
+        return;
+    }
+    let Some(home) = std::env::var_os("HOME") else { return };
+    seed_copilot_dir_trust_at(&std::path::Path::new(&home).join(".copilot/config.json"), work_dir);
+}
+
+static COPILOT_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static COPILOT_CONFIG_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn seed_copilot_dir_trust_at(path: &std::path::Path, work_dir: &str) {
+    // A poisoned lock still serialises; the guarded data is `()`.
+    let _guard = COPILOT_CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let text = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(_) => return, // unreadable: fail-open, never block a launch
+    };
+    let Some(body) = copilot_config_with_trust(&text, work_dir) else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let seq = COPILOT_CONFIG_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("json.amux-trust-tmp.{}.{seq}", std::process::id()));
+    if std::fs::write(&tmp, body.as_bytes()).is_ok() {
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+}
+
+/// `config_text` with `dir` added to `trustedFolders`, or `None` when nothing
+/// should be written: `dir` is already listed, or the text after its leading
+/// `//` lines is not a JSON object with an array (or no) `trustedFolders`.
+/// Refusing beats corrupting a file Copilot manages. Pure, so it is tested
+/// without a real `~/.copilot`.
+fn copilot_config_with_trust(config_text: &str, dir: &str) -> Option<String> {
+    let mut header_len = 0;
+    for line in config_text.split_inclusive('\n') {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("//") {
+            header_len += line.len();
+        } else {
+            break;
+        }
+    }
+    let (header, body) = config_text.split_at(header_len);
+    let mut doc: Value = if body.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(body).ok()?
+    };
+    let folders = doc
+        .as_object_mut()?
+        .entry("trustedFolders")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()?;
+    if folders.iter().any(|f| f.as_str() == Some(dir)) {
+        return None;
+    }
+    folders.push(Value::String(dir.to_string()));
+    let mut out = header.to_string();
+    out.push_str(&serde_json::to_string_pretty(&doc).ok()?);
+    out.push('\n');
+    Some(out)
+}
+
+/// The options after `copilot` in a worker launch. Every flag was checked
+/// against `copilot --help` of 1.0.91 on the server: `--yolo` enables all
+/// permissions (= `--allow-all`), `--model auto` lets Copilot pick, `--add-dir`
+/// grants a directory. Any provider's yolo spelling in CC_FLAGS becomes
+/// `--yolo`, the same translation the cursor arm makes. Pure, so the argv is
+/// pinned by tests rather than only by a live launch.
+fn copilot_launch_opts(flags: &str, extra_flags: &str, logs: &str) -> String {
+    let yolo = PROVIDER_YOLO_FLAGS.iter().any(|f| flags.contains(f));
+    let own_flags = if yolo { strip_provider_yolo_flags(flags) } else { flags.to_string() };
+    let mut opts = String::new();
+    if !own_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(&own_flags));
+    }
+    if !extra_flags.is_empty() {
+        opts += &format!(" {}", shell_quote_flags(extra_flags));
+    }
+    if !opts.contains("--model") {
+        opts += " --model auto";
+    }
+    if yolo && !opts.contains("--yolo") && !opts.contains("--allow-all") {
+        opts += " --yolo";
+    }
+    if !opts.contains(logs) {
+        opts += &format!(" --add-dir {}", sh_quote(logs));
+    }
+    opts
+}
+
 /// The CHEAP, synchronous reasons a session cannot start — the ones knowable
 /// without the op-lock or a tmux query. Returns the human reason, or None if
 /// nothing cheap blocks the launch.
@@ -9151,6 +9307,10 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
     // fail-open discipline; only touches ~/.codex for codex-launching providers.
     if matches!(provider_of(&cfg).as_str(), "codex" | "ollama") {
         seed_codex_dir_trust(&work_dir);
+    }
+    // Copilot's own folder-trust dialog, which `--yolo` does not skip.
+    if provider_of(&cfg) == "copilot" {
+        seed_copilot_dir_trust(&work_dir);
     }
     let mut flags = cfg.get_or("CC_FLAGS", "").to_string();
     #[cfg(unix)]
@@ -9474,7 +9634,22 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             if !opts.contains(&logs) {
                 opts += &format!(" --add-dir {}", sh_quote(&logs));
             }
-            cursor_shell_command(&cursor_cmd_bin(), &opts)
+            override_shell_command(&cursor_cmd_bin(), &opts)
+        }
+        "copilot" => {
+            // GitHub Copilot CLI; the options are built by the pure
+            // `copilot_launch_opts`, which says where each flag was checked.
+            // The folder-trust dialog is handled before this match by
+            // `seed_copilot_dir_trust`. No resume wiring, the same documented
+            // gap as cursor: nothing records a Copilot session id per amux
+            // session, so every (re)launch starts a fresh session.
+            //
+            // The CLI reference says `--add-dir` aborts startup on a path that
+            // is not an accessible directory, so make sure it is one first.
+            let logs_path = logs_dir();
+            let _ = std::fs::create_dir_all(&logs_path);
+            let opts = copilot_launch_opts(&flags, extra_flags, &logs_path.to_string_lossy());
+            override_shell_command(&copilot_cmd_bin(), &opts)
         }
         _ => build_claude_cmd(&cfg, &flags, &default_flags, &session_flag, extra_flags),
     };
@@ -9483,7 +9658,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
     // cd, source the global agent credentials.
     let mut has_oauth = false;
     let mut shell_rc = String::new();
-    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" {
+    if provider != "codex" && provider != "gemini" && provider != "devin" && provider != "ollama" && provider != "cursor" && provider != "copilot" {
         shell_rc.push_str("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; ");
         if let Ok(t) = std::fs::read_to_string(PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude.json")) {
             if let Ok(v) = serde_json::from_str::<Value>(&t) {
@@ -9551,7 +9726,7 @@ pub(crate) async fn start_session(state: &AppState, name: &str, extra_flags: &st
             sh_quote(&f.to_string_lossy())
         ));
     }
-    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && has_oauth {
+    if provider != "codex" && provider != "gemini" && provider != "ollama" && provider != "cursor" && provider != "copilot" && has_oauth {
         shell_rc.push_str("unset ANTHROPIC_API_KEY; ");
     }
     // Settings writes provider keys to server.env at runtime. Reading that file
@@ -13299,6 +13474,16 @@ pub(crate) async fn steer_lane_at_boundary(state: &AppState, name: &str) -> bool
 pub(crate) fn pane_is_at_boundary(raw: &str) -> bool {
     if let Some(generating) = crate::backend::adapter::codex_pane_generation_state(raw) {
         return !generating;
+    }
+    // Codex can return to its styled empty composer after the rollout signal
+    // ages out. Its status parser deliberately returns "" for that provider,
+    // so the delivery gate needs this positive composer boundary separately.
+    if !pane_bar_says_generating(raw)
+        && detect_claude_status(raw) != "waiting"
+        && matches!(composer_state(raw), ComposerState::Placeholder(ref text) if text == "AskCodextodoanything")
+        && strip_ansi(raw).lines().any(|line| line.trim() == "\u{203a} Ask Codex to do anything")
+    {
+        return true;
     }
     !pane_bar_says_generating(raw) && detect_claude_status(raw) == "idle"
 }
@@ -25448,21 +25633,23 @@ mod tests {
             "lane-cap",
         )
         .expect("a real task prompt must link a board card");
-        let (sess, status): (String, String) = st
+        let (sess, status, next_action): (String, String, Option<String>) = st
             .store
             .read()
             .unwrap()
             .query_row(
-                "SELECT session, status FROM issues WHERE id=?1",
+                "SELECT session, status, next_action FROM issues WHERE id=?1",
                 rusqlite::params![card_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .expect("the minted card must exist");
         assert_eq!(sess, "lane-cap");
         assert_eq!(status, "doing", "capture mints in doing, not todo (AMUX-2613)");
-        let next_action = q("SELECT next_action FROM issues WHERE id=?1", &card_id)
-            .expect("the first capture must keep a disposition until the worker acts");
-        assert!(next_action.contains("delivered prompt"));
+        assert_eq!(
+            next_action.as_deref(),
+            Some("Read the linked delivered prompt and carry out its approved task"),
+            "a captured Doing card must explain how work continues",
+        );
 
         // 2. A distinct SECOND prompt is still work even while a card is open.
         //    The model gets both durable commands and decides whether to relate,
@@ -26781,6 +26968,16 @@ CLAUDE-POSTFIX-COMPLETE
         // Provider/model controls: the new Claude frame must not turn a Codex
         // prompt or Gemini selector into active.
         assert_eq!(detect_claude_status("\u{203a} Ask Codex to do anything"), "");
+        let stale_codex_update = "\
+\u{203a} 1. Update now\n  2. Skip\n  3. Skip until next version\n\
+Press enter to continue\n\nWorked for 7s\n\n\
+\u{203a} Ask Codex to do anything\n  GPT-5.6-Sol xhigh";
+        assert_ne!(detect_claude_status(stale_codex_update), "waiting",
+            "an old picker above the live Codex composer must not block queued delivery");
+        assert_eq!(idle_hook_frame(stale_codex_update), IdleHookFrame::Idle,
+            "the idle-hook delivery check must accept the live Codex composer");
+        assert_eq!(detect_claude_status("\u{203a} 1. Update now\n  2. Skip\nPress enter to continue"), "waiting",
+            "a live Codex picker still requires a human decision");
         assert_eq!(detect_claude_status("\u{2502} \u{25cf} 1. Allow\n\u{2502}   2. Deny"), "waiting");
         // Resume picker needs the ⌕ search glyph.
         assert!(at_resume_picker("Resume Session \u{2315}\nEnter to select"));
@@ -28226,8 +28423,104 @@ CLAUDE-POSTFIX-COMPLETE
 
     #[test]
     fn cursor_override_is_one_shell_word() {
-        let command = cursor_shell_command("/tmp/cursor agent; touch /tmp/unwanted", " --trust");
+        let command = override_shell_command("/tmp/cursor agent; touch /tmp/unwanted", " --trust");
         assert_eq!(command, "'/tmp/cursor agent; touch /tmp/unwanted' --trust");
+    }
+
+    #[test]
+    fn copilot_is_a_first_class_session_provider() {
+        assert!(SESSION_PROVIDERS.contains(&"copilot"));
+        assert_eq!(resolve_session_provider("Copilot"), "copilot");
+        assert_eq!(launch_base_binary("copilot"), "copilot");
+        assert_eq!(provider_label("copilot"), "GitHub Copilot");
+        assert_eq!(provider_yolo_flag("copilot"), "--yolo");
+        assert_eq!(default_model_for_provider("copilot"), "auto");
+        // The adapter and the launcher name the same binary, which is what
+        // `provider.launch_matches_adapter` checks at runtime.
+        let adapter = crate::provider::default_registry().resolve("copilot").expect("copilot adapter");
+        assert_eq!(
+            adapter.build_command(crate::provider::PromptMode::Interactive).first().map(String::as_str),
+            Some(launch_base_binary("copilot"))
+        );
+    }
+
+    #[test]
+    fn copilot_launch_opts_pin_the_argv() {
+        let logs = "/home/w/.amux/logs";
+        let add_dir = format!(" --add-dir {}", sh_quote(logs));
+        // A worker with no flags: Copilot picks the model, no permissions widened.
+        assert_eq!(copilot_launch_opts("", "", logs), format!(" --model auto{add_dir}"));
+        // Any provider's yolo spelling becomes copilot's own `--yolo`, once.
+        for yolo in ["--dangerously-skip-permissions", "--yolo", "--permission-mode=bypass"] {
+            let opts = copilot_launch_opts(yolo, "", logs);
+            assert_eq!(opts, format!(" --model auto --yolo{add_dir}"), "from {yolo}");
+        }
+        // The worker's own model wins, and an explicit --allow-all is not doubled.
+        let opts = copilot_launch_opts("--model gpt-5.4 --allow-all --dangerously-skip-permissions", "", logs);
+        assert!(opts.contains("--model gpt-5.4") && !opts.contains("--model auto"), "{opts}");
+        assert!(!opts.contains("--yolo") && !opts.contains("--dangerously"), "{opts}");
+        // Per-launch extra flags follow the stored ones.
+        assert_eq!(
+            copilot_launch_opts("", "--reasoning-effort high", logs),
+            format!(" --reasoning-effort high --model auto{add_dir}")
+        );
+    }
+
+    #[test]
+    fn copilot_trust_seed_keeps_the_file_and_never_duplicates() {
+        // The shape observed in ~/.copilot/config.json on the server.
+        let observed = "// User settings belong in settings.json.\n\
+                        // This file is managed automatically.\n\
+                        {\n  \"firstLaunchAt\": \"2026-10-05T07:10:42.619Z\",\n  \"appTipShown\": true,\n  \
+                        \"trustedFolders\": [\n    \"/tmp/a\"\n  ]\n}\n";
+        let out = copilot_config_with_trust(observed, "/home/w/repo").expect("new folder is added");
+        assert!(out.starts_with("// User settings belong in settings.json.\n// This file is managed automatically.\n"));
+        let body: Value = serde_json::from_str(out.splitn(3, '\n').nth(2).unwrap()).unwrap();
+        assert_eq!(body["trustedFolders"], json!(["/tmp/a", "/home/w/repo"]));
+        assert_eq!(body["appTipShown"], json!(true), "Copilot's own keys survive");
+        // Already trusted: nothing to write.
+        assert!(copilot_config_with_trust(&out, "/home/w/repo").is_none());
+        // No file yet: a minimal object.
+        let fresh: Value = serde_json::from_str(&copilot_config_with_trust("", "/d").unwrap()).unwrap();
+        assert_eq!(fresh, json!({"trustedFolders": ["/d"]}));
+        // Never write into a file this does not understand.
+        assert!(copilot_config_with_trust("// x\nnot json", "/d").is_none());
+        assert!(copilot_config_with_trust("{\"trustedFolders\": \"/d\"}", "/e").is_none());
+        assert!(copilot_config_with_trust("[]", "/d").is_none());
+    }
+
+    #[test]
+    fn concurrent_copilot_trust_seeds_lose_no_folder() {
+        // Many copilot workers starting at once all read-merge-write the same
+        // file; none of their folders may be dropped and the file must stay
+        // valid, with no temp files left behind.
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, "// managed\n{\n  \"appTipShown\": true\n}\n").unwrap();
+        let threads: Vec<_> = (0..16)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || seed_copilot_dir_trust_at(&path, &format!("/work/{i}")))
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("// managed\n"), "{text}");
+        let body: Value = serde_json::from_str(text.split_once('\n').unwrap().1).unwrap();
+        let folders = body["trustedFolders"].as_array().unwrap();
+        for i in 0..16 {
+            assert!(folders.contains(&json!(format!("/work/{i}"))), "lost /work/{i}: {text}");
+        }
+        assert_eq!(folders.len(), 16);
+        assert_eq!(body["appTipShown"], json!(true));
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name() != "config.json")
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
     }
 
     #[test]
@@ -31189,10 +31482,16 @@ mod composer_state_tests {
 
     #[test]
     fn a_codex_model_footer_is_chrome_not_unsubmitted_text() {
+        let current_codex = "\u{1b}[1m\u{203a}\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  \
+\u{1b}[38;2;246;226;183mGPT-5.6-Sol xhigh\u{1b}[39m \u{b7} \
+\u{1b}[38;2;171;223;167m~/worktrees/Tomverse/codex-impl\u{1b}[39m \u{b7} \
+\u{1b}[38;2;245;224;220mUpdate memory file\u{1b}[39m\n  \
+\u{1b}[1m\u{2190}\u{1b}[0m for agents \u{b7} \u{1b}[1m?\u{1b}[0m for shortcuts";
         for frame in [
             LIVE_CODEX_IDLE,
             LIVE_CODEX_IDLE_WITH_BRANCH,
             LIVE_CODEX_ASTRA_IDLE_WITH_BRANCH,
+            current_codex,
         ] {
             assert_eq!(
                 composer_state(frame),
@@ -31204,6 +31503,12 @@ mod composer_state_tests {
                 "an idle Codex prompt must not inherit its model/path/footer context as typed input"
             );
         }
+        assert!(pane_is_at_boundary(&format!(
+            "\u{203a} 1. Update now\n  2. Skip\nPress enter to continue\n\n{current_codex}"
+        )));
+        assert!(!pane_is_at_boundary(
+            "\u{203a} 1. Update now\n  2. Skip\nPress enter to continue"
+        ));
 
         // CONTROL: only Codex's dim placeholder is replaced. Ordinary typed
         // text in the current three-segment live frame must remain pending;
@@ -31224,6 +31529,9 @@ mod composer_state_tests {
             composer_state(unstyled).typed(),
             Some("gpt-5.6-solxhigh\u{b7}~/Dev/amux\u{b7}Main[default]")
         );
+        let one_coloured_field = "\u{1b}[1m\u{203a}\u{1b}[0m \u{1b}[2mAsk Codex to do anything\u{1b}[0m\n\n  \
+\u{1b}[38;2;246;226;183mgpt-5.6-sol xhigh\u{1b}[39m \u{b7} ~/Dev/amux";
+        assert!(composer_state(one_coloured_field).typed().is_some());
     }
 
     #[test]
@@ -31355,6 +31663,18 @@ mod steer_freeze_tests {
 › Ask Codex to do anything
 
   gpt-5.6-sol xhigh · ~/Dev/amux";
+
+    #[test]
+    fn codex_shortcuts_footer_does_not_hide_a_live_turn() {
+        let idle = "Worked for 7s \u{2022} 2:45 AM\n\n\u{203a} Ask Codex to do anything\n\n  GPT-5.6-Sol xhigh \u{b7} ~/worktrees/Tomverse/codex-impl \u{b7} Update memory file\n  \u{2190} for agents \u{b7} ? for shortcuts";
+        let working = idle.replace("Worked for 7s \u{2022} 2:45 AM", "\u{2022} Working (42s \u{2022} esc to interrupt)");
+        assert_eq!(crate::backend::adapter::codex_pane_generation_state(idle), Some(false));
+        assert_eq!(crate::backend::adapter::codex_pane_generation_state(&working), Some(true));
+        assert!(pane_is_at_boundary(idle));
+        assert!(!pane_is_at_boundary(&working));
+        assert!(pane_bar_says_generating(&working));
+        assert_eq!(idle_hook_frame(&working), IdleHookFrame::Active);
+    }
 
     #[test]
     fn stale_idle_hook_preserves_sonnet_tools_and_pending_questions() {

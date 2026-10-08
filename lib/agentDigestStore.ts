@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import type { SystemAuditActor } from "@/lib/adminAuditSystemActors";
-import type { AgentDigestAgentKey } from "@/lib/agentDigestContract";
+import { AGENT_DIGEST_META_RETENTION_DAYS, type AgentDigestAgentKey } from "@/lib/agentDigestContract";
 import {
   AGENT_DIGEST_STORE_TIMEOUTS as LIMITS,
   classifyAgentDigestRepeat,
@@ -20,7 +20,8 @@ import { prisma } from "@/lib/prisma";
  * names this file). Shared contract items 1-9: a row is born with its body, in
  * the same transaction as its system audit entry, and is never edited by the
  * application -- body expiry and the meta purge are the database's two allowed
- * changes and get their own functions here when a job needs them.
+ * changes, and expireAgentDigestBodies and purgeAgentDigestMeta below are their
+ * only callers.
  *
  * Idempotency: the insert is ON CONFLICT DO NOTHING on (agentKey,
  * idempotencyKey), so two concurrent submissions cannot both write; the loser
@@ -31,6 +32,10 @@ import { prisma } from "@/lib/prisma";
 /** Which listed system actor records each agent's intake. */
 const INTAKE_ACTOR: Readonly<Record<AgentDigestAgentKey, SystemAuditActor>> = Object.freeze({
   "qa-release": "qa-release-intake",
+  "billing-finance-ops": "billing-finance-ops-intake",
+  // The agent's one listed actor; its digest intake is a different action from
+  // the state advance the trust check binds (docs/policy/sre-ops.md §3 rule 10).
+  "sre-ops": "ops-observer",
 });
 
 export type AgentDigestRecordResult =
@@ -64,11 +69,24 @@ class AgentDigestNotAdmitted extends Error {
 
 type Db = Pick<typeof prisma, "$transaction">;
 
+/**
+ * A caller's own transaction limits, for an agent whose policy fixes them
+ * (docs/policy/sre-ops.md §6): `arm` replaces the default limits as the
+ * transaction's first statement, and `prismaTimeoutMs` replaces the default
+ * Prisma timeout. It must still be one statement, so the statement count is
+ * unchanged. Absent, the shared defaults apply as before.
+ */
+export type AgentDigestTransactionLimits = {
+  arm: (tx: Prisma.TransactionClient) => Promise<void>;
+  prismaTimeoutMs: number;
+};
+
 export async function recordAgentDigestItem(
   submission: AgentDigestSubmission,
   db: Db = prisma,
   admit?: AgentDigestAdmission,
   confirm?: AgentDigestAdmission,
+  limits?: AgentDigestTransactionLimits,
 ): Promise<AgentDigestRecordResult> {
   const prepared = prepareAgentDigestItem(submission);
   if (!prepared.ok) {
@@ -90,7 +108,8 @@ export async function recordAgentDigestItem(
         // (transaction_timeout only where PostgreSQL 17+ has it). They arm
         // for the statements after this one, which is why the lock is not
         // folded in here.
-        await tx.$executeRaw`SELECT
+        if (limits) await limits.arm(tx);
+        else await tx.$executeRaw`SELECT
           set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
           set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
           CASE WHEN current_setting('server_version_num')::int >= 170000
@@ -165,10 +184,112 @@ export async function recordAgentDigestItem(
       },
       // Policy section 10: Prisma's timeout is the transaction maximum plus five
       // seconds, never its default.
-      { maxWait: 5_000, timeout: LIMITS.prismaMs },
+      { maxWait: 5_000, timeout: limits?.prismaTimeoutMs ?? LIMITS.prismaMs },
     );
   } catch (error) {
     if (error instanceof AgentDigestNotAdmitted) return { status: "not_admitted", reason: error.reason };
     throw error;
   }
+}
+
+/** Rows one retention batch touches. Each batch is its own transaction and audit entry. */
+export const AGENT_DIGEST_RETENTION_BATCH = 200;
+
+type RetentionRow = { id: string; agentKey: string };
+
+const countByAgent = (rows: readonly RetentionRow[]) =>
+  rows.reduce<Record<string, number>>((counts, row) => {
+    counts[row.agentKey] = (counts[row.agentKey] ?? 0) + 1;
+    return counts;
+  }, {});
+
+/**
+ * Body expiry, the first of the table's two allowed changes (shared contract
+ * items 4-5; docs/policy/billing-finance-ops.md §1.4). One batch of rows past
+ * their `retentionUntil`, for every agent: the payload becomes NULL and the
+ * update trigger stamps `bodyDeletedAt` from the database clock. The trigger
+ * refuses the update for any row still inside its retention, so this function
+ * cannot remove a body early even if its WHERE were wrong.
+ *
+ * Irreversible by design: the payload is gone. What remains is the row's
+ * identity, size and hash, and the `agent_digest.recorded` audit entry that
+ * already carries the same hash.
+ */
+export async function expireAgentDigestBodies(db: Db = prisma): Promise<{ expired: number }> {
+  return db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<RetentionRow[]>`
+        UPDATE "AgentDigestItem" SET "payload" = NULL
+        WHERE "id" IN (
+          SELECT "id" FROM "AgentDigestItem"
+          WHERE "payload" IS NOT NULL AND "retentionUntil" < clock_timestamp()
+          ORDER BY "retentionUntil"
+          LIMIT ${AGENT_DIGEST_RETENTION_BATCH}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"::text AS "id", "agentKey"`;
+      if (rows.length === 0) return { expired: 0 };
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "agent-digest-retention",
+        action: "agent_digest.bodies_expired",
+        targetType: "AgentDigestItem",
+        targetId: null,
+        summary: `Expired the bodies of ${rows.length} agent digest items past their retention.`,
+        // Counts only: the rows keep their identity and hash, and the bodies are gone.
+        metadata: { expired: rows.length, byAgent: countByAgent(rows) },
+      });
+      return { expired: rows.length };
+    },
+    { maxWait: 5_000, timeout: LIMITS.prismaMs },
+  );
+}
+
+/**
+ * The meta purge, the second allowed change: one batch of rows whose body is
+ * already gone and whose `createdAt` is past the shared 365-day meta retention.
+ * The delete trigger refuses any other row.
+ */
+export async function purgeAgentDigestMeta(db: Db = prisma): Promise<{ purged: number }> {
+  return db.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT
+        set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
+        set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
+        CASE WHEN current_setting('server_version_num')::int >= 170000
+          THEN set_config('transaction_timeout', ${String(LIMITS.transactionMs)}, true)
+        END`;
+      await takeAuditChainLock(tx);
+      const rows = await tx.$queryRaw<RetentionRow[]>`
+        DELETE FROM "AgentDigestItem"
+        WHERE "id" IN (
+          SELECT "id" FROM "AgentDigestItem"
+          WHERE "bodyDeletedAt" IS NOT NULL
+            AND "createdAt" < clock_timestamp() - make_interval(days => ${AGENT_DIGEST_META_RETENTION_DAYS}::int)
+          ORDER BY "createdAt"
+          LIMIT ${AGENT_DIGEST_RETENTION_BATCH}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING "id"::text AS "id", "agentKey"`;
+      if (rows.length === 0) return { purged: 0 };
+      await writeSystemAuditLog({
+        tx,
+        systemActor: "agent-digest-retention",
+        action: "agent_digest.meta_purged",
+        targetType: "AgentDigestItem",
+        targetId: null,
+        summary: `Purged ${rows.length} agent digest items past the meta retention.`,
+        metadata: { purged: rows.length, byAgent: countByAgent(rows) },
+      });
+      return { purged: rows.length };
+    },
+    { maxWait: 5_000, timeout: LIMITS.prismaMs },
+  );
 }

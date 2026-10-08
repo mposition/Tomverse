@@ -12,14 +12,18 @@ import {
   PROMPT_REFINER_VNEXT_SLOT_COUNT,
 } from
   "@/lib/promptRefinerQualityEvaluationVnextExecutionContract";
+import { V4_STAGE_ID, V5_STAGE_ID,
+  type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = V4_STAGE_ID;
 const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const STOP_ACTION = "prompt_refiner.vnext_one_shot.outcome_unknown";
 const STOP_SUMMARY = "Stopped the one-shot run after an uncertain request outcome.";
 type Reason = "timeout" | "provider_error" | "response_unverified";
 
 type UnknownInput = Readonly<{
+  stageId?: PromptRefinerRunnableStageId;
   requestId: string;
   slotIndex: number;
   runApprovalAuditLogId: string;
@@ -28,6 +32,8 @@ type UnknownInput = Readonly<{
 }>;
 
 const validInput = (input: UnknownInput): boolean =>
+  (input.stageId === undefined || input.stageId === STAGE_ID ||
+    input.stageId === V5_STAGE_ID) &&
   UUID.test(input.requestId) && Number.isInteger(input.slotIndex) &&
   input.slotIndex >= 0 && input.slotIndex < PROMPT_REFINER_VNEXT_SLOT_COUNT &&
   typeof input.runApprovalAuditLogId === "string" &&
@@ -47,17 +53,18 @@ const metadata = (input: UnknownInput) => ({
   reservedCostMicroUsd: PROMPT_REFINER_VNEXT_REQUEST_CEILING_MICRO_USD,
 });
 
-async function verifyConsumedRequest(
+export async function verifyPromptRefinerVnextOneShotConsumedRequest(
   tx: Prisma.TransactionClient, input: UnknownInput,
 ): Promise<{ slotId: string }> {
+  const stageId = input.stageId ?? STAGE_ID;
   const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: STAGE_ID },
+    where: { id: stageId },
   });
   if (!stage || stage.runApprovalAuditLogId !== input.runApprovalAuditLogId) {
     throw new Error("vnext_one_shot_unknown_stage_mismatch");
   }
   const slot = await tx.promptRefinerVnextOneShotSlot.findUnique({
-    where: { stageId_slotIndex: { stageId: STAGE_ID, slotIndex: input.slotIndex } },
+    where: { stageId_slotIndex: { stageId, slotIndex: input.slotIndex } },
   });
   if (!slot || slot.status !== "consumed" || slot.requestId !== input.requestId ||
       slot.consumedAt === null ||
@@ -95,33 +102,40 @@ export async function stopPromptRefinerVnextOneShotUnknown(input: UnknownInput) 
   if (!validInput(input) || adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_unknown_input_invalid");
   }
+  const stageId = input.stageId ?? STAGE_ID;
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "PromptRefinerVnextOneShotStage"
-      WHERE "id" = ${STAGE_ID} FOR NO KEY UPDATE NOWAIT
+      WHERE "id" = ${stageId} FOR NO KEY UPDATE NOWAIT
     `;
-    if (rows.length !== 1 || rows[0]?.id !== STAGE_ID) {
+    if (rows.length !== 1 || rows[0]?.id !== stageId) {
       throw new Error("vnext_one_shot_unknown_stage_lock_unavailable");
     }
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.status !== "run_approved") {
       throw new Error("vnext_one_shot_unknown_stage_not_running");
     }
-    await verifyConsumedRequest(tx, input);
+    const consumed = await verifyPromptRefinerVnextOneShotConsumedRequest(tx, input);
+    if (await tx.adminAuditLog.count({ where: {
+      action: "prompt_refiner.vnext_one_shot.terminal_recorded",
+      targetType: "PromptRefinerVnextOneShotSlot", targetId: consumed.slotId,
+    } }) !== 0) {
+      throw new Error("vnext_one_shot_unknown_terminal_already_recorded");
+    }
     const stopAuditLogId = await writeSystemAuditLog({
       tx,
       systemActor: "prompt-refiner-vnext-one-shot-runner",
       action: STOP_ACTION,
       targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID,
+      targetId: stageId,
       summary: STOP_SUMMARY,
       metadata: metadata(input),
     });
     const closed = await tx.promptRefinerVnextOneShotStage.updateMany({
-      where: { id: STAGE_ID, status: "run_approved",
+      where: { id: stageId, status: "run_approved",
         runApprovalAuditLogId: input.runApprovalAuditLogId },
       data: { status: "closed" },
     });
@@ -140,20 +154,21 @@ export async function readPromptRefinerVnextOneShotUnknownStop(
       adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_unknown_readback_invalid");
   }
+  const stageId = input.stageId ?? STAGE_ID;
   return prisma.$transaction(async (tx) => {
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (stage?.status !== "closed") {
       throw new Error("vnext_one_shot_unknown_not_closed");
     }
-    await verifyConsumedRequest(tx, input);
+    await verifyPromptRefinerVnextOneShotConsumedRequest(tx, input);
     const receipt = await tx.adminAuditLog.findUnique({
       where: { id: input.stopAuditLogId },
     });
     if (!receipt || receipt.action !== STOP_ACTION ||
         receipt.targetType !== "PromptRefinerVnextOneShotStage" ||
-        receipt.targetId !== STAGE_ID || receipt.summary !== STOP_SUMMARY ||
+        receipt.targetId !== stageId || receipt.summary !== STOP_SUMMARY ||
         !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, receipt)) {
       throw new Error("vnext_one_shot_unknown_receipt_invalid");
     }

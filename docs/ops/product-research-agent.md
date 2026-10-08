@@ -193,10 +193,36 @@ Admin Console → Operations → Engineering agent → **Product research** tab.
 | 화면이 말하는 것 | 뜻 | 할 일 |
 |---|---|---|
 | 꺼져 있음 | 앱 스위치 unset | 없음. 운영자가 고른 상태입니다 |
-| 처음 켜진 시각 기록 중 | 기준 시각이 아직 없음 | 다음 maintenance 실행까지 기다립니다(15분) |
+| 처음 켜진 시각 기록 중 | 기준 시각이 아직 없음 | 이 탭을 한 번 열면 적힙니다. 새로 고쳐도 남아 있으면 **이상 상태**입니다 -- 아래 |
 | 기록된 회차 없음 | 켠 지 26시간 안이고 성공 없음 | 기다립니다 |
 | `…시간 동안 기록된 회차 없음` | 26시간 이상 침묵 | 아래 분기 |
 | 마지막 기록 회차 … | 정상 | 없음 |
+
+### "처음 켜진 시각 기록 중"이 남아 있으면
+
+기준 시각(`enabledSince`, `AppSetting`의 `productResearch.enabledSince`)은 **침묵
+경보가 재기 시작하는 지점**이고, 행을 쓰는 것과는 다른 장치입니다. 둘을 섞지
+않습니다 -- 기준 시각이 없어도 21:30 회차는 평소대로 행을 남깁니다.
+
+**이 탭을 여는 것 자체가 기준 시각을 적습니다.** 스위치가 켜져 있으면
+`readProductResearchConsole()`이 `readProductResearchEnabledSince(now)`를 부르고,
+행이 없으면 그때 만듭니다. maintenance 통과(`Maintenance Cron`, 매일 03:00 UTC)도
+같은 함수를 쓰므로, 먼저 일어난 쪽이 적습니다.
+
+그래서 **한 번 열고 새로 고친 뒤에도 이 문구가 남아 있으면 기다릴 상태가
+아닙니다.** 원인은 둘이고, 함수가 둘 다 `null`로 돌려주므로 화면만 보고는
+구분되지 않습니다. `AppSetting`에서 `productResearch.enabledSince` 행을 찾아
+가릅니다.
+
+- **행이 있다** — 저장된 값이 시간으로 읽히지 않습니다. 함수는 그 행을 고치지
+  않고 `null`을 돌려주므로, 사람이 그 값을 보고 정해야 합니다.
+- **행이 없다** — 생성이 계속 실패하고 있습니다. 함수는 `create()`의 오류를
+  모두 삼키고 재조회도 비어 있으면 `null`을 돌려주므로, 읽기는 되는데 INSERT가
+  안 되는 상태(권한, DB 쓰기)가 이 문구로만 나타납니다. 앱 로그를 보십시오.
+
+둘 중 어느 쪽이든 cron을 기다리는 것으로 안내하면 그 상태를 놓칩니다.
+
+15분은 runner의 강제 종료 시간이고 이것과 무관합니다.
 
 침묵 경보(`PRODUCT_RESEARCH_OBSERVATION_SILENT`)의 `measuredFrom`을 봅니다.
 
@@ -211,6 +237,33 @@ Admin Console → Operations → Engineering agent → **Product research** tab.
 **행이 둘 이상인 회차**가 보이면 정합성 이상입니다. DB의 unique 제약이 그것을
 막으므로 정상 경로로는 생길 수 없고, 생겼다면 제약이 없는 경로가 생겼다는
 뜻입니다. 그 창은 단계 판정에 쓰지 않습니다.
+
+## 실패한 회차의 단계가 가리키는 것
+
+회차는 성공이거나 실패이고, **실패한 회차도 행을 남깁니다.** 그래야 "오늘은
+실패했다"와 "아무도 돌리지 않았다"가 구분됩니다. 실패한 행은 내용을 담지 않고
+단계 하나만 담습니다 — 절반만 관측한 것을 저장하는 것이 이 모양이 막는 결함입니다.
+
+| 단계 | 어디서 멈췄는가 | 먼저 볼 것 |
+|---|---|---|
+| `clone_failed` | 저장소를 clone하지 못함 | 이미지에 `git`이 있는지(probe), `RAILPACK_DEPLOY_APT_PACKAGES` |
+| `release_branch_unavailable` | clone은 됐지만 `develop`·`main` tip을 읽지 못함 | 저장소의 branch 이름. partial clone이 약속한 만큼 가져오지 못한 경우입니다 |
+| `issue_fetch_failed` | 이슈 목록 조회 | 읽기 토큰의 만료·권한(Issues read), GitHub 상태. 토큰 값은 로그에 없습니다 |
+| `issue_input_too_large` | 조회는 됐지만 이 회차가 들 수 있는 바이트를 넘음 | 열린 이슈의 본문 총량. 상한을 올리는 것은 정책 변경입니다 |
+| `row_count_exceeded` | 열린 이슈가 행 상한보다 많음 | 같습니다. 잘라서 저장하지 않습니다 |
+| `issue_backlog_failed` | `report:issue-backlog` 자식 프로세스가 비정상 종료 | 배포 로그의 그 줄. 대개 `lib/modelPricing.ts` 해석이 실제 module과 어긋난 경우입니다 |
+| `schema_invalid` | report가 이 표가 모르는 모양을 냄 | report와 payload builder 중 한쪽만 바뀐 것입니다. 코드 변경입니다 |
+| `set_mismatch`·`count_mismatch` | 같은 이슈 번호가 둘, 또는 재계산한 수가 다름 | 코드 변경입니다 |
+| `timeout` | 자식 프로세스가 자기 deadline에 죽음 | clone 시간. S0에서 재어 둔 값과 비교합니다 |
+
+**재시도하지 않습니다.** 같은 회차에 두 번째 답을 보내는 것이 한 회차가 서로 다른
+두 답을 갖는 경로이고, 서비스의 restart policy가 `NEVER`인 이유입니다. 실패한
+회차는 실패로 남고, 원인을 고친 다음 회차가 답합니다.
+
+**제출이 끝났는지 모르는 경우**가 하나 있습니다. 배포 로그에 `submission: the
+submission did not complete`가 있으면 요청이 route에 닿았는지 알 수 없습니다. 그
+회차에 행이 있는지 Admin 화면에서 확인하고, 없으면 그 회차는 침묵입니다 — 손으로
+제출하지 않습니다.
 
 ## 하지 않는 일
 

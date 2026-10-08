@@ -349,6 +349,14 @@ lazy_re!(RE_CURSOR_TRUST, r"(?i)workspace trust required|do you trust the conten
 // panel may use different wording this pattern would miss.
 lazy_re!(RE_CURSOR_APPROVAL, r"(?i)waiting for approval\.\.\.|run this command\?");
 
+// GitHub Copilot CLI's first-launch folder-trust dialog, observed 2026-10-05
+// against Copilot CLI 1.0.91 in a scratch tmux pane on the server: a box
+// titled "Confirm folder trust" asking "Do you trust the files in this
+// folder?". `--yolo` does NOT skip it. The launch path seeds the folder into
+// ~/.copilot/config.json, so a worker should not park here; this is the
+// fallback that makes it read as waiting if it ever does.
+lazy_re!(RE_COPILOT_TRUST, r"(?i)confirm folder trust|do you trust the files in this folder");
+
 // The "Working" spinner: a leading braille spinner glyph (U+2800-U+28FF)
 // followed by the literal word. Verified live as `⠘⠤ Working`; the exact
 // glyph rotates per animation frame, which is why the class is a Unicode
@@ -429,6 +437,7 @@ impl TerminalAdapter {
             // ollama workers run codex --oss --local-provider ollama; same output format.
             "ollama" => scan_codex(&clean, &self.provider),
             "cursor" => scan_cursor(&clean),
+            "copilot" => scan_copilot(&clean),
             // Unknown provider: no pattern knowledge, no invented events
             // (Invariant 8 / Invariant 20's rule generalized: never report
             // what was not observed through a pattern we actually hold).
@@ -460,19 +469,26 @@ impl TerminalAdapter {
     /// (`orchestrator::scan`) mints the turn, exactly as it already does for a
     /// backend's native `working` report.
     ///
-    /// Only codex/ollama answer true. claude and gemini report their active
-    /// state through hooks / the structured protocol (the D1 exit), never the
-    /// scrape — so their `scan` already, correctly, emits nothing on active and
-    /// this stays false for them. A hookless codex/ollama worker has no such
-    /// voice: no Stop/UserPromptSubmit hooks, no structured session, so this
-    /// scrape of "• Working (…esc to interrupt)" is the ONLY signal that reaches
-    /// the store that the worker is running (AMUX-3165: a working ollama lane
-    /// read `running=false` the whole time because nothing emitted this).
+    /// Only codex/ollama and copilot answer true. claude and gemini report
+    /// their active state through hooks / the structured protocol (the D1
+    /// exit), never the scrape — so their `scan` already, correctly, emits
+    /// nothing on active and this stays false for them. A hookless
+    /// codex/ollama/copilot worker has no such voice: no Stop/UserPromptSubmit
+    /// hooks, no structured session, so this scrape of its working row is the
+    /// ONLY signal that reaches the store that the worker is running
+    /// (AMUX-3165: a working ollama lane read `running=false` the whole time
+    /// because nothing emitted this). The caller also ends the turn this
+    /// starts, at the lane's idle prompt or failure (`orchestrator::scan`).
     pub fn generating(&self, captured: &str) -> bool {
         let clean = strip_ansi(captured);
         match self.provider.as_str() {
             // ollama runs codex --oss --local-provider ollama; same pane format.
             "codex" | "ollama" => codex_generating(&clean),
+            "copilot" => copilot_generating(&clean),
+            // cursor is hookless too, but its rate-limit screen and a crashed
+            // process are unverified (see scan_cursor), so nobody has checked
+            // that a turn started here always has something to end it. It
+            // stays scan-only until that is checked.
             _ => false,
         }
     }
@@ -1138,9 +1154,9 @@ fn scan_gemini(clean: &str, provider: &ProviderId) -> Vec<WorkerEvent> {
 /// short-circuit idle/trust) and [`TerminalAdapter::generating`] (which the
 /// clock-holding caller uses to mint the turn that makes the worker Active).
 fn codex_model_bar(line: &str) -> bool {
-    let Some((identity, location)) = line.rsplit_once('\u{b7}') else {
-        return false;
-    };
+    let mut parts = line.split('\u{b7}');
+    let Some(identity) = parts.next() else { return false; };
+    let Some(location) = parts.next() else { return false; };
     let location = location.trim();
     let identity_parts = identity.split_whitespace().count();
     identity_parts >= 2
@@ -1197,9 +1213,17 @@ fn codex_structured_active_line_clean(clean: &str) -> Option<Option<&str>> {
     let start = lines.len().saturating_sub(12);
     let tail = &lines[start..];
     // Provider identity must be the CURRENT footer, not a Codex-looking frame
-    // pasted into another provider's prompt. The model/path bar is Codex's
-    // final non-empty row and its prompt glyph is `›` (not Claude's `❯`).
-    let model_i = tail.len().checked_sub(1).filter(|i| codex_model_bar(tail[*i]))?;
+    // pasted into another provider's prompt. Newer Codex builds put a known
+    // shortcuts row after the model/path bar; older builds end at that bar.
+    // Its prompt glyph is `›` (not Claude's `❯`).
+    let last_i = tail.len().checked_sub(1)?;
+    let model_i = if codex_model_bar(tail[last_i]) {
+        last_i
+    } else if tail[last_i] == "\u{2190} for agents \u{b7} ? for shortcuts" {
+        last_i.checked_sub(1).filter(|i| codex_model_bar(tail[*i]))?
+    } else {
+        return None;
+    };
     let prompt_i = tail[..model_i].iter().rposition(|s| s.starts_with('›'))?;
     // Current Codex paints the active row immediately before its disabled
     // prompt. Older builds painted it immediately after the submitted prompt,
@@ -1370,6 +1394,77 @@ fn scan_cursor(clean: &str) -> Vec<WorkerEvent> {
     }
     Vec::new()
 }
+
+/// GitHub Copilot CLI screen states, observed against Copilot CLI 1.0.91 in a
+/// scratch tmux pane on the server: the folder-trust dialog (2026-10-05) and
+/// one full turn of a short prompt (2026-10-07). Three states are mapped:
+///
+/// - the folder-trust dialog (`RE_COPILOT_TRUST`) is `trust_prompt`. The tail
+///   is 30 lines because that dialog alone is 17 rows tall;
+/// - a turn in progress is active (an empty vec, the `scan_gemini`
+///   convention). The status row under the composer reads
+///   `<spinner> Working … esc …`, e.g. `◉ Working esc edit prompt` and
+///   `● Working · 106 B esc interrupt`. It is recognised so a busy pane is
+///   never read as idle, and `generating()` reports it so the scan loop
+///   starts the turn (`copilot_generating`);
+/// - otherwise that row is the hints footer `← open sidebar · …`, which is
+///   `idle_prompt`.
+///
+/// The composer `❯` is on screen in BOTH of the last two, so it decides
+/// nothing: only the status rows below the composer's last rule are read, and
+/// a word in the transcript above cannot be mistaken for the status.
+///
+/// UNVERIFIED, stated rather than guessed at: the tool/command approval panel
+/// (the observed turn ran `echo` without one), rate-limit or quota banners, and
+/// a crashed process. None of those screens is mapped.
+fn scan_copilot(clean: &str) -> Vec<WorkerEvent> {
+    let tail = last_n_raw_lines(clean, 30);
+    if RE_COPILOT_TRUST.is_match(&tail) {
+        return vec![WorkerEvent::Waiting(WaitReason {
+            reason: "trust_prompt".to_string(),
+            detail: Some("copilot folder trust dialog".to_string()),
+        })];
+    }
+    let Some(status) = copilot_status_rows(clean) else { return Vec::new() };
+    if copilot_status_working(&status) {
+        return Vec::new();
+    }
+    if status.contains("open sidebar") {
+        return vec![WorkerEvent::Waiting(WaitReason {
+            reason: "idle_prompt".to_string(),
+            detail: None,
+        })];
+    }
+    Vec::new()
+}
+
+/// Is Copilot's current status row the Working row? The same reading
+/// `scan_copilot` uses, so the turn `generating()` starts and the idle footer
+/// that ends it come from one parse; the trust dialog outranks both.
+fn copilot_generating(clean: &str) -> bool {
+    !RE_COPILOT_TRUST.is_match(&last_n_raw_lines(clean, 30))
+        && copilot_status_rows(clean).is_some_and(|status| copilot_status_working(&status))
+}
+
+fn copilot_status_working(status: &str) -> bool {
+    RE_COPILOT_WORKING.is_match(status.trim_start())
+}
+
+/// The rows below the last full-width rule: Copilot's status line, which may
+/// wrap onto two or three rows when an update notice shares it. `None` when
+/// the screen has no such rule (not the Copilot composer).
+fn copilot_status_rows(clean: &str) -> Option<String> {
+    let lines: Vec<&str> = clean.lines().collect();
+    let rule = lines.iter().rposition(|l| {
+        let t = l.trim();
+        t.chars().count() >= 20 && t.chars().all(|c| c == '─')
+    })?;
+    Some(lines[rule + 1..].join("\n"))
+}
+
+// The first status row while a turn runs: a spinner glyph, "Working", and the
+// esc hint ("esc edit prompt" while queued, "esc interrupt" once running).
+lazy_re!(RE_COPILOT_WORKING, r"(?i)^\S\s+working\b[^\n]*\besc\b");
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -2227,6 +2322,119 @@ CLAUDE-POSTFIX-COMPLETE
     #[test]
     fn cursor_workspace_trust_dialog_is_a_trust_prompt() {
         assert_eq!(waiting_reasons(&adapter("cursor").scan(FX_CURSOR_TRUST)), vec!["trust_prompt"]);
+    }
+
+    // -- GitHub Copilot CLI fixtures — from `tmux capture-pane -p` against a
+    // real `copilot` 1.0.91 in a scratch tmux pane on the server (2026-10-05),
+    // not a production worker. Box rules are shortened and right padding
+    // trimmed; the words are verbatim. See `scan_copilot` for what is and is
+    // not mapped.
+
+    const FX_COPILOT_TRUST: &str = "\
+╭──────────────────────────────────────────────────────╮
+│ Confirm folder trust                                 │
+│ ──────────────────────────────────────────────────── │
+│ ╭──────────────────────────────────────────────────╮ │
+│ │ /tmp/copilot-probe-6ZcJ                          │ │
+│ ╰──────────────────────────────────────────────────╯ │
+│                                                      │
+│ Copilot can read files in this folder and, with your permission, edit them or run code and shell commands. It will │
+│ remember your permissions for the rest of this session. │
+│                                                      │
+│ Do you trust the files in this folder?               │
+│                                                      │
+│ ❯ 1. Yes                                             │
+│   2. Yes, and remember this folder for future sessions │
+│   3. No (Esc)                                        │
+│                                                      │
+│ ↑/↓ to navigate · enter to select · esc to cancel    │
+╰──────────────────────────────────────────────────────╯";
+
+    // The composer after the folder was trusted (option 2). The "added to
+    // trusted folders" line must not read as the trust dialog.
+    const FX_COPILOT_IDLE: &str = "\
+ ● Folder /tmp/copilot-probe-QBF8 has been added to trusted folders.
+ ● MCP Servers reloaded: 1 server connected
+ /tmp/copilot-probe-QBF8                                          Session: 0 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ← open sidebar · Interactive · Allow All · / commands · ? help · tab next tab   GPT-5.6 Sol";
+
+    #[test]
+    fn copilot_folder_trust_dialog_is_a_trust_prompt() {
+        assert_eq!(waiting_reasons(&adapter("copilot").scan(FX_COPILOT_TRUST)), vec!["trust_prompt"]);
+    }
+
+    // One turn of "Run the shell command `echo amux-copilot-probe` exactly
+    // once, then reply with only its output." (2026-10-07, same capture rules
+    // as above). Queued while the session starts: the composer `❯` is ALREADY
+    // on screen, which is why it decides nothing.
+    const FX_COPILOT_WORKING_QUEUED: &str = "\
+ ❯ Run the shell command `echo amux-copilot-probe` exactly once, then reply with only its output.   23:26
+Queued (1)
+ └ Run the shell command `echo amux-copilot-probe` exactly once, then reply with only its output.
+ /tmp/copilot-probe-hpjC                                          Session: 0 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ◉ Working esc edit prompt                                        Auto";
+
+    // Mid-turn, running the shell tool.
+    const FX_COPILOT_WORKING_TOOL: &str = "\
+ ❯ Run the shell command `echo amux-copilot-probe` exactly once, then reply with only its output.   23:26
+ ● MCP Servers reloaded: 1 server connected
+ $ Shell Run the requested echo command 1 line…
+   echo amux-copilot-probe
+ /tmp/copilot-probe-hpjC                                          Session: 0.19 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ ● Working · 106 B esc interrupt                                  Auto → GPT-6 Luna";
+
+    // Turn finished, and an update notice wrapping the footer onto three rows.
+    const FX_COPILOT_IDLE_AFTER_TURN: &str = "\
+ $ Shell Run the requested echo command 1 line…
+   echo amux-copilot-probe
+ ● amux-copilot-probe
+ /tmp/copilot-probe-hpjC                                          Session: 0.21 AIC used
+────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────
+ v1.0.92 downloaded · next launch or /   · ← open sidebar· Interactive · Manual       · / commands · ? help · tab next
+ restart                                                   Approval                     tab
+ Auto → GPT-6 Luna";
+
+    #[test]
+    fn copilot_working_status_is_active_not_idle() {
+        for fx in [FX_COPILOT_WORKING_QUEUED, FX_COPILOT_WORKING_TOOL] {
+            assert!(adapter("copilot").scan(fx).is_empty(), "working must not read as waiting: {fx}");
+            // The scrape is copilot's only voice: its Working row starts the
+            // turn, which the scan loop ends at the idle footer
+            // (orchestrator::scan, scraped_turn_ends_at_the_identical_idle_prompt_after_it).
+            assert!(adapter("copilot").generating(fx), "copilot working row must report generating: {fx}");
+        }
+    }
+
+    #[test]
+    fn copilot_hints_footer_is_idle_prompt() {
+        for fx in [FX_COPILOT_IDLE, FX_COPILOT_IDLE_AFTER_TURN] {
+            assert_eq!(waiting_reasons(&adapter("copilot").scan(fx)), vec!["idle_prompt"], "{fx}");
+            assert!(!adapter("copilot").generating(fx), "{fx}");
+        }
+        assert!(!adapter("copilot").generating(FX_COPILOT_TRUST));
+    }
+
+    #[test]
+    fn copilot_transcript_words_do_not_set_the_status() {
+        // "Working ... esc" in the transcript, above the composer's rule, is
+        // not the status row; the footer below it still says idle.
+        let fx = FX_COPILOT_IDLE_AFTER_TURN.replace(
+            " ● amux-copilot-probe",
+            " ◉ Working esc edit prompt (quoted in an answer)",
+        );
+        assert_eq!(waiting_reasons(&adapter("copilot").scan(&fx)), vec!["idle_prompt"]);
+        assert!(!adapter("copilot").generating(&fx));
     }
 
     #[test]

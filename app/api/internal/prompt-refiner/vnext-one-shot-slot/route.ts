@@ -16,11 +16,18 @@ const DEFINITE_REFUSALS = new Set([
   "vnext_one_shot_slot_binding_mismatch",
   "vnext_one_shot_slot_already_consumed",
   "vnext_one_shot_slot_transition_conflict",
+  "vnext_one_shot_shadow_evidence_unavailable",
+  "vnext_one_shot_paid_authorization_unavailable",
+  "vnext_one_shot_price_mismatch",
+  "vnext_one_shot_prior_terminal_unverified",
 ]);
 const bodySchema = z.object({
+  stageId: z.literal("prompt-refiner-vnext-one-shot-v5").optional(),
   requestId: z.string().regex(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/),
   slotIndex: z.number().int().min(0).max(79),
   runApprovalAuditLogId: z.string().min(1).max(128),
+  manifestRoot: z.string().regex(/^[0-9a-f]{64}$/),
+  runnerDigest: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
 
 function authorized(request: Request): boolean {
@@ -36,7 +43,7 @@ function authorized(request: Request): boolean {
   );
 }
 
-/** Default-off reservation consumption; a successful response is not dispatch approval. */
+/** Default-off dispatch admission after the app's stage, run and slot checks. */
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Not found." }, { status: 404, headers });
@@ -45,10 +52,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ code: "SLOT_CONSUMPTION_DISABLED" },
       { status: 409, headers });
   }
+  if (process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1") {
+    return NextResponse.json({ code: "ONE_SHOT_DISPATCH_DISABLED" },
+      { status: 409, headers });
+  }
   try {
     const input = await readLimitedJson(request, 2 * 1024, bodySchema);
-    const result = await consumePromptRefinerVnextOneShotSlot(input);
-    return NextResponse.json(result, { status: 201, headers });
+    if (input.manifestRoot !== process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT ||
+        input.runnerDigest !== process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST) {
+      return NextResponse.json({ code: "SLOT_CONSUMPTION_REFUSED",
+        retryAuthorized: false }, { status: 409, headers });
+    }
+    const { manifestRoot: _manifestRoot, runnerDigest: _runnerDigest,
+      ...slotInput } = input;
+    void _manifestRoot;
+    void _runnerDigest;
+    const result = await consumePromptRefinerVnextOneShotSlot(slotInput);
+    if (result.requestId !== slotInput.requestId ||
+        result.slotIndex !== slotInput.slotIndex ||
+        result.reservationConsumed !== true ||
+        typeof result.slotConsumptionAuditLogId !== "string" ||
+        result.slotConsumptionAuditLogId.length < 1 ||
+        result.slotConsumptionAuditLogId.length > 128) {
+      throw new Error("vnext_one_shot_slot_receipt_mismatch");
+    }
+    return NextResponse.json({
+      requestId: result.requestId,
+      slotIndex: result.slotIndex,
+      slotConsumptionAuditLogId: result.slotConsumptionAuditLogId,
+      reservationConsumed: true,
+      dispatchAuthorized: true,
+    },
+      { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
     if (security) {

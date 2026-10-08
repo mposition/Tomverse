@@ -16,6 +16,7 @@ import {
 import { MarketingWebhookSettingRefusedError } from "@/lib/marketingWebhookCore";
 import { takeAuditChainLock } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 // The staging shadow receiver's two races, against PostgreSQL (S2 plan, S2e).
 //
@@ -39,19 +40,29 @@ const shadow = (eventIdDigest: string) => ({
 const saved: Record<string, string | undefined> = {};
 
 const reset = async () => {
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "MarketingReport" RESTART IDENTITY`);
-  // AdminAuditLog is referenced by these tables' foreign keys, so it is
-  // truncated with them -- the same set the marketing schema suite truncates.
-  await prisma.$executeRawUnsafe(`
+  await resetTestFixture(prisma, `TRUNCATE TABLE "MarketingReport" RESTART IDENTITY CASCADE`);
+  // Clear the audit-linked fixtures in the same disposable test database.
+  // Keep the v4 foreign-key closure explicit for audit-backed rows.
+  await resetTestFixture(prisma, `
     TRUNCATE TABLE
       "PromptRefinerShadowAttempt",
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "EngineeringAgentApproval",
+      "AmuxIdeaUnitDecision",
+      "AmuxIdeaDraftUnit",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaAnalysisChunk",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaFrontierModelApproval",
       "AdminAuditLog"
-    RESTART IDENTITY
+    RESTART IDENTITY CASCADE
   `);
   await prisma.appSetting.deleteMany({
     where: { key: { in: [MARKETING_WEBHOOK_FAULT_ARM_KEY, MARKETING_WEBHOOK_SHADOW_KEY] } },

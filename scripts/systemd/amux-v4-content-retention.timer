@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll due Tomverse AMUX v4 content retention
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1h
+AccuracySec=1min
+Persistent=false
+Unit=amux-v4-content-retention.service
+
+[Install]
+WantedBy=timers.target

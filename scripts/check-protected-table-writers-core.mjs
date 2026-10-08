@@ -191,6 +191,18 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/qa-release-agent.md §6",
   },
   {
+    table: "QaReleaseMergeAttempt",
+    delegate: "qaReleaseMergeAttempt",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
+    table: "QaReleaseMergeLaneLatch",
+    delegate: "qaReleaseMergeLaneLatch",
+    writers: ["lib/qaReleaseMergeLaneStore.ts", "lib/qaReleaseMergeLaneRelease.ts"],
+    contract: "docs/policy/qa-release-agent.md §8",
+  },
+  {
     table: "AdminAuditLog",
     delegate: "adminAuditLog",
     writers: ["lib/adminAudit.ts"],
@@ -285,6 +297,48 @@ export const PROTECTED_TABLES = [
     delegate: "engineeringAgentRequest",
     writers: ["lib/engineeringAgentStore.ts"],
     contract: "docs/policy/engineering-agent.md §11",
+  },
+  {
+    table: "AmuxDecisionMakerSwitchEvent",
+    delegate: "amuxDecisionMakerSwitchEvent",
+    writers: ["lib/amux/decisionMakerSwitchStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerRequest",
+    delegate: "amuxDecisionMakerRequest",
+    writers: ["lib/amux/decisionMakerRequestStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerRequestEvent",
+    delegate: "amuxDecisionMakerRequestEvent",
+    writers: ["lib/amux/decisionMakerRequestStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerBody",
+    delegate: "amuxDecisionMakerBody",
+    writers: ["lib/amux/decisionMakerBodyStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerRetentionEvent",
+    delegate: "amuxDecisionMakerRetentionEvent",
+    writers: ["lib/amux/decisionMakerBodyStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerDigestKeyEvent",
+    delegate: "amuxDecisionMakerDigestKeyEvent",
+    writers: ["lib/amux/decisionMakerBodyStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
+  {
+    table: "AmuxDecisionMakerResultDetail",
+    delegate: "amuxDecisionMakerResultDetail",
+    writers: ["lib/amux/decisionMakerBodyStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
   },
 ];
 
@@ -398,6 +452,24 @@ export const DELEGATE_NAME_ALLOWLIST = [
     count: 1,
     reason: "The data-domain registry's domain key. No client is indexed with it.",
   },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxDecisionMakerSwitchEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxDecisionMakerBody",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxDecisionMakerRetentionEvent",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
 ];
 
 /**
@@ -406,12 +478,36 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/opsObserverDigest.ts",
+    table: "AgentDigestItem",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The sre-ops digest intake reads AgentDigestItem in two plain SELECTs of its own rows: the item already kept for an owner date, so a retry answers that item instead of rebuilding it, and one item by id for the Admin screen the digest notice links to. Its one write verb is the INSERT of its own run guard row, the shared transaction's last write; the digest row itself is written only by lib/agentDigestStore.ts.",
+  },
+  {
+    path: "lib/opsObserverStore.ts",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 13,
+    reason:
+      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its thirteen write verbs are four SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged, its own closed reservations a retention batch skips when held), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation and its items, an INSERT into its own transition ledger, the owner genesis INSERTs of its own genesis and generation-0 state rows, and the retention DELETE of its own closed reservations past ninety days. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
+  },
+  {
+    path: "lib/promptRefinerVnextOneShotTerminalReceipt.ts",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The AdminAuditLog delegate only reads terminal and stop receipts. The one SQL write verb is FOR NO KEY UPDATE NOWAIT on PromptRefinerVnextOneShotStage, a row lock before writeSystemAuditLog appends the receipt through the sole audit writer. No statement here inserts, updates or deletes AdminAuditLog.",
+  },
+  {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
     tableMentions: 3,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
-      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the sixteen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose.",
+      "The table's own writer module. Its one raw statement naming the table is readEngineeringAgentRegistrationCounts: a constant SELECT of three count(*) subqueries that repeats the registration trigger's cap counts, so a full cap is refused by name under the registration lock before the insert meets the trigger. Every write to the table is a Prisma delegate call; the seventeen write verbs are the advisory-lock and FOR UPDATE SELECTs and the module's prose, including the read-only v22 run lock.",
   },
   {
     path: "lib/marketingStore.ts",
@@ -478,6 +574,30 @@ export const RAW_SQL_ALLOWLIST = [
       "The data-domain registry names the decision model as prismaModel and in its exclusion reason. It builds no SQL and opens no database connection.",
   },
   {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the Decision Maker switch model as its domain key and as prismaModel, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxDecisionMakerBody",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the Decision Maker body model as prismaModel and in its exclusion reason (an operational record, not in a per-account export), and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxDecisionMakerRetentionEvent",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The data-domain registry names the Decision Maker retention event model as prismaModel and in its exclusion reason, and other domains' prose uses delete and update. It builds no SQL and opens no database connection.",
+  },
+  {
     path: "lib/promptRefinerShadowRunStore.ts",
     table: "PromptRefinerShadowRun",
     tableMentions: 4,
@@ -492,6 +612,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 6,
     reason:
       "The same sole writer; the attempt table appears only in constant SELECT ... FOR UPDATE SQL while all mutations use the protected Prisma delegate.",
+  },
+  {
+    path: "lib/agentDigestStore.ts",
+    table: "AgentDigestItem",
+    tableMentions: 7,
+    writeVerbs: 4,
+    reason:
+      "The table's sole writer. Its raw SQL is the two retention batches (docs/policy/billing-finance-ops.md §1.4): a constant UPDATE that sets an expired body to NULL and a constant DELETE of rows past the meta retention, each bounded and audited, and each also refused by the table's own update and delete triggers outside those conditions. No table name is interpolated.",
   },
   {
     path: "scripts/report-issue-backlog-core.mjs",
@@ -510,6 +638,38 @@ export const RAW_SQL_ALLOWLIST = [
       "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
   },
   {
+    path: "prisma/migrations/20261005100000_amux_v4_derivation_groups/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 33,
+    reason:
+      "The derivation group has a restrictive audit foreign key and its insert guard SELECTs the exact owner audit row under a share lock. Every write verb in this migration creates or constrains derivation tables; none inserts, updates or deletes AdminAuditLog. The canonical audit is written by lib/adminAudit.ts in the same transaction.",
+  },
+  {
+    path: "prisma/migrations/20261005110000_amux_v4_portfolio_scoring/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 35,
+    reason:
+      "The portfolio assessment and score tables each have a restrictive AdminAuditLog foreign key and an INSERT guard that SELECTs the exact actor, action, target and chain hash under a share lock. The migration writes only its new tables and triggers; it never inserts, updates or deletes AdminAuditLog. Both application writers call writeAdminAuditLog in the same transaction.",
+  },
+  {
+    path: "prisma/migrations/20261006100000_amux_v22_auto_promotion/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 32,
+    reason:
+      "The v22 evidence tables hold restrictive audit foreign keys and the receipt guard reads the exact canonical system audit row and its hash before accepting a Task pointer. The migration does not insert, update or delete AdminAuditLog; the application writes it through lib/adminAudit.ts in the promotion transaction.",
+  },
+  {
+    path: "prisma/migrations/20261006110000_amux_v22_worker_assignment/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 8,
+    writeVerbs: 32,
+    reason:
+      "The A13 lane and assignment tables hold restrictive audit foreign keys. Deferred guards only read the canonical human or system audit row and its hash before accepting a lane or worker pointer. This migration never inserts, updates or deletes AdminAuditLog; its only audit writers use lib/adminAudit.ts in the same transaction.",
+  },
+  {
     path: "prisma/migrations/20261003000000_agent_digest_item/migration.sql",
     table: "AgentDigestItem",
     tableMentions: 12,
@@ -518,10 +678,109 @@ export const RAW_SQL_ALLOWLIST = [
       "Creates the shared digest table and the triggers that constrain its insert, update and delete. It names those verbs to refuse or constrain them and writes no row.",
   },
   {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneRelease.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 4,
+    writeVerbs: 4,
+    reason: "A person's latch release (docs/policy/qa-release-agent.md version 4, section 8 item 5; section 10's fourth transaction), the other writer of both merge-lane tables, kept apart from the service's writer so no module writes both a system and an administrator audit row. Its raw SQL reads the newest latch event with two constant subqueries, makes one conditional UPDATE of the attempt bound to the id and state the screen showed, and one constant INSERT of the release event; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 3,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads QaReleaseOperatorControl and never writes it.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 10,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter.",
+  },
+  {
+    path: "lib/qaReleaseMergeLaneStore.ts",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 5,
+    writeVerbs: 14,
+    reason: "The merge lane's single writer (docs/policy/qa-release-agent.md version 4, section 10). Its raw SQL is the issue, consume and result-report transactions counted statement by statement: in issue and consume, one constant SELECT that reads the newest operator control revision and switch and the newest latch event in one snapshot (issue adds whether an attempt is open; consume adds the attempt row itself, locked FOR UPDATE); issue's one constant INSERT ... RETURNING of the attempt row, so the trigger-set expiry comes back in the same statement; consume's one conditional UPDATE of that row from issued to consumed; and the report's one constant WITH statement that reads the newest revision, locks the attempt and makes the conditional move, then one constant INSERT ... SELECT of the next latch event; and the round-start state read, one constant SELECT of the newest latch event and the open attempt with no write. A person's latch release is the other writer, lib/qaReleaseMergeLaneRelease.ts. No table name is interpolated; every value is a bound parameter. It reads the newest latch event in issue and consume, and appends one in the report through the INSERT ... SELECT above.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 19,
+    writeVerbs: 13,
+    reason:
+      "Creates the attempt table, its partial unique index and the triggers that constrain its insert and update and refuse delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeAttempt",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The latch table's foreign key names the attempt an event concerns, and its insert trigger accepts an audit row that targets that attempt. It writes no attempt row; its write verbs constrain or refuse the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "QaReleaseMergeLaneLatch",
+    tableMentions: 12,
+    writeVerbs: 9,
+    reason:
+      "Creates the latch table and the triggers that constrain its insert and refuse update, delete and truncate. It names those verbs to refuse or constrain them and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 9,
+    reason:
+      "The latch insert trigger reads the audit row this transaction wrote (id, target, actor, xmin) to bind each latch event to it. It never writes AdminAuditLog; its write verbs refuse or constrain the latch table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The attempt table's triggers read the audit row this transaction wrote (id, target, actor, xmin) to bind every attempt write to it. It never writes AdminAuditLog; its write verbs refuse or constrain the attempt table.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    table: "QaReleaseOperatorControl",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "Creates the merge-lane attempt table, whose foreign key names the operator control revision it was issued under. It names write verbs to refuse or constrain them on the attempt table and writes no control row.",
+  },
+  {
+    path: "prisma/migrations/20261004000000_agent_digest_billing_finance_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 8,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
+  },
+  {
+    path: "prisma/migrations/20261008010000_agent_digest_sre_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 7,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for sre-ops (docs/policy/sre-ops.md §1 item 3, §10). It writes no row of any table.",
+  },
+  {
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
-    writeVerbs: 16,
+    writeVerbs: 20,
     reason:
       "The enum-constraint registry names the AgentDigestItem agent-key CHECK; the write verbs belong to other entries' reasons. A static check; it opens no database connection.",
   },
@@ -550,12 +809,36 @@ export const RAW_SQL_ALLOWLIST = [
       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The sre-ops transition ledger migration keeps the audit entry id as a plain column (no foreign key; AdminAuditLog is append-only already) and reads the linked audit row (hash, action, target, actor, metadata generation and key stamp, and whether this transaction wrote it) under a key-share lock in the ledger's insert guard. Its write verbs create or guard the ledger table, including a statement-level TRUNCATE guard; it never writes AdminAuditLog.",
+  },
+  {
     path: "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
     writeVerbs: 16,
     reason:
       "The dark vNext one-shot migration keeps immutable audit IDs as plain columns and trigger-checks both linked audit rows under key-share locks. Its write verbs create or guard the new stage and slot tables, including two statement-level TRUNCATE guards; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005140000_prompt_refiner_one_shot_unrun_replacement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 12,
+    reason:
+      "The one-shot replacement migration reads the existing supersession audit row under a key-share lock in two guards. Its DDL and trigger write verbs constrain only the one-shot stage table; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005210000_prompt_refiner_one_shot_run_approved_recovery/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 9,
+    reason:
+      "The B06 recovery migration reads linked supersession audits and counts forbidden historical audits in stage guards. It changes only the one-shot stage constraint and guard functions; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
@@ -750,7 +1033,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentWorkItem",
     tableMentions: 7,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
@@ -758,7 +1041,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentCapability",
     tableMentions: 5,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
@@ -766,25 +1049,41 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentBinding",
     tableMentions: 2,
-    writeVerbs: 16,
+    writeVerbs: 17,
     reason:
       "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
   },
   {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRun",
-    tableMentions: 4,
-    writeVerbs: 16,
+    tableMentions: 6,
+    writeVerbs: 17,
     reason:
-      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+      "The sole engineering agent writer mutates through Prisma delegates. Its raw SQL is constant SELECT ... FOR UPDATE statements that take the row locks each transition is decided under, including a read-only v22 run lock after its AMUX attempt and card, in the cross lock order (run, work item, capability, binding), a SELECT ... FOR UPDATE SKIP LOCKED that picks the publisher's next item, a read-only count of the owner queues as the run trigger counts them, a read of active runs whose AMUX attempt ended, a SELECT ... FOR UPDATE SKIP LOCKED of lapsed claims, a transaction advisory lock for halts, the AMUX attempt and card rows a state mismatch concerns, locked FOR UPDATE in AMUX's order (attempt, card, delivery) before the audit chain, the mismatch's run locked before its work item, plus a SELECT of the database clock; none interpolates a table name, every value is a bound parameter.",
+  },
+  {
+    path: "lib/supportTriageWorker.ts",
+    table: "SupportTriageRun",
+    tableMentions: 1,
+    writeVerbs: 8,
+    reason:
+      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: reclaim and retry_exhausted UPDATEs, supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE, plus the words in comments describing them. None names a protected table.",
+  },
+  {
+    path: "lib/supportTriageRetention.ts",
+    table: "SupportTriageRun",
+    tableMentions: 3,
+    writeVerbs: 1,
+    reason:
+      "The retention step is a named SupportTriageRun writer, and its run-row delete goes through the Prisma delegate. Its SQL literals only read SupportTriageRun (the window read and the overdue count). The one write verb is the UPDATE that moves open SupportTriageSuggestion rows of closed reports to invalidated; it names no protected table.",
   },
   {
     path: "lib/supportTriageDeletionManifest.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 1,
+    writeVerbs: 5,
     reason:
-      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears as an account-deletion action name. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
+      "Pure data: the deletion manifest names SupportTriageRun as a model it classifies, and delete appears only as account-deletion action names (delete, delete_parent_record) and in comments about them. It holds no SQL, no client and no write; lib/supportTriageRunStore.ts is the writer.",
   },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
@@ -817,6 +1116,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 76,
     reason:
       "The migration creates EngineeringAgentRun and its fail-closed insert, update and delete triggers; it seeds no row. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
+  },
+  {
+    path: "prisma/migrations/20261007010000_engineering_agent_private_result/migration.sql",
+    table: "EngineeringAgentRun",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "This migration only replaces the closed EngineeringAgentRun outcome CHECK to admit private_result. It does not write rows or change guard triggers; the exact SQL counts remain pinned.",
   },
   {
     path: "prisma/migrations/20260928120000_engineering_agent_state/migration.sql",
@@ -875,6 +1182,182 @@ export const RAW_SQL_ALLOWLIST = [
       "The orchestrator halt migration (orchestration policy version 20) creates AmuxOrchestratorWrite, AmuxOrchestratorWriteReceipt and AmuxOrchestratorHalt and their guard triggers; it seeds no row. Its three AdminAuditLog mentions are SELECT EXISTS reads in those guards, which refuse a resolution, a halt or a clear whose audit row is missing. It never writes AdminAuditLog; its write verbs are the three tables' own DDL and the trigger events. Applied migration source is the reviewed schema boundary; an edit changes the exact counts.",
   },
   {
+    path: "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 8,
+    reason:
+      "The Decision Maker switch migration (docs/policy/amux-decision-maker.md §8, §10). Its three AdminAuditLog mentions are the restrictive foreign key from auditLogId and the two SELECT EXISTS reads in the switch event guard, one for a person's event and one for a latch, which refuse an event whose audit row of the same transaction, actor and action is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE adding that key with its ON DELETE / ON UPDATE RESTRICT, the trigger events, and one word of a comment inside the function body.",
+  },
+  {
+    path: "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 9,
+    writeVerbs: 8,
+    reason:
+      "Creates the switch event table, its indexes, its foreign key to the audit log and the guard trigger that binds an insert to its audit row and refuses every update and delete. It names those verbs to constrain or refuse them, reads the scope's newest event in the guard, and writes no row.",
+  },
+  {
+    path: "lib/amux/decisionMakerSwitchStore.ts",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 4,
+    writeVerbs: 3,
+    reason:
+      "The switch event table's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL is two constant SELECTs (the newest event of every scope, and of one scope) and two constant INSERT ... RETURNING statements, a person's event and a latch; every value is a bound parameter. The third verb is the word in the error raised when an insert returns no row. It never updates or deletes an event, and it writes the audit log only through writeAdminAuditLog and, for a latch, lib/amux/decisionMakerSwitchSystemAudit.ts.",
+  },
+  {
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "Replaces the Decision Maker switch event guard's body with the same body plus a READ COMMITTED check (docs/policy/amux-decision-maker.md §8). Its two AdminAuditLog mentions are the guard's two SELECT EXISTS reads, unchanged from 20261008030000. It never writes AdminAuditLog; its two verbs are the 'INSERT' the guard compares TG_OP with and one word of a comment inside the function body.",
+  },
+  {
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 3,
+    writeVerbs: 2,
+    reason:
+      "The same function body: it names the switch event table to read the scope's newest event after the scope lock and as the audit row's target type, and refuses every update and delete. It creates nothing and writes no row.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 18,
+    reason:
+      "The Decision Maker request ledger migration (docs/policy/amux-decision-maker.md §10). Its four AdminAuditLog mentions are the two restrictive foreign keys from the request's and the event's auditLogId and the two SELECT EXISTS reads in their guards, which refuse a row whose router or instance audit of the same transaction is missing. It never writes AdminAuditLog; its write verbs are the ALTER TABLE statements adding foreign keys with their ON DELETE / ON UPDATE RESTRICT, the trigger events, the 'INSERT' the guards compare TG_OP with, and words of comments inside the function bodies.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 10,
+    writeVerbs: 18,
+    reason:
+      "Creates the request table, its CHECKs, indexes and foreign keys, and the guard that binds an insert to the router's audit row and refuses every update and delete. The event guard and the deferred commit check read the request row; nothing here writes one.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 17,
+    writeVerbs: 18,
+    reason:
+      "Creates the request event table, its CHECKs, its partial unique indexes and foreign keys, the guard that holds the transition graph and refuses every update and delete, and the deferred constraint trigger that refuses a late COMMIT. The guard and the commit check read the request's events; nothing here writes one.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    table: "AmuxDecisionMakerSwitchEvent",
+    tableMentions: 2,
+    writeVerbs: 18,
+    reason:
+      "The request guard and the event guard read the switch store's newest kill switch and instance events, under the switch gate taken shared, to refuse a DM routing, a transmission intent or a proposal the switches do not allow (docs/policy/amux-decision-maker.md §6, §8). Both are SELECTs in EXECUTE; nothing here writes a switch event, and the write verbs are the ledger tables' own DDL and trigger events.",
+  },
+  {
+    path: "lib/amux/decisionMakerRequestStore.ts",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 5,
+    writeVerbs: 4,
+    reason:
+      "The request ledger's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the request table in four constant SELECTs (the throughput count, the request state, the request already recorded for a card revision, and -- since S1d, 2026-10-08 -- the open requests created in a key period, read for a digest key's destruction) and one constant INSERT ... RETURNING; every value is a bound parameter. The other verbs are the event INSERT and the word in the two errors raised when an insert returns no row. It never updates or deletes a request, and it writes the audit log only through lib/amux/decisionMakerRequestSystemAudit.ts.",
+  },
+  {
+    path: "lib/amux/decisionMakerRequestStore.ts",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 3,
+    writeVerbs: 4,
+    reason:
+      "The same module names the event table in the request state read, in the open-request count's NOT EXISTS over closing events (S1d, 2026-10-08), and in its one constant INSERT ... RETURNING of an event; every value is a bound parameter. It never updates or deletes an event.",
+  },
+  {
+    path: "lib/amux/decisionMakerBodyStore.ts",
+    table: "AmuxDecisionMakerBody",
+    tableMentions: 8,
+    writeVerbs: 9,
+    reason:
+      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
+  },
+  {
+    path: "lib/amux/decisionMakerBodyStore.ts",
+    table: "AmuxDecisionMakerRetentionEvent",
+    tableMentions: 7,
+    writeVerbs: 9,
+    reason:
+      "The same module names the retention event table in its constant SELECTs (a request's retention and hold counts, a key period's open holds, the purge candidates) and in one constant INSERT ... RETURNING of a person's hold_set or hold_release; every value is a bound parameter. retention_set is written by the closing trigger, never here. It never updates or deletes a retention event.",
+  },
+  {
+    path: "lib/amux/decisionMakerBodyStore.ts",
+    table: "AmuxDecisionMakerDigestKeyEvent",
+    tableMentions: 6,
+    writeVerbs: 9,
+    reason:
+      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
+  },
+  {
+    path: "lib/amux/decisionMakerBodyStore.ts",
+    table: "AmuxDecisionMakerResultDetail",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The same module writes a terminal result's structured detail in one constant data-modifying statement, INSERT ... SELECT ... WHERE the registry holds the key, with the bodies in a second CTE that inserts only beside it, and reads it in one constant SELECT; every value is a bound parameter. It never updates or deletes a detail.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 12,
+    writeVerbs: 46,
+    reason:
+      "The Decision Maker body store migration (docs/policy/amux-decision-maker.md §10). Its AdminAuditLog mentions are the four restrictive foreign keys from the body, retention event, key event and result detail auditLogId and the guards' SELECT EXISTS reads (and two joins) that refuse a row without its audit of the same transaction: the key event's router audit, the body's route, result or edit_confirm audit, the delete's body_purge or body_erase audit, and the retention event's legal_hold or closing audit. It never writes AdminAuditLog; its write verbs are the ALTER TABLE statements adding foreign keys with their ON DELETE / ON UPDATE RESTRICT, the trigger events, the guards' TG_OP comparisons, the closing trigger's INSERT into the retention event table, and words of comments inside the function bodies.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerRequest",
+    tableMentions: 12,
+    writeVerbs: 46,
+    reason:
+      "The body, retention and result detail tables reference the request with a restrictive foreign key, and the guards and the closing trigger read the request row (its route, instance, creation clock and route audit) and, for a key's destruction, count the open requests of a key period. Nothing here writes a request.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerRequestEvent",
+    tableMentions: 9,
+    writeVerbs: 46,
+    reason:
+      "One AFTER INSERT trigger on the request event table: when the ledger records a closing event (assign_discarded, stale_close), the same statement writes the request's retention_set into the retention event table. The result detail references its result event with a restrictive foreign key, and the guards read the event table to find a request's closing event, its result of a given kind and its closing event's own audit. Nothing here writes, updates or deletes a request event.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerBody",
+    tableMentions: 9,
+    writeVerbs: 46,
+    reason:
+      "Creates the body table, its CHECKs, indexes and foreign keys, and the guard that refuses every update and allows an insert or a delete only under its rules. The key event guard counts a period's bodies; nothing here writes a body.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerRetentionEvent",
+    tableMentions: 14,
+    writeVerbs: 46,
+    reason:
+      "Creates the retention event table, its CHECKs, its partial unique index and foreign keys, and its guard, which refuses every update and delete; the closing trigger's one constant INSERT ... SELECT writes a closing request's retention_set (the guard computes its retentionUntil). The body and key event guards read the retention events for open holds.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerDigestKeyEvent",
+    tableMentions: 11,
+    writeVerbs: 46,
+    reason:
+      "Creates the key registry table, its CHECKs, partial unique indexes and foreign key, and its guard, which refuses every update and delete. The body and result detail guards read a period's registry; nothing here writes a registry event.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerResultDetail",
+    tableMentions: 8,
+    writeVerbs: 46,
+    reason:
+      "Creates the result detail table, its CHECKs (the shape per result kind, the option id grammar), its unique indexes and foreign keys, and its guard, which refuses every update and delete and binds an insert to the request's own result event of the same transaction and a registered, undestroyed key. Nothing here writes a detail.",
+  },
+  {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
     table: "QaReleaseOperatorControl",
     tableMentions: 11,
@@ -890,10 +1373,138 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The operator control insert trigger reads AdminAuditLog once, as SELECT EXISTS, to refuse a revision whose same-transaction audit row by a person is missing. It never writes AdminAuditLog; the write verbs are the control table's own trigger events.",
   },
+  {
+    path: "prisma/migrations/20261001102600_amux_v4_unit_decisions/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 36,
+    reason:
+      "The v4 decision migration references four immutable audit IDs through restrictive foreign keys and reads one linked row with SELECT FOR SHARE in its decision guard. Its DDL and trigger write verbs affect AmuxIdeaUnitDecision and related v4 tables only; it neither inserts nor updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261001111800_amux_v4_frontier_model_catalog/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 12,
+    reason:
+      "The Frontier catalog migration adds two restrictive audit foreign keys, declares an audit row type, and reads the approval and revocation audit rows with two SELECT statements in its guard. The write verbs create and constrain AmuxIdeaFrontierModelApproval only; no statement writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261002100000_amux_v4_source_plan_revision/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 32,
+    reason:
+      "The initial source-plan migration adds one restrictive foreign key from creationAuditLogId to the existing audit row. Its write verbs create and constrain AmuxIdeaSourcePlanRevision and AmuxIdeaAnalysisChunk only; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261003120000_amux_v4_analysis_price_versions/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 14,
+    reason:
+      "The analysis price-version migration adds two restrictive foreign keys to existing approval and revocation audit rows. Its write verbs create and constrain AmuxIdeaAnalysisPriceVersion and add a provenance column to AmuxIdeaAnalysisBudgetHold; it neither writes nor seeds AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261004190000_amux_v4_content_key_retirement/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 10,
+    reason:
+      "The AMUX content-key retirement migration adds only two restrictive foreign keys to already-written purge and key-deletion audit rows. Its DDL and guard write verbs affect AmuxIdeaContentKeyRetirement alone; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261004190100_amux_v4_retention_hold/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 13,
+    reason:
+      "The AMUX retention-hold migration has three restrictive foreign keys to separately written owner approval/release and system notice audit rows. Its DDL and trigger constrain only AmuxIdeaRetentionHold; it does not write AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261006151000_prompt_refiner_one_shot_terminal_recovery/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 5,
+    writeVerbs: 10,
+    reason:
+      "The v4 one-shot recovery migration reads linked historical audit rows and counts forbidden audit actions in schema-qualified SELECTs. Its DDL replaces stage guards and creates a v4 guard; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005040000_amux_v4_registration_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The v4 registration consistency triggers read two already-written canonical audit rows at COMMIT. Their write verbs define guards for AmuxIdeaUnitDecision and AmuxWorkItem; they never write AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005050000_amux_v4_task_cost_catalog_approval/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 3,
+    writeVerbs: 6,
+    reason:
+      "The Task price-catalog migration reads approval and revocation audit rows in its immutable catalog guard. Its write verbs create and protect AmuxV4TaskCostCatalogApproval only; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261005060000_amux_v4_rejection_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred rejection guard reads the already-written canonical consume audit and checks the matching rejected draft at COMMIT. Its trigger creation writes no AdminAuditLog rows.",
+  },
+  {
+    path: "prisma/migrations/20261005070000_amux_v4_node_link_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred node-link guard reads a prior canonical human consume audit and checks its approved draft and v4 target. It creates no AdminAuditLog rows.",
+  },
+  {
+    path: "prisma/migrations/20261005080000_amux_v4_card_link_consistency/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 2,
+    reason:
+      "The deferred card-link guard only reads the canonical human consume audit and checks the approved draft and target card. It creates no AdminAuditLog rows.",
+  },
+  {
+    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 4,
+    writeVerbs: 6,
+    reason:
+      "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261005010000_support_triage_decision_record/migration.sql",
+    count: 8,
+    reason:
+      "Triggers on SupportTriageDecisionRecord and its links, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: at commit, whether a record that still exists has a link; a link's report message FOR SHARE (no link to a deleted account's report); the record FOR UPDATE and then, as a separate statement, its link count (the fifty cap); and, after a link is deleted, a DELETE of its own record by id, so no record outlives any of its links. The functions pin search_path to pg_catalog, pg_temp. The one write deletes the record the deleted link pointed at and nothing else. The other three uses are support_triage_group_member_guard() replaced unchanged except that it now requires READ COMMITTED: the report FOR SHARE, the group FOR UPDATE, then its member count.",
+  },
+  {
+    path: "scripts/ops-observer/statement-ceiling-core.mjs",
+    count: 2,
+    reason:
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_support_triage_group/migration.sql",
+    count: 5,
+    reason:
+      "Five reads in the SupportTriageGroup, SupportTriageGroupMember and SupportTriageGroupSignal guard triggers, each over names built from TG_TABLE_SCHEMA quoted with %I with every value bound by USING: whether an ending group still has signals; a member's report message FOR SHARE (no membership for a deleted account's report); the group FOR UPDATE and then, as a separate statement with a fresh snapshot, its member count (the fifty cap); and a signal's group state FOR SHARE (no signal on a terminal group). The functions pin search_path to pg_catalog, pg_temp. They read and lock; they never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_support_triage_suggestion/migration.sql",
+    count: 1,
+    reason:
+      "One read in the SupportTriageSuggestion guard trigger: the report's message, FOR SHARE, over a name built from TG_TABLE_SCHEMA quoted with %I, with the report id bound by USING. It refuses a suggestion for a deleted account's report and holds the report so an account deletion cannot slip in between. The function pins search_path to pg_catalog, pg_temp. It reads and never writes.",
+  },
   {
     path: "prisma/migrations/20261003120000_support_triage_run/migration.sql",
     count: 1,
@@ -907,10 +1518,64 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Five dynamic SELECTs in the one-shot stage and slot guards use the trigger's own schema quoted with %I and bind IDs with USING: two AdminAuditLog reads use FOR KEY SHARE, two stage-status reads use FOR SHARE, and one slot count in the deferred constraint trigger has no lock clause. The functions pin search_path to pg_catalog, pg_temp; none of these reads writes AdminAuditLog.",
   },
   {
+    path: "prisma/migrations/20261005140000_prompt_refiner_one_shot_unrun_replacement/migration.sql",
+    count: 5,
+    reason:
+      "Five dynamic SELECTs in the one-shot replacement guards use the trigger's own schema quoted with %I: two lock and read AdminAuditLog, one locks the historical stage, and two count the historical slots and replacement stage. The functions pin search_path to pg_catalog, pg_temp; each statement only reads and every variable ID is bound with USING.",
+  },
+  {
+    path: "prisma/migrations/20261005210000_prompt_refiner_one_shot_run_approved_recovery/migration.sql",
+    count: 8,
+    reason:
+      "Eight dynamic SELECTs in the B06 recovery guards use TG_TABLE_SCHEMA quoted with %I: two linked AdminAuditLog reads, one forbidden-audit count, two stage locks, two historical-slot counts, and one deferred replacement count. IDs are fixed or bound with USING, search_path is pinned to pg_catalog and pg_temp, and none writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261006151000_prompt_refiner_one_shot_terminal_recovery/migration.sql",
+    count: 12,
+    reason:
+      "Twelve dynamic SELECTs in the v4 recovery guards read fixed historical stages, slots and audit rows through TG_TABLE_SCHEMA quoted with %I. The linked audit IDs are bound with USING; the functions pin search_path to pg_catalog and pg_temp. All statements only read or lock, and none writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
+    count: 6,
+    reason:
+      "Six dynamic SELECTs in the v5 stage guard lock or read the fixed v4 stage, count its slots and terminal/recovery audits, and read the linked recovery and stop audit rows. Each uses TG_TABLE_SCHEMA quoted with %I, the variable stop ID is bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
+    path: "prisma/migrations/20261007180000_amux_v4_prless_review_evidence/migration.sql",
+    count: 3,
+    reason:
+      "Three dynamic SELECTs in the v4 PR-less review guard read the fixed task, latest retained result, and attempt. The trigger's own schema is quoted with %I, IDs are bound with USING, and search_path is pinned to pg_catalog and pg_temp. None writes a protected table.",
+  },
+  {
     path: "prisma/migrations/20260928210000_email_delivery_display_contract/migration.sql",
     count: 1,
     reason:
       "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    count: 9,
+    reason:
+      "Nine uses in the sre-ops transition ledger guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: on delete it locks its genesis FOR SHARE and reads whether it was superseded, and its verified checkpoint with whether the ledger row at that checkpoint exists; on insert it locks its genesis FOR SHARE and reads whether it was superseded, reads its state row FOR SHARE (generation, key stamp, whether this transaction wrote it), reads whether the previous generation's row exists, reads the linked AdminAuditLog row FOR KEY SHARE (hash, action, target, actor, metadata generation and key stamp, whether this transaction wrote it), and calls the deadline claim function. The schema is the trigger own, never input, quoted with %I (the ledger's own name via TG_TABLE_NAME); every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261008020000_ops_observer_run_guard/migration.sql",
+    count: 1,
+    reason:
+      "One use in the sre-ops run guard trigger, with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: it calls the deadline claim function on the inserted row's deadline. The schema is the trigger own, never input, quoted with %I, and the deadline is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261005030000_ops_observer_retention_deadline/migration.sql",
+    count: 1,
+    reason:
+      "One use in the sre-ops retention deadline trigger, with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: it calls the deadline claim function on the deadline the retention batch named for its transaction. The schema is the trigger own, never input, quoted with %I, and the deadline is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql",
+    count: 4,
+    reason:
+      "Four uses in the sre-ops reservation guards, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the reservation guard calls the deadline claim function in its own schema, locks its genesis FOR SHARE and reads whether it was superseded; the item guard locks its reservation FOR SHARE and reads its status, mode and whether this transaction wrote it. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
   },
   {
     path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
@@ -929,6 +1594,42 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 7,
     reason:
       "Seven reads in the three orchestrator halt guard triggers, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=. They read AmuxOrchestratorWriteReceipt, AmuxOrchestratorWrite (once FOR SHARE), AmuxOrchestratorHalt and AdminAuditLog, each as SELECT or SELECT EXISTS. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql",
+    count: 3,
+    reason:
+      "Three reads in the Decision Maker switch event guard, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp: the newest event of the inserted event's scope, read after a transaction advisory lock on that scope, and one SELECT EXISTS on AdminAuditLog for a person's event or for a latch. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql",
+    count: 3,
+    reason:
+      "The same three reads of the Decision Maker switch event guard, in its replaced body with the READ COMMITTED check and the exclusive switch gate: EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, values bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    count: 23,
+    reason:
+      "Twenty-three statements in the Decision Maker body store's functions, all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. Twenty-two read: the key event guard's period events, bodies, open holds, open requests and router audit (5); the body guard's delete-time holds and retention, purge audit and erase audit (3) and insert-time request row, closing events, period registry, request byte total and, by field, one of three audit reads (7); the retention guard's request row, event aggregate, closing event with its audit, and legal_hold audit (4); the result detail guard's request row, result event and period registry (3). One writes: the closing trigger's INSERT ... SELECT of a closing request's retention_set, whose guard then checks it. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING.",
+  },
+  {
+    path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",
+    count: 8,
+    reason:
+      "Eight reads in the Decision Maker request ledger's functions, all with EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp: the request guard's newest kill switch and instance events (under the shared switch gate, for a dm_proposal row) and its SELECT EXISTS on AdminAuditLog; the event guard's read of the request row, its aggregate of the request's events after the per-request advisory lock, its newest kill switch and instance events (under the shared switch gate), and its SELECT EXISTS on AdminAuditLog; and the commit check's read of the assignment deadline or the result deadline. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004020000_qa_release_merge_lane_latch/migration.sql",
+    count: 2,
+    reason:
+      "Two reads in the latch insert trigger, both EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because the function pins search_path to pg_catalog, pg_temp. One reads the newest QaReleaseMergeLaneLatch event, the other checks the AdminAuditLog row with SELECT EXISTS. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
+  },
+  {
+    path: "prisma/migrations/20261004010000_qa_release_merge_attempt/migration.sql",
+    count: 4,
+    reason:
+      "Four EXECUTE calls, all over a name built from TG_TABLE_SCHEMA and a constant name, because every function pins search_path to pg_catalog, pg_temp. One, in the audit helper, checks the AdminAuditLog row this transaction wrote with SELECT EXISTS; three, in the attempt insert and update triggers, call that helper schema-qualified. The schema is the trigger's own, quoted with %I, and every value is bound with USING. They read and never write.",
   },
   {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
@@ -1016,10 +1717,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "68e1c5a0d053c78699fa1c3d3f0eeb071bf17d22489de13f367010d45e7a344e",
+    sha256: "d04e571586ba42754dac9be8ffe8da55ece5ba5daea4517a2fa9b129aa0a517b",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17). 2026-10-02: on the refusal path it also asks one fixed catalogue question per pending migration, SELECT to_regclass($1) IS NOT NULL with the relation name the migration declares bound as a parameter (scripts/baseline-presence-core.mjs), inside BEGIN READ ONLY and ROLLBACK. A migration supplies a name, never SQL. 2026-10-03: a migration that creates only a function declares the function name instead, and the question is one fixed EXISTS over pg_catalog.pg_proc in public with that name bound; the guard file only switches to presenceQueryFor(probe).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Catalogue probes run inside BEGIN READ ONLY and ROLLBACK with object names bound as parameters, never migration-supplied SQL. For CREATE OR REPLACE FUNCTION, the fixed pg_catalog.pg_proc.prosrc query reads the existing zero-argument trigger body and the guard compares its SHA-256 to the declared prior version; absent, modified, or newer bodies block. The only write remains delegated to prisma migrate resolve for baseline history (reviewed 2026-09-17).",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",

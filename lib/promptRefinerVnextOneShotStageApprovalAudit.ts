@@ -19,10 +19,14 @@ import {
 const HEX_40 = /^[0-9a-f]{40}$/;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const DEPLOYMENT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const APPROVABLE_STAGE_IDS = new Set([
+  "prompt-refiner-vnext-one-shot-v3",
+  "prompt-refiner-vnext-one-shot-v4",
+  "prompt-refiner-vnext-one-shot-v5",
+]);
 
 function assertExactBinding(binding: PromptRefinerVnextOneShotAuditBinding): void {
-  if (!binding || binding.id !== STAGE_ID ||
+  if (!binding || !APPROVABLE_STAGE_IDS.has(binding.id) ||
       !HEX_40.test(binding.sourceCommitSha) ||
       !HEX_64.test(binding.sourceManifestDigest) ||
       !HEX_64.test(binding.runnerDigest) ||
@@ -67,7 +71,7 @@ export async function writePromptRefinerVnextOneShotStageApprovalAudit(input: {
     request: input.request,
     action: "prompt_refiner.vnext_one_shot.stage_approved",
     targetType: "PromptRefinerVnextOneShotStage",
-    targetId: STAGE_ID,
+    targetId: input.binding.id,
     summary: PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES.stage,
     metadata: promptRefinerVnextOneShotApprovalAuditMetadata(input.binding, "stage"),
   });

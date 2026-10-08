@@ -238,12 +238,27 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
     },
   },
+  "sre-ops": {
+    label: "SRE 에이전트",
+    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
+    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
+  },
   "agent-digests": {
     label: "Agent digest",
     description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
     aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision"],
     tabs: {
       "qa-release": { label: "QA·릴리스", description: "일일 릴리스 준비 digest와 운영자 제어 revision" },
+      "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
+    },
+  },
+  office: {
+    label: "에이전트 오피스",
+    description: "8개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
+    aliases: ["오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황"],
+    tabs: {
+      live: { label: "라이브 오피스", description: "오피스 바닥, 운영자 지시창, 데모 결재와 피드" },
+      dashboard: { label: "대시보드", description: "팀 현황판, 데모 결재, digest 브리핑과 팀별 기록 링크" },
     },
   },
   "email-campaigns": {
@@ -271,10 +286,11 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "amux-backlog": {
     label: "백로그",
-    description: "카드 등록, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
-    aliases: ["백로그", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정"],
+    description: "아이디어 입력 확인, 카드 등록, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
+    aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정"],
     tabs: {
       intake: { label: "등록", description: "명시적 카드 등록 한 건을 미리 보고 등록" },
+      ideas: { label: "아이디어", description: "외부 전송 전에 운영자 아이디어 입력을 확인" },
       import: { label: "카탈로그 이관", description: "현황판 카탈로그를 미리 보고 승인한 뒤 이관" },
       reconciliation: { label: "소스 재조정", description: "카드별 새 소스 개정을 수락하거나 거절" },
       metadata: { label: "카드 메타데이터", description: "backlog 카드 한 건의 kind, priority, 비용 추정" },
@@ -341,6 +357,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
+  },
+  "sre-ops-item": {
+    label: "운영 감시 메시지",
+    description: "page 메시지 하나가 무엇에 관한 것이었는지: 신호, 메시지 종류, 시각",
   },
   "campaign-detail": {
     label: "캠페인 상세",

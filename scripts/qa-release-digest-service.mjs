@@ -21,11 +21,28 @@
 import { spawn } from "node:child_process";
 
 import { collectQaReleaseCi } from "../lib/qaReleaseCiCollectCore.ts";
-import { runQaReleaseDigestService } from "../lib/qaReleaseDigestServiceCore.ts";
+import { QA_RELEASE_DIGEST_HARD_TIMEOUT_MS, runQaReleaseDigestService } from "../lib/qaReleaseDigestServiceCore.ts";
 
 const SCRIPT_TIMEOUT_MS = 4 * 60 * 1000;
 const HTTP_TIMEOUT_MS = 30_000;
 const GITHUB_API = "https://api.github.com";
+
+// Policy section 10: the run is bounded at 15 minutes, and Railway's cron does
+// not stop it on its own, so the service stops itself -- and the report child
+// it is waiting on, whose process group it leads. A run stopped here submits
+// nothing; the app's deadline would refuse a late submission anyway.
+const activeChildren = new Set();
+const supervisor = setTimeout(() => {
+  for (const pid of activeChildren) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+  console.log(JSON.stringify({ exitCode: 1, outcome: "hard_timeout" }));
+  process.exit(1);
+}, QA_RELEASE_DIGEST_HARD_TIMEOUT_MS);
 
 /**
  * `npm run <name> -- <args>` with only what a report needs to run. The child
@@ -53,6 +70,7 @@ const runScript = (name, args, extraEnv = {}) =>
         ...extraEnv,
       },
     });
+    if (child.pid) activeChildren.add(child.pid);
     let stdout = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
@@ -67,8 +85,14 @@ const runScript = (name, args, extraEnv = {}) =>
       }
       settle({ exitCode: 1, stdout: "" });
     }, SCRIPT_TIMEOUT_MS);
-    child.on("close", (code) => settle({ exitCode: code ?? 1, stdout }));
-    child.on("error", () => settle({ exitCode: 1, stdout: "" }));
+    child.on("close", (code) => {
+      activeChildren.delete(child.pid);
+      settle({ exitCode: code ?? 1, stdout });
+    });
+    child.on("error", () => {
+      activeChildren.delete(child.pid);
+      settle({ exitCode: 1, stdout: "" });
+    });
   });
 
 const githubJson = (token) => async (path) => {
@@ -103,5 +127,6 @@ const result = await runQaReleaseDigestService(process.env, {
   now: () => new Date(),
 });
 
+clearTimeout(supervisor);
 console.log(JSON.stringify(result));
 process.exitCode = result.exitCode;

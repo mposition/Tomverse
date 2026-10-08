@@ -36,7 +36,18 @@ export type ManifestLink =
   | { readonly kind: "none" }
   | { readonly kind: "feedback_id"; readonly column: string }
   | { readonly kind: "via_model"; readonly model: string; readonly column: string }
-  | { readonly kind: "untyped"; readonly column: string };
+  | { readonly kind: "untyped"; readonly column: string }
+  /**
+   * A parent reached through its members while it has any, and through a
+   * list of departed member report ids (`column`, a String[]) once it has
+   * none. `through` is the member model, which links back to this one.
+   */
+  | { readonly kind: "member_ids"; readonly column: string; readonly through: string }
+  /**
+   * A parent that holds no report id of its own and is reached only through
+   * its children (`through`), whose deletion takes it whole. `column` is its id.
+   */
+  | { readonly kind: "via_children"; readonly column: string; readonly through: string };
 
 export type AccountDeletionAction =
   | "none"
@@ -57,6 +68,11 @@ export const RETENTION_KEYS = Object.freeze([
   "agent_digest_90_365_days",
 ] as const);
 export type RetentionKey = (typeof RETENTION_KEYS)[number];
+
+// Named once: a `retentionKey: "<digits in it>"` line reads to the secret
+// scanner like an assigned credential, and this one shape is already known
+// to it as a plain constant name.
+const DECISION_RECORD_RETENTION_KEY = "decision_record_12_months" satisfies RetentionKey;
 
 export type ManifestEntry = {
   readonly model: string;
@@ -85,6 +101,112 @@ export const SUPPORT_TRIAGE_DELETION_MANIFEST: readonly ManifestEntry[] = Object
       overdueRemaining: "lifecycle",
       oldestOverdueAgeSeconds: "lifecycle",
       blocked: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageSuggestion",
+    link: Object.freeze({ kind: "feedback_id", column: "feedbackId" }),
+    onAccountDeletion: "delete",
+    retentionKey: "terminal_suggestion_30_days",
+    columns: Object.freeze({
+      id: "identifier",
+      feedbackId: "identifier",
+      // Derived from the report's text: can be matched by guessing a short report.
+      inputDigest: "report_derived",
+      state: "lifecycle",
+      failureCode: "lifecycle",
+      claimToken: "lifecycle",
+      leaseExpiresAt: "lifecycle",
+      attemptCount: "lifecycle",
+      lane: "report_derived",
+      keywordFlags: "report_derived",
+      ownerQueueState: "lifecycle",
+      displayedAt: "lifecycle",
+      createdAt: "lifecycle",
+      updatedAt: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageGroup",
+    link: Object.freeze({ kind: "member_ids", column: "retiredMemberIds", through: "SupportTriageGroupMember" }),
+    // Deleted whatever its state when a member or a departed member is the
+    // account's report; its members and signals go with it.
+    onAccountDeletion: "delete",
+    retentionKey: "terminal_group_30_days",
+    columns: Object.freeze({
+      id: "identifier",
+      state: "lifecycle",
+      primaryKind: "lifecycle",
+      primarySnapshotDigest: "signal_snapshot",
+      // A digest over member report ids: an identifier, cleared with the tombstone.
+      groupCandidateKey: "identifier",
+      // Includes the members' report statuses.
+      groupInputDigest: "report_derived",
+      keyRetiredAt: "lifecycle",
+      retiredMemberIds: "identifier",
+      decision: "lifecycle",
+      decidedAt: "lifecycle",
+      ownerQueueState: "lifecycle",
+      displayedAt: "lifecycle",
+      keyRecheckDeferredCount: "lifecycle",
+      keyRecheckDeferredRunId: "lifecycle",
+      keyRecheckLastEvaluatedRunSeq: "lifecycle",
+      keyRecheckDeferredRunSeq: "lifecycle",
+      createdAt: "lifecycle",
+      updatedAt: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageGroupMember",
+    link: Object.freeze({ kind: "feedback_id", column: "feedbackId" }),
+    onAccountDeletion: "cascade_from_group",
+    retentionKey: "membership_while_report_open",
+    columns: Object.freeze({
+      groupId: "identifier",
+      feedbackId: "identifier",
+      primarySnapshotDigest: "signal_snapshot",
+      createdAt: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageGroupSignal",
+    link: Object.freeze({ kind: "via_model", model: "SupportTriageGroup", column: "groupId" }),
+    onAccountDeletion: "cascade_from_group",
+    retentionKey: "group_signal_while_group_open",
+    columns: Object.freeze({
+      groupId: "identifier",
+      kind: "lifecycle",
+      snapshotDigest: "signal_snapshot",
+      provenanceClass: "lifecycle",
+      snapshotExpiresAt: "lifecycle",
+      observedAt: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageDecisionRecord",
+    link: Object.freeze({ kind: "via_children", column: "id", through: "SupportTriageDecisionRecordLink" }),
+    onAccountDeletion: "delete",
+    retentionKey: DECISION_RECORD_RETENTION_KEY,
+    columns: Object.freeze({
+      id: "identifier",
+      decisionKind: "lifecycle",
+      decidedAt: "lifecycle",
+      // Keyed, but over a binding derived from the reports: kept as report data.
+      decisionEnvelopeDigest: "report_derived",
+      digestVersion: "lifecycle",
+      retentionUntil: "lifecycle",
+    }),
+  }),
+  Object.freeze({
+    model: "SupportTriageDecisionRecordLink",
+    link: Object.freeze({ kind: "feedback_id", column: "feedbackId" }),
+    // Any link gone takes the record whole, and with it every other link.
+    onAccountDeletion: "delete_parent_record",
+    retentionKey: DECISION_RECORD_RETENTION_KEY,
+    columns: Object.freeze({
+      id: "identifier",
+      recordId: "identifier",
+      feedbackId: "identifier",
     }),
   }),
 ]);
@@ -118,6 +240,8 @@ type ParsedField = {
   readonly relation: boolean;
   /** For a relation field, the local columns its `@relation(fields: [...])` names. */
   readonly relationFields: readonly string[];
+  /** A `[]` field. */
+  readonly list: boolean;
 };
 type ParsedModel = { readonly name: string; readonly fields: readonly ParsedField[]; readonly unreadable: readonly string[] };
 type ParsedSchema = {
@@ -265,16 +389,17 @@ export const parsePrismaSchema = (schema: string): ParsedSchema => {
         modelUnreadable.push(line);
         continue;
       }
-      const [, fieldName, type, , attributes = ""] = match;
+      const [, fieldName, type, modifier, attributes = ""] = match;
+      const list = modifier === "[]";
       if (modelNames.has(type)) {
         const relationFields = relationFieldsOf(attributes);
         if (relationFields === null) {
           modelUnreadable.push(line);
           continue;
         }
-        fields.push({ name: fieldName, type, relation: true, relationFields });
+        fields.push({ name: fieldName, type, relation: true, relationFields, list });
       } else if (SCALAR_TYPES.has(type) || enums.has(type)) {
-        fields.push({ name: fieldName, type, relation: false, relationFields: [] });
+        fields.push({ name: fieldName, type, relation: false, relationFields: [], list });
       } else {
         modelUnreadable.push(line);
       }
@@ -385,6 +510,31 @@ export const auditDeletionManifest = (
           failures.push(
             `${entry.model}: link column ${link.column} is not the foreign key of a relation to ${target}`
           );
+        }
+      }
+      if (link.kind === "member_ids") {
+        const column = model.fields.find((field) => !field.relation && field.name === link.column);
+        if (!column || column.type !== "String" || !column.list) {
+          failures.push(`${entry.model}: member id list ${link.column} must be a String[] column`);
+        }
+        const through = manifest.find((other) => other.model === link.through);
+        if (!through || through.link.kind !== "feedback_id") {
+          failures.push(`${entry.model}: links through ${link.through}, which must link to Feedback by feedbackId`);
+        }
+        const back = models.get(link.through);
+        if (!back?.fields.some((field) => field.relation && field.type === entry.model && field.relationFields.length > 0)) {
+          failures.push(`${entry.model}: ${link.through} does not reference it`);
+        }
+      }
+      if (link.kind === "via_children") {
+        if (link.column !== "id") failures.push(`${entry.model}: a via_children link names the model's own id`);
+        const through = manifest.find((other) => other.model === link.through);
+        if (!through || through.link.kind !== "feedback_id" || through.onAccountDeletion !== "delete_parent_record") {
+          failures.push(`${entry.model}: links through ${link.through}, which must link by feedbackId and delete its parent`);
+        }
+        const back = models.get(link.through);
+        if (!back?.fields.some((field) => field.relation && field.type === entry.model && field.relationFields.length > 0)) {
+          failures.push(`${entry.model}: ${link.through} does not reference it`);
         }
       }
       if (link.kind === "untyped") {

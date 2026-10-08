@@ -256,6 +256,20 @@ gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지
 - 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
   job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
 
+## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
+
+2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
+staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
+사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
+
+- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
+  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
+- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
+- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
+  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는
@@ -1264,6 +1278,84 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
 - **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
   판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
+
+# AMUX Decision Maker
+
+AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·저장·전송·runner 코드를
+건드리기 전에 읽습니다.
+
+- `docs/policy/amux-decision-maker.md`
+
+절대 조건:
+
+- **v1은 제안 모드만입니다.** DM의 출력은 운영자가 Admin에서 확정하기 전에는 worker에게 가지
+  않습니다. 자율 경로를 만들지 않습니다 — 그것은 v2 정책과 공통 기반 원칙 3의 별도 개정입니다.
+- **라우팅은 `lib/amux/decisionMakerCore.ts`의 `routeDmQuestion()` 한 곳입니다.** 모든 검사를
+  실행하고 모든 거절 사유를 남기며, 결과는 `dm_proposal`과 `operator` 둘뿐입니다.
+- **용어 목록·비밀 경로 목록·경로 문법·출력 상한을 바꾸면 정책 버전이 바뀝니다.** 테스트의
+  고정값이 그 목록의 기준입니다.
+- DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
+  단계의 PR이 이 절에 추가합니다.
+- **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
+  I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
+- **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
+  `lib/amux/decisionMakerSwitchSystemAudit.ts`,
+  `prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql`,
+  `tests/amuxDecisionMakerSwitch.test.mjs`, `tests/integration/amux-decision-maker-switch.db.test.ts`.
+  스위치는 append-only 사건 표이고 scope마다 가장 새 사건이 상태입니다. **값은 DB CHECK가 닫습니다** —
+  인스턴스는 `off`·`proposal`, kill switch는 `on`·`off`뿐이고, 시스템은 인스턴스를 `off`로 latch만
+  합니다. 사건마다 같은 트랜잭션의 감사 행을 trigger가 요구하며, latch 뒤 사람의 첫 변경은
+  `amux.decision.latch_release`입니다. 읽기 실패나 목록 밖의 행은 전부 `null`(fail-closed)이고,
+  `routeDmQuestion()`이 `settings_unreadable`로 운영자에게 보냅니다. 표를 읽고 쓰는 곳은 store
+  하나이며, 시스템 감사는 별도 모듈이 씁니다(한 파일이 두 writer를 부르지 않습니다). route·Admin
+  화면·DM 호출은 없습니다.
+- **S1c(요청 원장)**: `lib/amux/decisionMakerRequestCore.ts`, `lib/amux/decisionMakerRequestStore.ts`,
+  `lib/amux/decisionMakerRequestSystemAudit.ts`,
+  `prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql`,
+  `prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql`,
+  `tests/amuxDecisionMakerRequest.test.mjs`, `tests/integration/amux-decision-maker-request.db.test.ts`.
+  요청은 (카드 id, 질문 revision)당 한 행이고 고칠 수 없으며, 상태는 append-only 사건 표의 합입니다.
+  **전이 그래프는 trigger가 강제하고 `dmEventRefusal()`·`dmEventSwitchRefusal()`이 같은 그래프를
+  옮깁니다** — 한쪽만 바꾸지 않습니다. 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)은 DB 시계이고,
+  배정·전송 의도·DM 출력(제안·이관·검증 실패)은 삽입 때와 COMMIT 때(`AX001`) 모두 마감에서 commit
+  예비시간 200 ms를 뺀 D로 거부되며, writer는 같은 마감을 `requireLeaseAt`으로 fence에 넘깁니다. 종결
+  결과는 요청당 하나이고 (요청, 결과 digest) 쌍으로 멱등입니다. 사건마다 같은 트랜잭션의 감사 행을
+  요구합니다 — 배정·종료는 router, 전송·결과는 요청의 인스턴스 actor입니다.
+  **스위치 값은 호출자가 넘기지 않습니다.** 라우팅·전송 의도·결과는 store가 audit chain lock(모든
+  스위치 변경도 먼저 잡는 lock) 뒤에 S1b reader로 직접 읽고, trigger는 스위치 gate(스위치 trigger는
+  배타, 원장 trigger는 공유)를 잡은 뒤 다시 읽어 kill switch on·인스턴스 off에서 DM 라우팅·전송
+  의도를, kill switch on에서 제안을 거부합니다. lock 순서는 audit chain lock → 스위치 gate →
+  요청·scope lock입니다. 원장 trigger와 S1b 스위치 trigger는 lock 뒤에 읽으므로 READ COMMITTED가
+  아니면 거부합니다. 운영자 직접 답의 종료, 본문, 보존, digest 키, 판정, 전달, route·Admin 화면·DM
+  호출은 없습니다.
+- **S1d(본문 저장소·보존)**: `lib/amux/decisionMakerBodyCore.ts`, `lib/amux/decisionMakerBodyStore.ts`,
+  `lib/amux/decisionMakerBodySystemAudit.ts`, `lib/amux/decisionMakerDigestKeys.ts`,
+  `prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql`,
+  `tests/amuxDecisionMakerBody.test.mjs`, `tests/integration/amux-decision-maker-body.db.test.ts`.
+  본문은 docs/policy/amux-decision-maker.md §10의 다섯 필드뿐이고(필드당 한 행, 상한은 CHECK) 고칠 수
+  없습니다. 본문 행은 열린 DM 요청에만, 그것이 속한 것을 쓴 같은 트랜잭션의 감사 행(카드는 route, DM
+  출력은 그 종류의 result, 운영자 답은 그 요청을 target으로 하는 edit_confirm)과 함께 들어갑니다. **종결
+  결과마다 `AmuxDecisionMakerResultDetail` 한 행이 결과와 같은 트랜잭션에 남습니다** — 출력 종류,
+  select가 고른 선택지 id, `irreversible`(docs/policy/amux-decision-maker.md §6: Admin이 판정 전에 먼저
+  보임)와 그 결과를 digest한 key check 값이며, 원장의 일부라 지우지 않고 자유 텍스트가 없습니다. 선택지
+  id는 S1a 문법(영숫자·`_`·`-`, 32자)이고, 어기거나 겹치는 카드는 라우팅이 DM에 보내지 않습니다.
+  **digest 키는 30일 key period마다 하나이고 서버 비밀 `AMUX_DM_DIGEST_KEYS`에만 있습니다** — DB에는
+  key check 값만 둡니다. 요청의 period는 그 DB 시계 `createdAt`에서 나오고, 요청 키 K_R = HMAC(K_P, 요청
+  id)로 선택지 집합 digest(라우팅 때 store가 카드의 선택지로 계산하고, 결과는 같은 선택지 목록을
+  가져와야 받아들여짐), broker의 payload·manifest digest, 앱이 저장한 출력으로 계산하는 결과 digest,
+  본문 digest를 모두 keyed로 만듭니다. 평문 hash는 어디에도 없습니다. 결과는 레지스트리가 그 키를
+  등록했고 파기하지 않았을 때만 commit됩니다. 보존은 별도 append-only 사건 표입니다: 요청이
+  닫히면(assign_discarded·stale_close) 같은 문장에서 trigger가 `retention_set`(닫힘 + 2160시간, 고정
+  길이)을 한 번 쓰고, hold는 사람의 `hold_set`·`hold_release`이며 열린 hold는 hold 사건 수로만 셉니다.
+  본문 삭제는 hold가 없을 때 router의 `.body_purge`(보존 기한 뒤) 또는 사람의 `.body_erase`(개인정보
+  삭제 예외) 감사와 같은 트랜잭션에서만 됩니다. 키 파기는 period가 끝났고 본문·열린 hold·열린 요청이
+  남지 않았을 때만 기록되며, 그 뒤로는 그 period의 본문을 쓸 수 없습니다.
+  docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
+  스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
+  그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
+  거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

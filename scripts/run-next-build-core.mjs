@@ -35,9 +35,22 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
+/** The build's child workers must inherit the CI type-check heap limit. */
+export const nodeOptionsForBuild = (env) => {
+  const configured = env.NODE_OPTIONS ?? "";
+  if (env.GITHUB_ACTIONS !== "true" ||
+      /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
+  return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
+};
+
 const INTERNAL_ERROR_MARKERS = [
   "TurbopackInternalError",
   "An unexpected Turbopack error occurred",
+  // 2026-10-07 (staging, develop 1c02353): the same corrupt cache surfaced as a
+  // panic in Turbopack's task backend, reported only as "Panic in async
+  // function", with neither marker above. The panic site is the persisted task
+  // store, which is what a cold cache replaces.
+  "panicked at turbopack/crates/turbo-tasks-backend/",
 ];
 
 const CACHE_RESTORE_MARKERS = [
@@ -45,6 +58,7 @@ const CACHE_RESTORE_MARKERS = [
   "Failed to restore Data for TaskId",
   "Looking up task storage for TaskId",
   "Unable to open static sorted file referenced from",
+  "Unable to read next free task id from database",
 ];
 
 /**

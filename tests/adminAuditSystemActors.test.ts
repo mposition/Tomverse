@@ -4,12 +4,44 @@ import { join, relative, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+  AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
+  AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
+  AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
+  AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+  AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+  AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
+  AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+  AMUX_V4_IDEA_AUTO_CANCEL_SCOPE,
+  AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
+  AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+  AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
+  AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+  AMUX_V4_UNIT_DECISION_TARGET,
+  AMUX_V4_UNIT_HOUSEKEEPING_SCOPE,
+  AMUX_V4_UNIT_INVALIDATE_ACTION,
+  AMUX_V4_UNIT_UNKNOWN_ACTION,
   SYSTEM_AUDIT_ACTORS,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
   auditRowActorKind,
   isSystemAuditActor,
   metadataClaimsSystemActor,
+  systemAuditActionAllowed,
 } from "../lib/adminAuditSystemActors.ts";
+import {
+  AMUX_V4_IDEA_AGENT_ID,
+  AMUX_V4_IDEA_SOURCE_SYSTEM,
+  AMUX_V4_IDEA_SYSTEM_ACTOR,
+} from "../lib/amux/ideaIdentityCore.ts";
 
 // The closed list of system actors and the reserved metadata key.
 //
@@ -36,6 +68,9 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-vnext-one-shot-runner",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
+    "amux-v22-auto-admit",
+    "amux-v22-worker-claim",
+    "amux-v4-intake",
     "engineering-agent-runner",
     "engineering-agent-publisher",
     "engineering-agent-retention",
@@ -51,12 +86,160 @@ test("the system actor list is closed and changes only by review", () => {
     "qa-release-intake",
     "support-triage-worker",
     "support-triage-retention",
+    // docs/policy/billing-finance-ops.md §1.1: the stage W digest intake route.
+    "billing-finance-ops-intake",
+    "support-triage-account-deletion",
+    // The shared AgentDigestItem body expiry and meta purge, for every agent
+    // (docs/policy/billing-finance-ops.md §1.4).
+    "agent-digest-retention",
+    // docs/policy/qa-release-agent.md section 5: the merge lane's own attempts and latches.
+    "qa-release-merge-lane",
+    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
+    "ops-observer",
+    // docs/policy/amux-decision-maker.md §10: the routing route and one actor
+    // per DM instance. A DM writes proposals, never approvals (§1).
+    "amux-decision-router",
+    "amux-decision-maker-openai",
+    "amux-decision-maker-anthropic",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);
   assert.equal(isSystemAuditActor("Marketing-Guard"), false);
   assert.equal(isSystemAuditActor("tomverse-amux-orchestrator"), true);
   assert.equal(isSystemAuditActor("amux-auto-promoter"), true);
+  assert.equal(isSystemAuditActor("amux-v22-auto-admit"), true);
+  // Only explicitly scoped v4 actions use the intake identity. The
+  // remaining candidate actors have no audit-writer authority.
+  assert.deepEqual([...AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS], [
+    "amux-intake-supervisor",
+    "amux-intake-retention",
+    "amux-portfolio-scorer",
+  ]);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.v22.auto_promotion.consumed", "AmuxV22PromotionReceipt"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.v22.auto_promotion.outcome_unknown", "AmuxV22PromotionUnknown"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.auto_promotion.halted", "AmuxRecommendationAutoHalt"), true);
+  assert.equal(systemAuditActionAllowed("amux-v22-auto-admit",
+    "amux.claim.assigned", "AmuxWorkItem"), false);
+  assert.equal(AMUX_V4_IDEA_SOURCE_SYSTEM, "admin-idea-v4");
+  assert.equal(AMUX_V4_IDEA_AGENT_ID, "amux-intake");
+  assert.equal(isSystemAuditActor(AMUX_V4_IDEA_SYSTEM_ACTOR), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_UNKNOWN_ACTION, AMUX_V4_UNIT_DECISION_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_UNIT_INVALIDATE_ACTION, "AmuxWorkItem"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_UNIT_UNKNOWN_ACTION,
+    targetType: AMUX_V4_UNIT_DECISION_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_UNIT_HOUSEKEEPING_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+    targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE },
+  })), "system");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_INITIAL_SOURCE_PLAN_ACTION, AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), true);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE },
+  })), "system");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_RESERVE_SCOPE },
+  })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
+    AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_SETTLE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_SETTLE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE },
+  })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+    AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+    targetType: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_ACTION,
+    targetType: AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE },
+  })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_FIRST_DRAFT_SAVED_ACTION, AMUX_V4_FIRST_DRAFT_SAVED_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
+    targetType: AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_FIRST_DRAFT_SAVED_SCOPE },
+  })), "system");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_IDEA_AUTO_CANCEL_ACTION, AMUX_V4_IDEA_AUTO_CANCEL_TARGET), true);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+    targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_IDEA_AUTO_CANCEL_SCOPE },
+  })), "system");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+    targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE },
+  })), "unknown");
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_ANALYSIS_BUDGET_RESERVE_ACTION,
+    targetType: AMUX_V4_ANALYSIS_BUDGET_RESERVE_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+      actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE },
+  })), "unknown");
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    "AMUX_V4_CARD_REGISTERED", AMUX_V4_INITIAL_SOURCE_PLAN_TARGET), false);
+  assert.equal(systemAuditActionAllowed(AMUX_V4_IDEA_SYSTEM_ACTOR,
+    AMUX_V4_INITIAL_SOURCE_PLAN_ACTION, "AmuxWorkItem"), false);
+  assert.equal(auditRowActorKind(row({
+    action: AMUX_V4_INITIAL_SOURCE_PLAN_ACTION,
+    targetType: AMUX_V4_INITIAL_SOURCE_PLAN_TARGET,
+    metadata: { systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR },
+  })), "unknown", "legacy marker-only rows must not be retroactively classified");
+  for (const proposed of AMUX_PROPOSED_SYSTEM_AUDIT_ACTORS) {
+    assert.equal(new Set<string>(SYSTEM_AUDIT_ACTORS).has(proposed), false);
+    assert.equal(isSystemAuditActor(proposed), false);
+    assert.equal(auditRowActorKind(row({ metadata: { systemActor: proposed } })), "unknown");
+  }
   assert.equal(isSystemAuditActor("Tomverse-AMUX-Orchestrator"), false);
   // The column marker is not an audit actor name.
   assert.equal(isSystemAuditActor("system:amux-auto-promoter"), false);

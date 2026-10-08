@@ -39,6 +39,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   ".tmp",
   "app",
   "apps",
+  "bin",
   "components",
   "config",
   "crates",
@@ -98,6 +99,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // §4-2: the execution environment. Root files and root dot-directories are
   // handled structurally in `classifyPath`.
   ".github/**",
+  "bin/**",
   "scripts/**",
   "config/**",
   // Operator tooling that runs reviewer CLIs (the independent review
@@ -132,6 +134,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/issueBacklogPartialClone.test.mjs",
   "tests/agent*",
   "tests/engineeringAgent*",
+  "tests/support/engineeringAgentV22PublicationCheckHarness.mjs",
   "tests/**/engineering-agent*",
   "tests/**/agent-digest*",
   "tests/security*",
@@ -147,6 +150,8 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/adminAmux*",
   "lib/adminMessages/engineeringAgent*",
   "lib/adminMessages/agentDigests*",
+  // The Agent office's copy, which names the agent teams and what each may do.
+  "lib/adminMessages/agentOffice*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",
@@ -158,6 +163,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*",
 ];
 

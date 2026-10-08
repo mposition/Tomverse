@@ -16,7 +16,7 @@ let role = "owner";
 let recent = true;
 let validOrigin = true;
 let writes = 0;
-let failWrite = false;
+let failWrite: string | null = null;
 let installed = false;
 const pins = {
   stageApprovalAuditLogId: "synthetic-stage-audit",
@@ -72,13 +72,14 @@ async function loadRoute() {
   mock.module(mod("lib/promptRefinerVnextOneShotRunApproval.ts"), { namedExports: {
     approvePromptRefinerVnextOneShotRun: async (input: {
       expected: Record<string, unknown>;
+      stageId?: string;
     }) => {
       writes++;
       const { confirmation: _confirmation, ...expected } = pins;
       void _confirmation;
       assert.deepEqual(input.expected, expected);
-      if (failWrite) throw new Error("private run storage failed");
-      return { stageId: "prompt-refiner-vnext-one-shot-v1",
+      if (failWrite) throw new Error(failWrite);
+      return { stageId: input.stageId ?? "prompt-refiner-vnext-one-shot-v4",
         runApprovalAuditLogId: "synthetic-run-audit", dispatchAuthorized: false };
     },
   } });
@@ -124,15 +125,37 @@ test("strict pins precede a single write; failure response is content-free", asy
   assert.equal(approved.status, 201);
   noStore(approved);
   assert.deepEqual(await approved.json(), {
-    stageId: "prompt-refiner-vnext-one-shot-v1",
+    stageId: "prompt-refiner-vnext-one-shot-v4",
     runApprovalAuditLogId: "synthetic-run-audit",
     dispatchAuthorized: false,
   });
   assert.equal(writes, 1);
-  failWrite = true;
+  failWrite = "vnext_one_shot_price_mismatch";
+  const refused = await route.POST(request());
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).retryAuthorized, false);
+  failWrite = "private run storage failed";
   const failed = await route.POST(request());
   assert.equal(failed.status, 503);
   noStore(failed);
   assert.doesNotMatch(JSON.stringify(await failed.json()), /private|runner|root/);
+  delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED;
+});
+
+test("v5 run approval requires the new explicit stage and confirmation", async () => {
+  const route = await loadRoute();
+  process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED = "1";
+  failWrite = null;
+  const before = writes;
+  const stageId = "prompt-refiner-vnext-one-shot-v5";
+  assert.equal((await route.POST(request({ ...pins, stageId }))).status, 400);
+  assert.equal((await route.POST(request({ ...pins,
+    confirmation: "APPROVE_VNEXT_ONE_SHOT_NEW_V5_RUN_80_SLOTS" }))).status, 400);
+  assert.equal(writes, before);
+  const approved = await route.POST(request({ ...pins, stageId,
+    confirmation: "APPROVE_VNEXT_ONE_SHOT_NEW_V5_RUN_80_SLOTS" }));
+  assert.equal(approved.status, 201);
+  assert.equal((await approved.json()).stageId, stageId);
+  assert.equal(writes, before + 1);
   delete process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED;
 });

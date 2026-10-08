@@ -25,6 +25,7 @@ import {
   observationSlotSeries,
   p1WindowJudgement,
   p2WindowJudgement,
+  observationSummaryView,
 } from "@/lib/productResearchObservationCore.mjs";
 import { isProductResearchRouteEnabled } from "@/lib/productResearchObservationRouteAuth";
 import { prisma } from "@/lib/prisma";
@@ -83,6 +84,16 @@ export type ProductResearchConsoleView = {
     mainSha: string;
     payloadDigest: string;
     issues: ProductResearchIssueView[];
+    /**
+     * The slot's own distribution, recomputed from the rows beside it.
+     *
+     * Counting a column by eye is the operator's job only until the column is
+     * long: the row limit is 200, and the P2 gate
+     * (docs/policy/product-research-agent.md §9) is a comparison of exactly this
+     * distribution against a local run. `null` when the stored payload does not
+     * have the shape to say -- an unknown count is not a zero.
+     */
+    summary: ProductResearchSummaryView | null;
     counts: unknown;
     blindSpots: unknown;
   } | null;
@@ -106,6 +117,25 @@ type StoredPayload = {
   }[];
   counts: unknown;
   blindSpots: unknown;
+};
+
+/**
+ * What the newest slot adds up to.
+ *
+ * Every verdict the vocabulary has, in the policy's own order and including
+ * the zeroes: a distribution with the zeroes dropped cannot be compared
+ * against another one, because "this verdict did not occur" and "this verdict
+ * is not in that build" would look the same.
+ *
+ * The vocabulary is read from the label table rather than from a second list,
+ * so the screen can only count verdicts it is also able to name.
+ */
+export type ProductResearchSummaryView = {
+  issueCount: number;
+  verdicts: { verdict: string; label: string | null; count: number }[];
+  blindSpots: { noSignalIssues: number; oneBranchOnly: number };
+  /** False when the stored counts disagree with the rows stored beside them. */
+  storedCountsAgree: boolean;
 };
 
 export async function readProductResearchConsole(
@@ -244,6 +274,7 @@ export async function readProductResearchConsole(
               blockedOnPresent: issue.blockedOnPresent,
               signals: issue.signals,
             })),
+            summary: observationSummaryView(payload),
             counts: payload.counts,
             blindSpots: payload.blindSpots,
           },

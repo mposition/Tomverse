@@ -40,6 +40,7 @@ Production mutation 전에는 다음을 확인한다.
 - immutable run records: `staging-verification-records/`
 - verification index: `verification/README.md`
 - recovery와 rollback: `recovery.md`
+- AMUX 서버 바이너리 빌드·교체·되돌리기: `server-deploy.md`
 
 실제 run record는 staging이 실제로 서빙하는 전체 40자리 SHA를 확인한 뒤에만
 생성한다.

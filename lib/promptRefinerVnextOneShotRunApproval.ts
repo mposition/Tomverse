@@ -11,10 +11,14 @@ import {
 } from "@/lib/promptRefinerVnextOneShotAuditReadback";
 import { readPromptRefinerVnextOneShotCandidateSource } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
+import { assertPromptRefinerVnextOneShotCurrentPrice } from
+  "@/lib/promptRefinerVnextOneShotPriceGuard";
 import { lockAndReadPromptRefinerVnextOneShotStage } from
   "@/lib/promptRefinerVnextOneShotStageReadback";
+import { V5_STAGE_ID, type PromptRefinerRunnableStageId } from
+  "@/lib/promptRefinerVnextOneShotV5Recovery";
 
-const STAGE_ID = "prompt-refiner-vnext-one-shot-v1";
+const STAGE_ID = "prompt-refiner-vnext-one-shot-v4";
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export type PromptRefinerVnextOneShotRunApprovalPins = Readonly<{
@@ -38,6 +42,7 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
   session: Session;
   request: Request;
   expected: PromptRefinerVnextOneShotRunApprovalPins;
+  stageId?: PromptRefinerRunnableStageId;
 }): Promise<Readonly<{
   stageId: string;
   runApprovalAuditLogId: string;
@@ -46,6 +51,10 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
   if (!input.session?.user?.id || !input.request || !input.expected ||
       adminAuditIntegrityKeys(process.env).length === 0) {
     throw new Error("vnext_one_shot_run_approval_context_invalid");
+  }
+  const stageId = input.stageId ?? STAGE_ID;
+  if (stageId !== STAGE_ID && stageId !== V5_STAGE_ID) {
+    throw new Error("vnext_one_shot_run_stage_invalid");
   }
   const pinnedRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
   const pinnedRunner = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
@@ -56,15 +65,16 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
     // The shared chain lock precedes stage/slot/registry locks to retain the
     // existing audit writer's global lock order. Refusals roll it all back.
     await takeAuditChainLock(tx);
-    const readback = await lockAndReadPromptRefinerVnextOneShotStage(tx);
+    const readback = await lockAndReadPromptRefinerVnextOneShotStage(tx, {}, stageId);
     if (!readback.stagePresent || readback.stageStatus !== "staged" ||
         !readback.reservationShapeValid || !readback.approvalAuditsValid ||
         readback.reservedSlots !== 80 || readback.consumedSlots !== 0) {
       throw new Error("vnext_one_shot_run_stage_not_ready");
     }
-    await readPromptRefinerVnextOneShotCandidateSource(tx);
+    await readPromptRefinerVnextOneShotCandidateSource(tx, stageId);
+    await assertPromptRefinerVnextOneShotCurrentPrice(tx);
     const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-      where: { id: STAGE_ID },
+      where: { id: stageId },
     });
     if (!stage || stage.approvedBy !== input.session.user.id ||
         stage.runApprovalAuditLogId !== null ||
@@ -85,18 +95,18 @@ export async function approvePromptRefinerVnextOneShotRun(input: {
       request: input.request,
       action: "prompt_refiner.vnext_one_shot.run_approved",
       targetType: "PromptRefinerVnextOneShotStage",
-      targetId: STAGE_ID,
+      targetId: stageId,
       summary: PROMPT_REFINER_VNEXT_ONE_SHOT_APPROVAL_SUMMARIES.run,
       metadata: promptRefinerVnextOneShotApprovalAuditMetadata(stage, "run"),
     });
     const updated = await tx.promptRefinerVnextOneShotStage.updateMany({
-      where: { id: STAGE_ID, status: "staged", runApprovalAuditLogId: null },
+      where: { id: stageId, status: "staged", runApprovalAuditLogId: null },
       data: { status: "run_approved", runApprovalAuditLogId: auditLogId },
     });
     if (updated.count !== 1) {
       throw new Error("vnext_one_shot_run_transition_conflict");
     }
-    return Object.freeze({ stageId: STAGE_ID,
+    return Object.freeze({ stageId,
       runApprovalAuditLogId: auditLogId,
       dispatchAuthorized: false as const });
   }, { maxWait: 5_000, timeout: 15_000 });
