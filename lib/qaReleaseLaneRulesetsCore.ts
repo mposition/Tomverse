@@ -20,6 +20,8 @@
  */
 import { createHash } from "node:crypto";
 
+import { parseDocument, visit } from "yaml";
+
 /** GitHub's built-in repository role ids for ruleset bypass: 5 is "admin". */
 export const QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID = 5;
 
@@ -267,6 +269,31 @@ const otherCredentials = (text: string, workflow: unknown): string[] => {
   return [...reasons].sort();
 };
 
+type QaReleaseWorkflowFile = { path: string; text: string; workflow: unknown; yamlAliases?: boolean };
+
+/**
+ * One workflow file as qaReleaseWorkflowBranchWriters reads it. `workflow` is
+ * null when the YAML does not parse. `yamlAliases` is true when the document
+ * holds an alias node -- the only way an anchor is reused or a merge key
+ * (`<<`) appears -- so the caller never relies on how a merge was expanded.
+ */
+export const qaReleaseReadWorkflow = (path: string, text: string): QaReleaseWorkflowFile => {
+  try {
+    const document = parseDocument(text);
+    if (document.errors.length > 0) return { path, text, workflow: null, yamlAliases: false };
+    let yamlAliases = false;
+    visit(document, {
+      Alias() {
+        yamlAliases = true;
+        return visit.BREAK;
+      },
+    });
+    return { path, text, workflow: document.toJS(), yamlAliases };
+  } catch {
+    return { path, text, workflow: null, yamlAliases: false };
+  }
+};
+
 /** The digest a person reviews: the workflow file's text, line endings normalised. */
 export const qaReleaseWorkflowDigest = (text: string): string =>
   createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
@@ -312,21 +339,26 @@ export const QA_RELEASE_REVIEWED_WRITER_WORKFLOWS: readonly { path: string; sha2
  * - it uses a secret not in QA_RELEASE_NON_BRANCH_SECRETS, passes secrets on
  *   wholesale, or mints an App token or uses a deploy key -- none of which
  *   can bypass;
- * - it cannot be read as YAML.
+ * - it cannot be read as YAML, or uses anchors, aliases or merge keys: a
+ *   value reached only through one (a `secrets: inherit` or an `if` in an
+ *   anchored job) is not in the plain parse, so such a file is read by a
+ *   person instead. No workflow here uses them (2026-10-08).
  * A listed workflow passes only by its whole-file digest in the reviewed list.
  *
  * Pure but for hashing: the caller passes each file's text and its parse
  * (the `yaml` package), or null when it could not be parsed.
  */
 export function qaReleaseWorkflowBranchWriters(
-  files: readonly { path: string; text: string; workflow: unknown }[],
+  files: readonly QaReleaseWorkflowFile[],
   defaultPermission: "read" | "write",
   reviewed: readonly { path: string; sha256: string }[] = QA_RELEASE_REVIEWED_WRITER_WORKFLOWS,
 ): string[] {
   const listed: string[] = [];
-  for (const { path, text, workflow } of files) {
+  for (const { path, text, workflow, yamlAliases } of files) {
     const sha256 = qaReleaseWorkflowDigest(text);
     const reasons: string[] = [];
+    // Unknown counts as present: a caller that did not check is not trusted.
+    if (yamlAliases !== false) reasons.push("yaml anchors or aliases");
     const root = asRecord(workflow);
     const jobs = asRecord(root?.jobs);
     if (!root || !jobs) reasons.push("unreadable");

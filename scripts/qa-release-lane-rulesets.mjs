@@ -18,7 +18,6 @@
 
 import { readFileSync } from "node:fs";
 
-import { parse as parseYaml } from "yaml";
 
 import { qaReleaseClassicProtection, qaReleaseRulesetRules } from "../lib/qaReleaseBranchProtectionCore.ts";
 import { qaReleaseRecordStillHolds } from "../lib/qaReleaseLaneObservationCore.ts";
@@ -26,6 +25,7 @@ import {
   QA_RELEASE_DEVELOP_RULESET_NAME,
   QA_RELEASE_UPDATE_RULESET_NAME,
   qaReleaseLaneRulesets,
+  qaReleaseReadWorkflow,
   qaReleaseWorkflowBranchWriters,
 } from "../lib/qaReleaseLaneRulesetsCore.ts";
 
@@ -84,13 +84,7 @@ const readWorkflows = async (ref) => {
     });
     if (response.status !== 200) throw new Error(`could not read ${entry.path} on ${ref}`);
     const text = await response.text();
-    let workflow = null;
-    try {
-      workflow = parseYaml(text);
-    } catch {
-      workflow = null;
-    }
-    files.push({ path: entry.path, text, workflow });
+    files.push(qaReleaseReadWorkflow(entry.path, text));
   }
   return files;
 };
