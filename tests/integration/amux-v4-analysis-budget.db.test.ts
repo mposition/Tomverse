@@ -9,6 +9,7 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
+  AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
@@ -735,38 +736,93 @@ async function syntheticFirstClaim() {
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
 
-async function simulateClaimedIdeaDeadlineCancellation(ideaId: string) {
-  return prisma.$transaction(async (tx) => {
-    await takeAuditChainLock(tx);
-    const idea = await tx.amuxIdeaSubmission.findUniqueOrThrow({
-      where: { id: ideaId },
-    });
-    if (idea.state !== "analyzing" || idea.cancelledAt !== null ||
-        idea.analysisCompletedAt !== null || !(idea.rawPurgeAfter instanceof Date)) {
-      throw new Error("invalid synthetic claimed cancellation fixture");
-    }
-    // Exercise the real post-canceller database shape without waiting seven days.
-    // The immutable deadline remains the cancellation anchor.
-    const cancelledAt = idea.analysisDeadlineAt;
-    const auditId = await writeSystemAuditLog({ tx,
-      systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
-      action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
-      targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
-      targetId: idea.id,
-      summary: "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
-      metadata: { submittedAt: idea.submittedAt.toISOString(),
-        analysisDeadlineAt: idea.analysisDeadlineAt.toISOString(),
-        rawPurgeAfter: idea.rawPurgeAfter.toISOString() },
-    });
-    const updated = await tx.amuxIdeaSubmission.updateMany({ where: {
-      id: idea.id, state: "analyzing", analysisCompletedAt: null, cancelledAt: null,
-    }, data: { state: "cancelled", cancelledAt } });
-    if (updated.count !== 1) {
-      throw new Error("synthetic claimed cancellation fixture raced");
-    }
-    return { auditId, cancelledAt, analysisDeadlineAt: idea.analysisDeadlineAt,
-      rawPurgeAfter: idea.rawPurgeAfter };
+async function syntheticFirstClaimInTransaction(tx: Prisma.TransactionClient) {
+  const selectedModelId = modelId();
+  const frontierApprovalId = randomUUID();
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1,
+    action: "approve", approvalId: frontierApprovalId, provider: "openai",
+    modelId: selectedModelId, allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true }));
+  assert.equal(frontier.ok, true);
+  if (!frontier.ok) throw new Error("synthetic frontier request invalid");
+  await commitFrontierCatalogDecision(tx,
+    { session, request, decision: frontier.request });
+
+  const ideaId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_BUDGET_${randomUUID()}`, repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await commitIdeaSubmission(tx, { session, request, inspected, ideaId, keys });
+  await commitInitialIdeaSourcePlan(tx, { session, request, ideaId, keys });
+  const choice = { previewId: randomUUID(), ideaId, provider: "openai" as const,
+    modelId: selectedModelId, reasoningEffort: "high" as const,
+    approvalId: frontierApprovalId, approvalVersion: 1 };
+  const prepared = await commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys, browserNonce });
+  await commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: choice.previewId, ideaId,
+      payloadDigest: prepared.payloadDigest,
+      payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys });
+
+  const priceVersionId = randomUUID();
+  const priceApproval = { id: priceVersionId, provider: "openai" as const,
+    modelId: selectedModelId, mode: "subscription_cli" as const,
+    expectedPreviousVersion: 0, inputTokensCap: 1_000, outputTokensCap: 2_000,
+    inputMicroUsdPerMillion: 1_000_000,
+    outputMicroUsdPerMillion: 2_000_000,
+    evidenceDigest: randomBytes(32).toString("hex"),
+    ownerConfirmedWorstTier: true as const,
+    verifiedAt: new Date(Date.now() - 24 * 60 * 60_000),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60_000) };
+  await commitAmuxIdeaAnalysisPriceApproval(tx,
+    { session, request, approval: priceApproval });
+  await tx.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
   });
+  const holdId = randomUUID();
+  await commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId: choice.previewId, priceVersionId, runner, keys });
+  const claim = await commitAmuxIdeaOnlyAnalysisClaim(tx,
+    { requestId: randomUUID(), previewId: choice.previewId, keys });
+  return { claim, previewId: choice.previewId, holdId };
+}
+
+async function simulateClaimedIdeaDeadlineCancellation(
+  tx: Prisma.TransactionClient, ideaId: string,
+) {
+  await takeAuditChainLock(tx);
+  const idea = await tx.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId },
+  });
+  if (idea.state !== "analyzing" || idea.cancelledAt !== null ||
+      idea.analysisCompletedAt !== null || !(idea.rawPurgeAfter instanceof Date)) {
+    throw new Error("invalid synthetic claimed cancellation fixture");
+  }
+  // Exercise the real post-canceller database shape without waiting seven days.
+  // The immutable deadline remains the cancellation anchor.
+  const cancelledAt = idea.analysisDeadlineAt;
+  const auditId = await writeSystemAuditLog({ tx,
+    systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+    action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+    targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
+    targetId: idea.id,
+    summary: "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
+    metadata: { submittedAt: idea.submittedAt.toISOString(),
+      analysisDeadlineAt: idea.analysisDeadlineAt.toISOString(),
+      rawPurgeAfter: idea.rawPurgeAfter.toISOString() },
+  });
+  const updated = await tx.amuxIdeaSubmission.updateMany({ where: {
+    id: idea.id, state: "analyzing", analysisCompletedAt: null, cancelledAt: null,
+  }, data: { state: "cancelled", cancelledAt } });
+  if (updated.count !== 1) {
+    throw new Error("synthetic claimed cancellation fixture raced");
+  }
+  return { auditId, cancelledAt, analysisDeadlineAt: idea.analysisDeadlineAt,
+    rawPurgeAfter: idea.rawPurgeAfter };
 }
 
 test("owner proof of non-execution releases a claimed hold as zero and fences late results", async () => {
@@ -936,95 +992,108 @@ test("a usage-unverified receipt forbids zero release and consumes the full rese
 });
 
 test("a cancelled in-flight claim can release zero without reopening analysis", async () => {
-  const { claim, previewId, holdId } = await syntheticFirstClaim();
-  const previewCount = await prisma.amuxIdeaTransferPreview.count({
-    where: { ideaId: claim.ideaId },
+  const claimCountBefore = await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
   });
-  const cancellation = await simulateClaimedIdeaDeadlineCancellation(claim.ideaId);
-  const readback = await prisma.$transaction((tx) =>
-    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
-  assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
-    readback.zeroReleaseEligible],
-  ["cancelled", cancellation.cancelledAt.toISOString(), true]);
-  const closed = await prisma.$transaction((tx) =>
-    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+  const rollback = new Error("rollback cancelled in-flight claim fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const previewCount = await tx.amuxIdeaTransferPreview.count({
+      where: { ideaId: claim.ideaId },
+    });
+    const cancellation = await simulateClaimedIdeaDeadlineCancellation(tx, claim.ideaId);
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId });
+    assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
+      readback.zeroReleaseEligible],
+    ["cancelled", cancellation.cancelledAt.toISOString(), true]);
+    const closed = await commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
       resolutionRequestId: randomUUID(), holdId,
       readbackDigest: readback.readbackDigest,
       evidenceDigest: randomBytes(32).toString("hex"),
-      disposition: "not_started_proven" }));
-  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
-    ["0", readback.reservedMicroUsd]);
-  const [idea, preview, chunk, hold, previewCountAfter, result] = await Promise.all([
-    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
-    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
-    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
-      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
-    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
-    prisma.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
-    readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys),
-  ]);
-  assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
-    idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
-  ["cancelled", cancellation.cancelledAt.toISOString(),
-    cancellation.analysisDeadlineAt.toISOString(),
-    cancellation.rawPurgeAfter.toISOString()]);
-  assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
-    chunk.currentPreviewId, hold.status, previewCountAfter, result.state],
-  ["in_flight", "in_flight", 1, previewId,
-    "owner_released_unstarted", previewCount, "cancelled"]);
+      disposition: "not_started_proven" });
+    assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+      ["0", readback.reservedMicroUsd]);
+    const [idea, preview, chunk, hold, previewCountAfter] = await Promise.all([
+      tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+      tx.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+      tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+        ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+      tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+      tx.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
+    ]);
+    assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
+      idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      cancellation.analysisDeadlineAt.toISOString(),
+      cancellation.rawPurgeAfter.toISOString()]);
+    assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
+      chunk.currentPreviewId, hold.status, previewCountAfter],
+    ["in_flight", "in_flight", 1, previewId,
+      "owner_released_unstarted", previewCount]);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  }), claimCountBefore);
 });
 
 test("a cancelled unknown claim consumes the full reservation without reopening analysis", async () => {
-  const { claim, previewId, holdId } = await syntheticFirstClaim();
-  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
-    requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
-    leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
-    inputTokens: null, outputTokens: null, keys,
-  }));
-  const previewCount = await prisma.amuxIdeaTransferPreview.count({
-    where: { ideaId: claim.ideaId },
+  const claimCountBefore = await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
   });
-  const cancellation = await simulateClaimedIdeaDeadlineCancellation(claim.ideaId);
-  const readback = await prisma.$transaction((tx) =>
-    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
-  assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
-    readback.resultOutcome, readback.resultFailureReason,
-    readback.zeroReleaseEligible],
-  ["cancelled", cancellation.cancelledAt.toISOString(),
-    "outcome_unknown", null, false]);
-  const evidenceDigest = randomBytes(32).toString("hex");
-  await assert.rejects(prisma.$transaction((tx) =>
-    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+  const rollback = new Error("rollback cancelled unknown claim fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    await commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
+      inputTokens: null, outputTokens: null, keys,
+    });
+    const previewCount = await tx.amuxIdeaTransferPreview.count({
+      where: { ideaId: claim.ideaId },
+    });
+    const cancellation = await simulateClaimedIdeaDeadlineCancellation(tx, claim.ideaId);
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId });
+    assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
+      readback.resultOutcome, readback.resultFailureReason,
+      readback.zeroReleaseEligible],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      "outcome_unknown", null, false]);
+    const evidenceDigest = randomBytes(32).toString("hex");
+    await assert.rejects(commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
       resolutionRequestId: randomUUID(), holdId,
       readbackDigest: readback.readbackDigest, evidenceDigest,
-      disposition: "not_started_proven" })),
-  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
-    error.code === "not_resolvable");
-  const closed = await prisma.$transaction((tx) =>
-    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      disposition: "not_started_proven" }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+      error.code === "not_resolvable");
+    const closed = await commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
       resolutionRequestId: randomUUID(), holdId,
       readbackDigest: readback.readbackDigest, evidenceDigest,
-      disposition: "evidence_insufficient" }));
-  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
-    [readback.reservedMicroUsd, "0"]);
-  const [idea, preview, chunk, hold, previewCountAfter, result] = await Promise.all([
-    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
-    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
-    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
-      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
-    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
-    prisma.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
-    readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys),
-  ]);
-  assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
-    idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
-  ["cancelled", cancellation.cancelledAt.toISOString(),
-    cancellation.analysisDeadlineAt.toISOString(),
-    cancellation.rawPurgeAfter.toISOString()]);
-  assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
-    chunk.currentPreviewId, hold.status, previewCountAfter, result.state],
-  ["outcome_unknown", "outcome_unknown", 1, previewId,
-    "owner_consumed", previewCount, "cancelled"]);
+      disposition: "evidence_insufficient" });
+    assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+      [readback.reservedMicroUsd, "0"]);
+    const [idea, preview, chunk, hold, previewCountAfter] = await Promise.all([
+      tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+      tx.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+      tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+        ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+      tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+      tx.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
+    ]);
+    assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
+      idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      cancellation.analysisDeadlineAt.toISOString(),
+      cancellation.rawPurgeAfter.toISOString()]);
+    assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
+      chunk.currentPreviewId, hold.status, previewCountAfter],
+    ["outcome_unknown", "outcome_unknown", 1, previewId,
+      "owner_consumed", previewCount]);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  }), claimCountBefore);
 });
 
 test("seventeen idea-only cards remain three bounded pages without an idea-wide cap", async () => {

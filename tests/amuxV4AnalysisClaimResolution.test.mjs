@@ -77,6 +77,10 @@ test("owner resolution stays dark, exact, Agent-only, and distinct from cancella
   assert.match(budgetPanel, /holdStatus === "reserved"/);
   assert.match(budgetPanel, /holdStatus === "in_flight"/);
   assert.match(budgetPanel, /holdStatus === "outcome_unknown"/);
+  assert.match(budgetPanel, /\["succeeded", "failed"\]\.includes\(holdStatus\)/);
+  assert.match(budgetPanel, /holdStatus === "released"/);
+  assert.match(budgetPanel, /holdStatus === "expired"/);
+  assert.match(budgetPanel, /!knownHoldStatus/);
   assert.match(budgetPanel, /onResolved=/);
   assert.match(budgetPanel, /loadHold\(\)\.catch/);
   assert.match(migration, /owner_released_unstarted/);

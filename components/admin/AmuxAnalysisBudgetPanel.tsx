@@ -91,6 +91,9 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
   const latest = price?.latest;
   const current = latest?.status === "approved" && latest.admissible;
   const holdStatus = hold?.state === "found" ? hold.hold.status : null;
+  const knownHoldStatus = holdStatus === null || ["reserved", "in_flight",
+    "outcome_unknown", "succeeded", "failed", "released", "expired",
+    "owner_consumed", "owner_released_unstarted"].includes(holdStatus);
 
   const approvePrice = async () => {
     if (!available || busy || !price || current || !checked || unknown) return;
@@ -224,6 +227,13 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
       ? <p role="status">{m.resolution.released}</p> : null}
     {holdStatus === "owner_consumed"
       ? <p role="status">{m.resolution.consumed}</p> : null}
+    {holdStatus && ["succeeded", "failed"].includes(holdStatus)
+      ? <p role="status">{m.holdSettled}</p> : null}
+    {holdStatus === "released" ? <p role="status">{m.holdReleased}</p> : null}
+    {holdStatus === "expired" ? <p role="status">{m.holdExpired}</p> : null}
+    {holdStatus && !knownHoldStatus ? <p role="status">
+      {m.holdOther} <span className="font-mono">{holdStatus}</span>
+    </p> : null}
     {hold?.state === "found" && ["in_flight", "outcome_unknown"].includes(hold.hold.status)
       ? <AmuxAnalysisClaimResolutionPanel holdId={hold.hold.id}
           onResolved={() => { void loadHold().catch(() => setFailure(true)); }} /> : null}
