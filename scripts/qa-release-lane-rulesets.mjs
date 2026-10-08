@@ -4,8 +4,8 @@
 // holds: it passed, it names the same bypass list, and develop's and main's
 // protection now is the one it recorded (item 10).
 //
-//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 15368,29110
-//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 15368,29110 --apply
+//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 29110
+//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 29110 --apply
 //
 // Without --apply it prints the two request bodies and whether the record
 // holds, and changes nothing. With --apply it creates both rulesets, then

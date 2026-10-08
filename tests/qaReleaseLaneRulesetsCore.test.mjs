@@ -29,7 +29,6 @@ test("the real rulesets: every branch but develop refuses updates and creations;
   assert.deepEqual(update.rules[1].parameters, { update_allows_fetch_and_merge: false });
   assert.deepEqual(update.bypass_actors, [
     { actor_id: QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID, actor_type: "RepositoryRole", bypass_mode: "always" },
-    { actor_id: 15368, actor_type: "Integration", bypass_mode: "always" },
     { actor_id: 29110, actor_type: "Integration", bypass_mode: "always" },
   ]);
 
@@ -53,7 +52,7 @@ test("the test rulesets are the real ones pointed at the test branches only", ()
   const realSet = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds: CANDIDATES, laneAppId: LANE_APP });
   assert.deepEqual(testSet.update.conditions.ref_name, {
     // The bypass automation branches are covered too, so their updates can be observed.
-    include: ["refs/heads/dependabot/**", "refs/heads/qa-lane-test/main-mirror", "refs/heads/qa-lane-test/other-base", "refs/heads/visual-baseline/**"],
+    include: ["refs/heads/dependabot/**", "refs/heads/qa-lane-test/main-mirror", "refs/heads/qa-lane-test/other-base"],
     exclude: [],
   });
   assert.deepEqual(testSet.develop.conditions.ref_name, { include: ["refs/heads/qa-lane-test/develop-mirror"], exclude: [] });

@@ -23,20 +23,17 @@
 export const QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID = 5;
 
 /**
- * Automation that updates branches today and therefore needs to bypass the
- * update ruleset (item 7). Ids read from `GET /apps/{slug}` on 2026-10-07.
+ * Automation that updates branches and can bypass the update ruleset
+ * (item 7). Ids read from `GET /apps/{slug}` on 2026-10-07.
+ *
  * Workflows that push with GH_AUTOMATION_PAT act as the account, which the
- * admin role already covers; visual-baseline-record pushes with the Actions
- * token, and Dependabot opens its own branches.
+ * admin role already covers. GitHub Actions (app 15368) is not a candidate:
+ * on this personal-account repository GitHub refuses it as a bypass actor
+ * ("must be part of the ruleset source or owner organization", seen
+ * 2026-10-08), so visual-baseline-record pushes its review branch with the PAT
+ * instead. Dependabot opens and updates its own branches and was accepted.
  */
 export const QA_RELEASE_BYPASS_CANDIDATES = Object.freeze([
-  Object.freeze({
-    appId: 15368,
-    slug: "github-actions",
-    botLogin: "github-actions[bot]",
-    branchPattern: "visual-baseline/**",
-    reason: "visual-baseline-record pushes its branch with the workflow token",
-  }),
   Object.freeze({
     appId: 29110,
     slug: "dependabot",

@@ -54,7 +54,9 @@ GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
 
 로컬 PC의 PowerShell, Tomverse clone 폴더 안, 1단계와 같은 창(`$env:GH_TOKEN` 설정됨). 쓰는 명령입니다: `qa-lane-test/*`
 브랜치와 이름이 정확히 `qa-release-lane: … (test)`인 ruleset 두 개만 만들고 바꾸며, `teardown`이 전부 지웁니다. `--bypass`는
-ruleset을 지나가야 하는 기존 자동화입니다(GitHub Actions 15368, Dependabot 29110; `lib/qaReleaseLaneRulesetsCore.ts`의 근거).
+ruleset을 지나가야 하는 기존 자동화이고 Dependabot(29110) 하나입니다(`lib/qaReleaseLaneRulesetsCore.ts`의 근거). GitHub Actions(15368)는 이 개인 계정 저장소에서
+GitHub이 bypass actor로 받지 않으므로(2026-10-08 확인) 목록에 없고, Actions 토큰으로 push하던 `visual-baseline-record`는
+`GH_AUTOMATION_PAT`(관리자 역할)로 push합니다.
 목록을 바꾸려면 모든 명령에 같은 값을 씁니다.
 
 **1) 준비.** develop·main의 classic protection을 시험 브랜치에 그대로 복사하고 시험 ruleset을 건 뒤, GitHub에 저장된 내용을
@@ -62,27 +64,28 @@ ruleset을 지나가야 하는 기존 자동화입니다(GitHub Actions 15368, D
 없는 설정(push 제한, 리뷰 우회 목록, 서명 필수, 알 수 없는 설정)이 있으면 아무것도 바꾸지 않고 멈춥니다(8절 10항).
 
 ```powershell
-npm run qa-release:lane-observe -- setup --observation-app-id <App ID> --bypass 15368,29110
+npm run qa-release:lane-observe -- setup --observation-app-id <App ID> --bypass 29110
 ```
 
-**2) 자동화의 브랜치 갱신 (8절 7항).** 시험 update ruleset은 bypass 자동화의 브랜치(`dependabot/**`, `visual-baseline/**`)에도
-걸려 있습니다. 그동안 각 자동화가 자기 브랜치를 한 번씩 갱신하게 합니다. 둘 다 운영자가 직접 일으킵니다.
+**2) 자동화의 브랜치 갱신 (8절 7항).** 시험 update ruleset은 bypass 자동화인 Dependabot의 브랜치(`dependabot/**`)에도
+걸려 있습니다. 그동안 Dependabot이 자기 브랜치를 한 번 갱신하게 합니다. 운영자가 직접 일으킵니다.
 
-- GitHub Actions: Actions → `visual-baseline-record` → Run workflow(develop). 실행이 `visual-baseline/<run id>` 브랜치를
-  push합니다. 생긴 브랜치와 PR은 이 관측이 끝나면 닫거나 지웁니다.
-- Dependabot: 열린 Dependabot PR 하나에 `@dependabot rebase` 댓글을 답니다. Dependabot이 그 브랜치를 다시 push합니다.
+- 열린 Dependabot PR 하나에 `@dependabot rebase` 댓글을 답니다. Dependabot이 그 브랜치를 다시 push합니다.
 
-갱신이 GitHub 활동 기록에 남았는지 읽기 전용으로 확인합니다. 종료 코드 0이면 두 App 모두 관측된 것입니다.
+`visual-baseline-record`는 bypass 목록이 아니라 관리자 역할(`GH_AUTOMATION_PAT`)로 지나가므로 여기서 따로 관측하지 않습니다.
+관리자 역할의 통과는 아래 관측의 운영자 병합·push로 확인됩니다.
+
+갱신이 GitHub 활동 기록에 남았는지 읽기 전용으로 확인합니다. 종료 코드 0이면 관측된 것입니다.
 
 ```powershell
-npm run qa-release:lane-observe -- automation-status --bypass 15368,29110
+npm run qa-release:lane-observe -- automation-status --bypass 29110
 ```
 
 **3) 관측.** 시험 보호가 아직 실제 보호와 같은지, 자동화 갱신이 관측됐는지 먼저 다시 확인하고, 하나라도 아니면 아무것도
 하지 않고 멈춥니다. 같으면 여덟 관측을 실행하고 기록을 씁니다.
 
 ```powershell
-npm run qa-release:lane-observe -- observe --observation-app-id <App ID> --bypass 15368,29110 --observation-key C:\keys\qa-lane-observation.pem
+npm run qa-release:lane-observe -- observe --observation-app-id <App ID> --bypass 29110 --observation-key C:\keys\qa-lane-observation.pem
 ```
 
 `observe`는 여덟 관측과 자동화 갱신의 표, 기록 파일 경로(`docs/ops/qa-release-merge-lane-observations/*.json`)를 출력합니다.
@@ -115,14 +118,14 @@ npm run qa-release:lane-observe -- teardown
 읽기만 합니다.
 
 ```powershell
-npm run qa-release:lane-rulesets -- --record docs/ops/qa-release-merge-lane-observations/<기록>.json --observation-app-id <App ID> --bypass 15368,29110
+npm run qa-release:lane-rulesets -- --record docs/ops/qa-release-merge-lane-observations/<기록>.json --observation-app-id <App ID> --bypass 29110
 ```
 
 `"recordHolds": true`이면 같은 명령에 `--apply`를 붙입니다. 기록 뒤 develop·main의 보호가 바뀌었으면 거절하고 아무것도 바꾸지
 않습니다(8절 10항) — 그때는 2단계를 다시 합니다.
 
 ```powershell
-npm run qa-release:lane-rulesets -- --record docs/ops/qa-release-merge-lane-observations/<기록>.json --observation-app-id <App ID> --bypass 15368,29110 --apply
+npm run qa-release:lane-rulesets -- --record docs/ops/qa-release-merge-lane-observations/<기록>.json --observation-app-id <App ID> --bypass 29110 --apply
 ```
 
 거는 날 주의할 것:
