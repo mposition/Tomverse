@@ -449,3 +449,21 @@ a07bebe2432c3f003ffeb38573a694ce8ecab80a:tests/agentDigestStoreCore.test.mjs:gen
 a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4LocalRetentionTrigger.test.mjs:generic-api-key:9
 a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxCommitDeadline.test.mjs:generic-api-key:84
 a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4ContentRetentionRoute.test.mjs:generic-api-key:10
+
+# AMUX Decision Maker S1d labels and a synthetic test token, not credentials.
+#
+# Commit c627ce4 introduced lib/amux/decisionMakerBodyCore.ts, whose result
+# digest is an HMAC under a per-request key with a fixed domain-separation
+# label; the scanner's generic-api-key rule reads that label, passed as the
+# second argument to hmac(), as a key. Two assertions in
+# tests/amuxDecisionMakerBody.test.mjs repeat the same label. The same test
+# file also feeds the body store's secret check an invented GitHub-token
+# shape to prove it is refused. None of these values grants access to any
+# system. Values are intentionally not repeated here.
+#
+# Scope: exactly these five findings in that one commit — nothing wider.
+c627ce4ede7ab0618b16205d8109741facab5fd8:lib/amux/decisionMakerBodyCore.ts:generic-api-key:188
+c627ce4ede7ab0618b16205d8109741facab5fd8:lib/amux/decisionMakerBodyCore.ts:generic-api-key:189
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:292
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:293
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:github-pat:389
