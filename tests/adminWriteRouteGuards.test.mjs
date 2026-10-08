@@ -497,6 +497,25 @@ test("every admin write route writes an audit entry", () => {
   );
 });
 
+test("multiline AMUX service imports remain in the audit sweep", () => {
+  const serviceAuditedRoutes = [
+    "amux/ideas/analysis-prices/route.ts",
+    "amux/ideas/analysis-reservations/route.ts",
+    "amux/ideas/retention-holds/route.ts",
+    "amux/ideas/unit-decisions/cancel/route.ts",
+    "amux/ideas/unit-decisions/no-commit/route.ts",
+    "amux/portfolio/route.ts",
+    "amux/task-cost-catalog/route.ts",
+    "amux/v22-lane/route.ts",
+  ];
+  for (const name of serviceAuditedRoutes) {
+    const route = routes.find((candidate) => candidate.name === name);
+    assert.ok(route, `${name} is included in the admin route sweep`);
+    assert.equal(route.reaches("writeAdminAuditLog"), true,
+      `${name} reaches its canonical audit writer through the imported service`);
+  }
+});
+
 test("a route that can queue an approval can also answer the step-up refusal", () => {
   // `runWithAdminApproval` asserts a recent sign-in before it does anything
   // else and throws `AdminReauthenticationRequiredError`. Only
