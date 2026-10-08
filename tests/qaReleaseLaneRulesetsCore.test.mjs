@@ -111,13 +111,52 @@ test("what is sent compares equal to what GitHub stores, and GitHub's extra-appr
   assert.equal(same(develop.rules, storedAsSent), true);
 });
 
-test("a workflow that runs git push without the admin PAT is named, so the real rulesets wait for it", async () => {
+
+test("a push counts as the admin PAT's only when the PAT is wired to it", async () => {
   const { qaReleaseWorkflowTokenPushers } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
-  const files = [
-    { path: ".github/workflows/token-push.yml", text: "steps:\n  - run: |\n      git push origin \"$branch\"\n" },
-    { path: ".github/workflows/pat-push.yml", text: "env:\n  GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}\nsteps:\n  - run: git push \"https://x-access-token:${GH_TOKEN}@github.com/x.git\" b\n" },
-    { path: ".github/workflows/comment-only.yml", text: "      # `git push` is never the signal\n" },
-    { path: ".github/workflows/none.yml", text: "steps:\n  - run: npm test\n" },
+  const { parse } = await import("yaml");
+  const { readFileSync } = await import("node:fs");
+  const PAT = "${{ secrets.GH_AUTOMATION_PAT }}";
+  const wf = (path, workflow) => ({ path, workflow });
+
+  // The four ways this repository wires it, each as its own workflow uses it.
+  const safe = [
+    wf("checkout-token", { jobs: { a: { steps: [{ uses: "actions/checkout@v6", with: { token: PAT } }, { run: 'git push origin "$b"' }] } } }),
+    wf("setup-git", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'gh auth setup-git\ngit push origin "$b"' }] } } }),
+    wf("remote-set-url", {
+      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git remote set-url origin \\n  "https://x-access-token:${GH_TOKEN}@github.com/x.git"\ngit push origin "$b"' }] } },
+    }),
+    wf("url", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git push "https://x-access-token:${GH_TOKEN}@github.com/x.git" "$b"' }] } } }),
   ];
-  assert.deepEqual(qaReleaseWorkflowTokenPushers(files), [".github/workflows/token-push.yml"]);
+  assert.deepEqual(qaReleaseWorkflowTokenPushers(safe), []);
+
+  // The ways it is not wired, all listed.
+  const unsafe = [
+    // the PAT named only in a comment
+    wf("comment", { jobs: { a: { steps: [{ run: '# migrate to secrets.GH_AUTOMATION_PAT later\ngit push origin "$b"' }] } } }),
+    // the PAT in another job
+    wf("other-job", { jobs: { a: { env: { GH_TOKEN: PAT }, steps: [{ run: "echo" }] }, b: { steps: [{ run: 'git push origin "$b"' }] } } }),
+    // a checkout token whose credential is not kept
+    wf("not-persisted", { jobs: { a: { steps: [{ uses: "actions/checkout@v6", with: { token: PAT, "persist-credentials": false } }, { run: "git push origin x" }] } } }),
+    // a URL whose variable is the workflow token
+    wf("workflow-token-url", { jobs: { a: { steps: [{ env: { GH_TOKEN: "${{ github.token }}" }, run: 'git push "https://x-access-token:${GH_TOKEN}@github.com/x.git" b' }] } } }),
+    // setup-git in an earlier step, not this one
+    wf("setup-elsewhere", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: "gh auth setup-git" }, { run: "git push origin x" }] } } }),
+    // unreadable
+    wf("unreadable", null),
+  ];
+  assert.deepEqual(qaReleaseWorkflowTokenPushers(unsafe), [
+    "comment#a/0",
+    "not-persisted#a/1",
+    "other-job#b/0",
+    "setup-elsewhere#a/1",
+    "unreadable#unreadable",
+    "workflow-token-url#a/0",
+  ]);
+
+  // The repository's own PAT pushers read as safe, parsed from their files.
+  const own = ["back-merge-main-to-develop", "cron-auto-fix", "feedback-autofix", "feedback-autofix-promotion-pr"].map((name) =>
+    wf(name, parse(readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8"))),
+  );
+  assert.deepEqual(qaReleaseWorkflowTokenPushers(own), []);
 });

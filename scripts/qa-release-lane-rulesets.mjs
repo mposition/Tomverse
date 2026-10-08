@@ -18,6 +18,8 @@
 
 import { readFileSync } from "node:fs";
 
+import { parse as parseYaml } from "yaml";
+
 import { qaReleaseClassicProtection, qaReleaseRulesetRules } from "../lib/qaReleaseBranchProtectionCore.ts";
 import { qaReleaseRecordStillHolds } from "../lib/qaReleaseLaneObservationCore.ts";
 import {
@@ -81,7 +83,14 @@ const readWorkflows = async (ref) => {
       signal: AbortSignal.timeout(30_000),
     });
     if (response.status !== 200) throw new Error(`could not read ${entry.path} on ${ref}`);
-    files.push({ path: `${ref}:${entry.path}`, text: await response.text() });
+    const text = await response.text();
+    let workflow = null;
+    try {
+      workflow = parseYaml(text);
+    } catch {
+      workflow = null;
+    }
+    files.push({ path: `${ref}:${entry.path}`, workflow });
   }
   return files;
 };

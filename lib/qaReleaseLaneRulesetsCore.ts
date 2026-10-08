@@ -179,25 +179,89 @@ export function qaReleaseComparableRules(rules: readonly { type: string; paramet
     .sort((a, b) => a.type.localeCompare(b.type));
 }
 
+/** The one expression that names the admin PAT, compared without spaces. */
+const isPat = (value: unknown): boolean =>
+  typeof value === "string" && value.replace(/\s+/g, "") === "${{secrets.GH_AUTOMATION_PAT}}";
+
+type Json = Record<string, unknown>;
+const asRecord = (value: unknown): Json | null =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : null;
+
+/** A script's lines without comments, with backslash continuations joined. */
+const scriptLines = (run: string): string[] => {
+  const joined: string[] = [];
+  let pending = "";
+  for (const raw of run.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("#")) continue;
+    if (line.endsWith("\\")) {
+      pending += `${line.slice(0, -1)} `;
+      continue;
+    }
+    joined.push(pending + line);
+    pending = "";
+  }
+  if (pending) joined.push(pending);
+  return joined;
+};
+const ACCESS_TOKEN_URL = /x-access-token:\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?@/;
+
 /**
- * Workflows that would push a branch with the workflow token, which the update
- * ruleset refuses once applied (GitHub Actions cannot be on its bypass list
- * here). A workflow whose script runs `git push` must take the admin PAT
- * (GH_AUTOMATION_PAT); the real-ruleset step refuses while any does not, so
- * applying the rulesets cannot silently break a workflow that pushes.
+ * Every `git push` in the workflows that is not authenticated with the admin
+ * PAT, as `path#job/step`. The update ruleset refuses a workflow-token push to
+ * every branch but develop once applied (GitHub Actions cannot be on its
+ * bypass list here), so the real-ruleset step refuses while any is listed.
  *
- * Text only: comment lines are skipped, and the PAT is looked for anywhere in
- * the file, since each workflow wires it into its own push step.
+ * A push counts as the PAT's only when it is wired to it in one of the four
+ * ways this repository's workflows use, in the same job:
+ * - its URL is `x-access-token:${VAR}@...` and VAR is the PAT in the step's
+ *   effective environment;
+ * - earlier in the job, `git remote set-url` put such a URL on the remote;
+ * - earlier in the same step, `gh auth setup-git` ran with GH_TOKEN the PAT;
+ * - the job's checkout took the PAT as its token and kept the credential.
+ * Anything else -- including the PAT named only in a comment or another job,
+ * or a workflow that cannot be read as YAML -- is listed, never assumed safe.
+ *
+ * Pure: the caller parses each workflow (the `yaml` package) and passes the
+ * object, or null when it could not.
  */
-export function qaReleaseWorkflowTokenPushers(files: readonly { path: string; text: string }[]): string[] {
-  return files
-    .filter(({ text }) =>
-      text.split("\n").some((line) => {
-        const trimmed = line.trim();
-        return !trimmed.startsWith("#") && /\bgit push\b/.test(trimmed);
-      }),
-    )
-    .filter(({ text }) => !text.includes("secrets.GH_AUTOMATION_PAT"))
-    .map(({ path }) => path)
-    .sort();
+export function qaReleaseWorkflowTokenPushers(files: readonly { path: string; workflow: unknown }[]): string[] {
+  const unsafe: string[] = [];
+  for (const { path, workflow } of files) {
+    const root = asRecord(workflow);
+    const jobs = asRecord(root?.jobs);
+    if (!root || !jobs) {
+      unsafe.push(`${path}#unreadable`);
+      continue;
+    }
+    for (const [jobId, rawJob] of Object.entries(jobs)) {
+      const job = asRecord(rawJob);
+      const steps = Array.isArray(job?.steps) ? job.steps : [];
+      let checkoutKeepsPat = false;
+      let remoteHasPat = false;
+      steps.forEach((rawStep, index) => {
+        const step = asRecord(rawStep) ?? {};
+        const env = { ...(asRecord(root.env) ?? {}), ...(asRecord(job?.env) ?? {}), ...(asRecord(step.env) ?? {}) };
+        const uses = typeof step.uses === "string" ? step.uses : "";
+        if (uses.startsWith("actions/checkout@")) {
+          const withs = asRecord(step.with) ?? {};
+          checkoutKeepsPat = isPat(withs.token) && withs["persist-credentials"] !== false && withs["persist-credentials"] !== "false";
+        }
+        if (typeof step.run !== "string") return;
+        let setupGitWithPat = false;
+        for (const line of scriptLines(step.run)) {
+          if (/\bgh auth setup-git\b/.test(line)) setupGitWithPat = isPat(env.GH_TOKEN);
+          if (/\bgit remote set-url\b/.test(line)) {
+            const match = ACCESS_TOKEN_URL.exec(line);
+            remoteHasPat = Boolean(match && isPat(env[match[1]]));
+          }
+          if (!/\bgit push\b/.test(line)) continue;
+          const direct = ACCESS_TOKEN_URL.exec(line);
+          const authenticated = direct ? isPat(env[direct[1]]) : remoteHasPat || setupGitWithPat || checkoutKeepsPat;
+          if (!authenticated) unsafe.push(`${path}#${jobId}/${index}`);
+        }
+      });
+    }
+  }
+  return [...new Set(unsafe)].sort();
 }
