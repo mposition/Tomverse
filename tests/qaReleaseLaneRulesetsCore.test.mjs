@@ -110,3 +110,14 @@ test("what is sent compares equal to what GitHub stores, and GitHub's extra-appr
   storedAsSent[0].parameters.require_extra_approval_for_unattributed_changes = false;
   assert.equal(same(develop.rules, storedAsSent), true);
 });
+
+test("a workflow that runs git push without the admin PAT is named, so the real rulesets wait for it", async () => {
+  const { qaReleaseWorkflowTokenPushers } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  const files = [
+    { path: ".github/workflows/token-push.yml", text: "steps:\n  - run: |\n      git push origin \"$branch\"\n" },
+    { path: ".github/workflows/pat-push.yml", text: "env:\n  GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}\nsteps:\n  - run: git push \"https://x-access-token:${GH_TOKEN}@github.com/x.git\" b\n" },
+    { path: ".github/workflows/comment-only.yml", text: "      # `git push` is never the signal\n" },
+    { path: ".github/workflows/none.yml", text: "steps:\n  - run: npm test\n" },
+  ];
+  assert.deepEqual(qaReleaseWorkflowTokenPushers(files), [".github/workflows/token-push.yml"]);
+});

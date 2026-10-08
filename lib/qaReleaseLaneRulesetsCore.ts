@@ -178,3 +178,26 @@ export function qaReleaseComparableRules(rules: readonly { type: string; paramet
     })
     .sort((a, b) => a.type.localeCompare(b.type));
 }
+
+/**
+ * Workflows that would push a branch with the workflow token, which the update
+ * ruleset refuses once applied (GitHub Actions cannot be on its bypass list
+ * here). A workflow whose script runs `git push` must take the admin PAT
+ * (GH_AUTOMATION_PAT); the real-ruleset step refuses while any does not, so
+ * applying the rulesets cannot silently break a workflow that pushes.
+ *
+ * Text only: comment lines are skipped, and the PAT is looked for anywhere in
+ * the file, since each workflow wires it into its own push step.
+ */
+export function qaReleaseWorkflowTokenPushers(files: readonly { path: string; text: string }[]): string[] {
+  return files
+    .filter(({ text }) =>
+      text.split("\n").some((line) => {
+        const trimmed = line.trim();
+        return !trimmed.startsWith("#") && /\bgit push\b/.test(trimmed);
+      }),
+    )
+    .filter(({ text }) => !text.includes("secrets.GH_AUTOMATION_PAT"))
+    .map(({ path }) => path)
+    .sort();
+}

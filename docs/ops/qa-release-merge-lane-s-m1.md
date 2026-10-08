@@ -114,6 +114,10 @@ npm run qa-release:lane-observe -- teardown
 
 ## 3. 실제 ruleset (develop 밖 모든 브랜치 갱신 제한, develop PR 필수)
 
+**선행 조건**: develop과 main의 어떤 workflow도 workflow 토큰으로 `git push`하지 않아야 합니다. ruleset이 걸리면 그 push가
+막히기 때문입니다. 스크립트가 두 브랜치의 workflow를 읽어 확인하고, 하나라도 있으면 아무것도 바꾸지 않고 멈춥니다.
+`visual-baseline-record`를 `GH_AUTOMATION_PAT`로 바꾸는 변경이 develop과 main 모두에 들어간 뒤에 진행합니다.
+
 로컬 PC의 PowerShell, Tomverse clone 폴더 안, `$env:GH_TOKEN` 설정됨. 먼저 dry run으로 기록이 아직 유효한지 봅니다. dry run은
 읽기만 합니다.
 

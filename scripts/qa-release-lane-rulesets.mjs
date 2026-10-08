@@ -20,7 +20,12 @@ import { readFileSync } from "node:fs";
 
 import { qaReleaseClassicProtection, qaReleaseRulesetRules } from "../lib/qaReleaseBranchProtectionCore.ts";
 import { qaReleaseRecordStillHolds } from "../lib/qaReleaseLaneObservationCore.ts";
-import { QA_RELEASE_DEVELOP_RULESET_NAME, QA_RELEASE_UPDATE_RULESET_NAME, qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
+import {
+  QA_RELEASE_DEVELOP_RULESET_NAME,
+  QA_RELEASE_UPDATE_RULESET_NAME,
+  qaReleaseLaneRulesets,
+  qaReleaseWorkflowTokenPushers,
+} from "../lib/qaReleaseLaneRulesetsCore.ts";
 
 const API = "https://api.github.com/repos/mposition/Tomverse";
 const args = process.argv.slice(2);
@@ -64,7 +69,32 @@ const readProtection = async (branch) => {
   return { branch, classic: qaReleaseClassicProtection(classic.status === 404 ? null : classic.json), rules: qaReleaseRulesetRules(rules.json) };
 };
 
+/** Every workflow file on a branch, as text: the push check reads what that branch would run. */
+const readWorkflows = async (ref) => {
+  const list = await call("GET", `/contents/.github/workflows?ref=${ref}`);
+  if (list.status !== 200 || !Array.isArray(list.json)) throw new Error(`could not list ${ref}'s workflows`);
+  const files = [];
+  for (const entry of list.json.filter((item) => item.type === "file" && /\.ya?ml$/.test(item.name))) {
+    const response = await fetch(`${API}/contents/${entry.path}?ref=${ref}`, {
+      headers: { accept: "application/vnd.github.raw+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28" },
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status !== 200) throw new Error(`could not read ${entry.path} on ${ref}`);
+    files.push({ path: `${ref}:${entry.path}`, text: await response.text() });
+  }
+  return files;
+};
+
 try {
+  // Applied, the update ruleset refuses a workflow-token push to any branch
+  // but develop. Refuse first while a workflow on develop or main would make
+  // one (visual-baseline-record until it pushes with the admin PAT).
+  const tokenPushers = qaReleaseWorkflowTokenPushers([...(await readWorkflows("develop")), ...(await readWorkflows("main"))]);
+  if (tokenPushers.length > 0) {
+    fail(`These workflows push with the workflow token, which the rulesets would refuse; move them to GH_AUTOMATION_PAT first. Nothing was changed: ${tokenPushers.join(", ")}`);
+  }
+
   const record = JSON.parse(readFileSync(recordPath, "utf8"));
   if (record.observationAppId !== appId) fail("--observation-app-id differs from the record's observation App.");
   const bodies = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds, laneAppId: appId });
