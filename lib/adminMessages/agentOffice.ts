@@ -620,11 +620,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       lead: "Lead",
       operator: "Op",
     },
-    credit: {
-      line: "Original UI: AI OFFICE by godseng.mom 🎀",
-      link: "📷 @godseng.mom — more creator tools →",
-      terms: "© godseng.mom · free to use and adapt, no unauthorised resale",
-    },
     sim: {
       greetings: ["Good morning!", "Clocking in ✨", "Let's go!", "Coffee first…"],
       ready: "The operator's office is ready. Waiting for the start button.",
@@ -1353,11 +1348,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       hint: "드래그로 둘러보기 · 직원 클릭하면 프로필",
       lead: "리드",
       operator: "운영자",
-    },
-    credit: {
-      line: "UI 원작: 갓생맘 🎀 AI OFFICE",
-      link: "📷 @godseng.mom — 더 많은 크리에이터 툴 보러가기 →",
-      terms: "© godseng.mom · 자유롭게 쓰되 무단 재판매 금지",
     },
     sim: {
       greetings: ["좋은 아침이에요!", "출근합니다 ✨", "오늘도 화이팅!", "커피부터…"],
