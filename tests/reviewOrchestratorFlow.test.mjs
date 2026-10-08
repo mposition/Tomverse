@@ -64,8 +64,87 @@ function fixture(modes, extra = {}) {
     git(work, "add", ".");
     git(work, "commit", "-q", "-m", `change ${file}`);
   };
-  return { root, work, origin, config: validateConfig(raw), client, commit, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, work, origin, configPath, config: validateConfig(raw), client, commit, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
+
+test("an explicit reviewer survives RPC, queue restart and quota wait without fallback", async () => {
+  const f = fixture({});
+  try {
+    f.commit("a.txt", "pin cursor\n");
+    const submitted = f.client("submit", "--author", "codex", "--repo", "demo", "--reviewer", "cursor");
+    assert.equal(submitted.code, 3, submitted.stderr);
+    const { jobId, reviewerProviders } = JSON.parse(submitted.stdout);
+    assert.deepEqual(reviewerProviders, ["cursor"]);
+    const queued = JSON.parse(f.client("status", jobId).stdout);
+    assert.deepEqual(queued.reviewerProviders, ["cursor"]);
+    assert.equal(queued.reviews[0].requestedProvider, "cursor");
+    const orchestrator = new Orchestrator(f.config);
+    assert.deepEqual(orchestrator.tick({ ...allAvailable(f.config), cursor: { state: "exhausted" } }), []);
+    assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).status, "queued");
+    // A new orchestrator reads the persisted selection instead of reverting to auto.
+    const restarted = new Orchestrator(f.config);
+    assert.deepEqual(restarted.tick(allAvailable(f.config)).map((d) => d.provider), ["cursor"]);
+    await restarted.idle();
+    assert.equal(JSON.parse(f.client("wait", jobId).stdout).reviews[0].provider, "cursor");
+  } finally { f.cleanup(); }
+});
+
+test("explicit reviewer lists set the slot count and cannot bypass the contract floor", async () => {
+  const f = fixture({});
+  try {
+    f.commit("prisma/migrations/pin/migration.sql", "select 1;\n");
+    const submitted = f.client("submit", "--author", "codex", "--repo", "demo", "--reviewer", "claude");
+    assert.equal(submitted.code, 3, submitted.stderr);
+    const { jobId, reviewers } = JSON.parse(submitted.stdout);
+    assert.equal(reviewers, 2);
+    const orchestrator = new Orchestrator(f.config);
+    assert.deepEqual(orchestrator.tick(allAvailable(f.config)).map((d) => d.provider), ["claude", "cursor"]);
+    await orchestrator.idle();
+    const summary = JSON.parse(f.client("wait", jobId).stdout);
+    assert.deepEqual(summary.reviews.map((r) => r.requestedProvider), ["claude", null]);
+    // Repeat and comma forms carry the same list and infer at least two slots.
+    f.commit("a.txt", "two pins\n");
+    const second = f.client("submit", "--author", "claude", "--repo", "demo", "--reviewer", "cursor", "--reviewer", "codex");
+    assert.equal(second.code, 3, second.stderr);
+    assert.deepEqual(JSON.parse(second.stdout).reviewerProviders, ["cursor", "codex"]);
+    assert.equal(JSON.parse(second.stdout).reviewers, 2);
+    orchestrator.tick(allAvailable(f.config));
+    await orchestrator.idle();
+  } finally { f.cleanup(); }
+});
+
+test("invalid, disabled, same-vendor and duplicate explicit reviewers publish no job", () => {
+  const f = fixture({});
+  try {
+    f.commit("a.txt", "invalid pins\n");
+    f.config.providers.push({ ...f.config.providers[0], id: "claude-alt" });
+    writeFileSync(f.configPath, JSON.stringify(f.config));
+    for (const [selection, error] of [["missing", "reviewer_unavailable"], ["devin", "reviewer_unavailable"],
+      ["codex", "reviewer_not_independent"], ["claude,claude", "reviewer_providers_duplicate"],
+      ["claude,claude-alt", "reviewer_vendors_duplicate"], ["claude,", "reviewer_providers_invalid"],
+      ["claude,cursor,codex,devin", "reviewer_providers_invalid"]]) {
+      const refused = f.client("submit", "--author", "codex", "--repo", "demo", "--reviewer", selection);
+      assert.equal(refused.code, 64, refused.stderr);
+      assert.match(refused.stderr, new RegExp(error));
+      assert.equal(new Store(f.config.stateDir).listJobs().length, 0);
+    }
+  } finally { f.cleanup(); }
+});
+
+test("explicit selection is refused before upload when an older server cannot honor it", () => {
+  const f = fixture({});
+  try {
+    f.commit("a.txt", "old server\n");
+    const oldServer = join(f.root, "old-server.mjs");
+    writeFileSync(oldServer, 'const request = JSON.parse(Buffer.from(process.argv[3], "base64url")); if (request.command !== "status") process.exit(91); console.log(JSON.stringify({providers:[]}));');
+    const result = run(process.execPath, [CLIENT, "submit", "--author", "codex", "--repo", "demo", "--reviewer", "claude"],
+      { cwd: f.work, env: { ...process.env, REVIEW_ORCH_LOCAL_BIN: oldServer } });
+    assert.equal(result.code, 64, result.stderr);
+    assert.match(result.stderr, /reviewer_selection_unsupported/);
+    assert.equal(existsSync(join(f.config.stateDir, "incoming")), false);
+    assert.equal(new Store(f.config.stateDir).listJobs().length, 0);
+  } finally { f.cleanup(); }
+});
 
 test("submit -> assign to a different vendor -> verdict -> wait", async () => {
   const f = fixture({ claude: "accept" });

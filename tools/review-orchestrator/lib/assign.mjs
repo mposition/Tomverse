@@ -79,10 +79,11 @@ const compareCandidates = (load) => (a, b) => {
  * - `wait`: an allowed provider exists but every one is at its concurrency cap.
  * - `assign`: the least-loaded allowed provider.
  */
-export function pickReviewer({ providers, authorVendor, excludeVendors = [], load, blockedProviders = new Set() }) {
+export function pickReviewer({ providers, authorVendor, excludeVendors = [], load, blockedProviders = new Set(), requestedProvider }) {
   const excluded = new Set([authorVendor, ...excludeVendors]);
   const allowed = eligibleProviders(providers, authorVendor).filter(
-    (provider) => !excluded.has(provider.vendor),
+    (provider) => !excluded.has(provider.vendor) &&
+      (requestedProvider === undefined || provider.id === requestedProvider),
   );
   if (allowed.length === 0) return { kind: "impossible" };
   const free = allowed.filter(
@@ -106,14 +107,19 @@ export function planAssignments({ jobs, providers, load, now, blockedProviders =
   const decisions = [];
   for (const { job, slots } of jobs) {
     const taken = slots.filter((slot) => slot.vendor).map((slot) => slot.vendor);
+    // Reserve pinned vendors even while their slots wait, so an automatic
+    // slot cannot take their vendor and make the requested slot impossible.
+    const reserved = (job.reviewerProviders ?? []).map((id) => providers.find((p) => p.id === id)?.vendor).filter(Boolean);
     for (const slot of slots) {
       if (slot.status !== "queued") continue;
+      const requestedProvider = job.reviewerProviders?.[slot.index];
       const pick = pickReviewer({
         providers,
         authorVendor: job.authorVendor,
-        excludeVendors: taken,
+        excludeVendors: requestedProvider === undefined ? [...taken, ...reserved] : taken,
         load: working,
         blockedProviders: blocked,
+        requestedProvider,
       });
       if (pick.kind === "wait") continue;
       if (pick.kind === "impossible") {

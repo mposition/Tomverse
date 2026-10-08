@@ -86,6 +86,25 @@ function reviewedHead(store, repoName, head) {
     );
 }
 
+function checkReviewerProviders(config, ids, authorVendor) {
+  if (ids === undefined) return [];
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 3 || !ids.every(isName)) {
+    throw new UsageError("reviewer_providers_invalid", "pass one to three configured provider ids");
+  }
+  if (new Set(ids).size !== ids.length) throw new UsageError("reviewer_providers_duplicate");
+  const vendors = new Set();
+  for (const id of ids) {
+    const provider = config.providers.find((p) => p.id === id);
+    if (!provider || provider.enabled !== true) throw new UsageError("reviewer_unavailable", id);
+    if (!isName(provider.vendor) || provider.vendor === "unknown" || provider.vendor === authorVendor) {
+      throw new UsageError("reviewer_not_independent", id);
+    }
+    if (vendors.has(provider.vendor)) throw new UsageError("reviewer_vendors_duplicate", id);
+    vendors.add(provider.vendor);
+  }
+  return [...ids];
+}
+
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
   const { repo: repoName, base, head, author, authorVendor: statedVendor, scope } = request;
   const repo = config.repos[repoName];
@@ -102,6 +121,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
   if (!Number.isInteger(requested) || requested < 1 || requested > 3) {
     throw new UsageError("reviewers_invalid");
   }
+  const reviewerProviders = checkReviewerProviders(config, request.reviewerProviders, authorVendor);
   if (statSync(bundlePath).size > config.maxBundleBytes) throw new UsageError("bundle_too_large");
 
   const store = new Store(config.stateDir);
@@ -137,7 +157,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       // contract change before it, so then the whole base..head range counts.
       const focusReviewed = focus !== null && reviewedHead(store, repoName, focus);
       const contractFiles = focusReviewed ? focusFiles : files;
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, contractFiles);
+      const { reviewers, touchesContract } = requiredReviewers(config, Math.max(requested, reviewerProviders.length), contractFiles);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
         throw new UsageError(
@@ -154,6 +174,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         author,
         authorVendor,
         reviewers,
+        reviewerProviders,
         touchesContract,
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
@@ -162,7 +183,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         submittedAt: now.getTime(),
       };
       store.publish(job);
-      return { jobId: id, reviewers, touchesContract, fileCount: files.length, focus, focusFileCount: focusFiles.length };
+      return { jobId: id, reviewers, reviewerProviders, touchesContract, fileCount: files.length, focus, focusFileCount: focusFiles.length };
     } catch (error) {
       store.discardStaging(id);
       // A refused job leaves no review ref behind either.

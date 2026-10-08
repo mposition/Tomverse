@@ -84,6 +84,7 @@ function overview(store, config, quotas = null) {
   const load = computeLoad(jobs, Date.now());
   const queued = jobs.reduce((n, { slots }) => n + slots.filter((s) => s.status === "queued").length, 0);
   return {
+    capabilities: ["reviewer-selection-v1"],
     draining: isDraining(config),
     runningReviews: Object.values(load).reduce((n, entry) => n + entry.running, 0),
     queuedReviews: queued,

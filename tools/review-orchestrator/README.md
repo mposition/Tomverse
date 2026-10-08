@@ -30,6 +30,9 @@
 4. reviewer는 기본 1명입니다. 바뀐 파일이 `contractPaths`에 걸리면 서버가 2명으로
    올리며, 두 명은 반드시 서로 다른 공급사입니다. 집계는 reject 하나라도 있으면
    reject, 그다음 unknown, 모두 accept여야 accept입니다.
+5. 운영자가 예외로 특정 검토자를 요청한 경우 `--reviewer <providerId>`로 지정합니다.
+   지정은 기본 배정 순서에 우선하지만 독립성·잔액·동시 실행 한도와 계약 검토자 수는
+   그대로 적용합니다. 지정된 검토자가 대기하면 다른 검토자로 대체하지 않습니다.
 
 ## Windows에서 쓰기
 
@@ -87,12 +90,42 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
   diff와 계약 경로 판정은 범위를 좁히지 않고 base..HEAD 전체로 합니다 — checkout에 base
   버전이 들어 있으므로, 좁히면 그 이전의 지시 파일 변경이 보이지 않게 됩니다.
 
+### 예외 상황에서 특정 검토자 지정
+
+자동 배정이 기본입니다. 운영자가 특정 검토자를 요청한 경우 서버 설정의 provider ID를
+`--reviewer`로 전달합니다. 옵션 반복 또는 쉼표로 최대 3명을 지정할 수 있고, 지정 순서대로
+검토 슬롯에 연결됩니다. 지정 수보다 `--reviewers`나 계약 규칙의 최소 인원이 크면 나머지
+슬롯은 자동 배정합니다. 예를 들어 계약 변경에 `--reviewer claude` 하나만 지정해도
+검토자는 2명이며, 두 번째는 다른 공급사에서 자동으로 고릅니다.
+
+**로컬 PC의 PowerShell, 저장소 clone 폴더 안.** Node 22 이상, 지정 기능이 포함된
+클라이언트와 서버, `review-orch` SSH key가 필요합니다. production 자격증명은 필요 없습니다.
+명령은 서버에 검토 작업을 만들고 배정 후 계정의 사용량을 소비할 수 있습니다. 대기 중인
+작업을 취소하려면 운영자가 아래 서버 운영 절의 `cancel`을 사용합니다. 실행된 검토의
+사용량은 되돌릴 수 없습니다.
+
+```powershell
+npm run -s review -- submit --author codex --reviewer claude --scope "운영자가 지정한 예외 검토"
+npm run -s review -- submit --author codex --reviewer claude --reviewer copilot --scope "운영자가 지정한 두 검토자"
+```
+
+- ID는 `status`의 provider 목록에서 확인합니다. 없는 ID, 비활성 provider, 작성자와 같은
+  공급사, 중복 ID 또는 같은 공급사의 검토자 두 명은 요청 오류로 거절합니다.
+- 지정 계정이 동시 실행 한도에 도달했거나 잔액이 없거나 조회 결과를 확인할 수 없으면
+  해당 슬롯은 대기합니다. 다른 작업은 계속 배정할 수 있습니다.
+- `status <jobId>`와 `wait <jobId>`의 `reviewerProviders`·`requestedProvider`는 지정한
+  검토자를, 슬롯의 `provider`는 실제 배정된 검토자를 보여 줍니다.
+- 클라이언트와 서버를 모두 업데이트해야 합니다. 새 클라이언트는 서버의
+  `reviewer-selection-v1` capability를 먼저 확인하고, 구버전 서버이면 작업을 보내기 전에
+  거절합니다. 구버전 클라이언트는 이 옵션을 지원하지 않습니다.
+
 ### 앱 지시 파일에 넣을 문장 (서버 가동 후)
 
 > 작업을 마치고 독립 검토가 필요하면 `npm run -s review -- submit --author <claude|codex|cursor>`
 > 를 실행하고(Cursor는 `--author-vendor`로 사용한 모델 공급사를 함께 적습니다),
-> 결과가 나올 때까지 `npm run -s review -- wait <jobId>`를 반복합니다. reviewer를
-> 직접 고르지 않습니다. `reject`는 지적을 고친 뒤 새로 submit하고, `unknown`은
+> 결과가 나올 때까지 `npm run -s review -- wait <jobId>`를 반복합니다. reviewer는
+> 기본으로 서버가 고르고, 운영자가 특정 검토자를 명시한 경우에만 `--reviewer <providerId>`를
+> 사용합니다. `reject`는 지적을 고친 뒤 새로 submit하고, `unknown`은
 > 다시 보내지 말고 사람에게 알립니다.
 
 ## 서버 설치 (Ubuntu)
