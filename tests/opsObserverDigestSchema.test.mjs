@@ -1,6 +1,6 @@
 // The sre-ops daily digest payload and request (docs/policy/sre-ops.md §1
-// item 3, §9 N-4): built from what the run read, closed, bounded, and parsed
-// back by the app before the shared store sees it.
+// item 3, §9 N-4): the payload built by the app from its own reads, closed and
+// bounded; the request only a deadline and a closed owner date.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -15,7 +15,6 @@ import {
 } from "../scripts/ops-observer/digest-schema-core.mjs";
 import { AGENT_DIGEST_KINDS, AGENT_DIGEST_MAX_PAYLOAD_BYTES } from "../lib/agentDigestContract.ts";
 
-const NOW = Date.parse("2026-10-07T21:00:00.000Z");
 const DAY = "2026-10-07";
 const budget = {
   reservedToday: [
@@ -83,15 +82,22 @@ test("the largest payload the shape allows is far under the shared 16 KiB limit"
   assert.ok(Buffer.byteLength(JSON.stringify(largest)) < AGENT_DIGEST_MAX_PAYLOAD_BYTES / 4);
 });
 
-test("the request carries a deadline, its owner date and a payload for that date", () => {
-  const body = { runDeadline: new Date(NOW + 60_000).toISOString(), ownerDate: DAY, payload: payload() };
-  const parsed = parseDigestRequest(JSON.stringify(body), NOW);
-  assert.equal(parsed.ok, true);
-  assert.deepEqual(parsed.value.runDeadline, new Date(NOW + 60_000));
-  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, ownerDate: "2026-10-06" }), NOW), { ok: false, error: "payload_shape" });
-  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, runDeadline: new Date(NOW - 1).toISOString() }), NOW),
+test("the request names a deadline and a closed owner date, and nothing else", () => {
+  // 2026-10-07 in Brisbane ends at 2026-10-07T14:00Z; it is final 390 s later.
+  const end = Date.parse("2026-10-07T14:00:00.000Z");
+  const at = end + 390_000;
+  const body = { runDeadline: new Date(at + 60_000).toISOString(), ownerDate: DAY };
+  const parsed = parseDigestRequest(JSON.stringify(body), at);
+  assert.deepEqual(parsed, { ok: true, value: { runDeadline: new Date(at + 60_000), ownerDate: DAY } });
+  // Not yet closed: a late page run may still reserve under it.
+  const early = end + 389_000;
+  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, runDeadline: new Date(early + 60_000).toISOString() }), early),
+    { ok: false, error: "date_not_final" });
+  // The service sends no payload: the app builds it.
+  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, payload: payload() }), at), { ok: false, error: "shape" });
+  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, ownerDate: "2026-02-30" }), at), { ok: false, error: "shape" });
+  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, runDeadline: new Date(at - 1).toISOString() }), at),
     { ok: false, error: "deadline_invalid" });
-  assert.deepEqual(parseDigestRequest(JSON.stringify({ ...body, extra: 1 }), NOW), { ok: false, error: "shape" });
-  assert.deepEqual(parseDigestRequest("{", NOW), { ok: false, error: "not_json" });
-  assert.deepEqual(parseDigestRequest("x".repeat(17_000), NOW), { ok: false, error: "too_large" });
+  assert.deepEqual(parseDigestRequest("{", at), { ok: false, error: "not_json" });
+  assert.deepEqual(parseDigestRequest("x".repeat(17_000), at), { ok: false, error: "too_large" });
 });

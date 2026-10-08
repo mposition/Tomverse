@@ -1,7 +1,7 @@
 // The sre-ops daily digest (docs/policy/sre-ops.md §1 item 3, §3 rule 7,
-// §8 S1b, §9 N-4): one closed payload per owner date, built by the digest
-// service from the state and snapshot it read, and parsed again by the app
-// before the shared store keeps it.
+// §8 S1b, §9 N-4): one closed payload per closed owner date, built by the app
+// itself from what it reads -- the digest service only names the date -- and
+// held to this shape before the shared store keeps it.
 //
 // Payload, schema version 1:
 //
@@ -21,6 +21,7 @@
 import { S2_PAGE_KEYS } from "./classify-core.mjs";
 import { MESSAGE_KINDS } from "./notification-budget-core.mjs";
 import { REQUEST_BODY_MAX_BYTES, isOwnerDate, parseRunDeadline } from "./request-schema-core.mjs";
+import { ownerDateIsFinal } from "./owner-date-core.mjs";
 
 export const DIGEST_SCHEMA_VERSION = 1;
 export const DIGEST_KIND = "daily_digest";
@@ -35,7 +36,7 @@ const hasExactly = (value, keys) =>
 
 const PAYLOAD_KEYS = Object.freeze(["ownerDate", "mode", "readiness", "reserved", "channelCheckTaken"]);
 const RESERVED_KEYS = Object.freeze(["key", "kind", "capped"]);
-const REQUEST_KEYS = Object.freeze(["runDeadline", "ownerDate", "payload"]);
+const REQUEST_KEYS = Object.freeze(["runDeadline", "ownerDate"]);
 
 /** The shared table's idempotency key for one owner date's digest. */
 export function digestIdempotencyKey(ownerDate) {
@@ -93,10 +94,12 @@ export function parseDigestPayload(value) {
 }
 
 /**
- * Parses the digest route's body: `{ runDeadline, ownerDate, payload }`, the
- * payload's owner date the request's. `{ ok: true, value }` or
+ * Parses the digest route's body: `{ runDeadline, ownerDate }` -- the service
+ * names the date; the app builds the payload itself from what it reads. The
+ * date must be closed at `nowMs` (ownerDateIsFinal), so its reservations can
+ * no longer change under the digest. `{ ok: true, value }` or
  * `{ ok: false, error }` with `too_large`, `not_json`, `shape`,
- * `deadline_invalid` or `payload_shape`.
+ * `deadline_invalid` or `date_not_final`.
  */
 export function parseDigestRequest(bodyText, nowMs) {
   if (typeof bodyText !== "string" || Buffer.byteLength(bodyText, "utf8") > REQUEST_BODY_MAX_BYTES) {
@@ -112,8 +115,6 @@ export function parseDigestRequest(bodyText, nowMs) {
   const runDeadline = parseRunDeadline(body.runDeadline, nowMs);
   if (!runDeadline) return { ok: false, error: "deadline_invalid" };
   if (!isOwnerDate(body.ownerDate)) return { ok: false, error: "shape" };
-  const parsed = parseDigestPayload(body.payload);
-  if (!parsed.ok) return parsed;
-  if (parsed.payload.ownerDate !== body.ownerDate) return { ok: false, error: "payload_shape" };
-  return { ok: true, value: { runDeadline, ownerDate: body.ownerDate, payload: parsed.payload } };
+  if (!ownerDateIsFinal(body.ownerDate, nowMs)) return { ok: false, error: "date_not_final" };
+  return { ok: true, value: { runDeadline, ownerDate: body.ownerDate } };
 }

@@ -110,6 +110,23 @@ async function arm(tx: Prisma.TransactionClient, kind: OpsObserverTransactionKin
   return row;
 }
 
+/**
+ * Arms a transaction this wrapper does not own -- one a shared store opens,
+ * whose last write lands in shared tables (the daily digest) -- with the
+ * kind's timers and its start-budget refusal, and logs it like the wrapper.
+ * The caller's transaction still needs a row of this agent's whose deferred
+ * trigger checks the deadline at COMMIT (OpsObserverRunGuard).
+ */
+export async function armOpsObserverTransaction(
+  tx: Prisma.TransactionClient,
+  kind: OpsObserverTransactionKind,
+  runDeadline: Date,
+): Promise<OpsObserverArmed> {
+  const armed = await arm(tx, kind, runDeadline);
+  logArmed(kind, armed);
+  return armed;
+}
+
 function logArmed(kind: OpsObserverTransactionKind, armed: OpsObserverArmed) {
   // Structured, value-free apart from the timer figures themselves.
   console.info(

@@ -431,6 +431,9 @@ run(
     // sre-ops retention: closed reservations past ninety days deleted in
     // bounded batches with their items; reserved and recent rows stay.
     "tests/integration/ops-observer-store-retention.db.test.ts",
+    // sre-ops run guard: born with its claimed deadline, immutable, kept 90 days,
+    // and a late COMMIT rolls the whole transaction back.
+    "tests/integration/ops-observer-run-guard.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

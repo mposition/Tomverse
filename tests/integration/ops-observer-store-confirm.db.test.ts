@@ -24,6 +24,7 @@ const migrations = [
   "20261003090000_ops_observer_delivery",
   "20261004030000_ops_observer_transition",
   "20261005030000_ops_observer_retention_deadline",
+  "20261008020000_ops_observer_run_guard",
 ].map((name) => path.resolve(here, `../../prisma/migrations/${name}/migration.sql`));
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_confirm_${randomUUID().replaceAll("-", "")}`;
