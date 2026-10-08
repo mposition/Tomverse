@@ -120,7 +120,8 @@ branch, and a test holds that); a linked team
 the demo day has no script for stays waiting rather than being reported as
 done. A LIVE room reads that team's operating state on the server and the
 demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
-one the operator calls), and its staff say only the record's line. For product research that is the app
+one the operator calls), and its staff say only the record's line -- which
+its lead keeps on screen in a speech bubble, demo or not. For product research that is the app
 switch, the latest scheduled slot (recorded, failed, or not yet, and whether
 its window is open), the newest success and the agent's own silence verdict,
 all in UTC -- never its observations, which
