@@ -22,9 +22,20 @@ export const QA_RELEASE_TEST_BRANCHES = Object.freeze({
   otherBase: "qa-lane-test/other-base",
   /** Copies develop's protection; the develop ruleset applies. */
   developMirror: "qa-lane-test/develop-mirror",
-  /** Heads of the observation pull requests (GitHub allows one open pull request per head and base); no ruleset. */
+  /**
+   * Heads of the develop-mirror pull request (GitHub allows one open pull
+   * request per head and base); no ruleset. The develop green commit.
+   */
   head: "qa-lane-test/head",
   headReviewed: "qa-lane-test/head-reviewed",
+  /**
+   * Heads of the main-mirror and other-base pull requests: one new commit on
+   * main's head, so they merge without conflicts. A develop commit there
+   * conflicts once develop and main diverge, and a conflict refusal says
+   * nothing about the rules (2026-10-08). No ruleset.
+   */
+  mainHead: "qa-lane-test/main-head",
+  mainHeadReviewed: "qa-lane-test/main-head-reviewed",
 });
 
 export type QaReleaseObservationId =
@@ -74,8 +85,10 @@ export type QaReleaseObservationVerdict = {
   namesRule: boolean;
 };
 
-const observedOf = (status: number | null): "refused" | "succeeded" | "unknown" => {
+const observedOf = (status: number | null, message: string | null): "refused" | "succeeded" | "unknown" => {
   if (status === null) return "unknown";
+  // A merge refused for conflicts was never put to the rules.
+  if (/merge conflict/i.test(message ?? "")) return "unknown";
   if (status >= 200 && status < 300) return "succeeded";
   if (status >= 400 && status < 500) return "refused";
   return "unknown";
@@ -83,7 +96,8 @@ const observedOf = (status: number | null): "refused" | "succeeded" | "unknown" 
 
 /**
  * Each observation against its expectation. An answer GitHub did not give
- * (no status, a 5xx) is unknown and never counts as the expected one.
+ * (no status, a 5xx) or a merge refused for conflicts is unknown and never
+ * counts as the expected one.
  * The reviewed-merge refusal must name a rule: a classic-protection refusal
  * there would mean the ruleset was not what stopped it.
  */
@@ -94,7 +108,7 @@ export function judgeQaReleaseObservations(results: readonly QaReleaseObservatio
   const verdicts = QA_RELEASE_OBSERVATIONS.map((spec): QaReleaseObservationVerdict => {
     const matching = results.filter((result) => result.id === spec.id);
     const result = matching.length === 1 ? matching[0] : null;
-    const observed = result ? observedOf(result.status) : "unknown";
+    const observed = result ? observedOf(result.status, result.message) : "unknown";
     const namesRule = /\brule/i.test(result?.message ?? "");
     const ok = observed === spec.expect && (spec.id !== "app_merge_reviewed_main" || namesRule);
     return { id: spec.id, expect: spec.expect, observed, ok, namesRule };

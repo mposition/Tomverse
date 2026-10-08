@@ -296,6 +296,13 @@ async function setup() {
   await create(T.developMirror, developParent);
   await create(T.head, developHead);
   await create(T.headReviewed, developHead);
+  // The main-side heads: one new commit on main's head (same tree), so those
+  // pull requests merge cleanly and only the rules can refuse them.
+  const mainTree = (await operator("GET", `/git/commits/${mainHead}`)).tree?.sha;
+  if (!SHA.test(mainTree ?? "")) fail("could not read main's head commit.");
+  const mainTopic = (await operator("POST", "/git/commits", { message: "QA-release merge lane S-M0 observation", tree: mainTree, parents: [mainHead] })).sha;
+  await create(T.mainHead, mainTopic);
+  await create(T.mainHeadReviewed, mainTopic);
 
   // Item 10: the mirrors copy the real branches' classic protection.
   if (bodies.main) await operator("PUT", `/branches/${encodeURIComponent(T.mainMirror)}/protection`, bodies.main);
@@ -347,7 +354,7 @@ async function observe() {
     Date.now,
   )();
   const developHead = await headSha(T.head);
-  if (!developHead) fail("the test branches are missing; run setup first.");
+  if (!developHead || !(await headSha(T.mainHead)) || !(await headSha(T.mainHeadReviewed))) fail("the test branches are missing; run teardown and setup again.");
 
   const results = [];
   const note = (id, answer) =>
@@ -368,16 +375,16 @@ async function observe() {
   const moveRef = (token, branch, sha) => call(token, "PATCH", `/git/refs/heads/${branch}`, { sha, force: false });
 
   // 8.7: the main mirror and another base.
-  const unreviewed = await openPull(operatorToken, T.head, T.mainMirror, "qa-lane-test: unreviewed");
+  const unreviewed = await openPull(operatorToken, T.mainHead, T.mainMirror, "qa-lane-test: unreviewed");
   note("app_merge_unreviewed_main", await merge(appToken, unreviewed));
 
-  const reviewed = await openPull(appToken, T.headReviewed, T.mainMirror, "qa-lane-test: reviewed");
+  const reviewed = await openPull(appToken, T.mainHeadReviewed, T.mainMirror, "qa-lane-test: reviewed");
   await operator("POST", `/pulls/${reviewed.number}/reviews`, { event: "APPROVE", body: "QA-release merge lane S-M0 observation." });
   note("app_merge_reviewed_main", await merge(appToken, reviewed));
 
   note("app_push_main", await moveRef(appToken, T.mainMirror, await commitOnTop(appToken, T.mainMirror)));
 
-  const otherBase = await openPull(appToken, T.head, T.otherBase, "qa-lane-test: other base");
+  const otherBase = await openPull(appToken, T.mainHead, T.otherBase, "qa-lane-test: other base");
   note("app_merge_other_base", await merge(appToken, otherBase));
 
   note("operator_merge_main", await merge(operatorToken, unreviewed));
