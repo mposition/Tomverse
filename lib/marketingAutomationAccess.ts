@@ -530,7 +530,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "efa8d3dfebfc7aa0e4285c2d275fbe0ce24b7fa9dfdfdf66ed964531996f4567";
+  "2cee411f3565b954d58c3d1f31348e3f990bc6f213b8cb86ba8edc046418cc3f";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

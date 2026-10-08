@@ -7,7 +7,7 @@
 // able to reach.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
@@ -40,7 +40,7 @@ const recordingDsl = () => {
   };
 };
 
-test("every runner's start command is a real npm script", () => {
+test("every runner's start command resolves: an npm script, or a node entry file that exists", () => {
   const scripts = JSON.parse(
     readFileSync(join(process.cwd(), "package.json"), "utf8")
   ).scripts;
@@ -48,8 +48,15 @@ test("every runner's start command is a real npm script", () => {
     // `npm run <name>` and `npm run <name> -- <flag>` both have to resolve: a
     // start command Railway cannot run is a cron that fails every night, and
     // the deploy log is the only place it would say so.
+    // A runner whose start check refuses unknown variable names starts node
+    // directly: npm run adds npm_*, INIT_CWD and NODE to the environment.
+    const direct = /^node --experimental-strip-types (scripts\/[a-z0-9/-]+\.mjs)$/.exec(runner.startCommand);
+    if (direct) {
+      assert.ok(existsSync(join(process.cwd(), direct[1])), `${runner.service}: ${direct[1]} does not exist`);
+      continue;
+    }
     const match = /^npm run ([a-z0-9:-]+)(?: -- .+)?$/.exec(runner.startCommand);
-    assert.ok(match, `${runner.service}: start command is not an npm run invocation`);
+    assert.ok(match, `${runner.service}: start command is neither npm run nor a node entry`);
     assert.ok(scripts[match[1]], `${runner.service}: package.json has no "${match[1]}" script`);
   }
   assert.equal(
