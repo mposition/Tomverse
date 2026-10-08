@@ -117,7 +117,11 @@ test("superseded and late responses cannot replace the current server-held reque
   const nextResponse = { ...f.response, requestId: next.requestId, refinedPrompt: "new synthetic proposal" };
   f.session.completeProposal(next.requestId, nextResponse);
   rejects(() => f.session.consumeSyntheticInput(messages, f.choice()), "invalid_choice");
-  const projected = f.session.consumeSyntheticInput(messages, { ...f.choice(), requestId: next.requestId });
+  rejects(() => f.session.consumeSyntheticInput(messages, { ...f.choice(), requestId: next.requestId }), "unavailable");
+  assert.equal(f.session.consumeSyntheticInput(messages).executionMessages, messages);
+  const latest = f.session.beginProposal();
+  f.session.completeProposal(latest.requestId, { ...nextResponse, requestId: latest.requestId });
+  const projected = f.session.consumeSyntheticInput(messages, { ...f.choice(), requestId: latest.requestId });
   assert.equal(projected.executionMessages[1].content, nextResponse.refinedPrompt);
 });
 
@@ -145,6 +149,8 @@ test("invalid choice, browser-provided text and claimed authorization fail close
   for (const override of [{ suggestionId: "forged" }, { requestId: "forged" }]) {
     const f = fixture(); f.ready();
     rejects(() => f.session.consumeSyntheticInput(messages, { ...f.choice(), ...override }), "invalid_choice");
+    assert.equal(f.session.status(), "failed");
+    rejects(() => f.session.consumeSyntheticInput(messages, f.choice()), "unavailable");
   }
 });
 
@@ -201,6 +207,19 @@ test("clock failure, unknown state and a restarted session reject old ids", () =
   const f = fixture(); f.ready();
   const restarted = createPromptRefinerSyntheticDecisionSession({ snapshot, now: () => 1_000 });
   rejects(() => restarted.consumeSyntheticInput(messages, f.choice()), "unavailable");
+});
+
+test("status reports clock faults as a fixed error and leaves the proposal revoked", () => {
+  let now = 1_000;
+  const session = createPromptRefinerSyntheticDecisionSession({ snapshot, now: () => {
+    if (now === null) throw new Error("synthetic clock error prose");
+    return now;
+  } });
+  session.beginProposal();
+  now = null;
+  rejects(() => session.status(), "clock_invalid");
+  now = 1_001;
+  assert.equal(session.status(), "failed");
 });
 
 test("concurrent explicit choices have one winner and cannot replay acceptance", async () => {

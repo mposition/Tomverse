@@ -75,9 +75,8 @@ export function createPromptRefinerSyntheticDecisionSession(input: {
     return parsed.data;
   };
   let snapshot = parseSnapshot(input.snapshot);
-  let epoch = 0;
   let state: State = "idle";
-  let pending: { request: PromptRefinerRequest; epoch: number; expiresAt: number } | null = null;
+  let pending: { request: PromptRefinerRequest; expiresAt: number } | null = null;
   let held: BoundPromptRefinerSuggestion | null = null;
   let lastNow = -Infinity;
   const clock = input.now ?? Date.now;
@@ -116,7 +115,7 @@ export function createPromptRefinerSyntheticDecisionSession(input: {
       }
       if (next.draft !== snapshot.draft || next.sourceMessageId !== snapshot.sourceMessageId
         || !sameScope(next.scope, snapshot.scope)) {
-        epoch += 1;
+        // Irrevocable lifetime invalidation also rejects same-value ABA.
         discard("stale");
       }
       snapshot = next;
@@ -129,7 +128,7 @@ export function createPromptRefinerSyntheticDecisionSession(input: {
       });
       if (!parsed.success) { discard("failed"); return fail("invalid_request"); }
       held = null;
-      pending = { request: parsed.data, epoch, expiresAt: now + PROMPT_REFINER_SYNTHETIC_PROPOSAL_TTL_MS };
+      pending = { request: parsed.data, expiresAt: now + PROMPT_REFINER_SYNTHETIC_PROPOSAL_TTL_MS };
       state = "requesting";
       return { ...parsed.data };
     },
@@ -137,7 +136,6 @@ export function createPromptRefinerSyntheticDecisionSession(input: {
     completeProposal(requestId: string, response: unknown) {
       observeTime();
       if (!pending || state !== "requesting" || pending.request.requestId !== requestId) return unavailable();
-      if (pending.epoch !== epoch) { discard("stale"); return fail("stale"); }
       try {
         const parsed = promptRefinerResponseSchema.parse(response);
         const bound = bindPromptRefinerSuggestion({
@@ -172,6 +170,7 @@ export function createPromptRefinerSyntheticDecisionSession(input: {
       if (!parsed.success) { discard("failed"); return fail("invalid_choice"); }
       if (!held || !pending || state !== "ready") return unavailable();
       if (parsed.data.requestId !== held.requestId || parsed.data.suggestionId !== held.suggestionId) {
+        discard("failed");
         return fail("invalid_choice");
       }
       const suggestion = held;
