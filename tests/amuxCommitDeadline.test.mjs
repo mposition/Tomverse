@@ -114,6 +114,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // It adds no commit deadline of its own; the closing trigger it adds to the
   // request event table fires on closing events, which have none.
   "20261008120000_amux_decision_maker_body_store",
+  // AMUX intake v13: owner-only terminal accounting for a claimed analysis.
+  "20261008130000_amux_v4_claim_owner_resolution",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

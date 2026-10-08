@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { AmuxAnalysisClaimResolutionPanel } from
+  "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
 import type { ConfirmedIdeaTransfer } from "@/lib/amux/ideaTransferConfirmationUiCore";
@@ -214,6 +216,8 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
       {m.reserve}
     </button> : null}
     {hold?.state === "found" ? <p role="status">{m.reserved}</p> : null}
+    {hold?.state === "found" && ["in_flight", "outcome_unknown"].includes(hold.hold.status)
+      ? <AmuxAnalysisClaimResolutionPanel holdId={hold.hold.id} /> : null}
     {unknown ? <><p role="alert">{m.unknown}</p><button type="button"
       disabled={busy} onClick={() => void readBack()}
       className="min-h-11 rounded-lg border border-zinc-500 px-4 disabled:opacity-50">

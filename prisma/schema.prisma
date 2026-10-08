@@ -9506,8 +9506,9 @@ model AmuxIdeaAnalysisPriceVersion {
 }
 
 /// One worst-case reservation for one exact, owner-confirmed preview. Unknown
-/// usage keeps the hold occupied; it is never settled as zero. No writer or
-/// model dispatch is enabled by this schema-only addition.
+/// usage keeps the hold occupied until the owner resolves the exact claim.
+/// A zero settlement is only valid after positive evidence that the CLI did
+/// not start; it is distinct from an unused, never-dispatched reservation.
 model AmuxIdeaAnalysisBudgetHold {
   id                       String    @id
   previewId                String    @unique
