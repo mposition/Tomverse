@@ -26,7 +26,7 @@ import {
   QA_RELEASE_DEVELOP_RULESET_NAME,
   QA_RELEASE_UPDATE_RULESET_NAME,
   qaReleaseLaneRulesets,
-  qaReleaseWorkflowTokenPushers,
+  qaReleaseWorkflowBranchWriters,
 } from "../lib/qaReleaseLaneRulesetsCore.ts";
 
 const API = "https://api.github.com/repos/mposition/Tomverse";
@@ -90,21 +90,30 @@ const readWorkflows = async (ref) => {
     } catch {
       workflow = null;
     }
-    files.push({ path: entry.path, workflow, ref });
+    files.push({ path: entry.path, text, workflow });
   }
   return files;
 };
 
 try {
-  // Applied, the update ruleset refuses a workflow-token push to any branch
-  // but develop. Refuse first while a workflow on develop or main would make
-  // one (visual-baseline-record until it pushes with the admin PAT).
-  const tokenPushers = [];
-  for (const ref of ["develop", "main"]) {
-    for (const finding of qaReleaseWorkflowTokenPushers(await readWorkflows(ref))) tokenPushers.push(`${ref}: ${finding}`);
+  // Applied, the update ruleset refuses a workflow-token (or App, or deploy
+  // key) update to any branch but develop. Refuse first while a workflow on
+  // develop or main holds such a credential and is not a reviewed file
+  // (visual-baseline-record until its token drops to contents: read).
+  const permission = await call("GET", "/actions/permissions/workflow");
+  const defaultPermission = permission.json?.default_workflow_permissions;
+  if (permission.status !== 200 || (defaultPermission !== "read" && defaultPermission !== "write")) {
+    fail("Could not read the repository's default workflow token permission. Nothing was changed.");
   }
-  if (tokenPushers.length > 0) {
-    fail(`These branch-updating workflow steps are not reviewed PAT pushes (lib/qaReleaseLaneRulesetsCore.ts QA_RELEASE_REVIEWED_PUSH_STEPS), and a workflow-token push would be refused once the rulesets apply. Nothing was changed: ${tokenPushers.join(", ")}`);
+  const writers = [];
+  for (const ref of ["develop", "main"]) {
+    for (const finding of qaReleaseWorkflowBranchWriters(await readWorkflows(ref), defaultPermission)) writers.push(`${ref}: ${finding}`);
+  }
+  if (writers.length > 0) {
+    fail(
+      `These workflows could update a branch with a credential the rulesets will refuse, and are not reviewed files ` +
+        `(lib/qaReleaseLaneRulesetsCore.ts QA_RELEASE_REVIEWED_WRITER_WORKFLOWS). Nothing was changed: ${writers.join(", ")}`,
+    );
   }
 
   const record = JSON.parse(readFileSync(recordPath, "utf8"));

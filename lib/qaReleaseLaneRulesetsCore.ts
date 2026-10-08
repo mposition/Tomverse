@@ -184,151 +184,92 @@ type Json = Record<string, unknown>;
 const asRecord = (value: unknown): Json | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : null;
 
-/** Stable JSON: object keys sorted at every depth. */
-const stableJson = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value as Json)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Json)[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value ?? null);
+/** Whether a `permissions` value gives the workflow token write access to contents. */
+const contentsWrite = (permissions: unknown): boolean => {
+  if (permissions === "write-all") return true;
+  const record = asRecord(permissions);
+  return record !== null && record.contents === "write";
 };
 
 /**
- * Whether a step can update a branch: a non-comment script line naming both
- * `git` and `push` (which also catches `VAR=x git push`, `command git push`,
- * `/usr/bin/git push` and `bash -c "git push ..."`), a `gh pr merge` or a
- * `gh api` call on refs or merges, or an action whose name says it pushes.
- * Deliberately broad: a step it flags that does not push only needs a review.
+ * Credentials other than the workflow token that cannot be on the lane
+ * rulesets' bypass list here and could still update a branch: a GitHub App
+ * token minted inside the workflow, or an SSH deploy key.
  */
-export function qaReleaseStepMayUpdateBranch(step: unknown): boolean {
-  const record = asRecord(step) ?? {};
-  if (typeof record.uses === "string" && /push|auto-commit|create-pull-request|merge/i.test(record.uses)) return true;
-  if (typeof record.run !== "string") return false;
-  return record.run.split("\n").some((raw) => {
-    const line = raw.trim();
-    if (line.startsWith("#")) return false;
-    return (/\bgit\b/.test(line) && /\bpush\b/.test(line)) || /\bgh\s+pr\s+merge\b/.test(line) || (/\bgh\s+api\b/.test(line) && /(refs|merges)\b/.test(line));
-  });
-}
+const OTHER_CREDENTIALS = /create-github-app-token|\bapp-id\s*:|\bprivate-key\s*:|webfactory\/ssh-agent|\bssh-key\s*:|deploy[_-]key/i;
+
+/** The digest a person reviews: the workflow file's text, line endings normalised. */
+export const qaReleaseWorkflowDigest = (text: string): string =>
+  createHash("sha256").update(text.replace(/\r\n/g, "\n"), "utf8").digest("hex");
 
 /**
- * The digest a person reviews for one branch-updating step: the step itself
- * with everything that decides which credential its commands use -- the
- * workflow's and job's env, the job's `if`, and every checkout step in the
- * job (its `with` and `if`). Any change to any of them is a new digest.
+ * Workflows a person has read whole and found to update no branch except with
+ * GH_AUTOMATION_PAT (repository admin), though they hold a credential that
+ * could. Pinned by the file's digest: any change to the file is a new review.
+ * Read on 2026-10-08 on develop and main (each branch's text is its own
+ * entry).
  */
-export function qaReleasePushStepDigest(workflow: unknown, jobId: string, stepIndex: number): string {
-  const root = asRecord(workflow) ?? {};
-  const job = asRecord(asRecord(root.jobs)?.[jobId]) ?? {};
-  const steps = Array.isArray(job.steps) ? job.steps : [];
-  const material = {
-    workflowEnv: root.env ?? null,
-    jobEnv: job.env ?? null,
-    jobIf: job.if ?? null,
-    checkouts: steps
-      .map((raw) => asRecord(raw) ?? {})
-      .filter((step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"))
-      .map((step) => ({ with: step.with ?? null, if: step.if ?? null })),
-    step: steps[stepIndex] ?? null,
-  };
-  return createHash("sha256").update(stableJson(material), "utf8").digest("hex");
-}
-
-/**
- * The branch-updating steps a person has read and found to authenticate with
- * GH_AUTOMATION_PAT (repository admin) or to push nothing, by workflow, job,
- * step index and digest. Reviewed on 2026-10-08 against develop and main
- * (a branch's own version of a step is its own entry). Adding or
- * changing an entry is a change a reviewer reads; a step not listed here,
- * or listed with another digest, refuses the real rulesets.
- */
-export const QA_RELEASE_REVIEWED_PUSH_STEPS: readonly { path: string; job: string; step: number; sha256: string; why: string }[] = Object.freeze([
-  Object.freeze({
-    path: ".github/workflows/back-merge-main-to-develop.yml",
-    job: "back-merge",
-    step: 6,
-    sha256: "a66d39957f6ae6245e89c75314d2a568dd4803a0419c9a349c64684d00ad9592",
-    why: "git push origin develop; the job checkout keeps GH_AUTOMATION_PAT as origin credential",
-  }),
-  Object.freeze({
-    path: ".github/workflows/back-merge-main-to-develop.yml",
-    job: "back-merge",
-    step: 7,
-    sha256: "ab70d297b2d69710dcd7d4a3663a1ae75eec98abdb5e0af370c6992be9b16242",
-    why: "git push -u origin branch; same checkout credential",
-  }),
+export const QA_RELEASE_REVIEWED_WRITER_WORKFLOWS: readonly { path: string; sha256: string; why: string }[] = Object.freeze([
+  // develop (24083083e)
   Object.freeze({
     path: ".github/workflows/cron-auto-fix.yml",
-    job: "attempt-fix",
-    step: 18,
-    sha256: "baa3471a9078c07b259a424fe926dc36020086e72c9de1827a1ea29a6f2a3646",
-    why: "gh auth setup-git in the same step with GH_TOKEN the PAT, then git push origin",
+    sha256: "26dc4dd34d8cf5bfa2c396c9b4958e3b3496b52c615d6e2b25c9e6d23d726f1e",
+    why: "workflow-level contents: write, but no step uses the workflow token to write: the checkout takes GH_AUTOMATION_PAT without keeping it, and the only push (and, on main, gh pr merge --auto) runs after gh auth setup-git in the same step with GH_TOKEN the PAT",
   }),
+  // main
   Object.freeze({
     path: ".github/workflows/cron-auto-fix.yml",
-    job: "attempt-fix",
-    step: 18,
-    sha256: "fc2f35e999323a753c409de42eb377a65f009a2af54d7eea3ed617fb04db6450",
-    why: "main version of the same step: gh auth setup-git with GH_TOKEN the PAT, then git push origin and gh pr merge --auto, all as the PAT",
-  }),
-  Object.freeze({
-    path: ".github/workflows/feedback-autofix-promotion-pr.yml",
-    job: "promotion-pr",
-    step: 8,
-    sha256: "85815692015c9a0f16b4ae8ea673b32d8b2eb41202fab00eefe52dcdc546f998",
-    why: "git push to the x-access-token URL of GH_TOKEN, the PAT",
-  }),
-  Object.freeze({
-    path: ".github/workflows/feedback-autofix.yml",
-    job: "attempt-fix",
-    step: 11,
-    sha256: "47b779bfe76794714a56f2c5f976c7684a62d96e33738c0b534f866e5cea2d12",
-    why: "git remote set-url origin to the PAT URL in the same step, then git push origin",
-  }),
-  Object.freeze({
-    path: ".github/workflows/visual-baseline-record.yml",
-    job: "record",
-    step: 10,
-    sha256: "e20aa7c1c05a9d3a853e33282254ec0e1fccde5d5a1ab1e95d376c45441f0126",
-    why: "git push to the x-access-token URL of GH_TOKEN, the PAT (the version that pushes with the PAT)",
+    sha256: "93413e0e4a12fb234712a507ad34faa6e6cdfce36cc2472aee3040e4eda37941",
+    why: "workflow-level contents: write, but no step uses the workflow token to write: the checkout takes GH_AUTOMATION_PAT without keeping it, and the only push (and, on main, gh pr merge --auto) runs after gh auth setup-git in the same step with GH_TOKEN the PAT",
   }),
 ]);
 
 /**
- * Every branch-updating step in the workflows that is not a reviewed one, as
- * `path#job/step sha256`. Applied, the update ruleset refuses workflow-token
- * updates to every branch but develop (GitHub Actions cannot be on its bypass
- * list here), so the real-ruleset step refuses while any is listed.
+ * Every workflow that could update a branch with something the lane's update
+ * ruleset will refuse, unless a person has reviewed that exact file. Applied,
+ * the ruleset refuses updates to every branch but develop from anyone off its
+ * bypass list -- the repository admin role and Dependabot -- and GitHub
+ * Actions cannot be on it here. So the real-ruleset step refuses while any
+ * workflow is listed.
  *
- * Shell is not interpreted: whether a push uses the PAT is a person's reading
- * of the exact step, pinned by its digest. An unreadable workflow is listed.
+ * The test is what GitHub itself enforces, not a reading of shell: the
+ * workflow token can change a branch -- by git push, a merge API call,
+ * GraphQL, a script action or a reusable workflow it calls -- only with
+ * `contents: write`. A workflow is listed when:
+ * - any job's effective token permission grants contents write (`write-all`,
+ *   `contents: write`, or no `permissions` while the repository default is
+ *   write), a reusable-workflow call included, since the called workflow
+ *   cannot exceed it;
+ * - it mints a GitHub App token or uses a deploy key, which cannot bypass;
+ * - it cannot be read as YAML.
+ * A listed workflow passes only by its whole-file digest in the reviewed list.
  *
- * Pure but for hashing: the caller parses each workflow (the `yaml` package)
- * and passes the object, or null when it could not.
+ * Pure but for hashing: the caller passes each file's text and its parse
+ * (the `yaml` package), or null when it could not be parsed.
  */
-export function qaReleaseWorkflowTokenPushers(
-  files: readonly { path: string; workflow: unknown }[],
-  reviewed: readonly { path: string; job: string; step: number; sha256: string }[] = QA_RELEASE_REVIEWED_PUSH_STEPS,
+export function qaReleaseWorkflowBranchWriters(
+  files: readonly { path: string; text: string; workflow: unknown }[],
+  defaultPermission: "read" | "write",
+  reviewed: readonly { path: string; sha256: string }[] = QA_RELEASE_REVIEWED_WRITER_WORKFLOWS,
 ): string[] {
-  const unsafe: string[] = [];
-  for (const { path, workflow } of files) {
-    const jobs = asRecord(asRecord(workflow)?.jobs);
-    if (!jobs) {
-      unsafe.push(`${path}#unreadable`);
-      continue;
+  const listed: string[] = [];
+  for (const { path, text, workflow } of files) {
+    const sha256 = qaReleaseWorkflowDigest(text);
+    const reasons: string[] = [];
+    const root = asRecord(workflow);
+    const jobs = asRecord(root?.jobs);
+    if (!root || !jobs) reasons.push("unreadable");
+    else {
+      for (const [jobId, rawJob] of Object.entries(jobs)) {
+        const job = asRecord(rawJob) ?? {};
+        const effective = job.permissions !== undefined ? job.permissions : root.permissions;
+        if (effective === undefined ? defaultPermission === "write" : contentsWrite(effective)) reasons.push(`${jobId}: contents write`);
+      }
     }
-    for (const [jobId, rawJob] of Object.entries(jobs)) {
-      const steps = Array.isArray(asRecord(rawJob)?.steps) ? (asRecord(rawJob)?.steps as unknown[]) : [];
-      steps.forEach((step, index) => {
-        if (!qaReleaseStepMayUpdateBranch(step)) return;
-        const sha256 = qaReleasePushStepDigest(workflow, jobId, index);
-        const known = reviewed.some((entry) => entry.path === path && entry.job === jobId && entry.step === index && entry.sha256 === sha256);
-        if (!known) unsafe.push(`${path}#${jobId}/${index} ${sha256}`);
-      });
-    }
+    if (OTHER_CREDENTIALS.test(text)) reasons.push("other credential");
+    if (reasons.length === 0) continue;
+    if (reviewed.some((entry) => entry.path === path && entry.sha256 === sha256)) continue;
+    listed.push(`${path} ${sha256} (${reasons.join("; ")})`);
   }
-  return [...new Set(unsafe)].sort();
+  return listed.sort();
 }

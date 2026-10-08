@@ -113,74 +113,51 @@ test("what is sent compares equal to what GitHub stores, and GitHub's extra-appr
 
 
 
-test("every step that can update a branch is caught, however the push is written", async () => {
-  const { qaReleaseStepMayUpdateBranch } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
-  for (const run of [
-    'git push origin "$b"',
-    'GIT_TERMINAL_PROMPT=0 git push origin "$b"',
-    "command git push origin b",
-    "/usr/bin/git push origin b",
-    'bash -c "git push origin b"',
-    "if git push origin develop; then echo ok; fi",
-    "git -c http.extraheader=x push origin b",
-    "gh pr merge 12 --merge",
-    "gh api -X PATCH repos/o/r/git/refs/heads/b -f sha=x",
-  ]) {
-    assert.equal(qaReleaseStepMayUpdateBranch({ run }), true, run);
-  }
-  assert.equal(qaReleaseStepMayUpdateBranch({ uses: "ad-m/github-push-action@v1" }), true);
-  assert.equal(qaReleaseStepMayUpdateBranch({ uses: "peter-evans/create-pull-request@v7" }), true);
-  for (const run of ["# git push is never the signal", 'docker push "ghcr.io/x"', "bad.push(x)", "npm run check:push-scope", "npm test"]) {
-    assert.equal(qaReleaseStepMayUpdateBranch({ run }), false, run);
-  }
+
+test("a workflow is listed when its token can write contents, or it holds another credential, unless that exact file was reviewed", async () => {
+  const { qaReleaseWorkflowBranchWriters, qaReleaseWorkflowDigest } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  const file = (path, workflow, text = JSON.stringify(workflow)) => ({ path, text, workflow });
+
+  const readOnly = file("read.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [{ run: "git push origin b" }] } } });
+  const topWrite = file("top.yml", { permissions: { contents: "write" }, jobs: { a: { steps: [] } } });
+  const jobWrite = file("job.yml", { permissions: { contents: "read" }, jobs: { a: { permissions: { contents: "write" }, steps: [] } } });
+  const writeAll = file("all.yml", { permissions: "write-all", jobs: { a: { steps: [] } } });
+  const jobOverridesTop = file("override.yml", { permissions: { contents: "write" }, jobs: { a: { permissions: { contents: "read" }, steps: [] } } });
+  const noPermissions = file("none.yml", { jobs: { a: { steps: [] } } });
+  const reusable = file("reusable.yml", { jobs: { a: { permissions: { contents: "write" }, uses: "./.github/workflows/other.yml" } } });
+  const appToken = file("app.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [{ uses: "actions/create-github-app-token@v2" }] } } }, "uses: actions/create-github-app-token@v2");
+  const deployKey = file("key.yml", { permissions: {}, jobs: { a: { steps: [] } } }, "ssh-key: ${{ secrets.DEPLOY_KEY }}");
+  const unreadable = { path: "bad.yml", text: "jobs: [", workflow: null };
+
+  // The workflow token's permission decides, not what the script says:
+  // a read-only token's git push cannot change a branch.
+  const listed = qaReleaseWorkflowBranchWriters([readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable], "read", []);
+  assert.deepEqual(
+    listed.map((line) => line.split(" ")[0]),
+    ["all.yml", "app.yml", "bad.yml", "job.yml", "key.yml", "reusable.yml", "top.yml"],
+  );
+  // With the repository default at write, a workflow without permissions is listed too.
+  assert.deepEqual(
+    qaReleaseWorkflowBranchWriters([noPermissions], "write", []).map((line) => line.split(" ")[0]),
+    ["none.yml"],
+  );
+
+  // Reviewed: the exact text passes; one changed byte is listed again, and so
+  // is the same text under another path.
+  const reviewed = [{ path: "top.yml", sha256: qaReleaseWorkflowDigest(topWrite.text) }];
+  assert.deepEqual(qaReleaseWorkflowBranchWriters([topWrite], "read", reviewed), []);
+  assert.equal(qaReleaseWorkflowBranchWriters([{ ...topWrite, text: `${topWrite.text} ` }], "read", reviewed).length, 1);
+  assert.equal(qaReleaseWorkflowBranchWriters([{ ...topWrite, path: "other.yml" }], "read", reviewed).length, 1);
+  // Line endings do not change the digest.
+  assert.equal(qaReleaseWorkflowDigest("a\r\nb\n"), qaReleaseWorkflowDigest("a\nb\n"));
 });
 
-test("a branch-updating step passes only as the exact step a person reviewed", async () => {
-  const { qaReleaseWorkflowTokenPushers, qaReleasePushStepDigest } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
-  const PAT = "${{ secrets.GH_AUTOMATION_PAT }}";
-  const workflow = {
-    env: { A: "1" },
-    jobs: {
-      push: {
-        env: { GH_TOKEN: PAT },
-        steps: [{ uses: "actions/checkout@v6", with: { token: PAT } }, { name: "Push", run: 'git push origin "$b"' }],
-      },
-    },
-  };
-  const path = ".github/workflows/x.yml";
-  const sha256 = qaReleasePushStepDigest(workflow, "push", 1);
-  const reviewed = [{ path, job: "push", step: 1, sha256 }];
-  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow }], reviewed), []);
-  // Not reviewed at all: listed with its digest, for the reviewer.
-  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow }], []), [`${path}#push/1 ${sha256}`]);
-
-  // Any change to what decides the credential is a new digest, so it is listed again.
-  const changes = [
-    (w) => (w.jobs.push.steps[1].run += "\n# a comment"),
-    (w) => (w.jobs.push.env.GH_TOKEN = "${{ github.token }}"),
-    (w) => (w.env.B = "2"),
-    (w) => (w.jobs.push.steps[0].with["persist-credentials"] = false),
-    (w) => (w.jobs.push.steps[0].if = "${{ false }}"),
-    (w) => (w.jobs.push.if = "${{ github.event_name == 'push' }}"),
-    (w) => (w.jobs.push.steps[1].env = { GH_TOKEN: "${{ github.token }}" }),
-  ];
-  for (const change of changes) {
-    const changed = structuredClone(workflow);
-    change(changed);
-    assert.equal(qaReleaseWorkflowTokenPushers([{ path, workflow: changed }], reviewed).length, 1, String(change));
-  }
-  // Another path, job or step index with the same digest does not count.
-  assert.equal(qaReleaseWorkflowTokenPushers([{ path: ".github/workflows/y.yml", workflow }], reviewed).length, 1);
-  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow: null }], reviewed), [`${path}#unreadable`]);
-});
-
-test("the reviewed list names exact steps with full digests and a reason", async () => {
-  const { QA_RELEASE_REVIEWED_PUSH_STEPS } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
-  assert.ok(QA_RELEASE_REVIEWED_PUSH_STEPS.length > 0);
-  for (const entry of QA_RELEASE_REVIEWED_PUSH_STEPS) {
+test("the reviewed workflows are named by path, full digest and a reason", async () => {
+  const { QA_RELEASE_REVIEWED_WRITER_WORKFLOWS } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  assert.ok(QA_RELEASE_REVIEWED_WRITER_WORKFLOWS.length > 0);
+  for (const entry of QA_RELEASE_REVIEWED_WRITER_WORKFLOWS) {
     assert.match(entry.path, /^\.github\/workflows\/[a-z0-9-]+\.ya?ml$/);
     assert.match(entry.sha256, /^[0-9a-f]{64}$/);
-    assert.ok(Number.isInteger(entry.step) && entry.step >= 0);
-    assert.ok(entry.why.length > 10);
+    assert.ok(entry.why.length > 20);
   }
 });
