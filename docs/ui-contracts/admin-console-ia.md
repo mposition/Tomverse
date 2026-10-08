@@ -107,8 +107,10 @@ fact says it is a demo -- a notice above the office, a chip on the approval
 card, "SIMULATION" and "SIM CLOCK" where the original said real-time. Its
 approve button advances the demo and nothing else; there is no publish link.
 The facts on it are the record links and the rooms marked LIVE. Each team
-links to the page above that holds its record, and a team with no such page
-is drawn as waiting on a link instead of being given a status; a linked team
+links to the page above that holds its record while the route table has that
+page and section, and a team without one -- including on a branch that does
+not carry its screen yet -- is drawn as waiting on a link instead of being
+given a status; a linked team
 the demo day has no script for stays waiting rather than being reported as
 done. A LIVE room reads that team's operating state on the server and the
 demo leaves it alone -- no scripted work, no seat in a meeting (the day's or

@@ -398,7 +398,7 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
                       title={isAmux ? amux.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
                     />
                   ) : null}
-                  {isAmux ? (
+                  {isAmux && AGENT_OFFICE_AMUX_RECORD_HREF ? (
                     <Link
                       href={AGENT_OFFICE_AMUX_RECORD_HREF}
                       className={cx("rm-link")}
