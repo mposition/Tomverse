@@ -5,18 +5,29 @@ export type PromptRefinerPreviewDiff = Readonly<{
   commonSuffix: string;
 }>;
 
-const graphemeSegmenter = new Intl.Segmenter("en", {
-  granularity: "grapheme",
-});
+let graphemeSegmenter: Intl.Segmenter | null | undefined;
 
-const graphemes = (value: string): string[] =>
-  Array.from(graphemeSegmenter.segment(value), ({ segment }) => segment);
+const graphemes = (value: string): string[] => {
+  if (graphemeSegmenter === undefined) {
+    const Segmenter = Intl.Segmenter;
+    graphemeSegmenter = typeof Segmenter === "function"
+      ? new Segmenter("en", { granularity: "grapheme" })
+      : null;
+  }
+  if (!graphemeSegmenter) return value.length === 0 ? [] : [value];
+  return Array.from(
+    graphemeSegmenter.segment(value),
+    ({ segment }) => segment
+  );
+};
 
 /**
  * Finds one bounded changed region while preserving both inputs byte-for-byte.
  * Grapheme segmentation keeps combining marks and joined emoji inside the same
- * highlight. It does not normalize either string. The Prompt Refiner schema
- * already bounds each input.
+ * highlight. It does not normalize either string. An environment without
+ * Intl.Segmenter treats each whole string as one conservative comparison unit,
+ * so unsupported browsers may highlight more but cannot split authored text.
+ * The Prompt Refiner schema already bounds each input.
  */
 export function diffPromptRefinerPreview(
   sourcePrompt: string,

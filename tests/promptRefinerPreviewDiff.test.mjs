@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { diffPromptRefinerPreview } from "../lib/promptRefinerPreviewDiff.ts";
@@ -56,6 +57,49 @@ test("preview diff highlights a whole joined emoji grapheme", () => {
   assert.equal(reconstructProposal(diff), proposal);
   assert.equal(diff.removed, "👩🏽‍💻");
   assert.equal(diff.added, "👩🏽‍🔬");
+});
+
+test("preview diff keeps a decomposed Hangul syllable inside one changed cluster", () => {
+  const source = "끝: \u1100\u1161";
+  const proposal = "끝: \u1100\u1162";
+  const diff = diffPromptRefinerPreview(source, proposal);
+
+  assert.equal(reconstructSource(diff), source);
+  assert.equal(reconstructProposal(diff), proposal);
+  assert.equal(diff.commonPrefix, "끝: ");
+  assert.equal(diff.removed, "\u1100\u1161");
+  assert.equal(diff.added, "\u1100\u1162");
+  assert.equal(diff.commonSuffix, "");
+});
+
+test("module import and conservative fallback work without Intl.Segmenter", () => {
+  const script = String.raw`
+    Object.defineProperty(Intl, "Segmenter", {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+    const imported = await import("./lib/promptRefinerPreviewDiff.ts");
+    const diffPromptRefinerPreview = imported.diffPromptRefinerPreview
+      ?? imported.default?.diffPromptRefinerPreview;
+    const source = "Cafe\u0301 👩🏽‍💻";
+    const proposal = "Cafe 👩🏽‍🔬";
+    process.stdout.write(JSON.stringify(diffPromptRefinerPreview(source, proposal)));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "--input-type=module", "-e", script],
+    { cwd: process.cwd(), encoding: "utf8" }
+  );
+
+  assert.equal(child.status, 0, child.stderr);
+  const diff = JSON.parse(child.stdout);
+  assert.deepEqual(diff, {
+    commonPrefix: "",
+    removed: "Cafe\u0301 👩🏽‍💻",
+    added: "Cafe 👩🏽‍🔬",
+    commonSuffix: "",
+  });
 });
 
 test("preview diff handles insertion, deletion and identical text", () => {
