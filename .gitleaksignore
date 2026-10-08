@@ -430,3 +430,22 @@ d3569b097b1d264031ea7b98e2f24684e14d03a2:tests/engineeringAgentPublisher.test.mj
 #
 # Scope: exactly this one finding in that one commit -- nothing wider.
 110c69474974e48200bcb7fbd556a7e41a7234b6:tests/agentDigestStoreCore.test.mjs:generic-api-key:92
+
+# The same fixture, carried to main by the QA-release merge lane selective release
+# (release/2026-10-07-qa-release-merge-lane) in cherry-pick a07bebe24. Same file,
+# same synthetic values, now on line 100.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+a07bebe2432c3f003ffeb38573a694ce8ecab80a:tests/agentDigestStoreCore.test.mjs:generic-api-key:100
+
+# AMUX release test fixtures, not credentials.
+#
+# The two retention-route tests use invented bearer values for authorization
+# assertions. The commit-deadline test lists a migration identifier whose
+# long underscore-separated name resembles a generic key to the scanner.
+# None of these values grants access. The scanner pins the introducing
+# cherry-pick, so only these exact three history findings are excluded.
+# Values are intentionally not repeated here.
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4LocalRetentionTrigger.test.mjs:generic-api-key:9
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxCommitDeadline.test.mjs:generic-api-key:84
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4ContentRetentionRoute.test.mjs:generic-api-key:10
