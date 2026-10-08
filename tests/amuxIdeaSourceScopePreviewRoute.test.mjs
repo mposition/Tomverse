@@ -10,9 +10,10 @@ import {
 const source = readFileSync(new URL("../app/api/admin/amux/ideas/source-scope-preview/route.ts", import.meta.url), "utf8");
 const service = readFileSync(new URL("../lib/amux/ideaSourceScopePreviewService.ts", import.meta.url), "utf8");
 
-test("source scope route stays dark independent of the environment", () => {
-  assert.equal(AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED, false);
-  assert.equal(sourceScopePreviewPermitted("enabled"), false);
+test("source scope route requires its dedicated environment gate", () => {
+  assert.equal(AMUX_V4_SOURCE_SCOPE_PREVIEW_CODE_ENABLED, true);
+  assert.equal(sourceScopePreviewPermitted(undefined), false);
+  assert.equal(sourceScopePreviewPermitted("enabled"), true);
   assert.match(source, /sourceScopePreviewPermitted\(process\.env\[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV\]\)/);
   assert.match(source, /error: "preview_disabled", transferAuthorized: false/);
   assert.doesNotMatch(source, /export async function GET\(/);

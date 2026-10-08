@@ -25,8 +25,10 @@ test("transfer confirmation accepts only one exact reviewed digest", () => {
     { ok: false, code: "schema_rejected" });
   assert.deepEqual(inspectIdeaTransferConfirmationRequest("x".repeat(513)),
     { ok: false, code: "too_large" });
-  assert.equal(transferConfirmWritePermitted("enabled"), false);
-  assert.equal(transferConfirmReadPermitted("enabled"), false);
+  assert.equal(transferConfirmWritePermitted(undefined), false);
+  assert.equal(transferConfirmReadPermitted(undefined), false);
+  assert.equal(transferConfirmWritePermitted("enabled"), true);
+  assert.equal(transferConfirmReadPermitted("enabled"), true);
 });
 
 test("same-preview browser receipt is unique and cannot be taken from another cookie", () => {
