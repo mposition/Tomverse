@@ -86,11 +86,11 @@ test("approval version only advances from absent or revoked latest history", () 
   }, 0), { decision: "hold", reason: "catalog_state_unverified" });
 });
 
-test("the new catalog writer cannot be opened by environment configuration", () => {
+test("the new catalog writer and reader require their dedicated environment values", () => {
   assert.equal(frontierCatalogWritePermitted(undefined), false);
-  assert.equal(frontierCatalogWritePermitted("enabled"), false);
+  assert.equal(frontierCatalogWritePermitted("enabled"), true);
   assert.equal(frontierCatalogReadPermitted(undefined), false);
-  assert.equal(frontierCatalogReadPermitted("enabled"), false);
+  assert.equal(frontierCatalogReadPermitted("enabled"), true);
 });
 
 test("only the catalog service may call its latch-bypassing transaction body", () => {

@@ -2,8 +2,8 @@ import { isAmuxIdeaRequestId } from "./ideaSubmissionCore.ts";
 
 export const AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV = "TOMVERSE_AMUX_V4_TRANSFER_CONFIRM_WRITE";
 export const AMUX_V4_TRANSFER_CONFIRM_READ_ENV = "TOMVERSE_AMUX_V4_TRANSFER_CONFIRM_READ";
-export const AMUX_V4_TRANSFER_CONFIRM_WRITE_CODE_ENABLED = false;
-export const AMUX_V4_TRANSFER_CONFIRM_READ_CODE_ENABLED = false;
+export const AMUX_V4_TRANSFER_CONFIRM_WRITE_CODE_ENABLED = true;
+export const AMUX_V4_TRANSFER_CONFIRM_READ_CODE_ENABLED = true;
 export const AMUX_V4_TRANSFER_CONFIRM_MAX_BYTES = 512;
 
 export const transferConfirmWritePermitted = (value: string | undefined): boolean =>

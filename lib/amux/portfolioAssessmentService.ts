@@ -13,7 +13,7 @@ import { amuxPortfolioAssessmentPayloadSchema,
   parseAmuxPortfolioMetrics, type AmuxPortfolioAssessmentPayload } from
   "./portfolioScoreSchemas.ts";
 
-export const AMUX_V4_PORTFOLIO_WRITE_CODE_ENABLED = false;
+export const AMUX_V4_PORTFOLIO_WRITE_CODE_ENABLED = true;
 export const AMUX_V4_PORTFOLIO_WRITE_ENV = "TOMVERSE_AMUX_V4_PORTFOLIO_WRITE";
 export const amuxV4PortfolioWriteEnabled = (value: string | undefined) =>
   AMUX_V4_PORTFOLIO_WRITE_CODE_ENABLED && value === "enabled";
