@@ -469,25 +469,26 @@ impl TerminalAdapter {
     /// (`orchestrator::scan`) mints the turn, exactly as it already does for a
     /// backend's native `working` report.
     ///
-    /// Only codex/ollama answer true. claude and gemini report their active
-    /// state through hooks / the structured protocol (the D1 exit), never the
-    /// scrape — so their `scan` already, correctly, emits nothing on active and
-    /// this stays false for them. A hookless codex/ollama worker has no such
-    /// voice: no Stop/UserPromptSubmit hooks, no structured session, so this
-    /// scrape of "• Working (…esc to interrupt)" is the ONLY signal that reaches
-    /// the store that the worker is running (AMUX-3165: a working ollama lane
-    /// read `running=false` the whole time because nothing emitted this).
+    /// Only codex/ollama and copilot answer true. claude and gemini report
+    /// their active state through hooks / the structured protocol (the D1
+    /// exit), never the scrape — so their `scan` already, correctly, emits
+    /// nothing on active and this stays false for them. A hookless
+    /// codex/ollama/copilot worker has no such voice: no Stop/UserPromptSubmit
+    /// hooks, no structured session, so this scrape of its working row is the
+    /// ONLY signal that reaches the store that the worker is running
+    /// (AMUX-3165: a working ollama lane read `running=false` the whole time
+    /// because nothing emitted this). The caller also ends the turn this
+    /// starts, at the lane's idle prompt or failure (`orchestrator::scan`).
     pub fn generating(&self, captured: &str) -> bool {
         let clean = strip_ansi(captured);
         match self.provider.as_str() {
             // ollama runs codex --oss --local-provider ollama; same pane format.
             "codex" | "ollama" => codex_generating(&clean),
-            // copilot is hookless too and its Working row is recognised (see
-            // scan_copilot), but it is deliberately NOT reported here yet: a
-            // turn this scrape starts is never ended by it (the post-turn idle
-            // prompt is deduped and the turn row stays open), a defect the
-            // codex/ollama lanes already carry. Copilot stays scan-only, like
-            // cursor, until that is fixed for all of them.
+            "copilot" => copilot_generating(&clean),
+            // cursor is hookless too, but its rate-limit screen and a crashed
+            // process are unverified (see scan_cursor), so nobody has checked
+            // that a turn started here always has something to end it. It
+            // stays scan-only until that is checked.
             _ => false,
         }
     }
@@ -1404,8 +1405,8 @@ fn scan_cursor(clean: &str) -> Vec<WorkerEvent> {
 ///   convention). The status row under the composer reads
 ///   `<spinner> Working … esc …`, e.g. `◉ Working esc edit prompt` and
 ///   `● Working · 106 B esc interrupt`. It is recognised so a busy pane is
-///   never read as idle; it is not reported through `generating()` (see the
-///   comment there);
+///   never read as idle, and `generating()` reports it so the scan loop
+///   starts the turn (`copilot_generating`);
 /// - otherwise that row is the hints footer `← open sidebar · …`, which is
 ///   `idle_prompt`.
 ///
@@ -1425,7 +1426,7 @@ fn scan_copilot(clean: &str) -> Vec<WorkerEvent> {
         })];
     }
     let Some(status) = copilot_status_rows(clean) else { return Vec::new() };
-    if RE_COPILOT_WORKING.is_match(status.trim_start()) {
+    if copilot_status_working(&status) {
         return Vec::new();
     }
     if status.contains("open sidebar") {
@@ -1435,6 +1436,18 @@ fn scan_copilot(clean: &str) -> Vec<WorkerEvent> {
         })];
     }
     Vec::new()
+}
+
+/// Is Copilot's current status row the Working row? The same reading
+/// `scan_copilot` uses, so the turn `generating()` starts and the idle footer
+/// that ends it come from one parse; the trust dialog outranks both.
+fn copilot_generating(clean: &str) -> bool {
+    !RE_COPILOT_TRUST.is_match(&last_n_raw_lines(clean, 30))
+        && copilot_status_rows(clean).is_some_and(|status| copilot_status_working(&status))
+}
+
+fn copilot_status_working(status: &str) -> bool {
+    RE_COPILOT_WORKING.is_match(status.trim_start())
 }
 
 /// The rows below the last full-width rule: Copilot's status line, which may
@@ -2396,9 +2409,10 @@ Queued (1)
     fn copilot_working_status_is_active_not_idle() {
         for fx in [FX_COPILOT_WORKING_QUEUED, FX_COPILOT_WORKING_TOOL] {
             assert!(adapter("copilot").scan(fx).is_empty(), "working must not read as waiting: {fx}");
-            // Pinned on purpose: reporting it would start turns the scan loop
-            // never ends (see generating()). Turn this on with that fix.
-            assert!(!adapter("copilot").generating(fx), "copilot stays scan-only: {fx}");
+            // The scrape is copilot's only voice: its Working row starts the
+            // turn, which the scan loop ends at the idle footer
+            // (orchestrator::scan, scraped_turn_ends_at_the_identical_idle_prompt_after_it).
+            assert!(adapter("copilot").generating(fx), "copilot working row must report generating: {fx}");
         }
     }
 

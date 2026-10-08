@@ -139,7 +139,22 @@ pub fn apply_event(
             if n > 0 {
                 events.push(ev(EntityType::Turn, turn_id.as_str(), MutationKind::Created));
             } else {
-                tracing::warn!(turn = turn_id.as_str(), "duplicate TurnStarted ignored");
+                // A turn that yielded (a limit, a wait) and is working again is
+                // resumed under its own id (orchestrator::scan): its row is
+                // already the record, so that is not a duplicate.
+                let open: bool = conn
+                    .query_row(
+                        "SELECT ended_at IS NULL FROM _amux_turns WHERE id = ?1",
+                        params![turn_id.as_str()],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(false);
+                if open {
+                    tracing::info!(worker = wid, turn = turn_id.as_str(), "open turn resumed");
+                } else {
+                    tracing::warn!(turn = turn_id.as_str(), "duplicate TurnStarted ignored");
+                }
             }
             let state = WorkerState::Active { turn: Some(turn_id.clone()) };
             write_state(conn, prior_state.as_ref(), wid, &state, &now_s, &mut events)?;
