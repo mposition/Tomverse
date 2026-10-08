@@ -16,6 +16,8 @@ export type AmuxIdeaAnalysisClaimReadback = {
   leaseGeneration: number;
   reservedMicroUsd: string;
   holdStatus: "in_flight" | "outcome_unknown";
+  ideaState: "analyzing" | "cancelled";
+  ideaCancelledAt: string | null;
   claimRequestId: string;
   payloadDigest: string;
   resultRequestId: string | null;
@@ -31,7 +33,7 @@ export function amuxIdeaAnalysisClaimReadbackDigest(
   readback: AmuxIdeaAnalysisClaimReadback,
 ): string {
   return createHash("sha256").update(JSON.stringify({
-    version: 2,
+    version: 3,
     policy: "amux-intake-v13",
     holdId: readback.holdId,
     previewId: readback.previewId,
@@ -40,6 +42,8 @@ export function amuxIdeaAnalysisClaimReadbackDigest(
     leaseGeneration: readback.leaseGeneration,
     reservedMicroUsd: readback.reservedMicroUsd,
     holdStatus: readback.holdStatus,
+    ideaState: readback.ideaState,
+    ideaCancelledAt: readback.ideaCancelledAt,
     claimRequestId: readback.claimRequestId,
     payloadDigest: readback.payloadDigest,
     resultRequestId: readback.resultRequestId,

@@ -8,7 +8,8 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { auditRowActorKind, AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_CLAIM_TARGET, AMUX_V4_ANALYSIS_RESULT_ACTION,
-  AMUX_V4_ANALYSIS_RESULT_TARGET } from "@/lib/adminAuditSystemActors";
+  AMUX_V4_ANALYSIS_RESULT_TARGET, AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+  AMUX_V4_IDEA_AUTO_CANCEL_TARGET } from "@/lib/adminAuditSystemActors";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 import { amuxIdeaAnalysisClaimReadbackDigest,
   type AmuxIdeaAnalysisClaimReadback,
@@ -59,9 +60,15 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
     where: { ideaId_chunkIndex: { ideaId: preview.ideaId,
       chunkIndex: preview.chunkIndex } },
   });
+  const activeIdea = idea?.state === "analyzing" && idea.cancelledAt === null &&
+    idea.analysisCompletedAt === null;
+  const cancelledIdea = idea?.state === "cancelled" &&
+    idea.cancelledAt instanceof Date && idea.analysisCompletedAt === null &&
+    idea.cancelledAt >= idea.analysisDeadlineAt &&
+    idea.rawPurgeAfter instanceof Date;
   if (!preview || !idea || !chunk || idea.actorUserId !== actorUserId ||
-      preview.confirmedByUserId !== actorUserId || idea.cancelledAt !== null ||
-      idea.state !== "analyzing" || chunk.currentPreviewId !== preview.id ||
+      preview.confirmedByUserId !== actorUserId ||
+      (!activeIdea && !cancelledIdea) || chunk.currentPreviewId !== preview.id ||
       chunk.attempt !== preview.attempt || chunk.leaseGeneration !== 1 ||
       preview.consumedAt === null ||
       (hold.status === "in_flight" &&
@@ -70,6 +77,21 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
         (preview.state !== "outcome_unknown" || chunk.state !== "outcome_unknown" ||
           preview.outcomeUnknownAt === null))) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+  }
+  if (cancelledIdea) {
+    const cancellations = await tx.adminAuditLog.findMany({ where: {
+      action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+      targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET, targetId: idea.id,
+    }, take: 2 });
+    const cancellation = cancellations[0];
+    const cancellationData = cancellation && record(cancellation.metadata);
+    if (cancellations.length !== 1 || !cancellation?.entryHash ||
+        auditRowActorKind(cancellation) !== "system" || !cancellationData ||
+        cancellationData.submittedAt !== idea.submittedAt.toISOString() ||
+        cancellationData.analysisDeadlineAt !== idea.analysisDeadlineAt.toISOString() ||
+        cancellationData.rawPurgeAfter !== idea.rawPurgeAfter?.toISOString()) {
+      throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+    }
   }
   const claims = await tx.adminAuditLog.findMany({ where: {
     action: AMUX_V4_ANALYSIS_CLAIM_ACTION,
@@ -116,6 +138,8 @@ async function readActiveSnapshot(tx: Prisma.TransactionClient,
     chunkIndex: preview.chunkIndex, leaseGeneration: 1,
     reservedMicroUsd: hold.reservedMicroUsd.toString(),
     holdStatus: hold.status as "in_flight" | "outcome_unknown",
+    ideaState: idea.state as "analyzing" | "cancelled",
+    ideaCancelledAt: idea.cancelledAt?.toISOString() ?? null,
     claimRequestId: claimData.requestId,
     payloadDigest: preview.payloadDigest,
     resultRequestId: resultData?.requestId as string | undefined ?? null,
@@ -288,6 +312,8 @@ export async function commitAmuxIdeaAnalysisClaimResolution(
       readbackDigest: input.readbackDigest, evidenceDigest: input.evidenceDigest,
       disposition: input.disposition, previewId: snapshot.previewId,
       ideaId: snapshot.ideaId, chunkIndex: snapshot.chunkIndex,
+      ideaState: snapshot.ideaState,
+      ideaCancelledAt: snapshot.ideaCancelledAt,
       claimRequestId: snapshot.claimRequestId,
       resultRequestId: snapshot.resultRequestId,
       resultOutcome: snapshot.resultOutcome,
@@ -317,22 +343,27 @@ export async function commitAmuxIdeaAnalysisClaimResolution(
   }, data: { status: input.disposition === "evidence_insufficient"
       ? "owner_consumed" : "owner_released_unstarted",
     settledMicroUsd: settled, closedAt: now } });
-  const previewUpdated = await tx.amuxIdeaTransferPreview.updateMany({ where: {
-    id: snapshot.previewId, state: snapshot.holdStatus,
-  }, data: { state: "owner_resolved" } });
-  const chunkUpdated = await tx.amuxIdeaAnalysisChunk.updateMany({ where: {
-    ideaId: snapshot.ideaId, chunkIndex: snapshot.chunkIndex,
-    currentPreviewId: snapshot.previewId, state: snapshot.holdStatus,
-    leaseGeneration: 1,
-  }, data: { state: "awaiting_preview", leaseGeneration: 0 } });
-  const ideaUpdated = snapshot.chunkIndex === 0
-    ? await tx.amuxIdeaSubmission.updateMany({ where: { id: snapshot.ideaId,
-        state: "analyzing", cancelledAt: null, analysisCompletedAt: null },
-      data: { state: "submitted" } })
-    : { count: 1 };
-  if ([windowUpdated.count, holdUpdated.count, previewUpdated.count,
-      chunkUpdated.count, ideaUpdated.count].some((count) => count !== 1)) {
+  if ([windowUpdated.count, holdUpdated.count].some((count) => count !== 1)) {
     throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+  }
+  if (snapshot.ideaState === "analyzing") {
+    const previewUpdated = await tx.amuxIdeaTransferPreview.updateMany({ where: {
+      id: snapshot.previewId, state: snapshot.holdStatus,
+    }, data: { state: "owner_resolved" } });
+    const chunkUpdated = await tx.amuxIdeaAnalysisChunk.updateMany({ where: {
+      ideaId: snapshot.ideaId, chunkIndex: snapshot.chunkIndex,
+      currentPreviewId: snapshot.previewId, state: snapshot.holdStatus,
+      leaseGeneration: 1,
+    }, data: { state: "awaiting_preview", leaseGeneration: 0 } });
+    const ideaUpdated = snapshot.chunkIndex === 0
+      ? await tx.amuxIdeaSubmission.updateMany({ where: { id: snapshot.ideaId,
+          state: "analyzing", cancelledAt: null, analysisCompletedAt: null },
+        data: { state: "submitted" } })
+      : { count: 1 };
+    if ([previewUpdated.count, chunkUpdated.count, ideaUpdated.count]
+        .some((count) => count !== 1)) {
+      throw new AmuxIdeaAnalysisClaimResolutionError("integrity_unavailable");
+    }
   }
   return { holdId: hold.id, disposition: input.disposition,
     settledMicroUsd: settled.toString(), releasedMicroUsd: released.toString(),

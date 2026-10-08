@@ -14,6 +14,7 @@ test("claim read-back digest is deterministic and binds the result receipt", () 
   const snapshot = { holdId: "hold-1", previewId: "preview-1", ideaId: "idea-1",
     chunkIndex: 0, leaseGeneration: 1, reservedMicroUsd: "10560000",
     holdStatus: "outcome_unknown", claimRequestId: "claim-1",
+    ideaState: "analyzing", ideaCancelledAt: null,
     payloadDigest: "a".repeat(64), resultRequestId: "result-1",
     resultDigest: "b".repeat(64), resultOutcome: "verified_success",
     resultEffectiveOutcome: "outcome_unknown",
@@ -25,6 +26,8 @@ test("claim read-back digest is deterministic and binds the result receipt", () 
     resultDigest: "c".repeat(64) }), digest);
   assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
     resultFailureReason: null }), digest);
+  assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
+    ideaState: "cancelled", ideaCancelledAt: "2026-10-08T00:00:00.000Z" }), digest);
   assert.notEqual(amuxIdeaAnalysisClaimReadbackDigest({ ...snapshot,
     zeroReleaseEligible: true }), digest);
 });
@@ -44,10 +47,11 @@ test("only the deterministic integrity 503 skips read-only recovery", () => {
 });
 
 test("owner resolution stays dark, exact, Agent-only, and distinct from cancellation", async () => {
-  const [route, service, panel, migration, cancellation] = await Promise.all([
+  const [route, service, panel, budgetPanel, migration, cancellation] = await Promise.all([
     read("app/api/admin/amux/ideas/analysis-claim-resolution/route.ts"),
     read("lib/amux/ideaAnalysisClaimResolutionService.ts"),
     read("components/admin/AmuxAnalysisClaimResolutionPanel.tsx"),
+    read("components/admin/AmuxAnalysisBudgetPanel.tsx"),
     read("prisma/migrations/20261008130000_amux_v4_claim_owner_resolution/migration.sql"),
     read("lib/amux/ideaAnalysisBudgetCancellationService.ts"),
   ]);
@@ -68,6 +72,13 @@ test("owner resolution stays dark, exact, Agent-only, and distinct from cancella
   assert.match(panel, /state !== "resolution_found"/);
   assert.match(panel, /isAmuxClaimResolutionWriteOutcomeUnknown/);
   assert.match(panel, /disabled=\{!readback\.zeroReleaseEligible\}/);
+  assert.match(budgetPanel, /holdStatus === "owner_released_unstarted"/);
+  assert.match(budgetPanel, /holdStatus === "owner_consumed"/);
+  assert.match(budgetPanel, /holdStatus === "reserved"/);
+  assert.match(budgetPanel, /holdStatus === "in_flight"/);
+  assert.match(budgetPanel, /holdStatus === "outcome_unknown"/);
+  assert.match(budgetPanel, /onResolved=/);
+  assert.match(budgetPanel, /loadHold\(\)\.catch/);
   assert.match(migration, /owner_released_unstarted/);
   assert.match(migration, /"dispatchedAt" IS NOT NULL/);
   assert.match(migration, /"settledMicroUsd" = 0/);
