@@ -9,10 +9,16 @@
 > 주장 자체는 대체로 맞았습니다. 예를 들어 3.4의 "열여섯 곳"은 지금도 정확합니다
 > (`actions/cache*` 단계 17개 중 16개). 틀린 것은 번호뿐이었으므로, 번호를 다시
 > 맞추는 대신 **밀리지 않는 것**으로 바꿨습니다 — step 이름, 상수 이름, 명령
-> 문자열, 그리고 개수 주장은 개수와 다시 세는 방법. 남은 20건은 전부 자기가
-> 주장하는 자리를 가리키는 것을 확인했고, 그중 workflow 줄 번호를 가진 것은
-> **step 이름이나 action 이름을 함께** 들고 있습니다. 번호와 이름이 어긋나면
-> 낡은 쪽은 번호입니다.
+> 문자열, 그리고 개수 주장은 개수와 다시 세는 방법.
+>
+> **범위를 정직하게 적습니다.** 그 재검증이 덮은 것은 `` `파일:줄` `` 형태로
+> backtick 안에 있던 **63건**이고, 그중 약 40건을 고쳤습니다. 문서 전체에는
+> `(:809-810)`처럼 괄호 안에 번호만 있는 형태까지 합쳐 **186건**의 줄 참조가
+> 있으며, 그 나머지는 **확인하지 않았습니다** — 독립 검토가 2026-10-07에 그
+> 누락을 지적했고, 그때 고친 것은 그 지적이 이름 댄 것뿐입니다. 이 문서의 줄
+> 번호는 조사 시점의 snapshot이고 **유지되지 않습니다.** 인용이 step·상수·명령
+> 이름을 함께 들고 있으면 **이름이 권위 있는 쪽**이고, 번호와 어긋나면 번호가
+> 낡은 것입니다.
 >
 > 다른 감사 문서(`pr-fast-gate-performance-audit.md`)로의 인용은 번호를
 > 유지합니다 — 그쪽은 날짜가 박힌 기록이고 움직이지 않습니다.
@@ -257,8 +263,10 @@ review-parity-shadow.yml:103
 ```
 
 `${{ runner.os }}-next-` 는 다른 모든 `Linux-next-*` 항목에 맞습니다.
-`pr-fast-gate.yml`은 이 fallback을 이미 **뺐고**(:809-810, :1014-1015), 그 이유가
-주석에 있습니다(:806-808).
+`pr-fast-gate.yml`은 이 fallback을 이미 **뺐습니다** — 네 `restore-keys` 블록이
+모두 `${{ runner.os }}-next-v2-pr-` 또는 `-playwright-v2-pr-`에서 멈추고, 16.3.4
+캐시가 16.3.5 Turbopack font 빌드를 깨뜨린 기록은
+`admin-console-e2e.yml`·`daily-security-audit.yml`의 restore-key 주석에 있습니다.
 
 > Stop at next-pr-&lt;lockfile&gt;. A bare Linux-next- prefix also matches
 > Linux-next-admin-e2e- from another workflow. That cache was built
@@ -501,10 +509,20 @@ provider key, 이메일 발송 key — 이 오염된 코드와 같은 job에 놓
 
 근거: `lib/agentCredentialReachability.ts`의 `cacheIsolationRecorded` 주석이 그 설정을 "a dated record
 that **pull_request-run caches never reach other refs' runs**"로 정의합니다.
-`docs/policy/engineering-agent.md` §5의 캐시 경로 항목이 계약입니다. 호출자는 둘이고 **둘
-다 `false`로 고정**돼 있습니다(`tests/agentCredentialReachability.test.mjs`와
-`scripts/report-engineering-agent-tiers.mjs`의 `cacheIsolationRecorded: false`) — 즉 기록은 아직
-존재하지 않습니다.
+`docs/policy/engineering-agent.md` §5의 캐시 경로 항목이 계약입니다.
+
+> **이 문단은 조사 시점(2026-10-03)에 "호출자는 둘이고 둘 다 `false`로 고정돼
+> 있다 — 즉 기록은 아직 존재하지 않는다"고 적었고, 그것은 더 이상 사실이
+> 아닙니다**(독립 검토가 지적, 2026-10-07). 기록은 2026-10-04에 소유자가
+> 서명했고(P7의 장치, #2052), `scripts/report-engineering-agent-tiers.mjs`는
+> 이제 **조건부로** 적용합니다 — `cacheIsolationRecordSignature().signed`와
+> `judgeAgentPrCacheIsolation()`의 `held`가 둘 다 참일 때만
+> `cacheIsolationRecorded: true`로 다시 분석하고, 그 둘은 먼저 기록을 무시한
+> 분석(`blind`)으로 판정합니다 — 기록을 적용한 분석은 캐시 이유를 하나도
+> 보고하지 않으므로, 그것으로 조건을 판정하면 증거를 가린 채 충족된 것처럼
+> 보이게 됩니다. `npm run check:credential-cache-separation`과
+> `tests/agentCredentialReachability.test.mjs`의 posture digest는 계속 기록을
+> 무시한 채 판정합니다.
 
 1장의 공식 규칙은 **그 방향이 이미 닫혀 있음을 확인합니다** — PR 캐시는
 `refs/pull/.../merge` scope이고 그 PR의 re-run만 복원합니다. 그러므로 그 기록은

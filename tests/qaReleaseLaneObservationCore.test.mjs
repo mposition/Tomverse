@@ -75,18 +75,22 @@ const record = (overrides = {}) => ({
   observedAt: "2026-10-08T03:00:00.000Z",
   repository: "mposition/Tomverse",
   observationAppId: 1,
-  bypassAppIds: [15368, 29110],
+  bypassAppIds: [29110],
   protection: { develop: QA_RELEASE_DEVELOP_PROTECTION_RECORDED, main: { branch: "main", classic: { present: false }, rules: [] } },
   results: asExpected(),
   verdict: judgeQaReleaseObservations(asExpected()),
-  automation: { since: SINCE, updates: qaReleaseAutomationUpdates(ACTIVITY, [15368, 29110], SINCE), missingAppIds: [] },
+  automation: { since: SINCE, updates: qaReleaseAutomationUpdates(ACTIVITY, [29110], SINCE), missingAppIds: [] },
   ...overrides,
 });
 
 test("an update by each bypass App on its own branch since the test ruleset went on, and nothing else, counts", () => {
-  const updates = qaReleaseAutomationUpdates(ACTIVITY, [15368, 29110], SINCE);
-  assert.deepEqual(updates.map((u) => u.appId), [29110, 15368]);
-  assert.deepEqual(qaReleaseAutomationMissing(updates, [15368, 29110]), []);
+  const updates = qaReleaseAutomationUpdates(ACTIVITY, [29110], SINCE);
+  assert.deepEqual(updates.map((u) => u.appId), [29110]);
+  assert.deepEqual(qaReleaseAutomationMissing(updates, [29110]), []);
+  // GitHub Actions is not a candidate (refused as a bypass actor here), so its
+  // pushes never count, even when it is named.
+  assert.deepEqual(qaReleaseAutomationUpdates(ACTIVITY, [15368], SINCE), []);
+  assert.deepEqual(qaReleaseAutomationMissing([], [15368]), [15368]);
 
   const noise = [
     // before the ruleset went on
@@ -101,27 +105,27 @@ test("an update by each bypass App on its own branch since the test ruleset went
     null,
     { ref: 1 },
   ];
-  assert.deepEqual(qaReleaseAutomationUpdates(noise, [15368, 29110], SINCE), []);
-  assert.deepEqual(qaReleaseAutomationMissing([], [29110, 15368]), [15368, 29110]);
+  assert.deepEqual(qaReleaseAutomationUpdates(noise, [29110], SINCE), []);
+  assert.deepEqual(qaReleaseAutomationMissing([], [29110]), [29110]);
   // An App not on the bypass list contributes nothing.
   assert.deepEqual(qaReleaseAutomationUpdates(ACTIVITY, [29110], SINCE).map((u) => u.appId), [29110]);
 });
 const now = (overrides = {}) => ({
   develop: QA_RELEASE_DEVELOP_PROTECTION_RECORDED,
   main: { branch: "main", classic: { present: false }, rules: [] },
-  bypassAppIds: [29110, 15368],
+  bypassAppIds: [29110],
   ...overrides,
 });
 
 test("a record licenses the real rulesets only while it passed, names the same bypass list, and the protection is unchanged", () => {
   assert.deepEqual(qaReleaseRecordStillHolds(record(), now()), { holds: true, reasons: [] });
-  assert.deepEqual(qaReleaseRecordStillHolds(record(), now({ bypassAppIds: [15368] })).reasons, ["bypass_list_differs"]);
+  assert.deepEqual(qaReleaseRecordStillHolds(record(), now({ bypassAppIds: [] })).reasons, ["bypass_list_differs"]);
   const changedMain = { branch: "main", classic: { present: false }, rules: [{ type: "update", rulesetId: 3, parameters: null }] };
   assert.deepEqual(qaReleaseRecordStillHolds(record(), now({ main: changedMain })).reasons, ["main.rules"]);
   const failed = record({ results: asExpected().slice(2) });
   assert.deepEqual(qaReleaseRecordStillHolds(failed, now()).reasons, ["observations_not_passed"]);
   // Item 7: no automation evidence, no real rulesets.
-  const unobserved = record({ automation: { since: SINCE, updates: [], missingAppIds: [15368, 29110] } });
+  const unobserved = record({ automation: { since: SINCE, updates: [], missingAppIds: [29110] } });
   assert.deepEqual(qaReleaseRecordStillHolds(unobserved, now()).reasons, ["automation_not_observed"]);
   assert.deepEqual(qaReleaseRecordStillHolds(record({ recordVersion: 1 }), now()).reasons, ["record_version"]);
 });
