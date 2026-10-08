@@ -211,10 +211,21 @@ jobs:
             echo "push with**, and no production access. \`npm run\` needs Node 22 and"
             echo "\`npm ci\`; skip that line if you have not installed."
             echo
+            echo "**Run them one at a time and stop at the first failure.** Pasting the"
+            echo "block runs every line regardless: in PowerShell a failed external command"
+            echo "does not stop the next one, so a failed \`git commit\` would be followed by"
+            echo "a \`git push\` of the wrong thing."
+            echo
             echo "**It writes.** It creates a local branch and pushes it to the remote."
-            echo "To undo: \`git branch -D claude/back-merge-main-${MAIN_SHORT}\` locally and"
-            echo "\`git push origin --delete claude/back-merge-main-${MAIN_SHORT}\` on the remote."
             echo "Nothing touches \`develop\` or \`main\` until you merge the pull request."
+            echo "To undo, in this order -- the branch is checked out when you finish, and"
+            echo "\`git branch -D\` refuses to delete the branch you are on:"
+            echo
+            echo '```'
+            echo "git switch develop"
+            echo "git branch -D claude/back-merge-main-${MAIN_SHORT}"
+            echo "git push origin --delete claude/back-merge-main-${MAIN_SHORT}"
+            echo '```'
             echo
             echo '```'
             echo "git fetch origin main develop"
@@ -228,9 +239,9 @@ jobs:
             echo "git push -u origin claude/back-merge-main-${MAIN_SHORT}"
             echo '```'
             echo
-            echo "One command per line on purpose: \`&&\` is not a statement separator in"
-            echo "Windows PowerShell 5.1, and each of these should stop the sequence if it"
-            echo "fails rather than carry on."
+            echo "One command per line because \`&&\` is not a statement separator in Windows"
+            echo "PowerShell 5.1 -- not because the lines stop each other. They do not; that"
+            echo "is why the instruction above is to run them one at a time."
             echo
             echo "Open the pull request against \`develop\` and **merge it with a merge"
             echo "commit** -- a squash records no ancestry and leaves this invariant red."
