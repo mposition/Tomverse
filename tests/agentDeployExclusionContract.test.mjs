@@ -17,11 +17,21 @@ const sourcePaths = execFileSync("git", ["ls-files", "app", "lib", "packages"],
 const fileCalls = new Set(["readFile", "readFileSync", "createReadStream",
   "open", "stat", "lstat", "access", "readdir", "existsSync"]);
 
-test("deploy source exclusion remains narrow and grants no T1 before image proof", () => {
+test("deploy source exclusion includes only pinned vNext test sources", () => {
   const patterns = readFileSync(join(root, ".dockerignore"), "utf8")
     .split(/\r?\n/).map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
-  assert.deepEqual(patterns, ["tests/", "playwright.admin.config.ts"]);
+  const closure = JSON.parse(readFileSync(join(root,
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-candidate-source-closure.json"),
+  "utf8"));
+  const pinnedTests = Object.keys(closure.files).filter((path) =>
+    path.startsWith("tests/")).sort();
+  assert.deepEqual(pinnedTests, [
+    "tests/promptRefinerQualityEvaluationVnextCandidate.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextDevelopment.test.mjs",
+  ]);
+  assert.deepEqual(patterns, ["tests/*", ...pinnedTests.map((path) =>
+    `!${path}`), "playwright.admin.config.ts"]);
   assert.deepEqual([...DEPLOY_EXCLUDED_PREFIXES], []);
   // This live route reads committed verification records by path.
   assert.match(readFileSync(join(root,
