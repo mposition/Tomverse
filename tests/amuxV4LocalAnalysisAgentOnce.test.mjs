@@ -34,7 +34,7 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
 
-test("retention hold reads stay available while writes remain code-latched off", () => {
+test("retention hold writes remain code-latched off", () => {
   const route = readFileSync(new URL(
     "../app/api/admin/amux/ideas/retention-holds/route.ts", import.meta.url),
   "utf8");

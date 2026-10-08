@@ -161,3 +161,58 @@ export async function submitOpsObserverDigest(
   await assertNotLate(input.runDeadline, client);
   return { result: recorded.status, itemId: recorded.id };
 }
+
+/** One kept digest as the Admin item screen shows it: the digest notice's link target. */
+export type OpsObserverDigestView = {
+  id: string;
+  createdAt: string;
+  /** null once the body is past its 90 days (§10); the row and its hash remain. */
+  payload: {
+    ownerDate: string;
+    mode: string;
+    readiness: "unknown" | Record<string, boolean>;
+    reserved: { key: string; kind: string; capped: boolean }[];
+    channelCheckTaken: boolean;
+  } | null;
+};
+
+/**
+ * The digest a notice links to, by its id: this agent's rows of the shared
+ * table only, read in one bounded state_read transaction, with the deadline
+ * checked before anything is returned. A body past its retention by the
+ * database clock -- deleted or not yet -- or one that no longer parses to the
+ * closed shape is shown as absent rather than as whatever it holds.
+ */
+export async function readOpsObserverDigestItem(
+  itemId: string,
+  client: PrismaClient = prisma,
+  runDeadline: Date = new Date(Date.now() + 120_000),
+): Promise<OpsObserverDigestView | null> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(itemId)) return null;
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx): Promise<OpsObserverDigestView | null> => {
+      // The body only while it is inside its retention by the database clock:
+      // an expiry batch that has not run yet must not keep it readable (§10).
+      const [row] = await tx.$queryRaw<{ id: string; createdAt: Date; payload: unknown }[]>`
+        SELECT id::text AS id, "createdAt",
+               CASE WHEN "retentionUntil" > clock_timestamp() THEN payload END AS payload
+          FROM "AgentDigestItem"
+         WHERE id = ${itemId}::uuid AND "agentKey" = 'sre-ops' AND kind = ${DIGEST_KIND}`;
+      if (!row) return null;
+      const parsed =
+        row.payload === null
+          ? null
+          : (parseDigestPayload(row.payload) as { ok: true; payload: unknown } | { ok: false; error: string });
+      return {
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
+        payload: parsed && parsed.ok ? (parsed.payload as OpsObserverDigestView["payload"]) : null,
+      };
+    },
+    client,
+  );
+  await assertNotLate(runDeadline, client);
+  return result;
+}
