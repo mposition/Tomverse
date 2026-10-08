@@ -13,6 +13,8 @@ import {
   AGENT_OFFICE_OPERATOR,
   AGENT_OFFICE_STAFF,
   AGENT_OFFICE_TEAM_IDS,
+  AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DECLARED_RECORD_HREFS,
   AGENT_OFFICE_WORKER_COLORS,
   consoleHasRecord,
 } from "../lib/agentOffice/roster.ts";
@@ -113,8 +115,20 @@ test("a record link is kept only while the console has its page and tab", () => 
   for (const id of ["engineering", "qa", "marketing", "research", "digest"]) {
     assert.ok(AGENT_OFFICE_DEPTS.find((dept) => dept.id === id)?.recordHref, `${id} lost its link`);
   }
+  // Every link on screen is the declared one filtered by that predicate, and
+  // every declared link is a well-formed console address, so a typo cannot
+  // pass for a screen a branch does not carry yet.
+  for (const dept of AGENT_OFFICE_DEPTS) {
+    const declared = AGENT_OFFICE_DECLARED_RECORD_HREFS[dept.id];
+    assert.equal(dept.recordHref, declared !== null && consoleHasRecord(declared) ? declared : null, dept.id);
+    if (declared !== null) assert.match(declared, /^\/admin\/[a-z0-9-]+(\?tab=[a-z0-9-]+)?$/, dept.id);
+  }
+  assert.equal(
+    AGENT_OFFICE_AMUX_RECORD_HREF,
+    consoleHasRecord("/admin/amux-execution") ? "/admin/amux-execution" : null
+  );
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /isAmux && AGENT_OFFICE_AMUX_RECORD_HREF ?/);
+  assert.match(world, /isAmux && AGENT_OFFICE_AMUX_RECORD_HREF \?/);
 });
 
 test("the catalog names every room, person and phase in both languages", () => {
