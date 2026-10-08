@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  clearConfirmedIdeaRequest,
   clearPendingIdeaRequest,
+  readConfirmedIdeaRequest,
   readPendingIdeaRequest,
+  rememberConfirmedIdeaRequest,
   reservePendingIdeaRequest,
 } from "../lib/amux/ideaSubmissionRecoveryCore.ts";
 
@@ -49,4 +52,30 @@ test("unavailable, corrupt and non-persisting browser storage fails closed", () 
   corrupt.data.set("amux-v4-idea-unresolved-request:owner-1", "not-a-request-id");
   assert.deepEqual(readPendingIdeaRequest(corrupt, "owner-1"), { kind: "unavailable" });
   assert.equal(reservePendingIdeaRequest(corrupt, "owner-1", firstId), false);
+});
+
+test("confirmed request survives reload with no idea text and is reverified", () => {
+  const storage = store();
+  assert.equal(reservePendingIdeaRequest(storage, "owner-1", firstId), true);
+  assert.equal(rememberConfirmedIdeaRequest(storage, "owner-1", firstId), true);
+  assert.deepEqual(readPendingIdeaRequest(storage, "owner-1"), { kind: "none" });
+  assert.deepEqual(readConfirmedIdeaRequest(storage, "owner-1"),
+    { kind: "confirmed", requestId: firstId });
+  assert.deepEqual([...storage.data.values()], [firstId], "only an opaque request ID is retained");
+  clearConfirmedIdeaRequest(storage, "owner-1", secondId);
+  assert.deepEqual(readConfirmedIdeaRequest(storage, "owner-1"),
+    { kind: "confirmed", requestId: firstId });
+  clearConfirmedIdeaRequest(storage, "owner-1", firstId);
+  assert.deepEqual(readConfirmedIdeaRequest(storage, "owner-1"), { kind: "none" });
+});
+
+test("failure to preserve a confirmed receipt keeps the unresolved receipt", () => {
+  const storage = store();
+  reservePendingIdeaRequest(storage, "owner-1", firstId);
+  const noConfirm = { ...storage,
+    setItem: (key, value) => { if (!key.includes("confirmed")) storage.setItem(key, value); },
+  };
+  assert.equal(rememberConfirmedIdeaRequest(noConfirm, "owner-1", firstId), false);
+  assert.deepEqual(readPendingIdeaRequest(storage, "owner-1"),
+    { kind: "pending", requestId: firstId });
 });

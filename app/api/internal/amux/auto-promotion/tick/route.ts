@@ -11,6 +11,14 @@ import {
   autoTickHttpStatus,
 } from "@/lib/amux/autoPromotionCore";
 import { tickAutoPromotion } from "@/lib/amux/autoPromotionService";
+import { AMUX_V22_AUTO_PROMOTION_ENV,
+  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
+import { tickV22AutoPromotion } from "@/lib/amux/v22AutoPromotionService";
+import { v22PromotionTickWire, v22WorkerClaimTickWire } from
+  "@/lib/amux/v22TickWire";
+import { AMUX_V22_WORKER_CLAIM_ENV, amuxV22WorkerClaimEnabled } from
+  "@/lib/amux/v22WorkerClaimCore";
+import { tickV22WorkerClaim } from "@/lib/amux/v22WorkerClaimService";
 import { withAmuxRouteBudget } from "@/lib/amux/dbBoundary";
 import { isAmuxSyncAuthorized } from "@/lib/amux/guard";
 import {
@@ -69,19 +77,47 @@ export async function POST(request: Request) {
       return amuxInternalErrorResponse(OPERATION, error);
     }
 
-    if (
-      !autoPromotionApplyPermitted({
+    const legacyEnabled = autoPromotionApplyPermitted({
         envValue: process.env[AUTO_PROMOTION_APPLY_ENV],
         codeLatch: AUTO_PROMOTION_CODE_LATCH,
-      })
-    ) {
+      });
+    const v22Enabled = amuxV22AutoPromotionEnabled(
+      process.env[AMUX_V22_AUTO_PROMOTION_ENV]);
+    const claimEnabled = amuxV22WorkerClaimEnabled(
+      process.env[AMUX_V22_WORKER_CLAIM_ENV]);
+    if (!legacyEnabled && !v22Enabled && !claimEnabled) {
       return Response.json(
         { promoted: false, reason: "apply_disabled", expired: 0 },
         { status: 409, headers: noStore },
       );
     }
+    if ((v22Enabled || claimEnabled) && identity.kind !== "admitted" &&
+        !legacyEnabled) {
+      return Response.json({ promoted: false, reason: "apply_disabled", expired: 0 },
+        { status: 409, headers: noStore });
+    }
 
     try {
+      if (claimEnabled && identity.kind === "admitted") {
+        const result = await tickV22WorkerClaim();
+        if (result.claimed || result.reason === "outcome_unknown" ||
+            (!v22Enabled && !legacyEnabled)) {
+          return Response.json(v22WorkerClaimTickWire(result), {
+            status: result.claimed ? 200 : autoTickHttpStatus(result.reason),
+            headers: noStore,
+          });
+        }
+      }
+      if (v22Enabled && identity.kind === "admitted") {
+        const result = await tickV22AutoPromotion();
+        if (result.promoted || (!result.promoted && result.reason === "outcome_unknown") ||
+            !legacyEnabled) {
+          return Response.json(v22PromotionTickWire(result), {
+            status: result.promoted ? 200 : autoTickHttpStatus(result.reason),
+            headers: noStore,
+          });
+        }
+      }
       const result = await tickAutoPromotion();
       return Response.json(result, { status: autoTickHttpStatus(result.reason), headers: noStore });
     } catch (error) {

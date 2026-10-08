@@ -33,6 +33,7 @@ import {
   runMarketingTransaction,
 } from "@/lib/marketingStore";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import {
   finishMarketingPublisherRun,
   findSilentMarketingPublisherRuns,
@@ -109,7 +110,7 @@ const resumeAutonomous = async (
 };
 
 const reset = () =>
-  prisma.$executeRawUnsafe(
+  resetTestFixture(prisma,
     `TRUNCATE TABLE "MarketingPost", "MarketingChannel", "MarketingReport", "AiVisibilityRun" RESTART IDENTITY CASCADE`,
   );
 
@@ -323,26 +324,26 @@ beforeEach(async () => {
   previousAuditKey = process.env.ADMIN_AUDIT_INTEGRITY_KEY;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = AUDIT_SECRET;
   await reset();
-  await prisma.$executeRawUnsafe(`
+  await resetTestFixture(prisma, `
     TRUNCATE TABLE
       "PromptRefinerShadowAttempt",
       "PromptRefinerShadowRun",
       "PromptRefinerReservation",
       "PromptRefinerReservationStage",
       "AmuxReviewDecision",
-      "EngineeringAgentApproval",
-      -- These dark v4 tables are empty in this lane; list the complete FK
-      -- closure instead of cascading into unrelated data.
-      "AmuxIdeaUnitDecision",
-      "AmuxIdeaDraftUnit",
-      "AmuxIdeaTransferPreview",
+      "AmuxIdeaAnalysisBudgetHold",
+      "AmuxIdeaAnalysisPriceVersion",
       "AmuxIdeaAnalysisChunk",
-      "AmuxIdeaSourceScopeApproval",
-      "AmuxIdeaSourcePlanRevision",
-      "AmuxIdeaSubmission",
+      "AmuxIdeaDraftUnit",
       "AmuxIdeaFrontierModelApproval",
+      "AmuxIdeaSourcePlanRevision",
+      "AmuxIdeaSourceScopeApproval",
+      "AmuxIdeaSubmission",
+      "AmuxIdeaTransferPreview",
+      "AmuxIdeaUnitDecision",
+      "EngineeringAgentApproval",
       "AdminAuditLog"
-    RESTART IDENTITY
+    RESTART IDENTITY CASCADE
   `);
 });
 

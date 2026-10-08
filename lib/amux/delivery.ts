@@ -6,6 +6,15 @@ import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
+import { openAmuxContent, verifyAmuxContentDigest,
+  type AmuxContentKeys } from "@/lib/amux/ideaCrypto";
+import { AMUX_V22_TASK_EXECUTION_ENV,
+  AMUX_V22_SEALED_DELIVERY_MARKER,
+  amuxV22TaskExecutionEnabled } from
+  "@/lib/amux/v22TaskExecutionCore";
+import { AMUX_V22_WORKER_AUTHORITY_NOTICE } from
+  "@/lib/amux/v22ExternalAuthorityCore";
 
 export const AMUX_DELIVERY_RECEIPT_LEASE_MS = 30_000;
 
@@ -41,6 +50,7 @@ type DeliveryLockRow = {
   runtimeLeaseExpiresAt: Date;
   attemptLeaseExpiresAt: Date;
   attemptId: string;
+  v22AssignmentId: string | null;
   taskId: string;
   worker: string;
   workerInstanceId: string;
@@ -193,10 +203,16 @@ export type AmuxPulledDelivery =
       available: true;
       delivery: {
         attemptId: string;
+        assignmentId: string | null;
         taskId: string;
         worker: string;
         taskRevision: number;
         prompt: string;
+        v22Execution: {
+          modelId: string;
+          role: string;
+          budgetMicrousd: number;
+        } | null;
         receiptId: string;
         leaseExpiresAt: Date;
       };
@@ -212,6 +228,96 @@ export async function pullAmuxWorkDelivery(input: {
   generation: number;
   now?: Date;
 }): Promise<AmuxPulledDelivery> {
+  // Key-store I/O is outside the DB transaction. The locked row below must
+  // still match this candidate; a race refuses delivery rather than opening
+  // another Task's sealed brief with stale keys.
+  const v22Enabled = amuxV22TaskExecutionEnabled(
+    process.env[AMUX_V22_TASK_EXECUTION_ENV]);
+  const { sealedCandidate, candidateCard } = v22Enabled ?
+    await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.deliveryKeyRead, async (tx) => {
+      const sealedCandidate = await tx.amuxWorkDelivery.findFirst({
+        where: { worker: input.worker, prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
+          status: { in: ["queued", "leased"] }, acknowledgedAt: null,
+          cancelledAt: null },
+        orderBy: [{ createdAt: "asc" }, { attemptId: "asc" }],
+        select: { attemptId: true, taskId: true },
+      });
+      const candidateCard = sealedCandidate ? await tx.amuxWorkItem.findUnique({
+        where: { id: sealedCandidate.taskId },
+        select: { sourceSnapshot: true },
+      }) : null;
+      return { sealedCandidate, candidateCard };
+    }) : { sealedCandidate: null, candidateCard: null };
+  const snapshot = candidateCard?.sourceSnapshot;
+  const ideaId = snapshot && typeof snapshot === "object" &&
+    !Array.isArray(snapshot) && typeof snapshot.ideaId === "string" ?
+      snapshot.ideaId : null;
+  const briefKeys = sealedCandidate && ideaId ?
+    await loadAmuxContentKeyRing([{ ideaId, purpose: "card_brief",
+      subjectId: sealedCandidate.taskId }]) : null;
+  const deliveryContent = async (tx: Prisma.TransactionClient,
+    delivery: DeliveryLockRow) => {
+    if (delivery.prompt !== AMUX_V22_SEALED_DELIVERY_MARKER)
+      return { prompt: delivery.prompt, v22Execution: null };
+    if (!v22Enabled) throw new Error("v22 sealed delivery is disabled");
+    if (!briefKeys || sealedCandidate?.attemptId !== delivery.attemptId ||
+        sealedCandidate.taskId !== delivery.taskId)
+      throw new Error("v22 sealed delivery key binding changed");
+    const card = await tx.amuxWorkItem.findUnique({
+      where: { id: delivery.taskId },
+      select: { sourceSystem: true, cardType: true,
+        v4BriefCiphertext: true, v4BriefKeyId: true,
+        v4BriefKeyVersion: true, v4BriefDigest: true,
+        v4BriefDigestKeyId: true, v4BriefPurgedAt: true,
+        v22AssignmentId: true },
+    });
+    const attempt = await tx.amuxExecutionAttempt.findUnique({
+      where: { id: delivery.attemptId },
+      select: { v22AssignmentId: true },
+    });
+    if (card?.sourceSystem !== "admin-idea-v4" ||
+        card.cardType !== "task" || !card.v4BriefCiphertext ||
+        !card.v4BriefKeyId || !card.v4BriefKeyVersion ||
+        !card.v4BriefDigest || !card.v4BriefDigestKeyId ||
+        card.v4BriefPurgedAt !== null ||
+        !card.v22AssignmentId ||
+        attempt?.v22AssignmentId !== card.v22AssignmentId)
+      throw new Error("v22 sealed delivery is not assignment-bound");
+    const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+      where: { id: card.v22AssignmentId },
+      select: { workItemId: true, workerName: true,
+        workerInstanceId: true, workerGeneration: true,
+        modelId: true, role: true,
+        perAttemptMicroUsd: true },
+    });
+    const budgetMicrousd = Number(assignment?.perAttemptMicroUsd);
+    if (assignment?.workItemId !== delivery.taskId ||
+        assignment?.workerName !== delivery.worker ||
+        assignment?.workerInstanceId !== delivery.workerInstanceId ||
+        assignment?.workerGeneration !== delivery.workerGeneration ||
+        !Number.isSafeInteger(budgetMicrousd) ||
+        budgetMicrousd < 1 || budgetMicrousd > 5_000_000)
+      throw new Error("v22 delivery assignment profile is invalid");
+    let plain: Buffer | null = null;
+    try {
+      plain = openAmuxContent({
+        ciphertext: Buffer.from(card.v4BriefCiphertext),
+        keyId: card.v4BriefKeyId,
+        keyVersion: card.v4BriefKeyVersion,
+      }, "card_brief", delivery.taskId, briefKeys as AmuxContentKeys);
+      if (!verifyAmuxContentDigest(plain, "card_brief", delivery.taskId,
+        card.v4BriefDigest, card.v4BriefDigestKeyId, briefKeys as AmuxContentKeys))
+        throw new Error("v22 sealed delivery digest mismatch");
+      return {
+        prompt: `Task: ${delivery.taskId}\nExecution attempt: ${delivery.attemptId}\n` +
+          `${AMUX_V22_WORKER_AUTHORITY_NOTICE}\n` +
+          `Approved execution brief:\n${plain.toString("utf8")}\n\n` +
+          AMUX_V22_WORKER_AUTHORITY_NOTICE,
+        v22Execution: { modelId: assignment.modelId, role: assignment.role,
+          budgetMicrousd },
+      };
+    } finally { plain?.fill(0); }
+  };
   return withAmuxDbBoundary(
     AMUX_DB_BOUNDARIES.deliveryPull,
     async (tx, context) => {
@@ -228,6 +334,7 @@ export async function pullAmuxWorkDelivery(input: {
       SELECT
         r."leaseExpiresAt" AS "runtimeLeaseExpiresAt",
         a."leaseExpiresAt" AS "attemptLeaseExpiresAt",
+        a."v22AssignmentId",
         d."attemptId",
         d."taskId",
         d."worker",
@@ -281,6 +388,7 @@ export async function pullAmuxWorkDelivery(input: {
           reason: "none" as const,
         };
       }
+      const content = await deliveryContent(tx, delivery);
 
       /*
        * A retry while the receipt lease is still live is idempotent: return
@@ -305,10 +413,12 @@ export async function pullAmuxWorkDelivery(input: {
           available: true as const,
           delivery: {
             attemptId: delivery.attemptId,
+            assignmentId: delivery.v22AssignmentId,
             taskId: delivery.taskId,
             worker: delivery.worker,
             taskRevision: delivery.taskRevision,
-            prompt: delivery.prompt,
+            prompt: content.prompt,
+            v22Execution: content.v22Execution,
             receiptId,
             leaseExpiresAt,
           },
@@ -369,10 +479,12 @@ export async function pullAmuxWorkDelivery(input: {
         available: true as const,
         delivery: {
           attemptId: delivery.attemptId,
+          assignmentId: delivery.v22AssignmentId,
           taskId: delivery.taskId,
           worker: delivery.worker,
           taskRevision: delivery.taskRevision,
-          prompt: delivery.prompt,
+          prompt: content.prompt,
+          v22Execution: content.v22Execution,
           receiptId,
           leaseExpiresAt: deliveryLeaseExpiresAt,
         },

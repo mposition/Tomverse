@@ -17,6 +17,10 @@
  *
  *     -- baseline-check: present-if-relation "Some_index_or_table_name"
  *
+ * A CREATE OR REPLACE FUNCTION migration must instead pin the SHA-256 digest
+ * of the existing function body. The guard proceeds only when that exact old
+ * version is present; an absent, newer, or unknown version remains blocked.
+ *
  * **A name, not SQL.** The guard asks the one fixed question itself --
  * `SELECT to_regclass($1) IS NOT NULL` with the name bound as a parameter -- so
  * a migration cannot make the guard run anything else. (An earlier draft
@@ -28,19 +32,24 @@
  * one, or one buried in a function body later in the file is not a
  * declaration, and the guard refuses as it always did.
  *
- * Only when every pending migration names a relation and every answer is
- * exactly one boolean `false` does the deploy go on. Anything else keeps the
- * original refusal. Nothing here ever marks a migration applied.
+ * Only when every pending migration proves its new object absent or its old
+ * function body exact does the deploy go on. Anything else keeps the original
+ * refusal. Nothing here ever marks a migration applied.
  *
  * Pure: no database, no filesystem.
  */
+
+import { createHash } from "node:crypto";
 
 /** An unquoted PostgreSQL identifier's characters, at most 63 of them. */
 const RELATION_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/;
 
 const DECLARATION_PREFIX = /^--[ \t]*baseline-check:/;
 const DECLARATION =
-  /^--[ \t]*baseline-check:[ \t]*present-if-relation[ \t]+"([^"]*)"[ \t]*$/;
+  /^--[ \t]*baseline-check:[ \t]*present-if-(relation|function)[ \t]+"([^"]*)"[ \t]*$/;
+const REPLACEMENT_DECLARATION =
+  /^--[ \t]*baseline-check:[ \t]*replace-function-if-body-sha256[ \t]+"([^"]*)"[ \t]+"([0-9a-f]{64})"[ \t]*$/;
+const TEXT_FUNCTION_SIGNATURE = /^([A-Za-z_][A-Za-z0-9_]{0,62})\((text(?:,text){0,15})\)$/;
 
 /** The comment lines before the first statement; blank lines are skipped. */
 const headerLines = (sql) => {
@@ -55,10 +64,10 @@ const headerLines = (sql) => {
 };
 
 /**
- * The relation a migration declares, or why it declares none.
+ * The object or replacement a migration declares, or why it declares none.
  *
  * `none`: no declaration in the header. `invalid`: more than one, or one that is
- * not exactly the form above with a plain identifier. Both mean the guard cannot
+ * not exactly the approved plain identifier or typed function signature. Both mean the guard cannot
  * prove this migration absent.
  */
 export const presenceDeclarationIn = (sql) => {
@@ -66,9 +75,22 @@ export const presenceDeclarationIn = (sql) => {
   const declarations = headerLines(sql).filter((line) => DECLARATION_PREFIX.test(line));
   if (declarations.length === 0) return { kind: "none" };
   if (declarations.length > 1) return { kind: "invalid" };
+  const replacement = REPLACEMENT_DECLARATION.exec(declarations[0]);
+  if (replacement) {
+    const signature = TEXT_FUNCTION_SIGNATURE.exec(replacement[1]);
+    if (!RELATION_NAME.test(replacement[1]) && !signature) return { kind: "invalid" };
+    return {
+      kind: "function-replacement",
+      function: signature?.[1] ?? replacement[1],
+      ...(signature ? { functionArgs: signature[2].split(",") } : {}),
+      previousBodySha256: replacement[2],
+    };
+  }
   const match = DECLARATION.exec(declarations[0]);
-  if (!match || !RELATION_NAME.test(match[1])) return { kind: "invalid" };
-  return { kind: "relation", relation: match[1] };
+  if (!match || !RELATION_NAME.test(match[2])) return { kind: "invalid" };
+  return match[1] === "function"
+    ? { kind: "function", function: match[2] }
+    : { kind: "relation", relation: match[2] };
 };
 
 /** The fixed question, with the name as a bound parameter -- never as SQL text. */
@@ -79,6 +101,40 @@ export const presenceQuery = (relation) => ({
 });
 
 /**
+ * The fixed question for a migration that creates only a function -- which is
+ * not a relation, so to_regclass cannot see it (2026-10-03,
+ * `20261003130000_support_triage_arm_timeouts`, refused on staging). Any
+ * overload in public counts as present: EXISTS always answers one boolean,
+ * where to_regproc would have to choose among overloads.
+ */
+export const functionPresenceQuery = (name) => ({
+  text:
+    'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = \'public\' AND p.proname = $1) AS "present"',
+  values: [name],
+  rowMode: "array",
+});
+
+/** Read only the exact existing function body for a replacement. */
+export const functionBodyQuery = (name, functionArgs = []) =>
+  functionArgs.length === 0 ? {
+    text:
+      "SELECT p.prosrc FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 AND p.pronargs = 0 AND p.prorettype = 'pg_catalog.trigger'::regtype",
+    values: [name], rowMode: "array",
+  } : {
+    text:
+      "SELECT p.prosrc FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1 AND p.oid = pg_catalog.to_regprocedure($2)",
+    values: [name, `public."${name}"(${functionArgs.join(",")})`], rowMode: "array",
+  };
+
+/** The fixed question for one probe from `pendingProbes`. */
+export const presenceQueryFor = (probe) =>
+  probe.previousBodySha256 !== undefined
+    ? functionBodyQuery(probe.function, probe.functionArgs)
+    : probe.function !== undefined
+      ? functionPresenceQuery(probe.function)
+      : presenceQuery(probe.relation);
+
+/**
  * The answer, or undefined when it is not exactly one row of one boolean.
  * `rows` is pg's array-mode result.
  */
@@ -87,6 +143,17 @@ export const presenceAnswer = (rows) => {
   const row = rows[0];
   if (!Array.isArray(row) || row.length !== 1) return undefined;
   return typeof row[0] === "boolean" ? row[0] : undefined;
+};
+
+/** Only the exact previous function version permits CREATE OR REPLACE. */
+export const replacementAnswer = (rows, previousBodySha256) => {
+  if (!Array.isArray(rows) || rows.length !== 1) return undefined;
+  const row = rows[0];
+  if (!Array.isArray(row) || row.length !== 1 || typeof row[0] !== "string") {
+    return undefined;
+  }
+  const actual = createHash("sha256").update(row[0], "utf8").digest("hex");
+  return actual === previousBodySha256 ? false : true;
 };
 
 /**
@@ -101,6 +168,15 @@ export const pendingProbes = (pending, sqlOf) => {
   for (const name of pending) {
     const declaration = presenceDeclarationIn(sqlOf(name));
     if (declaration.kind === "relation") probes.push({ name, relation: declaration.relation });
+    else if (declaration.kind === "function") probes.push({ name, function: declaration.function });
+    else if (declaration.kind === "function-replacement") {
+      probes.push({
+        name,
+        function: declaration.function,
+        ...(declaration.functionArgs ? { functionArgs: declaration.functionArgs } : {}),
+        previousBodySha256: declaration.previousBodySha256,
+      });
+    }
     else undeclared.push(name);
   }
   return { probes, undeclared };

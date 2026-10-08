@@ -3,6 +3,7 @@ import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
+import { resetTestFixture } from "./resetTestFixture";
 
 
 // The suppression lift endpoint, driven end to end against a real PostgreSQL.
@@ -77,7 +78,7 @@ before(async () => {
 });
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "AdminAuditLog", "AdminActionApproval", "SuppressionCause",
       "SuppressionEntry", "AppSetting", "User"

@@ -245,7 +245,9 @@ const hasUnresolvedExpression = (value: Json | undefined): boolean => {
   const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
   for (const match of text.matchAll(EXPRESSION)) {
     const body = match[1].replace(/'[^']*'/g, "''");
-    for (const identifier of body.matchAll(/(?<![.\w])([A-Za-z_][A-Za-z0-9_-]*)/g)) {
+    // GitHub expression property names may contain hyphens (for example,
+    // needs.static-and-unit.result). A suffix after `-` is not a new context.
+    for (const identifier of body.matchAll(/(?<![.\w-])([A-Za-z_][A-Za-z0-9_-]*)/g)) {
       const name = identifier[1];
       if (name === "secrets") {
         const rest = body.slice((identifier.index ?? 0) + name.length);
@@ -439,6 +441,10 @@ const AGENT_RUN_BRANCH = /^agent\/engineering\/[0-9]{1,12}$/;
 export const agentBranchMayMatch = (pattern: string): boolean => {
   if (pattern.includes("${{")) return true;
   if (compileFilter(pattern) === "unknown") return true;
+  // The Auto PR opt-in filters require this literal path segment, which an
+  // agent/engineering/<digits> branch can never contain. Do not infer safety
+  // from the workflow's job-level `if` or from arbitrary glob shapes.
+  if (pattern === "to-develop/**" || pattern === "**/to-develop/**") return false;
   const star = pattern.indexOf("*");
   if (star === -1) return AGENT_RUN_BRANCH.test(pattern);
   const prefix = pattern.slice(0, star);

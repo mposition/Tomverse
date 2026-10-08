@@ -73,6 +73,9 @@ export const readEnumConstraints = (migrations) => {
       /CONSTRAINT\s+"([^"]+)"\s+CHECK\s*\(\s*(?:"[^"]+"\s+IS\s+NULL\s+OR\s+)?"([^"]+)"\s+IN\s*\(([\s\S]*?)\)\s*\)/gi;
     for (const match of sql.matchAll(inlinePattern)) {
       if (constraints.has(match[1])) continue;
+      // A composite CHECK can start with IN but continue with AND/OR before
+      // its outer close. It is not a single closed-list constraint.
+      if (/\)\s*(?:AND|OR)\b/i.test(match[3])) continue;
       const values = Array.from(match[3].matchAll(/'([^']*)'/g), (item) => item[1]);
       if (values.length === 0) continue;
       constraints.set(match[1], {

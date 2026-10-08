@@ -299,7 +299,8 @@ test("a run starts active on the database clock, on its attempt's card, ends onc
     prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { status: "finished" } }),
     "a finished run carries an outcome",
   );
-  await prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { status: "finished", outcome: "t2_draft" } });
+  await prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { status: "finished", outcome: "private_result" } });
+  assert.equal(await prisma.engineeringAgentWorkItem.count({ where: { runId: run.id } }), 0);
   await refused(
     prisma.engineeringAgentRun.update({ where: { id: run.id }, data: { halt: "circuit_open" } }),
     "an ended run is immutable",
