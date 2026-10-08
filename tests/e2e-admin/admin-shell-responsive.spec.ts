@@ -39,6 +39,7 @@ const NAV_LABELS = [
   "Marketing",
   "Engineering agent",
   "Agent digests",
+  "Agent office",
   "Platform settings",
   // The AMUX group, listed in full to the owner these tests sign in as.
   "Backlog",
