@@ -179,7 +179,8 @@ export type OpsObserverDigestView = {
 /**
  * The digest a notice links to, by its id: this agent's rows of the shared
  * table only, read in one bounded state_read transaction, with the deadline
- * checked before anything is returned. A body that no longer parses to the
+ * checked before anything is returned. A body past its retention by the
+ * database clock -- deleted or not yet -- or one that no longer parses to the
  * closed shape is shown as absent rather than as whatever it holds.
  */
 export async function readOpsObserverDigestItem(
@@ -192,8 +193,12 @@ export async function readOpsObserverDigestItem(
     "state_read",
     runDeadline,
     async (tx): Promise<OpsObserverDigestView | null> => {
+      // The body only while it is inside its retention by the database clock:
+      // an expiry batch that has not run yet must not keep it readable (§10).
       const [row] = await tx.$queryRaw<{ id: string; createdAt: Date; payload: unknown }[]>`
-        SELECT id::text AS id, "createdAt", payload FROM "AgentDigestItem"
+        SELECT id::text AS id, "createdAt",
+               CASE WHEN "retentionUntil" > clock_timestamp() THEN payload END AS payload
+          FROM "AgentDigestItem"
          WHERE id = ${itemId}::uuid AND "agentKey" = 'sre-ops' AND kind = ${DIGEST_KIND}`;
       if (!row) return null;
       const parsed = row.payload === null ? null : parseDigestPayload(row.payload);

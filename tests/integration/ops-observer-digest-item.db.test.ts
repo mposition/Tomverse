@@ -50,7 +50,8 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
     await q(`SET search_path TO "${schema}"`);
     await q(await readFile(path.resolve(here, "../../prisma/migrations/20261003060000_ops_observer_transaction_arm/migration.sql"), "utf8"));
     await q(`CREATE TABLE "AgentDigestItem" (id UUID PRIMARY KEY, "agentKey" TEXT NOT NULL, kind TEXT NOT NULL,
-      payload JSONB, "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp())`);
+      payload JSONB, "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp(),
+      "retentionUntil" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp() + interval '90 days')`);
 
     await t.test("this agent's digest is read back in the closed shape", async () => {
       const id = await insert("sre-ops", "daily_digest", payload);
@@ -70,6 +71,14 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
       assert.deepEqual((await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", null), client))?.payload, null);
       const odd = await insert("sre-ops", "daily_digest", { ...payload, note: "<script>" });
       assert.deepEqual((await readOpsObserverDigestItem(odd, client))?.payload, null);
+    });
+
+    await t.test("a body past its retention is absent even before the expiry batch has removed it", async () => {
+      const id = await insert("sre-ops", "daily_digest", payload);
+      await q(`UPDATE "AgentDigestItem" SET "retentionUntil" = clock_timestamp() - interval '1 second' WHERE id = $1`, [id]);
+      const view = await readOpsObserverDigestItem(id, client);
+      assert.equal(view?.id, id);
+      assert.equal(view?.payload, null);
     });
 
     await t.test("a read without the time left to finish returns nothing", async () => {
