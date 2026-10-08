@@ -124,7 +124,8 @@ test("a push counts as the admin PAT's only when the PAT is wired to it", async 
     wf("checkout-token", { jobs: { a: { steps: [{ uses: "actions/checkout@v6", with: { token: PAT } }, { run: 'git push origin "$b"' }] } } }),
     wf("setup-git", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'gh auth setup-git\ngit push origin "$b"' }] } } }),
     wf("remote-set-url", {
-      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git remote set-url origin \\n  "https://x-access-token:${GH_TOKEN}@github.com/x.git"\ngit push origin "$b"' }] } },
+      // A backslash-continued command, as feedback-autofix writes it.
+      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: ["git remote set-url origin \\", '  "https://x-access-token:${GH_TOKEN}@github.com/x.git"', 'git push origin "$b"'].join("\n") }] } },
     }),
     wf("url", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git push "https://x-access-token:${GH_TOKEN}@github.com/x.git" "$b"' }] } } }),
   ];
@@ -144,15 +145,56 @@ test("a push counts as the admin PAT's only when the PAT is wired to it", async 
     wf("setup-elsewhere", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: "gh auth setup-git" }, { run: "git push origin x" }] } } }),
     // unreadable
     wf("unreadable", null),
+    // the PAT URL put on another remote, the push going to origin
+    wf("other-remote", {
+      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git remote set-url backup "https://x-access-token:${GH_TOKEN}@github.com/x.git"\ngit push origin b' }] } },
+    }),
+    // the PAT URL only in an inline comment of the push line
+    wf("inline-comment", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: "git push origin b # https://x-access-token:${GH_TOKEN}@github.com/x.git" }] } } }),
+    // the PAT URL in another command on the line
+    wf("other-command", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'echo "https://x-access-token:${GH_TOKEN}@github.com/x.git"; git push origin b' }] } } }),
+    // a PAT checkout that may not have run
+    wf("conditional-checkout", {
+      jobs: { a: { steps: [{ uses: "actions/checkout@v6" }, { if: "${{ false }}", uses: "actions/checkout@v6", with: { token: PAT } }, { run: "git push origin b" }] } },
+    }),
+    // a remote set in a step that may not have run
+    wf("conditional-remote", {
+      jobs: {
+        a: {
+          steps: [
+            { if: "${{ false }}", env: { GH_TOKEN: PAT }, run: 'git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/x.git"' },
+            { run: "git push origin b" },
+          ],
+        },
+      },
+    }),
   ];
   assert.deepEqual(qaReleaseWorkflowTokenPushers(unsafe), [
     "comment#a/0",
+    "conditional-checkout#a/2",
+    "conditional-remote#a/1",
+    "inline-comment#a/0",
     "not-persisted#a/1",
+    "other-command#a/0",
     "other-job#b/0",
+    "other-remote#a/0",
     "setup-elsewhere#a/1",
     "unreadable#unreadable",
     "workflow-token-url#a/0",
   ]);
+
+  // A remote given the PAT URL in an earlier, unconditional step stays authenticated.
+  const carried = wf("carried-remote", {
+    jobs: {
+      a: {
+        steps: [
+          { env: { GH_TOKEN: PAT }, run: 'git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/x.git"' },
+          { if: "${{ success() }}", run: 'if git push origin "$b"; then echo ok; fi' },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(qaReleaseWorkflowTokenPushers([carried]), []);
 
   // The repository's own PAT pushers read as safe, parsed from their files.
   const own = ["back-merge-main-to-develop", "cron-auto-fix", "feedback-autofix", "feedback-autofix-promotion-pr"].map((name) =>

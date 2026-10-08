@@ -187,7 +187,7 @@ type Json = Record<string, unknown>;
 const asRecord = (value: unknown): Json | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : null;
 
-/** A script's lines without comments, with backslash continuations joined. */
+/** A script's lines without comment lines, with backslash continuations joined. */
 const scriptLines = (run: string): string[] => {
   const joined: string[] = [];
   let pending = "";
@@ -204,7 +204,66 @@ const scriptLines = (run: string): string[] => {
   if (pending) joined.push(pending);
   return joined;
 };
-const ACCESS_TOKEN_URL = /x-access-token:\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?@/;
+
+/**
+ * The commands on one shell line, each as its words: quotes respected, an
+ * unquoted `#` ends the line, and `;`, `&&`, `||` and `|` separate
+ * commands. Leading control words (`if`, `then`, `!`, ...) are dropped, so
+ * `if git push origin x; then` reads as `git push origin x`.
+ */
+const shellCommands = (line: string): string[][] => {
+  const commands: string[][] = [];
+  let words: string[] = [];
+  let word = "";
+  let inWord = false;
+  let quote: string | null = null;
+  const endWord = () => {
+    if (inWord) words.push(word);
+    word = "";
+    inWord = false;
+  };
+  const endCommand = () => {
+    endWord();
+    if (words.length > 0) commands.push(words);
+    words = [];
+  };
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (quote) {
+      if (char === quote) quote = null;
+      else word += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      inWord = true;
+      continue;
+    }
+    if (char === "#" && !inWord) break;
+    if (char === ";" || char === "|" || char === "&") {
+      endCommand();
+      if ((char === "|" || char === "&") && line[i + 1] === char) i += 1;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      endWord();
+      continue;
+    }
+    word += char;
+    inWord = true;
+  }
+  endCommand();
+  const CONTROL = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "("]);
+  return commands.map((command) => {
+    let index = 0;
+    while (index < command.length && CONTROL.has(command[index])) index += 1;
+    return command.slice(index);
+  });
+};
+
+const ACCESS_TOKEN_URL = /^https:\/\/x-access-token:\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?@[^\s]+$/;
+/** The first argument that is not an option. */
+const firstOperand = (args: string[]): string | undefined => args.find((arg) => !arg.startsWith("-"));
 
 /**
  * Every `git push` in the workflows that is not authenticated with the admin
@@ -212,15 +271,16 @@ const ACCESS_TOKEN_URL = /x-access-token:\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?@/;
  * every branch but develop once applied (GitHub Actions cannot be on its
  * bypass list here), so the real-ruleset step refuses while any is listed.
  *
- * A push counts as the PAT's only when it is wired to it in one of the four
- * ways this repository's workflows use, in the same job:
- * - its URL is `x-access-token:${VAR}@...` and VAR is the PAT in the step's
- *   effective environment;
- * - earlier in the job, `git remote set-url` put such a URL on the remote;
- * - earlier in the same step, `gh auth setup-git` ran with GH_TOKEN the PAT;
- * - the job's checkout took the PAT as its token and kept the credential.
- * Anything else -- including the PAT named only in a comment or another job,
- * or a workflow that cannot be read as YAML -- is listed, never assumed safe.
+ * Each push is read as a shell command and judged by its own target:
+ * - a URL target counts only as `https://x-access-token:${VAR}@...` with VAR
+ *   the PAT in the step's effective environment; any other URL is listed;
+ * - a remote-name target counts when that same remote was given such a URL by
+ *   an earlier `git remote set-url`, when `gh auth setup-git` ran earlier in
+ *   the same step with GH_TOKEN the PAT, or -- for `origin` -- when the job's
+ *   checkout took the PAT and kept the credential.
+ * Authentication set up in an earlier step that carries an `if:` is not
+ * relied on: it may not have run. Comments, other commands on the line, other
+ * jobs and unreadable workflows never count.
  *
  * Pure: the caller parses each workflow (the `yaml` package) and passes the
  * object, or null when it could not.
@@ -238,27 +298,54 @@ export function qaReleaseWorkflowTokenPushers(files: readonly { path: string; wo
       const job = asRecord(rawJob);
       const steps = Array.isArray(job?.steps) ? job.steps : [];
       let checkoutKeepsPat = false;
-      let remoteHasPat = false;
+      const remotesWithPat = new Set<string>();
       steps.forEach((rawStep, index) => {
         const step = asRecord(rawStep) ?? {};
+        const conditional = step.if !== undefined;
         const env = { ...(asRecord(root.env) ?? {}), ...(asRecord(job?.env) ?? {}), ...(asRecord(step.env) ?? {}) };
         const uses = typeof step.uses === "string" ? step.uses : "";
         if (uses.startsWith("actions/checkout@")) {
           const withs = asRecord(step.with) ?? {};
-          checkoutKeepsPat = isPat(withs.token) && withs["persist-credentials"] !== false && withs["persist-credentials"] !== "false";
+          const keeps = isPat(withs.token) && withs["persist-credentials"] !== false && withs["persist-credentials"] !== "false";
+          // A later checkout replaces the credential either way; a conditional
+          // one may not have run, so it can only take the PAT away.
+          checkoutKeepsPat = conditional ? checkoutKeepsPat && keeps : keeps;
         }
         if (typeof step.run !== "string") return;
+        // Set up inside this step: it ran if this step's push runs.
         let setupGitWithPat = false;
+        const stepRemotes = new Map<string, boolean>();
         for (const line of scriptLines(step.run)) {
-          if (/\bgh auth setup-git\b/.test(line)) setupGitWithPat = isPat(env.GH_TOKEN);
-          if (/\bgit remote set-url\b/.test(line)) {
-            const match = ACCESS_TOKEN_URL.exec(line);
-            remoteHasPat = Boolean(match && isPat(env[match[1]]));
+          for (const words of shellCommands(line)) {
+            if (words[0] === "gh" && words[1] === "auth" && words[2] === "setup-git") {
+              setupGitWithPat = isPat(env.GH_TOKEN);
+              continue;
+            }
+            if (words[0] === "git" && words[1] === "remote" && words[2] === "set-url") {
+              const operands = words.slice(3).filter((arg) => !arg.startsWith("-"));
+              const [name, url] = operands;
+              const match = typeof url === "string" ? ACCESS_TOKEN_URL.exec(url) : null;
+              if (name) stepRemotes.set(name, Boolean(match && isPat(env[match[1]])));
+              continue;
+            }
+            if (words[0] !== "git" || words[1] !== "push") continue;
+            const target = firstOperand(words.slice(2)) ?? "origin";
+            let authenticated: boolean;
+            if (target.includes("://") || target.includes("@")) {
+              const match = ACCESS_TOKEN_URL.exec(target);
+              authenticated = Boolean(match && isPat(env[match[1]]));
+            } else {
+              const remotePat = stepRemotes.has(target) ? stepRemotes.get(target) === true : remotesWithPat.has(target);
+              authenticated = remotePat || setupGitWithPat || (target === "origin" && checkoutKeepsPat);
+            }
+            if (!authenticated) unsafe.push(`${path}#${jobId}/${index}`);
           }
-          if (!/\bgit push\b/.test(line)) continue;
-          const direct = ACCESS_TOKEN_URL.exec(line);
-          const authenticated = direct ? isPat(env[direct[1]]) : remoteHasPat || setupGitWithPat || checkoutKeepsPat;
-          if (!authenticated) unsafe.push(`${path}#${jobId}/${index}`);
+        }
+        // A remote's URL set in this step stays for the later steps, unless
+        // the step was conditional and may not have run.
+        for (const [name, pat] of stepRemotes) {
+          if (pat && !conditional) remotesWithPat.add(name);
+          else remotesWithPat.delete(name);
         }
       });
     }
