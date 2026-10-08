@@ -2,7 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { randomUUID } from "node:crypto";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
-import { promptRefinerKillSwitchEngaged } from "@/lib/promptRefinerAccess";
+import {
+  promptRefinerAvailable,
+  promptRefinerKillSwitchEngaged,
+  promptRefinerOfferDecision,
+} from "@/lib/promptRefinerAccess";
 import {
   PROMPT_REFINER_INPUT_SCOPE,
   PROMPT_REFINER_VERSION,
@@ -36,10 +40,8 @@ const fixtureProposal = async (request: PromptRefinerRequest) => {
  * quality/rollout gate and product adapter are connected here.
  */
 export async function POST(request: Request): Promise<Response> {
-  // This extra opt-in only exists on the loopback, database-free E2E server.
-  // Product traffic never imports auth, reads text or reaches an adapter here.
+  // Product traffic never reads cookies, text or reaches an adapter here.
   if (
-    process.env.E2E_PROMPT_REFINER_PROPOSAL_ENABLED !== "true" ||
     !isE2EFixtureMode() ||
     promptRefinerKillSwitchEngaged(process.env)
   ) {
@@ -49,15 +51,31 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const [{ getServerSession }, { authOptions }, { handlePromptRefinerProposal }] =
-    await Promise.all([
-      import("next-auth/next"),
-      import("@/lib/auth"),
-      import("@/lib/promptRefinerProposalApi"),
-    ]);
+  const { cookies } = await import("next/headers");
+  const jar = await cookies();
+  const fixtureAdapterReady =
+    jar.get("__tomverse_e2e_prompt_refiner")?.value === "1";
+  // Use the same cookie, rollout semantics and adapter decision as the shell.
+  if (!promptRefinerOfferDecision({
+    available: promptRefinerAvailable({
+      storedFlagValue: fixtureAdapterReady ? "true" : undefined,
+      env: process.env,
+    }),
+    adapterReady: fixtureAdapterReady,
+  })) {
+    return Response.json(
+      { code: "PROMPT_REFINER_UNAVAILABLE" },
+      { status: 503, headers }
+    );
+  }
+
+  const { handlePromptRefinerProposal } =
+    await import("@/lib/promptRefinerProposalApi");
   return handlePromptRefinerProposal(request, {
+    // The layout's synthetic identity is valid only inside the full E2E gate.
+    // There is no product authentication or provider mode behind this branch.
     authenticatedUserId: async () =>
-      (await getServerSession(authOptions))?.user?.id ?? null,
+      jar.get("__tomverse_e2e_auth")?.value === "1" ? "qa-user" : null,
     suggest: fixtureProposal,
   });
 }
