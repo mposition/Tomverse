@@ -132,12 +132,12 @@ test("consistent but impossible labels and a second item for one key are refused
   const item = { signal: "P3", scope: "credit_reservation_reconciliation", openedAt: NOW };
   const reserve = (items, extra = {}) => parse(body({ reservation: { ownerDate: OWNER_DATE, channelCheck: false, items }, ...extra }));
   // A first open labelled as a reopen; a worsening at the first band; a new
-  // open whose owner date is not today's.
+  // open whose owner date is not today's (refused for the date before its kind).
   assert.deepEqual(reserve([{ ...item, kind: "reopen", origin: "reopen" }]), { ok: false, error: "reservation_invalid" });
   assert.deepEqual(reserve([{ ...item, kind: "worsening", origin: "new" }]), { ok: false, error: "reservation_invalid" });
   assert.deepEqual(parse(body({ reservation: { ownerDate: "2026-10-05", channelCheck: false, items: [{ ...item, kind: "new_open", origin: "new" }] } })), {
     ok: false,
-    error: "reservation_invalid",
+    error: "owner_date_refused",
   });
   // One key's move owes one message.
   const keys = keysWithP3Open();
@@ -192,4 +192,23 @@ test("a reopen on the same owner date counts even after 24 hours, as on a 25-hou
   assert.equal(owedMessage(P3, closed, reopened, ownerDate), "reopen");
   // The same move on the next owner date is a new open.
   assert.equal(owedMessage(P3, closed, reopened, "2026-10-05"), "new_open");
+});
+
+test("a reservation names today's owner date, or yesterday's only within a run deadline of midnight", async () => {
+  const { admissibleReservationDates, ownerDateIsFinal, ownerDateEndMs } = await import("../scripts/ops-observer/owner-date-core.mjs");
+  // Brisbane midnight starting 2026-10-05 is 2026-10-04T14:00Z.
+  const midnight = Date.parse("2026-10-04T14:00:00.000Z");
+  assert.equal(ownerDateEndMs("2026-10-04"), midnight);
+  assert.deepEqual(admissibleReservationDates(midnight - 1), ["2026-10-04"]);
+  assert.deepEqual(admissibleReservationDates(midnight + 179_999), ["2026-10-05", "2026-10-04"]);
+  assert.deepEqual(admissibleReservationDates(midnight + 180_000), ["2026-10-05"]);
+  // A date is final once a reservation can no longer name it and the last
+  // such advance has passed its deadline.
+  assert.equal(ownerDateIsFinal("2026-10-04", midnight + 389_999), false);
+  assert.equal(ownerDateIsFinal("2026-10-04", midnight + 390_000), true);
+  const channelCheck = (ownerDate, nowMs) =>
+    parseAdvanceRequest(JSON.stringify(body({ runDeadline: new Date(nowMs + 60_000).toISOString(), reservation: { ownerDate, channelCheck: true, items: [] } })), nowMs);
+  assert.equal(channelCheck("2026-10-04", midnight + 60_000).ok, true);
+  assert.deepEqual(channelCheck("2026-10-04", midnight + 200_000), { ok: false, error: "owner_date_refused" });
+  assert.deepEqual(channelCheck("2026-10-06", midnight + 60_000), { ok: false, error: "owner_date_refused" });
 });

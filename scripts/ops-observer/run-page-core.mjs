@@ -33,6 +33,10 @@ import { checkNotification, isCanonicalItemId, renderChannelCheckMessage, render
 import { observationsFromSnapshot, parseSnapshot } from "./envelope-schema-core.mjs";
 import { admitOwedItems, planRunMessage } from "./notification-budget-core.mjs";
 import { RUN_DEADLINE_MS } from "./transaction-bounds-core.mjs";
+import { OWNER_TIME_ZONE, ownerDateOf } from "./owner-date-core.mjs";
+
+// Re-exported for the run's callers and tests; the rule lives in owner-date-core.
+export { OWNER_TIME_ZONE, ownerDateOf };
 import { TRUST_REASONS } from "./trust-check-core.mjs";
 
 /** The store's advance and confirm answers; anything else is logged as unknown. */
@@ -44,9 +48,6 @@ const CONFIRM_RESULTS = Object.freeze(["confirmed", "shadowed", "replayed", "aba
 const asEnum = (answer, field, allowed) =>
   answer.status === 409 ? "late" : allowed.includes(answer.json?.[field]) ? answer.json[field] : "unknown";
 
-/** The owner's time zone (decision T-1): UTC+10 all year, no daylight saving. */
-export const OWNER_TIME_ZONE = "Australia/Brisbane";
-const OWNER_UTC_OFFSET_MS = 10 * 60 * 60 * 1000;
 
 /** Each request's own limit; the supervisor's 180 s bounds the run. */
 export const REQUEST_TIMEOUT_MS = 15_000;
@@ -54,10 +55,6 @@ export const REQUEST_TIMEOUT_MS = 15_000;
 /** No request starts with less than this left before the run deadline. */
 const DEADLINE_MARGIN_MS = 5_000;
 
-/** The owner date of an instant: its calendar date in Australia/Brisbane. */
-export function ownerDateOf(ms) {
-  return new Date(ms + OWNER_UTC_OFFSET_MS).toISOString().slice(0, 10);
-}
 
 /** A run id in the shape OpsObserverDelivery_runId_check accepts. */
 export function runIdOf(ms, random) {

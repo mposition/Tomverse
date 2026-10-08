@@ -355,3 +355,37 @@ test("sre-ops is registered with its kind, retention and intake actor", async ()
     /AgentDigestItem_kind_check/,
   );
 });
+
+// A caller whose policy fixes its own limits (docs/policy/sre-ops.md §6): its
+// arming replaces the shared defaults as the transaction's first statement,
+// and what it armed holds for the rest of the transaction.
+test("a caller's own limits arm the transaction first, in place of the defaults", async () => {
+  const seen: string[] = [];
+  const result = await recordAgentDigestItem(
+    {
+      agentKey: "sre-ops",
+      kind: "daily_digest",
+      schemaVersion: 1,
+      idempotencyKey: `sre-ops:test:${randomUUID()}`,
+      payload: { verdict: "quiet", items: [] },
+    },
+    undefined,
+    async (tx) => {
+      const [row] = await tx.$queryRaw<{ timeout: string }[]>`SELECT current_setting('statement_timeout') AS timeout`;
+      seen.push(`admit:${row.timeout}`);
+      return null;
+    },
+    undefined,
+    {
+      arm: async (tx) => {
+        seen.push("arm");
+        await tx.$executeRaw`SELECT set_config('statement_timeout', '1234', true)`;
+      },
+      prismaTimeoutMs: 55_000,
+    },
+  );
+  assert.equal(result.status, "created");
+  if (result.status === "created") createdIds.push(result.id);
+  // The arming ran, and before anything the caller sees: the default 2 s is not in force.
+  assert.deepEqual(seen, ["arm", "admit:1234ms"]);
+});

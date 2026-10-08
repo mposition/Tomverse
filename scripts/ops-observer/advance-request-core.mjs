@@ -19,6 +19,7 @@
 import { REOPEN_WINDOW_MS, S2_PAGE_KEYS, S2_PAGE_SIGNALS } from "./classify-core.mjs";
 import { ITEM_ORIGINS, MESSAGE_KINDS } from "./delivery-core.mjs";
 import { keysAreValid } from "./keys-schema-core.mjs";
+import { admissibleReservationDates } from "./owner-date-core.mjs";
 import {
   REQUEST_BODY_MAX_BYTES,
   isOwnerDate,
@@ -128,11 +129,16 @@ export function reservationIsOwed(items, owed) {
   );
 }
 
-function parseReservation(reservation, keys) {
+function parseReservation(reservation, keys, nowMs) {
   if (reservation === null) return { ok: true, value: null };
   if (!hasExactly(reservation, RESERVATION_KEYS)) return refuse("shape");
   const { ownerDate, channelCheck, items } = reservation;
   if (!isOwnerDate(ownerDate) || typeof channelCheck !== "boolean" || !Array.isArray(items)) return refuse("shape");
+  // The owner date of the server clock, or of one run deadline ago (a run that
+  // started before midnight): so a date's reservations are final soon after
+  // it ends, which is what lets its daily digest be read once and kept
+  // (docs/policy/sre-ops.md §5, §9 T-1).
+  if (!admissibleReservationDates(nowMs).includes(ownerDate)) return refuse("owner_date_refused");
   // Something must be sent; one key's move owes one message, so one item per key.
   if (items.length > S2_PAGE_KEYS.length || (items.length === 0 && !channelCheck)) return refuse("reservation_invalid");
   const seen = new Set();
@@ -157,7 +163,7 @@ function parseReservation(reservation, keys) {
 /**
  * Parses an advance body. Returns `{ ok: true, value }` or `{ ok: false, error }`
  * with one of `too_large`, `not_json`, `shape`, `deadline_invalid`,
- * `keys_invalid`, `reservation_invalid`.
+ * `keys_invalid`, `reservation_invalid`, `owner_date_refused`.
  */
 export function parseAdvanceRequest(bodyText, nowMs) {
   if (typeof bodyText !== "string" || Buffer.byteLength(bodyText, "utf8") > REQUEST_BODY_MAX_BYTES) {
@@ -177,7 +183,7 @@ export function parseAdvanceRequest(bodyText, nowMs) {
   if (typeof baseGenesisId !== "string" || !UUID_PATTERN.test(baseGenesisId)) return refuse("shape");
   if (!Number.isSafeInteger(baseGeneration) || baseGeneration < 0) return refuse("shape");
   if (!keysAreValid(keys)) return refuse("keys_invalid");
-  const parsedReservation = parseReservation(reservation, keys);
+  const parsedReservation = parseReservation(reservation, keys, nowMs);
   if (!parsedReservation.ok) return parsedReservation;
   return {
     ok: true,

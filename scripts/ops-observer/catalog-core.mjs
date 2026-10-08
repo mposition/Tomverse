@@ -17,6 +17,7 @@
 export const OPS_OBSERVER_DEFERRED_DEADLINE_TRIGGERS = Object.freeze([
   "ops_observer_delivery_deadline_check",
   "ops_observer_delivery_retention_deadline_check",
+  "ops_observer_run_guard_deadline_check",
   "ops_observer_genesis_deadline_check",
   "ops_observer_state_deadline_check",
   "ops_observer_transition_deadline_check",
@@ -37,6 +38,11 @@ export const EXPECTED_TRIGGERS = Object.freeze({
     "ops_observer_delivery_retention_deadline_check",
   ],
   OpsObserverDeliveryItem: ["OpsObserverDeliveryItem_guard"],
+  OpsObserverRunGuard: [
+    "OpsObserverRunGuard_guard",
+    "OpsObserverRunGuard_no_truncate",
+    "ops_observer_run_guard_deadline_check",
+  ],
   OpsObserverTransition: [
     "OpsObserverTransition_guard",
     "OpsObserverTransition_no_truncate",
@@ -53,6 +59,9 @@ export const EXPECTED_TRIGGER_FUNCTIONS = Object.freeze({
   OpsObserverState_guard: "ops_observer_state_guard",
   OpsObserverDelivery_guard: "ops_observer_delivery_guard",
   OpsObserverDeliveryItem_guard: "ops_observer_delivery_item_guard",
+  OpsObserverRunGuard_guard: "ops_observer_run_guard_guard",
+  OpsObserverRunGuard_no_truncate: "ops_observer_run_guard_no_truncate",
+  ops_observer_run_guard_deadline_check: "ops_observer_deadline_check",
   OpsObserverTransition_guard: "ops_observer_transition_guard",
   OpsObserverTransition_no_truncate: "ops_observer_transition_no_truncate",
   ops_observer_genesis_deadline_check: "ops_observer_deadline_check",
@@ -109,6 +118,12 @@ export const EXPECTED_CONSTRAINTS = Object.freeze({
     OpsObserverDeliveryItem_scope_check: "c",
     OpsObserverDeliveryItem_signal_check: "c",
   },
+  OpsObserverRunGuard: {
+    OpsObserverRunGuard_pkey: "p",
+    OpsObserverRunGuard_kind_check: "c",
+    OpsObserverRunGuard_runId_check: "c",
+    ops_observer_run_guard_deadline_check: "t",
+  },
   OpsObserverTransition: {
     OpsObserverTransition_pkey: "p",
     OpsObserverTransition_genesisId_fkey: "f",
@@ -135,6 +150,7 @@ export const EXPECTED_INDEXES = Object.freeze({
     "OpsObserverDeliveryItem_incident_kind_key",
     "OpsObserverDeliveryItem_deliveryId_idx",
   ],
+  OpsObserverRunGuard: ["OpsObserverRunGuard_pkey"],
   OpsObserverTransition: ["OpsObserverTransition_pkey", "OpsObserverTransition_auditLogId_key"],
 });
 

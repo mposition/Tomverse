@@ -1155,6 +1155,13 @@ const REGISTRY = {
     reason:
       "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
   },
+  OpsObserverRunGuard_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "RUN_GUARD_KINDS",
+    reason:
+      "daily_digest. The one run whose last write is to shared tables; its guard row carries the deadline the deferred trigger checks at COMMIT (docs/policy/sre-ops.md §6 item 5).",
+  },
   OpsObserverGenesis_reason_check: {
     owner: "list",
     module: "scripts/ops-observer/genesis-core.mjs",
