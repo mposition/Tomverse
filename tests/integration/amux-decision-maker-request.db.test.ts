@@ -75,10 +75,12 @@ const requireDedicatedAmuxTestDatabase = () => {
 requireDedicatedAmuxTestDatabase();
 
 // The three tables refuse DELETE; TRUNCATE fires no row trigger, so each test
-// starts from an empty ledger and empty switches.
+// starts from an empty ledger and empty switches. Since S1d (2026-10-08) the
+// body and retention tables reference the request table and a closing event
+// writes a retention row, so they are emptied with it.
 const resetLedger = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
+    `TRUNCATE TABLE "AmuxDecisionMakerBody", "AmuxDecisionMakerRetentionEvent", "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
   );
 
 const switchOperator = () =>

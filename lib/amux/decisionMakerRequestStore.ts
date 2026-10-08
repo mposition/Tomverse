@@ -41,7 +41,7 @@ import {
   isDmInstanceScope,
   type DmInstanceScope,
 } from "@/lib/amux/decisionMakerSwitchCore";
-import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
+import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitchStore";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerRequest` and
@@ -88,7 +88,7 @@ import { readDecisionMakerSwitches } from "@/lib/amux/decisionMakerSwitchStore";
 type LedgerReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 export class DecisionMakerRequestWriteError extends Error {
-  readonly code: "invalid_input" | "state_unreadable";
+  readonly code: "invalid_input" | "state_unreadable" | "settings_unreadable";
 
   constructor(code: DecisionMakerRequestWriteError["code"]) {
     super(code);
@@ -96,6 +96,29 @@ export class DecisionMakerRequestWriteError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * The switches for a write that follows in the same transaction (§6, §8), by
+ * the switch store's reader, after the audit chain lock. A read that fails
+ * has aborted the PostgreSQL transaction, so nothing this module would write
+ * next could run: it is reported as `settings_unreadable` here, before any
+ * other statement, and the caller's transaction rolls back with nothing
+ * written. Before 2026-10-08 the read was the fail-closed reader, whose
+ * unreadable state let routing go on to write an operator row into the
+ * aborted transaction and let a refused transmission intent reach a COMMIT
+ * that could not commit (the S1c review minor). A SAVEPOINT around the read
+ * would keep the transaction usable at two more statements on every routing,
+ * intent and result -- a routing with an integrity key would then send 13
+ * with the boundary's two, over §9's 12. Rows the switch store could not have
+ * written still read as unreadable and are decided as before.
+ */
+const readSwitchesForWrite = async (tx: Prisma.TransactionClient) => {
+  try {
+    return await readDecisionMakerSwitchesOrThrow(tx);
+  } catch {
+    throw new DecisionMakerRequestWriteError("settings_unreadable");
+  }
+};
 
 const safeInteger = (value: unknown, label: string): number => {
   const number = typeof value === "bigint" || typeof value === "number" ? Number(value) : Number.NaN;
@@ -203,6 +226,42 @@ export async function lookupDecisionMakerResult(
   return state === null ? null : dmResultLookup(state, input.resultDigest);
 }
 
+/**
+ * Requests routed to a DM, created in [from, to) by the database clock, that
+ * no closing event has closed, in one statement. Stage S1d's digest-key
+ * destruction reads it for one key period (§10): a body can still be stored
+ * for an open request, so a period's key is not destroyed while one is open.
+ * Bounds are epoch milliseconds, added to the epoch as an interval so the
+ * comparison is exact.
+ */
+export async function countOpenDecisionMakerRequestsCreatedBetween(
+  client: LedgerReader,
+  input: { fromMs: number; toMs: number },
+): Promise<number> {
+  if (
+    !Number.isSafeInteger(input.fromMs) ||
+    !Number.isSafeInteger(input.toMs) ||
+    input.fromMs < 0 ||
+    input.toMs <= input.fromMs
+  ) {
+    throw new DecisionMakerRequestWriteError("invalid_input");
+  }
+  const rows = await client.$queryRaw<Array<{ open: bigint | number }>>`
+    SELECT count(*) AS "open"
+    FROM "AmuxDecisionMakerRequest" r
+    WHERE r."route" = 'dm_proposal'
+      AND r."createdAt" >= 'epoch'::timestamptz + ${input.fromMs} * INTERVAL '1 millisecond'
+      AND r."createdAt" < 'epoch'::timestamptz + ${input.toMs} * INTERVAL '1 millisecond'
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
+        WHERE ev."requestId" = r."id" AND ev."kind" IN ('assign_discarded', 'stale_close')
+      )
+  `;
+  const row = rows[0];
+  if (!row) throw new Error("AMUX Decision Maker open request count returned no row");
+  return safeInteger(row.open, "count");
+}
+
 // ---------------------------------------------------------------------------
 // Requests
 // ---------------------------------------------------------------------------
@@ -246,10 +305,15 @@ type ExistingRequestRow = Record<string, unknown> & {
  * concurrent routing of the same instance can let a question through. The
  * card is routed and never stored.
  *
+ * A switch read that fails throws `settings_unreadable` and writes nothing:
+ * the read has aborted the transaction, and the question stays with the
+ * operator as a route failure does (§2-1). Rows the switch store could not
+ * have written are still recorded as `settings_unreadable`.
+ *
  * Statements: 1 lock, 1 read -- 2 for an existing request; then the switch
- * read, the throughput read (none for a provider without an instance), the
- * system writer's 3 (4 with an integrity key) and 1 insert -- 8, or 9 (7, or
- * 8, without an instance).
+ * read -- 3 when it fails; then the throughput read (none for a provider
+ * without an instance), the system writer's 3 (4 with an integrity key) and 1
+ * insert -- 8, or 9 (7, or 8, without an instance).
  */
 export async function recordDecisionMakerRequest(
   tx: Prisma.TransactionClient,
@@ -292,7 +356,7 @@ export async function recordDecisionMakerRequest(
     };
   }
 
-  const switches = await readDecisionMakerSwitches(tx);
+  const switches = await readSwitchesForWrite(tx);
   const instance = dmInstanceForProvider(binding.askingProvider);
   const throughput = isDmInstanceScope(instance)
     ? await readDecisionMakerThroughput(tx, instance)
@@ -512,13 +576,15 @@ export async function discardDecisionMakerAssignment(
  *
  * The switches are read here, after the lock: with the kill switch on, the
  * instance `off`, or the switch store unreadable, nothing is written and no
- * process may start (§6, §8). The result deadline is given to
- * `requireLeaseAt`, and the database refuses an intent whose COMMIT reaches
- * it, as it does a late DM output.
+ * process may start (§6, §8). A switch read that fails throws
+ * `settings_unreadable` (the transaction is aborted and rolls back); rows
+ * the store could not have written return the refusal. The result deadline is
+ * given to `requireLeaseAt`, and the database refuses an intent whose COMMIT
+ * reaches it, as it does a late DM output.
  *
  * Statements: 1 lock, 1 state read -- 2 for an unknown request or a ledger
- * refusal; then the switch read -- 3 for a switch refusal; then the system
- * writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8.
+ * refusal; then the switch read -- 3 for a switch refusal or a failed read;
+ * then the system writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8.
  */
 export async function recordDecisionMakerTransmitIntent(
   tx: Prisma.TransactionClient,
@@ -540,7 +606,7 @@ export async function recordDecisionMakerTransmitIntent(
   const refusal = dmEventRefusal(state, { kind: "transmit_intent", instance });
   if (refusal) return { recorded: false, reason: refusal };
   const switchRefusal = dmTransmitSwitchRefusal(
-    dmSwitchRoutingInput(await readDecisionMakerSwitches(tx), instance),
+    dmSwitchRoutingInput(await readSwitchesForWrite(tx), instance),
   );
   if (switchRefusal) return { recorded: false, reason: switchRefusal };
   if (state.resultDeadlineAtMs === null) throw new DecisionMakerRequestWriteError("state_unreadable");
@@ -605,13 +671,14 @@ export type DecisionMakerResultSubmission =
  *
  * The kill switch is read here, after the lock, never taken from the caller
  * (§6's table: "진행 중 결과의 제안 저장 — 거부"); an unreadable switch store
- * writes nothing. A DM output's result deadline is given to `requireLeaseAt`,
- * so the commit fence and, at COMMIT, the database refuse a late one.
+ * writes nothing and throws `settings_unreadable`. A DM output's result
+ * deadline is given to `requireLeaseAt`, so the commit fence and, at COMMIT,
+ * the database refuse a late one.
  *
  * Statements: 1 lock, 1 state read -- 2 when nothing is written (an existing
- * pair, an unknown request, another instance); then the switch read, the
- * system writer's 3 (4 with an integrity key) and 1 insert -- 7, or 8, for a
- * result or a rejection.
+ * pair, an unknown request, another instance); then the switch read -- 3 when
+ * it is unreadable; then the system writer's 3 (4 with an integrity key) and 1
+ * insert -- 7, or 8, for a result or a rejection.
  */
 export async function submitDecisionMakerResult(
   tx: Prisma.TransactionClient,
@@ -637,8 +704,8 @@ export async function submitDecisionMakerResult(
   }
   if (recorded.status === "rejected") return { status: "already_rejected", reason: recorded.reason };
 
-  const { killSwitch } = await readDecisionMakerSwitches(tx);
-  if (killSwitch === null) throw new DecisionMakerRequestWriteError("state_unreadable");
+  const { killSwitch } = await readSwitchesForWrite(tx);
+  if (killSwitch === null) throw new DecisionMakerRequestWriteError("settings_unreadable");
   const decision = dmResultSubmissionOutcome(state, submission, killSwitch);
   switch (decision.outcome) {
     case "existing_result":

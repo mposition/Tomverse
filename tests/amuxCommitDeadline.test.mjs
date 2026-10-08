@@ -110,6 +110,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // whose own deferred check uses this migration's SQLSTATE (AX001).
   "20261008090000_amux_decision_maker_switch_serialization",
   "20261008090100_amux_decision_maker_request_ledger",
+  // S1d: the body store, its retention events and the digest-key registry.
+  // It adds no commit deadline of its own; the closing trigger it adds to the
+  // request event table fires on closing events, which have none.
+  "20261008120000_amux_decision_maker_body_store",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

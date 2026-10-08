@@ -164,8 +164,12 @@ export const isDmVersionIdentifier = (value: unknown): value is string =>
 export const isDmProviderId = (value: unknown): value is string =>
   typeof value === "string" && PROVIDER_ID.test(value);
 /**
- * An opaque 64-hex digest. Whether it is keyed, and by which key period, is
- * the digest-key stage's decision (§10); the ledger only stores it.
+ * An opaque 64-hex digest; the ledger only stores it. Stage S1d settled what
+ * it is (§10, lib/amux/decisionMakerBodyCore.ts): an HMAC-SHA256 under the
+ * request's own key, derived from the key of the request's 30-day key period
+ * -- the input payload and snapshot manifest digests by the broker, which
+ * receives the request key at assignment, and the result digest by the app,
+ * from the output it stores. Never a plain hash.
  */
 export const isDmDigest = (value: unknown): value is string => typeof value === "string" && DIGEST.test(value);
 export const isDmRequestId = (value: unknown): value is string => typeof value === "string" && UUID.test(value);

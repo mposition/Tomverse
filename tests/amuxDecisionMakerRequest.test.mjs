@@ -57,6 +57,7 @@ import {
 import {
   DecisionMakerRequestWriteError,
   assignDecisionMakerRequest,
+  countOpenDecisionMakerRequestsCreatedBetween,
   discardDecisionMakerAssignment,
   lookupDecisionMakerResult,
   readDecisionMakerRequestState,
@@ -1429,9 +1430,45 @@ test("the router decides on the switches and the throughput it reads after the l
   ]);
   // No event for the instance reads as off.
   assert.deepEqual((await routed({ switches: [{ scope: "kill_switch", value: "off" }] })).refusalCodes, ["instance_off"]);
-  assert.deepEqual((await routed({ failSwitchRead: true })).refusalCodes, ["settings_unreadable"]);
+  // A row the switch store could not have written reads as unreadable and is
+  // recorded as such: the transaction is intact.
+  assert.deepEqual((await routed({ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] })).refusalCodes, [
+    "settings_unreadable",
+  ]);
   assert.deepEqual((await routed({ throughput: { lastHour: 20n, lastDay: 20n } })).refusalCodes, ["throughput_exceeded"]);
   assert.deepEqual((await routed({}, { askingProvider: "codex" })).instance, "decision-maker-anthropic");
+});
+
+// The S1c review minor (2026-10-08): a switch read that fails has aborted the
+// PostgreSQL transaction, so nothing after it can run. Each writer stops at
+// the failed read with a typed settings_unreadable and sends nothing more; the
+// caller's transaction rolls back with nothing written.
+test("a switch read that fails stops every writer at that read, with settings_unreadable", async () => {
+  const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
+  const cases = [
+    ["routing", stateRow(), (tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: routedCard() })],
+    [
+      "intent",
+      STATES.assigned,
+      (tx, lease) => recordDecisionMakerTransmitIntent(tx, { requestId: REQUEST_ID, instance: OPENAI, transmission, requireLeaseAt: lease }),
+    ],
+    ["result", STATES.transmitted, (tx, lease) => submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: lease })],
+  ];
+  for (const [name, row, run] of cases) {
+    const { tx, sent } = recordingTx({ state: row, failSwitchRead: true });
+    const lease = leases();
+    await assert.rejects(
+      run(tx, lease.requireLeaseAt),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
+      name,
+    );
+    // Lock, the request (or the routed card's existing request), the failed switch read -- and nothing after it.
+    assert.equal(sent.length, 3, name);
+    assert.deepEqual(kindsOf(sent), ["execute", "query", "query"], name);
+    assert.match(sent[2].sql, SWITCH_READ, name);
+    assert.ok(!sent.some((statement) => statement.kind === "create"), name);
+    assert.deepEqual(lease.seen, [], name);
+  }
 });
 
 test("a refusal, an existing pair or an unknown request writes nothing, in 2 statements -- 3 after a switch read", async () => {
@@ -1482,7 +1519,6 @@ test("no transmission intent is recorded while the kill switch is on, the instan
     // No event for the instance is its default, off.
     [{ switches: [{ scope: "decision-maker-anthropic", value: "proposal" }] }, "instance_off"],
     [{ switches: [{ scope: "decision-maker-openai", value: "autonomous" }] }, "settings_unreadable"],
-    [{ failSwitchRead: true }, "settings_unreadable"],
   ]) {
     const { tx, sent } = recordingTx({ state: STATES.assigned, ...options });
     const lease = leases();
@@ -1506,7 +1542,7 @@ test("a result writes nothing when the switch store is unreadable", async () => 
     const { tx, sent } = recordingTx({ state: STATES.transmitted, ...options });
     await assert.rejects(
       submitDecisionMakerResult(tx, { requestId: REQUEST_ID, submission: submission(), requireLeaseAt: () => assert.fail("no lease") }),
-      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "state_unreadable",
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "settings_unreadable",
     );
     assert.equal(sent.length, 3);
     assert.ok(!sent.some((statement) => statement.kind === "create"));
@@ -1515,9 +1551,38 @@ test("a result writes nothing when the switch store is unreadable", async () => 
 
 test("the switches cannot be handed to the writers", () => {
   const store = read(STORE);
-  // The writers take no switch value, and read the switch store themselves.
+  // The writers take no switch value, and read the switch store themselves --
+  // through the reader that lets a failed read through, never the fail-closed
+  // one, whose unreadable state would let a writer go on in an aborted
+  // transaction.
   assert.doesNotMatch(store, /killSwitch:\s*(boolean|unknown)|switches:\s*\{/);
-  assert.equal((store.match(/await readDecisionMakerSwitches\(tx\)/g) ?? []).length, 3);
+  assert.equal((store.match(/await readSwitchesForWrite\(tx\)/g) ?? []).length, 3);
+  assert.equal((store.match(/await readDecisionMakerSwitchesOrThrow\(tx\)/g) ?? []).length, 1);
+  assert.doesNotMatch(store, /readDecisionMakerSwitches\(/);
+});
+
+test("the open requests of a key period are counted in one statement, from [from, to) by the database clock", async () => {
+  const sent = [];
+  const tx = {
+    $queryRaw: (strings, ...values) => {
+      sent.push({ sql: strings.join("$"), values });
+      return Promise.resolve([{ open: 2n }]);
+    },
+  };
+  assert.equal(await countOpenDecisionMakerRequestsCreatedBetween(tx, { fromMs: 1_000, toMs: 2_000 }), 2);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].values, [1_000, 2_000]);
+  assert.match(sent[0].sql, /r\."route" = 'dm_proposal'/);
+  assert.match(sent[0].sql, /"createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
+  assert.match(sent[0].sql, /"createdAt" < 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
+  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close'\)/);
+  for (const input of [{ fromMs: -1, toMs: 5 }, { fromMs: 5, toMs: 5 }, { fromMs: 1.5, toMs: 5 }, { fromMs: 0, toMs: Number.MAX_VALUE }]) {
+    await assert.rejects(
+      countOpenDecisionMakerRequestsCreatedBetween(tx, input),
+      (error) => error instanceof DecisionMakerRequestWriteError && error.code === "invalid_input",
+    );
+  }
+  assert.equal(sent.length, 1);
 });
 
 test("a malformed input sends nothing at all", async () => {

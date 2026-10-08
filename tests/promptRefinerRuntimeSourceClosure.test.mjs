@@ -456,12 +456,17 @@ const compilerOptions = parsedConfig.options;
 // relations on `AdminAuditLog`, above that file's seven accesses, which moves
 // them. No closure file gains an access; count 228 and the position-free
 // inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker body store (S1d): the fingerprint record in
+// `lib/marketingAutomationAccess.ts` gains a note for the body store's three
+// back relations on `AdminAuditLog`, above that file's seven accesses, which
+// moves them. No closure file gains an access; count 228 and the position-free
+// inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "0fa104064f4e340a003a2b141f1fb557",
-  "e5953b404cd9f2e88bceb377c95bdada",
+  "61580b42a193a3ea96776d55e006ecef",
+  "60b61b820266ac3090356bd63aeee1c2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
