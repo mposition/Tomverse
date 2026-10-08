@@ -197,10 +197,13 @@ const contentsWrite = (permissions: unknown): boolean => {
  * GH_AUTOMATION_PAT acts as the repository admin, which the rulesets' bypass
  * list holds; the rest are alert webhooks, mail settings, model and price API
  * keys, and the app's own sync secrets. Read on 2026-10-08 from every
- * workflow on develop and main. A secret not named here -- a GitHub App key
- * minted into a token by any action, a deploy key, a second PAT -- lists the
- * workflow for a whole-file review, as do `secrets: inherit` and a computed
- * `secrets[...]`, which could pass any of them.
+ * workflow on develop and main. Inside an expression, the secrets context is
+ * harmless only as `secrets.NAME` with NAME here. A name not here -- a GitHub
+ * App key minted into a token by any action, a deploy key, a second PAT --
+ * lists the workflow for a whole-file review, and so does any use that could
+ * reach every secret: the bare object (`toJSON(secrets)`, a function
+ * argument, `secrets[...]`) or a job's `secrets` key handing them to a
+ * called workflow (`inherit` or a mapping, however the YAML spells it).
  */
 export const QA_RELEASE_NON_BRANCH_SECRETS: readonly string[] = Object.freeze([
   "ADMIN_ALERT_EMAIL",
@@ -223,35 +226,42 @@ export const QA_RELEASE_NON_BRANCH_SECRETS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Where Actions evaluates the `secrets` context: inside `${{ }}`, and on an
- * `if:` line, whose condition may be written without the braces.
+ * Where Actions evaluates the `secrets` context: inside `${{ }}` anywhere in
+ * the file, and in every job and step `if`, whose condition may be written
+ * without the braces and over several lines -- read from the parsed workflow,
+ * not from text lines.
  */
-const expressionTexts = (text: string): string[] => [
-  ...[...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((match) => match[1]),
-  ...text
-    .split("\n")
-    .filter((line) => /^\s*(-\s*)?if\s*:/.test(line))
-    .map((line) => line.replace(/^\s*(-\s*)?if\s*:/, "")),
-];
+const expressionTexts = (text: string, workflow: unknown): string[] => {
+  const expressions = [...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((match) => match[1]);
+  for (const rawJob of Object.values(asRecord(asRecord(workflow)?.jobs) ?? {})) {
+    const job = asRecord(rawJob) ?? {};
+    if (typeof job.if === "string") expressions.push(job.if);
+    for (const rawStep of Array.isArray(job.steps) ? job.steps : []) {
+      const step = asRecord(rawStep) ?? {};
+      if (typeof step.if === "string") expressions.push(step.if);
+    }
+  }
+  return expressions;
+};
 
 /**
- * The other-credential reasons in a workflow's text, empty when there are
- * none. Inside expressions the `secrets` context counts as harmless only as
- * `secrets.NAME` with NAME in QA_RELEASE_NON_BRANCH_SECRETS; the whole object
- * (`toJSON(secrets)`, `secrets[...]`, passed as an argument) or another name
- * lists the workflow. So does a `secrets:` key, which hands a called workflow
- * secrets (`inherit` or a mapping).
+ * The other-credential reasons in a workflow, empty when there are none (see
+ * QA_RELEASE_NON_BRANCH_SECRETS for the rule).
  */
-const otherCredentials = (text: string): string[] => {
+const otherCredentials = (text: string, workflow: unknown): string[] => {
   const reasons = new Set<string>();
-  for (const expression of expressionTexts(text)) {
+  for (const expression of expressionTexts(text, workflow)) {
     for (const match of expression.matchAll(/\bsecrets\b(\s*\.\s*([A-Za-z0-9_]+))?/g)) {
       const name = match[2];
       if (!name) reasons.add("secrets object");
       else if (!QA_RELEASE_NON_BRANCH_SECRETS.includes(name)) reasons.add(`secret ${name}`);
     }
   }
-  if (/^\s*secrets\s*:/m.test(text)) reasons.add("secrets passed to a called workflow");
+  // A job's `secrets` key, read from the parse whatever its quoting or flow
+  // style, hands secrets to the workflow it calls.
+  for (const [jobId, rawJob] of Object.entries(asRecord(asRecord(workflow)?.jobs) ?? {})) {
+    if (asRecord(rawJob)?.secrets !== undefined) reasons.add(`${jobId}: secrets passed to a called workflow`);
+  }
   // A token minted from a key the workflow reads some other way.
   if (/github-app-token|\bapp[-_]id\s*:|\bprivate[-_]key\s*:|ssh-agent|\bssh[-_]key\s*:|deploy[-_]key/i.test(text)) reasons.add("app or deploy key");
   return [...reasons].sort();
@@ -327,7 +337,7 @@ export function qaReleaseWorkflowBranchWriters(
         if (effective === undefined ? defaultPermission === "write" : contentsWrite(effective)) reasons.push(`${jobId}: contents write`);
       }
     }
-    reasons.push(...otherCredentials(text));
+    reasons.push(...otherCredentials(text, workflow));
     if (reasons.length === 0) continue;
     if (reviewed.some((entry) => entry.path === path && entry.sha256 === sha256)) continue;
     listed.push(`${path} ${sha256} (${reasons.join("; ")})`);

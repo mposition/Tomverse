@@ -136,24 +136,31 @@ test("a workflow is listed when its token can write contents, or it holds anothe
     "uses: tibdex/github-app-token@v2\nwith:\n  app_id: 1\n  private_key: ${{ secrets.APP_PRIVATE_KEY }}",
   );
   const otherKey = file("otherkey.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets.SECOND_PAT }}");
-  const inherit = file("inherit.yml", { permissions: { contents: "read" }, jobs: { a: { uses: "./x.yml" } } }, "secrets: inherit");
   const computed = file("computed.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets[format('{0}', 'X')] }}");
-  // The whole secrets object handed to a script, and a secret mapped to a called workflow.
-  const wholeObject = file("tojson.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "env:\n  ALL: ${{ toJSON(secrets) }}");
-  const mapped = file("mapped.yml", { permissions: { contents: "read" }, jobs: { a: { uses: "./x.yml" } } }, "    secrets:\n      token: ${{ secrets.SLACK_WEBHOOK_URL }}");
+  // From real YAML, so quoting and flow style are the parser's, not a pattern's.
+  const { parse } = await import("yaml");
+  const yamlFile = (path, text) => ({ path, text, workflow: parse(text) });
+  const inherit = yamlFile("inherit.yml", "permissions:\n  contents: read\njobs:\n  a:\n    uses: ./x.yml\n    secrets: inherit\n");
+  const quotedInherit = yamlFile("quoted.yml", "permissions:\n  contents: read\njobs:\n  a:\n    uses: ./x.yml\n    \"secrets\": inherit\n");
+  const flowInherit = yamlFile("flow.yml", "permissions: {contents: read}\njobs: {call: {uses: './x.yml', secrets: inherit}}\n");
+  const mapped = yamlFile("mapped.yml", "permissions:\n  contents: read\njobs:\n  a:\n    uses: ./x.yml\n    secrets:\n      token: ${{ secrets.SLACK_WEBHOOK_URL }}\n");
+  // The whole secrets object handed to a script.
+  const wholeObject = yamlFile("tojson.yml", "permissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n    env:\n      ALL: ${{ toJSON(secrets) }}\n    steps: []\n");
+  // A multi-line if without braces, naming a secret outside the list.
+  const multiLineIf = yamlFile("multiif.yml", "permissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n    steps:\n      - if: >-\n          github.event_name == 'push' &&\n          secrets.SECOND_PAT != ''\n        run: echo\n");
   // Secrets that are not GitHub credentials leave a read-only workflow unlisted.
-  const harmless = file("harmless.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "url: ${{ secrets.SLACK_WEBHOOK_URL }}\npat: ${{ secrets.GH_AUTOMATION_PAT }}");
+  const harmless = yamlFile("harmless.yml", "permissions:\n  contents: read\njobs:\n  a:\n    runs-on: x\n    env:\n      URL: ${{ secrets.SLACK_WEBHOOK_URL }}\n      PAT: ${{ secrets.GH_AUTOMATION_PAT }}\n    steps:\n      - if: secrets.SLACK_WEBHOOK_URL != ''\n        run: echo\n");
 
   // The workflow token's permission decides, not what the script says:
   // a read-only token's git push cannot change a branch.
   const listed = qaReleaseWorkflowBranchWriters(
-    [readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable, tibdex, otherKey, inherit, computed, harmless, wholeObject, mapped],
+    [readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable, tibdex, otherKey, computed, inherit, quotedInherit, flowInherit, mapped, wholeObject, multiLineIf, harmless],
     "read",
     [],
   );
   assert.deepEqual(
     listed.map((line) => line.split(" ")[0]),
-    ["all.yml", "app.yml", "bad.yml", "computed.yml", "inherit.yml", "job.yml", "key.yml", "mapped.yml", "otherkey.yml", "reusable.yml", "tibdex.yml", "tojson.yml", "top.yml"],
+    ["all.yml", "app.yml", "bad.yml", "computed.yml", "flow.yml", "inherit.yml", "job.yml", "key.yml", "mapped.yml", "multiif.yml", "otherkey.yml", "quoted.yml", "reusable.yml", "tibdex.yml", "tojson.yml", "top.yml"],
   );
   // With the repository default at write, a workflow without permissions is listed too.
   assert.deepEqual(
