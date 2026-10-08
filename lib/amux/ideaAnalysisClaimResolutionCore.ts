@@ -20,6 +20,10 @@ export type AmuxIdeaAnalysisClaimReadback = {
   payloadDigest: string;
   resultRequestId: string | null;
   resultDigest: string | null;
+  resultOutcome: "verified_success" | "invocation_failed" | "outcome_unknown" | null;
+  resultEffectiveOutcome: "outcome_unknown" | null;
+  resultFailureReason: "usage_unverified" | "invocation_unverified" | null;
+  zeroReleaseEligible: boolean;
 };
 
 /** Content-free digest shown to the owner before a terminal disposition. */
@@ -27,7 +31,7 @@ export function amuxIdeaAnalysisClaimReadbackDigest(
   readback: AmuxIdeaAnalysisClaimReadback,
 ): string {
   return createHash("sha256").update(JSON.stringify({
-    version: 1,
+    version: 2,
     policy: "amux-intake-v13",
     holdId: readback.holdId,
     previewId: readback.previewId,
@@ -40,5 +44,9 @@ export function amuxIdeaAnalysisClaimReadbackDigest(
     payloadDigest: readback.payloadDigest,
     resultRequestId: readback.resultRequestId,
     resultDigest: readback.resultDigest,
+    resultOutcome: readback.resultOutcome,
+    resultEffectiveOutcome: readback.resultEffectiveOutcome,
+    resultFailureReason: readback.resultFailureReason,
+    zeroReleaseEligible: readback.zeroReleaseEligible,
   })).digest("hex");
 }
