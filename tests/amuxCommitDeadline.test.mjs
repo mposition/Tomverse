@@ -70,6 +70,40 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261001111800_amux_v4_frontier_model_catalog",
   // AMUX intake v4: immutable source-plan revision and per-revision cursor.
   "20261002100000_amux_v4_source_plan_revision",
+  // AMUX v4 worker CLI usage: additive invocation and aggregate evidence.
+  "20261002150000_amux_cli_usage_invocation",
+  "20261002160000_amux_cli_usage_aggregate_final",
+  "20261002170000_amux_cli_usage_role_snapshot",
+  "20261002180000_amux_cli_aggregate_role_vocabulary",
+  "20261002190000_amux_cli_usage_year_insert_fence",
+  // AMUX v4 idea-analysis budget ledger: additive and dark.
+  "20261003100000_amux_v4_analysis_budget_ledger",
+  "20261003110000_amux_v4_analysis_budget_total_check",
+  "20261003120000_amux_v4_analysis_price_versions",
+  "20261003130000_amux_v4_chunk_completion_deadline",
+  "20261004190000_amux_v4_content_key_retirement",
+  "20261004190100_amux_v4_retention_hold",
+  "20261004190200_amux_v4_content_no_resurrection",
+  "20261005010000_amux_v4_story_kind",
+  // A09: immutable, non-body owner confirmation metadata.
+  "20261005030000_amux_v4_unit_confirmation_snapshot",
+  "20261005040000_amux_v4_registration_consistency",
+  "20261005050000_amux_v4_task_cost_catalog_approval",
+  "20261005060000_amux_v4_rejection_consistency",
+  "20261005070000_amux_v4_node_link_consistency",
+  "20261005080000_amux_v4_card_link_consistency",
+  "20261005090000_amux_v4_unit_actor_scope",
+  "20261005100000_amux_v4_derivation_groups",
+  "20261005110000_amux_v4_portfolio_scoring",
+  "20261005120000_amux_v4_task_dag_guard",
+  // A12: v22-only receipt and a separate, still-dark promotion gate.
+  "20261006100000_amux_v22_auto_promotion",
+  "20261006110000_amux_v22_worker_assignment",
+  "20261006130000_amux_cli_usage_event",
+  "20261006140000_amux_v22_execution_binding",
+  "20261006150000_amux_v22_task_result",
+  "20261006234000_amux_v22_task_patch",
+  "20261007180000_amux_v4_prless_review_evidence",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {
@@ -310,13 +344,31 @@ test("no AMUX code, nor code that attaches to an AMUX transaction, runs SET CONS
   assert.deepEqual(offenders, []);
 });
 
-test("no AMUX internal route opens its own transaction except the catalog tasks route", () => {
+test("only the named AMUX receipt and admission routes open direct transactions", () => {
   const routes = filesUnder("app/api/internal/amux");
   assert.ok(routes.length > 10);
   const direct = routes.filter((path) => /\$transaction\s*\(/.test(withoutComments(read(path))));
-  // The tasks route upserts catalog cards and records no execution success,
-  // so it has no deadline to keep and is outside the commit deadline check.
-  assert.deepEqual(direct, ["app/api/internal/amux/tasks/route.ts"]);
+  // The analysis admission routes predate A09 and own their explicit
+  // reconciliation contracts; the commit-deadline boundary still governs
+  // orchestration task execution.
+  assert.deepEqual(direct, [
+    "app/api/internal/amux/cli-usage/route.ts",
+    "app/api/internal/amux/tasks/route.ts",
+    "app/api/internal/amux/v22/execution/result/route.ts",
+    "app/api/internal/amux/v4/analysis-claim/route.ts",
+    "app/api/internal/amux/v4/analysis-result/route.ts",
+  ]);
+  // The analysis routes keep their writes dark and bound both write and
+  // receipt-read transactions independently of execution commit deadlines.
+  const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
+  const result = "app/api/internal/amux/v4/analysis-result/route.ts";
+  for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
+    const source = withoutComments(read(path));
+    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));
+    assert.match(source, /maxWait: 5_000, timeout: 15_000/);
+    assert.match(source, /maxWait: 5_000, timeout: 10_000/);
+    assert.match(source, /callbackReturned = true/);
+  }
 });
 
 test("the push harnesses install the migration's own function and trigger, idempotently", () => {

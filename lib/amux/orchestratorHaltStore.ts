@@ -653,6 +653,12 @@ export async function clearAmuxOrchestratorHalt(input: {
 export const countOpenAmuxOrchestratorHalts = (): Promise<number> =>
   prisma.amuxOrchestratorHalt.count({ where: { clearedAt: null } });
 
+/** Admission paths use this store-owned read in their existing transaction. */
+export const findOpenAmuxOrchestratorHalt = (tx: Prisma.TransactionClient) =>
+  tx.amuxOrchestratorHalt.findFirst({
+    where: { clearedAt: null }, select: { id: true },
+  });
+
 export const AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT = 50;
 export const AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT = 20;
 export const AMUX_ORCHESTRATOR_ADMIN_RECEIPT_LIMIT = 20;

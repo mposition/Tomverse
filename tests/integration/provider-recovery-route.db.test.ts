@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { resetTestFixture } from "./resetTestFixture";
 
 // STG-R002: the administrator verification and recovery routes driven end to
 // end against a real PostgreSQL.
@@ -75,7 +76,7 @@ before(async () => {
 });
 
 const resetRecoveryRouteData = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "AdminAuditLog",
       "ProviderHealthCheck",

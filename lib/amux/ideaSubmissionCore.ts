@@ -3,10 +3,11 @@ import {
   type IdeaInput,
   type IdeaInputInspection,
 } from "./ideaInputCore.ts";
+import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
+
+export { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
 export const AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES = 70_000;
-const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-export const isAmuxIdeaRequestId = (value: string) => UUID_V4.test(value);
 
 const exactKeys = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");

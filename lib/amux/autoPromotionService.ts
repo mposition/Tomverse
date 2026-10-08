@@ -163,14 +163,14 @@ const AUTO_PROMOTION_DB_OPERATION = "auto_promotion";
 type AutoTransactionLimits = { maxWaitMs: number; timeoutMs: number; statementTimeoutMs: number };
 
 /** The owner's routes, as since version 8. They run outside any route budget. */
-const OWNER_TRANSACTION_LIMITS: AutoTransactionLimits = {
+export const OWNER_TRANSACTION_LIMITS: AutoTransactionLimits = {
   maxWaitMs: 5_000,
   timeoutMs: 20_000,
   statementTimeoutMs: Number(BOARD_IMPORT_STATEMENT_TIMEOUT),
 };
 
 /** The system actor runs only from the internal tick, inside its route budget. */
-const TICK_TRANSACTION_LIMITS: AutoTransactionLimits = {
+export const TICK_TRANSACTION_LIMITS: AutoTransactionLimits = {
   maxWaitMs: AUTO_TICK_TRANSACTION_MAX_WAIT_MS,
   timeoutMs: AUTO_TICK_TRANSACTION_TIMEOUT_MS,
   statementTimeoutMs: AUTO_TICK_STATEMENT_TIMEOUT_MS,
@@ -214,7 +214,7 @@ const tickHasRoomFor = (transactions: number): boolean =>
  * deadline refusal the caller may meet again next time, not a lost outcome that
  * refuses its grant for good and counts toward the halt rule.
  */
-const withAutoTransaction = async <T>(
+export const withAutoTransaction = async <T>(
   targetId: string | null,
   limits: AutoTransactionLimits,
   run: (

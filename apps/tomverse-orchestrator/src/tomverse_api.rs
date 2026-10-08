@@ -67,6 +67,13 @@ pub struct TomverseApi {
     secret: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22UsageRecord {
+    Recorded,
+    PrivateOnly,
+    Rejected,
+}
+
 const PRISMA_INT_MAX: i64 = 2_147_483_647;
 const MAX_QUEUE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_OWNED_QUEUE_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -910,6 +917,195 @@ async fn read_claim_response(mut response: reqwest::Response) -> Result<ClaimRes
 }
 
 impl TomverseApi {
+    pub async fn v22_task_result_readback(
+        &self, attempt_id: &str, expected_digest: &str,
+        expected_patch: Option<(&str, &str)>,
+        expected_files_digest: Option<&str>,
+    ) -> Result<V22UsageRecord> {
+        let response = self.client
+            .get(format!("{}/api/internal/amux/v22/execution/result", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("attemptId", attempt_id)])
+            .send().await.context("v22 result read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("v22 result read-back failed");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+            match expected_patch {
+                Some((digest, base)) =>
+                    body.pointer("/patch/sha256").and_then(Value::as_str) == Some(digest) &&
+                    body.pointer("/patch/baseSha").and_then(Value::as_str) == Some(base) &&
+                    body.pointer("/patch/bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+                    body.pointer("/patch/filesDigest").and_then(Value::as_str) ==
+                        expected_files_digest,
+                None => body.get("patch").is_some_and(Value::is_null),
+            } {
+            return Ok(V22UsageRecord::Recorded);
+        }
+        if expected_patch.is_some() &&
+            body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+            body.get("bodyAvailable").and_then(Value::as_bool) == Some(true) &&
+            body.get("patch").is_some_and(Value::is_null) {
+            return Ok(V22UsageRecord::PrivateOnly);
+        }
+        if body.get("status").and_then(Value::as_str) == Some("absent") {
+            return Ok(V22UsageRecord::Rejected);
+        }
+        bail!("v22 result read-back conflict")
+    }
+
+    /// A result is sent at most once. A lost answer is resolved by exact
+    /// attempt/digest read-back; the model is never called again for recovery.
+    pub async fn v22_task_result_record_once(
+        &self,
+        attempt_id: &str,
+        worker: &str,
+        result_text: &str,
+        expected_digest: &str,
+        patch: Option<(&str, &str, &str)>,
+        publish_files: Option<&Value>,
+        publish_files_digest: Option<&str>,
+    ) -> Result<V22UsageRecord> {
+        if result_text.is_empty() || result_text.len() > 65_536 ||
+            result_text.contains('\0') || expected_digest.len() != 64 ||
+            !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("invalid v22 result envelope");
+        }
+        if let Some((body, digest, base)) = patch {
+            if body.is_empty() || body.len() > 65_536 ||
+                !body.starts_with("diff --git ") || body.contains('\0') ||
+                digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) ||
+                base.len() != 40 || !base.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("invalid v22 patch envelope");
+            }
+        }
+        if publish_files.is_some() != publish_files_digest.is_some() ||
+            publish_files.is_some() && patch.is_none() ||
+            publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+            bail!("v22 publish files without patch");
+        }
+        let path = format!("{}/api/internal/amux/v22/execution/result", self.base_url);
+        let mut payload = serde_json::json!({
+            "attemptId": attempt_id, "worker": worker,
+            "resultText": result_text, "sourceSha256": expected_digest,
+        });
+        if let Some((text, sha256, base_sha)) = patch {
+            payload["patch"] = serde_json::json!({
+                "text": text, "sha256": sha256, "baseSha": base_sha,
+            });
+            if let Some(files) = publish_files {
+                payload["patch"]["files"] = files.clone();
+                payload["patch"]["filesDigest"] =
+                    serde_json::json!(publish_files_digest);
+            }
+        }
+        let response = self.client.post(&path)
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&payload).send().await;
+        let mut definitely_rejected = false;
+        if let Ok(response) = response {
+            let status = response.status();
+            if status == StatusCode::OK {
+                let answer = read_raw_answer(response, 4096).await?;
+                let body: Value = serde_json::from_slice(&answer.body)?;
+                let accepted_patch = body.get("patchSha256").and_then(Value::as_str) ==
+                    patch.map(|(_, digest, _)| digest) &&
+                    body.get("filesDigest").and_then(Value::as_str) ==
+                        publish_files_digest;
+                let private_only = patch.is_some() &&
+                    body.get("patchRejected").and_then(Value::as_bool) == Some(true) &&
+                    body.get("patchSha256").is_some_and(Value::is_null) &&
+                    body.get("filesDigest").is_some_and(Value::is_null);
+                if body.get("attemptId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("sourceSha256").and_then(Value::as_str) == Some(expected_digest) &&
+                    (accepted_patch || private_only) {
+                    return Ok(if private_only { V22UsageRecord::PrivateOnly }
+                        else { V22UsageRecord::Recorded });
+                }
+                bail!("v22 result write response mismatch");
+            }
+            definitely_rejected = status == StatusCode::CONFLICT ||
+                status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED;
+        }
+        match self.v22_task_result_readback(attempt_id, expected_digest,
+            patch.map(|(_, digest, base)| (digest, base)),
+            publish_files_digest).await? {
+            V22UsageRecord::Recorded => Ok(V22UsageRecord::Recorded),
+            V22UsageRecord::PrivateOnly => Ok(V22UsageRecord::PrivateOnly),
+            V22UsageRecord::Rejected if definitely_rejected => Ok(V22UsageRecord::Rejected),
+            V22UsageRecord::Rejected =>
+                bail!("v22 result write outcome unknown; read-back absent"),
+        }
+    }
+
+    /// Submit the exact content-free A14 receipt once. An ambiguous write is
+    /// resolved only by a GET for the same invocation ID, never by re-POST.
+    pub async fn v22_cli_usage_record_once(
+        &self,
+        attempt_id: &str,
+        receipt: &Value,
+        expected_digest: &str,
+    ) -> Result<V22UsageRecord> {
+        if receipt.get("invocationId").and_then(Value::as_str) != Some(attempt_id) ||
+            receipt.pointer("/binding/kind").and_then(Value::as_str) != Some("task_attempt") ||
+            receipt.pointer("/binding/attemptId").and_then(Value::as_str) != Some(attempt_id) ||
+            expected_digest.len() != 64 ||
+            !expected_digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            bail!("invalid v22 usage receipt binding");
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/cli-usage", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(receipt)
+            .send().await;
+        let mut definitely_rejected = false;
+        if let Ok(response) = response {
+            let status = response.status();
+            if status == StatusCode::OK {
+                let answer = read_raw_answer(response, 4096).await?;
+                let body: Value = serde_json::from_slice(&answer.body)?;
+                if body.get("invocationId").and_then(Value::as_str) == Some(attempt_id) &&
+                    body.get("receiptDigest").and_then(Value::as_str) == Some(expected_digest) {
+                    return Ok(V22UsageRecord::Recorded);
+                }
+                bail!("v22 usage write response mismatch");
+            }
+            definitely_rejected = status == StatusCode::CONFLICT ||
+                status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED;
+        }
+        let response = self.client
+            .get(format!("{}/api/internal/amux/cli-usage", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("invocationId", attempt_id)])
+            .send().await.context("v22 usage write outcome unknown; read-back unavailable")?;
+        let answer = read_raw_answer(response, 4096).await?;
+        if answer.status != StatusCode::OK {
+            bail!("v22 usage write outcome unknown; read-back failed");
+        }
+        let body: Value = serde_json::from_slice(&answer.body)?;
+        if body.get("status").and_then(Value::as_str) == Some("recorded") &&
+            body.get("invocationId").and_then(Value::as_str) == Some(attempt_id) &&
+            body.get("receiptDigest").and_then(Value::as_str) == Some(expected_digest) {
+            return Ok(V22UsageRecord::Recorded);
+        }
+        if definitely_rejected && body.get("status").and_then(Value::as_str) == Some("absent") {
+            return Ok(V22UsageRecord::Rejected);
+        }
+        bail!("v22 usage write outcome unknown or conflicting read-back")
+    }
+
     fn with_timeouts(
         base_url: String,
         secret: String,
@@ -1075,6 +1271,26 @@ mod tests {
         thread,
     };
 
+    fn answer_once(status: &'static str, body: String) -> (TomverseApi, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0_u8; 4096];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+            }
+            write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()).unwrap();
+        });
+        (TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+            Duration::from_secs(1), Duration::from_secs(3)), server)
+    }
+
     #[test]
     fn internal_deadlines_outlast_their_route_budgets() {
         // Claim runs inside the app's bounded admission budget and lifecycle
@@ -1120,6 +1336,181 @@ mod tests {
         let refused: ExecutionHeartbeatResponse =
             serde_json::from_str(r#"{"accepted":false,"reason":"fenced_out"}"#).unwrap();
         assert!(!refused.accepted);
+    }
+
+    #[test]
+    fn v22_unverified_settlement_cannot_claim_success_or_retry() {
+        let body = serde_json::to_value(V22ExecutionSettleRequest {
+            attempt_id: "attempt",
+            worker: "worker",
+            instance_id: "instance",
+            generation: 1,
+            task_revision: 3,
+            outcome: "blocked",
+            invocation_ids: &[],
+        }).unwrap();
+        assert_eq!(body["outcome"], "blocked");
+        assert_eq!(body["invocation_ids"], serde_json::json!([]));
+        assert!(body.get("to_status").is_none());
+        let response: ExecutionSettleResponse = serde_json::from_value(
+            serde_json::json!({"settled":true,"taskRevision":4})
+        ).unwrap();
+        assert!(response.settled);
+    }
+
+    #[tokio::test]
+    async fn v22_usage_record_reads_back_a_lost_write_reply_without_reposting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            for (method, status, body) in [
+                ("POST", "503 Service Unavailable", r#"{"error":"outcome_unknown"}"#),
+                ("GET", "200 OK", concat!(
+                    "{\"status\":\"recorded\",\"invocationId\":\"attempt-1\",",
+                    "\"receiptDigest\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+                )),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut chunk = [0_u8; 4096];
+                    let count = stream.read(&mut chunk).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&chunk[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") { break; }
+                }
+                let request_line = String::from_utf8_lossy(&request);
+                assert!(request_line.starts_with(method));
+                if method == "GET" {
+                    assert!(request_line.contains("invocationId=attempt-1"));
+                }
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()).unwrap();
+            }
+        });
+        let api = TomverseApi::for_test_with_timeouts(format!("http://{address}"),
+            Duration::from_secs(1), Duration::from_secs(3));
+        let receipt = serde_json::json!({"invocationId":"attempt-1",
+            "binding":{"kind":"task_attempt","attemptId":"attempt-1"}});
+        let recorded = api.v22_cli_usage_record_once("attempt-1", &receipt,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_rejected_optional_patch_does_not_confirm_the_patch() {
+        let patch = "diff --git a/a b/a\n";
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+                "attemptId": "attempt-1", "sourceSha256": "a".repeat(64),
+                "patchSha256": null, "filesDigest": null, "patchRejected": true,
+            }).to_string());
+        let recorded = api.v22_task_result_record_once("attempt-1", "worker",
+            "private result", &"a".repeat(64),
+            Some((patch, &"b".repeat(64), &"c".repeat(40))), None, None)
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::PrivateOnly);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_lost_response_readback_marks_a_missing_patch_private_only() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+                "status": "recorded", "attemptId": "attempt-1",
+                "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+                "patch": null,
+            }).to_string());
+        let recorded = api.v22_task_result_readback("attempt-1",
+            &"a".repeat(64), Some((&"b".repeat(64), &"c".repeat(40))), None)
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::PrivateOnly);
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_patch_readback_requires_exact_digest_base_and_files() {
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+            "patch": { "sha256": "b".repeat(64), "baseSha": "c".repeat(40),
+                "bodyAvailable": true, "filesDigest": "d".repeat(64) },
+        }).to_string());
+        let recorded = api.v22_task_result_readback("attempt-1", &"a".repeat(64),
+            Some((&"b".repeat(64), &"c".repeat(40))), Some(&"d".repeat(64)))
+            .await.unwrap();
+        assert_eq!(recorded, V22UsageRecord::Recorded);
+        server.join().unwrap();
+
+        let (api, server) = answer_once("200 OK", serde_json::json!({
+            "status": "recorded", "attemptId": "attempt-1",
+            "sourceSha256": "a".repeat(64), "bodyAvailable": true,
+            "patch": { "sha256": "b".repeat(64), "baseSha": "c".repeat(40),
+                "bodyAvailable": true, "filesDigest": "d".repeat(64) },
+        }).to_string());
+        assert!(api.v22_task_result_readback("attempt-1", &"a".repeat(64),
+            Some((&"b".repeat(64), &"e".repeat(40))), Some(&"d".repeat(64)))
+            .await.is_err());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn v22_verified_settlement_sends_only_the_attempt_invocation() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let body_start = loop {
+                let mut chunk = [0_u8; 1024];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(index) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = std::str::from_utf8(&request[..body_start]).unwrap();
+            let content_length: usize = headers
+                .lines()
+                .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ").map(str::to_owned))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            while request.len() - body_start < content_length {
+                let mut chunk = [0_u8; 1024];
+                let count = stream.read(&mut chunk).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&chunk[..count]);
+            }
+            let body: Value = serde_json::from_slice(&request[body_start..body_start + content_length]).unwrap();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 33\r\nConnection: close\r\n\r\n{{\"settled\":true,\"taskRevision\":4}}").unwrap();
+            body
+        });
+        let delivery = PulledDelivery {
+            attempt_id: "attempt-1".to_owned(),
+            assignment_id: Some("assignment-1".to_owned()),
+            v22_execution: None,
+            task_id: "task-1".to_owned(),
+            worker: "worker-1".to_owned(),
+            task_revision: 3,
+            prompt: String::new(),
+            receipt_id: "receipt-1".to_owned(),
+            lease_expires_at: String::new(),
+        };
+        let api = TomverseApi::for_test_with_timeouts(
+            format!("http://{address}"),
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+        );
+        assert!(api.v22_execution_settle_verified(&delivery, "instance-1", 1, "blocked").await.is_err());
+        let result = api.v22_execution_settle_verified(&delivery, "instance-1", 1, "succeeded").await.unwrap();
+        assert!(result.settled);
+        let body = server.join().unwrap();
+        assert_eq!(body["outcome"], "succeeded");
+        assert_eq!(body["attempt_id"], "attempt-1");
+        assert_eq!(body["invocation_ids"], serde_json::json!(["attempt-1"]));
     }
 
     #[test]
@@ -1744,6 +2135,8 @@ pub struct OwnedTodoTask {
     pub id: String,
     pub owner: String,
     pub revision: i64,
+    #[serde(default)]
+    pub assignment_id: Option<String>,
     // Compatibility window (docs/ops/amux/wsl-execution-bridge.md, "Wire
     // compatibility"). main's server sent these six. This app keeps sending
     // title, kind, priority and created_at, which a WSL bridge built before
@@ -1807,8 +2200,20 @@ struct DeliveryPullRequest<'a> {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct V22ExecutionProfile {
+    pub model_id: String,
+    pub role: String,
+    pub budget_microusd: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PulledDelivery {
     pub attempt_id: String,
+    #[serde(default)]
+    pub assignment_id: Option<String>,
+    #[serde(default)]
+    pub v22_execution: Option<V22ExecutionProfile>,
     pub task_id: String,
     pub worker: String,
     pub task_revision: i64,
@@ -1867,6 +2272,8 @@ struct ExecutionStartRequest<'a> {
     instance_id: &'a str,
     generation: i64,
     expected_revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assignment_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1877,6 +2284,22 @@ pub struct ExecutionStartResponse {
     pub task_revision: Option<i64>,
     pub lease_expires_at: Option<String>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct V22ExecutionReadback {
+    pub found: bool,
+    pub state: Option<String>,
+    #[serde(rename = "attemptId")]
+    pub attempt_id: Option<String>,
+    #[serde(rename = "taskRevision")]
+    pub task_revision: Option<i64>,
+    #[serde(rename = "leaseExpiresAt")]
+    pub lease_expires_at: Option<String>,
+    pub outcome: Option<String>,
+    #[serde(rename = "toStatus")]
+    pub to_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1899,6 +2322,17 @@ struct ExecutionSettleRequest<'a> {
     review_pr_number: Option<Option<i64>>,
 }
 
+#[derive(Debug, Serialize)]
+struct V22ExecutionSettleRequest<'a> {
+    attempt_id: &'a str,
+    worker: &'a str,
+    instance_id: &'a str,
+    generation: i64,
+    task_revision: i64,
+    outcome: &'a str,
+    invocation_ids: &'a [&'a str],
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionSettleResponse {
@@ -1913,9 +2347,15 @@ pub struct ExecutionSettleResponse {
 #[serde(deny_unknown_fields)]
 pub struct AutoPromotionTickResponse {
     pub promoted: bool,
+    pub claimed: Option<bool>,
     pub reason: Option<String>,
     pub consumption_id: Option<String>,
     pub expired: Option<i64>,
+    pub policy_version: Option<i64>,
+    pub receipt_id: Option<String>,
+    pub task_id: Option<String>,
+    pub assignment_id: Option<String>,
+    pub worker_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1925,6 +2365,8 @@ pub struct ExecutionRecoveryResponse {
     pub reclaimed: Option<i64>,
     pub reclaimed_claims: Option<i64>,
     pub quota_observations_deleted: Option<i64>,
+    pub quarantined_v22: Option<i64>,
+    pub released_unstarted_v22: Option<i64>,
     pub more: Option<bool>,
     pub reason: Option<String>,
 }
@@ -2149,12 +2591,14 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
     ) -> Result<ExecutionHeartbeatResponse> {
+        let route = if delivery.assignment_id.is_some() {
+            "v22/execution/heartbeat"
+        } else {
+            "execution/heartbeat"
+        };
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/execution/heartbeat",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/{}", self.base_url, route))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&ExecutionHeartbeatRequest {
@@ -2215,13 +2659,16 @@ impl TomverseApi {
         instance_id: &str,
         generation: i64,
         expected_revision: i64,
+        assignment_id: Option<&str>,
     ) -> Result<ExecutionStartResponse> {
+        let route = if assignment_id.is_some() {
+            "v22/execution/start"
+        } else {
+            "execution/start"
+        };
         let response = self
             .client
-            .post(format!(
-                "{}/api/internal/amux/execution/start",
-                self.base_url
-            ))
+            .post(format!("{}/api/internal/amux/{}", self.base_url, route))
             .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
             .bearer_auth(&self.secret)
             .json(&ExecutionStartRequest {
@@ -2230,6 +2677,7 @@ impl TomverseApi {
                 instance_id,
                 generation,
                 expected_revision,
+                assignment_id,
             })
             .send()
             .await?;
@@ -2264,6 +2712,31 @@ impl TomverseApi {
         };
         if !valid {
             bail!("invalid Tomverse AMUX execution-start response invariant");
+        }
+        Ok(body)
+    }
+
+    pub async fn v22_execution_readback(
+        &self,
+        assignment_id: &str,
+        worker: &str,
+        instance_id: &str,
+        generation: i64,
+    ) -> Result<V22ExecutionReadback> {
+        let response = self.client.get(format!(
+            "{}/api/internal/amux/v22/execution/attempt", self.base_url
+        )).timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .query(&[("assignment_id", assignment_id), ("worker", worker),
+                ("instance_id", instance_id)])
+            .query(&[("generation", generation)])
+            .send().await?;
+        let (status, body): (_, V22ExecutionReadback) = read_bounded_json(
+            response, &[StatusCode::OK], MAX_LIFECYCLE_RESPONSE_BYTES,
+        ).await?;
+        if status != StatusCode::OK || !body.found ||
+            !matches!(body.state.as_deref(), Some("not_started" | "started" | "ended")) {
+            bail!("invalid v22 execution readback");
         }
         Ok(body)
     }
@@ -2357,6 +2830,77 @@ impl TomverseApi {
             bail!("invalid Tomverse AMUX execution-settle response invariant");
         }
         Ok(body)
+    }
+
+    async fn v22_execution_settle_with_receipt(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        outcome: &str,
+        invocation_ids: &[&str],
+    ) -> Result<ExecutionSettleResponse> {
+        if delivery.assignment_id.is_none() {
+            bail!("v22 settlement requires an assignment-bound delivery");
+        }
+        let response = self.client
+            .post(format!("{}/api/internal/amux/v22/execution/settle", self.base_url))
+            .timeout(TOMVERSE_INTERNAL_LIFECYCLE_TIMEOUT)
+            .bearer_auth(&self.secret)
+            .json(&V22ExecutionSettleRequest {
+                attempt_id: &delivery.attempt_id,
+                worker: &delivery.worker,
+                instance_id,
+                generation,
+                task_revision: delivery.task_revision,
+                outcome,
+                invocation_ids,
+            })
+            .send().await?;
+        let (status, body): (_, ExecutionSettleResponse) = read_bounded_json(
+            response, &[StatusCode::OK, StatusCode::CONFLICT],
+            MAX_LIFECYCLE_RESPONSE_BYTES,
+        ).await?;
+        if (status == StatusCode::OK && body.settled &&
+            body.task_revision.is_some_and(|value| (0..=PRISMA_INT_MAX).contains(&value)) &&
+            body.reason.is_none()) ||
+           (status == StatusCode::CONFLICT && !body.settled &&
+            body.task_revision.is_none() &&
+            body.reason.as_deref().is_some_and(|value| !value.is_empty())) {
+            Ok(body)
+        } else {
+            bail!("invalid v22 execution-settle response invariant")
+        }
+    }
+
+    /// Only a supervised one-shot CLI process may use this positive path.
+    /// The app independently requires its A14 usage row to be complete,
+    /// priced, and bound to the durable attempt ID before changing status.
+    pub async fn v22_execution_settle_verified(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+        outcome: &str,
+    ) -> Result<ExecutionSettleResponse> {
+        if !matches!(outcome, "succeeded" | "failed") {
+            bail!("verified v22 settlement requires a terminal CLI result");
+        }
+        self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
+            outcome, &[&delivery.attempt_id]).await
+    }
+
+    /// A local AMUX card is not an A14 usage receipt. Without a verified
+    /// one-shot result, close a terminal v22 attempt as blocked for owner
+    /// read-back, never as succeeded or automatically retryable failed.
+    pub async fn v22_execution_settle_unverified(
+        &self,
+        delivery: &PulledDelivery,
+        instance_id: &str,
+        generation: i64,
+    ) -> Result<ExecutionSettleResponse> {
+        self.v22_execution_settle_with_receipt(delivery, instance_id, generation,
+            "blocked", &[]).await
     }
 
     /// Policy version 15: the system consumer of pre-approved automatic
@@ -2473,6 +3017,8 @@ pub(crate) fn recovery_answer_is_valid(
                 && nonnegative(body.reclaimed)
                 && nonnegative(body.reclaimed_claims)
                 && nonnegative(body.quota_observations_deleted)
+                && nonnegative(body.quarantined_v22)
+                && nonnegative(body.released_unstarted_v22)
                 && body.reason.is_none()
         }
         StatusCode::CONFLICT => {
@@ -2480,6 +3026,8 @@ pub(crate) fn recovery_answer_is_valid(
                 && body.reclaimed.is_none()
                 && body.reclaimed_claims.is_none()
                 && nonnegative(body.quota_observations_deleted)
+                && body.quarantined_v22.is_none()
+                && body.released_unstarted_v22.is_none()
                 && body.reason.as_deref() == Some("execution_api_disabled")
         }
         _ => false,
@@ -2490,6 +3038,38 @@ pub(crate) fn recovery_answer_is_valid(
 /// the route sends, whatever its reason, and the 409 `apply_disabled`.
 pub(crate) fn tick_answer_is_valid(status: StatusCode, body: &AutoPromotionTickResponse) -> bool {
     let expired = body.expired.is_none_or(|value| value >= 0);
+    if body.policy_version == Some(22) {
+        return match status {
+            StatusCode::OK if body.promoted => {
+                body.claimed.is_none() && body.reason.is_none() && body.consumption_id.is_none()
+                    && body.expired.is_none()
+                    && body.receipt_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.task_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.assignment_id.is_none() && body.worker_name.is_none()
+            }
+            StatusCode::OK if body.claimed == Some(true) => {
+                !body.promoted && body.reason.is_none() && body.consumption_id.is_none()
+                    && body.expired.is_none() && body.receipt_id.is_none()
+                    && body.task_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.assignment_id.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.worker_name.as_deref().is_some_and(|value| !value.is_empty())
+            }
+            StatusCode::OK if !body.promoted => {
+                body.claimed.is_none() &&
+                body.reason.as_deref().is_some_and(|value| !value.is_empty())
+                    && body.reason.as_deref() != Some("outcome_unknown")
+                    && body.consumption_id.is_none() && body.expired.is_none()
+                    && body.receipt_id.is_none() && body.task_id.is_none()
+                    && body.assignment_id.is_none() && body.worker_name.is_none()
+            }
+            _ => false,
+        };
+    }
+    if body.policy_version.is_some() || body.claimed.is_some() ||
+        body.receipt_id.is_some() || body.task_id.is_some() ||
+        body.assignment_id.is_some() || body.worker_name.is_some() {
+        return false;
+    }
     match status {
         StatusCode::OK => {
             expired

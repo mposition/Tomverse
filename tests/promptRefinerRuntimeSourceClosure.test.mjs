@@ -389,6 +389,10 @@ const compilerOptions = parsedConfig.options;
 // `lib/adminAuditSystemActors.ts` and the
 // marketing pipeline fingerprint repin move source positions only. Count and
 // position-free inventory are unchanged.
+// 2026-10-08, the AMUX-only release adds scoped budget, settlement, expiry,
+// unknown-outcome, auto-cancel, claim, result and retention audit actions.
+// Repin the source-position digest after assembling the release tree.
+//
 // 2026-10-08, the product-research selective release onto main: two audit
 // actor names are added to
 // `lib/adminAuditSystemActors.ts` as their own exported array
@@ -424,8 +428,8 @@ const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "5bb0fbcc26b9699f1c86de5102999250",
-  "9349a436c7e0ee006152ad8efead3f37",
+  "a1cf5224d93dcd87156cb0c5bbdd400f",
+  "0bb8b09336c509f33a8e512b339f4622",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

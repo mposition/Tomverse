@@ -515,7 +515,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * admission decisions are unchanged. The same release adds the
  * agent-digest-retention system actor to lib/adminAuditSystemActors.ts, a
  * watched file; no marketing actor changes.
- * 2026-10-02: the product-research agent's observation table is added
+ *
+ * 2026-10-08: AMUX v4 analysis budget, expiry, settlement, unknown-outcome,
+ * auto-cancel, claim, result, retention and A09 add scoped audit actions.
+ * The webhook receiver's behavior is unchanged; repin this closure digest
+ * after assembling the AMUX-only release tree.
+ *
+ * 2026-10-08: the product-research selective release adds the observation table
  * (docs/policy/product-research-agent.md §4) -- one new model with its own
  * triggers. Not a marketing model and not a webhook input; the digest moves
  * because the whole Prisma schema is deliberately watched. Descriptor and
@@ -524,7 +530,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * state the file is committed in.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "557ba98e30eb90b28d8b6e42ed84ce2f5f3772727eace2e962e99901af8b40df";
+  "18efce8aa0c113e07187d9b6f0497500374c07f06cdd80adfc0f1d71f9bd4e6f";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

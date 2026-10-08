@@ -7,6 +7,7 @@ import {
   analyseCredentialReachability,
   credentialForbiddenPaths,
 } from "../lib/agentCredentialReachability.ts";
+import { AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS } from "../lib/agentCredentialReviewedExclusions.ts";
 
 const wf = (name, text) => ({ path: `.github/workflows/${name}.yml`, blobSha: "a".repeat(40), text });
 const analyse = (workflows, overrides = {}) =>
@@ -33,6 +34,18 @@ test("a read-only pull request workflow forbids nothing", () => {
   assert.equal(result.status, "analysed");
   assert.equal(result.forbidsAll, false);
   assert.deepEqual(result.pathRules, []);
+});
+
+test("a hyphenated needs job name does not become an unknown expression context", () => {
+  const text = READ_ONLY_PR.replace(
+    "    steps:\n",
+    "    needs: [static-and-unit]\n    if: ${{ needs.static-and-unit.result == 'success' }}\n    steps:\n",
+  );
+  const result = analyse([wf("ci", text)]);
+  assert.equal(result.status, "analysed");
+  assert.equal(result.forbidsAll, false);
+  const unknown = text.replace("needs.static-and-unit.result", "unknownContext.value");
+  assert.equal(analyse([wf("ci", unknown)]).forbidsAll, true);
 });
 
 test("every way a job gets a writable credential is caught", () => {
@@ -313,6 +326,7 @@ test("any agent branch a filter could name is reached; only a covering ignore ru
     "    branches: ['main', 'release/*']",
     "    branches: ['agent/review/*']",
     "    branches: ['agent/engineering/x']",
+    "    branches: ['to-develop/**', '**/to-develop/**']",
     "    branches-ignore: ['agent/**']",
     "    branches-ignore: ['agent/engineering/*']",
     "    branches-ignore: ['**']",
@@ -778,7 +792,31 @@ const anonymise = (value) => createHash("sha256").update(value).digest("hex").sl
 // cache is not found" and "cache write denied: token has no writable scopes"
 // in one job.
 // .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and 10.
-const POSTURE_DIGEST = "5f27d8ac775e";
+// 2026-10-07 owner-approved false-positive correction: a hyphenated `needs`
+// expression stopped inventing a credentialed job, and the two exact
+// to-develop opt-in globs stopped matching agent/engineering/<digits>.
+// The unexcluded baseline is now 20 credentialed jobs, 1 reason, 1 path rule,
+// 7 reached workflows, and still forbids all because of the remaining PAT job.
+// The intermediate cf63... value measured only the first correction.
+const POSTURE_DIGEST = "ed4f5e71fc85";
+
+test("owner-reviewed workflow exclusion is exact-blob-only", () => {
+  const workflows = committedWorkflows();
+  const matched = analyseCredentialReachability({ workflows,
+    exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS,
+    cacheIsolationRecorded: true });
+  assert.equal(matched.status, "analysed");
+  assert.equal(matched.voidExclusions.length, 0);
+  assert.equal(matched.forbidsAll, false);
+  const stale = analyseCredentialReachability({ workflows: workflows.map((workflow) =>
+    workflow.path === AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS[0].workflowPath
+      ? { ...workflow, blobSha: "b".repeat(40) } : workflow),
+    exclusions: AGENT_CREDENTIAL_REVIEWED_EXCLUSIONS,
+    cacheIsolationRecorded: true });
+  assert.equal(stale.status, "analysed");
+  assert.equal(stale.voidExclusions.length, 1);
+  assert.equal(stale.forbidsAll, true);
+});
 
 test("on this repository's committed workflows the credential posture is the reviewed one", () => {
   const result = analyseCredentialReachability({

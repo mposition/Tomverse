@@ -461,8 +461,8 @@ test("the Prisma-call limit is not presented as an SQL statement-count guarantee
     /executionHeartbeat: \{[\s\S]*?prismaCallCeiling: 10/,
   );
   const heartbeat = executionSource
-    .split("export async function heartbeatAmuxExecution")[1]
-    ?.split("export async function settleAmuxExecution")[0];
+    .split("async function heartbeatAmuxExecutionBound(")[1]
+    ?.split("export const heartbeatAmuxExecution")[0];
   assert.ok(heartbeat);
   assert.match(heartbeat, /action: "amux\.execution\.lease_renewed"/);
   assert.match(heartbeat, /await writeSystemAuditLog\(\{[\s\S]*?tx,/);

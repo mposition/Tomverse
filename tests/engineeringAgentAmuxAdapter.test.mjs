@@ -28,6 +28,7 @@ import {
 import {
   HALT_VALUES,
   RUNNER_REPORTABLE_HALTS,
+  RUNNER_REPORTABLE_OUTCOMES,
   RUN_OUTCOMES,
   combineRunHalt,
   decideHalt,
@@ -94,6 +95,10 @@ test("the worker is the policy's one identity, and a run id is minted in the wid
 });
 
 test("a run's outcome settles its attempt to review, todo or blocked, never done, and abandoned is not the runner's", () => {
+  assert.equal(RUNNER_REPORTABLE_OUTCOMES.includes("private_result"), false);
+  assert.equal(RUNNER_REPORTABLE_OUTCOMES.includes("abandoned"), false);
+  const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
+  assert.match(finish, /outcome: z\.enum\(RUNNER_REPORTABLE_OUTCOMES\)/);
   for (const outcome of RUN_OUTCOMES) {
     if (outcome === "abandoned") {
       assert.throws(() => amuxSettlementForRunOutcome(outcome), /outcome_not_settled_by_agent/);

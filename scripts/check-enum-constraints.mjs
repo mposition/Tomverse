@@ -651,6 +651,31 @@ const REGISTRY = {
     reason:
       "The v4 model-transfer preview has one confirmed or in-flight attempt per idea chunk; outcome_unknown remains occupied until read-back and owner resolution.",
   },
+  AmuxIdeaAnalysisBudgetHold_mode_check: {
+    owner: "database",
+    reason:
+      "The dark v4 analysis hold distinguishes subscription CLI API-conversion estimates from actual API-mode costs. No reservation writer is enabled by the schema migration.",
+  },
+  AmuxIdeaAnalysisBudgetHold_provider_check: {
+    owner: "database",
+    reason:
+      "Only the currently approved OpenAI and Anthropic analysis providers may appear in the dark hold ledger. A later provider needs a policy and migration change.",
+  },
+  AmuxIdeaAnalysisBudgetHold_status_check: {
+    owner: "database",
+    reason:
+      "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
+  },
+  AmuxIdeaAnalysisPriceVersion_provider_check: {
+    owner: "database",
+    reason:
+      "Only OpenAI and Anthropic may have owner-approved AMUX v4 analysis prices; adding a provider requires an explicit policy and migration change.",
+  },
+  AmuxIdeaAnalysisPriceVersion_mode_check: {
+    owner: "database",
+    reason:
+      "Each approved analysis price is tied to subscription CLI or API mode so estimates and actual API costs cannot be silently interchanged.",
+  },
   AmuxIdeaAnalysisChunk_state_check: {
     owner: "database",
     reason:
@@ -665,6 +690,16 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "DraftUnitRetentionState in lib/amux/ideaRetentionCore.ts has proposed, approved, rejected, and expired. The read-only cleanup planner knows these four states, but no runtime writer list or live transition route exists yet.",
+  },
+  AmuxIdeaContentKeyRetirement_purpose_check: {
+    owner: "database",
+    reason:
+      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+  },
+  AmuxIdeaRetentionHold_reason_check: {
+    owner: "database",
+    reason:
+      "AMUX idea-wide retention holds record a constrained reason category rather than free-text personal data in the seven-year approval audit.",
   },
   AmuxIdeaUnitDecision_action_check: {
     owner: "database",
@@ -686,10 +721,27 @@ const REGISTRY = {
     reason:
       "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
   },
+  AmuxPortfolioAssessment_uncertainty_check: {
+    owner: "database",
+    reason:
+      "Owner-confirmed portfolio evidence has exactly low, medium or high uncertainty; the score uses the worst uncertainty across the hierarchy.",
+  },
+  AmuxPortfolioAssessment_reasonCode_check: {
+    owner: "database",
+    reason:
+      "The append-only portfolio assessment records why the operator entered a new evidence version or override; it never edits a prior score.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
+  },
+  AmuxV22LaneDecision_lane_check: {
+    owner: "list",
+    module: "lib/amux/v22WorkerClaimCore.ts",
+    list: "AMUX_V22_CLAIM_LANES",
+    reason:
+      "The owner-declared normal, parallel and SEV1 worker-assignment lanes are a closed v22 capacity contract. A fourth value must update the guard and owner route together.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",

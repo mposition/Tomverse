@@ -35,7 +35,23 @@ import {
   writeItemTerminalStates,
   writeItemTransitions,
   shouldSendSuccessHeartbeat,
+  v22RunOutcomeForProduct,
 } from "../lib/engineeringAgentCore.ts";
+
+test("v22 run outcomes distinguish a private result, owner draft, and publish queue", () => {
+  assert.equal(v22RunOutcomeForProduct({ taskOutcome: "succeeded",
+    productKind: null }), "private_result");
+  assert.equal(v22RunOutcomeForProduct({ taskOutcome: "succeeded",
+    productKind: "t2_draft" }), "t2_draft");
+  assert.equal(v22RunOutcomeForProduct({ taskOutcome: "succeeded",
+    productKind: "publish" }), "t1_queued");
+  assert.equal(v22RunOutcomeForProduct({ taskOutcome: "blocked",
+    productKind: null }), "agent_failed");
+  assert.throws(() => v22RunOutcomeForProduct({ taskOutcome: "failed",
+    productKind: "publish" }), /without successful result/);
+  assert.throws(() => v22RunOutcomeForProduct({ taskOutcome: "succeeded",
+    productKind: "decision" }), /kind invalid/);
+});
 
 const at = (iso) => new Date(iso);
 const HOUR = 60 * 60 * 1000;

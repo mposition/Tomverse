@@ -10,6 +10,7 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { sealAmuxContent, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { amuxContentKeyRing, createAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { analysisDeadlineAt } from "./ideaRetentionCore.ts";
 import {
   AMUX_V4_IDEA_SUBMISSION_ENV,
@@ -24,7 +25,8 @@ const STATEMENT_TIMEOUT = "5000";
 
 export class IdeaSubmissionError extends Error {
   constructor(
-    readonly code: "submission_disabled" | "forbidden" | "audit_unavailable" | "request_already_seen" | "outcome_unknown",
+    readonly code: "submission_disabled" | "forbidden" | "audit_unavailable" |
+      "key_store_unavailable" | "request_already_seen" | "outcome_unknown",
     readonly status: number,
     readonly readBack?: "committed" | "partial" | "unavailable",
     readonly ideaId?: string,
@@ -125,7 +127,11 @@ export async function commitIdeaSubmission(
 export async function readIdeaSubmissionRequest(
   session: Session,
   requestId: string,
-): Promise<{ requestId: string; status: "committed" | "absent" | "partial"; ideaId?: string }> {
+): Promise<
+  | { requestId: string; status: "absent" }
+  | { requestId: string; status: "partial"; ideaId: string }
+  | { requestId: string; status: "committed"; ideaId: string; hasExternalSources: boolean }
+> {
   const actorUserId = actorId(session);
   const row = await prisma.amuxIdeaSubmission.findUnique({
     where: { requestId },
@@ -139,9 +145,22 @@ export async function readIdeaSubmissionRequest(
       targetId: row.id,
       actorUserId,
     },
-    select: { id: true },
+    select: { id: true, entryHash: true, metadata: true },
   });
-  return { requestId, status: audit ? "committed" : "partial", ideaId: row.id };
+  const metadata = audit?.metadata;
+  if (!audit?.entryHash || !metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  const values = metadata as Record<string, unknown>;
+  const repositoryCount = values.repositoryCount;
+  const pullRequestCount = values.pullRequestCount;
+  if (values.requestId !== requestId || values.transferAuthorized !== false ||
+      !Number.isSafeInteger(repositoryCount) || (repositoryCount as number) < 0 ||
+      !Number.isSafeInteger(pullRequestCount) || (pullRequestCount as number) < 0) {
+    return { requestId, status: "partial", ideaId: row.id };
+  }
+  return { requestId, status: "committed", ideaId: row.id,
+    hasExternalSources: (repositoryCount as number) + (pullRequestCount as number) > 0 };
 }
 
 /** New v4 submission path. The hard code latch ships false. */
@@ -157,8 +176,18 @@ export async function submitIdea(input: {
   if (adminAuditIntegrityKeys(process.env).length === 0) {
     throw new IdeaSubmissionError("audit_unavailable", 503);
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const global = loadCurrentAmuxContentKeys(process.env);
   const ideaId = randomUUID();
+  const keyIdentity = { ideaId, purpose: "idea_raw" as const, subjectId: ideaId };
+  let keys: AmuxContentKeys;
+  try {
+    const unit = await createAmuxContentUnitKeys(keyIdentity);
+    keys = amuxContentKeyRing(global, [{ identity: keyIdentity, keys: unit }]);
+  } catch {
+    // No DB transaction was opened. An uncertain object-store PUT can leave
+    // only an orphan key, never a committed user body.
+    throw new IdeaSubmissionError("key_store_unavailable", 503);
+  }
   let callbackReturned = false;
   try {
     return await prisma.$transaction(async (tx) => {

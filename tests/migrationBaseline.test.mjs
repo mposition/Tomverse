@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -183,6 +184,24 @@ CREATE INDEX x;`),
     { kind: "relation", relation: "X_key" },
   );
   assert.deepEqual(presenceDeclarationIn("CREATE INDEX x;"), { kind: "none" });
+  // A function is not a relation; it has its own declaration and question.
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: present-if-function "f_x"
+CREATE FUNCTION f_x();`),
+    { kind: "function", function: "f_x" },
+  );
+  const digest = "a".repeat(64);
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: replace-function-if-body-sha256 "f_x" "${digest}"
+CREATE OR REPLACE FUNCTION f_x();`),
+    { kind: "function-replacement", function: "f_x", previousBodySha256: digest },
+  );
+  assert.deepEqual(
+    presenceDeclarationIn(`-- baseline-check: replace-function-if-body-sha256 "f_x(text,text)" "${digest}"
+CREATE OR REPLACE FUNCTION f_x(text, text);`),
+    { kind: "function-replacement", function: "f_x", functionArgs: ["text", "text"],
+      previousBodySha256: digest },
+  );
   for (const [label, sql] of [
     // SQL instead of a name: the guard asks its own fixed question, so a
     // declaration that tries to supply one is not a declaration at all.
@@ -194,6 +213,16 @@ CREATE INDEX x;`],
     ["quoted inside", `-- baseline-check: present-if-relation "a\"b"
 CREATE INDEX x;`],
     ["schema-qualified", `-- baseline-check: present-if-relation "other.X"
+CREATE INDEX x;`],
+    ["unknown kind", `-- baseline-check: present-if-trigger "T"
+CREATE INDEX x;`],
+    ["function schema-qualified", `-- baseline-check: present-if-function "other.f"
+CREATE INDEX x;`],
+    ["replacement bad digest", `-- baseline-check: replace-function-if-body-sha256 "f_x" "abc"
+CREATE INDEX x;`],
+    ["replacement schema-qualified", `-- baseline-check: replace-function-if-body-sha256 "other.f" "${digest}"
+CREATE INDEX x;`],
+    ["replacement unsafe signature", `-- baseline-check: replace-function-if-body-sha256 "f_x(text);DELETE" "${digest}"
 CREATE INDEX x;`],
     ["too long", `-- baseline-check: present-if-relation "${"a".repeat(64)}"
 CREATE INDEX x;`],
@@ -217,6 +246,31 @@ test("the guard asks one fixed question with the name bound, and accepts one boo
     values: ['public."X_key"'],
     rowMode: "array",
   });
+  const { functionPresenceQuery, presenceQueryFor } = await import("../scripts/baseline-presence-core.mjs");
+  const fn = functionPresenceQuery("f_x");
+  assert.deepEqual(fn, {
+    text: "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = $1) AS \"present\"",
+    values: ["f_x"],
+    rowMode: "array",
+  });
+  assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x" }), fn);
+  assert.deepEqual(presenceQueryFor({ name: "m", relation: "X_key" }), presenceQuery("X_key"));
+  const { functionBodyQuery, replacementAnswer } = await import("../scripts/baseline-presence-core.mjs");
+  assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x", previousBodySha256: "a".repeat(64) }), functionBodyQuery("f_x"));
+  assert.deepEqual(functionBodyQuery("f_x").values, ["f_x"]);
+  assert.match(functionBodyQuery("f_x").text, /p\.pronargs = 0/);
+  const typed = functionBodyQuery("f_x", ["text", "text"]);
+  assert.deepEqual(typed.values, ["f_x", 'public."f_x"(text,text)']);
+  assert.match(typed.text, /pg_catalog\.to_regprocedure\(\$2\)/);
+  assert.deepEqual(presenceQueryFor({ name: "m", function: "f_x",
+    functionArgs: ["text", "text"], previousBodySha256: "a".repeat(64) }), typed);
+  const oldBody = "BEGIN RETURN NEW; END;";
+  const oldHash = createHash("sha256").update(oldBody).digest("hex");
+  assert.equal(replacementAnswer([[oldBody]], oldHash), false);
+  assert.equal(replacementAnswer([["changed"]], oldHash), true);
+  for (const rows of [[], [[oldBody], [oldBody]], [[null]], [[false]], undefined]) {
+    assert.equal(replacementAnswer(rows, oldHash), undefined, JSON.stringify(rows));
+  }
   assert.equal(presenceAnswer([[false]]), false);
   assert.equal(presenceAnswer([[true]]), true);
   for (const rows of [[], [[false], [false]], [[false, true]], [["f"]], [[null]], undefined]) {
@@ -230,7 +284,19 @@ test("the guard proceeds only when every pending migration proves absence", asyn
     a: `-- baseline-check: present-if-relation "A"\nCREATE INDEX a;`,
     b: `-- baseline-check: present-if-relation "B"\nCREATE INDEX b;`,
     c: "CREATE INDEX c;",
+    f: `-- baseline-check: present-if-function "F"
+CREATE FUNCTION f();`,
+    r: `-- baseline-check: replace-function-if-body-sha256 "R" "${"a".repeat(64)}"
+CREATE OR REPLACE FUNCTION r();`,
   };
+  assert.deepEqual(pendingProbes(["a", "f"], (name) => sql[name]), {
+    probes: [{ name: "a", relation: "A" }, { name: "f", function: "F" }],
+    undeclared: [],
+  });
+  assert.deepEqual(pendingProbes(["r"], (name) => sql[name]), {
+    probes: [{ name: "r", function: "R", previousBodySha256: "a".repeat(64) }],
+    undeclared: [],
+  });
   assert.deepEqual(pendingProbes(["a", "c"], (name) => sql[name]).undeclared, ["c"]);
   assert.deepEqual(pendingProbes(["a", "b"], (name) => sql[name]).probes, [
     { name: "a", relation: "A" },
@@ -249,7 +315,8 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   const match = guard.indexOf("schemaMatchesPrisma()) {");
   const probe = guard.indexOf("pendingProbes(", match);
   // The query the guard runs is the core's fixed one, never a migration's text.
-  assert.ok(guard.includes("client.query(presenceQuery(relation))"));
+  assert.ok(guard.includes("client.query(presenceQueryFor(probe))"));
+  assert.ok(guard.includes("replacementAnswer(rows, probe.previousBodySha256)"));
   const readOnly = guard.indexOf('"BEGIN READ ONLY"', probe);
   const rollback = guard.indexOf('"ROLLBACK"', readOnly);
   assert.ok(match > 0 && probe > match && readOnly > probe && rollback > readOnly);
@@ -257,3 +324,43 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   assert.ok(guard.includes("undeclared,"));
 });
 
+test("the AMUX chunk deadline migration pins the exact previous function body", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261003130000_amux_v4_chunk_completion_deadline", "migration.sql"),
+    "utf8",
+  );
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261001102300_amux_v4_draft_units", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /CREATE FUNCTION amux_v4_chunk_completion_immutable\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  const created = /CREATE (?:OR REPLACE )?FUNCTION (?:public\.)?"?([a-z0-9_]+)"?\(/i.exec(sql)?.[1];
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: created,
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+});
+test("the AMUX unit actor replacement pins its five-text-argument predecessor", async () => {
+  const { presenceDeclarationIn, pendingProbes } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS,
+    "20261005090000_amux_v4_unit_actor_scope", "migration.sql"), "utf8");
+  const previousSql = readFileSync(join(MIGRATIONS,
+    "20261001102600_amux_v4_unit_decisions", "migration.sql"), "utf8");
+  const previousBody = /CREATE FUNCTION amux_v4_unit_audit_matches\([\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  const declaration = {
+    kind: "function-replacement",
+    function: "amux_v4_unit_audit_matches",
+    functionArgs: ["text", "text", "text", "text", "text"],
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  };
+  assert.deepEqual(presenceDeclarationIn(sql), declaration);
+  assert.deepEqual(pendingProbes(["replacement"], () => sql), {
+    probes: [{ name: "replacement", function: declaration.function,
+      functionArgs: declaration.functionArgs,
+      previousBodySha256: declaration.previousBodySha256 }], undeclared: [],
+  });
+});
