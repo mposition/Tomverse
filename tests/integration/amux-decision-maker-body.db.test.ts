@@ -511,6 +511,19 @@ test("the option set is the store's keyed digest of the card's options, and a re
   // both refused before the ledger is touched.
   assert.deepEqual(await submitWith([...OPTIONS, { id: "c", label: "Ship it" }], "c"), { status: "option_set_mismatch" });
   assert.deepEqual(await submitWith(OPTIONS.slice(0, 1), "b"), { status: "option_set_mismatch" });
+  // The request's own options, but the ring holds another key for the period than the registered
+  // one: the digest cannot match, and the store says why -- the key, never the options.
+  const underOtherKey = await prisma.$transaction((tx) =>
+    submitDecisionMakerOutput(tx, {
+      requestId,
+      instance: OPENAI,
+      binding: resultBinding,
+      output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId: "a", rationale: "r", irreversible: false }), options: OPTIONS },
+      requireLeaseAt: () => {},
+      keyRing: new Map([[period, OTHER_KEY]]),
+    }),
+  );
+  assert.deepEqual(underOtherKey, { status: "digest_key_unavailable" });
   assert.deepEqual(await resultEvents(requestId), []);
   assert.deepEqual(await prisma.$queryRaw`SELECT 1 FROM "AmuxDecisionMakerResultDetail" WHERE "requestId" = ${requestId}`, []);
   // The request's own options, in any order, are accepted.
@@ -687,14 +700,14 @@ test("a result detail belongs to its request's result of the same transaction, k
   const { requestId } = await routeAssignAndTransmit(ring);
   type Build = (eventId: string, audit: string, otherAudit: string) => Omit<DetailRow, "requestId">;
   /** A timeout result written past the store, then the detail the case builds, in one transaction rolled back. */
-  const withResult = (build: Build) =>
+  const withResult = (build: Build, eventResultKind: "timeout" | "proposal" | "escalate" = "timeout") =>
     prisma.$transaction(async (tx) => {
       const eventId = randomUUID();
       const audit = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: eventId });
       const otherAudit = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: randomUUID() });
       await tx.$executeRaw`
         INSERT INTO "AmuxDecisionMakerRequestEvent" ("id", "requestId", "kind", "instance", "inputPayloadDigest", "resultKind", "resultDigest", "auditLogId")
-        VALUES (${eventId}, ${requestId}, 'result', ${OPENAI}, ${DIGEST_B}, 'timeout', ${DIGEST_A}, ${audit})
+        VALUES (${eventId}, ${requestId}, 'result', ${OPENAI}, ${DIGEST_B}, ${eventResultKind}, ${DIGEST_A}, ${audit})
       `;
       await insertDetailRow(tx, { requestId, ...build(eventId, audit, otherAudit) });
       throw new RolledBack();
@@ -710,6 +723,34 @@ test("a result detail belongs to its request's result of the same transaction, k
     withResult((eventId, audit) => ({ resultEventId: eventId, resultKind: "timeout", outputKind: "select", optionId: "a", irreversible: false, keyPeriod: period, auditLogId: audit })),
     /AmuxDecisionMakerResultDetail_shape_check/,
   );
+  // A CHECK passes when its expression is NULL: no NULL output kind, option or flag may stand in
+  // for what a proposal or an escalation must carry, however the other columns are set.
+  type Shape = Pick<DetailRow, "outputKind" | "optionId" | "irreversible">;
+  const shaped = (resultKind: "proposal" | "escalate", shape: Shape) =>
+    withResult((eventId, audit) => ({ resultEventId: eventId, resultKind, ...shape, keyPeriod: period, auditLogId: audit }), resultKind);
+  for (const [resultKind, shape] of [
+    ["proposal", { outputKind: null, optionId: null, irreversible: false }],
+    ["proposal", { outputKind: null, optionId: null, irreversible: true }],
+    ["proposal", { outputKind: null, optionId: "a", irreversible: true }],
+    ["proposal", { outputKind: null, optionId: null, irreversible: null }],
+    ["proposal", { outputKind: "select", optionId: null, irreversible: true }],
+    ["proposal", { outputKind: "select", optionId: "a", irreversible: null }],
+    ["proposal", { outputKind: "free_text", optionId: null, irreversible: null }],
+    ["proposal", { outputKind: "escalate", optionId: null, irreversible: null }],
+    ["escalate", { outputKind: null, optionId: null, irreversible: null }],
+    ["escalate", { outputKind: null, optionId: "a", irreversible: false }],
+    ["escalate", { outputKind: "escalate", optionId: null, irreversible: false }],
+  ] as const) {
+    await rejectsWith(shaped(resultKind, shape), /AmuxDecisionMakerResultDetail_shape_check/);
+  }
+  // What each kind must carry is accepted (and rolled back by the case itself).
+  for (const [resultKind, shape] of [
+    ["proposal", { outputKind: "select", optionId: "a", irreversible: true }],
+    ["proposal", { outputKind: "free_text", optionId: null, irreversible: false }],
+    ["escalate", { outputKind: "escalate", optionId: null, irreversible: null }],
+  ] as const) {
+    await rejectsWith(shaped(resultKind, shape), /RolledBack/);
+  }
   // The option id grammar: no prose.
   await rejectsWith(
     prisma.$executeRaw`

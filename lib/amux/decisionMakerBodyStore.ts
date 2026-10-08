@@ -674,7 +674,13 @@ export type DecisionMakerOutputSubmission =
  * digest the store computed at routing, or nothing is recorded
  * (`option_set_mismatch`). A fake id added to the output and the list, or a
  * real one dropped to force a validation failure, is refused before the
- * ledger is touched.
+ * ledger is touched. A digest that does not match can also mean that the key
+ * ring holds another key for the period than the one the option set was
+ * digested with, so on a mismatch -- and only then -- the registry is read:
+ * when it does not hold the ring's key undestroyed, the answer is
+ * `digest_key_unavailable`, never a wrong option set. (A matching digest
+ * needs no read here: the detail statement below refuses an unregistered key
+ * for every result.)
  *
  * The result digest is computed here, under the request key, from the exact
  * output bytes submitted (or the fixed no-output marker of a timeout or an
@@ -698,11 +704,12 @@ export type DecisionMakerOutputSubmission =
  * the same rule. An existing pair already has its detail, and a rejection --
  * a proposal under the kill switch included -- has none and stores no body.
  *
- * Statements: 1 request read -- 1 for an unknown request, a key the ring does
- * not hold, or an option set that does not match; then the ledger's
- * submission: 2 when it writes nothing, 3 when its switch read finds the store
- * unreadable, 7 (8 with an integrity key) for a result or a rejection; and 1
- * detail-and-body insert for an accepted result -- 9, or 10.
+ * Statements: 1 request read -- 1 for an unknown request or a key the ring
+ * does not hold; 1 registry read after an option set that does not match -- 2
+ * for `option_set_mismatch` or the key it reveals as unusable; otherwise the
+ * ledger's submission: 2 when it writes nothing, 3 when its switch read finds
+ * the store unreadable, 7 (8 with an integrity key) for a result or a
+ * rejection; and 1 detail-and-body insert for an accepted result -- 9, or 10.
  */
 export async function submitDecisionMakerOutput(
   tx: Prisma.TransactionClient,
@@ -732,9 +739,13 @@ export async function submitDecisionMakerOutput(
   let validOutput: DmOutput | null = null;
   let bodies: Array<{ field: DmBodyField; text: string }> = [];
   if (output.kind === "output") {
-    // Only the options the request was routed with.
+    // Only the options the request was routed with -- unless the ring's key is
+    // not the registered one, which makes every option set look wrong.
     if (dmOptionSetDigest(requestKey, output.options) !== state.binding.optionSetDigest) {
-      return { status: "option_set_mismatch" };
+      const registry = await readDecisionMakerDigestKeyPeriod(tx, keyPeriod);
+      return dmDigestKeyUsable(registry, dmDigestKeyCheck(periodKey))
+        ? { status: "option_set_mismatch" }
+        : { status: "digest_key_unavailable" };
     }
     let parsed: unknown;
     try {

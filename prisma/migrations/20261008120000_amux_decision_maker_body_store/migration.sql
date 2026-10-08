@@ -122,6 +122,10 @@
 --   explains why).
 -- * Every row's "id" is a lowercase UUID and every digest and key check value
 --   64 lowercase hex characters.
+-- * No CHECK here passes on NULL. A CHECK accepts a row when its expression is
+--   NULL, so each single-column CHECK on a nullable column says "IS NULL OR",
+--   and each CHECK over several columns is held to IS TRUE, comparing a
+--   nullable column only with IS [NOT] DISTINCT FROM or IS [NOT] NULL.
 --
 -- Under the kill switch every write here stays allowed (section 6's table:
 -- legal hold, body deletion, stale close and expiry deletion), so no guard
@@ -169,10 +173,10 @@ CREATE TABLE "AmuxDecisionMakerDigestKeyEvent" (
       CHECK ("keyPeriod" >= 0),
     -- A rotation records the key check value, a destruction nothing.
     CONSTRAINT "AmuxDecisionMakerDigestKeyEvent_key_check_shape_check"
-      CHECK (
+      CHECK ((
         ("kind" = 'rotate') = ("keyCheck" IS NOT NULL)
         AND ("keyCheck" IS NULL OR "keyCheck" ~ '^[0-9a-f]{64}$')
-      )
+      ) IS TRUE)
 );
 
 CREATE UNIQUE INDEX "AmuxDecisionMakerDigestKeyEvent_sequence_key"
@@ -206,7 +210,7 @@ CREATE TABLE "AmuxDecisionMakerBody" (
       CHECK ("field" IN ('card_text', 'dm_answer', 'dm_rationale', 'dm_escalation_reason', 'operator_answer')),
     -- Section 10's caps in UTF-8 bytes (the database encoding is UTF8).
     CONSTRAINT "AmuxDecisionMakerBody_text_size_check"
-      CHECK (
+      CHECK ((
         octet_length("text") >= 1
         AND octet_length("text") <= CASE "field"
           WHEN 'card_text' THEN 16384
@@ -216,11 +220,11 @@ CREATE TABLE "AmuxDecisionMakerBody" (
           WHEN 'operator_answer' THEN 8192
           ELSE 0
         END
-      ),
+      ) IS TRUE),
     CONSTRAINT "AmuxDecisionMakerBody_key_period_check"
       CHECK ("keyPeriod" >= 0),
     CONSTRAINT "AmuxDecisionMakerBody_digest_format_check"
-      CHECK ("digest" ~ '^[0-9a-f]{64}$' AND "keyCheck" ~ '^[0-9a-f]{64}$')
+      CHECK (("digest" ~ '^[0-9a-f]{64}$' AND "keyCheck" ~ '^[0-9a-f]{64}$') IS TRUE)
 );
 
 -- One row per field per request: section 10's five fields, 37 KiB at most.
@@ -261,11 +265,11 @@ CREATE TABLE "AmuxDecisionMakerRetentionEvent" (
       CHECK ("keyPeriod" >= 0),
     -- The retention is the system's, at the close; a hold is a person's.
     CONSTRAINT "AmuxDecisionMakerRetentionEvent_actor_shape_check"
-      CHECK (
+      CHECK ((
         ("kind" = 'retention_set') = ("actorKind" = 'system')
         AND ("actorKind" = 'human') = ("actorUserId" IS NOT NULL)
         AND ("kind" = 'retention_set') = ("retentionUntil" IS NOT NULL)
-      )
+      ) IS TRUE)
 );
 
 CREATE UNIQUE INDEX "AmuxDecisionMakerRetentionEvent_sequence_key"
@@ -665,28 +669,32 @@ CREATE TABLE "AmuxDecisionMakerResultDetail" (
     -- token, never prose.
     CONSTRAINT "AmuxDecisionMakerResultDetail_option_id_format_check"
       CHECK ("optionId" IS NULL OR "optionId" ~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$'),
-    -- Section 6: what each terminal result carries.
+    -- Section 6: what each terminal result carries. A CHECK passes when its
+    -- expression is NULL, and three of these columns are nullable, so every
+    -- comparison with a nullable column is IS [NOT] DISTINCT FROM or IS [NOT]
+    -- NULL, and the whole is held to IS TRUE: a NULL output kind or flag can
+    -- never satisfy a branch by making it unknown.
     CONSTRAINT "AmuxDecisionMakerResultDetail_shape_check"
-      CHECK (
+      CHECK ((
         (
           "resultKind" = 'proposal'
           AND "irreversible" IS NOT NULL
           AND (
-            ("outputKind" = 'select' AND "optionId" IS NOT NULL)
-            OR ("outputKind" = 'free_text' AND "optionId" IS NULL)
+            ("outputKind" IS NOT DISTINCT FROM 'select' AND "optionId" IS NOT NULL)
+            OR ("outputKind" IS NOT DISTINCT FROM 'free_text' AND "optionId" IS NULL)
           )
         )
         OR (
           "resultKind" = 'escalate'
-          AND "outputKind" = 'escalate' AND "optionId" IS NULL AND "irreversible" IS NULL
+          AND "outputKind" IS NOT DISTINCT FROM 'escalate' AND "optionId" IS NULL AND "irreversible" IS NULL
         )
         OR (
           "resultKind" IN ('validation_failure', 'timeout', 'unavailable')
           AND "outputKind" IS NULL AND "optionId" IS NULL AND "irreversible" IS NULL
         )
-      ),
+      ) IS TRUE),
     CONSTRAINT "AmuxDecisionMakerResultDetail_key_check"
-      CHECK ("keyPeriod" >= 0 AND "keyCheck" ~ '^[0-9a-f]{64}$')
+      CHECK (("keyPeriod" >= 0 AND "keyCheck" ~ '^[0-9a-f]{64}$') IS TRUE)
 );
 
 CREATE UNIQUE INDEX "AmuxDecisionMakerResultDetail_requestId_key"

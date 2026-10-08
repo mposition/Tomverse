@@ -274,6 +274,31 @@ test("the triggers use the core's period, retention, total and actions, and the 
   assert.match(sql, /AFTER INSERT ON "AmuxDecisionMakerRequestEvent"/);
 });
 
+test("no CHECK passes on NULL: every multi-column CHECK is held to IS TRUE, and the shape compares nullable columns only by IS [NOT] DISTINCT FROM", () => {
+  const sql = read(MIGRATION);
+  const composite = [
+    "AmuxDecisionMakerDigestKeyEvent_key_check_shape_check",
+    "AmuxDecisionMakerBody_text_size_check",
+    "AmuxDecisionMakerBody_digest_format_check",
+    "AmuxDecisionMakerRetentionEvent_actor_shape_check",
+    "AmuxDecisionMakerResultDetail_shape_check",
+    "AmuxDecisionMakerResultDetail_key_check",
+  ];
+  for (const name of composite) {
+    assert.match(checkBody(sql, name).replace(/\s+/g, " "), /^CHECK \(\(.*\) IS TRUE\)$/, name);
+  }
+  // Every other CHECK names one NOT NULL column, or says IS NULL OR for a nullable one.
+  const all = [...sql.matchAll(/CONSTRAINT "([A-Za-z]+_[a-z_]+_check)"/g)].map((match) => match[1]);
+  const nullable = { AmuxDecisionMakerResultDetail_output_kind_check: "outputKind", AmuxDecisionMakerResultDetail_option_id_format_check: "optionId" };
+  for (const name of all.filter((item) => !composite.includes(item))) {
+    const body = checkBody(sql, name);
+    if (nullable[name]) assert.match(body, new RegExp(`^CHECK \\("${nullable[name]}" IS NULL OR `), name);
+    else assert.match(body, /^CHECK \("(id|kind|keyPeriod|field|actorKind|resultKind)" (~|IN|>=) /, name);
+  }
+  const shape = checkBody(sql, "AmuxDecisionMakerResultDetail_shape_check");
+  assert.doesNotMatch(shape, /"(outputKind|optionId|irreversible)" (=|<>|IN)/);
+});
+
 test("every guard refuses an update, reads only under READ COMMITTED, pins search_path and sets its clock", () => {
   const sql = read(MIGRATION);
   for (const [name, immutable, isolation] of [
@@ -1105,7 +1130,7 @@ test("a refusal writes nothing, in the statements up to the read that refused it
           keyRing: RING,
         }),
       { status: "option_set_mismatch" },
-      1,
+      2,
     ],
     // A real option dropped to force a validation failure: refused the same way.
     [
@@ -1121,7 +1146,40 @@ test("a refusal writes nothing, in the statements up to the read that refused it
           keyRing: RING,
         }),
       { status: "option_set_mismatch" },
-      1,
+      2,
+    ],
+    // The request's own options, but the ring holds another key for the period than the
+    // registered one: every option set looks wrong, and the answer is the key, not the options.
+    [
+      "output with the right options under a key the registry does not hold",
+      { request: requestRow(TRANSMITTED) },
+      (tx) =>
+        submitDecisionMakerOutput(tx, {
+          requestId: REQUEST_ID,
+          instance: "decision-maker-openai",
+          binding: resultBinding(),
+          output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId: "a", rationale: "r", irreversible: false }), options: OPTIONS },
+          requireLeaseAt: () => assert.fail("no lease"),
+          keyRing: new Map([[PERIOD, OTHER_KEY]]),
+        }),
+      { status: "digest_key_unavailable" },
+      2,
+    ],
+    // A wrong option set under a destroyed period's key is the key's answer too.
+    [
+      "output under a destroyed period's key",
+      { request: requestRow(TRANSMITTED), key: keyRow({ keyCheck: CHECK, destroyed: true }) },
+      (tx) =>
+        submitDecisionMakerOutput(tx, {
+          requestId: REQUEST_ID,
+          instance: "decision-maker-openai",
+          binding: resultBinding(),
+          output: { kind: "output", raw: "{}", options: OPTIONS.slice(0, 1) },
+          requireLeaseAt: () => assert.fail("no lease"),
+          keyRing: RING,
+        }),
+      { status: "digest_key_unavailable" },
+      2,
     ],
     // A relabelled option is another set, too.
     [
@@ -1137,7 +1195,7 @@ test("a refusal writes nothing, in the statements up to the read that refused it
           keyRing: RING,
         }),
       { status: "option_set_mismatch" },
-      1,
+      2,
     ],
   ];
   for (const [name, options, run, expected, statements] of cases) {
