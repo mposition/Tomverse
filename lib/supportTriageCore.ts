@@ -510,3 +510,26 @@ export const supportTriageHeartbeatStale = (input: {
     WORKER_LIVENESS_THRESHOLD_SECONDS
   );
 };
+
+/** Flags that send a report to the person-only trust and safety lane. */
+export const TRUST_SAFETY_FLAGS = Object.freeze(["account_privacy", "security", "legal", "self_harm_threat"] as const);
+
+/**
+ * The lane a report is proposed for (policy section 1). Trust and safety
+ * flags win over money, money or a billing report win over everything else,
+ * and only then does the report's type decide; a bug is verified only when
+ * the server verified its error report.
+ */
+export const triageLaneFor = (input: {
+  readonly type: string;
+  readonly keywordFlags: readonly string[];
+  readonly errorReportVerification: string | null;
+}): TriageLane => {
+  if (input.keywordFlags.some((flag) => (TRUST_SAFETY_FLAGS as readonly string[]).includes(flag))) {
+    return "trust_safety_human";
+  }
+  if (input.keywordFlags.includes("money") || input.type === "billing") return "billing_human";
+  if (input.type === "bug") return input.errorReportVerification === "verified" ? "bug_verified" : "bug_unverified";
+  if (input.type === "feature") return "feature_request";
+  return "other";
+};
