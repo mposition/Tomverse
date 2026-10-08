@@ -128,13 +128,29 @@ test("a workflow is listed when its token can write contents, or it holds anothe
   const appToken = file("app.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [{ uses: "actions/create-github-app-token@v2" }] } } }, "uses: actions/create-github-app-token@v2");
   const deployKey = file("key.yml", { permissions: {}, jobs: { a: { steps: [] } } }, "ssh-key: ${{ secrets.DEPLOY_KEY }}");
   const unreadable = { path: "bad.yml", text: "jobs: [", workflow: null };
+  // A contents-read workflow that mints a write App token through another
+  // action and its underscore inputs: caught by the secret it needs.
+  const tibdex = file(
+    "tibdex.yml",
+    { permissions: { contents: "read" }, jobs: { a: { steps: [{ uses: "tibdex/github-app-token@v2" }] } } },
+    "uses: tibdex/github-app-token@v2\nwith:\n  app_id: 1\n  private_key: ${{ secrets.APP_PRIVATE_KEY }}",
+  );
+  const otherKey = file("otherkey.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets.SECOND_PAT }}");
+  const inherit = file("inherit.yml", { permissions: { contents: "read" }, jobs: { a: { uses: "./x.yml" } } }, "secrets: inherit");
+  const computed = file("computed.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets[format('{0}', 'X')] }}");
+  // Secrets that are not GitHub credentials leave a read-only workflow unlisted.
+  const harmless = file("harmless.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "url: ${{ secrets.SLACK_WEBHOOK_URL }}\npat: ${{ secrets.GH_AUTOMATION_PAT }}");
 
   // The workflow token's permission decides, not what the script says:
   // a read-only token's git push cannot change a branch.
-  const listed = qaReleaseWorkflowBranchWriters([readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable], "read", []);
+  const listed = qaReleaseWorkflowBranchWriters(
+    [readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable, tibdex, otherKey, inherit, computed, harmless],
+    "read",
+    [],
+  );
   assert.deepEqual(
     listed.map((line) => line.split(" ")[0]),
-    ["all.yml", "app.yml", "bad.yml", "job.yml", "key.yml", "reusable.yml", "top.yml"],
+    ["all.yml", "app.yml", "bad.yml", "computed.yml", "inherit.yml", "job.yml", "key.yml", "otherkey.yml", "reusable.yml", "tibdex.yml", "top.yml"],
   );
   // With the repository default at write, a workflow without permissions is listed too.
   assert.deepEqual(

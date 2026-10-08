@@ -192,11 +192,48 @@ const contentsWrite = (permissions: unknown): boolean => {
 };
 
 /**
- * Credentials other than the workflow token that cannot be on the lane
- * rulesets' bypass list here and could still update a branch: a GitHub App
- * token minted inside the workflow, or an SSH deploy key.
+ * The secrets a workflow may use without its file being reviewed, because
+ * none is a credential that could update a branch past the lane rulesets:
+ * GH_AUTOMATION_PAT acts as the repository admin, which the rulesets' bypass
+ * list holds; the rest are alert webhooks, mail settings, model and price API
+ * keys, and the app's own sync secrets. Read on 2026-10-08 from every
+ * workflow on develop and main. A secret not named here -- a GitHub App key
+ * minted into a token by any action, a deploy key, a second PAT -- lists the
+ * workflow for a whole-file review, as do `secrets: inherit` and a computed
+ * `secrets[...]`, which could pass any of them.
  */
-const OTHER_CREDENTIALS = /create-github-app-token|\bapp-id\s*:|\bprivate-key\s*:|webfactory\/ssh-agent|\bssh-key\s*:|deploy[_-]key/i;
+export const QA_RELEASE_NON_BRANCH_SECRETS: readonly string[] = Object.freeze([
+  "ADMIN_ALERT_EMAIL",
+  "ANTHROPIC_API_KEY",
+  "AUTO_FIX_SYNC_SECRET",
+  "DEEPSEEK_API_KEY",
+  "FAL_KEY",
+  "FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY",
+  "FEEDBACK_AUTOFIX_SYNC_SECRET",
+  "GH_AUTOMATION_PAT",
+  "GITHUB_TOKEN",
+  "OPENAI_API_KEY",
+  "OPS_ALERT_EMAIL",
+  "OPS_ALERT_SLACK_WEBHOOK_URL",
+  "RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL",
+  "RESEND_API_KEY",
+  "SECURITY_AUDIT_EMAILS",
+  "SECURITY_AUDIT_SLACK_WEBHOOK_URL",
+  "SLACK_WEBHOOK_URL",
+]);
+
+/** The other-credential reasons in a workflow's text, empty when there are none. */
+const otherCredentials = (text: string): string[] => {
+  const reasons: string[] = [];
+  const names = new Set([...text.matchAll(/\bsecrets\.([A-Za-z0-9_]+)/g)].map((match) => match[1]));
+  const unknown = [...names].filter((name) => !QA_RELEASE_NON_BRANCH_SECRETS.includes(name)).sort();
+  if (unknown.length > 0) reasons.push(`secrets ${unknown.join(", ")}`);
+  if (/\bsecrets\s*:\s*inherit\b/.test(text)) reasons.push("secrets: inherit");
+  if (/\bsecrets\s*\[/.test(text)) reasons.push("computed secret");
+  // A token minted from a key the workflow reads some other way.
+  if (/github-app-token|\bapp[-_]id\s*:|\bprivate[-_]key\s*:|ssh-agent|\bssh[-_]key\s*:|deploy[-_]key/i.test(text)) reasons.push("app or deploy key");
+  return reasons;
+};
 
 /** The digest a person reviews: the workflow file's text, line endings normalised. */
 export const qaReleaseWorkflowDigest = (text: string): string =>
@@ -240,7 +277,9 @@ export const QA_RELEASE_REVIEWED_WRITER_WORKFLOWS: readonly { path: string; sha2
  *   `contents: write`, or no `permissions` while the repository default is
  *   write), a reusable-workflow call included, since the called workflow
  *   cannot exceed it;
- * - it mints a GitHub App token or uses a deploy key, which cannot bypass;
+ * - it uses a secret not in QA_RELEASE_NON_BRANCH_SECRETS, passes secrets on
+ *   wholesale, or mints an App token or uses a deploy key -- none of which
+ *   can bypass;
  * - it cannot be read as YAML.
  * A listed workflow passes only by its whole-file digest in the reviewed list.
  *
@@ -266,7 +305,7 @@ export function qaReleaseWorkflowBranchWriters(
         if (effective === undefined ? defaultPermission === "write" : contentsWrite(effective)) reasons.push(`${jobId}: contents write`);
       }
     }
-    if (OTHER_CREDENTIALS.test(text)) reasons.push("other credential");
+    reasons.push(...otherCredentials(text));
     if (reasons.length === 0) continue;
     if (reviewed.some((entry) => entry.path === path && entry.sha256 === sha256)) continue;
     listed.push(`${path} ${sha256} (${reasons.join("; ")})`);
