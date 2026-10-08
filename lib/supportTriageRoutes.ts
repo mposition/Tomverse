@@ -10,15 +10,19 @@
  *     run made no progress while rows were overdue or a row is past its grace,
  *     so the cron run itself fails as a second signal beside the heartbeat.
  *   * heartbeat: `{ stale }` from the newest run rows, for the team 3 watcher.
+ *   * run: one worker pass while SUPPORT_TRIAGE_ENABLED is exactly "true";
+ *     otherwise `{ enabled: false }` and nothing is written, not even a run row.
  */
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { supportTriageHeartbeatStale } from "@/lib/supportTriageCore";
 import { runSupportTriageRetention } from "@/lib/supportTriageRetention";
+import { runSupportTriageWorker } from "@/lib/supportTriageWorker";
 import {
   SUPPORT_TRIAGE_HEARTBEAT_SECRET_ENV,
   SUPPORT_TRIAGE_RETENTION_SECRET_ENV,
+  SUPPORT_TRIAGE_RUN_SECRET_ENV,
   isSupportTriageEnabled,
   isSupportTriageRouteAuthorized,
 } from "@/lib/supportTriageRouteAuth";
@@ -125,4 +129,37 @@ export const handleSupportTriageHeartbeat = async (
     workerLatestSuccessAt: workerSuccess?.finishedAt ?? null,
   });
   return { status: 200, body: { stale } };
+};
+
+export const handleSupportTriageRun = async (
+  request: Request,
+  { env = process.env as Env }: { env?: Env } = {}
+): Promise<SupportTriageRouteResponse> => {
+  if (!isSupportTriageRouteAuthorized(request.headers.get("authorization"), SUPPORT_TRIAGE_RUN_SECRET_ENV, env)) {
+    return unauthorized;
+  }
+  if (!isSupportTriageEnabled(env)) return { status: 200, body: { enabled: false } };
+  let result;
+  try {
+    result = await runSupportTriageWorker();
+  } catch (error) {
+    if (isDailyCapExceeded(error)) return { status: 429, body: { result: "daily_cap_exceeded" } };
+    if (error instanceof SupportTriageTransactionRefused) {
+      return { status: 503, body: { result: "transaction_refused", reason: error.reason } };
+    }
+    throw error;
+  }
+  return {
+    status: 200,
+    body: {
+      enabled: true,
+      outcome: result.outcome,
+      reclaimed: result.reclaimed,
+      exhausted: result.exhausted,
+      claimed: result.claimed,
+      ready: result.ready,
+      stale: result.stale,
+      superseded: result.superseded,
+    },
+  };
 };

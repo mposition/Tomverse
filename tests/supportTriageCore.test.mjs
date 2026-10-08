@@ -376,3 +376,25 @@ test("the heartbeat bit: retention always, the worker only while triage is enabl
   assert.equal(stale(true, healthy, minutesAgo(80)), false);
   assert.equal(stale(true, healthy, minutesAgo(81)), true);
 });
+
+test("the worker's claim and result transactions stay inside the worker lane's round-trip budget", async () => {
+  const core = await import("../lib/supportTriageCore.ts");
+  const AUDIT_ROUND_TRIPS = 4;
+  // BEGIN, arm, lock reports, supersede, insert, claim, audit, deadline check, COMMIT.
+  const claim = 1 + 1 + 1 + 1 + 1 + 1 + AUDIT_ROUND_TRIPS + 1 + 1;
+  // BEGIN, arm, lock reports, ready CAS, audit, deadline check, COMMIT.
+  const result = 1 + 1 + 1 + 1 + AUDIT_ROUND_TRIPS + 1 + 1;
+  assert.equal(claim, 12);
+  assert.equal(result, 10);
+  assert.ok(Math.max(claim, result) <= core.LANE_TIMEOUTS.worker.maxRoundTrips);
+  // A batch of 10 and a pass of 50 (design section 5.2).
+  assert.equal(core.WORKER_CLAIM_BATCH_SIZE, 10);
+  assert.equal(core.WORKER_PASS_MAX, 50);
+});
+
+test("the core's deleted-account marker is the one account deletion writes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const core = await import("../lib/supportTriageCore.ts");
+  const deletion = readFileSync(new URL("../lib/accountDeletion.ts", import.meta.url), "utf8");
+  assert.ok(deletion.includes(`message: "${core.DELETED_ACCOUNT_MARKER}"`));
+});
