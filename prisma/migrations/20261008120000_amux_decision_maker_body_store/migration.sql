@@ -1,9 +1,10 @@
 -- AMUX Decision Maker policy version 1 (docs/policy/amux-decision-maker.md),
 -- section 10 (with sections 6 and 9 where they meet it): the body store, its
--- retention events and the digest-key registry, stage S1d. Additive only:
--- three new tables, four functions and four triggers. One trigger is on the
--- S1c request event table and writes a retention row when a request closes;
--- no existing row, column, constraint or function changes.
+-- retention events, the digest-key registry and the structured detail of a
+-- terminal result, stage S1d. Additive only: four new tables, five functions
+-- and five triggers. One trigger is on the S1c request event table and writes
+-- a retention row when a request closes; no existing row, column, constraint
+-- or function changes.
 --
 -- AmuxDecisionMakerBody holds section 10's five body fields and nothing else:
 -- the question card text (16 KiB), the DM's answer (8 KiB), its rationale
@@ -14,7 +15,12 @@
 -- keyed digest. AmuxDecisionMakerRetentionEvent is section 10's separate
 -- append-only retention history: retention_set, hold_set and hold_release.
 -- AmuxDecisionMakerDigestKeyEvent records each key period's rotation into use
--- and its destruction.
+-- and its destruction. AmuxDecisionMakerResultDetail is part of the decision
+-- ledger, not the body store: one immutable row per terminal result, written
+-- with it, that keeps what the ledger's digest cannot -- the DM output's kind,
+-- the option a select chose and the irreversible flag Admin shows before the
+-- operator judges (section 6) -- and the key check value the result was
+-- digested under. It holds no free text: the option id has a closed grammar.
 --
 -- Digest keys, the decision this stage makes (section 10: "본문 식별은 서버
 -- 키의 keyed digest로 하며 평문 hash를 두지 않는다"; lib/amux/decisionMakerBodyCore.ts):
@@ -29,11 +35,14 @@
 --   included -- is keyed by the same key.
 -- * The request key is K_R = HMAC-SHA256(K_P, "amux-dm-request-key-v1" NUL
 --   requestId). The app hands K_R to the broker at assignment. Every digest of
---   the request is an HMAC-SHA256 under K_R with its own label: the broker's
---   input payload and snapshot manifest digests (the S1c ledger's
---   "inputPayloadDigest" and "snapshotManifestDigest"), the result digest (the
---   ledger's "resultDigest", computed by the app from the output bytes it
---   stores), and each body row's "digest" over its field and text.
+--   the request is an HMAC-SHA256 under K_R with its own label: the option set
+--   digest of the S1c binding ("optionSetDigest", computed by the request
+--   store at routing from the card's options, and recomputed from the options
+--   a result is submitted with, which must match), the broker's input payload
+--   and snapshot manifest digests ("inputPayloadDigest",
+--   "snapshotManifestDigest"), the result digest ("resultDigest", computed by
+--   the app from the output bytes it stores), and each body row's "digest"
+--   over its field and text.
 -- * What someone with read access to this database but no key can learn: every
 --   body while its row exists (the store is plaintext by design: section 10
 --   needs it to judge a proposal), identifiers, timings, closed codes, field
@@ -57,8 +66,9 @@
 --   amux.decision.result for the request's result of kind proposal, and its
 --   escalation reason with that of kind escalate (the result event, of this
 --   transaction); the operator's answer with a person's
---   amux.decision.edit_confirm whose metadata names the request (the
---   judgment table is a later stage). "createdAt" is the database clock.
+--   amux.decision.edit_confirm targeting the request and naming it in its
+--   metadata (the judgment table is a later stage). "createdAt" is the
+--   database clock.
 --   UPDATE is refused. DELETE is allowed only with no hold open on the
 --   request and either (1) the router's amux.decision.body_purge of this
 --   transaction naming the request and listing the field, once the request's
@@ -69,8 +79,12 @@
 -- * Retention events. retention_set is written when the request closes -- by
 --   the trigger on the request event table below, for assign_discarded and
 --   stale_close -- once per request (a partial unique index), with
---   retentionUntil = the closing event's database-clock "createdAt" + 90 days,
---   named by the closing event's own router audit of the same transaction.
+--   retentionUntil = the closing event's database-clock "createdAt" + 2160
+--   hours, named by the closing event's own router audit of the same
+--   transaction. Hours, not '90 days': a day-based interval on timestamptz
+--   follows the session time zone's calendar, so across a DST change it is an
+--   hour short or long, while the application counts exactly 90 x 86,400,000
+--   ms. The key period boundaries are epoch arithmetic, also fixed.
 --   hold_set only when no hold is open, hold_release only when one is; an open
 --   hold is more hold_set than hold_release, counting hold events only. Each
 --   hold event is a person's, with that person's amux.decision.legal_hold of
@@ -83,15 +97,27 @@
 --   its requests routed to a DM is still open. Each with the router's
 --   amux.decision.digest_key_rotate or .digest_key_destroy of the same
 --   transaction naming the event. UPDATE and DELETE are refused.
+-- * Result details. One per request, for its result event of this transaction
+--   (kind result, of the same request, the same result kind, named by the same
+--   audit row), in its request's key period, under that period's registered
+--   key check value and never after its destruction -- so no terminal result
+--   commits with a detail whose key the registry does not hold. The shape is a
+--   CHECK: a proposal is a select (with its option id) or a free text answer,
+--   both with irreversible; an escalation has neither; a validation failure,
+--   a timeout and an unavailable DM have no output. The option id follows the
+--   S1a grammar (letters, digits, _ and -, 32 at most). UPDATE and DELETE are
+--   refused: like the ledger it belongs to, it is never removed.
 -- * Serialization. Every body write and retention event takes the request's
 --   transaction advisory lock -- the one the S1c ledger's event guard takes --
 --   so a hold, a close, a body insert and a delete of one request commit one
 --   after the other (section 10: "사건 삽입과 본문 삭제는 요청 단위 advisory
 --   lock으로 직렬화한다"). A body insert and a hold event then take their key
 --   period's lock shared, and a key event takes it exclusive, so a destruction
---   never commits on a read that missed a body or a hold. Lock order: the audit
---   chain lock (every store path takes it first), the request lock, the key
---   period lock. All three guards read after a lock and refuse any isolation
+--   never commits on a read that missed a body or a hold. A result detail
+--   takes the request lock and the key period lock shared, as a body does.
+--   Lock order: the audit chain lock (every store path takes it first), the
+--   request lock, the key period lock. All four guards read after a lock and
+--   refuse any isolation
 --   level but READ COMMITTED (20261008090000_amux_decision_maker_switch_serialization
 --   explains why).
 -- * Every row's "id" is a lowercase UUID and every digest and key check value
@@ -117,11 +143,11 @@
 -- are tested (tests/integration/amux-decision-maker-body.db.test.ts).
 --
 -- Rollback: drop the trigger on the request event table and its function,
--- then the three tables' triggers and functions, then the three tables (their
+-- then the four tables' triggers and functions, then the four tables (their
 -- foreign keys go with them; AdminAuditLog and the ledger are not changed).
--- That discards every stored body and the key registry; the server's keys are
--- untouched. Nothing reads these tables yet: no route, Admin screen or DM
--- process exists in this stage.
+-- That discards every stored body, every result detail and the key registry;
+-- the server's keys are untouched. Nothing reads these tables yet: no route,
+-- Admin screen or DM process exists in this stage.
 
 BEGIN;
 
@@ -497,12 +523,13 @@ BEGIN
             CASE WHEN NEW."field" = 'dm_escalation_reason' THEN 'escalate' ELSE 'proposal' END,
             expected_actor;
     ELSIF NEW."field" = 'operator_answer' THEN
-        -- The operator's edited answer: a person's edit_confirm naming the request.
+        -- The operator's edited answer: a person's edit_confirm targeting the
+        -- request and naming it in its metadata.
         EXECUTE pg_catalog.format(
-            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "action" = $2 AND "actorUserId" IS NOT NULL AND pg_catalog.jsonb_typeof("metadata") = ''object'' AND NOT ("metadata" ? ''systemActor'') AND "metadata" ->> ''request_id'' = $3 AND xmin = pg_catalog.pg_current_xact_id()::xid)',
+            'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "action" = $2 AND "targetType" = $3 AND "targetId" = $4 AND "actorUserId" IS NOT NULL AND pg_catalog.jsonb_typeof("metadata") = ''object'' AND NOT ("metadata" ? ''systemActor'') AND "metadata" ->> ''request_id'' = $4 AND xmin = pg_catalog.pg_current_xact_id()::xid)',
             TG_TABLE_SCHEMA,
             'AdminAuditLog'
-        ) INTO audited USING NEW."auditLogId", 'amux.decision.edit_confirm', NEW."requestId";
+        ) INTO audited USING NEW."auditLogId", 'amux.decision.edit_confirm', 'AmuxDecisionMakerRequest', NEW."requestId";
     ELSE
         -- Not one of the five: the field CHECK refuses it as well.
         audited := false;
@@ -588,7 +615,7 @@ BEGIN
         IF closed_at IS NULL THEN
             RAISE EXCEPTION 'AMUX_DM_RETENTION_UNAUDITED';
         END IF;
-        NEW."retentionUntil" := closed_at + INTERVAL '90 days';
+        NEW."retentionUntil" := closed_at + INTERVAL '2160 hours';
     ELSE
         -- Section 10: a hold is set only when none is open, released only when one is.
         IF (NEW."kind" = 'hold_set' AND hold_sets > hold_releases)
@@ -614,8 +641,139 @@ CREATE TRIGGER "amux_decision_maker_retention_event_guard"
     BEFORE INSERT OR UPDATE OR DELETE ON "AmuxDecisionMakerRetentionEvent"
     FOR EACH ROW EXECUTE FUNCTION "amux_decision_maker_retention_event_guard"();
 
+CREATE TABLE "AmuxDecisionMakerResultDetail" (
+    "id" TEXT NOT NULL,
+    "requestId" TEXT NOT NULL,
+    "resultEventId" TEXT NOT NULL,
+    "resultKind" TEXT NOT NULL,
+    "outputKind" TEXT,
+    "optionId" TEXT,
+    "irreversible" BOOLEAN,
+    "keyPeriod" INTEGER NOT NULL,
+    "keyCheck" TEXT NOT NULL,
+    "auditLogId" TEXT NOT NULL,
+    "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AmuxDecisionMakerResultDetail_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "AmuxDecisionMakerResultDetail_id_format_check"
+      CHECK ("id" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    CONSTRAINT "AmuxDecisionMakerResultDetail_result_kind_check"
+      CHECK ("resultKind" IN ('proposal', 'escalate', 'validation_failure', 'timeout', 'unavailable')),
+    CONSTRAINT "AmuxDecisionMakerResultDetail_output_kind_check"
+      CHECK ("outputKind" IS NULL OR "outputKind" IN ('select', 'free_text', 'escalate')),
+    -- The S1a grammar (lib/amux/decisionMakerCore.ts DM_OPTION_ID_PATTERN): a
+    -- token, never prose.
+    CONSTRAINT "AmuxDecisionMakerResultDetail_option_id_format_check"
+      CHECK ("optionId" IS NULL OR "optionId" ~ '^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$'),
+    -- Section 6: what each terminal result carries.
+    CONSTRAINT "AmuxDecisionMakerResultDetail_shape_check"
+      CHECK (
+        (
+          "resultKind" = 'proposal'
+          AND "irreversible" IS NOT NULL
+          AND (
+            ("outputKind" = 'select' AND "optionId" IS NOT NULL)
+            OR ("outputKind" = 'free_text' AND "optionId" IS NULL)
+          )
+        )
+        OR (
+          "resultKind" = 'escalate'
+          AND "outputKind" = 'escalate' AND "optionId" IS NULL AND "irreversible" IS NULL
+        )
+        OR (
+          "resultKind" IN ('validation_failure', 'timeout', 'unavailable')
+          AND "outputKind" IS NULL AND "optionId" IS NULL AND "irreversible" IS NULL
+        )
+      ),
+    CONSTRAINT "AmuxDecisionMakerResultDetail_key_check"
+      CHECK ("keyPeriod" >= 0 AND "keyCheck" ~ '^[0-9a-f]{64}$')
+);
+
+CREATE UNIQUE INDEX "AmuxDecisionMakerResultDetail_requestId_key"
+  ON "AmuxDecisionMakerResultDetail"("requestId");
+CREATE UNIQUE INDEX "AmuxDecisionMakerResultDetail_resultEventId_key"
+  ON "AmuxDecisionMakerResultDetail"("resultEventId");
+CREATE UNIQUE INDEX "AmuxDecisionMakerResultDetail_auditLogId_key"
+  ON "AmuxDecisionMakerResultDetail"("auditLogId");
+
+ALTER TABLE "AmuxDecisionMakerResultDetail"
+  ADD CONSTRAINT "AmuxDecisionMakerResultDetail_requestId_fkey"
+  FOREIGN KEY ("requestId") REFERENCES "AmuxDecisionMakerRequest"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "AmuxDecisionMakerResultDetail"
+  ADD CONSTRAINT "AmuxDecisionMakerResultDetail_resultEventId_fkey"
+  FOREIGN KEY ("resultEventId") REFERENCES "AmuxDecisionMakerRequestEvent"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+ALTER TABLE "AmuxDecisionMakerResultDetail"
+  ADD CONSTRAINT "AmuxDecisionMakerResultDetail_auditLogId_fkey"
+  FOREIGN KEY ("auditLogId") REFERENCES "AdminAuditLog"("id") ON DELETE RESTRICT ON UPDATE RESTRICT;
+
+CREATE OR REPLACE FUNCTION "amux_decision_maker_result_detail_guard"()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+DECLARE
+    request_created_at TIMESTAMPTZ;
+    linked BOOLEAN;
+    registered_check TEXT;
+    destroyed BOOLEAN;
+BEGIN
+    IF TG_OP <> 'INSERT' THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_IMMUTABLE';
+    END IF;
+    -- The request's result and the period's registry are read after locks.
+    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_ISOLATION';
+    END IF;
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtext('tomverse-amux-decision-maker-request:' || NEW."requestId")
+    );
+    EXECUTE pg_catalog.format(
+        'SELECT "createdAt" FROM %I.%I WHERE "id" = $1',
+        TG_TABLE_SCHEMA,
+        'AmuxDecisionMakerRequest'
+    ) INTO request_created_at USING NEW."requestId";
+    IF request_created_at IS NULL THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_NO_REQUEST';
+    END IF;
+    IF NEW."keyPeriod" <> pg_catalog.floor(EXTRACT(EPOCH FROM request_created_at) * 1000 / 2592000000)::INTEGER THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_KEY_PERIOD';
+    END IF;
+    -- The request's terminal result, recorded by this very transaction, of the
+    -- same kind and named by the same audit row.
+    EXECUTE pg_catalog.format(
+        'SELECT EXISTS (SELECT 1 FROM %I.%I WHERE "id" = $1 AND "requestId" = $2 AND "kind" = ''result'' AND "resultKind" = $3 AND "auditLogId" = $4 AND xmin = pg_catalog.pg_current_xact_id()::xid)',
+        TG_TABLE_SCHEMA,
+        'AmuxDecisionMakerRequestEvent'
+    ) INTO linked USING NEW."resultEventId", NEW."requestId", NEW."resultKind", NEW."auditLogId";
+    IF linked IS DISTINCT FROM TRUE THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_UNLINKED';
+    END IF;
+    -- The key the result was digested under: registered for the period and not
+    -- destroyed. Shared, as a body takes it, against a destruction's exclusive.
+    PERFORM pg_catalog.pg_advisory_xact_lock_shared(
+        pg_catalog.hashtext('tomverse-amux-decision-maker-key-period:' || NEW."keyPeriod"::text)
+    );
+    EXECUTE pg_catalog.format(
+        'SELECT max("keyCheck") FILTER (WHERE "kind" = ''rotate''), coalesce(bool_or("kind" = ''destroy''), false) FROM %I.%I WHERE "keyPeriod" = $1',
+        TG_TABLE_SCHEMA,
+        'AmuxDecisionMakerDigestKeyEvent'
+    ) INTO registered_check, destroyed USING NEW."keyPeriod";
+    IF registered_check IS DISTINCT FROM NEW."keyCheck" OR destroyed THEN
+        RAISE EXCEPTION 'AMUX_DM_RESULT_DETAIL_KEY';
+    END IF;
+
+    NEW."createdAt" := pg_catalog.clock_timestamp();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "amux_decision_maker_result_detail_guard"
+    BEFORE INSERT OR UPDATE OR DELETE ON "AmuxDecisionMakerResultDetail"
+    FOR EACH ROW EXECUTE FUNCTION "amux_decision_maker_result_detail_guard"();
+
 -- Section 10: "retention_set은 요청이 닫힐 때 DB 시계로 계산한
--- retentionUntil(닫힘 + 90일)을 담으며 요청당 하나다". When the S1c ledger
+-- retentionUntil(닫힘 + 90일)을 담으며 요청당 하나다" -- 2160 hours, a fixed
+-- length (the header says why). When the S1c ledger
 -- records a request's closing event, the same statement writes its
 -- retention_set, named by the closing event's own audit row; the guard above
 -- computes retentionUntil from the closing event's clock. A request routed to
@@ -631,7 +789,7 @@ BEGIN
     EXECUTE pg_catalog.format(
         'INSERT INTO %1$I.%2$I ("id", "requestId", "keyPeriod", "kind", "retentionUntil", "actorKind", "actorUserId", "auditLogId")'
         || ' SELECT pg_catalog.gen_random_uuid()::text, r."id", pg_catalog.floor(EXTRACT(EPOCH FROM r."createdAt") * 1000 / 2592000000)::INTEGER,'
-        || ' ''retention_set'', $2 + INTERVAL ''90 days'', ''system'', NULL, $3 FROM %1$I.%3$I r WHERE r."id" = $1',
+        || ' ''retention_set'', $2 + INTERVAL ''2160 hours'', ''system'', NULL, $3 FROM %1$I.%3$I r WHERE r."id" = $1',
         TG_TABLE_SCHEMA,
         'AmuxDecisionMakerRetentionEvent',
         'AmuxDecisionMakerRequest'

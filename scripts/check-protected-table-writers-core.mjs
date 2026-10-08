@@ -334,6 +334,12 @@ export const PROTECTED_TABLES = [
     writers: ["lib/amux/decisionMakerBodyStore.ts"],
     contract: "docs/policy/amux-decision-maker.md §10",
   },
+  {
+    table: "AmuxDecisionMakerResultDetail",
+    delegate: "amuxDecisionMakerResultDetail",
+    writers: ["lib/amux/decisionMakerBodyStore.ts"],
+    contract: "docs/policy/amux-decision-maker.md §10",
+  },
 ];
 
 /** Prisma delegate operations that cannot change a row. */
@@ -1259,55 +1265,63 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerBody",
     tableMentions: 8,
-    writeVerbs: 7,
+    writeVerbs: 9,
     reason:
-      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and one constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
+      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerRetentionEvent",
     tableMentions: 7,
-    writeVerbs: 7,
+    writeVerbs: 9,
     reason:
       "The same module names the retention event table in its constant SELECTs (a request's retention and hold counts, a key period's open holds, the purge candidates) and in one constant INSERT ... RETURNING of a person's hold_set or hold_release; every value is a bound parameter. retention_set is written by the closing trigger, never here. It never updates or deletes a retention event.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerDigestKeyEvent",
-    tableMentions: 4,
-    writeVerbs: 7,
+    tableMentions: 6,
+    writeVerbs: 9,
     reason:
-      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded) and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
+      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
+  },
+  {
+    path: "lib/amux/decisionMakerBodyStore.ts",
+    table: "AmuxDecisionMakerResultDetail",
+    tableMentions: 2,
+    writeVerbs: 9,
+    reason:
+      "The same module writes a terminal result's structured detail in one constant data-modifying statement, INSERT ... SELECT ... WHERE the registry holds the key, with the bodies in a second CTE that inserts only beside it, and reads it in one constant SELECT; every value is a bound parameter. It never updates or deletes a detail.",
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AdminAuditLog",
-    tableMentions: 11,
-    writeVerbs: 33,
+    tableMentions: 12,
+    writeVerbs: 46,
     reason:
-      "The Decision Maker body store migration (docs/policy/amux-decision-maker.md §10). Its AdminAuditLog mentions are the three restrictive foreign keys from the body, retention event and key event auditLogId and the guards' SELECT EXISTS reads (and two joins) that refuse a row without its audit of the same transaction: the key event's router audit, the body's route, result or edit_confirm audit, the delete's body_purge or body_erase audit, and the retention event's legal_hold or closing audit. It never writes AdminAuditLog; its write verbs are the ALTER TABLE statements adding foreign keys with their ON DELETE / ON UPDATE RESTRICT, the trigger events, the guards' TG_OP comparisons, the closing trigger's INSERT into the retention event table, and words of comments inside the function bodies.",
+      "The Decision Maker body store migration (docs/policy/amux-decision-maker.md §10). Its AdminAuditLog mentions are the four restrictive foreign keys from the body, retention event, key event and result detail auditLogId and the guards' SELECT EXISTS reads (and two joins) that refuse a row without its audit of the same transaction: the key event's router audit, the body's route, result or edit_confirm audit, the delete's body_purge or body_erase audit, and the retention event's legal_hold or closing audit. It never writes AdminAuditLog; its write verbs are the ALTER TABLE statements adding foreign keys with their ON DELETE / ON UPDATE RESTRICT, the trigger events, the guards' TG_OP comparisons, the closing trigger's INSERT into the retention event table, and words of comments inside the function bodies.",
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AmuxDecisionMakerRequest",
-    tableMentions: 9,
-    writeVerbs: 33,
+    tableMentions: 12,
+    writeVerbs: 46,
     reason:
-      "The body and retention tables reference the request with a restrictive foreign key, and the guards and the closing trigger read the request row (its route, instance, creation clock and route audit) and, for a key's destruction, count the open requests of a key period. Nothing here writes a request.",
+      "The body, retention and result detail tables reference the request with a restrictive foreign key, and the guards and the closing trigger read the request row (its route, instance, creation clock and route audit) and, for a key's destruction, count the open requests of a key period. Nothing here writes a request.",
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AmuxDecisionMakerRequestEvent",
-    tableMentions: 7,
-    writeVerbs: 33,
+    tableMentions: 9,
+    writeVerbs: 46,
     reason:
-      "One AFTER INSERT trigger on the request event table: when the ledger records a closing event (assign_discarded, stale_close), the same statement writes the request's retention_set into the retention event table. The guards read the event table to find a request's closing event, its result of a given kind and its closing event's own audit. Nothing here writes, updates or deletes a request event.",
+      "One AFTER INSERT trigger on the request event table: when the ledger records a closing event (assign_discarded, stale_close), the same statement writes the request's retention_set into the retention event table. The result detail references its result event with a restrictive foreign key, and the guards read the event table to find a request's closing event, its result of a given kind and its closing event's own audit. Nothing here writes, updates or deletes a request event.",
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AmuxDecisionMakerBody",
     tableMentions: 9,
-    writeVerbs: 33,
+    writeVerbs: 46,
     reason:
       "Creates the body table, its CHECKs, indexes and foreign keys, and the guard that refuses every update and allows an insert or a delete only under its rules. The key event guard counts a period's bodies; nothing here writes a body.",
   },
@@ -1315,17 +1329,25 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AmuxDecisionMakerRetentionEvent",
     tableMentions: 14,
-    writeVerbs: 33,
+    writeVerbs: 46,
     reason:
       "Creates the retention event table, its CHECKs, its partial unique index and foreign keys, and its guard, which refuses every update and delete; the closing trigger's one constant INSERT ... SELECT writes a closing request's retention_set (the guard computes its retentionUntil). The body and key event guards read the retention events for open holds.",
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
     table: "AmuxDecisionMakerDigestKeyEvent",
-    tableMentions: 10,
-    writeVerbs: 33,
+    tableMentions: 11,
+    writeVerbs: 46,
     reason:
-      "Creates the key registry table, its CHECKs, partial unique indexes and foreign key, and its guard, which refuses every update and delete. The body guard reads a period's registry; nothing here writes a registry event.",
+      "Creates the key registry table, its CHECKs, partial unique indexes and foreign key, and its guard, which refuses every update and delete. The body and result detail guards read a period's registry; nothing here writes a registry event.",
+  },
+  {
+    path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
+    table: "AmuxDecisionMakerResultDetail",
+    tableMentions: 8,
+    writeVerbs: 46,
+    reason:
+      "Creates the result detail table, its CHECKs (the shape per result kind, the option id grammar), its unique indexes and foreign keys, and its guard, which refuses every update and delete and binds an insert to the request's own result event of the same transaction and a registered, undestroyed key. Nothing here writes a detail.",
   },
   {
     path: "prisma/migrations/20261003010000_qa_release_operator_control/migration.sql",
@@ -1579,9 +1601,9 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql",
-    count: 20,
+    count: 23,
     reason:
-      "Twenty statements in the Decision Maker body store's functions, all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. Nineteen read: the key event guard's period events, bodies, open holds, open requests and router audit (5); the body guard's delete-time holds and retention, purge audit and erase audit (3) and insert-time request row, closing events, period registry, request byte total and, by field, one of three audit reads (7); the retention guard's request row, event aggregate, closing event with its audit, and legal_hold audit (4). One writes: the closing trigger's INSERT ... SELECT of a closing request's retention_set, whose guard then checks it. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING.",
+      "Twenty-three statements in the Decision Maker body store's functions, all EXECUTE over a name built from TG_TABLE_SCHEMA and a constant table name, because every function pins search_path to pg_catalog, pg_temp. Twenty-two read: the key event guard's period events, bodies, open holds, open requests and router audit (5); the body guard's delete-time holds and retention, purge audit and erase audit (3) and insert-time request row, closing events, period registry, request byte total and, by field, one of three audit reads (7); the retention guard's request row, event aggregate, closing event with its audit, and legal_hold audit (4); the result detail guard's request row, result event and period registry (3). One writes: the closing trigger's INSERT ... SELECT of a closing request's retention_set, whose guard then checks it. The schema is the trigger's own, never input, quoted with %I; every value is bound with USING.",
   },
   {
     path: "prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql",

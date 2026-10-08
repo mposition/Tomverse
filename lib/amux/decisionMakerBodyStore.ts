@@ -5,11 +5,12 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { validateDmOutput, type DmOutputValidationFailure } from "@/lib/amux/decisionMakerCore";
+import { validateDmOutput, type DmOutput, type DmOutputValidationFailure } from "@/lib/amux/decisionMakerCore";
 import {
   DM_BODY_AUDIT_ACTIONS,
   DM_BODY_DELETE_AUDIT_TARGET_TYPE,
   DM_BODY_FIELDS,
+  DM_OUTPUT_KINDS,
   DM_RETENTION_EVENT_AUDIT_TARGET_TYPE,
   dmBodiesRefusal,
   dmBodyAuditMetadata,
@@ -25,9 +26,12 @@ import {
   dmKeyPeriodEndMs,
   dmKeyPeriodOf,
   dmKeyPeriodStartMs,
+  dmOptionSetDigest,
   dmOutputBodies,
   dmPurgeRefusal,
   dmRequestDigestKey,
+  dmResultDetail,
+  dmResultDetailShapeValid,
   dmResultDigest,
   isDmBodyField,
   isDmKeyPeriod,
@@ -39,13 +43,14 @@ import {
   type DmEraseRefusal,
   type DmHoldRefusal,
   type DmPurgeRefusal,
+  type DmResultDetail,
 } from "@/lib/amux/decisionMakerBodyCore";
 import {
   writeDecisionMakerBodyPurgeAudit,
   writeDecisionMakerDigestKeyAudit,
 } from "@/lib/amux/decisionMakerBodySystemAudit";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
-import { isDmRequestId, type DmResultKind } from "@/lib/amux/decisionMakerRequestCore";
+import { DM_RESULT_KINDS, isDmRequestId, type DmResultKind } from "@/lib/amux/decisionMakerRequestCore";
 import {
   assignDecisionMakerRequest,
   countOpenDecisionMakerRequestsCreatedBetween,
@@ -59,9 +64,12 @@ import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
 
 /**
  * The one module that reads and writes `AmuxDecisionMakerBody`,
- * `AmuxDecisionMakerRetentionEvent` and `AmuxDecisionMakerDigestKeyEvent`
- * (docs/policy/amux-decision-maker.md §10: "단일 writer 모듈이 위 표들에
- * 쓴다"), stage S1d. Nothing else in the application names the three tables;
+ * `AmuxDecisionMakerRetentionEvent`, `AmuxDecisionMakerDigestKeyEvent` and
+ * `AmuxDecisionMakerResultDetail` (docs/policy/amux-decision-maker.md §10:
+ * "단일 writer 모듈이 위 표들에 쓴다"), stage S1d. The result detail is the
+ * ledger's structured record of a terminal result -- output kind, chosen
+ * option, `irreversible` -- and is never deleted; the bodies are the only rows
+ * here that ever are. Nothing else in the application names the four tables;
  * tests/amuxDecisionMakerBody.test.mjs and `npm run
  * check:protected-table-writers` fail on another writer. The one other writer
  * is the database itself: the ledger's closing events (assign_discarded,
@@ -103,7 +111,7 @@ import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
 type BodyReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 export class DecisionMakerBodyWriteError extends Error {
-  readonly code: "invalid_input" | "state_unreadable" | "no_operator";
+  readonly code: "invalid_input" | "state_unreadable" | "no_operator" | "digest_key_unavailable";
 
   constructor(code: DecisionMakerBodyWriteError["code"]) {
     super(code);
@@ -597,26 +605,44 @@ export async function assignDecisionMakerRequestWithDigestKey(
   return { recorded: true, event: write.event, keyPeriod, requestKey: dmRequestDigestKey(periodKey, requestId) };
 }
 
-/** What the broker submits: the DM's output as the exact bytes it produced, or no output. */
+
+/**
+ * What the broker submits: the DM's output as the exact bytes it produced,
+ * with the card's options as the DM received them, or no output.
+ */
 export type DecisionMakerOutput =
-  | { kind: "output"; raw: string; optionIds: readonly string[] }
+  | { kind: "output"; raw: string; options: ReadonlyArray<{ id: string; label: string }> }
   | { kind: "timeout" }
   | { kind: "unavailable" };
+
+const ownKeysAre = (value: object, keys: readonly string[]) => {
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+};
 
 const parseOutput = (value: unknown): DecisionMakerOutput | null => {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   if (record.kind === "timeout" || record.kind === "unavailable") {
-    return Object.keys(record).length === 1 ? { kind: record.kind } : null;
+    return ownKeysAre(record, ["kind"]) ? { kind: record.kind } : null;
   }
   if (
     record.kind === "output" &&
-    Object.keys(record).length === 3 &&
+    ownKeysAre(record, ["kind", "raw", "options"]) &&
     typeof record.raw === "string" &&
-    Array.isArray(record.optionIds) &&
-    record.optionIds.every((id) => typeof id === "string")
+    Array.isArray(record.options) &&
+    record.options.every(
+      (option) =>
+        option !== null &&
+        typeof option === "object" &&
+        !Array.isArray(option) &&
+        ownKeysAre(option, ["id", "label"]) &&
+        typeof (option as { id: unknown }).id === "string" &&
+        typeof (option as { label: unknown }).label === "string",
+    )
   ) {
-    return { kind: "output", raw: record.raw, optionIds: [...(record.optionIds as string[])] };
+    const options = (record.options as Array<{ id: string; label: string }>).map(({ id, label }) => ({ id, label }));
+    return { kind: "output", raw: record.raw, options };
   }
   return null;
 };
@@ -624,6 +650,7 @@ const parseOutput = (value: unknown): DecisionMakerOutput | null => {
 export type DecisionMakerOutputSubmission =
   | { status: "unknown_request" }
   | { status: "digest_key_unavailable" }
+  | { status: "option_set_mismatch" }
   | {
       status: "submitted";
       resultKind: DmResultKind;
@@ -631,34 +658,51 @@ export type DecisionMakerOutputSubmission =
       validationFailure: DmOutputValidationFailure | null;
       resultDigest: string;
       result: DecisionMakerResultSubmission;
+      /** The structured detail recorded with an accepted result in this call; null otherwise. */
+      detail: DmResultDetail | null;
       /** The bodies this call stored: none unless the result was accepted now. */
       storedFields: DmBodyField[];
     };
 
 /**
  * §6, §9, §10: a DM's output, validated here, digested by the app and
- * recorded as the request's terminal result, with its bodies stored in the
- * same transaction when the ledger accepts it.
+ * recorded as the request's terminal result, with its structured detail and
+ * its bodies in the same transaction when the ledger accepts it.
+ *
+ * The options the output is checked against are the request's own: the
+ * submitted list must digest, under the request key, to the option set
+ * digest the store computed at routing, or nothing is recorded
+ * (`option_set_mismatch`). A fake id added to the output and the list, or a
+ * real one dropped to force a validation failure, is refused before the
+ * ledger is touched.
  *
  * The result digest is computed here, under the request key, from the exact
  * output bytes submitted (or the fixed no-output marker of a timeout or an
  * unavailable DM) -- never taken from the caller -- so a resubmission of the
  * same output is the same (request, digest) pair the ledger answers
  * idempotently, and the broker, which holds K_R, can compute the pair to look
- * up a lost response. The output is checked with `validateDmOutput()` against
- * the request's option ids; a proposal stores its rationale (and a free-text
- * answer), an escalation its reason, and a validation failure nothing. A text
- * the validator passes but the body store cannot hold (a lone surrogate or a
- * NUL) is recorded as a schema validation failure. Bodies are written only
- * when the ledger accepted the result in this call: an existing pair already
- * has them, and a rejection -- a proposal under the kill switch included --
- * stores none.
+ * up a lost response. The output is checked with `validateDmOutput()`; a
+ * proposal stores its rationale (and a free-text answer), an escalation its
+ * reason, and a validation failure nothing. A text the validator passes but
+ * the body store cannot hold (a lone surrogate or a NUL) is recorded as a
+ * schema validation failure.
  *
- * Statements: 1 request read -- 1 for an unknown request or a key the ring
- * does not hold; then the ledger's submission: 2 when it writes nothing, 3
- * when its switch read finds the store unreadable, 7 (8 with an integrity key)
- * for a result or a rejection; and 1 body insert for an accepted proposal or
- * escalation -- 9, or 10.
+ * With every result the ledger accepts in this call, of every kind, one
+ * statement writes `AmuxDecisionMakerResultDetail` -- the output's kind, the
+ * option a select chose and the `irreversible` flag Admin shows first (§6),
+ * no free text -- and the bodies, only if the registry holds the key check
+ * of the key this call digested with and has not destroyed its period. If it
+ * does not, nothing is written and this throws `digest_key_unavailable`, so
+ * the caller's transaction rolls the result back: no result commits under a
+ * key the registry does not hold. The detail's and the body's triggers hold
+ * the same rule. An existing pair already has its detail, and a rejection --
+ * a proposal under the kill switch included -- has none and stores no body.
+ *
+ * Statements: 1 request read -- 1 for an unknown request, a key the ring does
+ * not hold, or an option set that does not match; then the ledger's
+ * submission: 2 when it writes nothing, 3 when its switch read finds the store
+ * unreadable, 7 (8 with an integrity key) for a result or a rejection; and 1
+ * detail-and-body insert for an accepted result -- 9, or 10.
  */
 export async function submitDecisionMakerOutput(
   tx: Prisma.TransactionClient,
@@ -685,24 +729,34 @@ export async function submitDecisionMakerOutput(
 
   let resultKind: DmResultKind;
   let validationFailure: DmOutputValidationFailure | null = null;
+  let validOutput: DmOutput | null = null;
   let bodies: Array<{ field: DmBodyField; text: string }> = [];
   if (output.kind === "output") {
+    // Only the options the request was routed with.
+    if (dmOptionSetDigest(requestKey, output.options) !== state.binding.optionSetDigest) {
+      return { status: "option_set_mismatch" };
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(output.raw);
     } catch {
       parsed = undefined;
     }
-    const verdict = validateDmOutput(parsed, output.optionIds);
+    const verdict = validateDmOutput(
+      parsed,
+      output.options.map((option) => option.id),
+    );
     if (verdict.outcome === "validation_failure") {
       resultKind = "validation_failure";
       validationFailure = verdict.failure;
     } else {
       resultKind = verdict.outcome === "proposal" ? "proposal" : "escalate";
+      validOutput = verdict.output;
       bodies = dmOutputBodies(verdict.output);
       if (dmBodiesRefusal(bodies) !== null) {
         resultKind = "validation_failure";
         validationFailure = "schema";
+        validOutput = null;
         bodies = [];
       }
     }
@@ -716,33 +770,120 @@ export async function submitDecisionMakerOutput(
     submission: { instance: input.instance, resultKind, resultDigest, binding: input.binding },
     requireLeaseAt: input.requireLeaseAt,
   });
-  if (result.status !== "accepted" || bodies.length === 0) {
-    return { status: "submitted", resultKind, validationFailure, resultDigest, result, storedFields: [] };
+  if (result.status !== "accepted") {
+    return { status: "submitted", resultKind, validationFailure, resultDigest, result, detail: null, storedFields: [] };
   }
 
-  // The bodies name the result's own audit row, which the trigger requires to
-  // be this transaction's `amux.decision.result` for this request's result
-  // of the matching kind, and the period's registered key check.
-  const ids = bodies.map(() => randomUUID());
-  const stored = await tx.$queryRaw<Array<{ field: string }>>`
-    INSERT INTO "AmuxDecisionMakerBody"
-      ("id", "requestId", "field", "text", "keyPeriod", "keyCheck", "digest", "auditLogId")
-    SELECT b."id", ${requestId}, b."field", b."text", ${keyPeriod}, ${dmDigestKeyCheck(periodKey)}, b."digest",
-           ${result.event.auditLogId}
-    FROM unnest(
-      ${ids}::text[],
-      ${bodies.map((body) => body.field)}::text[],
-      ${bodies.map((body) => body.text)}::text[],
-      ${bodies.map((body) => dmBodyDigest(requestKey, body.field, body.text))}::text[]
-    ) AS b("id", "field", "text", "digest")
-    RETURNING "field"
+  const detail = dmResultDetail(validOutput);
+  if (!dmResultDetailShapeValid(resultKind, detail)) {
+    throw new Error("AMUX Decision Maker result detail does not fit its result kind");
+  }
+  const keyCheck = dmDigestKeyCheck(periodKey);
+  // One statement: the detail, naming the result and its audit row, only
+  // while the registry holds this key undestroyed; and the bodies only with
+  // the detail. The triggers re-check both under the key period's lock.
+  const written = await tx.$queryRaw<Array<{ details: bigint | number; fields: string[] }>>`
+    WITH "detail" AS (
+      INSERT INTO "AmuxDecisionMakerResultDetail"
+        ("id", "requestId", "resultEventId", "resultKind", "outputKind", "optionId", "irreversible",
+         "keyPeriod", "keyCheck", "auditLogId")
+      SELECT ${randomUUID()}, ${requestId}, ${result.event.eventId}, ${resultKind}, ${detail.outputKind}::text,
+             ${detail.optionId}::text, ${detail.irreversible}::boolean, ${keyPeriod}::integer, ${keyCheck},
+             ${result.event.auditLogId}
+      WHERE EXISTS (
+          SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+          WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'rotate' AND k."keyCheck" = ${keyCheck}
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+          WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'destroy'
+        )
+      RETURNING "id"
+    ), "bodies" AS (
+      INSERT INTO "AmuxDecisionMakerBody"
+        ("id", "requestId", "field", "text", "keyPeriod", "keyCheck", "digest", "auditLogId")
+      SELECT b."id", ${requestId}, b."field", b."text", ${keyPeriod}::integer, ${keyCheck}, b."digest",
+             ${result.event.auditLogId}
+      FROM unnest(
+        ${bodies.map(() => randomUUID())}::text[],
+        ${bodies.map((body) => body.field)}::text[],
+        ${bodies.map((body) => body.text)}::text[],
+        ${bodies.map((body) => dmBodyDigest(requestKey, body.field, body.text))}::text[]
+      ) AS b("id", "field", "text", "digest")
+      WHERE EXISTS (SELECT 1 FROM "detail")
+      RETURNING "field"
+    )
+    SELECT
+      (SELECT count(*) FROM "detail") AS "details",
+      coalesce((SELECT array_agg("field") FROM "bodies"), ARRAY[]::text[]) AS "fields"
   `;
+  const row = written[0];
+  if (!row) throw new Error("AMUX Decision Maker result detail insert returned no row");
+  if (Number(row.details) !== 1) throw new DecisionMakerBodyWriteError("digest_key_unavailable");
   return {
     status: "submitted",
     resultKind,
     validationFailure,
     resultDigest,
     result,
-    storedFields: returnedFields(stored, bodies.map((body) => body.field)),
+    detail,
+    storedFields: returnedFields(
+      (row.fields ?? []).map((field) => ({ field })),
+      bodies.map((body) => body.field),
+    ),
+  };
+}
+
+export type DecisionMakerResultDetailRecord = DmResultDetail & {
+  resultKind: DmResultKind;
+  keyPeriod: number;
+  createdAt: string;
+};
+
+/**
+ * The structured detail of a request's terminal result, in one statement:
+ * what Admin shows beside the bodies before the operator judges a proposal --
+ * its kind, the option a select chose, and `irreversible` (§6: shown first
+ * when true). Null when no detail was recorded.
+ */
+export async function readDecisionMakerResultDetail(
+  client: BodyReader,
+  requestId: string,
+): Promise<DecisionMakerResultDetailRecord | null> {
+  if (!isDmRequestId(requestId)) throw new DecisionMakerBodyWriteError("invalid_input");
+  const rows = await client.$queryRaw<
+    Array<{
+      resultKind: string;
+      outputKind: string | null;
+      optionId: string | null;
+      irreversible: boolean | null;
+      keyPeriod: number;
+      createdAtEpochMs: bigint | number;
+    }>
+  >`
+    SELECT "resultKind", "outputKind", "optionId", "irreversible", "keyPeriod",
+           floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+    FROM "AmuxDecisionMakerResultDetail"
+    WHERE "requestId" = ${requestId}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  const detail: DmResultDetail = {
+    outputKind: (row.outputKind ?? null) as DmResultDetail["outputKind"],
+    optionId: row.optionId ?? null,
+    irreversible: row.irreversible ?? null,
+  };
+  if (
+    !(DM_RESULT_KINDS as readonly string[]).includes(row.resultKind) ||
+    !(row.outputKind === null || (DM_OUTPUT_KINDS as readonly string[]).includes(row.outputKind)) ||
+    !dmResultDetailShapeValid(row.resultKind, detail)
+  ) {
+    throw new DecisionMakerBodyWriteError("state_unreadable");
+  }
+  return {
+    ...detail,
+    resultKind: row.resultKind as DmResultKind,
+    keyPeriod: safeInteger(row.keyPeriod, "key period"),
+    createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
   };
 }

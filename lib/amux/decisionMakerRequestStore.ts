@@ -4,9 +4,11 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock } from "@/lib/adminAudit";
+import { dmKeyPeriodOf, dmOptionSetDigest, dmRequestDigestKey } from "@/lib/amux/decisionMakerBodyCore";
 import { dmInstanceForProvider, routeDmQuestion } from "@/lib/amux/decisionMakerCore";
+import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
 import {
-  DM_REQUEST_BINDING_KEYS,
+  DM_ROUTING_BINDING_KEYS,
   DM_VENDOR_FOR_INSTANCE,
   dmEventAuditMetadata,
   dmEventRefusal,
@@ -19,8 +21,8 @@ import {
   isDmDeadlineResultKind,
   isDmDigest,
   isDmRequestId,
-  parseDmRequestBinding,
   parseDmRequestRecord,
+  parseDmRoutingBinding,
   parseDmResultSubmission,
   parseDmTransmission,
   type DmEventAttempt,
@@ -88,7 +90,12 @@ import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitch
 type LedgerReader = Pick<Prisma.TransactionClient, "$queryRaw">;
 
 export class DecisionMakerRequestWriteError extends Error {
-  readonly code: "invalid_input" | "state_unreadable" | "settings_unreadable";
+  readonly code:
+    | "invalid_input"
+    | "state_unreadable"
+    | "settings_unreadable"
+    | "digest_key_unavailable"
+    | "key_period_changed";
 
   constructor(code: DecisionMakerRequestWriteError["code"]) {
     super(code);
@@ -280,13 +287,16 @@ export type DecisionMakerRequestRecord = {
   assignmentDeadlineAt: string;
 };
 
+/** The routing read: the database clock, and the request of this card revision when there is one. */
 type ExistingRequestRow = Record<string, unknown> & {
-  id: string;
-  route: string;
+  dbNowEpochMs: bigint | number;
+  id: string | null;
+  route: string | null;
   instance: string | null;
+  optionSetDigest: string | null;
   refusalCodes: unknown;
-  createdAtEpochMs: bigint | number;
-  assignmentDeadlineAtEpochMs: bigint | number;
+  createdAtEpochMs: bigint | number | null;
+  assignmentDeadlineAtEpochMs: bigint | number | null;
 };
 
 /**
@@ -305,37 +315,54 @@ type ExistingRequestRow = Record<string, unknown> & {
  * concurrent routing of the same instance can let a question through. The
  * card is routed and never stored.
  *
+ * The option set digest of §9's binding is the store's own (stage S1d,
+ * 2026-10-08), never the caller's: an HMAC under the new request's key K_R
+ * (lib/amux/decisionMakerBodyCore.ts) of the card's options, the key period
+ * taken from the database clock read after the lock. The period of the row's
+ * `createdAt` -- which every later digest of the request uses -- is checked
+ * against it after the insert; on the rare routing that crosses a period
+ * boundary in between, the store throws `key_period_changed` and the caller
+ * routes again. Without the period's key in the ring nothing is written
+ * (`digest_key_unavailable`), and the question stays with the operator as a
+ * route failure does (§2-1). For an existing request `sameBinding` also
+ * compares the option set, recomputed under that request's own key (false
+ * when the ring no longer holds it).
+ *
  * A switch read that fails throws `settings_unreadable` and writes nothing:
  * the read has aborted the transaction, and the question stays with the
  * operator as a route failure does (§2-1). Rows the switch store could not
  * have written are still recorded as `settings_unreadable`.
  *
- * Statements: 1 lock, 1 read -- 2 for an existing request; then the switch
- * read -- 3 when it fails; then the throughput read (none for a provider
- * without an instance), the system writer's 3 (4 with an integrity key) and 1
- * insert -- 8, or 9 (7, or 8, without an instance).
+ * Statements: 1 lock, 1 read (the clock and any request of the card revision)
+ * -- 2 for an existing request or a key the ring lacks; then the switch read
+ * -- 3 when it fails; then the throughput read (none for a provider without
+ * an instance), the system writer's 3 (4 with an integrity key) and 1 insert
+ * -- 8, or 9 (7, or 8, without an instance).
  */
 export async function recordDecisionMakerRequest(
   tx: Prisma.TransactionClient,
-  input: { binding: unknown; card: unknown },
+  input: { binding: unknown; card: unknown; keyRing: DmDigestKeyRing },
 ): Promise<DecisionMakerRequestRecord> {
-  const binding = parseDmRequestBinding(input.binding);
+  const binding = parseDmRoutingBinding(input.binding);
   const card = parseDmCard(input.card);
-  if (!binding || !card) throw new DecisionMakerRequestWriteError("invalid_input");
+  if (!binding || !card || !(input.keyRing instanceof Map)) throw new DecisionMakerRequestWriteError("invalid_input");
 
   await takeAuditChainLock(tx);
-  const existing = await tx.$queryRaw<ExistingRequestRow[]>`
+  const read = await tx.$queryRaw<ExistingRequestRow[]>`
     SELECT
-      "id", "cardId", "questionRevision", "askingWorkerId", "amuxSessionId", "amuxSessionAttempt",
-      "askingProvider", "optionSetDigest", "termListVersion", "classificationVersion", "scannerVersion",
-      "route", "instance", "refusalCodes",
-      floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs",
-      floor(extract(epoch FROM "assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
-    FROM "AmuxDecisionMakerRequest"
-    WHERE "cardId" = ${binding.cardId} AND "questionRevision" = ${binding.questionRevision}
+      floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint AS "dbNowEpochMs",
+      r."id", r."cardId", r."questionRevision", r."askingWorkerId", r."amuxSessionId", r."amuxSessionAttempt",
+      r."askingProvider", r."optionSetDigest", r."termListVersion", r."classificationVersion", r."scannerVersion",
+      r."route", r."instance", r."refusalCodes",
+      floor(extract(epoch FROM r."createdAt") * 1000)::bigint AS "createdAtEpochMs",
+      floor(extract(epoch FROM r."assignmentDeadlineAt") * 1000)::bigint AS "assignmentDeadlineAtEpochMs"
+    FROM (SELECT 1) AS "probe"
+    LEFT JOIN "AmuxDecisionMakerRequest" r
+      ON r."cardId" = ${binding.cardId} AND r."questionRevision" = ${binding.questionRevision}
   `;
-  const found = existing[0];
-  if (found) {
+  const found = read[0];
+  if (!found) throw new Error("AMUX Decision Maker routing read returned no row");
+  if (found.id !== null) {
     if (
       (found.route !== "operator" && found.route !== "dm_proposal") ||
       (found.instance !== null && !isDmInstanceScope(found.instance)) ||
@@ -344,17 +371,25 @@ export async function recordDecisionMakerRequest(
     ) {
       throw new DecisionMakerRequestWriteError("state_unreadable");
     }
+    const foundCreatedAtMs = safeInteger(found.createdAtEpochMs, "clock");
+    const foundKey = decisionMakerPeriodKey(input.keyRing, dmKeyPeriodOf(foundCreatedAtMs));
+    const sameOptions =
+      foundKey !== null &&
+      found.optionSetDigest === dmOptionSetDigest(dmRequestDigestKey(foundKey, found.id), card.options);
     return {
       requestId: found.id,
       created: false,
       route: found.route,
       instance: found.instance as DmInstanceScope | null,
       refusalCodes: [...(found.refusalCodes as string[])],
-      sameBinding: DM_REQUEST_BINDING_KEYS.every((key) => found[key] === binding[key]),
-      createdAt: isoOf(safeInteger(found.createdAtEpochMs, "clock")),
+      sameBinding: sameOptions && DM_ROUTING_BINDING_KEYS.every((key) => found[key] === binding[key]),
+      createdAt: isoOf(foundCreatedAtMs),
       assignmentDeadlineAt: isoOf(safeInteger(found.assignmentDeadlineAtEpochMs, "clock")),
     };
   }
+  const keyPeriod = dmKeyPeriodOf(safeInteger(found.dbNowEpochMs, "clock"));
+  const periodKey = decisionMakerPeriodKey(input.keyRing, keyPeriod);
+  if (!periodKey) throw new DecisionMakerRequestWriteError("digest_key_unavailable");
 
   const switches = await readSwitchesForWrite(tx);
   const instance = dmInstanceForProvider(binding.askingProvider);
@@ -367,10 +402,11 @@ export async function recordDecisionMakerRequest(
     askingProvider: binding.askingProvider,
     throughput,
   });
-  const record = parseDmRequestRecord(binding, decision);
+  const requestId = randomUUID();
+  const optionSetDigest = dmOptionSetDigest(dmRequestDigestKey(periodKey, requestId), card.options);
+  const record = parseDmRequestRecord({ ...binding, optionSetDigest }, decision);
   if (!record) throw new Error("AMUX Decision Maker routing produced a decision the ledger refuses");
 
-  const requestId = randomUUID();
   const auditLogId = await writeDecisionMakerRouteAudit(tx, {
     requestId,
     metadata: dmRequestAuditMetadata({
@@ -398,6 +434,10 @@ export async function recordDecisionMakerRequest(
   `;
   const row = inserted[0];
   if (!row) throw new Error("AMUX Decision Maker request insert returned no row");
+  const createdAtMs = safeInteger(row.createdAtEpochMs, "clock");
+  // The digest was keyed by the period of the clock read above; the request's
+  // own period, which every later digest uses, must be the same.
+  if (dmKeyPeriodOf(createdAtMs) !== keyPeriod) throw new DecisionMakerRequestWriteError("key_period_changed");
   return {
     requestId,
     created: true,
@@ -405,7 +445,7 @@ export async function recordDecisionMakerRequest(
     instance: record.instance,
     refusalCodes: [...record.refusalCodes],
     sameBinding: true,
-    createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
+    createdAt: isoOf(createdAtMs),
     assignmentDeadlineAt: isoOf(safeInteger(row.assignmentDeadlineAtEpochMs, "clock")),
   };
 }

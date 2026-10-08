@@ -1127,6 +1127,20 @@ const REGISTRY = {
     reason:
       "system for retention_set, human for a legal hold or its release (section 10: a person with ops:write and a recent step-up). A second CHECK pairs the actor with the kind and requires the person's id exactly for human.",
   },
+  AmuxDecisionMakerResultDetail_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "The terminal result a detail row belongs to, the ledger's own five kinds (section 6). The guard requires it to equal the kind of the result event it names, of the same transaction.",
+  },
+  AmuxDecisionMakerResultDetail_output_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_OUTPUT_KINDS",
+    reason:
+      "Section 6's three kinds of DM output: select, free_text and escalate; NULL for a validation failure, a timeout and an unavailable DM. A shape CHECK ties it to the result kind, the option id and the irreversible flag.",
+  },
   AmuxDecisionMakerDigestKeyEvent_kind_check: {
     owner: "list",
     module: "lib/amux/decisionMakerBodyCore.ts",

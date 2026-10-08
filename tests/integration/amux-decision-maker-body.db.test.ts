@@ -12,10 +12,12 @@ import {
   dmDigestKeyCheck,
   dmKeyPeriodOf,
   dmKeyPeriodStartMs,
+  dmOptionSetDigest,
   dmRequestDigestKey,
   dmResultDigest,
 } from "@/lib/amux/decisionMakerBodyCore";
 import {
+  DecisionMakerBodyWriteError,
   assignDecisionMakerRequestWithDigestKey,
   destroyDecisionMakerDigestKey,
   eraseDecisionMakerBodies,
@@ -23,6 +25,7 @@ import {
   purgeDecisionMakerBodies,
   readDecisionMakerBodies,
   readDecisionMakerBodyRetention,
+  readDecisionMakerResultDetail,
   recordDecisionMakerLegalHold,
   rotateDecisionMakerDigestKey,
   submitDecisionMakerOutput,
@@ -30,6 +33,7 @@ import {
 import {
   DecisionMakerRequestWriteError,
   discardDecisionMakerAssignment,
+  readDecisionMakerRequestState,
   recordDecisionMakerRequest,
   recordDecisionMakerTransmitIntent,
   staleCloseDecisionMakerRequest,
@@ -82,7 +86,7 @@ requireDedicatedAmuxTestDatabase();
 // fires no row trigger, so each test starts empty.
 const resetAll = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "AmuxDecisionMakerBody", "AmuxDecisionMakerRetentionEvent", "AmuxDecisionMakerDigestKeyEvent", "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
+    `TRUNCATE TABLE "AmuxDecisionMakerResultDetail", "AmuxDecisionMakerBody", "AmuxDecisionMakerRetentionEvent", "AmuxDecisionMakerDigestKeyEvent", "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
   );
 
 const operator = (id = `dm-operator-${randomUUID()}`) =>
@@ -365,6 +369,21 @@ test("a card text belongs to its own routing: an open request routed to a DM, un
     }),
     /AMUX_DM_BODY_UNAUDITED/,
   );
+  // ... and targeting it: an edit_confirm aimed at another row does not carry this request's answer.
+  await rejectsWith(
+    prisma.$transaction(async (tx) => {
+      const audit = await writeAudit(tx, { kind: "person", action: "amux.decision.edit_confirm", targetType: REQUEST, targetId: randomUUID(), metadata: { request_id: earlier.id } });
+      await insertBodyRow(tx, earlier.id, period, { field: "operator_answer", text: "x", auditLogId: audit });
+    }),
+    /AMUX_DM_BODY_UNAUDITED/,
+  );
+  await rejectsWith(
+    prisma.$transaction(async (tx) => {
+      const audit = await writeAudit(tx, { kind: "person", action: "amux.decision.edit_confirm", targetType: EVENT, targetId: earlier.id, metadata: { request_id: earlier.id } });
+      await insertBodyRow(tx, earlier.id, period, { field: "operator_answer", text: "x", auditLogId: audit });
+    }),
+    /AMUX_DM_BODY_UNAUDITED/,
+  );
   await prisma.$transaction(async (tx) => {
     const audit = await writeAudit(tx, { kind: "person", action: "amux.decision.edit_confirm", targetType: REQUEST, targetId: earlier.id, metadata: { request_id: earlier.id } });
     await insertBodyRow(tx, earlier.id, period, { field: "operator_answer", text: "Use the locale too.", auditLogId: audit });
@@ -418,6 +437,11 @@ test("a body is never changed, and only READ COMMITTED writes one", async () => 
 // The DM's output: the app's digest, its bodies, and the kill switch
 // ---------------------------------------------------------------------------
 
+const OPTIONS = [
+  { id: "a", label: "Model id only" },
+  { id: "b", label: "Model id and locale" },
+];
+
 const routeAssignAndTransmit = async (ring: Map<number, Buffer>) => {
   const binding = {
     cardId: `card-output-${randomUUID()}`,
@@ -426,7 +450,6 @@ const routeAssignAndTransmit = async (ring: Map<number, Buffer>) => {
     amuxSessionId: "session:7",
     amuxSessionAttempt: 1,
     askingProvider: "claude",
-    optionSetDigest: DIGEST_A,
     termListVersion: "v1",
     classificationVersion: "authority-manifest-1",
     scannerVersion: "v1",
@@ -438,15 +461,12 @@ const routeAssignAndTransmit = async (ring: Map<number, Buffer>) => {
     tags: [],
     title: "Pick a cache key layout",
     question: "Should the cache key include the locale or only the model id?",
-    options: [
-      { id: "a", label: "Model id only" },
-      { id: "b", label: "Model id and locale" },
-    ],
+    options: OPTIONS,
     unblocks: "The cache module can be finished.",
     context: "Both layouts pass the current tests.",
     contextPaths: ["lib/cache.ts"],
   };
-  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding, card }));
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding, card, keyRing: ring }));
   assert.equal(routed.route, "dm_proposal");
   const assigned = await prisma.$transaction((tx) =>
     assignDecisionMakerRequestWithDigestKey(tx, { requestId: routed.requestId, requireLeaseAt: () => {}, keyRing: ring }),
@@ -458,23 +478,57 @@ const routeAssignAndTransmit = async (ring: Map<number, Buffer>) => {
     recordDecisionMakerTransmitIntent(tx, { requestId: routed.requestId, instance: OPENAI, transmission, requireLeaseAt: () => {} }),
   );
   assert.equal(intent.recorded, true);
-  // A result repeats every binding value but the provider, which its instance already is.
-  const rest: Record<string, unknown> = { ...binding };
-  delete rest.askingProvider;
-  return { requestId: routed.requestId, requestKey, resultBinding: { ...rest, policyVersion: 1, transmission } };
+  // A result repeats every stored binding value but the provider, which its instance already is.
+  const stored: Record<string, unknown> = { ...(await readDecisionMakerRequestState(prisma, routed.requestId))!.binding };
+  delete stored.askingProvider;
+  return { requestId: routed.requestId, requestKey, resultBinding: { ...stored, transmission } };
 };
 
-test("a DM output is digested by the app under the request key, and its bodies are stored with the result", async () => {
+const resultEvents = (requestId: string) =>
+  prisma.$queryRaw<Array<{ kind: string }>>`
+    SELECT "kind" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} AND "kind" IN ('result', 'result_rejected')
+  `;
+
+test("the option set is the store's keyed digest of the card's options, and a result must bring the same options", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  const { requestId, requestKey, resultBinding } = await routeAssignAndTransmit(ring);
+  const state = (await readDecisionMakerRequestState(prisma, requestId))!;
+  // Keyed under the request's own key, never a plain hash of the labels.
+  assert.equal(state.binding.optionSetDigest, dmOptionSetDigest(requestKey, OPTIONS));
+  const submitWith = (options: Array<{ id: string; label: string }>, optionId: string) =>
+    prisma.$transaction((tx) =>
+      submitDecisionMakerOutput(tx, {
+        requestId,
+        instance: OPENAI,
+        binding: resultBinding,
+        output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId, rationale: "r", irreversible: false }), options },
+        requireLeaseAt: () => {},
+        keyRing: ring,
+      }),
+    );
+  // A fake id added to the output and the list, or a real one dropped to force a validation failure:
+  // both refused before the ledger is touched.
+  assert.deepEqual(await submitWith([...OPTIONS, { id: "c", label: "Ship it" }], "c"), { status: "option_set_mismatch" });
+  assert.deepEqual(await submitWith(OPTIONS.slice(0, 1), "b"), { status: "option_set_mismatch" });
+  assert.deepEqual(await resultEvents(requestId), []);
+  assert.deepEqual(await prisma.$queryRaw`SELECT 1 FROM "AmuxDecisionMakerResultDetail" WHERE "requestId" = ${requestId}`, []);
+  // The request's own options, in any order, are accepted.
+  const accepted = await submitWith([...OPTIONS].reverse(), "b");
+  assert.equal(accepted.status === "submitted" && accepted.result.status, "accepted");
+});
+
+test("a DM output is digested by the app under the request key, and its detail and bodies are stored with the result", async () => {
   const period = await currentPeriod();
   const ring = new Map([[period, KEY]]);
   const { requestId, requestKey, resultBinding } = await routeAssignAndTransmit(ring);
   // The broker's key is the request key the database's period key derives.
   assert.deepEqual(requestKey, dmRequestDigestKey(KEY, requestId));
 
-  const raw = JSON.stringify({ kind: "free_text", answer: "Use the model id only.", rationale: "The locale is already in the path.", irreversible: false });
+  const raw = JSON.stringify({ kind: "free_text", answer: "Use the model id only.", rationale: "The locale is already in the path.", irreversible: true });
   const submit = () =>
     prisma.$transaction((tx) =>
-      submitDecisionMakerOutput(tx, { requestId, instance: OPENAI, binding: resultBinding, output: { kind: "output", raw, optionIds: ["a", "b"] }, requireLeaseAt: () => {}, keyRing: ring }),
+      submitDecisionMakerOutput(tx, { requestId, instance: OPENAI, binding: resultBinding, output: { kind: "output", raw, options: OPTIONS }, requireLeaseAt: () => {}, keyRing: ring }),
     );
   const first = await submit();
   assert.equal(first.status, "submitted");
@@ -486,6 +540,15 @@ test("a DM output is digested by the app under the request key, and its bodies a
     SELECT "resultDigest" FROM "AmuxDecisionMakerRequestEvent" WHERE "requestId" = ${requestId} AND "kind" = 'result'
   `;
   assert.deepEqual(ledger, [{ resultDigest: first.resultDigest }]);
+  // Section 6: the irreversible flag is kept with the result, for Admin to show first.
+  const detail = await prisma.$transaction((tx) => readDecisionMakerResultDetail(tx, requestId));
+  assert.deepEqual(detail && [detail.resultKind, detail.outputKind, detail.optionId, detail.irreversible, detail.keyPeriod], [
+    "proposal",
+    "free_text",
+    null,
+    true,
+    period,
+  ]);
   const bodies = await prisma.$transaction((tx) => readDecisionMakerBodies(tx, requestId));
   assert.deepEqual(
     bodies.map((body) => [body.field, body.text, body.digest, body.keyPeriod]),
@@ -494,7 +557,7 @@ test("a DM output is digested by the app under the request key, and its bodies a
       ["dm_rationale", "The locale is already in the path.", dmBodyDigest(requestKey, "dm_rationale", "The locale is already in the path."), period],
     ],
   );
-  // The same output again is the same pair: the ledger's result, and no second set of bodies.
+  // The same output again is the same pair: the ledger's result, and no second detail or bodies.
   const again = await submit();
   assert.equal(again.status === "submitted" && again.result.status, "existing");
   assert.equal((await bodyFields(requestId)).length, 2);
@@ -509,19 +572,166 @@ test("a DM output is digested by the app under the request key, and its bodies a
       /AMUX_DM_BODY_UNAUDITED|AmuxDecisionMakerBody_requestId_field_key|unique/i,
     );
   }
+  // The detail is never changed or removed.
+  await rejectsWith(prisma.$executeRaw`UPDATE "AmuxDecisionMakerResultDetail" SET "irreversible" = false`, /AMUX_DM_RESULT_DETAIL_IMMUTABLE/);
+  await rejectsWith(prisma.$executeRaw`DELETE FROM "AmuxDecisionMakerResultDetail"`, /AMUX_DM_RESULT_DETAIL_IMMUTABLE/);
 });
 
-test("under the kill switch a proposal is rejected and stores no body", async () => {
+test("a select keeps its chosen option, and a timeout has a detail with no output", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  const chosen = await routeAssignAndTransmit(ring);
+  const select = await prisma.$transaction((tx) =>
+    submitDecisionMakerOutput(tx, {
+      requestId: chosen.requestId,
+      instance: OPENAI,
+      binding: chosen.resultBinding,
+      output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId: "b", rationale: "Smaller key.", irreversible: false }), options: OPTIONS },
+      requireLeaseAt: () => {},
+      keyRing: ring,
+    }),
+  );
+  assert.equal(select.status === "submitted" && select.result.status, "accepted");
+  const selected = await prisma.$transaction((tx) => readDecisionMakerResultDetail(tx, chosen.requestId));
+  assert.deepEqual(selected && [selected.resultKind, selected.outputKind, selected.optionId, selected.irreversible], ["proposal", "select", "b", false]);
+
+  const timedOut = await routeAssignAndTransmit(ring);
+  const timeout = await prisma.$transaction((tx) =>
+    submitDecisionMakerOutput(tx, { requestId: timedOut.requestId, instance: OPENAI, binding: timedOut.resultBinding, output: { kind: "timeout" }, requireLeaseAt: () => {}, keyRing: ring }),
+  );
+  assert.equal(timeout.status === "submitted" && timeout.result.status, "accepted");
+  const detail = await prisma.$transaction((tx) => readDecisionMakerResultDetail(tx, timedOut.requestId));
+  assert.deepEqual(detail && [detail.resultKind, detail.outputKind, detail.optionId, detail.irreversible], ["timeout", null, null, null]);
+  assert.deepEqual(await bodyFields(timedOut.requestId), []);
+});
+
+test("no result of any kind commits under a key the registry does not hold", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  const { requestId, resultBinding } = await routeAssignAndTransmit(ring);
+  // The ring now holds another key for the period than the one registered.
+  const other = new Map([[period, OTHER_KEY]]);
+  for (const output of [{ kind: "timeout" }, { kind: "unavailable" }]) {
+    let caught: unknown = null;
+    try {
+      await prisma.$transaction((tx) =>
+        submitDecisionMakerOutput(tx, { requestId, instance: OPENAI, binding: resultBinding, output, requireLeaseAt: () => {}, keyRing: other }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof DecisionMakerBodyWriteError, String(caught));
+    assert.equal((caught as DecisionMakerBodyWriteError).code, "digest_key_unavailable");
+  }
+  // Rolled back: no result, no detail.
+  assert.deepEqual(await resultEvents(requestId), []);
+
+  // The database holds the same rule for a detail written past the store.
+  await rejectsWith(
+    prisma.$transaction(async (tx) => {
+      const eventId = randomUUID();
+      const audit = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: eventId });
+      await tx.$executeRaw`
+        INSERT INTO "AmuxDecisionMakerRequestEvent" ("id", "requestId", "kind", "instance", "inputPayloadDigest", "resultKind", "resultDigest", "auditLogId")
+        VALUES (${eventId}, ${requestId}, 'result', ${OPENAI}, ${DIGEST_B}, 'timeout', ${DIGEST_A}, ${audit})
+      `;
+      await insertDetailRow(tx, { requestId, resultEventId: eventId, resultKind: "timeout", keyPeriod: period, keyCheck: dmDigestKeyCheck(OTHER_KEY), auditLogId: audit });
+    }),
+    /AMUX_DM_RESULT_DETAIL_KEY/,
+  );
+});
+
+type DetailRow = {
+  requestId: string;
+  resultEventId: string;
+  resultKind: string;
+  outputKind?: string | null;
+  optionId?: string | null;
+  irreversible?: boolean | null;
+  keyPeriod: number;
+  keyCheck?: string;
+  auditLogId: string;
+};
+
+const insertDetailRow = (tx: Prisma.TransactionClient, row: DetailRow) =>
+  tx.$executeRaw`
+    INSERT INTO "AmuxDecisionMakerResultDetail"
+      ("id", "requestId", "resultEventId", "resultKind", "outputKind", "optionId", "irreversible", "keyPeriod", "keyCheck", "auditLogId")
+    VALUES (${randomUUID()}, ${row.requestId}, ${row.resultEventId}, ${row.resultKind}, ${row.outputKind ?? null}::text,
+            ${row.optionId ?? null}::text, ${row.irreversible ?? null}::boolean, ${row.keyPeriod}, ${row.keyCheck ?? CHECK}, ${row.auditLogId})
+  `;
+
+test("under the kill switch a proposal is rejected and stores no body and no detail", async () => {
   const period = await currentPeriod();
   const ring = new Map([[period, KEY]]);
   const { requestId, resultBinding } = await routeAssignAndTransmit(ring);
   await setSwitch("kill_switch", "on");
   const raw = JSON.stringify({ kind: "select", optionId: "a", rationale: "Smaller key.", irreversible: false });
   const submitted = await prisma.$transaction((tx) =>
-    submitDecisionMakerOutput(tx, { requestId, instance: OPENAI, binding: resultBinding, output: { kind: "output", raw, optionIds: ["a", "b"] }, requireLeaseAt: () => {}, keyRing: ring }),
+    submitDecisionMakerOutput(tx, { requestId, instance: OPENAI, binding: resultBinding, output: { kind: "output", raw, options: OPTIONS }, requireLeaseAt: () => {}, keyRing: ring }),
   );
   assert.equal(submitted.status === "submitted" && submitted.result.status, "rejected");
   assert.deepEqual(await bodyFields(requestId), []);
+  assert.equal(await prisma.$transaction((tx) => readDecisionMakerResultDetail(tx, requestId)), null);
+});
+
+class RolledBack extends Error {
+  constructor() {
+    super("RolledBack");
+  }
+}
+
+test("a result detail belongs to its request's result of the same transaction, kind and audit, in its own shape", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  const { requestId } = await routeAssignAndTransmit(ring);
+  type Build = (eventId: string, audit: string, otherAudit: string) => Omit<DetailRow, "requestId">;
+  /** A timeout result written past the store, then the detail the case builds, in one transaction rolled back. */
+  const withResult = (build: Build) =>
+    prisma.$transaction(async (tx) => {
+      const eventId = randomUUID();
+      const audit = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: eventId });
+      const otherAudit = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: randomUUID() });
+      await tx.$executeRaw`
+        INSERT INTO "AmuxDecisionMakerRequestEvent" ("id", "requestId", "kind", "instance", "inputPayloadDigest", "resultKind", "resultDigest", "auditLogId")
+        VALUES (${eventId}, ${requestId}, 'result', ${OPENAI}, ${DIGEST_B}, 'timeout', ${DIGEST_A}, ${audit})
+      `;
+      await insertDetailRow(tx, { requestId, ...build(eventId, audit, otherAudit) });
+      throw new RolledBack();
+    });
+  // Accepted (and rolled back by the case itself).
+  await rejectsWith(withResult((eventId, audit) => ({ resultEventId: eventId, resultKind: "timeout", keyPeriod: period, auditLogId: audit })), /RolledBack/);
+  // Another kind than the result's, another audit row, another period.
+  await rejectsWith(withResult((eventId, audit) => ({ resultEventId: eventId, resultKind: "unavailable", keyPeriod: period, auditLogId: audit })), /AMUX_DM_RESULT_DETAIL_UNLINKED/);
+  await rejectsWith(withResult((eventId, _audit, otherAudit) => ({ resultEventId: eventId, resultKind: "timeout", keyPeriod: period, auditLogId: otherAudit })), /AMUX_DM_RESULT_DETAIL_UNLINKED/);
+  await rejectsWith(withResult((eventId, audit) => ({ resultEventId: eventId, resultKind: "timeout", keyPeriod: period - 1, auditLogId: audit })), /AMUX_DM_RESULT_DETAIL_KEY_PERIOD/);
+  // Each kind's shape: a timeout has no output.
+  await rejectsWith(
+    withResult((eventId, audit) => ({ resultEventId: eventId, resultKind: "timeout", outputKind: "select", optionId: "a", irreversible: false, keyPeriod: period, auditLogId: audit })),
+    /AmuxDecisionMakerResultDetail_shape_check/,
+  );
+  // The option id grammar: no prose.
+  await rejectsWith(
+    prisma.$executeRaw`
+      INSERT INTO "AmuxDecisionMakerResultDetail" ("id", "requestId", "resultEventId", "resultKind", "outputKind", "optionId", "irreversible", "keyPeriod", "keyCheck", "auditLogId")
+      VALUES (${randomUUID()}, ${requestId}, ${randomUUID()}, 'proposal', 'select', 'Use the model id only', false, ${period}, ${CHECK}, 'x')
+    `,
+    /AmuxDecisionMakerResultDetail_option_id_format_check|AMUX_DM_RESULT_DETAIL_UNLINKED/,
+  );
+  // A result an earlier transaction recorded gains no detail later.
+  const eventId = randomUUID();
+  const audit = await prisma.$transaction(async (tx) => {
+    const id = await writeAudit(tx, { kind: "system", actor: "amux-decision-maker-openai", action: "amux.decision.result", targetType: EVENT, targetId: eventId });
+    await tx.$executeRaw`
+      INSERT INTO "AmuxDecisionMakerRequestEvent" ("id", "requestId", "kind", "instance", "inputPayloadDigest", "resultKind", "resultDigest", "auditLogId")
+      VALUES (${eventId}, ${requestId}, 'result', ${OPENAI}, ${DIGEST_B}, 'timeout', ${DIGEST_A}, ${id})
+    `;
+    return id;
+  });
+  await rejectsWith(
+    prisma.$transaction((tx) => insertDetailRow(tx, { requestId, resultEventId: eventId, resultKind: "timeout", keyPeriod: period, auditLogId: audit })),
+    /AMUX_DM_RESULT_DETAIL_UNLINKED/,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -859,7 +1069,6 @@ test("a switch read that fails reaches the caller as settings_unreadable, throug
     amuxSessionId: "session:7",
     amuxSessionAttempt: 1,
     askingProvider: "claude",
-    optionSetDigest: DIGEST_A,
     termListVersion: "v1",
     classificationVersion: "authority-manifest-1",
     scannerVersion: "v1",
@@ -876,13 +1085,14 @@ test("a switch read that fails reaches the caller as settings_unreadable, throug
     context: "Both layouts pass the current tests.",
     contextPaths: [],
   };
+  const ring = new Map([[dmKeyPeriodOf(await dbNowMs()), KEY]]);
   const boundary = { operation: "dm_body_test", prismaCallCeiling: 12, isolation: "mutation" as const };
   let caught: unknown = null;
   try {
     await withAmuxDbBoundary(boundary, async (tx) => {
       // The switch table is out of reach for this one transaction, so the read fails in PostgreSQL.
       await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerSwitchEvent" RENAME TO "AmuxDecisionMakerSwitchEventAway"`);
-      return recordDecisionMakerRequest(tx, { binding, card });
+      return recordDecisionMakerRequest(tx, { binding, card, keyRing: ring });
     });
   } catch (error) {
     caught = error;
@@ -896,7 +1106,7 @@ test("a switch read that fails reaches the caller as settings_unreadable, throug
   );
   assert.ok(Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AmuxDecisionMakerSwitchEvent"`)[0]!.n) > 0);
   // And the same question routes normally once the switches read.
-  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding, card }));
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding, card, keyRing: ring }));
   assert.equal(routed.created, true);
   assert.equal(routed.route, "dm_proposal");
 });

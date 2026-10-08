@@ -2291,6 +2291,7 @@ model AdminAuditLog {
   amuxDecisionMakerBodies AmuxDecisionMakerBody[]
   amuxDecisionMakerRetentionEvent AmuxDecisionMakerRetentionEvent?
   amuxDecisionMakerDigestKeyEvent AmuxDecisionMakerDigestKeyEvent?
+  amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8445,6 +8446,7 @@ model AmuxDecisionMakerRequest {
   events          AmuxDecisionMakerRequestEvent[]
   bodies          AmuxDecisionMakerBody[]
   retentionEvents AmuxDecisionMakerRetentionEvent[]
+  resultDetail    AmuxDecisionMakerResultDetail?
 
   @@unique([cardId, questionRevision])
   @@index([instance, createdAt])
@@ -8483,8 +8485,9 @@ model AmuxDecisionMakerRequestEvent {
   /// Overwritten by the insert trigger from the database clock.
   createdAt              DateTime  @default(now()) @db.Timestamptz(3)
 
-  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  request      AmuxDecisionMakerRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultDetail AmuxDecisionMakerResultDetail?
 
   @@index([requestId, sequence])
 }
@@ -8582,6 +8585,38 @@ model AmuxDecisionMakerDigestKeyEvent {
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
 
   auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// The structured detail of an AMUX Decision Maker request's terminal result
+/// (docs/policy/amux-decision-maker.md §6, §9, §10): part of the decision
+/// ledger, one immutable row per terminal result, written in the result's own
+/// transaction. It keeps what the ledger's result digest cannot and section 6
+/// needs on the stored proposal -- the output's kind, the option a select
+/// chose and the `irreversible` flag Admin shows before the operator judges --
+/// and the key period and key check value the result was digested under. No
+/// free text: the option id has the S1a grammar. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs (the shape
+/// per result kind, the option id grammar) and the guard: the request's own
+/// result event of the same transaction, kind and audit row; its key period
+/// under a registered, undestroyed key; no update or delete.
+model AmuxDecisionMakerResultDetail {
+  id            String   @id
+  requestId     String   @unique
+  resultEventId String   @unique
+  resultKind    String
+  outputKind    String?
+  optionId      String?
+  irreversible  Boolean?
+  keyPeriod     Int
+  keyCheck      String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
 
 /// The shared agent digest table: one row per stored digest item of any agent

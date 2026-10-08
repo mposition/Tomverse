@@ -560,9 +560,12 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * digest-key event back relations to `AdminAuditLog` in the watched schema.
  * No actor, descriptor, webhook writer or admission decision changes; the
  * bytes moved, so evidence is stale.
+ * 2026-10-08, the S1d review: the body store adds the result detail's back
+ * relation to `AdminAuditLog` in the watched schema. Nothing else changes; the
+ * bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "c1f425f83f10575399afd0710c79a96b5100031aba5bb9d8a5858bb2b46644db";
+  "8d9faae2d39f9a92fc61a5a9daba9253ab6acdebfec4591bffe88326de064288";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

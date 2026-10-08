@@ -240,6 +240,27 @@ export const parseDmRequestBinding = (value: unknown): DmRequestBinding | null =
   return Object.fromEntries(DM_REQUEST_BINDING_KEYS.map((key) => [key, binding[key]])) as DmRequestBinding;
 };
 
+/**
+ * What a routing caller supplies: every binding value but the option set
+ * digest, which the store computes itself from the card's options under the
+ * request's key (stage S1d, 2026-10-08). A caller-supplied digest could be a
+ * plain hash of the option labels, which §10 forbids, and nothing tied it to
+ * the options a result is later checked against.
+ */
+export type DmRoutingBinding = Omit<DmRequestBinding, "optionSetDigest">;
+
+export const DM_ROUTING_BINDING_KEYS = DM_REQUEST_BINDING_KEYS.filter(
+  (key): key is Exclude<keyof DmRequestBinding, "optionSetDigest"> => key !== "optionSetDigest",
+);
+
+export const parseDmRoutingBinding = (value: unknown): DmRoutingBinding | null => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!ownKeysAre(value, DM_ROUTING_BINDING_KEYS)) return null;
+  const binding = value as Record<string, unknown>;
+  if (!bindingFieldsValid(binding, DM_ROUTING_BINDING_KEYS)) return null;
+  return Object.fromEntries(DM_ROUTING_BINDING_KEYS.map((key) => [key, binding[key]])) as DmRoutingBinding;
+};
+
 /** What the request row records: the binding, the router's decision and the policy version. */
 export type DmRequestRecordInput = DmRequestBinding & {
   policyVersion: number;

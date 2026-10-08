@@ -21,6 +21,7 @@ import {
   DM_ANSWER_MAX_BYTES,
   DM_CARD_TEXT_MAX_BYTES,
   DM_ESCALATION_MAX_BYTES,
+  DM_OPTION_ID_PATTERN,
   DM_RATIONALE_MAX_BYTES,
 } from "../lib/amux/decisionMakerCore.ts";
 import {
@@ -34,6 +35,7 @@ import {
   DM_HOLD_EVENT_KINDS,
   DM_KEY_PERIOD_MS,
   DM_OPERATOR_ANSWER_MAX_BYTES,
+  DM_OUTPUT_KINDS,
   DM_RETENTION_ACTOR_KINDS,
   DM_RETENTION_AFTER_CLOSE_MS,
   DM_RETENTION_EVENT_KINDS,
@@ -53,10 +55,13 @@ import {
   dmKeyPeriodEndMs,
   dmKeyPeriodOf,
   dmKeyPeriodStartMs,
+  dmOptionSetDigest,
   dmOutputBodies,
   dmPayloadDigest,
   dmPurgeRefusal,
   dmRequestDigestKey,
+  dmResultDetail,
+  dmResultDetailShapeValid,
   dmResultDigest,
   dmRetentionUntilMs,
   dmSnapshotManifestDigest,
@@ -71,6 +76,7 @@ import {
   readDecisionMakerBodies,
   readDecisionMakerBodyRetention,
   readDecisionMakerDigestKeyPeriod,
+  readDecisionMakerResultDetail,
   recordDecisionMakerLegalHold,
   rotateDecisionMakerDigestKey,
   submitDecisionMakerOutput,
@@ -85,6 +91,7 @@ import {
 import {
   DM_ASSIGNMENT_WINDOW_MS,
   DM_CLOSING_EVENT_KINDS,
+  DM_RESULT_KINDS,
   DM_STALE_CLOSE_AFTER_MS,
 } from "../lib/amux/decisionMakerRequestCore.ts";
 
@@ -194,6 +201,44 @@ test("the migration's CHECKs hold the core's lists and caps", () => {
   assert.match(sql, /"AmuxDecisionMakerDigestKeyEvent_one_rotate_key"\s+ON "AmuxDecisionMakerDigestKeyEvent"\("keyPeriod"\) WHERE "kind" = 'rotate'/);
   assert.match(sql, /"AmuxDecisionMakerDigestKeyEvent_one_destroy_key"\s+ON "AmuxDecisionMakerDigestKeyEvent"\("keyPeriod"\) WHERE "kind" = 'destroy'/);
   assert.match(sql, /"AmuxDecisionMakerBody_requestId_field_key"\s+ON "AmuxDecisionMakerBody"\("requestId", "field"\)/);
+  // The result detail: the ledger's result kinds, section 6's output kinds, and the S1a option id grammar.
+  assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerResultDetail_result_kind_check")), [...DM_RESULT_KINDS]);
+  assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerResultDetail_output_kind_check")), [...DM_OUTPUT_KINDS]);
+  assert.deepEqual(quoted(checkBody(sql, "AmuxDecisionMakerResultDetail_option_id_format_check")), [DM_OPTION_ID_PATTERN.source]);
+  for (const index of ["requestId", "resultEventId", "auditLogId"]) {
+    assert.match(sql, new RegExp(`"AmuxDecisionMakerResultDetail_${index}_key"\\s+ON "AmuxDecisionMakerResultDetail"\\("${index}"\\)`), index);
+  }
+});
+
+test("the detail's shape CHECK and the core agree on every result kind and output", () => {
+  const select = { kind: "select", optionId: "b", rationale: "r", irreversible: true };
+  const free = { kind: "free_text", answer: "a", rationale: "r", irreversible: false };
+  const escalate = { kind: "escalate", reason: "r" };
+  assert.deepEqual(dmResultDetail(select), { outputKind: "select", optionId: "b", irreversible: true });
+  assert.deepEqual(dmResultDetail(free), { outputKind: "free_text", optionId: null, irreversible: false });
+  assert.deepEqual(dmResultDetail(escalate), { outputKind: "escalate", optionId: null, irreversible: null });
+  assert.deepEqual(dmResultDetail(null), { outputKind: null, optionId: null, irreversible: null });
+  const valid = [
+    ["proposal", dmResultDetail(select)],
+    ["proposal", dmResultDetail(free)],
+    ["escalate", dmResultDetail(escalate)],
+    ["validation_failure", dmResultDetail(null)],
+    ["timeout", dmResultDetail(null)],
+    ["unavailable", dmResultDetail(null)],
+  ];
+  for (const [kind, detail] of valid) assert.equal(dmResultDetailShapeValid(kind, detail), true, kind);
+  for (const [kind, detail] of [
+    ["proposal", { outputKind: "select", optionId: null, irreversible: true }],
+    ["proposal", { outputKind: "select", optionId: "b", irreversible: null }],
+    ["proposal", { outputKind: "free_text", optionId: "b", irreversible: true }],
+    ["proposal", { outputKind: "escalate", optionId: null, irreversible: null }],
+    ["proposal", { outputKind: "select", optionId: "Use the model id", irreversible: true }],
+    ["escalate", { outputKind: "escalate", optionId: null, irreversible: false }],
+    ["timeout", { outputKind: "select", optionId: "b", irreversible: true }],
+    ["result_unknown", dmResultDetail(null)],
+  ]) {
+    assert.equal(dmResultDetailShapeValid(kind, detail), false, JSON.stringify([kind, detail]));
+  }
 });
 
 test("the triggers use the core's period, retention, total and actions, and the ledger's lock", () => {
@@ -206,8 +251,12 @@ test("the triggers use the core's period, retention, total and actions, and the 
     DM_KEY_PERIOD_MS,
     DM_KEY_PERIOD_MS,
   ]);
-  // One in the retention guard, one (quoted twice) in the closing trigger's format string.
-  assert.equal([...sql.matchAll(/INTERVAL '{1,2}90 days'{1,2}/g)].length, 2);
+  // One in the retention guard, one (quoted twice) in the closing trigger's format string: 2160
+  // hours, a fixed length, exactly the core's 90 days of milliseconds. No interval here is counted in
+  // days, months or years, whose length follows the session time zone's calendar.
+  const retention = [...sql.matchAll(/INTERVAL '{1,2}(\d+) hours'{1,2}/g)].map((match) => Number(match[1]) * 3_600_000);
+  assert.deepEqual(retention, [DM_RETENTION_AFTER_CLOSE_MS, DM_RETENTION_AFTER_CLOSE_MS]);
+  assert.doesNotMatch(sql, /INTERVAL '{1,2}[^']*\b(day|days|month|months|year|years|mon|mons)\b/i);
   assert.match(functionBody(sql, "amux_decision_maker_body_guard"), new RegExp(`> ${DM_BODY_REQUEST_MAX_BYTES} THEN`));
   for (const action of Object.values(DM_BODY_AUDIT_ACTIONS)) {
     if (action.startsWith("amux.decision.digest_key_")) continue;
@@ -231,6 +280,7 @@ test("every guard refuses an update, reads only under READ COMMITTED, pins searc
     ["amux_decision_maker_body_guard", "AMUX_DM_BODY_IMMUTABLE", "AMUX_DM_BODY_ISOLATION"],
     ["amux_decision_maker_retention_event_guard", "AMUX_DM_RETENTION_IMMUTABLE", "AMUX_DM_RETENTION_ISOLATION"],
     ["amux_decision_maker_digest_key_event_guard", "AMUX_DM_DIGEST_KEY_IMMUTABLE", "AMUX_DM_DIGEST_KEY_ISOLATION"],
+    ["amux_decision_maker_result_detail_guard", "AMUX_DM_RESULT_DETAIL_IMMUTABLE", "AMUX_DM_RESULT_DETAIL_ISOLATION"],
   ]) {
     const body = functionBody(sql, name);
     assert.ok(body.includes(`RAISE EXCEPTION '${immutable}'`), name);
@@ -241,9 +291,13 @@ test("every guard refuses an update, reads only under READ COMMITTED, pins searc
   }
   // Only the body table allows a delete at all; the retention and key tables refuse any non-insert.
   assert.ok(functionBody(sql, "amux_decision_maker_body_guard").includes("IF TG_OP = 'UPDATE' THEN"));
-  for (const name of ["amux_decision_maker_retention_event_guard", "amux_decision_maker_digest_key_event_guard"]) {
+  for (const name of ["amux_decision_maker_retention_event_guard", "amux_decision_maker_digest_key_event_guard", "amux_decision_maker_result_detail_guard"]) {
     assert.ok(functionBody(sql, name).includes("IF TG_OP <> 'INSERT' THEN"), name);
   }
+  // Every field binds its audit's target: the operator's answer to the request, like the card.
+  const bodyGuard = functionBody(sql, "amux_decision_maker_body_guard");
+  assert.match(bodyGuard, /'amux\.decision\.edit_confirm', 'AmuxDecisionMakerRequest', NEW\."requestId"/);
+  assert.match(bodyGuard, /"action" = \$2 AND "targetType" = \$3 AND "targetId" = \$4 AND "actorUserId" IS NOT NULL/);
   assert.ok(functionBody(sql, "amux_decision_maker_request_closing_retention").includes("SET search_path = pg_catalog, pg_temp"));
   // No guard reads the switches: everything here stays allowed under the kill switch (section 6's table).
   assert.doesNotMatch(withoutSqlComments(sql), /AmuxDecisionMakerSwitchEvent|switch-gate/);
@@ -305,6 +359,32 @@ test("the digests are HMAC-SHA256 of the documented layout, never a plain hash",
   }
   // A short key is refused, not padded.
   assert.throws(() => dmDigestKeyCheck(Buffer.alloc(16)));
+});
+
+test("the option set digest is keyed, ordered by id, and changes with any id or label", () => {
+  const requestKey = dmRequestDigestKey(KEY, REQUEST_ID);
+  const options = [
+    { id: "b", label: "Model id and locale" },
+    { id: "a", label: "Model id only" },
+  ];
+  assert.equal(
+    dmOptionSetDigest(requestKey, options),
+    hmacHex(requestKey, "amux-dm-option-set-v1", JSON.stringify([["a", "Model id only"], ["b", "Model id and locale"]])),
+  );
+  assert.equal(dmOptionSetDigest(requestKey, options), dmOptionSetDigest(requestKey, [...options].reverse()));
+  for (const changed of [
+    [...options, { id: "c", label: "A third" }],
+    options.slice(1),
+    [{ id: "b", label: "Locale only" }, options[1]],
+    [{ id: "B", label: "Model id and locale" }, options[1]],
+  ]) {
+    assert.notEqual(dmOptionSetDigest(requestKey, changed), dmOptionSetDigest(requestKey, options), JSON.stringify(changed));
+  }
+  // A label cannot run into the next id.
+  assert.notEqual(dmOptionSetDigest(requestKey, [{ id: "a", label: "b" }]), dmOptionSetDigest(requestKey, [{ id: "ab", label: "" }]));
+  // Another request, another digest: the set is bound to its own request.
+  assert.notEqual(dmOptionSetDigest(dmRequestDigestKey(KEY, OTHER_REQUEST_ID), options), dmOptionSetDigest(requestKey, options));
+  assert.notEqual(dmOptionSetDigest(requestKey, options), createHash("sha256").update(JSON.stringify(options)).digest("hex"));
 });
 
 test("every digest is bound to its request, its field and its label", () => {
@@ -568,9 +648,9 @@ const walk = (directory) =>
 
 const withoutComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-test("one module reads and writes the three tables, never updates a body, and keeps the writers apart", () => {
+test("one module reads and writes the four tables, never updates a body or a detail, and keeps the writers apart", () => {
   const reaches =
-    /\.\s*amuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent)\b|\[\s*["'`]amuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent)["'`]\s*\]|\b(from|into|update|join|table)\s+"?AmuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent)"?\b/i;
+    /\.\s*amuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent|ResultDetail)\b|\[\s*["'`]amuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent|ResultDetail)["'`]\s*\]|\b(from|into|update|join|table)\s+"?AmuxDecisionMaker(Body|RetentionEvent|DigestKeyEvent|ResultDetail)"?\b/i;
   const files = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(join(root, top)))
     .map((path) => relative(root, path).split("\\").join("/"));
@@ -581,8 +661,18 @@ test("one module reads and writes the three tables, never updates a body, and ke
   assert.match(store, /INSERT INTO "AmuxDecisionMakerBody"\n/);
   assert.match(store, /INSERT INTO "AmuxDecisionMakerRetentionEvent"\n/);
   assert.equal((store.match(/INSERT INTO "AmuxDecisionMakerDigestKeyEvent"/g) ?? []).length, 2);
+  assert.equal((store.match(/INSERT INTO "AmuxDecisionMakerResultDetail"/g) ?? []).length, 1);
+  // A terminal result is recorded only through the composition that writes its detail under a
+  // registered key, and a broker key is handed out only through the keyed assignment: no other
+  // module calls the two ledger writes.
+  for (const call of [/\bsubmitDecisionMakerResult\(/, /\bassignDecisionMakerRequest\(/]) {
+    const callers = files.filter(
+      (path) => path !== "lib/amux/decisionMakerRequestStore.ts" && call.test(withoutComments(readFileSync(join(root, path), "utf8"))),
+    );
+    assert.deepEqual(callers, [STORE], String(call));
+  }
   // A body is never updated, and the retention and key tables are never changed or emptied.
-  assert.doesNotMatch(withoutComments(store), /UPDATE "AmuxDecisionMaker|DELETE FROM "AmuxDecisionMaker(RetentionEvent|DigestKeyEvent)|TRUNCATE/);
+  assert.doesNotMatch(withoutComments(store), /UPDATE "AmuxDecisionMaker|DELETE FROM "AmuxDecisionMaker(RetentionEvent|DigestKeyEvent|ResultDetail)|TRUNCATE/);
   assert.equal((withoutComments(store).match(/DELETE FROM "AmuxDecisionMakerBody"/g) ?? []).length, 2);
   // A person's audit through the administrator writer; the system's from its own module.
   assert.doesNotMatch(store, /systemActor|writeSystemAuditLog/);
@@ -603,8 +693,13 @@ test("one module reads and writes the three tables, never updates a body, and ke
 
 const PERIOD = dmKeyPeriodOf(NOW - 10_000);
 const RING = new Map([[PERIOD, KEY]]);
-const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
+/** The card's options as routed, and the option set digest the routing store recorded for them. */
+const OPTIONS = [
+  { id: "a", label: "Model id only" },
+  { id: "b", label: "Model id and locale" },
+];
+const OPTION_SET = dmOptionSetDigest(dmRequestDigestKey(KEY, REQUEST_ID), OPTIONS);
 
 /** The S1c state read's row, as tests/amuxDecisionMakerRequest.test.mjs shapes it. */
 const requestRow = (overrides = {}) => ({
@@ -615,7 +710,7 @@ const requestRow = (overrides = {}) => ({
   amuxSessionId: "session:9",
   amuxSessionAttempt: 1,
   askingProvider: "claude",
-  optionSetDigest: DIGEST_A,
+  optionSetDigest: OPTION_SET,
   termListVersion: "v1",
   classificationVersion: "authority-manifest-1",
   scannerVersion: "v1",
@@ -643,6 +738,23 @@ const requestRow = (overrides = {}) => ({
 });
 const TRANSMITTED = { assigned: true, resultDeadlineAtEpochMs: BigInt(NOW + 20 * 60_000), transmitted: true, snapshotState: "none", inputPayloadDigest: DIGEST_B };
 
+/** Where each value sits in the detail-and-bodies statement. */
+const DETAIL = {
+  requestId: 1,
+  resultEventId: 2,
+  resultKind: 3,
+  outputKind: 4,
+  optionId: 5,
+  irreversible: 6,
+  keyPeriod: 7,
+  keyCheck: 8,
+  auditLogId: 9,
+  fields: 18,
+  texts: 19,
+  digests: 20,
+};
+const detailInsertOf = (sent) => sent.find((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerResultDetail"'));
+
 const PERMISSIVE_SWITCHES = [
   { scope: "kill_switch", value: "off" },
   { scope: "decision-maker-openai", value: "proposal" },
@@ -656,6 +768,7 @@ const recordingTx = ({
   open = 0n,
   switches = PERMISSIVE_SWITCHES,
   candidates = [],
+  registryHoldsKey = true,
 } = {}) => {
   const sent = [];
   const tx = {
@@ -667,7 +780,9 @@ const recordingTx = ({
       const sql = strings.join("$");
       sent.push({ kind: "query", sql, values });
       if (sql.includes("AT TIME ZONE 'UTC'")) return Promise.resolve([{ createdAt: new Date("2026-10-08T00:00:00.000Z") }]);
-      if (sql.includes('INSERT INTO "AmuxDecisionMakerBody"')) return Promise.resolve(values[5].map((field) => ({ field })));
+      if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
+        return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
+      }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')) {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: BigInt(NOW + 5), resultDeadlineAtEpochMs: null }]);
       }
@@ -683,6 +798,7 @@ const recordingTx = ({
       if (sql.includes("SELECT DISTINCT ON")) return Promise.resolve(switches);
       if (sql.includes('ORDER BY re."retentionUntil"')) return Promise.resolve(candidates);
       if (sql.includes('FROM "AmuxDecisionMakerBody"')) return Promise.resolve([]);
+      if (sql.includes('FROM "AmuxDecisionMakerResultDetail"')) return Promise.resolve([]);
       return Promise.reject(new Error(`unexpected statement: ${sql}`));
     },
     adminAuditLog: {
@@ -731,7 +847,7 @@ const resultBinding = () => ({
   askingWorkerId: "worker.claude-1",
   amuxSessionId: "session:9",
   amuxSessionAttempt: 1,
-  optionSetDigest: DIGEST_A,
+  optionSetDigest: OPTION_SET,
   termListVersion: "v1",
   classificationVersion: "authority-manifest-1",
   scannerVersion: "v1",
@@ -769,6 +885,12 @@ test("the reads are one statement each", async () => {
   {
     const { tx } = recordingTx({ retention: retentionRow({ bodyFields: ["dm_verdict"] }) });
     await assert.rejects(readDecisionMakerBodyRetention(tx, REQUEST_ID), (error) => error.code === "state_unreadable");
+  }
+  {
+    const { tx, sent } = recordingTx();
+    assert.equal(await readDecisionMakerResultDetail(tx, REQUEST_ID), null);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].sql, /FROM "AmuxDecisionMakerResultDetail"\s+WHERE "requestId" = \$/);
   }
 });
 
@@ -905,7 +1027,7 @@ for (const [label, integrityKey] of [
           requestId: REQUEST_ID,
           instance: "decision-maker-openai",
           binding: resultBinding(),
-          output: { kind: "output", raw, optionIds: ["a", "b"] },
+          output: { kind: "output", raw, options: OPTIONS },
           requireLeaseAt: lease.requireLeaseAt,
           keyRing: RING,
         });
@@ -918,19 +1040,30 @@ for (const [label, integrityKey] of [
         assert.equal(result.resultDigest, dmResultDigest(requestKey, { kind: "output", raw }));
         const event = sent.find((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"'));
         assert.equal(event.values[10], result.resultDigest);
-        // The request, the ledger's submission (lock, state, switches, audit, event), the bodies.
+        // The request, the ledger's submission (lock, state, switches, audit, event), then one
+        // statement for the result's detail and its bodies.
         assert.deepEqual(kindsOf(sent), ["query", "execute", "query", "query", ...auditKinds, "query", "query"]);
         assert.equal(sent.length, 9 + extra);
         assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
-        const bodies = sent.at(-1);
-        assert.match(bodies.sql, /FROM unnest\(/);
-        assert.deepEqual(bodies.values.slice(0, 4), [REQUEST_ID, PERIOD, CHECK, "audit-row-1"]);
-        assert.deepEqual(bodies.values[5], ["dm_answer", "dm_rationale"]);
-        assert.deepEqual(bodies.values[6], ["Use the model id only.", "The locale is in the key already."]);
-        assert.deepEqual(bodies.values[7], [
+        const written = sent.at(-1);
+        assert.equal(written, detailInsertOf(sent));
+        // The detail and the bodies only while the registry holds this key, undestroyed.
+        assert.match(written.sql, /WHERE EXISTS \(\s+SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k\s+WHERE k\."keyPeriod" = \$::integer AND k\."kind" = 'rotate' AND k\."keyCheck" = \$/);
+        assert.match(written.sql, /AND NOT EXISTS \(\s+SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k\s+WHERE k\."keyPeriod" = \$::integer AND k\."kind" = 'destroy'/);
+        assert.match(written.sql, /FROM unnest\([\s\S]*WHERE EXISTS \(SELECT 1 FROM "detail"\)/);
+        assert.deepEqual(
+          [DETAIL.requestId, DETAIL.resultEventId, DETAIL.resultKind, DETAIL.outputKind, DETAIL.optionId, DETAIL.irreversible, DETAIL.keyPeriod, DETAIL.keyCheck, DETAIL.auditLogId].map(
+            (index) => written.values[index],
+          ),
+          [REQUEST_ID, event.values[0], "proposal", "free_text", null, false, PERIOD, CHECK, "audit-row-1"],
+        );
+        assert.deepEqual(written.values[DETAIL.fields], ["dm_answer", "dm_rationale"]);
+        assert.deepEqual(written.values[DETAIL.texts], ["Use the model id only.", "The locale is in the key already."]);
+        assert.deepEqual(written.values[DETAIL.digests], [
           dmBodyDigest(requestKey, "dm_answer", "Use the model id only."),
           dmBodyDigest(requestKey, "dm_rationale", "The locale is in the key already."),
         ]);
+        assert.deepEqual(result.detail, { outputKind: "free_text", optionId: null, irreversible: false });
       }
     });
   });
@@ -958,6 +1091,54 @@ test("a refusal writes nothing, in the statements up to the read that refused it
     ["assignment of an unknown request", { request: null }, (tx) => assignDecisionMakerRequestWithDigestKey(tx, { requestId: REQUEST_ID, requireLeaseAt: () => assert.fail("no lease"), keyRing: RING }), { recorded: false, reason: "unknown_request" }, 1],
     ["output without the period's key", {}, (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "timeout" }, requireLeaseAt: () => {}, keyRing: new Map() }), { status: "digest_key_unavailable" }, 1],
     ["output for an unknown request", { request: null }, (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "timeout" }, requireLeaseAt: () => {}, keyRing: RING }), { status: "unknown_request" }, 1],
+    // A fake option added to the output and to the list: the list is not the request's.
+    [
+      "output with an option the request does not have",
+      { request: requestRow(TRANSMITTED) },
+      (tx) =>
+        submitDecisionMakerOutput(tx, {
+          requestId: REQUEST_ID,
+          instance: "decision-maker-openai",
+          binding: resultBinding(),
+          output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId: "c", rationale: "r", irreversible: false }), options: [...OPTIONS, { id: "c", label: "Ship it" }] },
+          requireLeaseAt: () => assert.fail("no lease"),
+          keyRing: RING,
+        }),
+      { status: "option_set_mismatch" },
+      1,
+    ],
+    // A real option dropped to force a validation failure: refused the same way.
+    [
+      "output with an option dropped",
+      { request: requestRow(TRANSMITTED) },
+      (tx) =>
+        submitDecisionMakerOutput(tx, {
+          requestId: REQUEST_ID,
+          instance: "decision-maker-openai",
+          binding: resultBinding(),
+          output: { kind: "output", raw: JSON.stringify({ kind: "select", optionId: "b", rationale: "r", irreversible: false }), options: OPTIONS.slice(0, 1) },
+          requireLeaseAt: () => assert.fail("no lease"),
+          keyRing: RING,
+        }),
+      { status: "option_set_mismatch" },
+      1,
+    ],
+    // A relabelled option is another set, too.
+    [
+      "output with an option relabelled",
+      { request: requestRow(TRANSMITTED) },
+      (tx) =>
+        submitDecisionMakerOutput(tx, {
+          requestId: REQUEST_ID,
+          instance: "decision-maker-openai",
+          binding: resultBinding(),
+          output: { kind: "output", raw: "{}", options: [OPTIONS[0], { id: "b", label: "Deploy to production" }] },
+          requireLeaseAt: () => assert.fail("no lease"),
+          keyRing: RING,
+        }),
+      { status: "option_set_mismatch" },
+      1,
+    ],
   ];
   for (const [name, options, run, expected, statements] of cases) {
     const { tx, sent } = recordingTx(options);
@@ -978,22 +1159,26 @@ test("an output's bodies follow its validation, and only an accepted result stor
       requireLeaseAt: () => {},
       keyRing: RING,
     });
-    return { result, sent, bodyInsert: sent.find((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerBody"')) };
+    return { result, sent, written: detailInsertOf(sent) };
   };
-  const out = (value) => ({ kind: "output", raw: typeof value === "string" ? value : JSON.stringify(value), optionIds: ["a", "b"] });
+  const out = (value) => ({ kind: "output", raw: typeof value === "string" ? value : JSON.stringify(value), options: OPTIONS });
 
-  // select stores its rationale; escalate its reason.
+  // A select keeps its option and its irreversible flag with the result, and stores its rationale.
   {
-    const { result, bodyInsert } = await submit({}, out({ kind: "select", optionId: "b", rationale: "Smaller key.", irreversible: false }));
+    const { result, written } = await submit({}, out({ kind: "select", optionId: "b", rationale: "Smaller key.", irreversible: true }));
     assert.equal(result.resultKind, "proposal");
-    assert.deepEqual(bodyInsert.values[5], ["dm_rationale"]);
+    assert.deepEqual(result.detail, { outputKind: "select", optionId: "b", irreversible: true });
+    assert.deepEqual([written.values[DETAIL.outputKind], written.values[DETAIL.optionId], written.values[DETAIL.irreversible]], ["select", "b", true]);
+    assert.deepEqual(written.values[DETAIL.fields], ["dm_rationale"]);
   }
+  // An escalation keeps neither, and stores its reason.
   {
-    const { result, bodyInsert } = await submit({}, out({ kind: "escalate", reason: "The card asks for a person." }));
+    const { result, written } = await submit({}, out({ kind: "escalate", reason: "The card asks for a person." }));
     assert.equal(result.resultKind, "escalate");
-    assert.deepEqual(bodyInsert.values[5], ["dm_escalation_reason"]);
+    assert.deepEqual(result.detail, { outputKind: "escalate", optionId: null, irreversible: null });
+    assert.deepEqual(written.values[DETAIL.fields], ["dm_escalation_reason"]);
   }
-  // A validation failure, a timeout and an unavailable DM store nothing.
+  // A validation failure, a timeout and an unavailable DM have a detail with no output, and no body.
   for (const [output, kind, failure] of [
     [out("not json"), "validation_failure", "schema"],
     [out({ kind: "select", optionId: "z", rationale: "x", irreversible: false }), "validation_failure", "unknown_option"],
@@ -1003,32 +1188,44 @@ test("an output's bodies follow its validation, and only an accepted result stor
     [{ kind: "timeout" }, "timeout", null],
     [{ kind: "unavailable" }, "unavailable", null],
   ]) {
-    const { result, bodyInsert } = await submit({}, output);
+    const { result, written } = await submit({}, output);
     assert.equal(result.resultKind, kind, JSON.stringify(output));
     assert.equal(result.validationFailure, failure, JSON.stringify(output));
-    assert.equal(bodyInsert, undefined, JSON.stringify(output));
+    assert.deepEqual(result.detail, { outputKind: null, optionId: null, irreversible: null }, JSON.stringify(output));
+    assert.equal(written.values[DETAIL.resultKind], kind, JSON.stringify(output));
+    assert.deepEqual(written.values[DETAIL.fields], [], JSON.stringify(output));
     assert.deepEqual(result.storedFields, []);
+  }
+  // A result of any kind digested under a key the registry does not hold (or has destroyed) is
+  // not written: the detail statement inserts nothing, and the caller's transaction rolls back.
+  for (const output of [{ kind: "timeout" }, out({ kind: "select", optionId: "a", rationale: "r", irreversible: false })]) {
+    await assert.rejects(
+      submit({ registryHoldsKey: false }, output),
+      (error) => error instanceof DecisionMakerBodyWriteError && error.code === "digest_key_unavailable",
+      JSON.stringify(output),
+    );
   }
   // A proposal under the kill switch is recorded as a rejection, and no body is stored (section 6's table).
   {
-    const { result, bodyInsert } = await submit(
+    const { result, written } = await submit(
       { switches: [{ scope: "kill_switch", value: "on" }, ...PERMISSIVE_SWITCHES.slice(1)] },
       out({ kind: "select", optionId: "a", rationale: "x", irreversible: false }),
     );
     assert.equal(result.result.status, "rejected");
     assert.equal(result.result.reason, "kill_switch");
-    assert.equal(bodyInsert, undefined);
+    assert.equal(written, undefined);
+    assert.equal(result.detail, null);
   }
   // The same pair again is the ledger's existing result, and stores nothing again.
   {
     const raw = JSON.stringify({ kind: "select", optionId: "a", rationale: "x", irreversible: false });
     const digest = dmResultDigest(dmRequestDigestKey(KEY, REQUEST_ID), { kind: "output", raw });
-    const { result, sent, bodyInsert } = await submit(
+    const { result, sent, written } = await submit(
       { request: requestRow({ ...TRANSMITTED, terminalEventId: "99999999-2222-4333-8444-555555555555", terminalResultKind: "proposal", terminalResultDigest: digest }) },
-      { kind: "output", raw, optionIds: ["a", "b"] },
+      { kind: "output", raw, options: OPTIONS },
     );
     assert.equal(result.result.status, "existing");
-    assert.equal(bodyInsert, undefined);
+    assert.equal(written, undefined);
     assert.equal(sent.length, 3);
   }
 });
@@ -1048,6 +1245,10 @@ test("a malformed input sends nothing at all", async () => {
     (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-gemini", binding: resultBinding(), output: { kind: "timeout" }, requireLeaseAt: () => {}, keyRing: RING }),
     (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "timeout", raw: "x" }, requireLeaseAt: () => {}, keyRing: RING }),
     (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "output", raw: "{}" }, requireLeaseAt: () => {}, keyRing: RING }),
+    (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "output", raw: "{}", optionIds: ["a"] }, requireLeaseAt: () => {}, keyRing: RING }),
+    (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "output", raw: "{}", options: [{ id: "a" }] }, requireLeaseAt: () => {}, keyRing: RING }),
+    (tx) => submitDecisionMakerOutput(tx, { requestId: REQUEST_ID, instance: "decision-maker-openai", binding: resultBinding(), output: { kind: "output", raw: "{}", options: [{ id: "a", label: "x", note: "y" }] }, requireLeaseAt: () => {}, keyRing: RING }),
+    (tx) => readDecisionMakerResultDetail(tx, "not-a-uuid"),
     (tx) => listDecisionMakerPurgeCandidates(tx, { limit: 101 }),
     (tx) => readDecisionMakerDigestKeyPeriod(tx, 1.5),
   ];

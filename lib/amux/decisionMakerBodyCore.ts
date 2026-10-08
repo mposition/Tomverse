@@ -5,6 +5,7 @@ import {
   DM_CARD_TEXT_MAX_BYTES,
   DM_ESCALATION_MAX_BYTES,
   DM_RATIONALE_MAX_BYTES,
+  isDmOptionId,
   type DmOutput,
 } from "./decisionMakerCore.ts";
 import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
@@ -31,9 +32,11 @@ import { detectSecretsInFields } from "../engineeringAgentSecretPatterns.ts";
  * same key. From the period key and the request id the app derives the
  * request key, K_R = HMAC(K_P, "amux-dm-request-key-v1\0" + requestId), and
  * every digest of that request is an HMAC under K_R with its own label: the
- * broker's input payload and snapshot manifest digests (the app hands K_R to
- * the broker at assignment), the result digest (computed by the app from the
- * output it stores), and each body row's digest. The database stores, per key
+ * option set digest of §9's binding (computed by the request store at routing
+ * from the card's options, and again from the options a result is submitted
+ * with), the broker's input payload and snapshot manifest digests (the app
+ * hands K_R to the broker at assignment), the result digest (computed by the
+ * app from the output it stores), and each body row's digest. The database stores, per key
  * period, only a key check value, HMAC(K_P, "amux-dm-digest-key-check-v1"),
  * which lets a writer prove it holds the registered key and reveals nothing
  * about it.
@@ -73,7 +76,11 @@ export type DmRetentionEventKind = (typeof DM_RETENTION_EVENT_KINDS)[number];
 export const DM_HOLD_EVENT_KINDS = ["hold_set", "hold_release"] as const;
 export const DM_RETENTION_ACTOR_KINDS = ["human", "system"] as const;
 
-/** §10: "retentionUntil(닫힘 + 90일)". */
+/**
+ * §10: "retentionUntil(닫힘 + 90일)" -- exactly 90 × 24 hours. The migration
+ * adds `INTERVAL '2160 hours'`, a fixed length, never `'90 days'`, whose
+ * length follows the session time zone's calendar across a DST change.
+ */
 export const DM_RETENTION_AFTER_CLOSE_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** §10: "키는 30일 단위로 바꾸고". */
@@ -153,6 +160,24 @@ export const dmRequestDigestKey = (periodKey: Buffer, requestId: string): Buffer
 /** A body row's digest. The field is in the input, so equal texts in two fields differ. */
 export const dmBodyDigest = (requestKey: Buffer, field: DmBodyField, text: string): string =>
   hmac(requestKey, "amux-dm-body-v1", field, text).toString("hex");
+
+/**
+ * §9's option set digest: the card's options, sorted by id, as a JSON list of
+ * [id, label] pairs, so a label and an id cannot run into each other. The
+ * request store computes it at routing and stores it in the binding; a result
+ * is accepted only with the option list that digests to the same value, so
+ * no option can be added to or dropped from the set a DM output is checked
+ * against.
+ */
+export const dmOptionSetDigest = (
+  requestKey: Buffer,
+  options: ReadonlyArray<{ id: string; label: string }>,
+): string => {
+  const pairs = [...options]
+    .map((option) => [option.id, option.label])
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0));
+  return hmac(requestKey, "amux-dm-option-set-v1", JSON.stringify(pairs)).toString("hex");
+};
 
 /** The broker's input payload digest (§2-4, §10's transmission intent), over the exact bytes sent. */
 export const dmPayloadDigest = (requestKey: Buffer, payload: Uint8Array | string): string =>
@@ -246,6 +271,62 @@ export const dmOutputBodies = (output: DmOutput): Array<{ field: DmBodyField; te
       ];
     case "escalate":
       return [{ field: "dm_escalation_reason", text: output.reason }];
+  }
+};
+
+// ---------------------------------------------------------------------------
+// The terminal result's structured detail
+// ---------------------------------------------------------------------------
+
+/** §6's three kinds of DM output. */
+export const DM_OUTPUT_KINDS = ["select", "free_text", "escalate"] as const;
+export type DmOutputKind = (typeof DM_OUTPUT_KINDS)[number];
+
+/**
+ * What the ledger keeps of a terminal result beside its digest, with no free
+ * text: the output's kind, the option a `select` chose, and the
+ * `irreversible` flag Admin shows before the operator judges (§6). A
+ * proposal is a select or a free text answer and always carries the flag; an
+ * escalation is neither; a validation failure, a timeout and an unavailable DM
+ * have no output. Migration 20261008120000_amux_decision_maker_body_store
+ * holds the same shape as a CHECK, and the option id the S1a grammar.
+ */
+export type DmResultDetail = {
+  outputKind: DmOutputKind | null;
+  optionId: string | null;
+  irreversible: boolean | null;
+};
+
+export const dmResultDetail = (output: DmOutput | null): DmResultDetail => {
+  if (output === null) return { outputKind: null, optionId: null, irreversible: null };
+  switch (output.kind) {
+    case "select":
+      return { outputKind: "select", optionId: output.optionId, irreversible: output.irreversible };
+    case "free_text":
+      return { outputKind: "free_text", optionId: null, irreversible: output.irreversible };
+    case "escalate":
+      return { outputKind: "escalate", optionId: null, irreversible: null };
+  }
+};
+
+/** The CHECK of the detail row: which kinds carry what, for each terminal result kind. */
+export const dmResultDetailShapeValid = (resultKind: string, detail: DmResultDetail): boolean => {
+  const { outputKind, optionId, irreversible } = detail;
+  if (optionId !== null && !isDmOptionId(optionId)) return false;
+  switch (resultKind) {
+    case "proposal":
+      return (
+        (outputKind === "select" && optionId !== null && irreversible !== null) ||
+        (outputKind === "free_text" && optionId === null && irreversible !== null)
+      );
+    case "escalate":
+      return outputKind === "escalate" && optionId === null && irreversible === null;
+    case "validation_failure":
+    case "timeout":
+    case "unavailable":
+      return outputKind === null && optionId === null && irreversible === null;
+    default:
+      return false;
   }
 };
 
