@@ -983,14 +983,17 @@ const directStaleClose = (requestId: string, zone: string) =>
 test("an open request closes as stale 720 hours after its creation, also across a daylight-saving change in the session's time zone", async () => {
   const zone = await zoneWithRecentDstStart();
   // The zone is what the test claims: a 30-day calendar interval across it is 719 hours, so the
-  // previous guard would have closed a request 719.5 hours old.
+  // previous guard would have closed a request 719.5 hours old. One clock reading anchors every
+  // term: clock_timestamp() moves between calls inside a statement, and two readings a few
+  // microseconds apart once made the 719 come back as 718.9999999997.
   const probe = await prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${zone}'`);
     return tx.$queryRaw<Array<{ calendar: boolean; fixed: boolean; hours: number }>>`
       SELECT
-        (clock_timestamp() - INTERVAL '719 hours 30 minutes') + INTERVAL '30 days' <= clock_timestamp() AS "calendar",
-        (clock_timestamp() - INTERVAL '719 hours 30 minutes') + INTERVAL '720 hours' <= clock_timestamp() AS "fixed",
-        (extract(epoch FROM ((clock_timestamp() - INTERVAL '30 days') + INTERVAL '30 days') - (clock_timestamp() - INTERVAL '30 days')) / 3600)::float8 AS "hours"
+        (t."now" - INTERVAL '719 hours 30 minutes') + INTERVAL '30 days' <= t."now" AS "calendar",
+        (t."now" - INTERVAL '719 hours 30 minutes') + INTERVAL '720 hours' <= t."now" AS "fixed",
+        (extract(epoch FROM ((t."now" - INTERVAL '30 days') + INTERVAL '30 days') - (t."now" - INTERVAL '30 days')) / 3600)::float8 AS "hours"
+      FROM (SELECT clock_timestamp() AS "now") t
     `;
   });
   assert.deepEqual(probe, [{ calendar: true, fixed: false, hours: 719 }]);
