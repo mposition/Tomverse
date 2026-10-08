@@ -137,16 +137,22 @@ export function qaReleaseLaneRulesets(input: {
       enforcement: "active",
       conditions: { ref_name: { include: developInclude, exclude: [] } },
       // Zero approvals (item 10, version 4): the rule exists to refuse a direct
-      // push, not to require a review the lane cannot give.
+      // push, not to require a review the lane cannot give. Every parameter
+      // GitHub stores is named, because one left out is filled with GitHub's
+      // default -- and that default for unattributed changes (read back on
+      // 2026-10-08) is an extra approval, which zero approvals rules out.
       rules: [
         {
           type: "pull_request",
           parameters: {
-            required_approving_review_count: 0,
+            allowed_merge_methods: ["merge", "squash", "rebase"],
             dismiss_stale_reviews_on_push: false,
             require_code_owner_review: false,
+            require_extra_approval_for_unattributed_changes: false,
             require_last_push_approval: false,
+            required_approving_review_count: 0,
             required_review_thread_resolution: false,
+            required_reviewers: [],
           },
         },
       ],
@@ -154,4 +160,24 @@ export function qaReleaseLaneRulesets(input: {
       bypass_actors: [adminBypass],
     },
   };
+}
+
+/**
+ * Rules in a form where what was sent and what GitHub stored compare equal
+ * when they mean the same: sorted by type, and the update rule's one
+ * parameter, which GitHub omits when it is false (read back on 2026-10-08),
+ * treated as absent when false. Every other parameter is compared as given.
+ */
+export function qaReleaseComparableRules(rules: readonly { type: string; parameters?: unknown }[] | null | undefined) {
+  return [...(rules ?? [])]
+    .map((rule) => {
+      const parameters = rule.parameters ?? null;
+      if (rule.type === "update") {
+        const fetchAndMerge = parameters && typeof parameters === "object" ? (parameters as Record<string, unknown>).update_allows_fetch_and_merge : undefined;
+        const others = parameters && typeof parameters === "object" ? Object.keys(parameters).filter((key) => key !== "update_allows_fetch_and_merge") : [];
+        if ((fetchAndMerge === undefined || fetchAndMerge === false) && others.length === 0) return { type: "update", parameters: null };
+      }
+      return { type: rule.type, parameters };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type));
 }

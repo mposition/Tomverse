@@ -39,7 +39,7 @@ import {
   qaReleaseAutomationMissing,
   qaReleaseAutomationUpdates,
 } from "../lib/qaReleaseLaneObservationCore.ts";
-import { QA_RELEASE_TEST_RULESET_NAMES, qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
+import { QA_RELEASE_TEST_RULESET_NAMES, qaReleaseComparableRules, qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
 import { qaReleaseInstallationToken } from "../lib/qaReleaseMergeLaneGithub.ts";
 
 const OWNER = "mposition";
@@ -177,7 +177,7 @@ const verifyTestProtection = async (protection) => {
     // Compared as values: key order and the order of rules, refs and bypass
     // entries carry no meaning, so they are normalised first.
     const sortedRefs = (refName) => ({ include: [...(refName?.include ?? [])].sort(), exclude: [...(refName?.exclude ?? [])].sort() });
-    const rulesOf = (rules) => [...(rules ?? [])].map((rule) => ({ type: rule.type, parameters: rule.parameters ?? null })).sort((a, b) => a.type.localeCompare(b.type));
+    const rulesOf = (rules) => qaReleaseComparableRules(rules);
     const bypassOf = (actors) => [...(actors ?? [])].map((a) => [a.actor_id, a.actor_type, a.bypass_mode]).sort((a, b) => String(a).localeCompare(String(b)));
     const same =
       qaReleaseCanonicalJson(sortedRefs(detail.conditions?.ref_name)) === qaReleaseCanonicalJson(sortedRefs(body.conditions.ref_name)) &&
