@@ -73,3 +73,41 @@ test("the test rulesets are the real ones pointed at the test branches only", ()
     assert.throws(() => qaReleaseLaneRulesets({ scope: bad, bypassAppIds: [], laneAppId: LANE_APP }), /test_branches_invalid/);
   }
 });
+
+// What GitHub stored for the test rulesets on 2026-10-08, read back verbatim.
+const STORED_UPDATE_RULES = [{ type: "creation" }, { type: "update" }];
+const STORED_PULL_REQUEST_RULES = [
+  {
+    type: "pull_request",
+    parameters: {
+      allowed_merge_methods: ["merge", "squash", "rebase"],
+      dismiss_stale_reviews_on_push: false,
+      require_code_owner_review: false,
+      require_extra_approval_for_unattributed_changes: true,
+      require_last_push_approval: false,
+      required_approving_review_count: 0,
+      required_review_thread_resolution: false,
+      required_reviewers: [],
+    },
+  },
+];
+
+test("what is sent compares equal to what GitHub stores, and GitHub's extra-approval default is overridden", async () => {
+  const { qaReleaseComparableRules } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  const { qaReleaseCanonicalJson } = await import("../lib/qaReleaseBranchProtectionCore.ts");
+  const { update, develop } = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds: [29110], laneAppId: LANE_APP });
+  const same = (a, b) => qaReleaseCanonicalJson(qaReleaseComparableRules(a)) === qaReleaseCanonicalJson(qaReleaseComparableRules(b));
+
+  // The update rule's false parameter is omitted by GitHub.
+  assert.equal(same(update.rules, STORED_UPDATE_RULES), true);
+  assert.equal(same(update.rules, [{ type: "creation" }, { type: "update", parameters: { update_allows_fetch_and_merge: true } }]), false);
+
+  // Every pull request parameter GitHub stores is named, so its default
+  // (an extra approval for unattributed changes) cannot slip in.
+  assert.deepEqual(Object.keys(develop.rules[0].parameters).sort(), Object.keys(STORED_PULL_REQUEST_RULES[0].parameters).sort());
+  assert.equal(develop.rules[0].parameters.require_extra_approval_for_unattributed_changes, false);
+  assert.equal(same(develop.rules, STORED_PULL_REQUEST_RULES), false);
+  const storedAsSent = structuredClone(STORED_PULL_REQUEST_RULES);
+  storedAsSent[0].parameters.require_extra_approval_for_unattributed_changes = false;
+  assert.equal(same(develop.rules, storedAsSent), true);
+});
