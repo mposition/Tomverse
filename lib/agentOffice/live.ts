@@ -22,6 +22,11 @@
  * decisions wait for a person and its newest run's status -- enums, counts and
  * times only. Patch bodies, reasons and card text stay on its own screen
  * (docs/policy/engineering-agent.md §11).
+ *
+ * Billing and finance shows its app switch, whether today's price-deadline
+ * digest was recorded (the agent's own silence verdict) and when the newest
+ * one was stored -- never the verdict, models or deadlines inside it, which
+ * docs/policy/billing-finance-ops.md §1.4 keeps to its digest tab.
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
@@ -136,11 +141,34 @@ export type AgentOfficeAmuxState =
       workers: { name: string; provider: string; state: AgentOfficeAmuxWorkerState; heartbeatAt: string | null }[];
     };
 
+/** The billing-finance-ops agent's own silence verdict (lib/billingFinanceOpsSilence.ts). */
+export type AgentOfficeFinanceVerdict =
+  | "not_applicable"
+  | "control_unreadable"
+  | "off"
+  | "not_due"
+  | "recorded"
+  | "silent";
+
+export type AgentOfficeFinanceState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      verdict: AgentOfficeFinanceVerdict;
+      /** The switch row's revision, or null when it could not be read. */
+      controlRevision: number | null;
+      /** When the switch was turned on (UTC ISO), or null when it is off or unread. */
+      enabledAt: string | null;
+      /** When the newest digest was stored (UTC ISO), or null if none ever was. */
+      latestDigestAt: string | null;
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
+  finance: AgentOfficeFinanceState;
   engineering: AgentOfficeEngineeringState;
   amux: AgentOfficeAmuxState;
 };
@@ -528,4 +556,64 @@ export function amuxRoomView(
         ? [...workers].sort((a, b) => DRAW_ORDER.indexOf(a.status) - DRAW_ORDER.indexOf(b.status))
         : workers,
   };
+}
+
+/**
+ * The billing and finance room's colour. A day with no digest behind an
+ * enabled switch, and a switch row nobody can read, need a look; a digest
+ * recorded today is done; off, not yet due, or an environment the agent does
+ * not run in is waiting.
+ */
+export function financeTone(state: AgentOfficeFinanceState): DeptStatus {
+  if (state.kind === "unread") return "attention";
+  if (state.verdict === "silent" || state.verdict === "control_unreadable") return "attention";
+  if (state.verdict === "recorded") return "done";
+  return "waiting";
+}
+
+type FinanceCopy = {
+  badges: Record<AgentOfficeFinanceVerdict | "unread", string>;
+  unread: string;
+  recorded: (time: string) => string;
+  silent: (time: string) => string;
+  silentNever: string;
+  notDue: string;
+  off: string;
+  controlUnreadable: string;
+  notApplicable: string;
+  revision: (revision: number) => string;
+  noRevision: string;
+  enabledAt: (time: string) => string;
+  lastDigest: (time: string) => string;
+  readAt: (time: string) => string;
+};
+
+/** The billing and finance room's line and detail, from its state and the console's copy. */
+export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, copy: FinanceCopy): AgentOfficeLiveDept {
+  const read = copy.readAt(utcStamp(readAt));
+  const status = financeTone(state);
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+
+  const last = state.latestDigestAt ? utcStamp(state.latestDigestAt) : null;
+  const line =
+    state.verdict === "recorded" && last
+      ? copy.recorded(last)
+      : state.verdict === "silent"
+        ? last
+          ? copy.silent(last)
+          : copy.silentNever
+        : state.verdict === "not_due"
+          ? copy.notDue
+          : state.verdict === "off"
+            ? copy.off
+            : state.verdict === "control_unreadable"
+              ? copy.controlUnreadable
+              : copy.notApplicable;
+
+  const facts = [state.controlRevision === null ? copy.noRevision : copy.revision(state.controlRevision)];
+  if (state.enabledAt) facts.push(copy.enabledAt(utcStamp(state.enabledAt)));
+  // The recorded and silent lines already carry the newest digest's time.
+  if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
+  facts.push(read);
+  return { status, badge: copy.badges[state.verdict], line, detail: facts.join(" · ") };
 }
