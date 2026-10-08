@@ -5,17 +5,25 @@ export type PromptRefinerPreviewDiff = Readonly<{
   commonSuffix: string;
 }>;
 
+const graphemeSegmenter = new Intl.Segmenter("en", {
+  granularity: "grapheme",
+});
+
+const graphemes = (value: string): string[] =>
+  Array.from(graphemeSegmenter.segment(value), ({ segment }) => segment);
+
 /**
  * Finds one bounded changed region while preserving both inputs byte-for-byte.
- * Array.from iterates Unicode code points, so a highlight boundary cannot split
- * a surrogate pair. The Prompt Refiner schema already bounds each input.
+ * Grapheme segmentation keeps combining marks and joined emoji inside the same
+ * highlight. It does not normalize either string. The Prompt Refiner schema
+ * already bounds each input.
  */
 export function diffPromptRefinerPreview(
   sourcePrompt: string,
   refinedPrompt: string
 ): PromptRefinerPreviewDiff {
-  const source = Array.from(sourcePrompt);
-  const refined = Array.from(refinedPrompt);
+  const source = graphemes(sourcePrompt);
+  const refined = graphemes(refinedPrompt);
   const sharedLength = Math.min(source.length, refined.length);
   let prefixLength = 0;
   while (

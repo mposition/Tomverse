@@ -34,6 +34,30 @@ test("preview diff does not split a changed supplementary Unicode code point", (
   assert.equal(diff.added, "🧪");
 });
 
+test("preview diff highlights a base character and its new combining mark together", () => {
+  const source = "Cafe";
+  const proposal = "Cafe\u0301";
+  const diff = diffPromptRefinerPreview(source, proposal);
+
+  assert.equal(reconstructSource(diff), source);
+  assert.equal(reconstructProposal(diff), proposal);
+  assert.equal(diff.commonPrefix, "Caf");
+  assert.equal(diff.removed, "e");
+  assert.equal(diff.added, "e\u0301");
+  assert.equal(diff.commonSuffix, "");
+});
+
+test("preview diff highlights a whole joined emoji grapheme", () => {
+  const source = "역할: 👩🏽‍💻 완료";
+  const proposal = "역할: 👩🏽‍🔬 완료";
+  const diff = diffPromptRefinerPreview(source, proposal);
+
+  assert.equal(reconstructSource(diff), source);
+  assert.equal(reconstructProposal(diff), proposal);
+  assert.equal(diff.removed, "👩🏽‍💻");
+  assert.equal(diff.added, "👩🏽‍🔬");
+});
+
 test("preview diff handles insertion, deletion and identical text", () => {
   for (const [source, proposal] of [
     ["prefixsuffix", "prefix-new-suffix"],
