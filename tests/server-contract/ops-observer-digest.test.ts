@@ -32,6 +32,7 @@ const world = {
   asserted: 0,
   commitError: null as unknown,
   prismaTimeouts: [] as number[],
+  wrapped: [] as unknown[],
   assertThrows: false,
   kept: null as string | null,
 };
@@ -46,13 +47,6 @@ before(async () => {
       },
     },
   });
-  mock.module(mod("lib/prisma.ts"), {
-    namedExports: {
-      prisma: {
-        $queryRaw: async () => (world.kept ? [{ id: world.kept }] : []),
-      },
-    },
-  });
   mock.module(mod("lib/readinessChecks.ts"), {
     namedExports: { computeReadinessChecks: async () => ({ checks: world.checks, ready: true }) },
   });
@@ -60,6 +54,12 @@ before(async () => {
     namedExports: {
       OpsObserverLateError: TestLateError,
       isBudgetInsufficient: () => false,
+      // The kept-item read runs in the bounded wrapper, under the run's deadline.
+      withOpsObserverTransaction: async (kind: string, deadline: Date, fn: (tx: unknown) => Promise<unknown>) => {
+        world.wrapped.push([kind, deadline instanceof Date]);
+        const result = await fn({ $queryRaw: async () => (world.kept ? [{ id: world.kept }] : []) });
+        return { result, armed: {} };
+      },
       armOpsObserverTransaction: async (_tx: unknown, kind: string, deadline: Date) => {
         world.armed.push([kind, deadline instanceof Date]);
         world.txCalls.push("arm");
@@ -120,6 +120,7 @@ beforeEach(() => {
   world.assertThrows = false;
   world.kept = null;
   world.prismaTimeouts = [];
+  world.wrapped = [];
 });
 
 const body = (overrides: Record<string, unknown> = {}) => ({
@@ -195,6 +196,7 @@ test("a commit the deferred check refuses, a start budget refusal and a late ans
 test("a date already kept is answered with its item, never rebuilt or a conflict", async () => {
   world.kept = ITEM;
   assert.deepEqual(await (await call(DIGEST)).json(), { result: "replayed", itemId: ITEM });
+  assert.deepEqual(world.wrapped, [["state_read", true]]);
   assert.deepEqual(world.submissions, []);
   assert.equal(world.asserted, 1);
   // A concurrent run that kept it first between the read and the write.

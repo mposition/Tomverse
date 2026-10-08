@@ -34,7 +34,12 @@ import type { PrismaClient } from "@prisma/client";
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { prisma } from "@/lib/prisma";
 import { readOpsObserverState, type OpsObserverDailyBudget } from "@/lib/opsObserverStore";
-import { OpsObserverLateError, armOpsObserverTransaction, assertNotLate } from "@/lib/opsObserverTransaction";
+import {
+  OpsObserverLateError,
+  armOpsObserverTransaction,
+  assertNotLate,
+  withOpsObserverTransaction,
+} from "@/lib/opsObserverTransaction";
 import { TRANSACTION_BOUNDS } from "@/scripts/ops-observer/transaction-bounds-core.mjs";
 import { computeReadinessChecks } from "@/lib/readinessChecks";
 import {
@@ -64,12 +69,24 @@ function isDeadlineRefusal(error: unknown): boolean {
   return [cause?.originalCode, cause?.code, e?.code].some((code) => code === "OB012" || code === "OB001");
 }
 
-/** The item already kept for a date, if any (a plain read of the shared table). */
-async function keptItem(client: PrismaClient, idempotencyKey: string): Promise<string | null> {
-  const rows = await client.$queryRaw<{ id: string }[]>`
-    SELECT id::text AS id FROM "AgentDigestItem"
-     WHERE "agentKey" = 'sre-ops' AND "idempotencyKey" = ${idempotencyKey}`;
-  return rows[0]?.id ?? null;
+/**
+ * The item already kept for a date, if any: one read of the shared table in a
+ * bounded state_read transaction, so it holds to the run's deadline and the
+ * statement timeout like every other read of this agent (§6).
+ */
+async function keptItem(client: PrismaClient, idempotencyKey: string, runDeadline: Date): Promise<string | null> {
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx) => {
+      const rows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id::text AS id FROM "AgentDigestItem"
+         WHERE "agentKey" = 'sre-ops' AND "idempotencyKey" = ${idempotencyKey}`;
+      return rows[0]?.id ?? null;
+    },
+    client,
+  );
+  return result;
 }
 
 export async function submitOpsObserverDigest(
@@ -83,7 +100,7 @@ export async function submitOpsObserverDigest(
   }
   const budget: OpsObserverDailyBudget = state.budget;
   // Kept already: answer it as it is, after the same trust and deadline checks.
-  const existing = await keptItem(client, runId);
+  const existing = await keptItem(client, runId, input.runDeadline);
   if (existing) {
     await assertNotLate(input.runDeadline, client);
     return { result: "replayed", itemId: existing };
