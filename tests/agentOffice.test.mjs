@@ -1294,13 +1294,18 @@ test("the office opens on the real view: everyone at their desk, still, and ever
     const expected = live[id]?.status ?? (AGENT_OFFICE_BLOCKED_DEPTS.has(id) ? "blocked" : "waiting");
     assert.equal(office.deptStatus[id], expected, id);
   }
-  // Nobody wanders off or speaks a line of their own.
-  let spoke = false;
+  // Nobody wanders off or speaks a line of their own; a live room's lead
+  // keeps its record's line on screen, and that is all anyone says.
+  const said = new Set();
   for (let i = 0; i < 4000; i += 1) {
     office.tick(0.05);
-    if (office.agents.some((agent) => agent.speech)) spoke = true;
+    for (const agent of office.agents) if (agent.speech) said.add(`${agent.id}: ${agent.speech}`);
   }
-  assert.equal(spoke, false, "someone spoke on the real view");
+  assert.deepEqual(
+    [...said].sort(),
+    ["qa-lead: Digest silent", "research-lead: Latest run recorded"],
+    "someone said something other than a record line on the real view"
+  );
   for (const agent of office.agents) assert.equal(`${agent.x},${agent.y}`, homes.get(agent.id), agent.id);
 });
 
@@ -1314,8 +1319,11 @@ test("on the real view the console answers questions and declines orders that wo
     office.command(order);
     assert.equal(office.chat.at(-1).text, s.demoOnly, order);
   }
+  // An order phrased as a question is not an order: it moves nobody.
+  for (const question of ["Call a meeting?", "회의 소집?", "Brief me?", "브리핑?"]) office.command(question);
   for (let i = 0; i < 400; i += 1) office.tick(0.05);
   assert.deepEqual(office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`), before);
+  assert.equal(office.meetingTitle, null);
   // Questions are still answered, from the real view.
   office.command("Status?");
   const status = office.chat.at(-1).text;
@@ -1325,6 +1333,19 @@ test("on the real view the console answers questions and declines orders that wo
   assert.doesNotMatch(office.chat.at(-1).text, new RegExp(s.delayNotStarted));
   office.command("What is engineering doing?");
   assert.match(office.chat.at(-1).text, /real record/);
+  office.command("What is marketing doing?");
+  // ...and only in the console: nobody stirs, and the only bubble is the
+  // live room's record line.
+  for (let i = 0; i < 40; i += 1) office.tick(0.05);
+  for (const agent of office.agents) {
+    const expected = agent.id === "engineering-lead" ? "Run in progress · started 10-08 12:00 UTC" : null;
+    assert.equal(agent.speech, expected, `${agent.id} said something on the real view`);
+    if (agent.rank !== "operator") assert.equal(agent.anim, "sit", `${agent.id} stirred on the real view`);
+  }
+  // A fresh reading changes what the lead says.
+  office.setLive({ engineering: liveLine("2 decisions waiting for you", "attention") });
+  office.tick(0.05);
+  assert.equal(office.agentById.get("engineering-lead").speech, "2 decisions waiting for you");
 });
 
 test("the demo plays on request, leaves the live rooms seated, and ends back on the real view", () => {

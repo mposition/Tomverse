@@ -948,18 +948,22 @@ export class AgentOffice {
       this.pushChat("staff", this.narratorName(), this.copy.sim.demoOnly);
       return;
     }
-    if (ORDER.focusOff.test(text)) return this.setFocusMode(false);
-    if (ORDER.focusOn.test(text)) return this.setFocusMode(true);
-    if (ORDER.recall.test(text)) return this.recallAll();
-    if (ORDER.boost.test(text)) return this.boost();
-    if (ORDER.convene.test(text)) return this.convene();
-    if (ORDER.brief.test(text)) return this.briefNow();
-    if (ORDER.approve.test(text) && !ORDER.question.test(text) && this.approvalPending) {
-      this.approve();
-      this.pushChat("staff", this.narratorName(), this.copy.sim.approvedByOrder);
-      return;
+    // Orders run only in the demo. On the real view a question that names one
+    // ("a meeting?") goes on to the questions below and moves nobody.
+    if (this.demo) {
+      if (ORDER.focusOff.test(text)) return this.setFocusMode(false);
+      if (ORDER.focusOn.test(text)) return this.setFocusMode(true);
+      if (ORDER.recall.test(text)) return this.recallAll();
+      if (ORDER.boost.test(text)) return this.boost();
+      if (ORDER.convene.test(text)) return this.convene();
+      if (ORDER.brief.test(text)) return this.briefNow();
+      if (ORDER.approve.test(text) && !ORDER.question.test(text) && this.approvalPending) {
+        this.approve();
+        this.pushChat("staff", this.narratorName(), this.copy.sim.approvedByOrder);
+        return;
+      }
+      if (ORDER.cheer.test(text)) return this.cheer();
     }
-    if (ORDER.cheer.test(text)) return this.cheer();
 
     // ③ Questions
     if (ORDER.delay.test(text)) return this.reportDelay();
@@ -1101,8 +1105,11 @@ export class AgentOffice {
     if (ORDER.late.test(question) && status === "waiting" && !live) lines.push(s.deptNotLate);
 
     this.pushChat("staff", s.speaker(lead.name, this.roomName(deptId)), lines.join("\n"));
-    this.say(lead, live ? live.line : s.reportHere, 3);
-    lead.anim = "talk";
+    // On the real view the answer is the console's alone: nobody speaks or stirs.
+    if (this.demo) {
+      this.say(lead, live ? live.line : s.reportHere, 3);
+      lead.anim = "talk";
+    }
     this.spotlightRoom(deptId, 8);
     this.pushLog("🎤", s.deptCheckLog(this.roomName(deptId)), "yellow");
   }
@@ -1263,6 +1270,7 @@ export class AgentOffice {
   }
 
   private speakNarrator(text: string) {
+    if (!this.demo) return;
     const narrator = this.agentById.get(AGENT_OFFICE_NARRATOR_ID);
     if (narrator && narrator.status !== "offDuty") this.say(narrator, text, 3);
   }
@@ -1301,7 +1309,22 @@ export class AgentOffice {
     this.live = live;
     for (const [deptId, room] of Object.entries(live)) {
       if (deptId in this.deptStatus) this.deptStatus[deptId] = room.status;
+      // A fresh reading replaces what the room's lead is saying.
+      const lead = this.agentById.get(this.deptLead[deptId]?.id ?? "");
+      if (lead) this.showRecordLine(lead, room.line);
     }
+  }
+
+  /** The record line a live room's lead keeps on screen, or null for anyone else. */
+  private recordLine(agent: Agent): string | null {
+    const live = this.live[agent.deptId];
+    return live && agent.rank === "lead" ? live.line : null;
+  }
+
+  private showRecordLine(agent: Agent, line: string) {
+    agent.speech = line;
+    agent.speechKind = "talk";
+    agent.speechFor = Number.POSITIVE_INFINITY;
   }
 
   /** The live reading for a room, or null for a demo room. */
@@ -1379,6 +1402,10 @@ export class AgentOffice {
       agent.speechFor -= dt;
       if (agent.speechFor <= 0) agent.speech = null;
     }
+    // A live room's lead keeps its record's line on screen, demo or not: it is
+    // the room's real state in words, not a scripted line.
+    const recordLine = this.recordLine(agent);
+    if (recordLine !== null && agent.speech === null) this.showRecordLine(agent, recordLine);
 
     if (!agent.current) {
       const next = agent.queue.shift();
