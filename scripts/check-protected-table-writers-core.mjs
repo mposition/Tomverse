@@ -1203,9 +1203,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "d04e571586ba42754dac9be8ffe8da55ece5ba5daea4517a2fa9b129aa0a517b",
+    sha256: "5445379b7dca4746285caae806376aab0f74d9be6f278a10e881f9fd7a70b70b",
     count: 1,
     reason:
+      "Pre-deploy migration-history reconciliation reads the schema and _prisma_migrations before Prisma resolves the baseline. Catalogue probes use fixed SQL in read-only transactions with object names bound as parameters; function replacement compares an exact prior body digest. The only write is delegated to prisma migrate resolve.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
