@@ -1290,16 +1290,46 @@ pub(crate) fn codex_pane_background_working(captured: &str) -> bool {
 /// and its idle prompt read as the limit again, so the turn never ended.
 ///
 /// `banner_end` is the match end; the rest of that line still belongs to the
-/// banner. The composer is the LAST prompt row and is input, not transcript,
-/// so text typed but not sent there does not count.
+/// banner. Rows are read RAW: a transcript entry starts at the margin, while
+/// a multi-line message continues on indented rows, so an indented `›` is
+/// never an entry.
+///
+/// The composer is input, not transcript, so text typed there but not sent
+/// does not count. It is found by structure, never as "the last `›` row":
+/// the margin `›` row above the footer (the model bar, optionally followed by
+/// the shortcuts row) with nothing between but blank or indented rows (its
+/// own continuation lines). Older builds paint no idle composer row, so a
+/// `›` row followed by a margin `•` row is a submitted message and counts.
+/// With no identifiable footer only a `•` row counts, since a lone `›` row
+/// could still be the composer.
 fn codex_banner_superseded(tail: &str, banner_end: usize) -> bool {
     let after = tail[banner_end..].split_once('\n').map_or("", |(_, rest)| rest);
-    let lines = nonempty_trimmed(after);
-    let transcript = match lines.iter().rposition(|l| l.starts_with('›')) {
-        Some(composer) => &lines[..composer],
-        None => &lines[..],
+    let lines: Vec<&str> = after.lines().collect();
+    let nonblank: Vec<usize> = (0..lines.len()).filter(|&i| !lines[i].trim().is_empty()).collect();
+    let footer = match nonblank.as_slice() {
+        [.., bar] if codex_model_bar(lines[*bar].trim()) => Some(*bar),
+        [.., bar, keys]
+            if lines[*keys].trim() == "\u{2190} for agents \u{b7} ? for shortcuts"
+                && codex_model_bar(lines[*bar].trim()) =>
+        {
+            Some(*bar)
+        }
+        _ => None,
     };
-    transcript.iter().any(|l| l.starts_with('›') || l.starts_with('•'))
+    let Some(footer) = footer else {
+        return lines.iter().any(|l| l.starts_with('•'));
+    };
+    let composer = lines[..footer]
+        .iter()
+        .rposition(|l| l.starts_with('›'))
+        .filter(|&i| {
+            lines[i + 1..footer]
+                .iter()
+                .all(|l| l.trim().is_empty() || l.starts_with(char::is_whitespace))
+        });
+    lines[..composer.unwrap_or(footer)]
+        .iter()
+        .any(|l| l.starts_with('›') || l.starts_with('•'))
 }
 
 fn scan_codex(clean: &str, provider: &ProviderId) -> Vec<WorkerEvent> {
@@ -2016,18 +2046,36 @@ gemini-2.5-pro";
             let ev = adapter(provider).scan(FX_CODEX_LIMIT_AT_PROMPT);
             assert_eq!(limits(&ev).len(), 1, "{provider}: {ev:?}");
             assert!(waiting_reasons(&ev).is_empty(), "{provider}: the composer under a live banner is chrome: {ev:?}");
-            // Text typed into the composer but not sent is input, not a resumed turn.
-            let typed = FX_CODEX_LIMIT_AT_PROMPT.replace("› Ask Codex to do anything", "› continue please");
-            assert_eq!(limits(&adapter(provider).scan(&typed)).len(), 1, "{provider}: {typed}");
+            // Text typed into the composer but not sent is input, not a resumed
+            // turn: one line, or several with an indented `›` among them.
+            for typed in ["› continue please", "› Explain these markers:\n  › example\n  • and this"] {
+                let fx = FX_CODEX_LIMIT_AT_PROMPT.replace("› Ask Codex to do anything", typed);
+                assert_eq!(limits(&adapter(provider).scan(&fx)).len(), 1, "{provider}: {fx}");
+            }
+            // The same with the newer shortcuts row under the model bar.
+            let keys = format!("{FX_CODEX_LIMIT_AT_PROMPT}\n  \u{2190} for agents \u{b7} ? for shortcuts");
+            assert_eq!(limits(&adapter(provider).scan(&keys)).len(), 1, "{provider}: {keys}");
         }
     }
 
     #[test]
     fn codex_limit_banner_above_a_resumed_turn_is_history() {
+        // Older builds paint no idle composer row: the submitted message and
+        // its output sit directly above the model bar.
+        let older = "\
+■ You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.
+
+› continue
+
+• Done: the parser change is pushed.
+
+  gpt-5.5 xhigh · ~/Dev/amux";
         for provider in ["codex", "ollama"] {
-            let ev = adapter(provider).scan(FX_CODEX_IDLE_AFTER_RESUMED_LIMIT);
-            assert!(limits(&ev).is_empty(), "{provider}: the banner predates the resumed turn: {ev:?}");
-            assert_eq!(waiting_reasons(&ev), vec!["idle_prompt"], "{provider}: {ev:?}");
+            for fx in [FX_CODEX_IDLE_AFTER_RESUMED_LIMIT, older] {
+                let ev = adapter(provider).scan(fx);
+                assert!(limits(&ev).is_empty(), "{provider}: the banner predates the resumed turn: {ev:?}\n{fx}");
+                assert_eq!(waiting_reasons(&ev), vec!["idle_prompt"], "{provider}: {ev:?}\n{fx}");
+            }
         }
     }
 
