@@ -464,12 +464,16 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-08, the S1d review: the same record gains a note for the result
 // detail's back relation, which moves those seven accesses again. Count 228
 // and the position-free inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker judgment and delivery (S1e): the same record
+// gains a note for the judgment's and the delivery event's back relations,
+// which moves those seven accesses again. Count 228 and the position-free
+// inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "7433425ce711b15157535f28bb5290cb",
-  "e194f78edafabb839766a42389b449a8",
+  "af0ab859351cf7b5242acadf6570c35c",
+  "f7dbafe839c28c3a1d285bd3e5455c7f",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

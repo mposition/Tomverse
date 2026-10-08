@@ -1426,6 +1426,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_banner_left_in_scrollback_does_not_hold_the_resumed_turn_open() {
+        // A short turn resumed after a limit: the banner is still on screen
+        // above it, but the idle prompt below it ends the turn.
+        const RESUMED_WORKING: &str = "\u{25a0} You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.\n\n\u{203a} [10:12 AM] continue\n\n\u{2022} Working (3s \u{2022} esc to interrupt)\n\u{203a} Ask Codex to do anything\n  gpt-5.5 xhigh \u{b7} ~/Dev/amux";
+        const RESUMED_IDLE: &str = "\u{25a0} You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.\n\n\u{203a} [10:12 AM] continue\n\n\u{2022} Done: the parser change is pushed.\n\n\u{2022} Worked for 41s\n\n\u{203a} Ask Codex to do anything\n\n  gpt-5.5 xhigh \u{b7} ~/Dev/amux";
+        for (n, provider) in [(51, "codex"), (52, "ollama")] {
+            let lane = Lane::new(n, provider, WorkerCommand::Continue);
+            lane.pass(CODEX_WORKING).await;
+            let turn = lane.assert_one_open_turn(provider);
+            lane.pass(CODEX_LIMIT).await;
+            assert!(matches!(lane.state(), WorkerState::RateLimited { .. }), "{provider}");
+            lane.pass(RESUMED_WORKING).await;
+            assert_eq!(active_on(&lane.state()), Some(turn.clone()), "{provider}");
+            lane.pass(RESUMED_IDLE).await;
+            let turns = lane.turns();
+            assert_eq!(turns.len(), 1, "{provider}: {turns:?}");
+            assert!(turns[0].1.is_some(), "{provider}: the banner must not hold the turn open: {turns:?}");
+            assert_eq!(turns[0].2.as_deref(), Some("terminal idle prompt"), "{provider}");
+            assert_eq!(lane.command(), CommandState::Confirmed, "{provider}");
+            assert!(matches!(lane.state(), WorkerState::Idle { .. }), "{provider}");
+        }
+    }
+
+    #[tokio::test]
     async fn idle_after_a_limit_with_no_resumed_work_confirms_and_says_so() {
         for (n, provider) in [(44, "codex"), (45, "ollama")] {
             let lane = Lane::new(n, provider, WorkerCommand::Continue);

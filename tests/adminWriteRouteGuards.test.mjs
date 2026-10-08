@@ -443,6 +443,48 @@ const reachesCanonicalOneShotStageAudit = (route) =>
   oneShotStageAuditWriter.includes("tx: input.tx,") &&
   performs(oneShotStageAuditWriter, "writeAdminAuditLog");
 
+/** This owner-only POST carries custody pins in its body but does not mutate
+ * product state. Keep the exception tied to the read-only transaction and a
+ * closed import surface, so adding a writer cannot inherit it silently. */
+const isReadOnlyOneShotV5StagePreflight = (route) => {
+  if (route.name !== "prompt-refiner/vnext-v5-stage-preflight/route.ts") return false;
+  const imports = [...route.source.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+    .map((match) => match[1]).sort();
+  const expectedImports = [
+    "adminAuditIntegrityCore", "adminAuth", "adminReauthentication",
+    "apiSecurity", "auth", "promptRefinerQualityEvaluationVnextOneShotPriceReadback",
+    "promptRefinerVnextOneShotStageAdmission",
+    "promptRefinerVnextOneShotV5PredecessorReadback",
+    "promptRefinerVnextOneShotV5Recovery", "readOnlySnapshotTransaction",
+    "requestOrigin",
+  ].sort();
+  const reader = withoutComments(readFileSync(join(LIB_DIR,
+    "promptRefinerVnextOneShotV5PredecessorReadback.ts"), "utf8"));
+  const transaction = withoutComments(readFileSync(join(LIB_DIR,
+    "readOnlySnapshotTransaction.ts"), "utf8"));
+  const body = `${route.source}\n${reader}`;
+  return JSON.stringify(imports) === JSON.stringify(expectedImports) &&
+    !route.reaches("writeAdminAuditLog") &&
+    route.source.includes("readOnlySnapshotTransaction(async (tx) => {") &&
+    transaction.includes("await tx.$executeRaw`SET TRANSACTION READ ONLY`;") &&
+    !/\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/.test(body) &&
+    !/\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(body) &&
+    !/\b(?:fetch|require|import)\s*\(/.test(body);
+};
+
+test("v5 stage preflight remains a read-only audit exception", () => {
+  const route = routes.find((candidate) =>
+    candidate.name === "prompt-refiner/vnext-v5-stage-preflight/route.ts");
+  assert.ok(route);
+  assert.equal(isReadOnlyOneShotV5StagePreflight(route), true);
+  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
+    source: `${route.source}\nawait tx.promptRefinerVnextOneShotStage.create({});`,
+  }), false);
+  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
+    source: `${route.source}\nimport { createPromptRefinerVnextOneShotV5Stage } from "@/lib/promptRefinerVnextOneShotV5StageWriter";`,
+  }), false);
+});
+
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
     routes.length >= 60,
@@ -500,7 +542,8 @@ test("every admin write route writes an audit entry", () => {
       !reachesCanonicalAmuxReviewAudit(route) &&
       !isDarkReadOnlyAmuxSourceScopePreview(route) &&
       !isReadOnlyAmuxResolutionPreview(route) &&
-      !reachesCanonicalOneShotStageAudit(route))
+      !reachesCanonicalOneShotStageAudit(route) &&
+      !isReadOnlyOneShotV5StagePreflight(route))
     .map((route) => route.name);
 
   assert.deepEqual(

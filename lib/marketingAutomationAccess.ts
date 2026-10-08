@@ -563,9 +563,14 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * 2026-10-08, the S1d review: the body store adds the result detail's back
  * relation to `AdminAuditLog` in the watched schema. Nothing else changes; the
  * bytes moved, so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker judgment and delivery records (S1e, per
+ * docs/policy/amux-decision-maker.md §10) add the judgment and delivery event
+ * models and their back relations to `AdminAuditLog`, the request and the
+ * request event in the watched schema. No actor, descriptor, webhook writer or
+ * admission decision changes; the bytes moved, so evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "8d9faae2d39f9a92fc61a5a9daba9253ab6acdebfec4591bffe88326de064288";
+  "3be3c4a626b9937a6af26001f9e7439055028e525615844039c54ab888b2fe7f";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

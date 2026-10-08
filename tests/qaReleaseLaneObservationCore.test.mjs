@@ -57,6 +57,17 @@ test("all as expected passes; any one different, missing, duplicated or unanswer
   assert.equal(judgeQaReleaseObservations(noAnswer).passed, false);
 });
 
+test("a merge refused for conflicts is unknown, whatever was expected", () => {
+  const CONFLICT = "Pull Request has merge conflicts";
+  for (const id of ["app_merge_unreviewed_main", "app_merge_reviewed_main", "app_merge_other_base", "operator_merge_main"]) {
+    // A message naming a rule as well still does not count.
+    const conflicted = asExpected().map((r) => (r.id === id ? { ...r, status: 405, message: `${CONFLICT}. ${RULE}` } : r));
+    const verdict = judgeQaReleaseObservations(conflicted);
+    assert.equal(verdict.passed, false, id);
+    assert.equal(verdict.verdicts.find((v) => v.id === id).observed, "unknown", id);
+  }
+});
+
 test("the reviewed pull request must be refused by a rule, not by classic protection", () => {
   const classic = asExpected().map((r) =>
     r.id === "app_merge_reviewed_main" ? { ...r, status: 405, message: "Required status check \"x\" is expected." } : r,

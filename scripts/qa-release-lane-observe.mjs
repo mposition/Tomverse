@@ -261,13 +261,15 @@ async function setup() {
   const mainHead = await headSha("main");
   if (!SHA.test(mainHead ?? "")) fail("could not read main's head.");
 
-  // Item 9 needs a commit whose required checks passed, one fast-forward
-  // ahead of the develop mirror. Not develop's own head: its required checks
-  // run on pull requests, not on the merge commit develop is pushed to. So
-  // the head of a recently merged develop pull request, each required check
-  // passed from the App it names, with the mirror at that commit's parent.
-  const required = protection.develop.classic.present ? protection.develop.classic.requiredChecks ?? [] : [];
-  const passed = async (sha) => {
+  // Each mirror needs a head whose required checks passed, one fast-forward
+  // ahead of the mirror: then a pull request from it merges cleanly and
+  // meets the classic checks, and only the rules can refuse it. Not the real
+  // branch's own head: required checks run on pull requests, not on the
+  // merge commit the branch is pushed to. So the head of a recently merged
+  // pull request into that branch, each required check passed from the App
+  // it names, with the mirror at that commit's parent. A develop commit
+  // against main conflicts once the two diverge (2026-10-08).
+  const passed = async (sha, required) => {
     for (const check of required) {
       const runs = await operator("GET", `/commits/${sha}/check-runs?check_name=${encodeURIComponent(check.context)}&per_page=100`);
       const ok = runs.check_runs.some((run) => run.conclusion === "success" && (check.appId === null || run.app?.id === check.appId));
@@ -275,27 +277,30 @@ async function setup() {
     }
     return true;
   };
-  let green = null;
-  const merged = await operator("GET", "/pulls?state=closed&base=develop&sort=updated&direction=desc&per_page=30");
-  for (const pull of merged) {
-    if (!pull.merged_at || !SHA.test(pull.head?.sha ?? "")) continue;
-    if (!(await passed(pull.head.sha))) continue;
-    const parent = (await operator("GET", `/commits/${pull.head.sha}`)).parents?.[0]?.sha;
-    if (SHA.test(parent ?? "")) {
-      green = { sha: pull.head.sha, parent, pullRequest: pull.number };
-      break;
+  const greenHead = async (branch) => {
+    const required = protection[branch].classic.present ? protection[branch].classic.requiredChecks ?? [] : [];
+    const merged = await operator("GET", `/pulls?state=closed&base=${branch}&sort=updated&direction=desc&per_page=30`);
+    for (const pull of merged) {
+      if (!pull.merged_at || !SHA.test(pull.head?.sha ?? "")) continue;
+      if (!(await passed(pull.head.sha, required))) continue;
+      const parent = (await operator("GET", `/commits/${pull.head.sha}`)).parents?.[0]?.sha;
+      if (SHA.test(parent ?? "")) return { sha: pull.head.sha, parent, pullRequest: pull.number };
     }
-  }
-  if (!green) fail("no recently merged develop pull request has a head commit with every required check passed; nothing was changed.");
+    fail(`no recently merged ${branch} pull request has a head commit with every required check passed; nothing was changed.`);
+  };
+  const green = await greenHead("develop");
+  const mainGreen = await greenHead("main");
   const developHead = green.sha;
   const developParent = green.parent;
 
   const create = (name, sha) => operator("POST", "/git/refs", { ref: `refs/heads/${name}`, sha });
-  await create(T.mainMirror, mainHead);
-  await create(T.otherBase, mainHead);
+  await create(T.mainMirror, mainGreen.parent);
+  await create(T.otherBase, mainGreen.parent);
   await create(T.developMirror, developParent);
   await create(T.head, developHead);
   await create(T.headReviewed, developHead);
+  await create(T.mainHead, mainGreen.sha);
+  await create(T.mainHeadReviewed, mainGreen.sha);
 
   // Item 10: the mirrors copy the real branches' classic protection.
   if (bodies.main) await operator("PUT", `/branches/${encodeURIComponent(T.mainMirror)}/protection`, bodies.main);
@@ -307,7 +312,22 @@ async function setup() {
   // Read back: a copy that GitHub stored differently is not a copy.
   const problems = await verifyTestProtection(protection);
   if (problems.length > 0) fail(`the test protection is not an exact copy (${problems.join("; ")}); run teardown.`);
-  console.log(JSON.stringify({ setup: "done", mainHead, greenCommit: developHead, greenCommitPullRequest: green.pullRequest, developMirrorAt: developParent }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        setup: "done",
+        mainHead,
+        greenCommit: developHead,
+        greenCommitPullRequest: green.pullRequest,
+        developMirrorAt: developParent,
+        mainGreenCommit: mainGreen.sha,
+        mainGreenCommitPullRequest: mainGreen.pullRequest,
+        mainMirrorAt: mainGreen.parent,
+      },
+      null,
+      2,
+    ),
+  );
   console.log("Next: make each bypass App update one of its branches (docs/ops/qa-release-merge-lane-s-m1.md 2-2), then automation-status.");
 }
 
@@ -347,7 +367,7 @@ async function observe() {
     Date.now,
   )();
   const developHead = await headSha(T.head);
-  if (!developHead) fail("the test branches are missing; run setup first.");
+  if (!developHead || !(await headSha(T.mainHead)) || !(await headSha(T.mainHeadReviewed))) fail("the test branches are missing; run teardown and setup again.");
 
   const results = [];
   const note = (id, answer) =>
@@ -368,16 +388,16 @@ async function observe() {
   const moveRef = (token, branch, sha) => call(token, "PATCH", `/git/refs/heads/${branch}`, { sha, force: false });
 
   // 8.7: the main mirror and another base.
-  const unreviewed = await openPull(operatorToken, T.head, T.mainMirror, "qa-lane-test: unreviewed");
+  const unreviewed = await openPull(operatorToken, T.mainHead, T.mainMirror, "qa-lane-test: unreviewed");
   note("app_merge_unreviewed_main", await merge(appToken, unreviewed));
 
-  const reviewed = await openPull(appToken, T.headReviewed, T.mainMirror, "qa-lane-test: reviewed");
+  const reviewed = await openPull(appToken, T.mainHeadReviewed, T.mainMirror, "qa-lane-test: reviewed");
   await operator("POST", `/pulls/${reviewed.number}/reviews`, { event: "APPROVE", body: "QA-release merge lane S-M0 observation." });
   note("app_merge_reviewed_main", await merge(appToken, reviewed));
 
   note("app_push_main", await moveRef(appToken, T.mainMirror, await commitOnTop(appToken, T.mainMirror)));
 
-  const otherBase = await openPull(appToken, T.head, T.otherBase, "qa-lane-test: other base");
+  const otherBase = await openPull(appToken, T.mainHead, T.otherBase, "qa-lane-test: other base");
   note("app_merge_other_base", await merge(appToken, otherBase));
 
   note("operator_merge_main", await merge(operatorToken, unreviewed));

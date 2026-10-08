@@ -114,6 +114,12 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // It adds no commit deadline of its own; the closing trigger it adds to the
   // request event table fires on closing events, which have none.
   "20261008120000_amux_decision_maker_body_store",
+  // S1e: the stale close counted in hours, and a person's judgment and the
+  // delivery records. Neither adds a commit deadline: a judgment's closing
+  // event and a delivery event are not among the kinds the ledger's deferred
+  // check covers.
+  "20261008130000_amux_decision_maker_stale_close_hours",
+  "20261008130100_amux_decision_maker_judgment_delivery",
   // AMUX intake v13: owner-only terminal accounting for a claimed analysis.
   "20261008130000_amux_v4_claim_owner_resolution",
 ]);
