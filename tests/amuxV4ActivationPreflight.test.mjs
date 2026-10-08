@@ -16,6 +16,12 @@ const keys = () => ({
 
 test("content count coverage matches every v4/v22 ciphertext field", () => {
   const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
+  const actualColumns = [...schema.matchAll(/^model (\w+) \{([\s\S]*?)^\}/gm)]
+    .filter(([, name]) => /^(AmuxIdea|AmuxPortfolioNode$|AmuxWorkItem$|AmuxV22)/.test(name))
+    .flatMap(([, name, model]) => [...model.matchAll(/^\s+(\w*[Cc]iphertext)\s+Bytes\?/gm)]
+      .map(([, field]) => `${name}.${field}`));
+  assert.deepEqual(CONTENT_COLUMNS.map(([name, field]) => `${name}.${field}`).sort(),
+    actualColumns.sort(), "new v4/v22 encrypted tables must join the preflight inventory");
   for (const table of new Set(CONTENT_COLUMNS.map(([name]) => name))) {
     const model = schema.match(new RegExp(`model ${table} \\{([\\s\\S]*?)\\n\\}`))?.[1];
     assert.ok(model);
