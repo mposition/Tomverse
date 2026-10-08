@@ -110,7 +110,8 @@ The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record while the route table has that
 page and section, and a team without one -- including on a branch that does
 not carry its screen yet -- is drawn as waiting on a link instead of being
-given a status; a linked team
+given a status (the teams the demo day gives work to have screens on every
+branch, and a test holds that); a linked team
 the demo day has no script for stays waiting rather than being reported as
 done. A LIVE room reads that team's operating state on the server and the
 demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
@@ -142,8 +143,8 @@ the ones that need a look are drawn first and the room says in words how many
 are not drawn, as it does for a failed read or a missing catalog), each worker
 drawn seated with its real state -- the operator's exclusions first, then its
 runtime row read the way AMUX reads it when it hands out work (live while the
-lease has not run out and the status is idle or busy) -- and a link to the
-AMUX execution page. Workers are not demo staff: they never walk, meet or
+lease has not run out and the status is idle or busy) -- and, while the
+route table has it, a link to the AMUX execution page. Workers are not demo staff: they never walk, meet or
 speak a demo line, and nothing about the cards they work on is read.
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state

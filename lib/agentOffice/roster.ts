@@ -102,6 +102,11 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
   { id: "digest", icon: "📋", policy: null, recordHref: "/admin/agent-digests" },
 ];
 
+/** Each team's declared record link, before the route table is consulted. */
+export const AGENT_OFFICE_DECLARED_RECORD_HREFS: Readonly<Record<string, string | null>> = Object.fromEntries(
+  DECLARED_DEPTS.map((dept) => [dept.id, dept.recordHref])
+);
+
 export const AGENT_OFFICE_DEPTS: readonly AgentOfficeDeptMeta[] = DECLARED_DEPTS.map((dept) => ({
   ...dept,
   recordHref: linkIfOnConsole(dept.recordHref),
