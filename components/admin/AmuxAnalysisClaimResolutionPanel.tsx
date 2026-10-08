@@ -130,6 +130,9 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
       <div><dt className="inline font-semibold">{m.status}: </dt><dd className="inline">{readback.holdStatus}</dd></div>
       <div><dt className="inline font-semibold">{m.claim}: </dt><dd className="inline font-mono break-all">{readback.claimRequestId}</dd></div>
       <div><dt className="inline font-semibold">{m.payload}: </dt><dd className="inline font-mono break-all">{readback.payloadDigest}</dd></div>
+      <div><dt className="inline font-semibold">{m.reservation}: </dt><dd className="inline font-mono">{readback.reservedMicroUsd}</dd></div>
+      {readback.resultRequestId ? <div><dt className="inline font-semibold">{m.result}: </dt><dd className="inline font-mono break-all">{readback.resultRequestId}</dd></div> : null}
+      {readback.resultDigest ? <div><dt className="inline font-semibold">{m.resultDigest}: </dt><dd className="inline font-mono break-all">{readback.resultDigest}</dd></div> : null}
       <div><dt className="inline font-semibold">{m.readback}: </dt><dd className="inline font-mono break-all">{readback.readbackDigest}</dd></div>
     </dl> : null}
     {readback && !unknown ? <>
