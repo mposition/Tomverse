@@ -138,19 +138,22 @@ test("a workflow is listed when its token can write contents, or it holds anothe
   const otherKey = file("otherkey.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets.SECOND_PAT }}");
   const inherit = file("inherit.yml", { permissions: { contents: "read" }, jobs: { a: { uses: "./x.yml" } } }, "secrets: inherit");
   const computed = file("computed.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "token: ${{ secrets[format('{0}', 'X')] }}");
+  // The whole secrets object handed to a script, and a secret mapped to a called workflow.
+  const wholeObject = file("tojson.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "env:\n  ALL: ${{ toJSON(secrets) }}");
+  const mapped = file("mapped.yml", { permissions: { contents: "read" }, jobs: { a: { uses: "./x.yml" } } }, "    secrets:\n      token: ${{ secrets.SLACK_WEBHOOK_URL }}");
   // Secrets that are not GitHub credentials leave a read-only workflow unlisted.
   const harmless = file("harmless.yml", { permissions: { contents: "read" }, jobs: { a: { steps: [] } } }, "url: ${{ secrets.SLACK_WEBHOOK_URL }}\npat: ${{ secrets.GH_AUTOMATION_PAT }}");
 
   // The workflow token's permission decides, not what the script says:
   // a read-only token's git push cannot change a branch.
   const listed = qaReleaseWorkflowBranchWriters(
-    [readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable, tibdex, otherKey, inherit, computed, harmless],
+    [readOnly, topWrite, jobWrite, writeAll, jobOverridesTop, noPermissions, reusable, appToken, deployKey, unreadable, tibdex, otherKey, inherit, computed, harmless, wholeObject, mapped],
     "read",
     [],
   );
   assert.deepEqual(
     listed.map((line) => line.split(" ")[0]),
-    ["all.yml", "app.yml", "bad.yml", "computed.yml", "inherit.yml", "job.yml", "key.yml", "otherkey.yml", "reusable.yml", "tibdex.yml", "top.yml"],
+    ["all.yml", "app.yml", "bad.yml", "computed.yml", "inherit.yml", "job.yml", "key.yml", "mapped.yml", "otherkey.yml", "reusable.yml", "tibdex.yml", "tojson.yml", "top.yml"],
   );
   // With the repository default at write, a workflow without permissions is listed too.
   assert.deepEqual(

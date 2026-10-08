@@ -222,17 +222,39 @@ export const QA_RELEASE_NON_BRANCH_SECRETS: readonly string[] = Object.freeze([
   "SLACK_WEBHOOK_URL",
 ]);
 
-/** The other-credential reasons in a workflow's text, empty when there are none. */
+/**
+ * Where Actions evaluates the `secrets` context: inside `${{ }}`, and on an
+ * `if:` line, whose condition may be written without the braces.
+ */
+const expressionTexts = (text: string): string[] => [
+  ...[...text.matchAll(/\$\{\{([\s\S]*?)\}\}/g)].map((match) => match[1]),
+  ...text
+    .split("\n")
+    .filter((line) => /^\s*(-\s*)?if\s*:/.test(line))
+    .map((line) => line.replace(/^\s*(-\s*)?if\s*:/, "")),
+];
+
+/**
+ * The other-credential reasons in a workflow's text, empty when there are
+ * none. Inside expressions the `secrets` context counts as harmless only as
+ * `secrets.NAME` with NAME in QA_RELEASE_NON_BRANCH_SECRETS; the whole object
+ * (`toJSON(secrets)`, `secrets[...]`, passed as an argument) or another name
+ * lists the workflow. So does a `secrets:` key, which hands a called workflow
+ * secrets (`inherit` or a mapping).
+ */
 const otherCredentials = (text: string): string[] => {
-  const reasons: string[] = [];
-  const names = new Set([...text.matchAll(/\bsecrets\.([A-Za-z0-9_]+)/g)].map((match) => match[1]));
-  const unknown = [...names].filter((name) => !QA_RELEASE_NON_BRANCH_SECRETS.includes(name)).sort();
-  if (unknown.length > 0) reasons.push(`secrets ${unknown.join(", ")}`);
-  if (/\bsecrets\s*:\s*inherit\b/.test(text)) reasons.push("secrets: inherit");
-  if (/\bsecrets\s*\[/.test(text)) reasons.push("computed secret");
+  const reasons = new Set<string>();
+  for (const expression of expressionTexts(text)) {
+    for (const match of expression.matchAll(/\bsecrets\b(\s*\.\s*([A-Za-z0-9_]+))?/g)) {
+      const name = match[2];
+      if (!name) reasons.add("secrets object");
+      else if (!QA_RELEASE_NON_BRANCH_SECRETS.includes(name)) reasons.add(`secret ${name}`);
+    }
+  }
+  if (/^\s*secrets\s*:/m.test(text)) reasons.add("secrets passed to a called workflow");
   // A token minted from a key the workflow reads some other way.
-  if (/github-app-token|\bapp[-_]id\s*:|\bprivate[-_]key\s*:|ssh-agent|\bssh[-_]key\s*:|deploy[-_]key/i.test(text)) reasons.push("app or deploy key");
-  return reasons;
+  if (/github-app-token|\bapp[-_]id\s*:|\bprivate[-_]key\s*:|ssh-agent|\bssh[-_]key\s*:|deploy[-_]key/i.test(text)) reasons.add("app or deploy key");
+  return [...reasons].sort();
 };
 
 /** The digest a person reviews: the workflow file's text, line endings normalised. */
