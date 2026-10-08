@@ -31,7 +31,9 @@ const world = {
   armed: [] as unknown[],
   asserted: 0,
   commitError: null as unknown,
+  prismaTimeouts: [] as number[],
   assertThrows: false,
+  kept: null as string | null,
 };
 let POST: (request: Request) => Promise<Response>;
 
@@ -41,6 +43,13 @@ before(async () => {
       readOpsObserverState: async (...args: unknown[]) => {
         world.stateArgs = args;
         return world.state;
+      },
+    },
+  });
+  mock.module(mod("lib/prisma.ts"), {
+    namedExports: {
+      prisma: {
+        $queryRaw: async () => (world.kept ? [{ id: world.kept }] : []),
       },
     },
   });
@@ -67,17 +76,21 @@ before(async () => {
       recordAgentDigestItem: async (
         submission: { idempotencyKey: string; payload: unknown },
         _db: unknown,
-        admit: (tx: unknown) => Promise<string | null>,
+        admit: ((tx: unknown) => Promise<string | null>) | undefined,
         confirm: (tx: unknown) => Promise<string | null>,
+        limits: { arm: (tx: unknown) => Promise<void>; prismaTimeoutMs: number },
       ) => {
         world.submissions.push(submission);
+        world.prismaTimeouts.push(limits.prismaTimeoutMs);
         const tx = {
           $executeRaw: async (strings: TemplateStringsArray) => {
             world.txCalls.push(strings.join("?").includes('"OpsObserverRunGuard"') ? "run_guard" : "other");
             return 1;
           },
         };
-        assert.equal(await admit(tx), null);
+        // The caller's arming is the transaction's first statement.
+        await limits.arm(tx);
+        assert.equal(admit, undefined);
         world.txCalls.push("insert_and_audit");
         assert.equal(await confirm(tx), null);
         // A deferred trigger refusing the COMMIT surfaces from the store.
@@ -105,6 +118,8 @@ beforeEach(() => {
   world.asserted = 0;
   world.commitError = null;
   world.assertThrows = false;
+  world.kept = null;
+  world.prismaTimeouts = [];
 });
 
 const body = (overrides: Record<string, unknown> = {}) => ({
@@ -142,6 +157,8 @@ test("the app builds the digest from its own reads and keeps it under the date's
   // Armed first, the shared writes, then this agent's guard row last.
   assert.deepEqual(world.armed, [["digest_submit", true]]);
   assert.deepEqual(world.txCalls, ["arm", "insert_and_audit", "run_guard"]);
+  // digest_submit's Prisma timeout, not the shared default.
+  assert.deepEqual(world.prismaTimeouts, [55_000]);
   assert.equal(world.asserted, 1);
 });
 
@@ -173,4 +190,20 @@ test("a commit the deferred check refuses, a start budget refusal and a late ans
   world.commitError = null;
   world.assertThrows = true;
   assert.equal((await call(DIGEST)).status, 409);
+});
+
+test("a date already kept is answered with its item, never rebuilt or a conflict", async () => {
+  world.kept = ITEM;
+  assert.deepEqual(await (await call(DIGEST)).json(), { result: "replayed", itemId: ITEM });
+  assert.deepEqual(world.submissions, []);
+  assert.equal(world.asserted, 1);
+  // A concurrent run that kept it first between the read and the write.
+  world.kept = null;
+  world.record = { status: "conflict", id: ITEM };
+  assert.deepEqual(await (await call(DIGEST)).json(), { result: "replayed", itemId: ITEM });
+});
+
+test("only this agent's deadline codes are late; a Prisma code is a plain failure", async () => {
+  world.commitError = Object.assign(new Error("raw query failed"), { code: "P2010" });
+  assert.equal((await call(DIGEST)).status, 500);
 });

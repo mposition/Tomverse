@@ -430,6 +430,14 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/opsObserverDigest.ts",
+    table: "AgentDigestItem",
+    tableMentions: 1,
+    writeVerbs: 1,
+    reason:
+      "The sre-ops digest intake reads AgentDigestItem once, a plain SELECT of the item already kept for an owner date, so a retry answers that item instead of rebuilding it. Its one write verb is the INSERT of its own run guard row, the shared transaction's last write; the digest row itself is written only by lib/agentDigestStore.ts.",
+  },
+  {
     path: "lib/opsObserverStore.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
