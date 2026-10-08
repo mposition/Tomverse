@@ -16,6 +16,7 @@ type Disposition = "not_started_proven" | "evidence_insufficient";
 type Readback = { holdId: string; previewId: string; ideaId: string;
   chunkIndex: number; leaseGeneration: number; reservedMicroUsd: string;
   holdStatus: "in_flight" | "outcome_unknown"; claimRequestId: string;
+  ideaState: "analyzing" | "cancelled"; ideaCancelledAt: string | null;
   payloadDigest: string; resultRequestId: string | null;
   resultDigest: string | null;
   resultOutcome: "verified_success" | "invocation_failed" | "outcome_unknown" | null;
@@ -31,7 +32,10 @@ function parseReadback(value: unknown): Readback | null {
       Array.isArray(row)) return null;
   const data = row as Record<string, unknown>;
   const strings = ["holdId", "previewId", "ideaId", "reservedMicroUsd",
-    "holdStatus", "claimRequestId", "payloadDigest", "readbackDigest"];
+    "holdStatus", "ideaState", "claimRequestId", "payloadDigest", "readbackDigest"];
+  const ideaTupleValid =
+    (data.ideaState === "analyzing" && data.ideaCancelledAt === null) ||
+    (data.ideaState === "cancelled" && typeof data.ideaCancelledAt === "string");
   const resultTupleValid =
     (data.resultRequestId === null && data.resultDigest === null &&
       data.resultOutcome === null && data.resultEffectiveOutcome === null &&
@@ -49,12 +53,14 @@ function parseReadback(value: unknown): Readback | null {
       data.resultFailureReason === "usage_unverified" &&
       data.zeroReleaseEligible === false);
   return strings.every((key) => typeof data[key] === "string") &&
-    Number.isSafeInteger(data.chunkIndex) && data.leaseGeneration === 1 &&
+    Number.isSafeInteger(data.chunkIndex) && data.leaseGeneration === 1 && ideaTupleValid &&
     resultTupleValid
     ? data as Readback : null;
 }
 
-export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string }) {
+export function AmuxAnalysisClaimResolutionPanel({ holdId, onResolved }: {
+  holdId: string; onResolved: () => void;
+}) {
   const m = useAdminMessages(adminAmuxAnalysisBudgetMessages).resolution;
   const { locale } = useAdminLocale();
   const [readback, setReadback] = useState<Readback | null>(null);
@@ -115,7 +121,7 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
       if (body.holdId !== holdId || body.disposition !== disposition) {
         setUnknown(true); return;
       }
-      setComplete(disposition);
+      setComplete(disposition); onResolved();
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
@@ -140,7 +146,7 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
           requiresReauthentication: false, approvalId: null });
         return;
       }
-      setComplete(receipt.disposition); setUnknown(false);
+      setComplete(receipt.disposition); setUnknown(false); onResolved();
     } catch {
       setFailure({ message: m.readFailed, tone: "error",
         requiresReauthentication: false, approvalId: null });
@@ -156,6 +162,8 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId }: { holdId: string })
     <p>{m.stop}</p>
     {readback ? <dl className="space-y-1 text-xs">
       <div><dt className="inline font-semibold">{m.status}: </dt><dd className="inline">{readback.holdStatus}</dd></div>
+      <div><dt className="inline font-semibold">{m.ideaState}: </dt><dd className="inline">{readback.ideaState}</dd></div>
+      {readback.ideaCancelledAt ? <div><dt className="inline font-semibold">{m.cancelledAt}: </dt><dd className="inline font-mono">{readback.ideaCancelledAt}</dd></div> : null}
       <div><dt className="inline font-semibold">{m.claim}: </dt><dd className="inline font-mono break-all">{readback.claimRequestId}</dd></div>
       <div><dt className="inline font-semibold">{m.payload}: </dt><dd className="inline font-mono break-all">{readback.payloadDigest}</dd></div>
       <div><dt className="inline font-semibold">{m.reservation}: </dt><dd className="inline font-mono">{readback.reservedMicroUsd}</dd></div>
