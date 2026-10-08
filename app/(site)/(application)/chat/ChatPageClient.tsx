@@ -1190,12 +1190,14 @@ export function ChatPageClient({
     if (promptRefinerMode !== "e2e_fixture") return false;
     const dismissable = promptRefinerState.status === "failed"
       ? promptRefinerState.request
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion
         : null;
     const sourcePrompt = promptRefinerState.status === "failed"
       ? promptRefinerState.request.prompt
-      : promptRefinerState.status === "accepted_preview"
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
         ? promptRefinerState.suggestion.sourcePrompt
         : null;
     if (!dismissable || dismissable.requestId !== requestId) return false;
