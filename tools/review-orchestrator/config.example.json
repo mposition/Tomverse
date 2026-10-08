@@ -23,6 +23,7 @@
     {
       "id": "claude",
       "vendor": "anthropic",
+      "quotaProbe": "claude",
       "enabled": true,
       "maxConcurrent": 2,
       "command": "claude",
@@ -37,6 +38,7 @@
     {
       "id": "codex",
       "vendor": "openai",
+      "quotaProbe": "codex",
       "enabled": true,
       "maxConcurrent": 2,
       "command": "codex",
@@ -46,6 +48,7 @@
     {
       "id": "cursor",
       "vendor": "xai",
+      "quotaProbe": "manual",
       "enabled": true,
       "maxConcurrent": 2,
       "model": "grok-4.7-xhigh",
@@ -72,6 +75,7 @@
     {
       "id": "copilot",
       "vendor": "moonshot",
+      "quotaProbe": "manual",
       "enabled": true,
       "priority": 1,
       "maxConcurrent": 2,

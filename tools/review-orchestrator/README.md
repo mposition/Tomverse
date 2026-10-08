@@ -19,6 +19,8 @@
    `--author cursor --author-vendor anthropic`이고, Claude reviewer는 제외됩니다.
 2. `vendor`가 `unknown`이거나 `enabled: false`인 provider는 배정하지 않습니다.
    enabled인데 vendor를 모르면 설정 오류로 서버가 시작하지 않습니다.
+   새 배정에는 해당 **서버 계정**의 사용 가능 잔액도 필요합니다. `quotaProbe`가 없거나
+   조회가 실패한 계정, 소진된 계정은 대기시키고 이미 시작한 검토는 끝까지 진행합니다.
 3. 순서: `priority`(기본 0, 작을수록 먼저) → 진행 중 건수 → 최근 24시간 배정 수 → 가장 오래 쉰
    provider → id. provider마다 동시 실행은 `maxConcurrent`(기본 1)까지이고, 모두 바쁘면 대기합니다.
    막힌 작업이 뒤의 작업을 막지 않습니다. 요청마다 credit을 쓰는 provider(Copilot, 검토 1건 약
@@ -117,6 +119,44 @@ command="REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json node /opt/revie
 
 forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고 마지막 `rpc <token>`만
 읽힙니다. 상태 확인은 서버에서 `node .../bin/review-orchestrator.mjs status`.
+
+### 계정 잔액 확인과 배정 재개
+
+`quotaProbe: "claude"`는 reviewer가 쓰는 OAuth 토큰으로 Claude 사용량의 5시간·7일
+창을 조회합니다. `CLAUDE_CODE_OAUTH_TOKEN`을 `passEnv`로 전달하는 설정이면 그 토큰을
+우선하고, 그렇지 않으면 `~review/.claude/.credentials.json`을 읽습니다.
+`quotaProbe: "codex"`는 reviewer와 같은 `codex` 실행 파일의 app-server에서
+`account/rateLimits/read`를 조회합니다. 각 창의 남은 비율이 0이면 배정하지
+않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
+
+Cursor CLI의 대화형 [`/usage`](https://cursor.com/docs/cli/changelog)는 플랜의
+포함 사용량과 추가 지출을 보여 주지만, 비대화형 잔액 API/JSON 출력은 확인되지
+않았습니다. Copilot SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)는
+`premium_interactions` 할당량을 반환하지만 서버에서 쓰는 AI Credits 잔액과 같은
+기준인지는 확인되지 않았습니다. GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)는
+별도 `Plan` 읽기 권한의 토큰이 필요하고 소비량만 반환합니다. 두 provider는
+`quotaProbe: "manual"`로 두고 **review 서버에 로그인된 바로 그 계정**의 사용량
+화면을 확인해 기록합니다. Cursor는 해당 모델에 적용되는 잔여 비율을, Copilot은
+AI Credits 잔액을 기록합니다. 적용 범위가 모호하면 0으로 기록해 배정을 멈춥니다.
+`--max-ai-credits 50`은 한 검토의 제한이며 계정 잔액 조회가 아닙니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 저장소 clone 위치와 무관.** Node 22와
+`review` 서비스 계정으로 실행할 권한이 필요합니다. production 앱 자격증명은
+필요 없습니다. 아래 명령은 `review` 계정의 상태 폴더에 관측값을 쓰며,
+0으로 다시 기록하면 배정을 멈출 수 있습니다. 변수는 이 셸에서만 유지됩니다.
+
+```bash
+RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
+$RO quota record cursor 25 percent
+$RO quota record copilot 100 credits
+$RO status
+```
+
+수동 관측은 5분 동안만 유효하며 **한 번 기록하면 검토 한 건만** 시작합니다. 다음
+배정 전에는 다시 확인해 기록해야 합니다. `status`의 provider별 `quota`와
+`remaining`을 보되, 수동 기록을 사용한 뒤에는 `quota: "unknown"`으로 돌아갑니다.
+대기열의 작업은 삭제되지 않으며 새 관측값이 들어오면 자동으로 배정됩니다.
+`quota record`는 서버 로컬 명령이고 forced-command SSH RPC에는 열려 있지 않습니다.
 
 ### 설치 후 실측할 것
 

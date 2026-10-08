@@ -85,6 +85,9 @@ export function validateConfig(raw) {
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
     }
+    if (provider.quotaProbe !== undefined && !["claude", "codex", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be claude, codex or manual`);
+    }
     if (provider.promptNote !== undefined && !(typeof provider.promptNote === "string" && provider.promptNote.length <= 4000)) {
       errors.push(`${label}: promptNote must be a string of at most 4000 characters`);
     }

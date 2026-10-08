@@ -79,14 +79,15 @@ const compareCandidates = (load) => (a, b) => {
  * - `wait`: an allowed provider exists but every one is at its concurrency cap.
  * - `assign`: the least-loaded allowed provider.
  */
-export function pickReviewer({ providers, authorVendor, excludeVendors = [], load }) {
+export function pickReviewer({ providers, authorVendor, excludeVendors = [], load, blockedProviders = new Set() }) {
   const excluded = new Set([authorVendor, ...excludeVendors]);
   const allowed = eligibleProviders(providers, authorVendor).filter(
     (provider) => !excluded.has(provider.vendor),
   );
   if (allowed.length === 0) return { kind: "impossible" };
   const free = allowed.filter(
-    (provider) => loadOf(load, provider.id).running < (provider.maxConcurrent ?? 1),
+    (provider) => !blockedProviders.has(provider.id) &&
+      loadOf(load, provider.id).running < (provider.maxConcurrent ?? 1),
   );
   if (free.length === 0) return { kind: "wait" };
   const [chosen] = [...free].sort(compareCandidates(load));
@@ -98,7 +99,8 @@ export function pickReviewer({ providers, authorVendor, excludeVendors = [], loa
  * slots. A job that cannot be placed does not hold back the jobs behind it.
  * Returns the decisions; the caller applies them.
  */
-export function planAssignments({ jobs, providers, load, now }) {
+export function planAssignments({ jobs, providers, load, now, blockedProviders = new Set() }) {
+  const blocked = new Set(blockedProviders);
   const working = {};
   for (const provider of providers) working[provider.id] = { ...loadOf(load, provider.id) };
   const decisions = [];
@@ -111,6 +113,7 @@ export function planAssignments({ jobs, providers, load, now }) {
         authorVendor: job.authorVendor,
         excludeVendors: taken,
         load: working,
+        blockedProviders: blocked,
       });
       if (pick.kind === "wait") continue;
       if (pick.kind === "impossible") {
@@ -122,6 +125,9 @@ export function planAssignments({ jobs, providers, load, now }) {
       entry.recent24h += 1;
       entry.lastAssignedAt = now;
       taken.push(pick.provider.vendor);
+      // An operator-recorded balance is single-use evidence. A later pass can
+      // start another review only after the account is measured again.
+      if (pick.provider.quotaProbe === "manual") blocked.add(pick.provider.id);
       decisions.push({
         kind: "assign",
         jobId: job.id,

@@ -18,6 +18,7 @@ import {
   SHA,
 } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
+import { consumeManualQuota } from "./quota.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
 
@@ -278,7 +279,8 @@ export class Orchestrator {
     return recovered;
   }
 
-  tick() {
+  tick(quotas) {
+    if (!quotas || typeof quotas !== "object") throw new Error("quota_snapshot_required");
     // Draining: start nothing new, let running reviews finish. Submits are still
     // accepted and wait in the queue until the drain is lifted.
     if (isDraining(this.config)) return [];
@@ -289,6 +291,11 @@ export class Orchestrator {
       providers: this.config.providers,
       load: computeLoad(jobs, now),
       now,
+      // The daemon supplies a fresh account-specific snapshot each pass.
+      // A missing, failed, or stale probe cannot authorize a new review.
+      blockedProviders: new Set(this.config.providers
+        .filter((provider) => quotas[provider.id]?.state !== "available")
+        .map((provider) => provider.id)),
     });
     const byId = new Map(jobs.map((entry) => [entry.job.id, entry]));
     for (const decision of decisions) {
@@ -300,6 +307,7 @@ export class Orchestrator {
       }
       if (this.store.readSlot(job.id, slot.index).status !== "queued") continue;
       const provider = this.config.providers.find((p) => p.id === decision.provider);
+      if (provider.quotaProbe === "manual" && !consumeManualQuota(this.config, provider.id, now)) continue;
       const running = { ...slot, status: "running", provider: provider.id, vendor: provider.vendor, assignedAt: now, startedAt: now };
       this.store.writeSlot(job.id, running);
       const task = this.runReview(job, running, provider).finally(() => this.inflight.delete(task));
