@@ -137,6 +137,18 @@ run의 저장은 자기 merge-ref scope로 가므로 그것을 밀어내지 못�
 
 ## 2. 축 1 — `main`·`develop` scope 캐시에 쓸 수 있는 job
 
+> **2026-10-08: 이 장이 세는 writer는 더 이상 그만큼이 아닙니다.** 아래 2.1·2.2의
+> 표는 2026-10-03의 트리이고 기록으로 남깁니다. 그 뒤 두 가지가 일어났습니다 —
+> 널리 읽히는 24개 workflow가 최상위 `cache-mode: read`를 선언해 **토큰 자체가**
+> 쓸 수 없게 됐고(7장 P1a, 측정 포함), 자격증명을 가진 열 job에서 npm 캐시 선언을
+> 거뒀습니다(4.3, 지금 0건). 2026-10-08에 다시 센 결과 **캐시에 쓸 수 있는
+> workflow는 `pr-fast-gate`와 `review-parity-shadow` 둘뿐**입니다(`cache-mode`
+> 선언 없음 + `actions/cache@`). 2.1의 다섯 중 나머지와 `orchestrator-rust`는
+> `cache-mode: read`에 `actions/cache/restore@`뿐입니다.
+>
+> 공격자 모델 자체와 2.1이 세는 install script 10개는 이 변경과 무관하게 그대로
+> 입니다 — 바뀐 것은 **그 코드가 쥐는 토큰이 캐시에 쓸 수 있는지**입니다.
+
 공격자 모델은 **침해된 제3자 의존성 하나**입니다. `npm ci`는
 `--ignore-scripts` 없이는 의존성의 install script를 실행합니다. 이 저장소에서
 `--ignore-scripts`를 쓰는 곳은 `pr-fast-gate.yml`의 `npm ci --prefix vendor/amux --ignore-scripts` **한
@@ -252,14 +264,21 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 > | `review-parity-shadow` | `OS-playwright-v2-parity-LOCK-chromium` | `OS-next-v2-parity-LOCK-` |
 >
 > 표가 덮는 것은 `.next/cache`와 `~/.cache/ms-playwright` 두 종류입니다. 세
-> 번째 캐시는 `orchestrator-rust.yml`의 `OS-rust-v2-cargo-home-<Cargo.lock 해시>`
+> 번째 캐시는 `orchestrator-rust.yml`의
+> `OS-rust-v2-cargo-home-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}`
 > 하나이고 `restore-keys`가 없습니다(3.1).
 >
 > 읽는 법은 셋입니다. **workflow 사이의 exact 공유가 없습니다** — 여섯 개의
 > primary key가 모두 다른 문자열이므로 한 항목을 두 workflow가 집어 쓸 수
-> 없습니다. 단 **같은 workflow 안의 공유는 남아 있습니다**:
-> `pr-fast-gate`의 `build-and-e2e`와 `ui-risk`가 한 항목을 쓰고,
-> `daily-security-audit`의 두 job도 자기 것을 공유합니다. **교차 fallback은
+> 없습니다. 단 **같은 workflow 안에서 같은 키를 선언하는 쌍은 남아 있습니다**:
+> `pr-fast-gate`의 `build-and-e2e`와 `ui-risk`, 그리고 `daily-security-audit`의
+> `audit`과 `e2e`입니다. **그 둘은 성질이 다릅니다** — 키를 선언하는 것과 저장된
+> 항목을 주고받는 것은 다르기 때문입니다. `pr-fast-gate`는 `actions/cache@`를
+> 쓰고 `cache-mode` 선언이 없어 **쓸 수 있으므로** 두 job이 실제로 한 항목을
+> 주고받습니다. `daily-security-audit`은 최상위 `cache-mode: read`에
+> `actions/cache/restore@`뿐이라 **쓸 수 없고**, 이 저장소의 어느 workflow도
+> `-v2-daily-` 키를 쓰지 않으므로 그 쌍은 아무것도 담기지 않는 키를 함께
+> 선언하는 것입니다(P1a가 적은 영구 miss). **교차 fallback은
 > 없습니다** — 모든 `restore-keys`가 자기 namespace 안에서 멈추므로
 > `-chromium`과 `-chromium-webkit`이 서로의 후보가 되지 않습니다. 그리고
 > **broad `OS-next-` fallback은 한 곳도 남지 않았습니다**(3.3이 다섯 곳을 셌던 그
@@ -311,6 +330,13 @@ nightly-visual-regression.yml   review-parity-shadow.yml
 즉 `admin-console-e2e`와 `nightly-visual-regression`은 PR Fast Gate가 exact로
 집어 쓰는 항목을 직접 씁니다. `daily-security-audit`의 항목은 한 단계 더 멀어,
 lockfile이 바뀌어 `-chromium` 항목이 아직 없는 창에서만 닿습니다.
+
+> **2026-10-08: 이 세 workflow는 더 이상 writer가 아닙니다.** 셋 다 최상위
+> `cache-mode: read`를 선언하고 캐시 단계가 전부 `actions/cache/restore@`이므로
+> **쓸 수 없습니다**(P1a의 측정). 키까지 `-v2-visual-`·`-v2-admin-e2e-`로 갈라져
+> PR Fast Gate의 `-v2-pr-`과 맞지도 않습니다. 남은 writer는 `pr-fast-gate`와
+> `review-parity-shadow` 둘뿐이고(`cache-mode` 선언 없음, `actions/cache@`),
+> 각자 자기 namespace에만 씁니다. 위 세 항목은 2026-10-03의 기록입니다.
 
 `.next/cache` 쪽은 workflow마다 namespace가 다릅니다(`-daily-`, `-visual-`,
 `-admin-e2e-`, `-main-`, `-parity-`, `-pr-`). 그런데 다섯 곳이 그 경계를 지우는
@@ -522,10 +548,12 @@ lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 
 > **2026-10-08: 이 발견의 전제가 더 이상 성립하지 않습니다.** 여섯 job의
 > primary key가 workflow마다 자기 `v2-<namespace>-`를 갖게 되어 **여섯이 한
 > 항목을 공유하지 않습니다**(3.2 앞의 갱신 주석에 전수 표). 남은 공유는 같은
-> workflow 안에서입니다 — `pr-fast-gate`의 두 job이 한 항목을,
-> `daily-security-audit`의 두 job이 또 한 항목을 씁니다. 그 둘은 자기 workflow의
-> writer가 쓴 것을 자기가 읽는 관계이므로 이 발견이 말한 **교차 경로가
-> 아닙니다.** 아래 분석은 2026-10-03의 트리에 대한
+> workflow 안에서 같은 키를 선언하는 쌍입니다 — `pr-fast-gate`의 두 job과
+> `daily-security-audit`의 두 job. 어느 쪽도 이 발견이 말한 **교차 경로가
+> 아닙니다**: 앞은 그 workflow 자신이 쓴 항목을 그 workflow가 읽는 것이고
+> (`pr-fast-gate`는 `actions/cache@`로 쓸 수 있습니다), 뒤는 **아무것도 담기지
+> 않는 키**입니다 — `daily-security-audit`은 `cache-mode: read`에
+> `actions/cache/restore@`뿐이고 그 `-v2-daily-` 키를 쓰는 workflow가 없습니다. 아래 분석은 2026-10-03의 트리에 대한
 > 기록이며, **권고 1순위라는 표시는 그 시점의 것입니다.** 캐시 항목 자체에 여전히
 > 서명도 해시 핀도 없다는 1장의 사실은 바뀌지 않았습니다.
 
