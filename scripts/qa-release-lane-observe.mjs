@@ -2,9 +2,9 @@
 // (docs/policy/qa-release-agent.md version 7, section 8 items 7, 9, 10 and
 // 11). The operator runs it locally (docs/ops/qa-release-merge-lane-s-m1.md):
 //
-//   npm run qa-release:lane-observe -- setup --observation-app-id <id> --bypass 15368,29110
-//   npm run qa-release:lane-observe -- automation-status --bypass 15368,29110
-//   npm run qa-release:lane-observe -- observe --observation-app-id <id> --bypass 15368,29110 --observation-key <pem path>
+//   npm run qa-release:lane-observe -- setup --observation-app-id <id> --bypass 29110
+//   npm run qa-release:lane-observe -- automation-status --bypass 29110
+//   npm run qa-release:lane-observe -- observe --observation-app-id <id> --bypass 29110 --observation-key <pem path>
 //   npm run qa-release:lane-observe -- teardown
 //
 // Credentials: GH_TOKEN (the operator's own token, repository admin) for

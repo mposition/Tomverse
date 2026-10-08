@@ -4,8 +4,8 @@
 // holds: it passed, it names the same bypass list, and develop's and main's
 // protection now is the one it recorded (item 10).
 //
-//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 15368,29110
-//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 15368,29110 --apply
+//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 29110
+//   npm run qa-release:lane-rulesets -- --record <record.json> --observation-app-id <id> --bypass 29110 --apply
 //
 // Without --apply it prints the two request bodies and whether the record
 // holds, and changes nothing. With --apply it creates both rulesets, then
@@ -18,9 +18,16 @@
 
 import { readFileSync } from "node:fs";
 
+
 import { qaReleaseClassicProtection, qaReleaseRulesetRules } from "../lib/qaReleaseBranchProtectionCore.ts";
 import { qaReleaseRecordStillHolds } from "../lib/qaReleaseLaneObservationCore.ts";
-import { QA_RELEASE_DEVELOP_RULESET_NAME, QA_RELEASE_UPDATE_RULESET_NAME, qaReleaseLaneRulesets } from "../lib/qaReleaseLaneRulesetsCore.ts";
+import {
+  QA_RELEASE_DEVELOP_RULESET_NAME,
+  QA_RELEASE_UPDATE_RULESET_NAME,
+  qaReleaseLaneRulesets,
+  qaReleaseReadWorkflow,
+  qaReleaseWorkflowBranchWriters,
+} from "../lib/qaReleaseLaneRulesetsCore.ts";
 
 const API = "https://api.github.com/repos/mposition/Tomverse";
 const args = process.argv.slice(2);
@@ -64,7 +71,45 @@ const readProtection = async (branch) => {
   return { branch, classic: qaReleaseClassicProtection(classic.status === 404 ? null : classic.json), rules: qaReleaseRulesetRules(rules.json) };
 };
 
+/** Every workflow file on a branch, as text: the push check reads what that branch would run. */
+const readWorkflows = async (ref) => {
+  const list = await call("GET", `/contents/.github/workflows?ref=${ref}`);
+  if (list.status !== 200 || !Array.isArray(list.json)) throw new Error(`could not list ${ref}'s workflows`);
+  const files = [];
+  for (const entry of list.json.filter((item) => item.type === "file" && /\.ya?ml$/.test(item.name))) {
+    const response = await fetch(`${API}/contents/${entry.path}?ref=${ref}`, {
+      headers: { accept: "application/vnd.github.raw+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28" },
+      redirect: "error",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (response.status !== 200) throw new Error(`could not read ${entry.path} on ${ref}`);
+    const text = await response.text();
+    files.push(qaReleaseReadWorkflow(entry.path, text));
+  }
+  return files;
+};
+
 try {
+  // Applied, the update ruleset refuses a workflow-token (or App, or deploy
+  // key) update to any branch but develop. Refuse first while a workflow on
+  // develop or main holds such a credential and is not a reviewed file
+  // (visual-baseline-record until its token drops to contents: read).
+  const permission = await call("GET", "/actions/permissions/workflow");
+  const defaultPermission = permission.json?.default_workflow_permissions;
+  if (permission.status !== 200 || (defaultPermission !== "read" && defaultPermission !== "write")) {
+    fail("Could not read the repository's default workflow token permission. Nothing was changed.");
+  }
+  const writers = [];
+  for (const ref of ["develop", "main"]) {
+    for (const finding of qaReleaseWorkflowBranchWriters(await readWorkflows(ref), defaultPermission)) writers.push(`${ref}: ${finding}`);
+  }
+  if (writers.length > 0) {
+    fail(
+      `These workflows could update a branch with a credential the rulesets will refuse, and are not reviewed files ` +
+        `(lib/qaReleaseLaneRulesetsCore.ts QA_RELEASE_REVIEWED_WRITER_WORKFLOWS). Nothing was changed: ${writers.join(", ")}`,
+    );
+  }
+
   const record = JSON.parse(readFileSync(recordPath, "utf8"));
   if (record.observationAppId !== appId) fail("--observation-app-id differs from the record's observation App.");
   const bodies = qaReleaseLaneRulesets({ scope: { kind: "real" }, bypassAppIds, laneAppId: appId });
