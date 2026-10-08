@@ -2,7 +2,7 @@
 //!
 //! The legacy top-level response remains Anthropic's body plus `available`, so
 //! older clients keep working. The `providers[]` collection is the complete
-//! Settings contract: Claude, Codex, Gemini, and the honest unmetered state for
+//! Settings contract: Claude, Codex, Gemini, Cursor, Copilot and the unmetered state for
 //! local Ollama. Provider-specific fields stay under their provider row rather
 //! than being collapsed into a lowest-common-denominator percentage.
 //!
@@ -57,6 +57,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::AppState;
 use crate::provider::claude::{probe_usage_raw, UsageProbe};
+
+mod agent_quota;
+use agent_quota::{probe_copilot_usage, probe_cursor_usage, shape_copilot_provider, shape_cursor_provider};
 
 // ---------------------------------------------------------------------------
 // BACKGROUND RESERVE (AMUX-3545) — a share of the plan window background work
@@ -265,6 +268,8 @@ struct UsageProbes {
     claude: ProbeFn,
     codex: ProviderProbeFn,
     gemini: ProviderProbeFn,
+    cursor: ProviderProbeFn,
+    copilot: ProviderProbeFn,
 }
 
 #[derive(Default)]
@@ -288,6 +293,8 @@ fn production_usage_probes() -> UsageProbes {
         claude: Arc::new(|| Box::pin(probe_usage_raw())),
         codex: Arc::new(|| Box::pin(probe_codex_usage())),
         gemini: Arc::new(|| Box::pin(probe_gemini_usage())),
+        cursor: Arc::new(|| Box::pin(probe_cursor_usage())),
+        copilot: Arc::new(|| Box::pin(probe_copilot_usage())),
     }
 }
 
@@ -335,6 +342,8 @@ pub fn routes_with(probe: ProbeFn) -> Router<AppState> {
         claude: probe,
         codex: unavailable("Codex"),
         gemini: unavailable("Gemini"),
+        cursor: unavailable("Cursor"),
+        copilot: unavailable("Copilot"),
     })
 }
 
@@ -393,9 +402,11 @@ async fn cached_usage_body(
     // is the behaviour that provokes the rate limit in the first place.
     let fresh = matches!((&c.data, c.at), (Some(_), Some(at)) if at.elapsed() < ttl);
     if !fresh {
-        let (claude, codex, gemini) =
-            tokio::join!((probes.claude)(), (probes.codex)(), (probes.gemini)());
-        let shaped = shape_all_providers(claude, codex, gemini);
+        let (claude, codex, gemini, cursor, copilot) = tokio::join!(
+            (probes.claude)(), (probes.codex)(), (probes.gemini)(),
+            (probes.cursor)(), (probes.copilot)(),
+        );
+        let shaped = shape_all_providers(claude, codex, gemini, cursor, copilot);
         if shaped.get("available") == Some(&json!(true)) && shaped.get("stale") != Some(&json!(true)) {
             c.last_good = Some(shaped.clone());
             c.last_good_at = Some(Instant::now());
@@ -419,7 +430,7 @@ async fn cached_usage_body(
         if let (Some(good), Some(at)) = (&c.last_good, c.last_good_at) {
             if !stale_window.is_zero() && at.elapsed() < stale_window {
                 stale_reason = body.get("reason").cloned();
-                // Preserve today's Codex/Gemini result, not the old envelope
+                // Preserve today's other-provider results, not the old envelope
                 // that happened to accompany the last Claude success.
                 let providers = body.get("providers").cloned();
                 body = good.clone();
@@ -607,6 +618,8 @@ fn shape_all_providers(
     claude_probe: UsageProbe,
     codex_probe: ProviderProbe,
     gemini_probe: ProviderProbe,
+    cursor_probe: ProviderProbe,
+    copilot_probe: ProviderProbe,
 ) -> Value {
     let mut body = shape_probe(claude_probe);
     let providers = vec![
@@ -626,29 +639,8 @@ fn shape_all_providers(
             "measured": true, "n_considered": 0, "metered": false, "local": true,
             "summary": "Local models have no subscription limit", "windows": [],
         }),
-        // Cursor Agent CLI (added alongside `default_registry()`'s sixth
-        // adapter). No probe script exists yet — `CursorAdapter::usage()`
-        // is honestly `Unknown` for the same reason (no verified
-        // machine-readable quota API) — so this is the same
-        // available-but-unmeasured shape Claude/Codex/Gemini use while
-        // their own probe is unavailable, NOT ollama's "local, no limit"
-        // shape: Cursor genuinely is a metered subscription, this server
-        // just cannot read it yet.
-        json!({
-            "id": "cursor", "label": "Cursor", "available": true,
-            "measured": false, "n_considered": 0, "metered": true,
-            "summary": "Cursor account usage is not yet probed by this server",
-            "windows": [],
-        }),
-        // GitHub Copilot CLI: same shape as Cursor. A Copilot plan is metered
-        // (premium requests), and CopilotAdapter::usage() is honestly Unknown
-        // because no machine-readable quota API is documented for the CLI.
-        json!({
-            "id": "copilot", "label": "GitHub Copilot", "available": true,
-            "measured": false, "n_considered": 0, "metered": true,
-            "summary": "GitHub Copilot usage is not yet probed by this server",
-            "windows": [],
-        }),
+        shape_cursor_provider(cursor_probe),
+        shape_copilot_provider(copilot_probe),
     ];
     if let Some(obj) = body.as_object_mut() {
         let measured = providers.iter()
@@ -1843,6 +1835,8 @@ mod tests {
             UsageProbe::Ok(live_shaped_body()),
             ProviderProbe::Ok(codex),
             ProviderProbe::Ok(gemini),
+            ProviderProbe::Unavailable { cause: "test", reason: "test".into() },
+            ProviderProbe::Unavailable { cause: "test", reason: "test".into() },
         );
         let providers = body["providers"].as_array().expect("provider rows");
         let mut response_ids = providers.iter()
@@ -1898,10 +1892,12 @@ mod tests {
                 cause: "account_quota_not_reported",
                 reason: "This Gemini authentication mode has no account-wide quota.".into(),
             },
+            ProviderProbe::Unavailable { cause: "no_credentials", reason: "Cursor is not signed in.".into() },
+            ProviderProbe::Unavailable { cause: "cli_missing", reason: "Copilot CLI is not installed.".into() },
         );
         let providers = body["providers"].as_array().unwrap();
         assert_eq!(providers.len(), 7, "claude, codex, gemini, devin, ollama, cursor, copilot");
-        assert_eq!(providers.iter().filter(|p| p["available"] == false).count(), 3);
+        assert_eq!(providers.iter().filter(|p| p["available"] == false).count(), 5);
         assert_eq!(
             providers.iter().find(|p| p["id"] == "ollama").unwrap()["available"],
             true,
@@ -1914,8 +1910,8 @@ mod tests {
         );
         assert_eq!(
             providers.iter().find(|p| p["id"] == "cursor").unwrap()["available"],
-            true,
-            "cursor's row stays available (just unmeasured) when every OTHER provider's own probe fails"
+            false,
+            "cursor reports its own unavailable probe truthfully"
         );
     }
 
@@ -2065,49 +2061,70 @@ mod tests {
 
     #[tokio::test]
     async fn route_and_internal_snapshot_can_share_one_cache() {
-        let calls = Arc::new(AtomicUsize::new(0));
-
-        let unavailable = || -> ProviderProbeFn {
-            Arc::new(|| {
-                Box::pin(async {
-                    ProviderProbe::Unavailable {
-                        cause: "test",
-                        reason: "test".into(),
-                    }
+        temp_env_ttl("60", || async {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let agent_calls = Arc::new(AtomicUsize::new(0));
+            let agent_probe = |body: Value| -> ProviderProbeFn {
+                let calls = agent_calls.clone();
+                Arc::new(move || {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    let body = body.clone();
+                    Box::pin(async move { ProviderProbe::Ok(body) })
                 })
-            })
-        };
+            };
 
-        let probes = UsageProbes {
-            claude: probe_fn(
-                UsageProbe::Ok(live_shaped_body()),
-                calls.clone(),
-            ),
-            codex: unavailable(),
-            gemini: unavailable(),
-        };
+            let unavailable = || -> ProviderProbeFn {
+                Arc::new(|| {
+                    Box::pin(async {
+                        ProviderProbe::Unavailable {
+                            cause: "test",
+                            reason: "test".into(),
+                        }
+                    })
+                })
+            };
 
-        let cache =
-            Arc::new(tokio::sync::Mutex::new(UsageCache::default()));
+            let probes = UsageProbes {
+                claude: probe_fn(
+                    UsageProbe::Ok(live_shaped_body()),
+                    calls.clone(),
+                ),
+                codex: unavailable(),
+                gemini: unavailable(),
+                cursor: agent_probe(json!({"planUsage":{"totalPercentUsed":100,"remaining":0}})),
+                copilot: agent_probe(json!({"quota_key":"premium_interactions","quota":{
+                    "entitlementRequests":300,"usedRequests":120,"remainingPercentage":60
+                }})),
+            };
 
-        let app = app_routes(routes_with_probes_and_cache(
-            probes.clone(),
-            cache.clone(),
-        ));
+            let cache =
+                Arc::new(tokio::sync::Mutex::new(UsageCache::default()));
 
-        let (_, from_route) = get(&app).await;
-        let from_router = cached_usage_body(&probes, &cache).await;
+            let app = app_routes(routes_with_probes_and_cache(
+                probes.clone(),
+                cache.clone(),
+            ));
 
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "HTTP and routing consumers sharing one cache must not double-probe"
-        );
-        assert_eq!(from_route["limits"], from_router["limits"]);
-        assert_eq!(
-            from_route["providers"],
-            from_router["providers"]
-        );
+            let (_, from_route) = get(&app).await;
+            let from_router = cached_usage_body(&probes, &cache).await;
+
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "HTTP and routing consumers sharing one cache must not double-probe"
+            );
+            assert_eq!(from_route["limits"], from_router["limits"]);
+            assert_eq!(
+                from_route["providers"],
+                from_router["providers"]
+            );
+            assert_eq!(agent_calls.load(Ordering::SeqCst), 2, "each agent probe runs once for both consumers");
+            let cursor = crate::routing_signals::quota_signal_from_snapshot(&from_router, "cursor");
+            assert!(cursor.observed && cursor.provider_exhausted);
+            let copilot = crate::routing_signals::quota_signal_from_snapshot(&from_router, "copilot");
+            assert_eq!(copilot.quota_remaining, Some(0.6));
+            assert!(!copilot.provider_exhausted);
+        }).await;
     }
 
     #[tokio::test]
@@ -2204,7 +2221,8 @@ mod tests {
             let used=n.fetch_add(1,Ordering::SeqCst)*20;
             Box::pin(async move { ProviderProbe::Ok(json!({"rateLimits":{"primary":{"usedPercent":used,"windowDurationMins":300}}})) })
         });
-        let probes=UsageProbes { claude,codex,gemini:Arc::new(||Box::pin(async { ProviderProbe::Unavailable{cause:"test",reason:"test".into()} })) };
+        let unavailable = || -> ProviderProbeFn { Arc::new(||Box::pin(async { ProviderProbe::Unavailable{cause:"test",reason:"test".into()} })) };
+        let probes=UsageProbes { claude,codex,gemini:unavailable(),cursor:unavailable(),copilot:unavailable() };
         let app=app_routes(routes_with_probes(probes));
         temp_env_ttl("0",||async {
             let (_,first)=get(&app).await; let (_,second)=get(&app).await;
