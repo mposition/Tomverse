@@ -250,6 +250,16 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // Its two operator writes (W2): the switch and the monitor check, each with
+    // its administrator audit entry in one transaction.
+    "tests/integration/billing-finance-ops-control.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",

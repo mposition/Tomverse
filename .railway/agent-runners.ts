@@ -94,6 +94,19 @@ const PRODUCT_RESEARCH_PROBE_VARIABLES = [
   "RAILPACK_DEPLOY_APT_PACKAGES",
 ] as const;
 
+/**
+ * The billing-finance-ops stage W trigger's variables
+ * (docs/policy/billing-finance-ops.md §3 item 6): the run secret, the dead-man
+ * signal URL and the deployment setting, and nothing else. The same list
+ * lib/billingFinanceOpsServiceCore.ts accepts at start; the IaC test holds the
+ * two equal.
+ */
+const BILLING_FINANCE_OPS_VARIABLES = [
+  "BILLING_FINANCE_OPS_AGENT_ENABLED",
+  "BILLING_FINANCE_OPS_RUN_SECRET",
+  "BILLING_FINANCE_OPS_DEADMAN_URL",
+] as const;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -105,6 +118,21 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: PRODUCT_RESEARCH_VARIABLES,
       staging: PRODUCT_RESEARCH_VARIABLES,
+    },
+  },
+  {
+    key: "billing_finance_ops_deadline",
+    service: "Billing Finance Ops Deadline",
+    // Node directly, not npm run: npm adds npm_*, INIT_CWD and NODE to the
+    // environment, and the start check refuses any name it does not know
+    // (lib/billingFinanceOpsServiceCore.ts).
+    startCommand: "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs",
+    // docs/policy/billing-finance-ops.md §1.1: 01:00 UTC daily, two hours
+    // before the Maintenance Cron's silence check reads the day.
+    cronSchedule: "0 1 * * *",
+    environments: {
+      production: BILLING_FINANCE_OPS_VARIABLES,
+      staging: BILLING_FINANCE_OPS_VARIABLES,
     },
   },
   {
