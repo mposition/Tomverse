@@ -176,7 +176,7 @@ test("the run route answers enabled false and writes nothing while triage is off
   });
   assert.deepEqual(await handleSupportTriageRun(post(SECRET), { env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET } }), {
     status: 200,
-    body: { enabled: false },
+    body: { result: "ok", enabled: false },
   });
   assert.equal(await prisma.supportTriageRun.count(), 0);
   assert.equal((await suggestions()).length, 0);
@@ -184,7 +184,7 @@ test("the run route answers enabled false and writes nothing while triage is off
     env: { SUPPORT_TRIAGE_RUN_SECRET: SECRET, SUPPORT_TRIAGE_ENABLED: "true" },
   });
   assert.equal(on.status, 200);
-  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "reclaimed", "stale", "superseded"]);
+  assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "reclaimed", "result", "stale", "superseded"]);
   assert.equal(on.body.ready, 1);
 });
 

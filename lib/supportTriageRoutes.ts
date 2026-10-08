@@ -11,7 +11,8 @@
  *     so the cron run itself fails as a second signal beside the heartbeat.
  *   * heartbeat: `{ stale }` from the newest run rows, for the team 3 watcher.
  *   * run: one worker pass while SUPPORT_TRIAGE_ENABLED is exactly "true";
- *     otherwise `{ enabled: false }` and nothing is written, not even a run row.
+ *     otherwise `{ result: "ok", enabled: false }` and nothing is written, not
+ *     even a run row.
  */
 import "server-only";
 
@@ -138,7 +139,7 @@ export const handleSupportTriageRun = async (
   if (!isSupportTriageRouteAuthorized(request.headers.get("authorization"), SUPPORT_TRIAGE_RUN_SECRET_ENV, env)) {
     return unauthorized;
   }
-  if (!isSupportTriageEnabled(env)) return { status: 200, body: { enabled: false } };
+  if (!isSupportTriageEnabled(env)) return { status: 200, body: { result: "ok", enabled: false } };
   let result;
   try {
     result = await runSupportTriageWorker();
@@ -152,6 +153,7 @@ export const handleSupportTriageRun = async (
   return {
     status: 200,
     body: {
+      result: "ok",
       enabled: true,
       outcome: result.outcome,
       reclaimed: result.reclaimed,
