@@ -38,7 +38,19 @@
 > 자격증명 캐시 복원 수는 **4.3의 0건**입니다(P1a는 `cache-mode` 쪽 측정입니다). **번호가 밀린 것과 주장이 바뀐 것은 다른 사건이고, 번호만 고치면
 > 뒤쪽을 놓칩니다.**
 >
-> **상태: 조사 완료, 독립 검토 반영(rev 3 — 2026-10-08 인용 회차와 3.2·3.3·F1·F2 갱신), 조치 없음.** 이 감사는
+> 그래서 2장, 3.1의 Rust 단락, 2.1 뒤의 `e2e.yml` 단락, 그리고 **F1·F2·F3·F4**에
+> 각각 날짜 있는 갱신 주석을 달았습니다 — `cache-mode: read`가 24개 workflow에
+> 선언되고 쓸 수 있는 둘이 `pull_request` 전용이라 **`main`·`develop` scope의
+> writer가 0**이기 때문입니다. F4는 그 사이 검사가 생겨(`check:credential-cache-separation`
+> 등) 해소됐습니다.
+>
+> 다시 세어 **그대로 맞은 것도 적습니다** — 3.4와 F6의 "열여섯 곳"은 지금도
+> 정확하고(캐시 단계 17개 중 16개, 예외는 `orchestrator-rust.yml`의
+> `Restore the downloaded crates`), 2장의 install script 10개도 그대로입니다.
+> 낡은 것만 고르고 맞은 것을 말하지 않으면 **문서가 어디까지 확인됐는지 알 수
+> 없습니다.**
+>
+> **상태: 조사 완료, 독립 검토 반영(rev 4 — 2026-10-08 인용 회차와 2장·3.1·3.2·3.3·F1~F4 갱신), 조치 없음.** 이 감사는
 > workflow를 하나도 바꾸지 않았습니다. 7장의 권고는 소유자 승인 전 제안이며,
 > 각 항목에 승인·검토 요건을 적었습니다.
 >
@@ -141,13 +153,23 @@ run의 저장은 자기 merge-ref scope로 가므로 그것을 밀어내지 못�
 > 표는 2026-10-03의 트리이고 기록으로 남깁니다. 그 뒤 두 가지가 일어났습니다 —
 > 널리 읽히는 24개 workflow가 최상위 `cache-mode: read`를 선언해 **토큰 자체가**
 > 쓸 수 없게 됐고(7장 P1a, 측정 포함), 자격증명을 가진 열 job에서 npm 캐시 선언을
-> 거뒀습니다(4.3, 지금 0건). 2026-10-08에 다시 센 결과 **캐시에 쓸 수 있는
-> workflow는 `pr-fast-gate`와 `review-parity-shadow` 둘뿐**입니다(`cache-mode`
-> 선언 없음 + `actions/cache@`). 2.1의 다섯 중 나머지와 `orchestrator-rust`는
-> `cache-mode: read`에 `actions/cache/restore@`뿐입니다.
+> 거뒀습니다(4.3, 지금 0건).
+>
+> **이 장이 묻는 것에 대한 답은 2026-10-08 현재 0입니다.** 캐시에 쓸 수 있는
+> workflow는 `pr-fast-gate`와 `review-parity-shadow` 둘뿐이지만(`cache-mode`
+> 선언 없음 + `actions/cache@`), **둘 다 `pull_request` 전용**이므로 그 save는
+> `refs/pull/<n>/merge` scope에 남습니다 — `main`·`develop` scope에는 쓰지
+> 않습니다. 2.1의 나머지와 `orchestrator-rust`는 `cache-mode: read`이고 캐시
+> 단계가 `actions/cache/restore@`이므로 어느 scope에도 쓸 수 없습니다.
+>
+> **쓸 수 없다는 것이 복원하지 않는다는 뜻은 아닙니다.** `admin-console-e2e`·
+> `daily-security-audit`·`e2e`·`nightly-visual-regression`은 `actions/setup-node@v6`에
+> `cache: npm`을 그대로 두고 있어 npm 캐시를 계속 **복원**합니다. `cache-mode: read`가
+> 거절하는 것은 save입니다.
 >
 > 공격자 모델 자체와 2.1이 세는 install script 10개는 이 변경과 무관하게 그대로
-> 입니다 — 바뀐 것은 **그 코드가 쥐는 토큰이 캐시에 쓸 수 있는지**입니다.
+> 입니다(2026-10-08 lockfile에서 다시 세어 10개) — 바뀐 것은 **그 코드가 쥐는
+> 토큰이 캐시에 쓸 수 있는지**입니다.
 
 공격자 모델은 **침해된 제3자 의존성 하나**입니다. `npm ci`는
 `--ignore-scripts` 없이는 의존성의 install script를 실행합니다. 이 저장소에서
@@ -179,6 +201,12 @@ script입니다(`Cargo.lock`·`vendor/amux/Cargo.lock`이 정하는 의존성). 
 PR scope에만 씁니다. `main` scope에 쓰는 경로는 `workflow_dispatch`를 `main`에서
 돌릴 때만 남습니다 — 이 감사의 과제 설명에 있던 "`e2e.yml` push main"은 더 이상
 맞지 않습니다.
+
+> **2026-10-08: 이제 어느 이벤트에서도 그 두 항목을 저장하지 않습니다.**
+> `e2e.yml`은 최상위 `cache-mode: read`를 선언하고 Next·Playwright 단계가
+> `actions/cache/restore@`뿐이므로, `pull_request`도 `main`에서 돌린
+> `workflow_dispatch`도 save에 도달하지 못합니다(7장 P1a). 위 문단의 "PR scope에만
+> 쓴다"·"`workflow_dispatch`가 `main` scope에 쓴다"는 2026-10-03의 기록입니다.
 
 ### 2.2 `npm` cacache만 `main` scope에 쓰는 job
 
@@ -238,11 +266,18 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 퇴출·cache version 변경 — 이고, lockfile이 그대로인 동안 적중이 이어졌다는
 사실은 **그 항목이 길게 산다**는 것까지만 말합니다.
 
-**Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml`의 step `Restore the downloaded crates`가
-`~/.cargo/registry`, `~/.cargo/git`, `target`, `vendor/amux/target`을 한 항목에
-담습니다. restore-keys가 없는 것(그 step은 `key:` 하나만 갖습니다)은 올바른 선택이지만,
-`target/` 안의 build script 바이너리에는 검증이 없습니다. `push: main`과
-`push: develop` 양쪽에서 씁니다.
+**Rust `target` 과 `~/.cargo`.** `orchestrator-rust.yml`의 step
+`Restore the downloaded crates`가 담던 것은 `~/.cargo/registry`, `~/.cargo/git`,
+`target`, `vendor/amux/target` 넷이었고, `push: main`과 `push: develop` 양쪽에서
+썼습니다. restore-keys가 없는 것(그 step은 `key:` 하나만 갖습니다)은 올바른
+선택이지만, `target/` 안의 build script 바이너리에는 검증이 없었습니다.
+
+> **2026-10-08: 이 단락의 세 가지가 모두 달라졌습니다.** 그 step은 이제
+> `~/.cargo/registry`와 `~/.cargo/git` **둘만** 담고 `target`·`vendor/amux/target`은
+> 들어 있지 않습니다. `actions/cache/restore@`이고 workflow가 `cache-mode: read`
+> 이므로 **어느 push에서도 쓰지 않습니다.** 키는
+> `OS-rust-v2-cargo-home-${{ hashFiles('Cargo.lock', 'vendor/amux/Cargo.lock') }}`
+> 이고 `restore-keys`는 여전히 없습니다. 위 문단은 2026-10-03의 기록입니다.
 
 ### 3.2 키 공유 — 한 exact 항목을 6개 job이, 그리고 그 둘이 서로의 fallback
 
@@ -281,8 +316,8 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 > 선언하는 것입니다(P1a가 적은 영구 miss). **교차 fallback은
 > 없습니다** — 모든 `restore-keys`가 자기 namespace 안에서 멈추므로
 > `-chromium`과 `-chromium-webkit`이 서로의 후보가 되지 않습니다. 그리고
-> **broad `OS-next-` fallback은 한 곳도 남지 않았습니다**(3.3이 다섯 곳을 셌던 그
-> 항목입니다).
+> **broad `OS-next-` fallback은 한 곳도 남지 않았습니다**(이 절이 아래에서 다섯
+> 곳을 셌던 그 항목입니다).
 >
 > 이 갱신은 범위를 줄이지 않습니다. 1장의 신뢰 경계(항목에 서명도 해시 핀도 없고
 > 내용을 대조할 기대값도 없다)와 `~/.cache/ms-playwright`가 실행 가능한 바이너리를
@@ -601,11 +636,23 @@ repository write 자격증명도 없기 때문입니다(4.3). 차단 사유가 �
 scope 캐시 쓰기를 얻는 경로. 따로 분류하지 않고 7장 P6의 조사 항목으로
 넘깁니다.
 
+> **2026-10-08: 그 전제의 뒷부분이 사라졌습니다.** `npm ci`가 install script를
+> 실행한다는 것과 그 패키지가 10개라는 것은 그대로지만, **그 코드가 쥔 토큰이
+> `main`·`develop` scope 캐시에 쓸 수 있는 경로가 없습니다** — 2장 앞의 갱신
+> 주석대로 그 scope의 writer는 0입니다. 남는 것은 그 토큰이 할 수 있는 다른
+> 일들이고, 이 발견이 말한 캐시 쓰기는 아닙니다.
+
 ### F4 — 자격증명과 무검증 캐시의 분리를 유지하는 검사가 없습니다
 
 근거: 4.3의 열한 건과 3.3의 아홉 건이 교집합 없음. 그 사실을 고정하는
-테스트·검사 없음. `credential_job_restores_cache`(lib:61, :494)는 에이전트의
-push를 막을 뿐 workflow 변경을 막지 않습니다.
+테스트·검사 없음. `credential_job_restores_cache`(`lib/agentCredentialReachability.ts`의
+`reason` 값)는 에이전트의 push를 막을 뿐 workflow 변경을 막지 않습니다.
+
+> **2026-10-08: 이 발견은 해소됐습니다.** 그 분리를 고정하는 검사가 생겼고 PR Fast
+> Gate에서 돕니다 — `npm run check:credential-cache-separation`,
+> `npm run check:agent-pr-cache-isolation`, `npm run check:ci-cache-keys`
+> (4.3이 앞의 둘의 보고 수치를 적습니다). 아래 결과·분류는 2026-10-03의
+> 기록입니다.
 
 결과: 열한 job 중 하나에 무검증 캐시가 더해지면, 4.3이 종류로 적은 것 —
 공개 저장소에 `contents: write`인 자동화 토큰, LLM provider key 셋, 이미지·음성
@@ -1211,6 +1258,31 @@ workflow의 자격증명 job은 어떤 cache도 복원하지 않는다.** 그것
 | 1 | rev 2 (`5abcb4ef7`) | 검토 서버 `r-20261002-223406-84907a` | **devin** (vendor `cognition`) | **unknown** — `reviewer_exit_1`, findings 0건 |
 | 2 | rev 2 (`7598ff881`) | 검토 서버 `r-20261002-223916-d7532b` | **codex** (vendor `openai`) | **reject** — major 2, minor 1. 전부 반영 → rev 3 |
 | 12 | 구현 전체 diff (`2e831bbd7`, PR #1964) | 검토 서버 `r-20261003-055900-4e006a` | 2명 (contract 경로) | **reject** — major 1, minor 1. 전부 반영 → P1a |
+| 13 | rev 3 (`ee802e6c3`, PR #2230) | 검토 서버 `r-20261008-091013-08b7de` | **cursor** (vendor `xai`) | **reject** — major 1, minor 3. 전부 반영 |
+| 14 | 같은 PR (`580dbac5b`) | 검토 서버 `r-20261008-092418-121d66` | **cursor** (vendor `xai`) | **reject** — major 2, nit 1. 전부 반영 |
+| 15 | 같은 PR | 검토 서버 `r-20261008-093548-f38842` | **cursor** (vendor `xai`) | **reject** — major 3, minor 1, nit 1. 전부 반영 → rev 4 |
+
+### round 13~15 — 같은 실패를 세 번: 선언을 읽고 권한을 읽지 않았습니다
+
+**round 12가 고친 것과 같은 종류입니다.** 그때는 restore-only 선언을 토큰 통제로
+읽었고, 이번에는 **같은 캐시 키를 선언하는 것을 항목을 주고받는 것으로** 읽었습니다.
+세 round이 잡은 것을 합치면 하나입니다 — 어떤 workflow가 캐시에 **쓸 수 있는가**는
+`cache-mode`와 그 단계가 `actions/cache@`인지 `actions/cache/restore@`인지가 정하며,
+키 문자열은 그것을 말하지 않습니다.
+
+그 결과로 바뀐 사실들입니다.
+
+- 쓸 수 있는 workflow는 `pr-fast-gate`·`review-parity-shadow` 둘뿐이고 **둘 다
+  `pull_request` 전용**이므로, 2장이 묻는 `main`·`develop` scope writer는 **0**입니다.
+- `daily-security-audit`의 두 job이 선언하는 키는 **아무도 쓰지 않는 키**입니다.
+- `e2e.yml`은 어느 이벤트에서도 Next·Playwright 항목을 저장하지 않습니다.
+- `orchestrator-rust.yml`의 항목은 `~/.cargo/registry`·`~/.cargo/git` 둘만 담고
+  `target`은 들어 있지 않으며, 어느 push에서도 쓰지 않습니다.
+- 쓸 수 없는 것이 복원하지 않는다는 뜻은 아닙니다 — 네 workflow가 `cache: npm`으로
+  npm 캐시를 계속 복원합니다.
+
+**세 round 모두 제 수정이 만든 오류였고, 원래 조사의 오류가 아닙니다.** rev 4
+자체는 아직 검토를 받지 않았습니다.
 
 ### round 12 — reject, 완화의 전제가 틀렸습니다
 
