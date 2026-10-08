@@ -8,16 +8,21 @@
  * guarded budget:
  *
  *   1. read candidates: reports awaiting an operator, not a deleted account's,
- *      whose current input has no suggestion yet (a hint; nothing is locked);
+ *      that need work: an open suggestion of another input to supersede, a
+ *      pending one of the current input, or no live or decided one for it
+ *      (a hint; nothing is locked). A current input whose only rows are
+ *      superseded or invalidated (the input came back, or the report
+ *      reopened) is made again;
  *   2. claim transaction: lock those reports FOR SHARE in id order with the
  *      eligibility re-checked, recompute each input digest from the locked
  *      rows, supersede open suggestions of an older input, insert the new
  *      pending rows and claim the pending ones with this batch's token;
  *   3. compute the keyword flags and the lane outside any transaction;
  *   4. result transaction: lock the reports again with the eligibility
- *      re-checked, and move to ready only the rows still claimed with this
- *      batch's token (fencing). A row whose claim was lost is not written
- *      and is counted as stale.
+ *      re-checked and their input digest recomputed, and move to ready only
+ *      rows still claimed with this batch's token (fencing) whose input is
+ *      unchanged since the claim. Anything else is not written and is counted
+ *      as stale; a changed input is picked up by the next pass.
  *
  * Every batch write set is set-based, one statement per step, so a batch
  * stays inside the lane's round-trip budget. Each transaction's last write
@@ -164,7 +169,10 @@ export const reclaimExpiredSuggestions = (run: { id: string; deadlineAt: Date })
     return { reclaimed, exhausted };
   });
 
-/** Up to `limit` eligible reports after `after` whose current input has no suggestion yet. */
+/** States of a current-input row that settle the report: live or decided. */
+const SETTLING_STATES = new Set(["claimed", "ready", "accepted", "rejected", "expired", "failed"]);
+
+/** Up to `limit` eligible reports after `after` that need work (step 1). */
 const readCandidates = async (after: string | null, limit: number) => {
   const reports = await prisma.$queryRaw<ReportRow[]>`
     SELECT f."id", f."message", f."type", f."language", f."status", f."errorReportVerification",
@@ -187,24 +195,36 @@ const readCandidates = async (after: string | null, limit: number) => {
     where: { feedbackId: { in: reports.map((row) => row.id) } },
     select: { feedbackId: true, inputDigest: true, state: true },
   });
-  // A current-input row that is pending (returned by a reclaim) is claimed
-  // again; any other current-input row means the report needs nothing now.
-  const settled = new Set(
-    existing
-      .filter((row) => row.inputDigest === digests.get(row.feedbackId) && row.state !== "pending")
-      .map((row) => row.feedbackId)
-  );
+  const needsWork = (feedbackId: string) => {
+    const current = digests.get(feedbackId);
+    const rows = existing.filter((row) => row.feedbackId === feedbackId);
+    // An open proposal for an input the report no longer has.
+    if (rows.some((row) => row.inputDigest !== current && OPEN_STATES.includes(row.state as never))) return true;
+    const mine = rows.filter((row) => row.inputDigest === current);
+    // Returned to pending by a reclaim: claim it again.
+    if (mine.some((row) => row.state === "pending")) return true;
+    // Live or decided for this input: nothing to do. Only superseded or
+    // invalidated rows, or none: make one.
+    return !mine.some((row) => SETTLING_STATES.has(row.state));
+  };
   const candidates: string[] = [];
   let last: string | null = null;
   for (const row of reports) {
     last = row.id;
-    if (!settled.has(row.id)) candidates.push(row.id);
+    if (needsWork(row.id)) candidates.push(row.id);
     if (candidates.length === limit) break;
   }
   return { candidates, last, exhausted: reports.length < limit * 5 && candidates.length < limit };
 };
 
-export type ClaimedRow = { readonly id: string; readonly feedbackId: string; readonly lane: TriageLane; readonly flags: string[] };
+export type ClaimedRow = {
+  readonly id: string;
+  readonly feedbackId: string;
+  /** The input the lane and flags were computed from. */
+  readonly inputDigest: string;
+  readonly lane: TriageLane;
+  readonly flags: string[];
+};
 
 /** Step 2: supersede, insert and claim, for the reports still eligible under lock. */
 export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, reportIds: string[]) =>
@@ -225,13 +245,13 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
       SELECT c."id", c."feedbackId", c."inputDigest"
         FROM unnest(${newIds}::text[], ${feedbackIds}::text[], ${digests}::text[])
              AS c("id", "feedbackId", "inputDigest")
-      ON CONFLICT ("feedbackId", "inputDigest") DO NOTHING`;
+      ON CONFLICT ("feedbackId", "inputDigest") WHERE "state" IN ('pending', 'claimed', 'ready') DO NOTHING`;
     const token = randomUUID();
-    const claimed = await tx.$queryRaw<{ id: string; feedbackId: string }[]>`
+    const claimed = await tx.$queryRaw<{ id: string; feedbackId: string; inputDigest: string }[]>`
       UPDATE "SupportTriageSuggestion" s SET "state" = 'claimed', "claimToken" = ${token}
         FROM unnest(${feedbackIds}::text[], ${digests}::text[]) AS c("feedbackId", "inputDigest")
        WHERE s."feedbackId" = c."feedbackId" AND s."inputDigest" = c."inputDigest" AND s."state" = 'pending'
-      RETURNING s."id", s."feedbackId"`;
+      RETURNING s."id", s."feedbackId", s."inputDigest"`;
     if (claimed.length + superseded > 0) {
       await audit(tx, run.id, "support_triage.worker_claim", { claimed: claimed.length, superseded });
       await assertDeadline(tx, run.deadlineAt);
@@ -248,6 +268,7 @@ export const claimSupportTriageBatch = (run: { id: string; deadlineAt: Date }, r
         return {
           id: row.id,
           feedbackId: row.feedbackId,
+          inputDigest: row.inputDigest,
           flags,
           lane: triageLaneFor({
             type: report.type,
@@ -267,8 +288,11 @@ export const writeSupportTriageResults = (
 ) =>
   transaction(async (tx) => {
     await armSupportTriageTransaction(tx, "worker");
-    const eligible = new Set((await lockEligibleReports(tx, rows.map((row) => row.feedbackId))).map((row) => row.id));
-    const writable = rows.filter((row) => eligible.has(row.feedbackId));
+    // Still eligible, and the same input the lane and flags were computed from.
+    const current = new Map(
+      (await lockEligibleReports(tx, rows.map((row) => row.feedbackId))).map((row) => [row.id, digestOf(row)])
+    );
+    const writable = rows.filter((row) => current.get(row.feedbackId) === row.inputDigest);
     const ready =
       writable.length === 0
         ? []

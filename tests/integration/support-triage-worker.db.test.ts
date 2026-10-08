@@ -187,3 +187,36 @@ test("the run route answers enabled false and writes nothing while triage is off
   assert.deepEqual(Object.keys(on.body).sort(), ["claimed", "enabled", "exhausted", "outcome", "ready", "reclaimed", "stale", "superseded"]);
   assert.equal(on.body.ready, 1);
 });
+
+test("an input that comes back gets a new suggestion, and the other input's proposal is superseded", async () => {
+  await report("a");
+  await runSupportTriageWorker();
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "feature" } });
+  await runSupportTriageWorker();
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { type: "bug" } });
+  const result = await runSupportTriageWorker();
+  assert.equal(result.superseded, 1);
+  assert.equal(result.ready, 1);
+  assert.deepEqual(
+    (await suggestions()).map((s) => [s.state, s.lane]),
+    [
+      ["superseded", "bug_unverified"],
+      ["superseded", "feature_request"],
+      ["ready", "bug_unverified"],
+    ]
+  );
+  // Settled: a further pass does nothing.
+  assert.equal((await runSupportTriageWorker()).claimed, 0);
+});
+
+test("a result for an input changed after the claim is not written; the next pass proposes for the new input", async () => {
+  await report("a");
+  const run = await startSupportTriageRun("worker");
+  const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
+  assert.equal(batch.claimed[0].lane, "bug_unverified");
+  await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { message: "Please delete my account." } });
+  assert.deepEqual(await writeSupportTriageResults(run, batch.token as string, batch.claimed), { ready: 0, stale: 1 });
+  await runSupportTriageWorker();
+  const live = (await suggestions()).filter((s) => s.state === "ready");
+  assert.deepEqual(live.map((s) => s.lane), ["trust_safety_human"]);
+});
