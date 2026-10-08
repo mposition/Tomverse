@@ -4,28 +4,31 @@ const endpoint = "/api/chat/prompt-refiner/proposal";
 const input = { requestId: "synthetic_http_request", prompt: "합성 원문 질문" };
 const fixtureCookie = "__tomverse_e2e_prompt_refiner=1";
 const authenticatedCookies = `${fixtureCookie}; __tomverse_e2e_auth=1`;
-const origin = "http://127.0.0.1:3100";
+const mutationHeaders = (cookie: string, baseURL: string | undefined) => {
+  if (!baseURL) throw new Error("E2E baseURL is required");
+  return { cookie, origin: new URL(baseURL).origin };
+};
 const assertNoStore = (response: APIResponse) =>
   expect(response.headers()["cache-control"].split(",").map((value) => value.trim()))
     .toContain("no-store");
 
-test("@smoke C01 proposal API requires fixture opt-in and synthetic authentication", async ({ request }) => {
+test("C01 proposal API requires fixture opt-in and synthetic authentication", async ({ request, baseURL }) => {
   for (const cookie of ["", "__tomverse_e2e_auth=1"]) {
-    const response = await request.post(endpoint, { headers: { cookie, origin }, data: input });
+    const response = await request.post(endpoint, { headers: mutationHeaders(cookie, baseURL), data: input });
     expect(response.status()).toBe(503);
     assertNoStore(response);
     expect(await response.json()).toEqual({ code: "PROMPT_REFINER_UNAVAILABLE" });
   }
   for (const cookie of [fixtureCookie, `${fixtureCookie}; __tomverse_e2e_auth=claimed`]) {
-    const response = await request.post(endpoint, { headers: { cookie, origin }, data: input });
+    const response = await request.post(endpoint, { headers: mutationHeaders(cookie, baseURL), data: input });
     expect(response.status()).toBe(401);
     assertNoStore(response);
     expect(await response.json()).toEqual({ code: "AUTHENTICATION_REQUIRED" });
   }
 });
 
-test("@smoke C01 proposal API binds an unmocked HTTP fixture response to strict input", async ({ request }) => {
-  const headers = { cookie: authenticatedCookies, origin };
+test("C01 proposal API binds an unmocked HTTP fixture response to strict input", async ({ request, baseURL }) => {
+  const headers = mutationHeaders(authenticatedCookies, baseURL);
   const invalid = await request.post(endpoint, { headers, data: { ...input, approved: true } });
   expect(invalid.status()).toBe(400);
   expect(await invalid.json()).toEqual({ code: "PROMPT_REFINER_INVALID_REQUEST" });
