@@ -34,8 +34,8 @@
 > 이 회차가 찾은 것은 번호만이 아닙니다. **3.2와 3.3의 주장 자체가 낡았습니다** —
 > 캐시 key가 workflow마다 구획된 뒤로 그 두 절이 전제한 공유 항목과 broad
 > fallback이 존재하지 않습니다. 3.2 앞의 갱신 주석에 전수 수집 결과를 표로
-> 넣었습니다. 4.2의 분석기 셈도 그 뒤 판정이 세분화됐으므로 1a장의 측정이
-> 최신입니다. **번호가 밀린 것과 주장이 바뀐 것은 다른 사건이고, 번호만 고치면
+> 넣았습니다. 4.2의 분석기 셈도 그 뒤 판정이 세분화됐고, 선언을 거둔 뒤의
+> 자격증명 캐시 복원 수는 **4.3의 0건**입니다(P1a는 `cache-mode` 쪽 측정입니다). **번호가 밀린 것과 주장이 바뀐 것은 다른 사건이고, 번호만 고치면
 > 뒤쪽을 놓칩니다.**
 >
 > **상태: 조사 완료, 독립 검토 반영(rev 3 — 2026-10-08 인용 회차와 3.2·3.3·F1·F2 갱신), 조치 없음.** 이 감사는
@@ -251,8 +251,15 @@ key 적중** (키가 lockfile 해시만 포함 → lockfile이 안 바뀌면 항
 > | `pr-fast-gate` | `OS-playwright-v2-pr-LOCK-chromium` | `OS-next-v2-pr-LOCK-` |
 > | `review-parity-shadow` | `OS-playwright-v2-parity-LOCK-chromium` | `OS-next-v2-parity-LOCK-` |
 >
-> 읽는 법은 셋입니다. **exact 공유가 없습니다** — 여섯 개의 primary key가 모두
-> 다른 문자열이므로 한 항목을 두 workflow가 집어 쓸 수 없습니다. **교차 fallback도
+> 표가 덮는 것은 `.next/cache`와 `~/.cache/ms-playwright` 두 종류입니다. 세
+> 번째 캐시는 `orchestrator-rust.yml`의 `OS-rust-v2-cargo-home-<Cargo.lock 해시>`
+> 하나이고 `restore-keys`가 없습니다(3.1).
+>
+> 읽는 법은 셋입니다. **workflow 사이의 exact 공유가 없습니다** — 여섯 개의
+> primary key가 모두 다른 문자열이므로 한 항목을 두 workflow가 집어 쓸 수
+> 없습니다. 단 **같은 workflow 안의 공유는 남아 있습니다**:
+> `pr-fast-gate`의 `build-and-e2e`와 `ui-risk`가 한 항목을 쓰고,
+> `daily-security-audit`의 두 job도 자기 것을 공유합니다. **교차 fallback은
 > 없습니다** — 모든 `restore-keys`가 자기 namespace 안에서 멈추므로
 > `-chromium`과 `-chromium-webkit`이 서로의 후보가 되지 않습니다. 그리고
 > **broad `OS-next-` fallback은 한 곳도 남지 않았습니다**(3.3이 다섯 곳을 셌던 그
@@ -287,9 +294,12 @@ nightly-visual-regression.yml   review-parity-shadow.yml
 ```
 
 그리고 **모두** restore-keys `${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-`
-를 갖습니다(같은 step의 `restore-keys` 블록). 이 prefix는
+를 갖고 **있었습니다**(같은 step의 `restore-keys` 블록). 그 prefix는
 `daily-security-audit.yml`의 `-chromium-webkit`로 끝나는 키 두 개에도 맞으므로
-사실 B가 성립합니다.
+사실 B가 성립했습니다. **2026-10-08 현재는 성립하지 않습니다** — 여섯 곳의
+`restore-keys`가 모두 자기 `-playwright-v2-<namespace>-<lock>-`에서 멈추므로
+`-chromium`과 `-chromium-webkit`이 서로의 후보가 되지 않습니다(이 절 앞의 갱신
+주석).
 
 `main` scope writer는 이렇게 갈립니다.
 
@@ -330,6 +340,11 @@ review-parity-shadow.yml
 **이 채널이 실제로 작동한다는 것은 이미 관측됐습니다.** 당시 판정은 정합성
 문제였고 보안 경계로 다루지 않았으므로, 같은 수정이 다른 다섯 곳에는 적용되지
 않았습니다.
+
+> **2026-10-08: 그 뒤 다섯 곳에도 적용됐습니다.** 어느 `restore-keys`에도 bare
+> `${{ runner.os }}-next-`가 남아 있지 않고, 전부 자기
+> `-next-v2-<namespace>-<lock>-`에서 멈춥니다(3.2 앞의 갱신 주석). 위 문단은
+> 2026-10-03의 기록입니다.
 
 ### 3.3 복원 → 실행 경로 전수
 
@@ -415,7 +430,7 @@ npm run report:engineering-agent-tiers
 `VERIFIED_SETUP_CACHES`가 어느 action의 어느 캐시를 검증된 것으로 볼지 정하고,
 `AUTOMATIC_PACKAGE_MANAGER_CACHE`가 `cache:` 입력 없이도 복원하는 것은
 `actions/setup-node` v6뿐임을 적습니다. 아래 셈은 그 세분화 이전의 것이고, 열 개
-job에서 선언을 뺀 뒤의 측정은 1a장에 있습니다. 14건 중 **3건**은 `setup-node`에
+job에서 선언을 뺀 뒤의 측정은 4.3의 0건입니다. 14건 중 **3건**은 `setup-node`에
 `cache:` 입력이 없어 **현재 트리에서는** 실제 복원자가 아닙니다 — fail-closed
 설계의 의도된 과대추정입니다. 어느 셋인지는 §16에 따라 적지 않습니다(4.1).
 
@@ -505,8 +520,12 @@ lockfile 밖의 설치만이 치환 위험이고, 저장소에 둘 있습니다 
 ### F1 — `main` scope에서 쓰인 Playwright 항목 하나를 6개 job이 exact key로 공유합니다
 
 > **2026-10-08: 이 발견의 전제가 더 이상 성립하지 않습니다.** 여섯 job의
-> primary key가 모두 자기 `v2-<namespace>-`를 갖게 되어 공유되는 항목이
-> 없습니다(3.2 앞의 갱신 주석에 전수 표). 아래 분석은 2026-10-03의 트리에 대한
+> primary key가 workflow마다 자기 `v2-<namespace>-`를 갖게 되어 **여섯이 한
+> 항목을 공유하지 않습니다**(3.2 앞의 갱신 주석에 전수 표). 남은 공유는 같은
+> workflow 안에서입니다 — `pr-fast-gate`의 두 job이 한 항목을,
+> `daily-security-audit`의 두 job이 또 한 항목을 씁니다. 그 둘은 자기 workflow의
+> writer가 쓴 것을 자기가 읽는 관계이므로 이 발견이 말한 **교차 경로가
+> 아닙니다.** 아래 분석은 2026-10-03의 트리에 대한
 > 기록이며, **권고 1순위라는 표시는 그 시점의 것입니다.** 캐시 항목 자체에 여전히
 > 서명도 해시 핀도 없다는 1장의 사실은 바뀌지 않았습니다.
 
