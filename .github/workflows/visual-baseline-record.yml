@@ -42,8 +42,14 @@ on:
         required: false
         default: tests/e2e/chat-state-visual-regression.spec.ts
 
+# Read only: the one write, the review branch push, uses GH_AUTOMATION_PAT in
+# that step alone. The workflow token cannot push it: every branch but develop
+# refuses updates from actors off the merge lane ruleset's bypass list, and on
+# this personal-account repository GitHub Actions cannot be on that list
+# (docs/policy/qa-release-agent.md section 8 item 7; GitHub refused it on
+# 2026-10-08). The PAT acts as the repository admin, which the list holds.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: visual-baseline-record-${{ github.ref }}
@@ -64,6 +70,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # No credential is left in .git/config for the build and the
+          # Playwright runs; only the push step below receives one.
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -117,6 +127,9 @@ jobs:
       - name: Push the recording to a review branch
         env:
           BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+          # This step alone: the token is never in .git/config and never in a
+          # step that runs repository code (see `permissions` above).
+          GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           # Playwright's default snapshot location: the spec path plus a
@@ -158,7 +171,7 @@ jobs:
           git commit \
             -m "Re-record visual goldens on the canonical environment" \
             -m "Recorded by Record Visual Baseline, run ${{ github.run_id }}, on ubuntu-24.04 with the Chromium bundled with the pinned Playwright version. Reviewed and merged separately -- see the run's baseline-evidence artifact for the diff against the previous baseline."
-          git push origin "$branch"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
           echo "Pushed $branch"
           # No `to-develop` segment, so Auto PR to Develop leaves this branch
           # alone and opens nothing (scripts/auto-pr-branch-policy.mjs). That
