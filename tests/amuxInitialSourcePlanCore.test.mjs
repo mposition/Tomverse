@@ -12,11 +12,13 @@ import {
 
 const ideaId = "c3f7daea-9647-4a7f-9330-92caa0cb4b53";
 
-test("initial source-plan gates remain hard closed", () => {
-  assert.equal(AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED, false);
-  assert.equal(AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED, false);
-  assert.equal(initialPlanWritePermitted("enabled"), false);
-  assert.equal(initialPlanReadbackPermitted("enabled"), false);
+test("initial source-plan gates require their dedicated environment values", () => {
+  assert.equal(AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED, true);
+  assert.equal(AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED, true);
+  assert.equal(initialPlanWritePermitted(undefined), false);
+  assert.equal(initialPlanReadbackPermitted(undefined), false);
+  assert.equal(initialPlanWritePermitted("enabled"), true);
+  assert.equal(initialPlanReadbackPermitted("enabled"), true);
 });
 
 test("initial source-plan accepts only one bounded owned idea identity", () => {

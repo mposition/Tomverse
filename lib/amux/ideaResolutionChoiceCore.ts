@@ -3,7 +3,7 @@ import { inspectAmuxHierarchyChoices, type AmuxHierarchyChoice,
   type AmuxHierarchySnapshotNode } from "./ideaHierarchyDecisionCore.ts";
 
 export const AMUX_V4_RESOLUTION_PREVIEW_ENV = "TOMVERSE_AMUX_V4_RESOLUTION_PREVIEW";
-export const AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED = false;
+export const AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED = true;
 export const amuxV4ResolutionPreviewEnabled = (value: string | undefined): boolean =>
   AMUX_V4_RESOLUTION_PREVIEW_CODE_ENABLED && value === "enabled";
 
