@@ -255,6 +255,8 @@ test("the meta purge deletes only rows whose body is gone and whose 365 days are
     orderBy: { createdAt: "desc" },
   });
   assert.equal((audit.metadata as Record<string, unknown>).systemActor, "agent-digest-retention");
+});
+
 // docs/policy/billing-finance-ops.md §7 W1a: the registration migration widens
 // the CHECKs and the retention CASE. A billing-finance-ops row is accepted with
 // its own 90-day body retention and its own intake actor; a kind that belongs
