@@ -8,9 +8,10 @@
 // the other, so they count as unset too.
 //
 // The bearer is compared with each usable secret as SHA-256 digests in
-// constant time. The page service may call every route; the digest service is
-// refused advance and confirm (§7), with 403 rather than 401 because its
-// secret is valid -- it is the route that is not its own.
+// constant time. The page service may call every route but the digest
+// submission; the digest service is refused advance and confirm (§7). Either
+// refusal is 403 rather than 401 because the secret is valid -- it is the
+// route that is not its own.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 
@@ -24,6 +25,7 @@ export const ROUTE_SERVICES = Object.freeze({
   state: Object.freeze(["page", "digest"]),
   advance: Object.freeze(["page"]),
   confirm: Object.freeze(["page"]),
+  digest: Object.freeze(["digest"]),
 });
 
 const digest = (value) => createHash("sha256").update(value, "utf8").digest();

@@ -9049,6 +9049,22 @@ model SupportTriageRun {
   @@index([kind, createdAt])
 }
 
+/// The sre-ops run guard: one row per daily digest, its transaction's last
+/// write, whose deferred trigger refuses a late COMMIT of the shared rows
+/// written before it (docs/policy/sre-ops.md §6 item 5). Triggers in
+/// migrations/20261008020000_ops_observer_run_guard.
+model OpsObserverRunGuard {
+  /// sre-ops:daily:<owner date>.
+  runId            String   @id
+  /// One of RUN_GUARD_KINDS.
+  kind             String
+  /// The database clock, set by the trigger.
+  startedAt        DateTime @default(now()) @db.Timestamptz(3)
+  /// The deadline the run claimed; checked again at COMMIT.
+  runDeadlineAt    DateTime @db.Timestamptz(3)
+  invariantVersion Int
+}
+
 /// One row per state advance of the sre-ops agent, naming the system audit
 /// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
 /// Append-only; triggers in migrations/20261004030000_ops_observer_transition.

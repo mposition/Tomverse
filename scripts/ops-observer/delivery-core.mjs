@@ -20,6 +20,13 @@ export const ITEM_ORIGINS = Object.freeze(["new", "reopen"]);
 /** Closed reservations are deleted after this many days (policy §10). */
 export const DELIVERY_RETENTION_DAYS = 90;
 
+/**
+ * The runs whose last write lands in shared tables, and so carry a guard row
+ * of this agent's whose deferred trigger refuses a late COMMIT
+ * (OpsObserverRunGuard, docs/policy/sre-ops.md §6 item 5).
+ */
+export const RUN_GUARD_KINDS = Object.freeze(["daily_digest"]);
+
 export { MESSAGE_KINDS };
 
 /** The terminal status a closing confirm must use for a genesis mode. */
