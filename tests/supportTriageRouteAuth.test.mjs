@@ -34,7 +34,7 @@ test("triage is enabled only by the exact string true", () => {
 
 test("the route files export POST only and answer no-store, success or failure", async () => {
   const { readFileSync } = await import("node:fs");
-  for (const route of ["retention", "heartbeat"]) {
+  for (const route of ["retention", "heartbeat", "run"]) {
     const source = readFileSync(new URL(`../app/api/internal/support-triage/${route}/route.ts`, import.meta.url), "utf8");
     const handlers = [...source.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
     assert.deepEqual(handlers, ["POST"], route);

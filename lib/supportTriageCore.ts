@@ -533,3 +533,13 @@ export const triageLaneFor = (input: {
   if (input.type === "feature") return "feature_request";
   return "other";
 };
+
+/** The worker pass (design section 5.2): claim batches of 10, at most 50 reports per pass. */
+export const WORKER_CLAIM_BATCH_SIZE = 10;
+export const WORKER_PASS_MAX = 50;
+/** Expired claims a pass returns to pending (or fails), at most. */
+export const WORKER_RECLAIM_MAX = 50;
+/** Reports a pass considers: still awaiting an operator. */
+export const TRIAGE_ELIGIBLE_REPORT_STATUSES = Object.freeze(["open", "reviewing"] as const);
+/** The message lib/accountDeletion.ts leaves on a deleted account's report. */
+export const DELETED_ACCOUNT_MARKER = "[deleted account]";
