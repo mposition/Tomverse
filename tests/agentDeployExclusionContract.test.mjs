@@ -26,6 +26,33 @@ test("deploy source exclusion includes only pinned vNext test sources", () => {
   "utf8"));
   const pinnedTests = Object.keys(closure.files).filter((path) =>
     path.startsWith("tests/")).sort();
+  const oneShot = JSON.parse(readFileSync(join(root,
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-candidate-source.json"),
+  "utf8"));
+  const oneShotPaths = Object.keys(oneShot.files).sort();
+  const readerPath = join(root,
+    "lib/promptRefinerVnextOneShotCandidateSourceReadback.ts");
+  const reader = ts.createSourceFile(readerPath, readFileSync(readerPath, "utf8"),
+    ts.ScriptTarget.Latest, true);
+  let runtimePaths = null;
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+        node.name.text === "SOURCE_PATHS" && node.initializer &&
+        ts.isCallExpression(node.initializer)) {
+      const argument = node.initializer.arguments[0];
+      const array = ts.isAsExpression(argument) ? argument.expression : argument;
+      if (ts.isArrayLiteralExpression(array)) {
+        runtimePaths = array.elements.map((element) =>
+          ts.isStringLiteral(element) ? element.text : null);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(reader);
+  assert.ok(runtimePaths?.every((path) => typeof path === "string"));
+  assert.deepEqual(runtimePaths.sort(), oneShotPaths);
+  assert.deepEqual(oneShotPaths.filter((path) => path.startsWith("tests/")),
+    pinnedTests);
   assert.deepEqual(pinnedTests, [
     "tests/promptRefinerQualityEvaluationVnextCandidate.test.mjs",
     "tests/promptRefinerQualityEvaluationVnextDevelopment.test.mjs",
@@ -39,7 +66,7 @@ test("deploy source exclusion includes only pinned vNext test sources", () => {
   /readFile\(path\.join\(process\.cwd\(\), relative\)/);
 });
 
-test("app runtime does not directly open excluded test source paths", () => {
+test("app runtime has no literal filesystem opens under tests", () => {
   const offenders = [];
   for (const path of sourcePaths) {
     const source = ts.createSourceFile(path,
