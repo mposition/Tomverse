@@ -19,11 +19,13 @@ import "server-only";
 import type {
   AgentOfficeAmuxState,
   AgentOfficeEngineeringState,
+  AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
+import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
   AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
   agentOfficeEngineeringState,
@@ -31,6 +33,14 @@ import {
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
+import {
+  BILLING_FINANCE_OPS_AGENT_KEY,
+  BILLING_FINANCE_OPS_ENVIRONMENTS,
+  type BillingFinanceOpsEnvironment,
+  billingFinanceOpsIdempotencyKey,
+} from "@/lib/billingFinanceOpsDigest";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -122,6 +132,47 @@ async function readQa(): Promise<AgentOfficeQaState> {
 }
 
 /**
+ * Billing and finance: the switch row, whether this environment's digest for
+ * today exists, and when the newest digest was stored. The digest body is not
+ * selected -- the office says whether the day was recorded, never what the
+ * register held (docs/policy/billing-finance-ops.md §1.4).
+ */
+async function readFinance(): Promise<AgentOfficeFinanceState> {
+  try {
+    const environment = resolveDeploymentEnvironment();
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const runsHere = (BILLING_FINANCE_OPS_ENVIRONMENTS as readonly string[]).includes(environment);
+    const [control, recordedToday, latest] = await Promise.all([
+      readBillingFinanceOpsControl(prisma),
+      runsHere
+        ? prisma.agentDigestItem.count({
+            where: {
+              agentKey: BILLING_FINANCE_OPS_AGENT_KEY,
+              idempotencyKey: billingFinanceOpsIdempotencyKey(environment as BillingFinanceOpsEnvironment, today),
+            },
+          })
+        : Promise.resolve(0),
+      prisma.agentDigestItem.findFirst({
+        where: { agentKey: BILLING_FINANCE_OPS_AGENT_KEY },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+    ]);
+    return agentOfficeFinanceState({
+      environment,
+      control,
+      recordedToday: recordedToday > 0,
+      latestDigestAt: latest?.createdAt ?? null,
+      now,
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "billing_finance_ops" });
+    return { kind: "unread" };
+  }
+}
+
+/**
  * Engineering: the switch settings, the agent's own halt reading, open owner
  * items counted by kind, how many runs are in progress and since when, and the
  * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
@@ -192,11 +243,12 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, engineering, amux] = await Promise.all([
+  const [research, qa, finance, engineering, amux] = await Promise.all([
     readResearch(now),
     readQa(),
+    readFinance(),
     readEngineering(),
     readAmuxWorkers(),
   ]);
-  return { readAt: now.toISOString(), research, qa, engineering, amux };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux };
 }

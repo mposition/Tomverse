@@ -22,6 +22,8 @@ import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  financeLiveDept,
+  financeTone,
   qaLiveDept,
   qaTone,
   researchLiveDept,
@@ -29,6 +31,7 @@ import {
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
 import { agentOfficeEngineeringState } from "../lib/agentOfficeEngineeringState.ts";
+import { agentOfficeFinanceState } from "../lib/agentOfficeFinanceState.ts";
 import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
@@ -41,6 +44,17 @@ import {
   OPERATOR_SEAT,
   walkable,
 } from "../lib/agentOffice/world.ts";
+
+/** The live read module's code (comments stripped), cut from one read function to the next. */
+const readFunction = (name) => {
+  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  const start = source.indexOf(`async function ${name}(`);
+  assert.ok(start >= 0, `${name} not found`);
+  const next = source.indexOf("async function ", start + 1);
+  return source.slice(start, next < 0 ? undefined : next);
+};
 
 const reaches = (target) => {
   const path = findPath(ENTRANCE, target);
@@ -656,13 +670,7 @@ test("with research and QA both live the demo day still reaches its end, and QA 
 });
 
 test("the office reads the QA agent's state, never a digest's content", () => {
-  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  const start = source.indexOf("async function readQa");
-  const end = source.indexOf("async function readEngineering");
-  assert.ok(start >= 0 && end > start, "readQa not found");
-  const qa = source.slice(start, end);
+  const qa = readFunction("readQa");
   // The digest row is read for when it was stored, nothing else.
   assert.match(qa, /agentDigestItem\.findFirst\(\{[\s\S]*?select: \{ createdAt: true \}/);
   assert.doesNotMatch(qa, /payload|sizeBytes|kind: true|idempotencyKey/);
@@ -956,13 +964,7 @@ test("a live room at work is named by its record, not by a demo progress figure"
 });
 
 test("the office reads the engineering agent's state, never what it worked on", () => {
-  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  const start = source.indexOf("async function readEngineering");
-  const end = source.indexOf("async function readAmuxWorkers");
-  assert.ok(start >= 0 && end > start, "readEngineering not found");
-  const engineering = source.slice(start, end);
+  const engineering = readFunction("readEngineering");
   // The agent's own halt verdict, not a restatement of it.
   assert.match(engineering, /halt: currentEngineeringAgentHalt\(haltState\)/);
   assert.match(engineering, /readEngineeringAgentHaltState\(prisma\)/);
@@ -1132,13 +1134,7 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
 });
 
 test("the office reads AMUX workers' runtime state, never their work, and draws them outside the demo", () => {
-  const source = readFileSync("lib/agentOfficeLiveRead.ts", "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "");
-  const start = source.indexOf("async function readAmuxWorkers");
-  const end = source.indexOf("export async function readAgentOfficeLiveRooms");
-  assert.ok(start >= 0 && end > start, "readAmuxWorkers not found");
-  const amux = source.slice(start, end);
+  const amux = readFunction("readAmuxWorkers");
   assert.match(amux, /getConfiguredAmuxWorkerCatalog\(\)/);
   assert.match(
     amux,
@@ -1159,6 +1155,109 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   assert.match(world, /<WorkerLayer workers=\{amux\.workers\} \/>/);
   assert.match(world, /isAmux && amux\.note \?/);
   assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
+});
+
+// ── Billing and finance ───────────────────────────────────────────────────
+
+const financeControl = (state, overrides = {}) =>
+  state === "unreadable"
+    ? { state }
+    : {
+        state,
+        control: {
+          enabled: state === "enabled",
+          revision: 3,
+          enabledAt: state === "enabled" ? "2026-10-01T00:00:00.000Z" : null,
+          ...overrides,
+        },
+      };
+const financeInput = (overrides = {}) => ({
+  environment: "production",
+  control: financeControl("enabled"),
+  recordedToday: true,
+  latestDigestAt: at("2026-10-08T01:00:12Z"),
+  now: at("2026-10-08T08:00:00Z"),
+  ...overrides,
+});
+
+test("the billing and finance room's verdict is the agent's own silence judgement", () => {
+  const verdict = (overrides) => agentOfficeFinanceState(financeInput(overrides)).verdict;
+  assert.deepEqual(agentOfficeFinanceState(financeInput()), {
+    kind: "observed",
+    verdict: "recorded",
+    controlRevision: 3,
+    enabledAt: "2026-10-01T00:00:00.000Z",
+    latestDigestAt: "2026-10-08T01:00:12.000Z",
+  });
+  assert.equal(verdict({ recordedToday: false }), "silent");
+  // The day's slot is 01:00 UTC with an hour's grace.
+  assert.equal(verdict({ recordedToday: false, now: at("2026-10-08T01:59:59Z") }), "not_due");
+  // Turned on after today's slot: the first run is tomorrow's.
+  assert.equal(
+    verdict({ recordedToday: false, control: financeControl("enabled", { enabledAt: "2026-10-08T03:00:00.000Z" }) }),
+    "not_due"
+  );
+  assert.equal(verdict({ control: financeControl("disabled") }), "off");
+  // An unreadable switch row is never folded into "off".
+  assert.equal(verdict({ control: financeControl("unreadable") }), "control_unreadable");
+  assert.equal(agentOfficeFinanceState(financeInput({ control: financeControl("unreadable") })).controlRevision, null);
+  assert.equal(verdict({ environment: "development" }), "not_applicable");
+});
+
+test("the billing and finance room says whether today's digest arrived, never what it held", () => {
+  const copy = adminAgentOfficeMessages.ko.real.finance;
+  const readAt = "2026-10-08T08:05:00.000Z";
+  const room = (overrides) => financeLiveDept(agentOfficeFinanceState(financeInput(overrides)), readAt, copy);
+
+  const recorded = room({});
+  assert.equal(recorded.status, "done");
+  assert.equal(recorded.badge, "기록됨");
+  assert.equal(recorded.line, "오늘 기한 digest 기록됨 · 10-08 01:00 UTC");
+  assert.equal(recorded.detail, "스위치 기록 3번 · 켜진 시각 10-01 00:00 UTC · 읽은 시각 10-08 08:05 UTC");
+
+  const silent = room({ recordedToday: false, latestDigestAt: at("2026-10-07T01:00:09Z") });
+  assert.equal(silent.status, "attention");
+  assert.equal(silent.line, "오늘 digest 없음 · 마지막 기록 10-07 01:00 UTC");
+  assert.equal(room({ recordedToday: false, latestDigestAt: null }).line, copy.silentNever);
+
+  const unreadable = room({ control: financeControl("unreadable") });
+  assert.equal(unreadable.status, "attention");
+  assert.equal(unreadable.line, copy.controlUnreadable);
+  assert.match(unreadable.detail, /읽을 수 있는 스위치 없음/);
+
+  const off = room({ control: financeControl("disabled") });
+  assert.equal(financeTone(agentOfficeFinanceState(financeInput({ control: financeControl("disabled") }))), "waiting");
+  assert.equal(off.line, copy.off);
+  // The newest digest's time is still named when the line does not carry it.
+  assert.match(off.detail, /마지막 digest 10-08 01:00 UTC/);
+  assert.equal(room({ environment: "development" }).status, "waiting");
+  assert.equal(room({ environment: "development" }).line, copy.notApplicable);
+
+  const unread = financeLiveDept({ kind: "unread" }, readAt, copy);
+  assert.equal(unread.status, "attention");
+  assert.equal(unread.badge, "읽지 못함");
+
+  for (const locale of ["en", "ko"]) {
+    const words = adminAgentOfficeMessages[locale].real.finance;
+    for (const key of ["recorded", "silent", "not_due", "off", "control_unreadable", "not_applicable", "unread"]) {
+      assert.ok(words.badges[key], `${locale}: ${key}`);
+    }
+    // Nothing about prices, models or deadlines inside the digest.
+    for (const value of Object.values(words).filter((v) => typeof v === "string")) {
+      assert.doesNotMatch(value, /model|price|\$|모델|가격/i, `${locale}: "${value}"`);
+    }
+  }
+});
+
+test("the office reads the billing and finance agent's state, never its digest", () => {
+  const finance = readFunction("readFinance");
+  assert.match(finance, /readBillingFinanceOpsControl\(prisma\)/);
+  assert.match(finance, /agentDigestItem\.findFirst\(\{[\s\S]*?select: \{ createdAt: true \}/);
+  assert.doesNotMatch(finance, /payload|sizeBytes|kind: true|select: \{ value/);
+  // The environment through the app's own resolver; no secret, no raw env.
+  assert.match(finance, /resolveDeploymentEnvironment\(\)/);
+  assert.doesNotMatch(finance, /process\.env/);
+  assert.match(finance, /read: "billing_finance_ops"/);
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {

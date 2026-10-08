@@ -13,6 +13,7 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  financeLiveDept,
   qaLiveDept,
   researchLiveDept,
   type AgentOfficeAmuxView,
@@ -96,6 +97,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => ({
       research: researchLiveDept(live.research, live.readAt, m.real.research),
       qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
+      finance: financeLiveDept(live.finance, live.readAt, m.real.finance),
       engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
     }),
     [live, m]
