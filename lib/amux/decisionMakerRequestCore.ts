@@ -70,8 +70,33 @@ export type DmRequestEventKind = (typeof DM_REQUEST_EVENT_KINDS)[number];
 /** Recorded by the router's actor; every other kind by the request's instance. */
 export const DM_ROUTER_EVENT_KINDS = ["assign", "assign_discarded", "stale_close"] as const;
 
-/** Events that close a request. A request routed to the operator is closed from its creation. */
-export const DM_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close"] as const;
+/**
+ * A person's judgment of the request's proposal (§2-6, stage S1e), each named
+ * after the person's §10 audit action (`amux.decision.confirm`,
+ * `.edit_confirm`, `.reject`). A judgment closes its request. This module
+ * never writes these kinds: the judgment table's own trigger (migration
+ * 20261008130100_amux_decision_maker_judgment_delivery) inserts the event in
+ * the judgment's statement, and the event guard accepts one only beside the
+ * judgment row of the same transaction, kind and audit row.
+ */
+export const DM_JUDGMENT_EVENT_KINDS = ["confirm", "edit_confirm", "reject"] as const;
+export type DmJudgmentEventKind = (typeof DM_JUDGMENT_EVENT_KINDS)[number];
+
+/**
+ * Every kind the event table holds, as its kind CHECK lists them since stage
+ * S1e: this module's nine and a judgment's three.
+ */
+export const DM_LEDGER_EVENT_KINDS = [...DM_REQUEST_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
+
+/** The router's closing events (stage S1c). */
+export const DM_ROUTER_CLOSING_EVENT_KINDS = ["assign_discarded", "stale_close"] as const;
+
+/**
+ * Events that close a request: the router's, and since stage S1e a person's
+ * judgment. A request routed to the operator is closed from its creation.
+ * One per request (the partial unique index of the closing kinds).
+ */
+export const DM_CLOSING_EVENT_KINDS = [...DM_ROUTER_CLOSING_EVENT_KINDS, ...DM_JUDGMENT_EVENT_KINDS] as const;
 
 /** §6: the five terminal results; a request has at most one. */
 export const DM_RESULT_KINDS = ["proposal", "escalate", "validation_failure", "timeout", "unavailable"] as const;
@@ -123,7 +148,14 @@ export const dmEventAuditAction = (kind: DmRequestEventKind): string => `amux.de
 /** §2, §9: the database-clock windows. */
 export const DM_ASSIGNMENT_WINDOW_MS = 2 * 60 * 1000;
 export const DM_RESULT_WINDOW_MS = 30 * 60 * 1000;
-/** §10: an open request is closed as stale 30 days after it was created. */
+/**
+ * §10: an open request is closed as stale 30 days after it was created --
+ * exactly 720 hours. Since migration
+ * 20261008130000_amux_decision_maker_stale_close_hours the event guard adds
+ * `INTERVAL '720 hours'`, a fixed length, as this does; its earlier 30-day
+ * interval followed the session time zone's calendar and was an hour off across
+ * a daylight-saving change.
+ */
 export const DM_STALE_CLOSE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 /** §9: the commit reserve, `AMUX_DB_COMMIT_RESERVE_MS`; a deadline D is the window's end less this. */
 export const DM_COMMIT_RESERVE_MS = 200;
@@ -577,10 +609,12 @@ export const isDmDeadlineResultKind = (kind: DmResultKind): boolean =>
  *   reason the ledger can check must hold: closed, another digest's result,
  *   an unknown result, no intent, or the deadline reached.
  * - `result_unknown`: assigned, open, no result and no earlier unknown.
- * - `stale_close`: open, and 30 days after creation.
+ * - `stale_close`: open, and 720 hours after creation.
  *
  * A request routed to the operator is closed from its creation, so only a
- * rejection can ever be recorded against it.
+ * rejection can ever be recorded against it. A person's judgment (stage S1e)
+ * closes a request too; it is not an attempt here, because the judgment
+ * store records it and the database writes its event.
  */
 export const dmEventRefusal = (state: DmRequestState, attempt: DmEventAttempt): DmEventRefusal | null => {
   const closed = state.closing !== null;
