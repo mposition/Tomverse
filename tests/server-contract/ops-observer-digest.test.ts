@@ -56,12 +56,12 @@ before(async () => {
       isBudgetInsufficient: () => false,
       // The kept-item read runs in the bounded wrapper, under the run's deadline.
       withOpsObserverTransaction: async (kind: string, deadline: Date, fn: (tx: unknown) => Promise<unknown>) => {
-        world.wrapped.push([kind, deadline instanceof Date]);
+        world.wrapped.push([kind, deadline instanceof Date ? deadline.toISOString() : null]);
         const result = await fn({ $queryRaw: async () => (world.kept ? [{ id: world.kept }] : []) });
         return { result, armed: {} };
       },
       armOpsObserverTransaction: async (_tx: unknown, kind: string, deadline: Date) => {
-        world.armed.push([kind, deadline instanceof Date]);
+        world.armed.push([kind, deadline instanceof Date ? deadline.toISOString() : null]);
         world.txCalls.push("arm");
         return {};
       },
@@ -142,7 +142,8 @@ test("only the digest service may submit", async () => {
 });
 
 test("the app builds the digest from its own reads and keeps it under the date's key", async () => {
-  const response = await call(DIGEST);
+  const runDeadline = new Date(Date.now() + 120_000).toISOString();
+  const response = await call(DIGEST, body({ runDeadline }));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { result: "created", itemId: ITEM });
   assert.equal(world.stateArgs[2], DAY);
@@ -156,7 +157,9 @@ test("the app builds the digest from its own reads and keeps it under the date's
     channelCheckTaken: true,
   });
   // Armed first, the shared writes, then this agent's guard row last.
-  assert.deepEqual(world.armed, [["digest_submit", true]]);
+  // Armed with the request's own deadline, not any other.
+  assert.deepEqual(world.armed, [["digest_submit", runDeadline]]);
+  assert.deepEqual(world.wrapped, [["state_read", runDeadline]]);
   assert.deepEqual(world.txCalls, ["arm", "insert_and_audit", "run_guard"]);
   // digest_submit's Prisma timeout, not the shared default.
   assert.deepEqual(world.prismaTimeouts, [55_000]);
@@ -195,8 +198,9 @@ test("a commit the deferred check refuses, a start budget refusal and a late ans
 
 test("a date already kept is answered with its item, never rebuilt or a conflict", async () => {
   world.kept = ITEM;
-  assert.deepEqual(await (await call(DIGEST)).json(), { result: "replayed", itemId: ITEM });
-  assert.deepEqual(world.wrapped, [["state_read", true]]);
+  const runDeadline = new Date(Date.now() + 90_000).toISOString();
+  assert.deepEqual(await (await call(DIGEST, body({ runDeadline }))).json(), { result: "replayed", itemId: ITEM });
+  assert.deepEqual(world.wrapped, [["state_read", runDeadline]]);
   assert.deepEqual(world.submissions, []);
   assert.equal(world.asserted, 1);
   // A concurrent run that kept it first between the read and the write.
