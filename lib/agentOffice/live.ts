@@ -575,6 +575,8 @@ type FinanceCopy = {
   badges: Record<AgentOfficeFinanceVerdict | "unread", string>;
   unread: string;
   recorded: (time: string) => string;
+  /** Recorded today, but the newest digest's time was not read with it. */
+  recordedUntimed: string;
   silent: (time: string) => string;
   silentNever: string;
   notDue: string;
@@ -596,8 +598,10 @@ export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, 
 
   const last = state.latestDigestAt ? utcStamp(state.latestDigestAt) : null;
   const line =
-    state.verdict === "recorded" && last
-      ? copy.recorded(last)
+    state.verdict === "recorded"
+      ? last
+        ? copy.recorded(last)
+        : copy.recordedUntimed
       : state.verdict === "silent"
         ? last
           ? copy.silent(last)

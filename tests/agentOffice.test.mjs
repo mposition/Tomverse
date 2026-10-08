@@ -1220,6 +1220,18 @@ test("the billing and finance room says whether today's digest arrived, never wh
   assert.equal(silent.line, "오늘 digest 없음 · 마지막 기록 10-07 01:00 UTC");
   assert.equal(room({ recordedToday: false, latestDigestAt: null }).line, copy.silentNever);
 
+  // Not due covers the grace hour and a switch turned on after today's slot.
+  assert.equal(room({ recordedToday: false, now: at("2026-10-08T01:30:00Z") }).line, copy.notDue);
+  assert.equal(room({ recordedToday: false, now: at("2026-10-08T01:30:00Z") }).status, "waiting");
+  // Recorded stays recorded even when the newest digest's time was not read with it.
+  const untimed = financeLiveDept(
+    { kind: "observed", verdict: "recorded", controlRevision: 3, enabledAt: null, latestDigestAt: null },
+    readAt,
+    copy
+  );
+  assert.equal(untimed.line, copy.recordedUntimed);
+  assert.equal(untimed.badge, "기록됨");
+
   const unreadable = room({ control: financeControl("unreadable") });
   assert.equal(unreadable.status, "attention");
   assert.equal(unreadable.line, copy.controlUnreadable);
@@ -1252,6 +1264,8 @@ test("the billing and finance room says whether today's digest arrived, never wh
 test("the office reads the billing and finance agent's state, never its digest", () => {
   const finance = readFunction("readFinance");
   assert.match(finance, /readBillingFinanceOpsControl\(prisma\)/);
+  // Today's row for this environment, by the agent's own idempotency key.
+  assert.match(finance, /agentDigestItem\.count\(\{[\s\S]*?billingFinanceOpsIdempotencyKey\(/);
   assert.match(finance, /agentDigestItem\.findFirst\(\{[\s\S]*?select: \{ createdAt: true \}/);
   assert.doesNotMatch(finance, /payload|sizeBytes|kind: true|select: \{ value/);
   // The environment through the app's own resolver; no secret, no raw env.
