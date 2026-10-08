@@ -44,10 +44,14 @@ npm run promote:test -- --sha=<develop 병합 commit>
 
 **순서** (2~4는 이어서 합니다. 사이에 staging이 develop의 새 병합을 배포하면 전환이 그만큼 되돌아갑니다)
 
-1. **[Cloudflare 대시보드]** dev의 Access bypass 앱이 staging과 같은 경로를 덮는지 확인합니다:
-   `/api/internal`, `/api/billing/webhook`, `/api/webhooks`, `/api/build-info`
-   (`docs/ops/staging-access-boundary.md`). `/api/build-info`가 없으면 매시 drift 보고가 dev를 unknown으로 봅니다.
-   확인: 로컬 PowerShell에서 `npm run report:deployed-commit-drift -- --environment=dev --fetch`가 dev의 commit을 읽는지.
+1. **[Cloudflare Zero Trust 대시보드 → Access → Applications]** dev의 bypass 앱이 staging과 같은 다섯 경로를
+   덮는지 확인합니다: `/robots.txt`, `/api/internal`, `/api/billing/webhook`, `/api/webhooks`, `/api/build-info`
+   (`docs/ops/staging-access-boundary.md`). staging은 앱이 둘입니다 — 호스트 전체(Allow, 운영자 이메일)와 이 다섯
+   destination을 묶은 앱(Bypass, Everyone). **staging의 bypass 앱은 UI 한도인 destination 다섯 개가 이미 차 있어서**
+   dev 경로를 거기에 더할 수 없으므로, dev는 자기 bypass 앱(같은 다섯 경로, 호스트 `dev.tomverse.app`)을 갖습니다.
+   `/api/build-info`가 없으면 매시 drift 보고가 dev를 unknown으로 보고, `/robots.txt`가 없으면
+   `check:edge-robots`가 실패합니다. 확인: 로컬 PowerShell에서
+   `npm run report:deployed-commit-drift -- --environment=dev --fetch`가 dev의 commit을 읽는지.
 2. **[브라우저 — 읽기]** `https://staging.tomverse.app/api/build-info`의 `commitSha`를 읽습니다.
 3. **[로컬 PowerShell — 쓰기]** 그 SHA로 `test`를 만듭니다. 첫 실행은 `create`이고, lease는 `test`가 아직 없어야
    통과합니다.

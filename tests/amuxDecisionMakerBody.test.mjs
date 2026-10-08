@@ -90,8 +90,8 @@ import {
 } from "../lib/amux/decisionMakerDigestKeys.ts";
 import {
   DM_ASSIGNMENT_WINDOW_MS,
-  DM_CLOSING_EVENT_KINDS,
   DM_RESULT_KINDS,
+  DM_ROUTER_CLOSING_EVENT_KINDS,
   DM_STALE_CLOSE_AFTER_MS,
 } from "../lib/amux/decisionMakerRequestCore.ts";
 
@@ -269,8 +269,10 @@ test("the triggers use the core's period, retention, total and actions, and the 
   for (const name of ["amux_decision_maker_body_guard", "amux_decision_maker_retention_event_guard"]) {
     assert.ok(functionBody(sql, name).includes("'tomverse-amux-decision-maker-request:' ||"), name);
   }
-  // The closing trigger fires on exactly the ledger's closing kinds.
-  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${DM_CLOSING_EVENT_KINDS.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
+  // The closing trigger fires on exactly the router's closing kinds. Stage S1e recreated it with a
+  // judgment's three as well (20261008130100_amux_decision_maker_judgment_delivery,
+  // tests/amuxDecisionMakerJudgment.test.mjs).
+  assert.match(sql, new RegExp(`WHEN \\(NEW\\."kind" IN \\(${DM_ROUTER_CLOSING_EVENT_KINDS.map((kind) => `'${kind}'`).join(", ")}\\)\\)`));
   assert.match(sql, /AFTER INSERT ON "AmuxDecisionMakerRequestEvent"/);
 });
 
