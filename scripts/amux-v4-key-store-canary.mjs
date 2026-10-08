@@ -3,8 +3,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { createAmuxContentUnitKeys, loadAmuxContentUnitKeys,
-  deleteAmuxContentUnitKey } from "../lib/amux/ideaKeyStore.ts";
+  deleteAmuxContentUnitKey, amuxContentKeyRing } from "../lib/amux/ideaKeyStore.ts";
 import { sealAmuxContent, openAmuxContent } from "../lib/amux/ideaCrypto.ts";
+import { loadCurrentAmuxContentKeys } from "../lib/amux/ideaKeyConfig.ts";
 
 const STAGING_ENVIRONMENT_ID = "9347d760-66f6-430b-8f2f-36fd5dbef333";
 
@@ -57,10 +58,22 @@ export async function verifyStagingKeyCanary({ env = process.env,
     } catch (error) {
       if (error?.code !== "missing") return result;
     }
+    // Actually attempt to open the retained backup after deletion. A key ring
+    // containing only the wrapping master must refuse the now-missing unit;
+    // a missing storage read alone is not evidence of envelope-open refusal.
+    try {
+      const unexpected = openAmuxContent(backupEnvelope, identity.purpose,
+        ideaId, amuxContentKeyRing(loadCurrentAmuxContentKeys(isolatedEnv), []));
+      unexpected.fill(0);
+      return result;
+    } catch (error) {
+      if (error?.message !== "AMUX content unit key is unavailable") return result;
+    }
     result = { kind: "verified", canaryId: ideaId,
       mayHaveOrphanKey: false,
       readableBeforeDeletion: true, unitKeyMissingAfterDeletion: true,
-      oldEnvelopeKeyReloadRefused: true, runtimeActivated: false };
+      oldEnvelopeKeyReloadRefused: true, oldEnvelopeOpenRefused: true,
+      runtimeActivated: false };
     return result;
   } catch { return result; /* Never retry uncertain PUT/DELETE. */ }
   finally {
