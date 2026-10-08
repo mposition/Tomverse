@@ -139,11 +139,12 @@ const BILLING_FINANCE_OPS_VARIABLES = [
 ] as const;
 
 /**
- * The Support Triage Retention service's one variable
- * (docs/policy/support-triage.md §3): the retention route secret, nothing
- * else. The same list lib/supportTriageRetentionServiceCore.ts accepts at
- * start; the IaC test holds the two equal.
+ * The Support Triage services' one variable each (docs/policy/support-triage.md
+ * §3): their own route secret, nothing else. The same lists
+ * lib/supportTriageServiceCore.ts accepts at start; the IaC test holds them
+ * equal.
  */
+const SUPPORT_TRIAGE_WORKER_VARIABLES = ["SUPPORT_TRIAGE_RUN_SECRET"] as const;
 const SUPPORT_TRIAGE_RETENTION_VARIABLES = ["SUPPORT_TRIAGE_RETENTION_SECRET"] as const;
 
 /**
@@ -238,6 +239,19 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: BILLING_FINANCE_OPS_VARIABLES,
       staging: BILLING_FINANCE_OPS_VARIABLES,
+    },
+  },
+  {
+    // docs/policy/support-triage.md §3: every 30 minutes. The run route
+    // answers without writing anything while SUPPORT_TRIAGE_ENABLED is off.
+    // Applied by the operator at stage P0c.
+    key: "support_triage_worker",
+    service: "Support Triage",
+    startCommand: "node --experimental-strip-types scripts/support-triage-worker-service.mjs",
+    cronSchedule: "*/30 * * * *",
+    environments: {
+      production: SUPPORT_TRIAGE_WORKER_VARIABLES,
+      staging: SUPPORT_TRIAGE_WORKER_VARIABLES,
     },
   },
   {
