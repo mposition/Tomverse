@@ -11,9 +11,11 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { useModalDialog } from "@/components/useModalDialog";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
+  amuxRoomView,
   engineeringLiveDept,
   qaLiveDept,
   researchLiveDept,
+  type AgentOfficeAmuxView,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
 } from "@/lib/agentOffice/live";
@@ -29,7 +31,7 @@ import {
   type Snapshot,
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
-import { DEPT_ROOMS } from "@/lib/agentOffice/world";
+import { AMUX_ROOM, DEPT_ROOMS } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -96,6 +98,11 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
       qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
       engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
     }),
+    [live, m]
+  );
+  // The AMUX room is not a team: its workers are drawn from the record and never enter the demo.
+  const amuxView = useMemo(
+    () => amuxRoomView(live.amux, live.readAt, AMUX_ROOM.desks.length, m.real.amux),
     [live, m]
   );
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
@@ -264,6 +271,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
             <LiveView
               m={m}
               engine={engine}
+              amuxView={amuxView}
               snap={snap}
               follow={follow}
               setFollow={setFollow}
@@ -354,6 +362,7 @@ function LiveDecisionNote({ m }: { m: OfficeCopy }) {
 function LiveView({
   m,
   engine,
+  amuxView,
   snap,
   follow,
   setFollow,
@@ -365,6 +374,7 @@ function LiveView({
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
+  amuxView: AgentOfficeAmuxView;
   snap: Snapshot;
   follow: boolean;
   setFollow: (value: boolean) => void;
@@ -457,7 +467,14 @@ function LiveView({
       </section>
 
       <section className={cx("live-grid")}>
-        <AgentOfficeWorld engine={engine} snap={snap} selectedId={selectedId} follow={follow} onSelect={onSelect} />
+        <AgentOfficeWorld
+          engine={engine}
+          amux={amuxView}
+          snap={snap}
+          selectedId={selectedId}
+          follow={follow}
+          onSelect={onSelect}
+        />
 
         <aside className={cx("live-rail")}>
           <OperatorConsole m={m} engine={engine} snap={snap} />

@@ -1,7 +1,9 @@
 // The Agent office's map: a tile grid, 0 = walkable and 1 = wall or furniture.
 // Ported from the original AI OFFICE layout and its four-by-three grid: the
 // operator's office, digest desk, approval room and lounge on top, and the
-// eight teams below. Geometry only: room names come from the console catalog.
+// eight teams below. Under them, the AMUX execution room spans three columns
+// and the fourth is the entrance lobby. Geometry only: room names come from
+// the console catalog.
 
 import {
   AGENT_OFFICE_TEAM_IDS,
@@ -11,13 +13,13 @@ import {
 
 export const TILE = 18;
 export const COLS = 74;
-export const ROWS = 46;
+export const ROWS = 59;
 export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
 export type Pt = { x: number; y: number };
-export type RoomKind = "dept" | "operator" | "meeting" | "lounge";
-export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "lounge";
+export type RoomKind = "dept" | "operator" | "meeting" | "lounge" | "amux";
+export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "lounge" | "amux";
 
 export type Desk = {
   /** Left tile of the desk top. */
@@ -165,6 +167,35 @@ export const LOUNGE_ROOM: Room = {
   ],
 };
 
+/**
+ * The AMUX execution room: one desk for each AMUX worker, in a row. Workers
+ * are drawn seated at their desks with their real state; nobody walks in or
+ * out of this room, because nothing in it is the demo's.
+ */
+const AMUX_Y = 45;
+const AMUX_H = 11;
+const AMUX_W = COL_X[2] + ROOM_W - COL_X[0];
+
+export const AMUX_ROOM: Room = {
+  id: "amux",
+  short: "amux.workers",
+  icon: "🧩",
+  kind: "amux",
+  x: COL_X[0],
+  y: AMUX_Y,
+  w: AMUX_W,
+  h: AMUX_H,
+  doors: [
+    { x: COL_X[0] + 25, y: AMUX_Y },
+    { x: COL_X[0] + 26, y: AMUX_Y },
+  ],
+  desks: Array.from({ length: 12 }, (_, i) => {
+    const dx = 3 + i * 4;
+    return { deskX: COL_X[0] + dx - 1, deskY: AMUX_Y + 5, seat: { x: COL_X[0] + dx, y: AMUX_Y + 6 } };
+  }),
+  loiter: [],
+};
+
 /** Eight meeting seats, above and below the table. */
 export const MEETING_SEATS: Pt[] = [
   { x: 41, y: 5 },
@@ -180,10 +211,10 @@ export const MEETING_SEATS: Pt[] = [
 /** Where a report is delivered, in front of the operator's desk. */
 export const OPERATOR_REPORT_SPOT: Pt = { x: 9, y: 9 };
 export const OPERATOR_SEAT: Pt = { x: 9, y: 5 };
-/** The way in and out. */
-export const ENTRANCE: Pt = { x: 36, y: ROWS - 1 };
+/** The way in and out, at the foot of the lobby beside the AMUX room. */
+export const ENTRANCE: Pt = { x: COL_X[3] + 7, y: ROWS - 1 };
 /** The doormat drawn in front of the entrance. */
-export const ENTRANCE_MAT = { x: 34, y: ROWS - 3, w: 5, h: 2 };
+export const ENTRANCE_MAT = { x: COL_X[3] + 5, y: ROWS - 3, w: 5, h: 2 };
 
 const TEAM_ROOMS: Room[] = AGENT_OFFICE_TEAM_IDS.map((id, i) =>
   deskRoom(id, COL_X[i % 4], ROW_Y[Math.floor(i / 4)], DEPT_H, "top")
@@ -191,7 +222,7 @@ const TEAM_ROOMS: Room[] = AGENT_OFFICE_TEAM_IDS.map((id, i) =>
 
 /** Every room with desks and staff: the eight teams, then the digest desk. */
 export const DEPT_ROOMS: Room[] = [...TEAM_ROOMS, DIGEST_ROOM];
-export const ROOMS: Room[] = [OPERATOR_ROOM, DIGEST_ROOM, MEETING_ROOM, LOUNGE_ROOM, ...TEAM_ROOMS];
+export const ROOMS: Room[] = [OPERATOR_ROOM, DIGEST_ROOM, MEETING_ROOM, LOUNGE_ROOM, ...TEAM_ROOMS, AMUX_ROOM];
 
 export type Prop = {
   kind:
@@ -225,6 +256,16 @@ for (const room of DEPT_ROOMS) {
   PROPS.push({ kind: "plant", x: room.x + 13, y: room.y + 1, w: 1, h: 1 });
   PROPS.push({ kind: "cabinet", x: room.x + 12, y: room.y + 8, w: 2, h: 1 });
 }
+
+for (const desk of AMUX_ROOM.desks) {
+  PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });
+}
+PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + 1, w: 3, h: 1 });
+PROPS.push({ kind: "plant", x: AMUX_ROOM.x + AMUX_ROOM.w - 2, y: AMUX_ROOM.y + 1, w: 1, h: 1 });
+PROPS.push({ kind: "plant", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + AMUX_ROOM.h - 2, w: 1, h: 1 });
+// The lobby.
+PROPS.push({ kind: "plant", x: COL_X[3] + 1, y: AMUX_Y + 1, w: 1, h: 1 });
+PROPS.push({ kind: "plant", x: COL_X[3] + ROOM_W - 2, y: AMUX_Y + 1, w: 1, h: 1 });
 
 PROPS.push({ kind: "operator-desk", x: 7, y: 6, w: 5, h: 2 });
 PROPS.push({ kind: "rug", x: 6, y: 9, w: 7, h: 3 });
