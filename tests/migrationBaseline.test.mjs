@@ -364,3 +364,39 @@ test("the AMUX unit actor replacement pins its five-text-argument predecessor", 
       previousBodySha256: declaration.previousBodySha256 }], undeclared: [],
   });
 });
+
+test("the Decision Maker switch isolation check pins the S1b switch guard body", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261008090000_amux_decision_maker_switch_serialization", "migration.sql"),
+    "utf8",
+  );
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261008030000_amux_decision_maker_switch", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /CREATE OR REPLACE FUNCTION "amux_decision_maker_switch_event_guard"\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "amux_decision_maker_switch_event_guard",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+  // No migration between the two redefines the function.
+  const between = readdirSync(MIGRATIONS)
+    .filter(
+      (name) =>
+        name > "20261008030000_amux_decision_maker_switch" &&
+        name < "20261008090000_amux_decision_maker_switch_serialization",
+    )
+    .filter((name) => {
+      try {
+        return /FUNCTION "amux_decision_maker_switch_event_guard"\(/.test(
+          readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8"),
+        );
+      } catch {
+        return false;
+      }
+    });
+  assert.deepEqual(between, []);
+});

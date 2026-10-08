@@ -1275,6 +1275,25 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `routeDmQuestion()`이 `settings_unreadable`로 운영자에게 보냅니다. 표를 읽고 쓰는 곳은 store
   하나이며, 시스템 감사는 별도 모듈이 씁니다(한 파일이 두 writer를 부르지 않습니다). route·Admin
   화면·DM 호출은 없습니다.
+- **S1c(요청 원장)**: `lib/amux/decisionMakerRequestCore.ts`, `lib/amux/decisionMakerRequestStore.ts`,
+  `lib/amux/decisionMakerRequestSystemAudit.ts`,
+  `prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql`,
+  `prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql`,
+  `tests/amuxDecisionMakerRequest.test.mjs`, `tests/integration/amux-decision-maker-request.db.test.ts`.
+  요청은 (카드 id, 질문 revision)당 한 행이고 고칠 수 없으며, 상태는 append-only 사건 표의 합입니다.
+  **전이 그래프는 trigger가 강제하고 `dmEventRefusal()`·`dmEventSwitchRefusal()`이 같은 그래프를
+  옮깁니다** — 한쪽만 바꾸지 않습니다. 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)은 DB 시계이고,
+  배정·전송 의도·DM 출력(제안·이관·검증 실패)은 삽입 때와 COMMIT 때(`AX001`) 모두 마감에서 commit
+  예비시간 200 ms를 뺀 D로 거부되며, writer는 같은 마감을 `requireLeaseAt`으로 fence에 넘깁니다. 종결
+  결과는 요청당 하나이고 (요청, 결과 digest) 쌍으로 멱등입니다. 사건마다 같은 트랜잭션의 감사 행을
+  요구합니다 — 배정·종료는 router, 전송·결과는 요청의 인스턴스 actor입니다.
+  **스위치 값은 호출자가 넘기지 않습니다.** 라우팅·전송 의도·결과는 store가 audit chain lock(모든
+  스위치 변경도 먼저 잡는 lock) 뒤에 S1b reader로 직접 읽고, trigger는 스위치 gate(스위치 trigger는
+  배타, 원장 trigger는 공유)를 잡은 뒤 다시 읽어 kill switch on·인스턴스 off에서 DM 라우팅·전송
+  의도를, kill switch on에서 제안을 거부합니다. lock 순서는 audit chain lock → 스위치 gate →
+  요청·scope lock입니다. 원장 trigger와 S1b 스위치 trigger는 lock 뒤에 읽으므로 READ COMMITTED가
+  아니면 거부합니다. 운영자 직접 답의 종료, 본문, 보존, digest 키, 판정, 전달, route·Admin 화면·DM
+  호출은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

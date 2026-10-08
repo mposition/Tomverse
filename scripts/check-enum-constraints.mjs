@@ -1035,6 +1035,62 @@ const REGISTRY = {
     reason:
       "human or system. The guard trigger binds each to its own audit entry of the same transaction: a person's under amux.decision.mode or amux.decision.latch_release, a latch under amux.decision.latch by the instance's own system actor.",
   },
+  AmuxDecisionMakerRequest_route_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_REQUEST_ROUTES",
+    reason:
+      "routeDmQuestion()'s two results (docs/policy/amux-decision-maker.md section 3). There is no autonomous route in policy version 1; a third value would be a v2 policy and a schema change. Further CHECKs tie the route to the refusal codes: dm_proposal carries none, operator at least one.",
+  },
+  AmuxDecisionMakerRequest_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The two DM instances, the switch store's own list (section 7), or NULL for a provider the router does not verify. A separate CHECK pairs the instance with the asking provider: claude to decision-maker-openai, codex to decision-maker-anthropic.",
+  },
+  AmuxDecisionMakerRequestEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_REQUEST_EVENT_KINDS",
+    reason:
+      "The request lifecycle of stage S1c, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>). The trigger also holds the transition graph that dmEventRefusal() mirrors. Operator judgments, deliveries, retention and body events are later stages and are not values here.",
+  },
+  AmuxDecisionMakerRequestEvent_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The instance a transmission, result or rejection event comes from; NULL on the router's assignment and closing events. The guard trigger also requires it to be the request's own instance.",
+  },
+  AmuxDecisionMakerRequestEvent_vendor_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_VENDORS",
+    reason:
+      "The vendor a transmission intent records (section 10), paired with the instance by a second CHECK: openai with decision-maker-openai, anthropic with decision-maker-anthropic. The writer derives it from the instance.",
+  },
+  AmuxDecisionMakerRequestEvent_snapshot_state_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_SNAPSHOT_STATES",
+    reason:
+      "Section 5's three snapshot states, recorded on the transmission intent: none (card only), worker_head and develop. A second CHECK requires the target SHA and the manifest digest exactly when the state is not none.",
+  },
+  AmuxDecisionMakerRequestEvent_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "Section 6's five terminal results. A partial unique index keeps one per request; the first three are DM output and are held to the result deadline when recorded and at COMMIT, timeout and unavailable only hand the question to the operator.",
+  },
+  AmuxDecisionMakerRequestEvent_rejection_reason_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_REJECTION_REASONS",
+    reason:
+      "Why an arriving result was recorded as rejected (sections 6 and 9). The guard trigger checks the first five against the ledger's own state; binding_mismatch and kill_switch are decided from the submission and the switch store, outside the ledger.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",
