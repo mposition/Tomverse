@@ -112,93 +112,75 @@ test("what is sent compares equal to what GitHub stores, and GitHub's extra-appr
 });
 
 
-test("a push counts as the admin PAT's only when the PAT is wired to it", async () => {
-  const { qaReleaseWorkflowTokenPushers } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
-  const { parse } = await import("yaml");
-  const { readFileSync } = await import("node:fs");
+
+test("every step that can update a branch is caught, however the push is written", async () => {
+  const { qaReleaseStepMayUpdateBranch } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  for (const run of [
+    'git push origin "$b"',
+    'GIT_TERMINAL_PROMPT=0 git push origin "$b"',
+    "command git push origin b",
+    "/usr/bin/git push origin b",
+    'bash -c "git push origin b"',
+    "if git push origin develop; then echo ok; fi",
+    "git -c http.extraheader=x push origin b",
+    "gh pr merge 12 --merge",
+    "gh api -X PATCH repos/o/r/git/refs/heads/b -f sha=x",
+  ]) {
+    assert.equal(qaReleaseStepMayUpdateBranch({ run }), true, run);
+  }
+  assert.equal(qaReleaseStepMayUpdateBranch({ uses: "ad-m/github-push-action@v1" }), true);
+  assert.equal(qaReleaseStepMayUpdateBranch({ uses: "peter-evans/create-pull-request@v7" }), true);
+  for (const run of ["# git push is never the signal", 'docker push "ghcr.io/x"', "bad.push(x)", "npm run check:push-scope", "npm test"]) {
+    assert.equal(qaReleaseStepMayUpdateBranch({ run }), false, run);
+  }
+});
+
+test("a branch-updating step passes only as the exact step a person reviewed", async () => {
+  const { qaReleaseWorkflowTokenPushers, qaReleasePushStepDigest } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
   const PAT = "${{ secrets.GH_AUTOMATION_PAT }}";
-  const wf = (path, workflow) => ({ path, workflow });
-
-  // The four ways this repository wires it, each as its own workflow uses it.
-  const safe = [
-    wf("checkout-token", { jobs: { a: { steps: [{ uses: "actions/checkout@v6", with: { token: PAT } }, { run: 'git push origin "$b"' }] } } }),
-    wf("setup-git", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'gh auth setup-git\ngit push origin "$b"' }] } } }),
-    wf("remote-set-url", {
-      // A backslash-continued command, as feedback-autofix writes it.
-      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: ["git remote set-url origin \\", '  "https://x-access-token:${GH_TOKEN}@github.com/x.git"', 'git push origin "$b"'].join("\n") }] } },
-    }),
-    wf("url", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git push "https://x-access-token:${GH_TOKEN}@github.com/x.git" "$b"' }] } } }),
-  ];
-  assert.deepEqual(qaReleaseWorkflowTokenPushers(safe), []);
-
-  // The ways it is not wired, all listed.
-  const unsafe = [
-    // the PAT named only in a comment
-    wf("comment", { jobs: { a: { steps: [{ run: '# migrate to secrets.GH_AUTOMATION_PAT later\ngit push origin "$b"' }] } } }),
-    // the PAT in another job
-    wf("other-job", { jobs: { a: { env: { GH_TOKEN: PAT }, steps: [{ run: "echo" }] }, b: { steps: [{ run: 'git push origin "$b"' }] } } }),
-    // a checkout token whose credential is not kept
-    wf("not-persisted", { jobs: { a: { steps: [{ uses: "actions/checkout@v6", with: { token: PAT, "persist-credentials": false } }, { run: "git push origin x" }] } } }),
-    // a URL whose variable is the workflow token
-    wf("workflow-token-url", { jobs: { a: { steps: [{ env: { GH_TOKEN: "${{ github.token }}" }, run: 'git push "https://x-access-token:${GH_TOKEN}@github.com/x.git" b' }] } } }),
-    // setup-git in an earlier step, not this one
-    wf("setup-elsewhere", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: "gh auth setup-git" }, { run: "git push origin x" }] } } }),
-    // unreadable
-    wf("unreadable", null),
-    // the PAT URL put on another remote, the push going to origin
-    wf("other-remote", {
-      jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'git remote set-url backup "https://x-access-token:${GH_TOKEN}@github.com/x.git"\ngit push origin b' }] } },
-    }),
-    // the PAT URL only in an inline comment of the push line
-    wf("inline-comment", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: "git push origin b # https://x-access-token:${GH_TOKEN}@github.com/x.git" }] } } }),
-    // the PAT URL in another command on the line
-    wf("other-command", { jobs: { a: { steps: [{ env: { GH_TOKEN: PAT }, run: 'echo "https://x-access-token:${GH_TOKEN}@github.com/x.git"; git push origin b' }] } } }),
-    // a PAT checkout that may not have run
-    wf("conditional-checkout", {
-      jobs: { a: { steps: [{ uses: "actions/checkout@v6" }, { if: "${{ false }}", uses: "actions/checkout@v6", with: { token: PAT } }, { run: "git push origin b" }] } },
-    }),
-    // a remote set in a step that may not have run
-    wf("conditional-remote", {
-      jobs: {
-        a: {
-          steps: [
-            { if: "${{ false }}", env: { GH_TOKEN: PAT }, run: 'git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/x.git"' },
-            { run: "git push origin b" },
-          ],
-        },
-      },
-    }),
-  ];
-  assert.deepEqual(qaReleaseWorkflowTokenPushers(unsafe), [
-    "comment#a/0",
-    "conditional-checkout#a/2",
-    "conditional-remote#a/1",
-    "inline-comment#a/0",
-    "not-persisted#a/1",
-    "other-command#a/0",
-    "other-job#b/0",
-    "other-remote#a/0",
-    "setup-elsewhere#a/1",
-    "unreadable#unreadable",
-    "workflow-token-url#a/0",
-  ]);
-
-  // A remote given the PAT URL in an earlier, unconditional step stays authenticated.
-  const carried = wf("carried-remote", {
+  const workflow = {
+    env: { A: "1" },
     jobs: {
-      a: {
-        steps: [
-          { env: { GH_TOKEN: PAT }, run: 'git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/x.git"' },
-          { if: "${{ success() }}", run: 'if git push origin "$b"; then echo ok; fi' },
-        ],
+      push: {
+        env: { GH_TOKEN: PAT },
+        steps: [{ uses: "actions/checkout@v6", with: { token: PAT } }, { name: "Push", run: 'git push origin "$b"' }],
       },
     },
-  });
-  assert.deepEqual(qaReleaseWorkflowTokenPushers([carried]), []);
+  };
+  const path = ".github/workflows/x.yml";
+  const sha256 = qaReleasePushStepDigest(workflow, "push", 1);
+  const reviewed = [{ path, job: "push", step: 1, sha256 }];
+  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow }], reviewed), []);
+  // Not reviewed at all: listed with its digest, for the reviewer.
+  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow }], []), [`${path}#push/1 ${sha256}`]);
 
-  // The repository's own PAT pushers read as safe, parsed from their files.
-  const own = ["back-merge-main-to-develop", "cron-auto-fix", "feedback-autofix", "feedback-autofix-promotion-pr"].map((name) =>
-    wf(name, parse(readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8"))),
-  );
-  assert.deepEqual(qaReleaseWorkflowTokenPushers(own), []);
+  // Any change to what decides the credential is a new digest, so it is listed again.
+  const changes = [
+    (w) => (w.jobs.push.steps[1].run += "\n# a comment"),
+    (w) => (w.jobs.push.env.GH_TOKEN = "${{ github.token }}"),
+    (w) => (w.env.B = "2"),
+    (w) => (w.jobs.push.steps[0].with["persist-credentials"] = false),
+    (w) => (w.jobs.push.steps[0].if = "${{ false }}"),
+    (w) => (w.jobs.push.if = "${{ github.event_name == 'push' }}"),
+    (w) => (w.jobs.push.steps[1].env = { GH_TOKEN: "${{ github.token }}" }),
+  ];
+  for (const change of changes) {
+    const changed = structuredClone(workflow);
+    change(changed);
+    assert.equal(qaReleaseWorkflowTokenPushers([{ path, workflow: changed }], reviewed).length, 1, String(change));
+  }
+  // Another path, job or step index with the same digest does not count.
+  assert.equal(qaReleaseWorkflowTokenPushers([{ path: ".github/workflows/y.yml", workflow }], reviewed).length, 1);
+  assert.deepEqual(qaReleaseWorkflowTokenPushers([{ path, workflow: null }], reviewed), [`${path}#unreadable`]);
+});
+
+test("the reviewed list names exact steps with full digests and a reason", async () => {
+  const { QA_RELEASE_REVIEWED_PUSH_STEPS } = await import("../lib/qaReleaseLaneRulesetsCore.ts");
+  assert.ok(QA_RELEASE_REVIEWED_PUSH_STEPS.length > 0);
+  for (const entry of QA_RELEASE_REVIEWED_PUSH_STEPS) {
+    assert.match(entry.path, /^\.github\/workflows\/[a-z0-9-]+\.ya?ml$/);
+    assert.match(entry.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(Number.isInteger(entry.step) && entry.step >= 0);
+    assert.ok(entry.why.length > 10);
+  }
 });

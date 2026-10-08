@@ -90,7 +90,7 @@ const readWorkflows = async (ref) => {
     } catch {
       workflow = null;
     }
-    files.push({ path: `${ref}:${entry.path}`, workflow });
+    files.push({ path: entry.path, workflow, ref });
   }
   return files;
 };
@@ -99,9 +99,12 @@ try {
   // Applied, the update ruleset refuses a workflow-token push to any branch
   // but develop. Refuse first while a workflow on develop or main would make
   // one (visual-baseline-record until it pushes with the admin PAT).
-  const tokenPushers = qaReleaseWorkflowTokenPushers([...(await readWorkflows("develop")), ...(await readWorkflows("main"))]);
+  const tokenPushers = [];
+  for (const ref of ["develop", "main"]) {
+    for (const finding of qaReleaseWorkflowTokenPushers(await readWorkflows(ref))) tokenPushers.push(`${ref}: ${finding}`);
+  }
   if (tokenPushers.length > 0) {
-    fail(`These workflows push with the workflow token, which the rulesets would refuse; move them to GH_AUTOMATION_PAT first. Nothing was changed: ${tokenPushers.join(", ")}`);
+    fail(`These branch-updating workflow steps are not reviewed PAT pushes (lib/qaReleaseLaneRulesetsCore.ts QA_RELEASE_REVIEWED_PUSH_STEPS), and a workflow-token push would be refused once the rulesets apply. Nothing was changed: ${tokenPushers.join(", ")}`);
   }
 
   const record = JSON.parse(readFileSync(recordPath, "utf8"));

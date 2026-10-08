@@ -18,6 +18,7 @@
  * after the observations (item 7); these builders refuse a list that holds
  * the lane's own App.
  */
+import { createHash } from "node:crypto";
 
 /** GitHub's built-in repository role ids for ruleset bypass: 5 is "admin". */
 export const QA_RELEASE_REPOSITORY_ADMIN_ROLE_ID = 5;
@@ -179,174 +180,153 @@ export function qaReleaseComparableRules(rules: readonly { type: string; paramet
     .sort((a, b) => a.type.localeCompare(b.type));
 }
 
-/** The one expression that names the admin PAT, compared without spaces. */
-const isPat = (value: unknown): boolean =>
-  typeof value === "string" && value.replace(/\s+/g, "") === "${{secrets.GH_AUTOMATION_PAT}}";
-
 type Json = Record<string, unknown>;
 const asRecord = (value: unknown): Json | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : null;
 
-/** A script's lines without comment lines, with backslash continuations joined. */
-const scriptLines = (run: string): string[] => {
-  const joined: string[] = [];
-  let pending = "";
-  for (const raw of run.split("\n")) {
+/** Stable JSON: object keys sorted at every depth. */
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value as Json)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson((value as Json)[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+};
+
+/**
+ * Whether a step can update a branch: a non-comment script line naming both
+ * `git` and `push` (which also catches `VAR=x git push`, `command git push`,
+ * `/usr/bin/git push` and `bash -c "git push ..."`), a `gh pr merge` or a
+ * `gh api` call on refs or merges, or an action whose name says it pushes.
+ * Deliberately broad: a step it flags that does not push only needs a review.
+ */
+export function qaReleaseStepMayUpdateBranch(step: unknown): boolean {
+  const record = asRecord(step) ?? {};
+  if (typeof record.uses === "string" && /push|auto-commit|create-pull-request|merge/i.test(record.uses)) return true;
+  if (typeof record.run !== "string") return false;
+  return record.run.split("\n").some((raw) => {
     const line = raw.trim();
-    if (line.startsWith("#")) continue;
-    if (line.endsWith("\\")) {
-      pending += `${line.slice(0, -1)} `;
-      continue;
-    }
-    joined.push(pending + line);
-    pending = "";
-  }
-  if (pending) joined.push(pending);
-  return joined;
-};
-
-/**
- * The commands on one shell line, each as its words: quotes respected, an
- * unquoted `#` ends the line, and `;`, `&&`, `||` and `|` separate
- * commands. Leading control words (`if`, `then`, `!`, ...) are dropped, so
- * `if git push origin x; then` reads as `git push origin x`.
- */
-const shellCommands = (line: string): string[][] => {
-  const commands: string[][] = [];
-  let words: string[] = [];
-  let word = "";
-  let inWord = false;
-  let quote: string | null = null;
-  const endWord = () => {
-    if (inWord) words.push(word);
-    word = "";
-    inWord = false;
-  };
-  const endCommand = () => {
-    endWord();
-    if (words.length > 0) commands.push(words);
-    words = [];
-  };
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    if (quote) {
-      if (char === quote) quote = null;
-      else word += char;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      inWord = true;
-      continue;
-    }
-    if (char === "#" && !inWord) break;
-    if (char === ";" || char === "|" || char === "&") {
-      endCommand();
-      if ((char === "|" || char === "&") && line[i + 1] === char) i += 1;
-      continue;
-    }
-    if (/\s/.test(char)) {
-      endWord();
-      continue;
-    }
-    word += char;
-    inWord = true;
-  }
-  endCommand();
-  const CONTROL = new Set(["if", "then", "else", "elif", "do", "while", "until", "!", "{", "("]);
-  return commands.map((command) => {
-    let index = 0;
-    while (index < command.length && CONTROL.has(command[index])) index += 1;
-    return command.slice(index);
+    if (line.startsWith("#")) return false;
+    return (/\bgit\b/.test(line) && /\bpush\b/.test(line)) || /\bgh\s+pr\s+merge\b/.test(line) || (/\bgh\s+api\b/.test(line) && /(refs|merges)\b/.test(line));
   });
-};
-
-const ACCESS_TOKEN_URL = /^https:\/\/x-access-token:\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?@[^\s]+$/;
-/** The first argument that is not an option. */
-const firstOperand = (args: string[]): string | undefined => args.find((arg) => !arg.startsWith("-"));
+}
 
 /**
- * Every `git push` in the workflows that is not authenticated with the admin
- * PAT, as `path#job/step`. The update ruleset refuses a workflow-token push to
- * every branch but develop once applied (GitHub Actions cannot be on its
- * bypass list here), so the real-ruleset step refuses while any is listed.
- *
- * Each push is read as a shell command and judged by its own target:
- * - a URL target counts only as `https://x-access-token:${VAR}@...` with VAR
- *   the PAT in the step's effective environment; any other URL is listed;
- * - a remote-name target counts when that same remote was given such a URL by
- *   an earlier `git remote set-url`, when `gh auth setup-git` ran earlier in
- *   the same step with GH_TOKEN the PAT, or -- for `origin` -- when the job's
- *   checkout took the PAT and kept the credential.
- * Authentication set up in an earlier step that carries an `if:` is not
- * relied on: it may not have run. Comments, other commands on the line, other
- * jobs and unreadable workflows never count.
- *
- * Pure: the caller parses each workflow (the `yaml` package) and passes the
- * object, or null when it could not.
+ * The digest a person reviews for one branch-updating step: the step itself
+ * with everything that decides which credential its commands use -- the
+ * workflow's and job's env, the job's `if`, and every checkout step in the
+ * job (its `with` and `if`). Any change to any of them is a new digest.
  */
-export function qaReleaseWorkflowTokenPushers(files: readonly { path: string; workflow: unknown }[]): string[] {
+export function qaReleasePushStepDigest(workflow: unknown, jobId: string, stepIndex: number): string {
+  const root = asRecord(workflow) ?? {};
+  const job = asRecord(asRecord(root.jobs)?.[jobId]) ?? {};
+  const steps = Array.isArray(job.steps) ? job.steps : [];
+  const material = {
+    workflowEnv: root.env ?? null,
+    jobEnv: job.env ?? null,
+    jobIf: job.if ?? null,
+    checkouts: steps
+      .map((raw) => asRecord(raw) ?? {})
+      .filter((step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"))
+      .map((step) => ({ with: step.with ?? null, if: step.if ?? null })),
+    step: steps[stepIndex] ?? null,
+  };
+  return createHash("sha256").update(stableJson(material), "utf8").digest("hex");
+}
+
+/**
+ * The branch-updating steps a person has read and found to authenticate with
+ * GH_AUTOMATION_PAT (repository admin) or to push nothing, by workflow, job,
+ * step index and digest. Reviewed on 2026-10-08 against develop and main
+ * (a branch's own version of a step is its own entry). Adding or
+ * changing an entry is a change a reviewer reads; a step not listed here,
+ * or listed with another digest, refuses the real rulesets.
+ */
+export const QA_RELEASE_REVIEWED_PUSH_STEPS: readonly { path: string; job: string; step: number; sha256: string; why: string }[] = Object.freeze([
+  Object.freeze({
+    path: ".github/workflows/back-merge-main-to-develop.yml",
+    job: "back-merge",
+    step: 6,
+    sha256: "a66d39957f6ae6245e89c75314d2a568dd4803a0419c9a349c64684d00ad9592",
+    why: "git push origin develop; the job checkout keeps GH_AUTOMATION_PAT as origin credential",
+  }),
+  Object.freeze({
+    path: ".github/workflows/back-merge-main-to-develop.yml",
+    job: "back-merge",
+    step: 7,
+    sha256: "ab70d297b2d69710dcd7d4a3663a1ae75eec98abdb5e0af370c6992be9b16242",
+    why: "git push -u origin branch; same checkout credential",
+  }),
+  Object.freeze({
+    path: ".github/workflows/cron-auto-fix.yml",
+    job: "attempt-fix",
+    step: 18,
+    sha256: "baa3471a9078c07b259a424fe926dc36020086e72c9de1827a1ea29a6f2a3646",
+    why: "gh auth setup-git in the same step with GH_TOKEN the PAT, then git push origin",
+  }),
+  Object.freeze({
+    path: ".github/workflows/cron-auto-fix.yml",
+    job: "attempt-fix",
+    step: 18,
+    sha256: "fc2f35e999323a753c409de42eb377a65f009a2af54d7eea3ed617fb04db6450",
+    why: "main version of the same step: gh auth setup-git with GH_TOKEN the PAT, then git push origin and gh pr merge --auto, all as the PAT",
+  }),
+  Object.freeze({
+    path: ".github/workflows/feedback-autofix-promotion-pr.yml",
+    job: "promotion-pr",
+    step: 8,
+    sha256: "85815692015c9a0f16b4ae8ea673b32d8b2eb41202fab00eefe52dcdc546f998",
+    why: "git push to the x-access-token URL of GH_TOKEN, the PAT",
+  }),
+  Object.freeze({
+    path: ".github/workflows/feedback-autofix.yml",
+    job: "attempt-fix",
+    step: 11,
+    sha256: "47b779bfe76794714a56f2c5f976c7684a62d96e33738c0b534f866e5cea2d12",
+    why: "git remote set-url origin to the PAT URL in the same step, then git push origin",
+  }),
+  Object.freeze({
+    path: ".github/workflows/visual-baseline-record.yml",
+    job: "record",
+    step: 10,
+    sha256: "e20aa7c1c05a9d3a853e33282254ec0e1fccde5d5a1ab1e95d376c45441f0126",
+    why: "git push to the x-access-token URL of GH_TOKEN, the PAT (the version that pushes with the PAT)",
+  }),
+]);
+
+/**
+ * Every branch-updating step in the workflows that is not a reviewed one, as
+ * `path#job/step sha256`. Applied, the update ruleset refuses workflow-token
+ * updates to every branch but develop (GitHub Actions cannot be on its bypass
+ * list here), so the real-ruleset step refuses while any is listed.
+ *
+ * Shell is not interpreted: whether a push uses the PAT is a person's reading
+ * of the exact step, pinned by its digest. An unreadable workflow is listed.
+ *
+ * Pure but for hashing: the caller parses each workflow (the `yaml` package)
+ * and passes the object, or null when it could not.
+ */
+export function qaReleaseWorkflowTokenPushers(
+  files: readonly { path: string; workflow: unknown }[],
+  reviewed: readonly { path: string; job: string; step: number; sha256: string }[] = QA_RELEASE_REVIEWED_PUSH_STEPS,
+): string[] {
   const unsafe: string[] = [];
   for (const { path, workflow } of files) {
-    const root = asRecord(workflow);
-    const jobs = asRecord(root?.jobs);
-    if (!root || !jobs) {
+    const jobs = asRecord(asRecord(workflow)?.jobs);
+    if (!jobs) {
       unsafe.push(`${path}#unreadable`);
       continue;
     }
     for (const [jobId, rawJob] of Object.entries(jobs)) {
-      const job = asRecord(rawJob);
-      const steps = Array.isArray(job?.steps) ? job.steps : [];
-      let checkoutKeepsPat = false;
-      const remotesWithPat = new Set<string>();
-      steps.forEach((rawStep, index) => {
-        const step = asRecord(rawStep) ?? {};
-        const conditional = step.if !== undefined;
-        const env = { ...(asRecord(root.env) ?? {}), ...(asRecord(job?.env) ?? {}), ...(asRecord(step.env) ?? {}) };
-        const uses = typeof step.uses === "string" ? step.uses : "";
-        if (uses.startsWith("actions/checkout@")) {
-          const withs = asRecord(step.with) ?? {};
-          const keeps = isPat(withs.token) && withs["persist-credentials"] !== false && withs["persist-credentials"] !== "false";
-          // A later checkout replaces the credential either way; a conditional
-          // one may not have run, so it can only take the PAT away.
-          checkoutKeepsPat = conditional ? checkoutKeepsPat && keeps : keeps;
-        }
-        if (typeof step.run !== "string") return;
-        // Set up inside this step: it ran if this step's push runs.
-        let setupGitWithPat = false;
-        const stepRemotes = new Map<string, boolean>();
-        for (const line of scriptLines(step.run)) {
-          for (const words of shellCommands(line)) {
-            if (words[0] === "gh" && words[1] === "auth" && words[2] === "setup-git") {
-              setupGitWithPat = isPat(env.GH_TOKEN);
-              continue;
-            }
-            if (words[0] === "git" && words[1] === "remote" && words[2] === "set-url") {
-              const operands = words.slice(3).filter((arg) => !arg.startsWith("-"));
-              const [name, url] = operands;
-              const match = typeof url === "string" ? ACCESS_TOKEN_URL.exec(url) : null;
-              if (name) stepRemotes.set(name, Boolean(match && isPat(env[match[1]])));
-              continue;
-            }
-            if (words[0] !== "git" || words[1] !== "push") continue;
-            const target = firstOperand(words.slice(2)) ?? "origin";
-            let authenticated: boolean;
-            if (target.includes("://") || target.includes("@")) {
-              const match = ACCESS_TOKEN_URL.exec(target);
-              authenticated = Boolean(match && isPat(env[match[1]]));
-            } else {
-              const remotePat = stepRemotes.has(target) ? stepRemotes.get(target) === true : remotesWithPat.has(target);
-              authenticated = remotePat || setupGitWithPat || (target === "origin" && checkoutKeepsPat);
-            }
-            if (!authenticated) unsafe.push(`${path}#${jobId}/${index}`);
-          }
-        }
-        // A remote's URL set in this step stays for the later steps, unless
-        // the step was conditional and may not have run.
-        for (const [name, pat] of stepRemotes) {
-          if (pat && !conditional) remotesWithPat.add(name);
-          else remotesWithPat.delete(name);
-        }
+      const steps = Array.isArray(asRecord(rawJob)?.steps) ? (asRecord(rawJob)?.steps as unknown[]) : [];
+      steps.forEach((step, index) => {
+        if (!qaReleaseStepMayUpdateBranch(step)) return;
+        const sha256 = qaReleasePushStepDigest(workflow, jobId, index);
+        const known = reviewed.some((entry) => entry.path === path && entry.job === jobId && entry.step === index && entry.sha256 === sha256);
+        if (!known) unsafe.push(`${path}#${jobId}/${index} ${sha256}`);
       });
     }
   }
