@@ -14,7 +14,7 @@
     "predev": "node scripts/generate-build-info.mjs",
     "prebuild": "node scripts/check-native-swc.mjs && node scripts/generate-build-info.mjs",
     "build": "node scripts/run-next-build.mjs",
-    "build:local": "node scripts/run-next-build.mjs --large-heap",
+    "build:local": "npm run build -- --large-heap",
     "start": "next start",
     "start:e2e": "next start -H 127.0.0.1 -p 3100",
     "start:e2e:tutorial": "next start -H 127.0.0.1 -p 3117",
