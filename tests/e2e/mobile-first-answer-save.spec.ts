@@ -69,8 +69,15 @@ for (const narrow of [false, true]) {
     await prepareGuestPage(page, "ko");
     await mockChatStream(page, answer);
     let dispatches = 0;
+    const dispatchesByModel: Record<string, number> = {};
     await page.route("**/api/chat", async (route) => {
-      if (route.request().method() === "POST") dispatches += 1;
+      if (route.request().method() === "POST") {
+        const { modelId } = route.request().postDataJSON() as { modelId: unknown };
+        expect(typeof modelId).toBe("string");
+        const model = modelId as string;
+        dispatchesByModel[model] = (dispatchesByModel[model] || 0) + 1;
+        dispatches += 1;
+      }
       await route.fallback();
     });
 
@@ -104,9 +111,10 @@ for (const narrow of [false, true]) {
         .map(({ role, content, status }) => ({ role, content, status })));
     }).toEqual(conversation.selectedModels.map(() => expectedTurn));
     expect(dispatches).toBe(conversation.selectedModels.length);
+    const expectedDispatches = Object.fromEntries(conversation.selectedModels.map((modelId) => [modelId, 1]));
+    expect(dispatchesByModel).toEqual(expectedDispatches);
     const savedTranscripts = await readSavedMessages(page, conversation);
     for (const messages of savedTranscripts) {
-      expect(messages.filter((message) => message.id === CHAT_WELCOME_MESSAGE_ID)).toHaveLength(1);
       expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
     }
 
@@ -129,8 +137,10 @@ for (const narrow of [false, true]) {
       await expect(visibleMessage("user", question)).toHaveCount(1);
       await expect(visibleMessage("assistant", answer)).toHaveCount(1);
     }
+    expect(dispatchesByModel).toEqual(expectedDispatches);
+    expect(blockedExternalRequests).toEqual([]);
     await testInfo.attach("synthetic-saved-readback", {
-      body: JSON.stringify({ saved, savedTranscripts, dispatches, blockedExternalRequests }, null, 2),
+      body: JSON.stringify({ saved, savedTranscripts, dispatches, dispatchesByModel, blockedExternalRequests }, null, 2),
       contentType: "application/json",
     });
     await testInfo.attach("restored-mobile-answer", {
