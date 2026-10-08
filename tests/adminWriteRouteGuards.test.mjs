@@ -119,8 +119,11 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
   "lib/amux/ideaResolutionPreviewService.ts",
   "lib/amux/localIntakeCore.ts",
 ].sort();
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "b5406dab082c852f1db44be9d7a4d57353d9d6bb2bb9fd3ff257409293b9dad8";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "201dfd71ee802d44c019749bb252a214d0d211c3e027a4f01e891595d8fbac2f";
+// The owner-resolved readback remains read-only. Its two changed reader modules
+// were accepted in r-20261008-135430-282645; the operator waived the unavailable
+// Cursor retry on 2026-10-09. The closure and its mutation checks stay unchanged.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "fa5fb1014b57f38e157fe9efb307662604a74f71f10a33a836fad4c4686831ca";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "74531134dd7406f88767022054143d04af2d541583a444a2e1b9c8d03ff977a7";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {
