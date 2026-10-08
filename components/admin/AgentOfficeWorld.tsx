@@ -7,7 +7,7 @@ import Link from "next/link";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
-import type { AgentOfficeAmuxView, AgentOfficeAmuxWorkerView } from "@/lib/agentOffice/live";
+import type { AgentOfficeAmuxView, AgentOfficeReviewView, AgentOfficeSeatedView } from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
   AGENT_OFFICE_WORKER_COLORS,
@@ -16,6 +16,8 @@ import {
 import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
 import {
   AMUX_ROOM,
+  REVIEW_ROOM,
+  type Room,
   ENTRANCE,
   ENTRANCE_MAT,
   MEETING_ROOM,
@@ -32,6 +34,8 @@ type Props = {
   engine: AgentOffice;
   /** The AMUX execution room, read from the real record. */
   amux: AgentOfficeAmuxView;
+  /** The independent review room, read from the review server's latest report. */
+  review: AgentOfficeReviewView;
   snap: Snapshot;
   selectedId: string | null;
   follow: boolean;
@@ -103,21 +107,31 @@ const AgentLayer = memo(function AgentLayer({
 });
 
 /**
- * The AMUX workers, seated at their desks. Not engine agents: they never walk,
- * meet or take a demo task, and what each says is its real state.
+ * Figures seated at a room's desks from a real record: the AMUX workers and
+ * the reviewers. Not engine agents: they never walk, meet or take a demo task,
+ * and what each says is its real state.
  */
-const WorkerLayer = memo(function WorkerLayer({ workers }: { workers: AgentOfficeAmuxWorkerView[] }) {
+const SeatedLayer = memo(function SeatedLayer({
+  room,
+  people,
+  palette = 0,
+}: {
+  room: Room;
+  people: AgentOfficeSeatedView[];
+  /** Where in the palette this room's clothes start, so two rooms do not dress alike. */
+  palette?: number;
+}) {
   return (
     <>
-      {workers.slice(0, AMUX_ROOM.desks.length).map((worker, i) => {
-        const seat = AMUX_ROOM.desks[i].seat;
-        const [hair, shirt, accent] = AGENT_OFFICE_WORKER_COLORS[i % AGENT_OFFICE_WORKER_COLORS.length];
+      {people.slice(0, room.desks.length).map((worker, i) => {
+        const seat = room.desks[i].seat;
+        const [hair, shirt, accent] = AGENT_OFFICE_WORKER_COLORS[(i + palette) % AGENT_OFFICE_WORKER_COLORS.length];
         return (
           <div
             key={worker.name}
             className={cx("ag", "f-up", "a-sit", "r-member", "wk", worker.dim && "wk-off")}
             title={worker.title}
-            data-testid="agent-office-amux-worker"
+            data-testid={`agent-office-${room.id}-person`}
             data-worker-state={worker.state}
             style={
               {
@@ -200,7 +214,7 @@ const PropLayer = memo(function PropLayer({
  * follows whatever is happening. Ported from the original AI OFFICE
  * OfficeWorld; a demo of the agent teams, not a reading of them.
  */
-export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follow, onSelect }: Props) {
+export default function AgentOfficeWorld({ engine, amux, review, snap, selectedId, follow, onSelect }: Props) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -375,7 +389,9 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
 
           {ROOMS.map((room) => {
             const isAmux = room.kind === "amux";
-            const status = isAmux ? amux.status : snap.deptStatus[room.id];
+            const isReview = room.kind === "review";
+            const real = isAmux ? amux : isReview ? review : null;
+            const status = real ? real.status : snap.deptStatus[room.id];
             return (
               <div
                 key={room.id}
@@ -389,13 +405,13 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
               >
                 <span className={cx("rm-head")}>
                   <b>
-                    {room.icon} {isAmux ? m.rooms.amux : roomName(room.id)}
+                    {room.icon} {isAmux ? m.rooms.amux : isReview ? m.rooms.review : roomName(room.id)}
                   </b>
-                  {isAmux || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
+                  {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
                     <i
                       className={cx("rm-dot", status)}
-                      title={isAmux ? amux.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
+                      title={real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
                     />
                   ) : null}
                   {isAmux && AGENT_OFFICE_AMUX_RECORD_HREF ? (
@@ -411,9 +427,9 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
                   ) : null}
                 </span>
                 <span className={cx("rm-code")}>{room.short}</span>
-                {isAmux && amux.note ? (
-                  <span className={cx("rm-note")} data-testid="agent-office-amux-note">
-                    {amux.note}
+                {real?.note ? (
+                  <span className={cx("rm-note")} data-testid={`agent-office-${room.id}-note`}>
+                    {real.note}
                   </span>
                 ) : null}
                 {room.doors.map((door) => (
@@ -428,7 +444,8 @@ export default function AgentOfficeWorld({ engine, amux, snap, selectedId, follo
           })}
 
           <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
-          <WorkerLayer workers={amux.workers} />
+          <SeatedLayer room={AMUX_ROOM} people={amux.workers} />
+          <SeatedLayer room={REVIEW_ROOM} people={review.reviewers} palette={3} />
           <AgentLayer
             agents={engine.agents}
             register={register}

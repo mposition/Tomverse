@@ -163,9 +163,37 @@ export type AgentOfficeFinanceState =
       latestDigestAt: string | null;
     };
 
+/** One reviewer of the independent review server, as its latest report shows it. */
+export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
+
+export type AgentOfficeReviewState =
+  | { kind: "unread" }
+  /** No report has ever been stored. */
+  | { kind: "not_reporting" }
+  /** A stored report that is not the report's shape. */
+  | { kind: "unreadable" }
+  | {
+      kind: "observed";
+      /** When the app received the latest report (UTC ISO). */
+      receivedAt: string;
+      /** No report for longer than the reporter's five missed beats. */
+      stale: boolean;
+      draining: boolean;
+      pendingJobs: number;
+      reviewers: {
+        id: string;
+        vendor: string;
+        state: AgentOfficeReviewerState;
+        running: number;
+        maxConcurrent: number;
+      }[];
+      last24h: { accept: number; reject: number; unknown: number };
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
+  review: AgentOfficeReviewState;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
   finance: AgentOfficeFinanceState;
@@ -487,6 +515,18 @@ type AmuxCopy = {
   readAt: (time: string) => string;
 };
 
+/** A figure drawn seated at a desk from a real record: an AMUX worker or a reviewer. */
+export type AgentOfficeSeatedView = {
+  name: string;
+  state: string;
+  status: DeptStatus;
+  label: string;
+  /** Name, kind, state and when it was last heard, for the sprite's tooltip. */
+  title: string;
+  /** Not running at all: drawn faded. */
+  dim: boolean;
+};
+
 export type AgentOfficeAmuxWorkerView = {
   name: string;
   state: AgentOfficeAmuxWorkerState;
@@ -620,4 +660,82 @@ export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, 
   if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
   facts.push(read);
   return { status, badge: copy.badges[state.verdict], line, detail: facts.join(" · ") };
+}
+
+/** A reviewer's colour: reviewing is working, idle is ready, off waits, lost needs a look. */
+export function reviewerTone(state: AgentOfficeReviewerState): DeptStatus {
+  if (state === "reviewing") return "working";
+  if (state === "idle") return "done";
+  if (state === "lost") return "attention";
+  return "waiting";
+}
+
+type ReviewCopy = {
+  states: Record<AgentOfficeReviewerState, string>;
+  unread: string;
+  notReporting: string;
+  unreadable: string;
+  stale: (time: string) => string;
+  draining: string;
+  summary: (pending: number, accept: number, reject: number, unknown: number) => string;
+  lastReport: (time: string) => string;
+  load: (running: number, max: number) => string;
+  readAt: (time: string) => string;
+};
+
+export type AgentOfficeReviewView = {
+  status: DeptStatus;
+  summary: string;
+  /** Words drawn in the room itself: why it is empty or quiet. */
+  note: string | null;
+  reviewers: AgentOfficeSeatedView[];
+};
+
+/** The independent review room: its colour, its summary and each reviewer's sprite. */
+export function reviewRoomView(
+  state: AgentOfficeReviewState,
+  readAt: string,
+  desks: number,
+  copy: ReviewCopy
+): AgentOfficeReviewView {
+  const read = copy.readAt(utcStamp(readAt));
+  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, reviewers: [] };
+  if (state.kind === "unreadable") {
+    return { status: "attention", summary: `${copy.unreadable} · ${read}`, note: copy.unreadable, reviewers: [] };
+  }
+  if (state.kind === "not_reporting") {
+    return { status: "waiting", summary: `${copy.notReporting} · ${read}`, note: copy.notReporting, reviewers: [] };
+  }
+
+  const last = utcStamp(state.receivedAt);
+  const reviewers = state.reviewers.slice(0, desks).map((reviewer): AgentOfficeSeatedView => {
+    const label = copy.states[reviewer.state];
+    return {
+      name: reviewer.id,
+      state: reviewer.state,
+      status: reviewerTone(reviewer.state),
+      label,
+      title: [reviewer.id, reviewer.vendor, label, copy.load(reviewer.running, reviewer.maxConcurrent), copy.lastReport(last)].join(
+        " · "
+      ),
+      dim: reviewer.state === "off",
+    };
+  });
+  const any = (tone: DeptStatus) => reviewers.some((reviewer) => reviewer.status === tone);
+  const status: DeptStatus = state.stale
+    ? "attention"
+    : state.draining
+      ? "waiting"
+      : any("working")
+        ? "working"
+        : any("done")
+          ? "done"
+          : "waiting";
+  const summary = [
+    copy.summary(state.pendingJobs, state.last24h.accept, state.last24h.reject, state.last24h.unknown),
+    copy.lastReport(last),
+    read,
+  ].join(" · ");
+  const note = state.stale ? copy.stale(last) : state.draining ? copy.draining : null;
+  return { status, summary, note, reviewers };
 }

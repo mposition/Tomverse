@@ -157,6 +157,15 @@ runtime row read the way AMUX reads it when it hands out work (live while the
 lease has not run out and the status is idle or busy) -- and, while the
 route table has it, a link to the AMUX execution page. Workers are not demo staff: they never walk, meet or
 speak a demo line, and nothing about the cards they work on is read.
+Beside it the independent review room is LIVE too: the review server runs on
+the operator's Ubuntu machine, reachable only over SSH, so it reports instead
+of being asked -- a content-free status (per reviewer: vendor, enabled,
+reviews running out of its limit; jobs waiting; the last 24 hours' verdict
+counts) posted about once a minute to
+`POST /api/internal/review-orchestrator/status` with its own secret, kept as
+the latest report in one AppSetting row stamped with the app's receipt time.
+Each reviewer is drawn seated as reviewing, idle or off, and a report older
+than five minutes draws them all as without a report.
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,

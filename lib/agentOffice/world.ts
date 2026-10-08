@@ -2,8 +2,8 @@
 // Ported from the original AI OFFICE layout and its four-by-three grid: the
 // operator's office, digest desk, approval room and lounge on top, and the
 // eight teams below. Under them, the AMUX execution room spans three columns
-// and the fourth is the entrance lobby. Geometry only: room names come from
-// the console catalog.
+// and the independent review room takes the fourth, with the entrance below
+// it. Geometry only: room names come from the console catalog.
 
 import {
   AGENT_OFFICE_TEAM_IDS,
@@ -18,8 +18,8 @@ export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
 export type Pt = { x: number; y: number };
-export type RoomKind = "dept" | "operator" | "meeting" | "lounge" | "amux";
-export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "lounge" | "amux";
+export type RoomKind = "dept" | "operator" | "meeting" | "lounge" | "amux" | "review";
+export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "lounge" | "amux" | "review";
 
 export type Desk = {
   /** Left tile of the desk top. */
@@ -196,6 +196,34 @@ export const AMUX_ROOM: Room = {
   loiter: [],
 };
 
+/**
+ * The independent review room: one desk for each reviewer the review server
+ * reports, two rows of three. Its door is at the right of its top wall, so the
+ * way in runs down the free column beside the desks.
+ */
+export const REVIEW_ROOM: Room = {
+  id: "review",
+  short: "review.orch",
+  icon: "🔎",
+  kind: "review",
+  x: COL_X[3],
+  y: AMUX_Y,
+  w: ROOM_W,
+  h: AMUX_H,
+  doors: [
+    { x: COL_X[3] + 12, y: AMUX_Y },
+    { x: COL_X[3] + 13, y: AMUX_Y },
+  ],
+  desks: [0, 1].flatMap((row) =>
+    [0, 1, 2].map((col) => {
+      const deskX = COL_X[3] + 1 + col * 4;
+      const deskY = AMUX_Y + 2 + row * 4;
+      return { deskX, deskY, seat: { x: deskX + 1, y: deskY + 1 } };
+    })
+  ),
+  loiter: [],
+};
+
 /** Eight meeting seats, above and below the table. */
 export const MEETING_SEATS: Pt[] = [
   { x: 41, y: 5 },
@@ -211,7 +239,7 @@ export const MEETING_SEATS: Pt[] = [
 /** Where a report is delivered, in front of the operator's desk. */
 export const OPERATOR_REPORT_SPOT: Pt = { x: 9, y: 9 };
 export const OPERATOR_SEAT: Pt = { x: 9, y: 5 };
-/** The way in and out, at the foot of the lobby beside the AMUX room. */
+/** The way in and out, below the review room. */
 export const ENTRANCE: Pt = { x: COL_X[3] + 7, y: ROWS - 1 };
 /** The doormat drawn in front of the entrance. */
 export const ENTRANCE_MAT = { x: COL_X[3] + 5, y: ROWS - 3, w: 5, h: 2 };
@@ -222,7 +250,15 @@ const TEAM_ROOMS: Room[] = AGENT_OFFICE_TEAM_IDS.map((id, i) =>
 
 /** Every room with desks and staff: the eight teams, then the digest desk. */
 export const DEPT_ROOMS: Room[] = [...TEAM_ROOMS, DIGEST_ROOM];
-export const ROOMS: Room[] = [OPERATOR_ROOM, DIGEST_ROOM, MEETING_ROOM, LOUNGE_ROOM, ...TEAM_ROOMS, AMUX_ROOM];
+export const ROOMS: Room[] = [
+  OPERATOR_ROOM,
+  DIGEST_ROOM,
+  MEETING_ROOM,
+  LOUNGE_ROOM,
+  ...TEAM_ROOMS,
+  AMUX_ROOM,
+  REVIEW_ROOM,
+];
 
 export type Prop = {
   kind:
@@ -263,9 +299,9 @@ for (const desk of AMUX_ROOM.desks) {
 PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + 1, w: 3, h: 1 });
 PROPS.push({ kind: "plant", x: AMUX_ROOM.x + AMUX_ROOM.w - 2, y: AMUX_ROOM.y + 1, w: 1, h: 1 });
 PROPS.push({ kind: "plant", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + AMUX_ROOM.h - 2, w: 1, h: 1 });
-// The lobby.
-PROPS.push({ kind: "plant", x: COL_X[3] + 1, y: AMUX_Y + 1, w: 1, h: 1 });
-PROPS.push({ kind: "plant", x: COL_X[3] + ROOM_W - 2, y: AMUX_Y + 1, w: 1, h: 1 });
+for (const desk of REVIEW_ROOM.desks) {
+  PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });
+}
 
 PROPS.push({ kind: "operator-desk", x: 7, y: 6, w: 5, h: 2 });
 PROPS.push({ kind: "rug", x: 6, y: 9, w: 7, h: 3 });

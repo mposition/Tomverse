@@ -17,6 +17,7 @@
 import "server-only";
 
 import type {
+  AgentOfficeReviewState,
   AgentOfficeAmuxState,
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
@@ -31,6 +32,7 @@ import {
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
+import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
@@ -41,6 +43,7 @@ import {
   billingFinanceOpsIdempotencyKey,
 } from "@/lib/billingFinanceOpsDigest";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { REVIEW_ORCHESTRATOR_STATUS_KEY } from "@/lib/reviewOrchestratorStatusCore";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -242,13 +245,33 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   }
 }
 
+/**
+ * The independent review server: the latest status report it sent, the one
+ * row it may write. The report has no field for a job, a branch or a finding.
+ */
+async function readReview(): Promise<AgentOfficeReviewState> {
+  try {
+    const row = await prisma.appSetting.findUnique({
+      where: { key: REVIEW_ORCHESTRATOR_STATUS_KEY },
+      select: { value: true },
+    });
+    // Judged against a clock taken after the read: a report older than the
+    // threshold by then is stale, never fresh.
+    return agentOfficeReviewState({ stored: row?.value ?? null, now: new Date() });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "review_orchestrator" });
+    return { kind: "unread" };
+  }
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, engineering, amux] = await Promise.all([
+  const [research, qa, finance, engineering, amux, review] = await Promise.all([
     readResearch(now),
     readQa(),
     readFinance(),
     readEngineering(),
     readAmuxWorkers(),
+    readReview(),
   ]);
-  return { readAt: now.toISOString(), research, qa, finance, engineering, amux };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review };
 }

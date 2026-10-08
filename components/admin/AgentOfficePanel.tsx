@@ -13,11 +13,13 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  reviewRoomView,
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
   utcStamp,
   type AgentOfficeAmuxView,
+  type AgentOfficeReviewView,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
 } from "@/lib/agentOffice/live";
@@ -33,7 +35,7 @@ import {
   type Snapshot,
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
-import { AMUX_ROOM, DEPT_ROOMS } from "@/lib/agentOffice/world";
+import { AMUX_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -106,6 +108,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   // The AMUX room is not a team: its workers are drawn from the record and never enter the demo.
   const amuxView = useMemo(
     () => amuxRoomView(live.amux, live.readAt, AMUX_ROOM.desks.length, m.real.amux),
+    [live, m]
+  );
+  const reviewView = useMemo(
+    () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
     [live, m]
   );
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
@@ -279,6 +285,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               m={m}
               engine={engine}
               amuxView={amuxView}
+              reviewView={reviewView}
               readAt={live.readAt}
               snap={snap}
               follow={follow}
@@ -362,6 +369,7 @@ function LiveView({
   m,
   engine,
   amuxView,
+  reviewView,
   readAt,
   snap,
   follow,
@@ -375,6 +383,7 @@ function LiveView({
   m: OfficeCopy;
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
   snap: Snapshot;
@@ -504,6 +513,7 @@ function LiveView({
         <AgentOfficeWorld
           engine={engine}
           amux={amuxView}
+          review={reviewView}
           snap={snap}
           selectedId={selectedId}
           follow={follow}
