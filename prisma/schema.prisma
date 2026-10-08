@@ -2289,6 +2289,8 @@ model AdminAuditLog {
   amuxDecisionMakerRetentionEvent AmuxDecisionMakerRetentionEvent?
   amuxDecisionMakerDigestKeyEvent AmuxDecisionMakerDigestKeyEvent?
   amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
+  amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
+  amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8401,6 +8403,8 @@ model AmuxDecisionMakerRequest {
   bodies          AmuxDecisionMakerBody[]
   retentionEvents AmuxDecisionMakerRetentionEvent[]
   resultDetail    AmuxDecisionMakerResultDetail?
+  judgment        AmuxDecisionMakerJudgment?
+  deliveryEvents  AmuxDecisionMakerDeliveryEvent[]
 
   @@unique([cardId, questionRevision])
   @@index([instance, createdAt])
@@ -8418,7 +8422,13 @@ model AmuxDecisionMakerRequest {
 /// its own transaction by the router or the request's instance, an increasing
 /// sequence, READ COMMITTED only, no update or delete) and the deferred
 /// constraint trigger that refuses a late assignment or DM output at COMMIT
-/// with SQLSTATE AX001.
+/// with SQLSTATE AX001. Since stage S1e (migration
+/// 20261008130100_amux_decision_maker_judgment_delivery) a person's judgment
+/// closes a request with an event of its kind (confirm, edit_confirm or
+/// reject), which the judgment table's trigger writes and the guard accepts
+/// only beside that judgment; since migration
+/// 20261008130000_amux_decision_maker_stale_close_hours the stale close is 720
+/// hours after the creation, a fixed length.
 model AmuxDecisionMakerRequestEvent {
   id                     String    @id
   sequence               BigInt    @unique @default(autoincrement())
@@ -8442,6 +8452,7 @@ model AmuxDecisionMakerRequestEvent {
   request      AmuxDecisionMakerRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   resultDetail AmuxDecisionMakerResultDetail?
+  judgment     AmuxDecisionMakerJudgment?
 
   @@index([requestId, sequence])
 }
@@ -8571,6 +8582,83 @@ model AmuxDecisionMakerResultDetail {
   request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A person's judgment of an AMUX Decision Maker proposal
+/// (docs/policy/amux-decision-maker.md §2-6, §4, §6, §10): one immutable row
+/// per request -- confirm, edit_confirm or reject -- with the values Admin
+/// showed beside the proposal (the keyed digests of its bodies, the select's
+/// option, the `irreversible` flag and the snapshot), the keyed digest of an
+/// edited answer (the answer itself is a body row), and §4's declaration
+/// accuracy (`matched`, `mismatched` with its wrong items, or the default
+/// `not_judged`). A judgment closes its request: its trigger writes the
+/// request's closing event of the same kind. Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs (the
+/// kind, accuracy and shape per kind), and the guard: an open request routed
+/// to a DM whose terminal result is the proposal it names, with that result's
+/// detail; no confirmation under the kill switch; every shown value equal to
+/// the stored one; the person's audit of the same transaction targeting the
+/// request; no update or delete. `actorUserId` is the operator's id and
+/// intentionally has no User foreign key.
+model AmuxDecisionMakerJudgment {
+  id                          String   @id
+  requestId                   String   @unique
+  resultEventId               String   @unique
+  instance                    String
+  kind                        String
+  actorUserId                 String
+  shownAnswerDigest           String?
+  shownRationaleDigest        String?
+  shownOptionId               String?
+  shownIrreversible           Boolean?
+  shownSnapshotState          String?
+  shownSnapshotTargetSha      String?
+  shownSnapshotManifestDigest String?
+  operatorAnswerDigest        String?
+  declarationAccuracy         String
+  /// Never NULL (a CHECK); empty unless `declarationAccuracy` is `mismatched`.
+  mismatchedItems             String[]
+  auditLogId                  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                   DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([instance, createdAt])
+}
+
+/// The append-only delivery history of a confirmed AMUX Decision Maker
+/// answer (docs/policy/amux-decision-maker.md §2-7, §9, §10): one delivery
+/// decision after a confirm or edit_confirm (refused under the kill switch),
+/// then one receipt or one unknown outcome, and for an unknown outcome one
+/// person's resolution (`delivered` or `not_delivered`). Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs, the
+/// partial unique indexes (one decision, one outcome and one resolution per
+/// request -- not expressible here) and the guard: the order above, the
+/// kill switch for the decision, the router's or the person's audit of the
+/// same transaction naming the event, an increasing sequence, READ COMMITTED
+/// only, no update or delete. `actorUserId` is the operator's id on a
+/// resolution and intentionally has no User foreign key.
+model AmuxDecisionMakerDeliveryEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  requestId   String
+  kind        String
+  outcome     String?
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
 }
 
 /// The shared agent digest table: one row per stored digest item of any agent

@@ -1052,9 +1052,9 @@ const REGISTRY = {
   AmuxDecisionMakerRequestEvent_kind_check: {
     owner: "list",
     module: "lib/amux/decisionMakerRequestCore.ts",
-    list: "DM_REQUEST_EVENT_KINDS",
+    list: "DM_LEDGER_EVENT_KINDS",
     reason:
-      "The request lifecycle of stage S1c, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>). The trigger also holds the transition graph that dmEventRefusal() mirrors. Operator judgments, deliveries, retention and body events are later stages and are not values here.",
+      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, and since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request. Deliveries, retention and body events have tables of their own and are not values here.",
   },
   AmuxDecisionMakerRequestEvent_instance_check: {
     owner: "list",
@@ -1132,6 +1132,55 @@ const REGISTRY = {
     list: "DM_DIGEST_KEY_EVENT_KINDS",
     reason:
       "A key period's rotation into use and its destruction (section 10: the rotation and destruction of keys are recorded as system audits), each once per period by partial unique indexes and each under its own router audit action, amux.decision.digest_key_rotate or .digest_key_destroy.",
+  },
+  AmuxDecisionMakerJudgment_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_JUDGMENT_KINDS",
+    reason:
+      "Section 2-6: a person confirms the proposal as it is, confirms it edited, or rejects it, once per request. The same three kinds close the request in the ledger, and each is recorded under the person's amux.decision.<kind> audit, which the guard requires.",
+  },
+  AmuxDecisionMakerJudgment_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The DM instance whose proposal was judged, the switch store's own list (section 7). The guard requires it to be the request's own instance; section 4's report counts judgments per instance.",
+  },
+  AmuxDecisionMakerJudgment_declaration_accuracy_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DECLARATION_ACCURACIES",
+    reason:
+      "Section 4: matched, mismatched or not_judged, not_judged by default. A second CHECK requires the wrong items (effect_class, resolution, paths) exactly when mismatched; section 4's report counts each.",
+  },
+  AmuxDecisionMakerJudgment_shown_snapshot_state_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_SNAPSHOT_STATES",
+    reason:
+      "The snapshot state Admin showed beside a confirmed proposal (section 6: none shown as card only, worker_head or develop), the transmission's own list; NULL on a rejection. The guard requires it to equal the transmission intent's state.",
+  },
+  AmuxDecisionMakerDeliveryEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_EVENT_KINDS",
+    reason:
+      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt or an unknown outcome, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+  },
+  AmuxDecisionMakerDeliveryEvent_outcome_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_RESOLVE_OUTCOMES",
+    reason:
+      "What a person found when they checked an unknown delivery (section 9): delivered or not_delivered; NULL on every other kind. A shape CHECK requires it exactly on the resolution.",
+  },
+  AmuxDecisionMakerDeliveryEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_ACTOR_KINDS",
+    reason:
+      "system for the decision, the receipt and the unknown outcome (the router's audit), human for the resolution (a person's audit). A shape CHECK pairs the actor with the kind and requires the person's id exactly for human.",
   },
   AmuxIntakeDraft_status_check: {
     owner: "list",

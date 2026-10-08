@@ -322,6 +322,13 @@ run(
     // erase, the key destroyed only once nothing of its period remains, and
     // all of it allowed under the kill switch.
     "tests/integration/amux-decision-maker-body.db.test.ts",
+    // AMUX Decision Maker judgment and delivery (docs/policy/amux-decision-maker.md
+    // §2-6, §2-7, §4, §6, §9): one judgment per request closing it with its own
+    // event and retention, a confirmation only on what Admin showed and never
+    // under the kill switch, an edited answer stored with its judgment, the
+    // delivery decision once and its outcome once, §4's report, and the stale
+    // close at 720 hours across a daylight-saving change.
+    "tests/integration/amux-decision-maker-judgment.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

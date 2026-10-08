@@ -648,6 +648,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX Decision Maker legal hold or its release, or the system's retention start when a request closes, not customer data. The actor id is the administrator who set or released the hold and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind, a key period and identifiers, not a body. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxDecisionMakerJudgment",
+    publicName: "amux_decision_maker_judgments",
+    prismaModel: "AmuxDecisionMakerJudgment",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker judgment -- a person's confirmation, edited confirmation or rejection of a proposal and the declaration accuracy they recorded -- not customer data. The actor id is the administrator who judged and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores closed codes, keyed digests and identifiers, never the answer. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerDeliveryEvent",
+    publicName: "amux_decision_maker_delivery_events",
+    prismaModel: "AmuxDecisionMakerDeliveryEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for the delivery of one confirmed AMUX Decision Maker answer, not customer data. The actor id, on a resolution only, is the administrator who checked an unknown delivery and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind and outcome and identifiers, not the answer. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIdeaFrontierModelApproval",
     publicName: "amux_idea_frontier_model_approvals",
     prismaModel: "AmuxIdeaFrontierModelApproval",

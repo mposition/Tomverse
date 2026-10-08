@@ -400,3 +400,39 @@ test("the Decision Maker switch isolation check pins the S1b switch guard body",
     });
   assert.deepEqual(between, []);
 });
+
+test("the Decision Maker stale-close interval pins the S1c request event guard body", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261008130000_amux_decision_maker_stale_close_hours", "migration.sql"),
+    "utf8",
+  );
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261008090100_amux_decision_maker_request_ledger", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /CREATE OR REPLACE FUNCTION "amux_decision_maker_request_event_guard"\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "amux_decision_maker_request_event_guard",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+  // No migration between the two redefines the function.
+  const between = readdirSync(MIGRATIONS)
+    .filter(
+      (name) =>
+        name > "20261008090100_amux_decision_maker_request_ledger" &&
+        name < "20261008130000_amux_decision_maker_stale_close_hours",
+    )
+    .filter((name) => {
+      try {
+        return /FUNCTION "amux_decision_maker_request_event_guard"\(/.test(
+          readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8"),
+        );
+      } catch {
+        return false;
+      }
+    });
+  assert.deepEqual(between, []);
+});

@@ -129,7 +129,8 @@ test("the ledger's vocabularies are the policy's, and no list holds an autonomou
     "stale_close",
   ]);
   assert.deepEqual([...DM_ROUTER_EVENT_KINDS], ["assign", "assign_discarded", "stale_close"]);
-  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close"]);
+  // Stage S1e adds a person's judgment to the closing kinds (tests/amuxDecisionMakerJudgment.test.mjs).
+  assert.deepEqual([...DM_CLOSING_EVENT_KINDS], ["assign_discarded", "stale_close", "confirm", "edit_confirm", "reject"]);
   assert.deepEqual([...DM_RESULT_KINDS], ["proposal", "escalate", "validation_failure", "timeout", "unavailable"]);
   assert.deepEqual([...DM_DEADLINE_RESULT_KINDS], ["proposal", "escalate", "validation_failure"]);
   assert.deepEqual([...DM_SNAPSHOT_STATES], ["none", "worker_head", "develop"]);
@@ -1642,7 +1643,8 @@ test("the open requests of a key period are counted in one statement, from [from
   assert.match(sent[0].sql, /r\."route" = 'dm_proposal'/);
   assert.match(sent[0].sql, /"createdAt" >= 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
   assert.match(sent[0].sql, /"createdAt" < 'epoch'::timestamptz \+ \$ \* INTERVAL '1 millisecond'/);
-  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close'\)/);
+  // A judgment closes a request too (stage S1e).
+  assert.match(sent[0].sql, /ev\."kind" IN \('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject'\)/);
   for (const input of [{ fromMs: -1, toMs: 5 }, { fromMs: 5, toMs: 5 }, { fromMs: 1.5, toMs: 5 }, { fromMs: 0, toMs: Number.MAX_VALUE }]) {
     await assert.rejects(
       countOpenDecisionMakerRequestsCreatedBetween(tx, input),

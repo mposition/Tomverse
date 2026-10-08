@@ -1321,6 +1321,27 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
   docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
   거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
+- **S1e(운영자 판정·전달)**: `lib/amux/decisionMakerJudgmentCore.ts`,
+  `lib/amux/decisionMakerJudgmentStore.ts`, `lib/amux/decisionMakerJudgmentSystemAudit.ts`,
+  `prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql`,
+  `prisma/migrations/20261008130100_amux_decision_maker_judgment_delivery/migration.sql`,
+  `tests/amuxDecisionMakerJudgment.test.mjs`, `tests/integration/amux-decision-maker-judgment.db.test.ts`.
+  판정은 요청당 하나(`confirm`·`edit_confirm`·`reject`)이고 사람의 `amux.decision.<kind>` 감사가 같은
+  트랜잭션에서 **요청**을 target으로 합니다(S1d 본문 guard가 이미 그렇게 묶음). **판정이 요청을
+  닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
+  guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
+  닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
+  request store의 두 읽기가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
+  상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
+  트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
+  `effect_class`·`resolution`·`paths` 중 하나 이상입니다. 전달은 확정 뒤 결정 한 번(kill switch 중 거부),
+  그 뒤 영수증 또는 `delivery_unknown` 한 번, `delivery_unknown`에만 사람의 해결 한 번입니다 —
+  docs/policy/amux-decision-maker.md §10이 영수증 action을 따로 두지 않으므로 결정과 영수증 모두 router의
+  `amux.decision.deliver`입니다. docs/policy/amux-decision-maker.md §4의 보고는 읽기만 하며 분모가 비면 `insufficient_evidence`이고 스위치·졸업과 닿지 않습니다. 같은 변경에서 원장의
+  stale close를 `720 hours`로 고정했습니다(이전 `30 days`는 DST에서 한 시간 어긋남). 함수 네 개를
+  교체하는 migration은 header 선언이 하나뿐이라 이전 본문 digest를 첫 DO 블록에서 대조합니다.
+  route·Admin 화면·bridge는 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

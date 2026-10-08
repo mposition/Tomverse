@@ -39,6 +39,7 @@ import {
   writeDecisionMakerRouteAudit,
 } from "@/lib/amux/decisionMakerRequestSystemAudit";
 import {
+  DM_INSTANCE_SCOPES,
   dmSwitchRoutingInput,
   isDmInstanceScope,
   type DmInstanceScope,
@@ -50,7 +51,10 @@ import { readDecisionMakerSwitchesOrThrow } from "@/lib/amux/decisionMakerSwitch
  * `AmuxDecisionMakerRequestEvent` (docs/policy/amux-decision-maker.md §10:
  * "단일 writer 모듈이 위 표들에 쓴다"). Nothing else in the application names
  * either table; tests/amuxDecisionMakerRequest.test.mjs and `npm run
- * check:protected-table-writers` fail on another writer.
+ * check:protected-table-writers` fail on another writer. The one other writer
+ * is the database itself: since stage S1e the judgment table's trigger writes
+ * a person's judgment as the request's closing event (confirm, edit_confirm or
+ * reject), in the judgment's own statement.
  *
  * Every function runs on a transaction its caller owns and holds no lock
  * beyond it. Each sends a fixed list of statements -- no loop -- pinned by
@@ -169,7 +173,10 @@ export async function readDecisionMakerThroughput(
  * A request's state in one statement: the request row, the database clock,
  * and what its events add up to. `probeDigest` also reports the rejection
  * already recorded for that result digest, if any. Null when no such request
- * exists; a row the core cannot read throws.
+ * exists; a row the core cannot read throws. Its closing kind is the router's
+ * (assign_discarded, stale_close) or, since stage S1e, a person's judgment
+ * (confirm, edit_confirm, reject), which the database writes beside the
+ * judgment row -- one per request either way.
  */
 export async function readDecisionMakerRequestState(
   client: LedgerReader,
@@ -206,7 +213,9 @@ export async function readDecisionMakerRequestState(
         max(ev."resultKind") FILTER (WHERE ev."kind" = 'result') AS "terminalResultKind",
         max(ev."resultDigest") FILTER (WHERE ev."kind" = 'result') AS "terminalResultDigest",
         coalesce(bool_or(ev."kind" = 'result_unknown'), false) AS "resultUnknown",
-        max(ev."kind") FILTER (WHERE ev."kind" IN ('assign_discarded', 'stale_close')) AS "closingKind",
+        max(ev."kind") FILTER (
+          WHERE ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
+        ) AS "closingKind",
         min(ev."rejectionReason") FILTER (
           WHERE ev."kind" = 'result_rejected' AND ev."resultDigest" = ${probeDigest}::text
         ) AS "probedRejection"
@@ -238,6 +247,7 @@ export async function lookupDecisionMakerResult(
  * no closing event has closed, in one statement. Stage S1d's digest-key
  * destruction reads it for one key period (§10): a body can still be stored
  * for an open request, so a period's key is not destroyed while one is open.
+ * A judgment closes a request as well (stage S1e), as the key guard counts it.
  * Bounds are epoch milliseconds, added to the epoch as an interval so the
  * comparison is exact.
  */
@@ -261,12 +271,71 @@ export async function countOpenDecisionMakerRequestsCreatedBetween(
       AND r."createdAt" < 'epoch'::timestamptz + ${input.toMs} * INTERVAL '1 millisecond'
       AND NOT EXISTS (
         SELECT 1 FROM "AmuxDecisionMakerRequestEvent" ev
-        WHERE ev."requestId" = r."id" AND ev."kind" IN ('assign_discarded', 'stale_close')
+        WHERE ev."requestId" = r."id"
+          AND ev."kind" IN ('assign_discarded', 'stale_close', 'confirm', 'edit_confirm', 'reject')
       )
   `;
   const row = rows[0];
   if (!row) throw new Error("AMUX Decision Maker open request count returned no row");
   return safeInteger(row.open, "count");
+}
+
+export type DecisionMakerProposalTimeline = {
+  /** The database clock when the timeline was read. */
+  dbNowMs: number;
+  instances: Array<{
+    instance: DmInstanceScope;
+    /** Terminal results of kind proposal the instance's requests recorded. */
+    proposals: number;
+    /** The database clock of the instance's first proposal; null before it has one. */
+    firstProposalAtMs: number | null;
+  }>;
+};
+
+/**
+ * Each DM instance's proposals and the database clock of its first, in one
+ * statement, with the database clock: the ledger half of the declaration
+ * accuracy report (docs/policy/amux-decision-maker.md §4: "첫 제안 뒤
+ * 일수"). An instance with no proposal yet is listed with none. Reads only.
+ */
+export async function readDecisionMakerProposalTimeline(client: LedgerReader): Promise<DecisionMakerProposalTimeline> {
+  const rows = await client.$queryRaw<
+    Array<{
+      dbNowEpochMs: bigint | number;
+      instance: string;
+      proposals: bigint | number;
+      firstProposalAtEpochMs: bigint | number | null;
+    }>
+  >`
+    WITH db_clock AS MATERIALIZED (SELECT clock_timestamp() AS "now")
+    SELECT
+      floor(extract(epoch FROM db_clock."now") * 1000)::bigint AS "dbNowEpochMs",
+      i."instance",
+      count(ev."id") AS "proposals",
+      floor(extract(epoch FROM min(ev."createdAt")) * 1000)::bigint AS "firstProposalAtEpochMs"
+    FROM db_clock
+    CROSS JOIN unnest(${[...DM_INSTANCE_SCOPES]}::text[]) AS i("instance")
+    LEFT JOIN "AmuxDecisionMakerRequest" r ON r."instance" = i."instance"
+    LEFT JOIN "AmuxDecisionMakerRequestEvent" ev
+      ON ev."requestId" = r."id" AND ev."kind" = 'result' AND ev."resultKind" = 'proposal'
+    GROUP BY db_clock."now", i."instance"
+    ORDER BY i."instance"
+  `;
+  if (rows.length !== DM_INSTANCE_SCOPES.length) {
+    throw new DecisionMakerRequestWriteError("state_unreadable");
+  }
+  const dbNowMs = safeInteger(rows[0]!.dbNowEpochMs, "clock");
+  return {
+    dbNowMs,
+    instances: rows.map((row) => {
+      if (!isDmInstanceScope(row.instance)) throw new DecisionMakerRequestWriteError("state_unreadable");
+      return {
+        instance: row.instance,
+        proposals: safeInteger(row.proposals, "count"),
+        firstProposalAtMs: row.firstProposalAtEpochMs === null ? null : safeInteger(row.firstProposalAtEpochMs, "clock"),
+      };
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------
