@@ -414,10 +414,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/opsObserverDigest.ts",
     table: "AgentDigestItem",
-    tableMentions: 1,
+    tableMentions: 2,
     writeVerbs: 1,
     reason:
-      "The sre-ops digest intake reads AgentDigestItem once, a plain SELECT of the item already kept for an owner date, so a retry answers that item instead of rebuilding it. Its one write verb is the INSERT of its own run guard row, the shared transaction's last write; the digest row itself is written only by lib/agentDigestStore.ts.",
+      "The sre-ops digest intake reads AgentDigestItem in two plain SELECTs of its own rows: the item already kept for an owner date, so a retry answers that item instead of rebuilding it, and one item by id for the Admin screen the digest notice links to. Its one write verb is the INSERT of its own run guard row, the shared transaction's last write; the digest row itself is written only by lib/agentDigestStore.ts.",
   },
   {
     path: "lib/opsObserverStore.ts",

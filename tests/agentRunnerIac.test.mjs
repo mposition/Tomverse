@@ -317,7 +317,19 @@ test("the sre-ops page service declares the supervisor's page list at S1b, produ
     SERVICE_VARIABLES.page.filter((name) => name !== "OPS_OBSERVER_PAGE_WEBHOOK_URL").sort(),
   );
   assert.equal(page.environments.production.includes("OPS_OBSERVER_PAGE_WEBHOOK_URL"), false);
-  // No digest service until its runner exists: a declared service whose child
-  // is missing would fail every day it is switched on.
-  assert.equal(AGENT_RUNNER_SERVICES.some((runner) => runner.key === "ops_observer_digest"), false);
+});
+
+test("the sre-ops digest service declares the supervisor's digest list, daily at 07:00 Brisbane, production only", async () => {
+  const { SERVICE_VARIABLES } = await import("../scripts/ops-observer/runtime-variables-core.mjs");
+  const { CHILD_SCRIPTS } = await import("../scripts/ops-observer/supervise.mjs");
+  const digest = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "ops_observer_digest");
+  assert.ok(digest, "the digest service is declared");
+  assert.equal(digest.service, "Ops Observer Digest");
+  assert.equal(digest.startCommand, "node scripts/ops-observer/supervise.mjs digest");
+  // 21:00 UTC is 07:00 in Brisbane (UTC+10, no daylight saving).
+  assert.equal(digest.cronSchedule, "0 21 * * *");
+  assert.deepEqual(Object.keys(digest.environments), ["production"]);
+  assert.deepEqual([...digest.environments.production].sort(), [...SERVICE_VARIABLES.digest].sort());
+  // The child the supervisor starts for it exists.
+  assert.ok(existsSync(CHILD_SCRIPTS.digest), CHILD_SCRIPTS.digest);
 });

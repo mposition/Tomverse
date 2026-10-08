@@ -392,6 +392,9 @@ run(
     // sre-ops run guard: born with its claimed deadline, immutable, kept 90 days,
     // and a late COMMIT rolls the whole transaction back.
     "tests/integration/ops-observer-run-guard.db.test.ts",
+    // sre-ops digest item read: this agent's kept digest by id, bounded, and an
+    // expired or malformed body shown as absent.
+    "tests/integration/ops-observer-digest-item.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
