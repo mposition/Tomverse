@@ -14,6 +14,7 @@ import {
   type DmEventAttempt,
   type DmEventRefusal,
 } from "@/lib/amux/decisionMakerRequestCore";
+import { dmKeyPeriodOf } from "@/lib/amux/decisionMakerBodyCore";
 import { dmSwitchRoutingInput } from "@/lib/amux/decisionMakerSwitchCore";
 import {
   readDecisionMakerSwitches,
@@ -75,10 +76,12 @@ const requireDedicatedAmuxTestDatabase = () => {
 requireDedicatedAmuxTestDatabase();
 
 // The three tables refuse DELETE; TRUNCATE fires no row trigger, so each test
-// starts from an empty ledger and empty switches.
+// starts from an empty ledger and empty switches. Since S1d (2026-10-08) the
+// body, retention and result detail tables reference the request table and a closing event
+// writes a retention row, so they are emptied with it.
 const resetLedger = () =>
   prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
+    `TRUNCATE TABLE "AmuxDecisionMakerResultDetail", "AmuxDecisionMakerBody", "AmuxDecisionMakerRetentionEvent", "AmuxDecisionMakerRequestEvent", "AmuxDecisionMakerRequest", "AmuxDecisionMakerSwitchEvent" RESTART IDENTITY`,
   );
 
 const switchOperator = () =>
@@ -366,6 +369,14 @@ const backdatedAssignment = (requestId: string, deadlineInMs: number, transmitte
     await tx.$executeRawUnsafe(`ALTER TABLE "AmuxDecisionMakerRequestEvent" ENABLE TRIGGER "amux_decision_maker_request_event_guard"`);
   });
 
+// The routing store computes the option set digest itself, keyed by the period
+// of the database clock (stage S1d): a key for the period around now and one
+// more on each side.
+const RING = new Map(
+  [-1, 0, 1].map((offset) => [dmKeyPeriodOf(Date.now()) + offset, Buffer.alloc(32, 10 + offset)] as const),
+);
+
+/** A routing caller's binding: every value but the option set digest, which the store computes. */
 const binding = (overrides: Record<string, unknown> = {}) => ({
   cardId: `card-store-${randomUUID()}`,
   questionRevision: 2,
@@ -373,7 +384,6 @@ const binding = (overrides: Record<string, unknown> = {}) => ({
   amuxSessionId: "session:7",
   amuxSessionAttempt: 1,
   askingProvider: "claude",
-  optionSetDigest: DIGEST_A,
   termListVersion: "v1",
   classificationVersion: "authority-manifest-1",
   scannerVersion: "v1",
@@ -497,11 +507,11 @@ test("createdAt and the assignment deadline are the database's, whatever the wri
 test("one request per card question revision; the store returns the first", async () => {
   const shared = binding();
   const first = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: shared, card: CARD }),
   );
   assert.equal(first.created, true);
   const again = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: { ...shared, amuxSessionAttempt: 2 }, card: { ...CARD, title: "Deploy it" } }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: { ...shared, amuxSessionAttempt: 2 }, card: { ...CARD, title: "Deploy it" } }),
   );
   assert.deepEqual(again, { ...first, created: false, sameBinding: false });
   const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { targetId: first.requestId, action: "amux.decision.route" } });
@@ -519,7 +529,7 @@ test("one request per card question revision; the store returns the first", asyn
   );
   // The next revision of the same card is a new request.
   const next = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: { ...shared, questionRevision: shared.questionRevision + 1 }, card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: { ...shared, questionRevision: shared.questionRevision + 1 }, card: CARD }),
   );
   assert.equal(next.created, true);
   assert.notEqual(next.requestId, first.requestId);
@@ -1009,9 +1019,10 @@ test("a DM output after the result deadline is refused at the insert and at COMM
 test("through the AMUX boundary, the store's result commits on time and its deadline reaches the fence", async () => {
   const shared = binding();
   const recorded = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: shared, card: CARD }),
   );
-  const requestBinding = withoutProvider(shared);
+  // The binding as stored, with the option set digest the store computed.
+  const requestBinding = withoutProvider((await readDecisionMakerRequestState(prisma, recorded.requestId))!.binding);
   const boundary = { operation: "dm_ledger_test", prismaCallCeiling: 12, isolation: "mutation" as const };
   const assigned = await withAmuxDbBoundary(boundary, (tx, context) =>
     assignDecisionMakerRequest(tx, { requestId: recorded.requestId, requireLeaseAt: context.requireLeaseAt }),
@@ -1051,7 +1062,7 @@ test("through the AMUX boundary, the store's result commits on time and its dead
 test("a request has one terminal result; its pair returns it, another digest is recorded as rejected", async () => {
   const shared = binding();
   const recorded = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: shared, card: CARD }),
   );
   const requestId = recorded.requestId;
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
@@ -1072,7 +1083,7 @@ test("a request has one terminal result; its pair returns it, another digest is 
     await prisma.$transaction((tx) => recordDecisionMakerTransmitIntent(tx, { requestId, instance: OPENAI, transmission, requireLeaseAt: noLease })),
     { recorded: false, reason: "already_transmitted" },
   );
-  const requestBinding = withoutProvider(shared);
+  const requestBinding = withoutProvider((await readDecisionMakerRequestState(prisma, requestId))!.binding);
   const submit = (resultDigest: string, overrides: Record<string, unknown> = {}) =>
     prisma.$transaction((tx) =>
       submitDecisionMakerResult(tx, {
@@ -1144,7 +1155,7 @@ test("a request has one terminal result; its pair returns it, another digest is 
 test("an unknown result hands the request to the operator; no later result is accepted", async () => {
   const shared = binding({ askingProvider: "codex" });
   const { requestId } = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: shared, card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: shared, card: CARD }),
   );
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
   const transmission = { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B };
@@ -1154,7 +1165,7 @@ test("an unknown result hands the request to the operator; no later result is ac
     recordDecisionMakerResultUnknown(tx, { requestId, instance: ANTHROPIC, resultDigest: DIGEST_C }),
   );
   assert.equal(unknown.recorded, true);
-  const requestBinding = withoutProvider(shared);
+  const requestBinding = withoutProvider((await readDecisionMakerRequestState(prisma, requestId))!.binding);
   const late = await prisma.$transaction((tx) =>
     submitDecisionMakerResult(tx, {
       requestId,
@@ -1180,7 +1191,7 @@ test("an unknown result hands the request to the operator; no later result is ac
 
 test("a discarded assignment closes the request; a request routed to the operator is closed from its creation", async () => {
   const { requestId } = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }),
   );
   await prisma.$transaction((tx) => assignDecisionMakerRequest(tx, { requestId, requireLeaseAt: noLease }));
   assert.equal((await prisma.$transaction((tx) => discardDecisionMakerAssignment(tx, { requestId }))).recorded, true);
@@ -1192,7 +1203,7 @@ test("a discarded assignment closes the request; a request routed to the operato
   assert.equal((await readDecisionMakerRequestState(prisma, requestId))!.closing, "assign_discarded");
 
   const operator = await prisma.$transaction((tx) =>
-    recordDecisionMakerRequest(tx, { binding: binding(), card: { ...CARD, title: "Deploy the cache to production" } }),
+    recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: { ...CARD, title: "Deploy the cache to production" } }),
   );
   assert.equal((await readDecisionMakerRequestState(prisma, operator.requestId))!.closing, "routed_to_operator");
   assert.deepEqual(
@@ -1279,7 +1290,7 @@ test("the database refuses a DM routing, an intent and a proposal under the kill
   await insertEvent(transmitted, { kind: "result_rejected", instance: OPENAI, resultDigest: DIGEST_C, rejectionReason: "kill_switch" });
   await insertEvent(transmitted, { ...PROPOSAL, resultKind: "escalate", resultDigest: DIGEST_D });
   // The router, reading the switches itself, routes to the operator.
-  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }));
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }));
   assert.deepEqual([routed.route, routed.refusalCodes], ["operator", ["kill_switch_on"]]);
 
   await setSwitch("kill_switch", "off");
@@ -1408,7 +1419,7 @@ test("a kill switch committed while a proposal waits turns the proposal into a r
 test("a kill switch committed while a routing waits sends the question to the operator", async () => {
   const outcome = await race(
     (tx) => recordDecisionMakerSwitchByOperator(tx, { session: switchOperator(), scope: "kill_switch", value: "on" }),
-    () => prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { binding: binding(), card: CARD }), OPEN),
+    () => prisma.$transaction((tx) => recordDecisionMakerRequest(tx, { keyRing: RING, binding: binding(), card: CARD }), OPEN),
   );
   assert.equal(outcome.error, null, String(outcome.error));
   const value = outcome.value as { route: string; refusalCodes: string[] };

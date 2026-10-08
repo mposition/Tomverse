@@ -1091,6 +1091,48 @@ const REGISTRY = {
     reason:
       "Why an arriving result was recorded as rejected (sections 6 and 9). The guard trigger checks the first five against the ledger's own state; binding_mismatch and kill_switch are decided from the submission and the switch store, outside the ledger.",
   },
+  AmuxDecisionMakerBody_field_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_BODY_FIELDS",
+    reason:
+      "Section 10's five body fields and nothing else: the card text, the DM's answer, rationale and escalation reason, and the operator's edited answer. A second CHECK holds each field's byte cap, and a unique index keeps one row per field per request, so a request holds at most 37 KiB of the 40 KiB section 10 allows. The guard binds each field to the audit row of what it belongs to.",
+  },
+  AmuxDecisionMakerRetentionEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_RETENTION_EVENT_KINDS",
+    reason:
+      "Section 10's three retention events: retention_set (once per request, written by the database when the request closes) and a person's hold_set and hold_release. An open hold counts hold events only; retention_set never enters it.",
+  },
+  AmuxDecisionMakerRetentionEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_RETENTION_ACTOR_KINDS",
+    reason:
+      "system for retention_set, human for a legal hold or its release (section 10: a person with ops:write and a recent step-up). A second CHECK pairs the actor with the kind and requires the person's id exactly for human.",
+  },
+  AmuxDecisionMakerResultDetail_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "The terminal result a detail row belongs to, the ledger's own five kinds (section 6). The guard requires it to equal the kind of the result event it names, of the same transaction.",
+  },
+  AmuxDecisionMakerResultDetail_output_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_OUTPUT_KINDS",
+    reason:
+      "Section 6's three kinds of DM output: select, free_text and escalate; NULL for a validation failure, a timeout and an unavailable DM. A shape CHECK ties it to the result kind, the option id and the irreversible flag.",
+  },
+  AmuxDecisionMakerDigestKeyEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_DIGEST_KEY_EVENT_KINDS",
+    reason:
+      "A key period's rotation into use and its destruction (section 10: the rotation and destruction of keys are recorded as system audits), each once per period by partial unique indexes and each under its own router audit action, amux.decision.digest_key_rotate or .digest_key_destroy.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",

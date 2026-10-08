@@ -164,8 +164,12 @@ export const isDmVersionIdentifier = (value: unknown): value is string =>
 export const isDmProviderId = (value: unknown): value is string =>
   typeof value === "string" && PROVIDER_ID.test(value);
 /**
- * An opaque 64-hex digest. Whether it is keyed, and by which key period, is
- * the digest-key stage's decision (§10); the ledger only stores it.
+ * An opaque 64-hex digest; the ledger only stores it. Stage S1d settled what
+ * it is (§10, lib/amux/decisionMakerBodyCore.ts): an HMAC-SHA256 under the
+ * request's own key, derived from the key of the request's 30-day key period
+ * -- the input payload and snapshot manifest digests by the broker, which
+ * receives the request key at assignment, and the result digest by the app,
+ * from the output it stores. Never a plain hash.
  */
 export const isDmDigest = (value: unknown): value is string => typeof value === "string" && DIGEST.test(value);
 export const isDmRequestId = (value: unknown): value is string => typeof value === "string" && UUID.test(value);
@@ -234,6 +238,27 @@ export const parseDmRequestBinding = (value: unknown): DmRequestBinding | null =
   const binding = value as Record<string, unknown>;
   if (!bindingFieldsValid(binding, DM_REQUEST_BINDING_KEYS)) return null;
   return Object.fromEntries(DM_REQUEST_BINDING_KEYS.map((key) => [key, binding[key]])) as DmRequestBinding;
+};
+
+/**
+ * What a routing caller supplies: every binding value but the option set
+ * digest, which the store computes itself from the card's options under the
+ * request's key (stage S1d, 2026-10-08). A caller-supplied digest could be a
+ * plain hash of the option labels, which §10 forbids, and nothing tied it to
+ * the options a result is later checked against.
+ */
+export type DmRoutingBinding = Omit<DmRequestBinding, "optionSetDigest">;
+
+export const DM_ROUTING_BINDING_KEYS = DM_REQUEST_BINDING_KEYS.filter(
+  (key): key is Exclude<keyof DmRequestBinding, "optionSetDigest"> => key !== "optionSetDigest",
+);
+
+export const parseDmRoutingBinding = (value: unknown): DmRoutingBinding | null => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!ownKeysAre(value, DM_ROUTING_BINDING_KEYS)) return null;
+  const binding = value as Record<string, unknown>;
+  if (!bindingFieldsValid(binding, DM_ROUTING_BINDING_KEYS)) return null;
+  return Object.fromEntries(DM_ROUTING_BINDING_KEYS.map((key) => [key, binding[key]])) as DmRoutingBinding;
 };
 
 /** What the request row records: the binding, the router's decision and the policy version. */

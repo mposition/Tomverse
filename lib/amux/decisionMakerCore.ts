@@ -66,6 +66,24 @@ export const DM_SNAPSHOT_FILE_MAX_BYTES = 256 * 1024;
 export const DM_SNAPSHOT_TOTAL_MAX_BYTES = 2 * 1024 * 1024;
 export const DM_REPOSITORY_PATH_MAX_BYTES = 200;
 
+/**
+ * A card's option id: a short token, never prose. The worker writes it, the
+ * DM's `select` names it, and the stored proposal keeps it beside the
+ * ledger (stage S1d), so the grammar is what stops an id from carrying free
+ * text: letters, digits, `_` and `-`, 32 characters at most, starting with a
+ * letter or digit. A card whose option ids break it, or repeat one, is an
+ * input the router does not send to a DM (section 3-7). Added 2026-10-08 with
+ * the S1d review; migration 20261008120000_amux_decision_maker_body_store holds
+ * the same pattern as a CHECK.
+ */
+export const DM_OPTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+export const isDmOptionId = (value: unknown): value is string =>
+  typeof value === "string" && DM_OPTION_ID_PATTERN.test(value);
+
+/** Every option id follows the grammar and none repeats. */
+export const dmCardOptionsWellFormed = (options: ReadonlyArray<{ id: string }>): boolean =>
+  options.every((option) => isDmOptionId(option.id)) && new Set(options.map((option) => option.id)).size === options.length;
+
 /** Section 10: body field caps, which also bound the DM output (section 6). */
 export const DM_ANSWER_MAX_BYTES = 8 * 1024;
 export const DM_RATIONALE_MAX_BYTES = 4 * 1024;
@@ -214,7 +232,8 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
   if (
     dmCardTextBytes(card) > DM_CARD_TEXT_MAX_BYTES ||
     card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
-    card.contextPaths.some((path) => repositoryPathRefusal(path) !== null)
+    card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
+    !dmCardOptionsWellFormed(card.options)
   ) {
     refusals.push("input_limit_exceeded");
   }
@@ -309,7 +328,7 @@ export const dmOutputSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("select"),
-      optionId: z.string().min(1).max(200),
+      optionId: z.string().regex(DM_OPTION_ID_PATTERN),
       rationale: boundedText(DM_RATIONALE_MAX_BYTES),
       irreversible: z.boolean(),
     })

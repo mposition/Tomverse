@@ -1294,6 +1294,33 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   요청·scope lock입니다. 원장 trigger와 S1b 스위치 trigger는 lock 뒤에 읽으므로 READ COMMITTED가
   아니면 거부합니다. 운영자 직접 답의 종료, 본문, 보존, digest 키, 판정, 전달, route·Admin 화면·DM
   호출은 없습니다.
+- **S1d(본문 저장소·보존)**: `lib/amux/decisionMakerBodyCore.ts`, `lib/amux/decisionMakerBodyStore.ts`,
+  `lib/amux/decisionMakerBodySystemAudit.ts`, `lib/amux/decisionMakerDigestKeys.ts`,
+  `prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql`,
+  `tests/amuxDecisionMakerBody.test.mjs`, `tests/integration/amux-decision-maker-body.db.test.ts`.
+  본문은 docs/policy/amux-decision-maker.md §10의 다섯 필드뿐이고(필드당 한 행, 상한은 CHECK) 고칠 수
+  없습니다. 본문 행은 열린 DM 요청에만, 그것이 속한 것을 쓴 같은 트랜잭션의 감사 행(카드는 route, DM
+  출력은 그 종류의 result, 운영자 답은 그 요청을 target으로 하는 edit_confirm)과 함께 들어갑니다. **종결
+  결과마다 `AmuxDecisionMakerResultDetail` 한 행이 결과와 같은 트랜잭션에 남습니다** — 출력 종류,
+  select가 고른 선택지 id, `irreversible`(docs/policy/amux-decision-maker.md §6: Admin이 판정 전에 먼저
+  보임)와 그 결과를 digest한 key check 값이며, 원장의 일부라 지우지 않고 자유 텍스트가 없습니다. 선택지
+  id는 S1a 문법(영숫자·`_`·`-`, 32자)이고, 어기거나 겹치는 카드는 라우팅이 DM에 보내지 않습니다.
+  **digest 키는 30일 key period마다 하나이고 서버 비밀 `AMUX_DM_DIGEST_KEYS`에만 있습니다** — DB에는
+  key check 값만 둡니다. 요청의 period는 그 DB 시계 `createdAt`에서 나오고, 요청 키 K_R = HMAC(K_P, 요청
+  id)로 선택지 집합 digest(라우팅 때 store가 카드의 선택지로 계산하고, 결과는 같은 선택지 목록을
+  가져와야 받아들여짐), broker의 payload·manifest digest, 앱이 저장한 출력으로 계산하는 결과 digest,
+  본문 digest를 모두 keyed로 만듭니다. 평문 hash는 어디에도 없습니다. 결과는 레지스트리가 그 키를
+  등록했고 파기하지 않았을 때만 commit됩니다. 보존은 별도 append-only 사건 표입니다: 요청이
+  닫히면(assign_discarded·stale_close) 같은 문장에서 trigger가 `retention_set`(닫힘 + 2160시간, 고정
+  길이)을 한 번 쓰고, hold는 사람의 `hold_set`·`hold_release`이며 열린 hold는 hold 사건 수로만 셉니다.
+  본문 삭제는 hold가 없을 때 router의 `.body_purge`(보존 기한 뒤) 또는 사람의 `.body_erase`(개인정보
+  삭제 예외) 감사와 같은 트랜잭션에서만 됩니다. 키 파기는 period가 끝났고 본문·열린 hold·열린 요청이
+  남지 않았을 때만 기록되며, 그 뒤로는 그 period의 본문을 쓸 수 없습니다.
+  docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
+  스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
+  그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
+  거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
