@@ -2746,14 +2746,6 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
         content: `Review answer ${index + 1}.`, status: "normal" },
     ] as QaConversationMessage[])).flat();
     const state = await openChat(page, {
-      // Opened at the desktop viewport on every project, because what this test
-      // forces is a remount, and the resizes below only produce one by crossing
-      // the shell's `(max-width: 767px)` boundary. Starting at the project's own
-      // viewport made that a different number of crossings per project: from
-      // desktop it is two, from mobile the first resize is a no-op and the one
-      // crossing that remains refetched nothing, so the third cursored read this
-      // test waits for never arrived and mobile-safari failed every night.
-      viewport: DESKTOP_VIEWPORT,
       legacyReview: true,
       selectedModels: [MODEL_A, MODEL_B],
       messages: savedMessages,
@@ -2765,10 +2757,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
     await page.getByTestId("model-only-send").first().click();
     await expect.poll(state.messageSaveStarted).toBe(true);
-    // Each swap is waited for rather than assumed. Two resizes back to back are
-    // coalesced in WebKit, so the mobile shell never rendered, the panes never
-    // remounted, and not one further history read followed -- the third cursored
-    // read below could not arrive and mobile-safari failed every night.
+    // Each swap is waited for rather than assumed. What this test forces is a
+    // remount, and the only thing that produces one here is crossing the
+    // shell's `(max-width: 767px)` boundary -- openChat starts every project at
+    // the desktop viewport, so these two resizes are meant to be two crossings.
+    // Back to back they are coalesced in WebKit: the mobile shell never
+    // rendered, the panes never remounted, and not one further history read
+    // followed, so the third cursored read below could not arrive and
+    // mobile-safari failed every night. Measured on the old test: the reads
+    // stopped at the two the first mount makes.
     await page.setViewportSize(MOBILE_VIEWPORT);
     await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await page.setViewportSize(DESKTOP_VIEWPORT);
