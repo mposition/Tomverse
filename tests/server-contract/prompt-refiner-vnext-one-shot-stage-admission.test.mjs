@@ -42,7 +42,8 @@ mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotDeploymentReadbac
 mock.module(mod("lib/promptRefinerVnextOneShotPriceBinding.ts"), {
   namedExports: { PROMPT_REFINER_VNEXT_ONE_SHOT_PRICE_PIN_DIGEST: "e".repeat(64) },
 });
-const { preparePromptRefinerVnextOneShotStageBinding } = await import(
+const { inspectPromptRefinerVnextOneShotStageControls,
+  preparePromptRefinerVnextOneShotStageBinding } = await import(
   mod("lib/promptRefinerVnextOneShotStageAdmission.ts"));
 const expected = {
   sourceCommitSha: "a".repeat(40), sourceManifestDigest: "b".repeat(64),
@@ -91,6 +92,25 @@ test("stage binding comes from fresh app and Railway observations", async () => 
   });
   assert.equal(sourceReads, 1);
   assert.equal(deploymentReads, 1);
+});
+
+test("content-free v5 controls distinguish custody, signer and token failures", () => {
+  const valid = inspectPromptRefinerVnextOneShotStageControls(expected, "v5");
+  assert.equal(Object.values(valid).every(Boolean), true);
+  const wrongRoot = inspectPromptRefinerVnextOneShotStageControls({
+    ...expected, manifestRoot: "f".repeat(64),
+  }, "v5");
+  assert.equal(wrongRoot.rootPinMatches, false);
+  assert.equal(wrongRoot.runnerPinMatches, true);
+  const wrongSigner = inspectPromptRefinerVnextOneShotStageControls(expected,
+    "v5", { ...process.env,
+      PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST: "0".repeat(64) });
+  assert.equal(wrongSigner.gateSignerValid, false);
+  const missingToken = inspectPromptRefinerVnextOneShotStageControls(expected,
+    "v5", { ...process.env,
+      PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN: undefined });
+  assert.equal(missingToken.runnerTokenValid, false);
+  assert.equal(JSON.stringify(valid).includes(expected.manifestRoot), false);
 });
 
 test("stale or disagreeing source, deployment and price pins fail closed", async () => {

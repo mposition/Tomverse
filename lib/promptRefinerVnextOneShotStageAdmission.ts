@@ -38,6 +38,54 @@ export type PromptRefinerVnextOneShotStageRequestPins = Readonly<{
   pricePinDigest: string;
 }>;
 
+/** Content-free checks shared by admission and the owner-only preflight. */
+export function inspectPromptRefinerVnextOneShotStageControls(
+  expected: PromptRefinerVnextOneShotStageRequestPins,
+  successor: "v4" | "v5",
+  env: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  const pinnedRoot = env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
+  const pinnedRunner = env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
+  const rootPinMatches = SHA256.test(pinnedRoot ?? "") &&
+    pinnedRoot === expected.manifestRoot;
+  const runnerPinMatches = SHA256.test(pinnedRunner ?? "") &&
+    pinnedRunner === expected.runnerDigest;
+  let shadowSignerValid = false;
+  let gateSignerValid = successor !== "v5";
+  try {
+    const key = env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 ?? "";
+    const digest = env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST;
+    shadowSignerValid = SHA256.test(digest ?? "") &&
+      promptRefinerVnextOneShotShadowPublicKeyDigest(key) === digest;
+  } catch { shadowSignerValid = false; }
+  if (successor === "v5") {
+    try {
+      const key = env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "";
+      const digest = env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST;
+      gateSignerValid = SHA256.test(digest ?? "") &&
+        promptRefinerVnextOneShotGatePublicKeyDigest(key) === digest;
+    } catch { gateSignerValid = false; }
+  }
+  const controlsValid =
+    env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED === "1" &&
+    env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED === "1" &&
+    env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED === "1" &&
+    env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED === "1" &&
+    env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED === "1" &&
+    (successor !== "v5" || (
+      env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED === "1" &&
+      env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPOSITION_WRITE_ENABLED === "1"));
+  const tokenLength =
+    (env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN ?? "").length;
+  return Object.freeze({ rootPinMatches, runnerPinMatches,
+    shadowSignerValid, gateSignerValid, controlsValid,
+    runnerTokenValid: tokenLength >= 32 && tokenLength <= 256,
+    providerKeyAbsent: !env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY,
+    paidGuardValid:
+      PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY === "v4-paid-terminal-guard-v1",
+  });
+}
+
 /**
  * The owner supplies the holdout root and runner digest from separate custody.
  * Source and deployment are read again from the app checkout and Railway;
@@ -54,51 +102,13 @@ export async function preparePromptRefinerVnextOneShotStageBinding(
 }>> {
   // The separate owner-runner supplies these content-free custody pins through
   // server configuration. A request cannot introduce a new root or runner.
-  const pinnedRoot = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_MANIFEST_ROOT;
-  const pinnedRunner = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_DIGEST;
-  if (!SHA256.test(pinnedRoot ?? "") || !SHA256.test(pinnedRunner ?? "") ||
-      pinnedRoot !== expected.manifestRoot || pinnedRunner !== expected.runnerDigest) {
+  const controls = inspectPromptRefinerVnextOneShotStageControls(expected, successor);
+  if (!controls.rootPinMatches || !controls.runnerPinMatches) {
     throw new Error("vnext_one_shot_stage_custody_pin_mismatch");
   }
-  const shadowPublicKey =
-    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_B64 ?? "";
-  const shadowPublicKeyDigest =
-    process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_PUBLIC_KEY_DIGEST ?? "";
-  const runnerToken = process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUNNER_API_TOKEN ?? "";
-  let signerPinValid = false;
-  let gateSignerPinValid = successor !== "v5";
-  try {
-    signerPinValid = SHA256.test(shadowPublicKeyDigest) &&
-      promptRefinerVnextOneShotShadowPublicKeyDigest(shadowPublicKey) ===
-        shadowPublicKeyDigest;
-  } catch {
-    signerPinValid = false;
-  }
-  if (successor === "v5") {
-    const gatePublicKey =
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 ?? "";
-    const gatePublicKeyDigest =
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_DIGEST ?? "";
-    try {
-      gateSignerPinValid = SHA256.test(gatePublicKeyDigest) &&
-        promptRefinerVnextOneShotGatePublicKeyDigest(gatePublicKey) ===
-          gatePublicKeyDigest;
-    } catch {
-      gateSignerPinValid = false;
-    }
-  }
-  if (PROMPT_REFINER_VNEXT_PAID_GUARD_CAPABILITY !== "v4-paid-terminal-guard-v1" ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPATCH_ENABLED !== "1" ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SLOT_CONSUME_ENABLED !== "1" ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_SHADOW_WRITE_ENABLED !== "1" ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PAID_APPROVAL_WRITE_ENABLED !== "1" ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_RUN_WRITE_ENABLED !== "1" ||
-      !signerPinValid || !gateSignerPinValid ||
-      (successor === "v5" && (
-        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_WRITE_ENABLED !== "1" ||
-        process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_DISPOSITION_WRITE_ENABLED !== "1")) ||
-      runnerToken.length < 32 || runnerToken.length > 256 ||
-      process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_PROVIDER_API_KEY) {
+  if (!controls.paidGuardValid || !controls.controlsValid ||
+      !controls.shadowSignerValid || !controls.gateSignerValid ||
+      !controls.runnerTokenValid || !controls.providerKeyAbsent) {
     throw new Error("vnext_one_shot_recovery_capability_unavailable");
   }
   const deployment = await observePromptRefinerVnextOneShotDeployment();
