@@ -1015,6 +1015,87 @@ async function switchToFixtureAccountA(
 
 const message = (page: Page, text: string) => page.getByTestId("chat-message").filter({ hasText: text });
 
+test.describe("E02 authenticated follow-up and reconnect", () => {
+  test("a follow-up transport failure keeps newer input through reconnect and reload", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const state = await openChat(page, { viewport });
+    const question = "Synthetic E02 follow-up after the retained answer.";
+    const draft = "Synthetic E02 newer unsent input\nwith whitespace  ";
+    await submitComposer(page, question, viewport.width);
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    const sent = (await requests(page))[0];
+    expect(sent.messages?.some(({ role, content }) => role === "assistant" && content === FIRST_ANSWER)).toBe(true);
+    await drive(page, 0, "push", "Synthetic E02 interrupted partial.");
+    await page.getByTestId("chat-textarea").fill(draft);
+    await drive(page, 0, "fail");
+    await expect(page.getByTestId("restore-chat-question")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(draft);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(draft);
+    await page.context().setOffline(true);
+    await page.context().setOffline(false);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(draft);
+    expect(await persistentChatPostCount(page)).toBe(1);
+    const savedQuestion = state.conversations[0].messages.filter(({ role, content }) => role === "user" && content === question);
+    expect(savedQuestion).toHaveLength(1);
+    await page.reload();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(draft);
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect(message(page, question)).toHaveCount(1);
+    expect(await persistentChatPostCount(page)).toBe(1);
+    expect(state.conversations[0].messages.filter(({ role, content }) => role === "user" && content === question)).toEqual(savedQuestion);
+    await testInfo.attach("E02-synthetic-account-error-readback", {
+      body: JSON.stringify({ sent, savedQuestion, draft: state.drafts.get(CONVERSATION), postCount: await persistentChatPostCount(page) }),
+      contentType: "application/json",
+    });
+  });
+
+  test("reload restores a pending follow-up and draft, then polls without replaying the send", async ({ page }, testInfo) => {
+    const viewport = testInfo.project.name.startsWith("mobile") ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+    const pendingQuestion = "Synthetic E02 pending follow-up.";
+    const draft = "Synthetic E02 successor draft\nwith whitespace  ";
+    const state = await openChat(page, { viewport, messages: [
+      { id: "seed-u", role: "user", content: "Synthetic E02 first saved question." },
+      { id: "seed-a", role: "assistant", content: FIRST_ANSWER, modelId: MODEL_A, status: "normal" },
+      { id: "e02-pending-u", role: "user", content: pendingQuestion },
+    ] });
+    await page.getByTestId("chat-textarea").fill(draft);
+    await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(draft);
+    const active = {
+      assistantMessageId: "e02-pending-a", conversationId: CONVERSATION,
+      sourceUserMessageId: "e02-pending-u", requestedModelId: MODEL_A, actualModelId: MODEL_A,
+      provider: "openai", status: "streaming", partialContent: "Synthetic E02 saved partial.",
+      checkpointRevision: 1, finishReason: null, failureCode: null, terminalAt: null,
+      createdAt: "2026-09-13T00:00:00.000Z", updatedAt: "2026-09-13T00:00:01.000Z",
+    };
+    state.setResponseAttempts([active]);
+    await page.reload();
+    await expect(message(page, "Synthetic E02 saved partial.")).toBeVisible();
+    await expect(message(page, FIRST_ANSWER)).toBeVisible();
+    await expect(message(page, pendingQuestion)).toHaveCount(1);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(draft);
+    await expect.poll(state.attemptReadCount).toBeGreaterThan(0);
+    await page.getByTestId("chat-textarea").press("Enter");
+    // Mobile Enter edits a multiline draft; desktop Enter attempts submission.
+    const expectedDraft = viewport.width < 768 ? `${draft}\n` : draft;
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(expectedDraft);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    state.setResponseAttempts([{ ...active, status: "completed", checkpointRevision: 2,
+      partialContent: "Synthetic E02 saved partial. Recovered ending.", finishReason: "stop",
+      terminalAt: "2026-09-13T00:00:02.000Z", updatedAt: "2026-09-13T00:00:02.000Z" }]);
+    await expect(message(page, "Recovered ending.")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(expectedDraft);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter(({ method, path }) => method === "POST" && path.endsWith("/messages"))).toHaveLength(0);
+    const visible = await page.getByTestId("chat-message").evaluateAll((messages) => messages.map((node) => node.getAttribute("data-message-id")));
+    expect(new Set(visible).size).toBe(visible.length);
+    await testInfo.attach("E02-synthetic-account-reconnect-readback", {
+      body: JSON.stringify({ draft: state.drafts.get(CONVERSATION), writes: state.writes, postCount: await persistentChatPostCount(page) }),
+      contentType: "application/json",
+    });
+  });
+});
+
 test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   test("draft sync failure is visible and retry keeps the local question", async ({ page }) => {
     const state = await openChat(page, { draftSyncFailure: true });
