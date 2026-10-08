@@ -1281,10 +1281,36 @@ pub(crate) fn codex_pane_background_working(captured: &str) -> bool {
         .is_some_and(codex_background_status_line)
 }
 
+/// Is a usage-limit banner history rather than the current state? A real
+/// limit leaves the banner as the newest transcript entry above the composer,
+/// the rule `live_limit_region` applies to Claude. Anything Codex wrote after
+/// it (a submitted message `›`, an output or tool row `•`, the `• Worked for`
+/// row of a finished turn) means the worker resumed and went on. Without this,
+/// a short turn resumed after a limit kept the banner inside the 30-line tail,
+/// and its idle prompt read as the limit again, so the turn never ended.
+///
+/// `banner_end` is the match end; the rest of that line still belongs to the
+/// banner. The composer is the LAST prompt row and is input, not transcript,
+/// so text typed but not sent there does not count.
+fn codex_banner_superseded(tail: &str, banner_end: usize) -> bool {
+    let after = tail[banner_end..].split_once('\n').map_or("", |(_, rest)| rest);
+    let lines = nonempty_trimmed(after);
+    let transcript = match lines.iter().rposition(|l| l.starts_with('›')) {
+        Some(composer) => &lines[..composer],
+        None => &lines[..],
+    };
+    transcript.iter().any(|l| l.starts_with('›') || l.starts_with('•'))
+}
+
 fn scan_codex(clean: &str, provider: &ProviderId) -> Vec<WorkerEvent> {
     let mut events = Vec::new();
     let tail30 = last_n_raw_lines(clean, 30);
-    if let Some(m) = RE_CODEX_USAGE_LIMIT.find(&tail30) {
+    // The NEWEST banner decides: limit -> resume -> limit leaves two on screen.
+    if let Some(m) = RE_CODEX_USAGE_LIMIT
+        .find_iter(&tail30)
+        .last()
+        .filter(|m| !codex_banner_superseded(&tail30, m.end()))
+    {
         // Credit-path semantics: no reset lifted, no auto-resume — lifting
         // "8:00 PM" from the wrong provider's banner is the AMUX-2088 bug
         // (py 7230-7254). Kind Unknown: the banner does not say which
@@ -1955,6 +1981,70 @@ gemini-2.5-pro";
             rl[0].reset_at, None,
             "never lift a reset from the codex banner (AMUX-2088)"
         );
+    }
+
+    // The banner at rest: the newest transcript entry above the composer.
+    // Built from the AMUX-2088 banner and the live composer/model bar shapes
+    // in this module; no live capture of a resumed limit exists yet.
+    const FX_CODEX_LIMIT_AT_PROMPT: &str = "\
+• Implementing the parser now.
+
+■ You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.
+
+› Ask Codex to do anything
+
+  gpt-5.6-sol xhigh · ~/Dev/amux";
+
+    // The same worker after the limit reset and a short resumed turn: the
+    // banner is still well inside the 30-line tail.
+    const FX_CODEX_IDLE_AFTER_RESUMED_LIMIT: &str = "\
+■ You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 2 hours.
+
+› [10:12 AM] continue
+
+• Done: the parser change is pushed.
+
+• Worked for 41s
+
+› Ask Codex to do anything
+
+  gpt-5.6-sol xhigh · ~/Dev/amux";
+
+    #[test]
+    fn codex_limit_banner_at_the_prompt_is_the_current_state() {
+        for provider in ["codex", "ollama"] {
+            let ev = adapter(provider).scan(FX_CODEX_LIMIT_AT_PROMPT);
+            assert_eq!(limits(&ev).len(), 1, "{provider}: {ev:?}");
+            assert!(waiting_reasons(&ev).is_empty(), "{provider}: the composer under a live banner is chrome: {ev:?}");
+            // Text typed into the composer but not sent is input, not a resumed turn.
+            let typed = FX_CODEX_LIMIT_AT_PROMPT.replace("› Ask Codex to do anything", "› continue please");
+            assert_eq!(limits(&adapter(provider).scan(&typed)).len(), 1, "{provider}: {typed}");
+        }
+    }
+
+    #[test]
+    fn codex_limit_banner_above_a_resumed_turn_is_history() {
+        for provider in ["codex", "ollama"] {
+            let ev = adapter(provider).scan(FX_CODEX_IDLE_AFTER_RESUMED_LIMIT);
+            assert!(limits(&ev).is_empty(), "{provider}: the banner predates the resumed turn: {ev:?}");
+            assert_eq!(waiting_reasons(&ev), vec!["idle_prompt"], "{provider}: {ev:?}");
+        }
+    }
+
+    #[test]
+    fn codex_second_limit_after_a_resumed_turn_is_current() {
+        // limit -> resume -> limit: the NEWEST banner decides.
+        let fx = FX_CODEX_IDLE_AFTER_RESUMED_LIMIT.replace(
+            "• Worked for 41s",
+            "• Worked for 41s\n\n› [10:20 AM] next step\n\n■ You've hit your usage limit. Upgrade to Pro (https://openai.com/chatgpt/pricing) or try again in 4 days 1 hour.",
+        );
+        for provider in ["codex", "ollama"] {
+            let ev = adapter(provider).scan(&fx);
+            let rl = limits(&ev);
+            assert_eq!(rl.len(), 1, "{provider}: {ev:?}");
+            assert!(rl[0].raw.as_deref().is_some_and(|r| r.contains("You've hit your usage limit")), "{provider}");
+            assert!(waiting_reasons(&ev).is_empty(), "{provider}: {ev:?}");
+        }
     }
 
     #[test]
