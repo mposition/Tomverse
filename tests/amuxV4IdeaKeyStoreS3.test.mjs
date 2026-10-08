@@ -4,10 +4,13 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import { openAmuxContent, sealAmuxContent } from "../lib/amux/ideaCrypto.ts";
-import { createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
+import { amuxContentUnitKeyId, createAmuxContentUnitKeys, deleteAmuxContentUnitKey,
   loadAmuxContentUnitKeys } from "../lib/amux/ideaKeyStore.ts";
 
 test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () => {
+  const identity = { ideaId: "1e5f6f12-4281-4879-ae75-8ab0d2a57b44",
+    purpose: "analysis_draft", subjectId: "1f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };
+  const listedObjectKey = `amux/v4/content-key/${amuxContentUnitKeyId(identity).slice("amux2-".length)}`;
   const objects = new Map();
   let listing = "empty";
   const server = createServer(async (request, response) => {
@@ -21,11 +24,12 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       response.writeHead(200, { ETag: '"synthetic"' }); response.end();
     } else if (request.method === "GET" && url.searchParams.has("versions")) {
       const prefix = url.searchParams.get("prefix");
+      if (prefix !== listedObjectKey) { response.writeHead(400); response.end(); return; }
       response.writeHead(200, { "Content-Type": "application/xml" });
       response.end(`<ListVersionsResult><IsTruncated>${listing === "truncated"}</IsTruncated>${
-        listing === "version" ? `<Version><Key>${prefix}</Key><VersionId>old</VersionId></Version>` :
+        listing === "version" ? `<Version><Key>${listedObjectKey}</Key><VersionId>old</VersionId></Version>` :
         listing === "delete_marker" ?
-          `<DeleteMarker><Key>${prefix}</Key><VersionId>old</VersionId></DeleteMarker>` :
+          `<DeleteMarker><Key>${listedObjectKey}</Key><VersionId>old</VersionId></DeleteMarker>` :
           ""}</ListVersionsResult>`);
     } else if (request.method === "GET") {
       const value = objects.get(key);
@@ -56,8 +60,6 @@ test("S3 key deletion makes a retained DB ciphertext unrecoverable", async () =>
       AMUX_V4_KEY_STORE_SECRET_ACCESS_KEY: "synthetic-secret",
       AMUX_V4_KEY_STORE_URL_STYLE: "path",
     };
-    const identity = { ideaId: "1e5f6f12-4281-4879-ae75-8ab0d2a57b44",
-      purpose: "analysis_draft", subjectId: "1f8c9c77-2e86-483e-8fbb-2d5e2c32ad78" };
     const keys = await createAmuxContentUnitKeys(identity, env);
     const ciphertext = sealAmuxContent(Buffer.from("synthetic proposal"),
       identity.purpose, identity.subjectId, keys);
