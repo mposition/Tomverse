@@ -1057,7 +1057,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
     await chooseConversation(page, SECOND_CONVERSATION);
     await expect.poll(state.draftHydrateStarted).toBe(true);
-    const readsWhenLeft = readsFor(CONVERSATION);
+    // Exactly three, not "however many there are now". Taking the count as a
+    // baseline here would let a runner slow enough to miss the four-second
+    // window pass with no cancel at all: the fourth read would land before the
+    // switch, nothing would be pending, and the comparison below would hold.
+    // Independent review found that gap, which the earlier guard-removal check
+    // could not see because the switch always wins on a fast machine. Asserting
+    // the number says the scenario this test needs actually happened, and fails
+    // loudly rather than silently passing when it did not.
+    expect(readsFor(CONVERSATION)).toBe(3);
     expect(readsFor(SECOND_CONVERSATION)).toBe(1);
 
     // Past that pending retry. Uncancelled it bumps the hydrate revision, and
@@ -1065,7 +1073,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     // on the scope just entered rather than the one left -- which is the half
     // of this test's name the guard actually protects.
     await page.waitForTimeout(5_000);
-    expect(readsFor(CONVERSATION)).toBe(readsWhenLeft);
+    expect(readsFor(CONVERSATION)).toBe(3);
     expect(readsFor(SECOND_CONVERSATION)).toBe(1);
     state.releaseDraftHydrate();
   });
@@ -1097,9 +1105,12 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(() => state.draftRequests().some(
       (entry) => entry.method === "GET" && entry.scopeKey === SECOND_CONVERSATION
     )).toBe(true);
-    const writesWhenLeft = writesFor(CONVERSATION);
+    // Still exactly three, for the reason given in the hydration test above: a
+    // baseline taken here would make a runner that missed the four-second
+    // window pass without any cancel having to happen.
+    expect(writesFor(CONVERSATION)).toBe(3);
     await page.waitForTimeout(5_000);
-    expect(writesFor(CONVERSATION)).toBe(writesWhenLeft);
+    expect(writesFor(CONVERSATION)).toBe(3);
   });
 
   test("a transport failure followed by a revision conflict clears the stale failure banner", async ({ page }) => {
