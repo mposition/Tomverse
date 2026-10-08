@@ -22,7 +22,7 @@ export type AmuxIdeaAnalysisClaimReadback = {
   resultDigest: string | null;
   resultOutcome: "verified_success" | "invocation_failed" | "outcome_unknown" | null;
   resultEffectiveOutcome: "outcome_unknown" | null;
-  resultFailureReason: "usage_unverified" | "invocation_unverified" | null;
+  resultFailureReason: "usage_unverified" | null;
   zeroReleaseEligible: boolean;
 };
 
