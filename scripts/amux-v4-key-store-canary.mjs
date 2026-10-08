@@ -31,6 +31,7 @@ export async function verifyStagingKeyCanary({ env = process.env,
   };
   let createdKeys;
   let loadedKeys;
+  let wrappingKeys;
   let beforeDelete;
   const plain = Buffer.from("AMUX_V4_SYNTHETIC_KEY_DELETION_CANARY", "utf8");
   let result = { kind: "outcome_unknown", canaryId: ideaId,
@@ -61,24 +62,40 @@ export async function verifyStagingKeyCanary({ env = process.env,
     // Actually attempt to open the retained backup after deletion. A key ring
     // containing only the wrapping master must refuse the now-missing unit;
     // a missing storage read alone is not evidence of envelope-open refusal.
+    wrappingKeys = loadCurrentAmuxContentKeys(isolatedEnv);
     try {
       const unexpected = openAmuxContent(backupEnvelope, identity.purpose,
-        ideaId, amuxContentKeyRing(loadCurrentAmuxContentKeys(isolatedEnv), []));
+        ideaId, amuxContentKeyRing(wrappingKeys, []));
       unexpected.fill(0);
       return result;
     } catch (error) {
       if (error?.message !== "AMUX content unit key is unavailable") return result;
     }
+    // Also test the cryptographic boundary without the missing-coordinate
+    // guard: even adopting the envelope's key identity does not let the
+    // wrapping master authenticate the unit-key-encrypted backup.
+    try {
+      const unexpected = openAmuxContent(backupEnvelope, identity.purpose,
+        ideaId, { ...wrappingKeys, masterKeyId: backupEnvelope.keyId,
+          masterKeyVersion: backupEnvelope.keyVersion, contentMasters: undefined });
+      unexpected.fill(0);
+      return result;
+    } catch (error) {
+      if (!/unable to authenticate data/.test(error?.message ?? "")) return result;
+    }
     result = { kind: "verified", canaryId: ideaId,
       mayHaveOrphanKey: false,
       readableBeforeDeletion: true, unitKeyMissingAfterDeletion: true,
       oldEnvelopeKeyReloadRefused: true, oldEnvelopeOpenRefused: true,
+      oldEnvelopeWrappingMasterOpenRefused: true,
       runtimeActivated: false };
     return result;
   } catch { return result; /* Never retry uncertain PUT/DELETE. */ }
   finally {
     createdKeys?.masterKey.fill(0);
     loadedKeys?.masterKey.fill(0);
+    wrappingKeys?.masterKey.fill(0);
+    wrappingKeys?.digestKey.fill(0);
     beforeDelete?.fill(0);
     plain.fill(0); master.fill(0); digest.fill(0);
   }

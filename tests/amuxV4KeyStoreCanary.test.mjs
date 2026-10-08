@@ -36,6 +36,7 @@ test("deleted unit refuses both reload and opening the retained backup with its 
   assert.equal(result.mayHaveOrphanKey, false);
   assert.equal(result.oldEnvelopeKeyReloadRefused, true);
   assert.equal(result.oldEnvelopeOpenRefused, true);
+  assert.equal(result.oldEnvelopeWrappingMasterOpenRefused, true);
   assert.equal(result.runtimeActivated, false);
   assert.equal(creates, 1); assert.equal(deletes, 1); assert.equal(loads, 2);
   assert.equal(createdKey.masterKey.equals(Buffer.alloc(32)), true);
