@@ -200,7 +200,27 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     service: "Product Research Probe",
     startCommand: "npm run agent:product-research-observation -- --probe",
     cronSchedule: null,
-    environments: { staging: PRODUCT_RESEARCH_PROBE_VARIABLES },
+    // One per environment, because the thing it measures is the image, and
+    // each environment builds its own. staging runs the release candidate;
+    // production runs main, and until this was added its image was the only
+    // one nobody could measure -- S0's git and partial-clone readings were
+    // all staging's. The phase that needs the answer is P2, whose first
+    // condition is a production run matching a local one
+    // (docs/policy/product-research-agent.md §9), and finding out there turns
+    // a measurement into a held phase.
+    //
+    // Adding it to production grants nothing: the probe has no submission URL
+    // and no submission secret in any environment, so it cannot write a row
+    // wherever it runs, and it has no schedule -- an operator runs it.
+    //
+    // `dev` is in this declaration on develop and is left out here, because
+    // this tree has no such environment: `RailwayEnvironment` is production
+    // and staging, and a third key is one no planner can plan and no apply
+    // can reach. It arrives with the release that brings the lane.
+    environments: {
+      production: PRODUCT_RESEARCH_PROBE_VARIABLES,
+      staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
+    },
   },
 ];
 

@@ -12,7 +12,7 @@
 | 서비스 | project | 환경 | 진입점 | 일정 | 강제 종료 |
 |---|---|---|---|---|---|
 | Product Research Observation | Tomverse Agents | production·staging | `npm run agent:product-research-observation` | 매일 21:30 UTC | 15분 |
-| Product Research Probe | Tomverse Agents | staging만 | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
+| Product Research Probe | Tomverse Agents | production·staging·dev | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
 
 - 두 서비스는 **별도 Railway project**(`Tomverse Agents`)에 있습니다. reference
   변수는 자기 project 안에서만 해석되므로, DB 서비스와 공유 변수가 없는 project는
@@ -23,6 +23,11 @@
 - 기존 `Tomverse` project의 cron은 `.railway/railway.ts`가 named partial로
   소유합니다. **두 파일을 섞지 않습니다** — `railway:iac:*` script는 공유
   project를, `railway:agents:*`는 Agent project를 대상으로 합니다.
+- **probe는 환경마다 하나씩 있습니다.** 그것이 재는 것은 *이미지*이고 환경마다
+  이미지를 따로 빌드하므로, 한 환경의 측정은 다른 환경에 대해 아무 말도 하지
+  않습니다. production에 없던 동안 production 이미지는 아무도 잴 수 없는 유일한
+  이미지였고, 그 답이 필요한 단계가 P2입니다(정책 §9의 첫 조건이 production
+  실행입니다). 거기서 알게 되면 측정이 아니라 단계 보류가 됩니다.
 - probe에는 제출 URL과 제출 secret이 **없습니다.** 이미지가 무엇을 할 수 있는지
   재는 데에는 행을 쓸 권한이 필요하지 않습니다.
 
