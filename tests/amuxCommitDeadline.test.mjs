@@ -106,6 +106,10 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   "20261007180000_amux_v4_prless_review_evidence",
   // AMUX Decision Maker policy version 1, S1b: the append-only switch events.
   "20261008030000_amux_decision_maker_switch",
+  // S1c: the switch guard's READ COMMITTED check, and the request ledger,
+  // whose own deferred check uses this migration's SQLSTATE (AX001).
+  "20261008090000_amux_decision_maker_switch_serialization",
+  "20261008090100_amux_decision_maker_request_ledger",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

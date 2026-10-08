@@ -451,12 +451,17 @@ const compilerOptions = parsedConfig.options;
 // accesses moves; the fingerprint record in `lib/marketingAutomationAccess.ts`
 // gains a note above that file's seven accesses, which moves them. No access
 // is added; count 228 and the position-free inventory are unchanged.
+// 2026-10-08, AMUX Decision Maker request ledger (S1c): the fingerprint record
+// in `lib/marketingAutomationAccess.ts` gains a note for the ledger's two back
+// relations on `AdminAuditLog`, above that file's seven accesses, which moves
+// them. No closure file gains an access; count 228 and the position-free
+// inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "c2722e4fbc2a062b36d807ccc0a770be",
-  "62cb36833e62ba24ca774b0358040e7f",
+  "0fa104064f4e340a003a2b141f1fb557",
+  "e5953b404cd9f2e88bceb377c95bdada",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

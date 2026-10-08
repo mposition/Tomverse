@@ -2286,6 +2286,8 @@ model AdminAuditLog {
   amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
   amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
   amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
+  amuxDecisionMakerRequest AmuxDecisionMakerRequest?
+  amuxDecisionMakerRequestEvent AmuxDecisionMakerRequestEvent?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8400,6 +8402,86 @@ model AmuxDecisionMakerSwitchEvent {
   auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([scope, sequence])
+}
+
+/// AMUX Decision Maker requests (docs/policy/amux-decision-maker.md §2, §9,
+/// §10): one per (card id, question revision), with the binding values known
+/// when the question was routed and `routeDmQuestion()`'s decision. Immutable;
+/// the lifecycle is in `AmuxDecisionMakerRequestEvent`. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (the
+/// route, the provider's instance, the router's refusal codes and how they
+/// agree with the route) and the trigger that binds each row to the router's
+/// `amux.decision.route` audit row of its own transaction, sets `createdAt`
+/// from the database clock and `assignmentDeadlineAt` 2 minutes after it, and
+/// refuses every update and delete. No body is stored: identifiers, closed
+/// codes and opaque digests only, and no person's id.
+model AmuxDecisionMakerRequest {
+  id                    String   @id
+  cardId                String
+  questionRevision      Int
+  askingWorkerId        String
+  amuxSessionId         String
+  amuxSessionAttempt    Int
+  askingProvider        String
+  optionSetDigest       String
+  policyVersion         Int
+  termListVersion       String
+  classificationVersion String
+  scannerVersion        String
+  route                 String
+  instance              String?
+  refusalCodes          String[]
+  auditLogId            String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  /// Set by the insert trigger: `createdAt` plus 2 minutes.
+  assignmentDeadlineAt  DateTime @db.Timestamptz(3)
+
+  auditLog AdminAuditLog                   @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events   AmuxDecisionMakerRequestEvent[]
+
+  @@unique([cardId, questionRevision])
+  @@index([instance, createdAt])
+}
+
+/// The append-only lifecycle of an `AmuxDecisionMakerRequest`
+/// (docs/policy/amux-decision-maker.md §2, §5, §6, §9, §10), ordered by
+/// `sequence`. `kind` is named after its §10 audit action. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (what
+/// each kind carries), the partial unique indexes (one assignment,
+/// transmission intent, transmission outcome, terminal result, unknown result
+/// and closing per request -- not expressible here), the guard trigger (the
+/// transition graph, the deadlines by the database clock, the audit row of
+/// its own transaction by the router or the request's instance, an increasing
+/// sequence, READ COMMITTED only, no update or delete) and the deferred
+/// constraint trigger that refuses a late assignment or DM output at COMMIT
+/// with SQLSTATE AX001.
+model AmuxDecisionMakerRequestEvent {
+  id                     String    @id
+  sequence               BigInt    @unique @default(autoincrement())
+  requestId              String
+  kind                   String
+  instance               String?
+  vendor                 String?
+  inputPayloadDigest     String?
+  snapshotState          String?
+  snapshotTargetSha      String?
+  snapshotManifestDigest String?
+  resultKind             String?
+  resultDigest           String?
+  rejectionReason        String?
+  /// Set by the insert trigger on an assignment: its `createdAt` plus 30 minutes.
+  resultDeadlineAt       DateTime? @db.Timestamptz(3)
+  auditLogId             String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
 }
 
 /// The shared agent digest table: one row per stored digest item of any agent

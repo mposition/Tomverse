@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { after, beforeEach, test } from "node:test";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -342,6 +342,71 @@ test("events are never updated or deleted", async () => {
   );
   const [row] = await rowsOf();
   assert.equal(row?.value, "on");
+});
+
+test("an event under any isolation level but READ COMMITTED is refused, by the store and by the guard", async () => {
+  // 20261008090000_amux_decision_maker_switch_serialization: the guard reads the
+  // scope's newest event after its lock, which sees a transaction the lock
+  // waited for only under READ COMMITTED. Under REPEATABLE READ a latch
+  // committed meanwhile could be missed and the first change after it written
+  // as amux.decision.mode instead of its release.
+  const userId = `dm-operator-${randomUUID()}`;
+  await append(latch("decision-maker-openai").row, latch("decision-maker-openai").audit);
+  for (const isolationLevel of [
+    Prisma.TransactionIsolationLevel.RepeatableRead,
+    Prisma.TransactionIsolationLevel.Serializable,
+  ]) {
+    const { row, audit } = person(userId, "decision-maker-openai", "proposal", "amux.decision.latch_release");
+    await rejectsWith(
+      prisma.$transaction(
+        async (tx) => {
+          const id = randomUUID();
+          await insertRow(tx, id, row, await writeAudit(tx, audit, id));
+        },
+        { isolationLevel },
+      ),
+      /AMUX_DM_SWITCH_ISOLATION/,
+    );
+    await rejectsWith(
+      prisma.$transaction(
+        (tx) =>
+          recordDecisionMakerSwitchByOperator(tx, {
+            session: operator(userId),
+            scope: "decision-maker-openai",
+            value: "proposal",
+          }),
+        { isolationLevel },
+      ),
+      /AMUX_DM_SWITCH_ISOLATION/,
+    );
+    await rejectsWith(
+      prisma.$transaction(
+        (tx) => latchDecisionMakerInstanceOff(tx, { instance: "decision-maker-anthropic", reason: "cleanup_latch" }),
+        { isolationLevel },
+      ),
+      /AMUX_DM_SWITCH_ISOLATION/,
+    );
+    // The refusal of an update comes first, whatever the level.
+    await rejectsWith(
+      prisma.$transaction(
+        (tx) => tx.$executeRaw`UPDATE "AmuxDecisionMakerSwitchEvent" SET "value" = 'proposal'`,
+        { isolationLevel },
+      ),
+      /AMUX_DM_SWITCH_IMMUTABLE/,
+    );
+  }
+  assert.equal((await rowsOf()).length, 1);
+  // Under READ COMMITTED the release goes through as before.
+  const release = await prisma.$transaction(
+    (tx) =>
+      recordDecisionMakerSwitchByOperator(tx, {
+        session: operator(userId),
+        scope: "decision-maker-openai",
+        value: "proposal",
+      }),
+    { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+  );
+  assert.equal(release.action, "amux.decision.latch_release");
 });
 
 test("createdAt is the database clock of the insert, whatever the writer sent", async () => {

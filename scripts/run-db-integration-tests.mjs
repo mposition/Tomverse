@@ -315,6 +315,12 @@ run(
     // each event bound to its own transaction's audit by the right actor and
     // action, the newest event wins, and nothing is changed or removed.
     "tests/integration/amux-decision-maker-switch.db.test.ts",
+    // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
+    // §2, §6, §9, §10): one request per card revision, the transition graph
+    // against the core's own, the deadlines by the database clock at the
+    // insert and at COMMIT, one terminal result idempotent on its pair, each
+    // event audited by the router or its instance, READ COMMITTED only.
+    "tests/integration/amux-decision-maker-request.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.
