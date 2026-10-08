@@ -33,6 +33,7 @@ test("one synthetic create/delete plus missing reload verifies the storage bound
     remove: async () => { deletes++; },
   });
   assert.equal(result.kind, "verified");
+  assert.equal(result.mayHaveOrphanKey, false);
   assert.equal(result.runtimeActivated, false);
   assert.equal(creates, 1); assert.equal(deletes, 1); assert.equal(loads, 2);
   assert.equal(createdKey.masterKey.equals(Buffer.alloc(32)), true);
@@ -43,10 +44,12 @@ test("uncertain create/delete is never retried or reported verified", async () =
   let result = await verifyStagingKeyCanary({ env: staging,
     create: async () => { creates++; throw new Error("secret-transport"); } });
   assert.equal(result.kind, "outcome_unknown");
+  assert.equal(result.mayHaveOrphanKey, true);
   assert.equal(creates, 1);
   result = await verifyStagingKeyCanary({ env: staging, create: async () => scoped(),
     load: async () => scoped(), remove: async () => { deletes++; throw new Error("secret"); } });
   assert.equal(result.kind, "outcome_unknown"); assert.equal(deletes, 1);
+  assert.equal(result.mayHaveOrphanKey, true);
   assert.doesNotMatch(JSON.stringify(result), /secret/);
 });
 
@@ -58,4 +61,17 @@ test("load unavailable after delete is not proof of a missing key", async () => 
       throw Object.assign(new Error("unavailable"), { code: "unavailable" });
     } });
   assert.equal(result.kind, "outcome_unknown");
+  assert.equal(result.mayHaveOrphanKey, false);
+});
+
+test("read-back mismatch reports the possible orphan without retrying a write", async () => {
+  let deletes = 0, loads = 0;
+  const progress = [];
+  const result = await verifyStagingKeyCanary({ env: staging, create: async () => scoped(),
+    load: async () => { loads++; const key = scoped(); key.masterKey.fill(6); return key; },
+    remove: async () => { deletes++; }, onProgress: value => progress.push(value) });
+  assert.equal(result.kind, "outcome_unknown");
+  assert.equal(result.mayHaveOrphanKey, true);
+  assert.equal(progress[0].canaryId, result.canaryId);
+  assert.equal(loads, 1); assert.equal(deletes, 0);
 });

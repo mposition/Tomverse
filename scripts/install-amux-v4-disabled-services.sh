@@ -23,6 +23,11 @@ for file in amux-v4-analysis-agent.service amux-v4-analysis-agent.timer \
   test -f "$src/$file" && test ! -L "$src/$file"
   test ! -e "$units/$file" && test ! -L "$units/$file"
 done
+for name in analysis-agent content-retention; do
+  test -f "$src/amux-v4-$name.env.example"
+  test ! -L "$src/amux-v4-$name.env.example"
+  test ! -L "$config/$name.env"
+done
 install -d -m 700 "$config" "$lib" "$units" \
   "$HOME/.local/state/tomverse-amux-v4-analysis" \
   "$HOME/.local/state/tomverse-amux-v4-content-retention"

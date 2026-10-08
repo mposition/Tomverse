@@ -12,6 +12,9 @@ test("installation never enables/starts a timer or replaces an existing target",
   assert.match(script, /test ! -e "\$units\/\$file"/);
   assert.match(script, /if test ! -e "\$config\/\$name.env"/);
   assert.match(script, /case "\$src" in \/home\/tommy\/amux-v4-install/);
+  const environmentCheck = script.indexOf('test -f "$src/amux-v4-$name.env.example"');
+  assert.ok(environmentCheck > 0);
+  assert.ok(environmentCheck < script.indexOf("install -d"));
 });
 
 test("the two installed environment examples are disabled and contain no credentials", () => {
