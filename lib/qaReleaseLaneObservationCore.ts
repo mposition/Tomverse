@@ -29,10 +29,11 @@ export const QA_RELEASE_TEST_BRANCHES = Object.freeze({
   head: "qa-lane-test/head",
   headReviewed: "qa-lane-test/head-reviewed",
   /**
-   * Heads of the main-mirror and other-base pull requests: one new commit on
-   * main's head, so they merge without conflicts. A develop commit there
-   * conflicts once develop and main diverge, and a conflict refusal says
-   * nothing about the rules (2026-10-08). No ruleset.
+   * Heads of the main-mirror and other-base pull requests: a merged main
+   * pull request's head whose required checks passed, with both bases at its
+   * parent, so they merge cleanly and meet the classic checks. A develop
+   * commit there conflicts once develop and main diverge, and a conflict
+   * refusal says nothing about the rules (2026-10-08). No ruleset.
    */
   mainHead: "qa-lane-test/main-head",
   mainHeadReviewed: "qa-lane-test/main-head-reviewed",

@@ -59,8 +59,9 @@ test("all as expected passes; any one different, missing, duplicated or unanswer
 
 test("a merge refused for conflicts is unknown, whatever was expected", () => {
   const CONFLICT = "Pull Request has merge conflicts";
-  for (const id of ["app_merge_unreviewed_main", "app_merge_other_base", "operator_merge_main"]) {
-    const conflicted = asExpected().map((r) => (r.id === id ? { ...r, status: 405, message: CONFLICT } : r));
+  for (const id of ["app_merge_unreviewed_main", "app_merge_reviewed_main", "app_merge_other_base", "operator_merge_main"]) {
+    // A message naming a rule as well still does not count.
+    const conflicted = asExpected().map((r) => (r.id === id ? { ...r, status: 405, message: `${CONFLICT}. ${RULE}` } : r));
     const verdict = judgeQaReleaseObservations(conflicted);
     assert.equal(verdict.passed, false, id);
     assert.equal(verdict.verdicts.find((v) => v.id === id).observed, "unknown", id);
