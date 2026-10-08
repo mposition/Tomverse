@@ -1274,6 +1274,107 @@ test("the office reads the billing and finance agent's state, never its digest",
   assert.match(finance, /read: "billing_finance_ops"/);
 });
 
+// ── The real view is the default; the demo plays on request ───────────────
+
+const liveLine = (text, status = "done") => ({ status, badge: "", line: text, detail: "" });
+
+test("the office opens on the real view: everyone at their desk, still, and every room at its real or link status", () => {
+  const live = { research: liveLine("Latest run recorded"), qa: liveLine("Digest silent", "attention") };
+  const office = new AgentOffice(adminAgentOfficeMessages.en, live);
+  assert.equal(office.snapshot().demo, false);
+  assert.equal(office.log[0].text, adminAgentOfficeMessages.en.sim.realReady);
+  const homes = new Map(office.agents.map((agent) => [agent.id, `${agent.x},${agent.y}`]));
+  for (const agent of office.agents) {
+    if (agent.rank === "operator") continue;
+    assert.notEqual(agent.status, "offDuty", `${agent.id} is not at work`);
+    assert.equal(`${agent.x},${agent.y}`, `${agent.home.x},${agent.home.y}`, `${agent.id} is not at their desk`);
+    assert.equal(agent.anim, "sit");
+  }
+  for (const id of AGENT_OFFICE_DEPT_IDS) {
+    const expected = live[id]?.status ?? (AGENT_OFFICE_BLOCKED_DEPTS.has(id) ? "blocked" : "waiting");
+    assert.equal(office.deptStatus[id], expected, id);
+  }
+  // Nobody wanders off or speaks a line of their own.
+  let spoke = false;
+  for (let i = 0; i < 4000; i += 1) {
+    office.tick(0.05);
+    if (office.agents.some((agent) => agent.speech)) spoke = true;
+  }
+  assert.equal(spoke, false, "someone spoke on the real view");
+  for (const agent of office.agents) assert.equal(`${agent.x},${agent.y}`, homes.get(agent.id), agent.id);
+});
+
+test("on the real view the console answers questions and declines orders that would move the demo's staff", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.en, {
+    engineering: liveLine("Run in progress · started 10-08 12:00 UTC", "working"),
+  });
+  const s = adminAgentOfficeMessages.en.sim;
+  const before = office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`);
+  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Thank you, everyone", "Hurry up"]) {
+    office.command(order);
+    assert.equal(office.chat.at(-1).text, s.demoOnly, order);
+  }
+  for (let i = 0; i < 400; i += 1) office.tick(0.05);
+  assert.deepEqual(office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`), before);
+  // Questions are still answered, from the real view.
+  office.command("Status?");
+  const status = office.chat.at(-1).text;
+  assert.ok(status.startsWith(s.statusReal), status);
+  assert.match(status, /Engineering: Run in progress/);
+  office.command("Why is it slow?");
+  assert.doesNotMatch(office.chat.at(-1).text, new RegExp(s.delayNotStarted));
+  office.command("What is engineering doing?");
+  assert.match(office.chat.at(-1).text, /real record/);
+});
+
+test("the demo plays on request, leaves the live rooms seated, and ends back on the real view", () => {
+  const office = new AgentOffice(adminAgentOfficeMessages.en, { research: liveLine("Latest run recorded") });
+  office.speed = 10;
+  office.start();
+  assert.equal(office.snapshot().demo, true);
+  const researchAt = new Map();
+  for (const agent of office.agents) {
+    if (agent.rank === "operator") continue;
+    if (agent.deptId === "research") {
+      assert.notEqual(agent.status, "offDuty", "a live room's staff were sent home for the demo");
+      researchAt.set(agent.id, `${agent.x},${agent.y}`);
+    } else {
+      assert.equal(agent.status, "offDuty", `${agent.id} did not start the demo at the entrance`);
+    }
+  }
+  runUntil(office, () => office.approvalPending);
+  for (const agent of office.agents) {
+    if (agent.deptId === "research") assert.equal(`${agent.x},${agent.y}`, researchAt.get(agent.id), agent.id);
+  }
+  // Orders work while the demo plays.
+  office.command("Thank you, everyone");
+  assert.notEqual(office.chat.at(-1).text, adminAgentOfficeMessages.en.sim.demoOnly);
+
+  office.endDemo();
+  const snap = office.snapshot();
+  assert.equal(snap.demo, false);
+  assert.equal(snap.running, false);
+  assert.equal(snap.approvalPending, false);
+  assert.equal(office.chat.at(-1).text, adminAgentOfficeMessages.en.sim.demoEnded);
+  assert.equal(office.deptStatus.research, "done");
+  assert.equal(office.deptStatus.engineering, "waiting");
+  for (const agent of office.agents) {
+    if (agent.rank !== "operator") assert.equal(`${agent.x},${agent.y}`, `${agent.home.x},${agent.home.y}`, agent.id);
+  }
+});
+
+test("the page says demo only while a demo plays", () => {
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /\{snap\.demo \? \(\s*<div className=\{cx\("shell-notice"\)\}/);
+  assert.match(panel, /snap\.demo \? m\.live\.eyebrow\(engine\.staff\.length\) : m\.live\.eyebrowReal/);
+  assert.match(panel, /data-testid="agent-office-end-demo"/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.match(copy.live.watchDemo, locale === "en" ? /demo/i : /데모/);
+    assert.match(copy.live.eyebrowReal(26), locale === "en" ? /REAL VIEW/ : /실제 화면/);
+  }
+});
+
 test("a record that needs a look is counted on its own, never as a decision", () => {
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];

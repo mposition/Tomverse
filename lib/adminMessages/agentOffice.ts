@@ -24,9 +24,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       todo: "📋 Your to-do",
     },
     shell: {
-      chip: "SHELL · DEMO",
+      chip: "DEMO PLAYING",
       notice:
-        "This is a shell. Every character, status, line and approval in this office is a demo scenario, except in a room marked LIVE: that room reads the team's real operating state (whether its latest scheduled run was recorded, its last success), never what it produced. Nothing here approves, merges, posts or sends anything. Each team's real record opens from its profile.",
+        "A demo is playing. Every walk, line, meeting and approval in it is a demo scenario; a room marked LIVE still shows its team's real operating state, never what it produced. Nothing here approves, merges, posts or sends anything. “Back to the real view” ends the demo.",
     },
     company: {
       titlePrefix: "Tomverse",
@@ -288,8 +288,14 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     phaseApproved: "Approved · back to desks",
     live: {
       eyebrow: (count: number) => `LIVE OFFICE · ${count} AI STAFF · SIMULATION`,
+      eyebrowReal: (count: number) => `LIVE OFFICE · ${count} AI STAFF · REAL VIEW`,
       lead: "They arrive, work at their desks, meet in the approval room and report to the operator's office.",
+      leadReal: "A room marked LIVE shows its team's real state; the others show whether a record screen is linked. “Watch demo” plays a day in the office.",
       clockLabel: "SIM CLOCK",
+      clockReal: "READ AT",
+      realPhase: "Real view",
+      watchDemo: "▶ Watch demo",
+      endDemo: "■ Back to the real view",
       start: "Start today's work",
       running: "Staff are working…",
       restart: "Start another day",
@@ -398,6 +404,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     dashboard: {
       eyebrow: "TODAY · 07:00 SIMULATED START",
+      eyebrowReal: (time: string) => `REAL VIEW · READ ${time}`,
+      watchDemo: "▶ Watch demo",
       titleBefore: "How your agent teams move today, ",
       titleAccent: "at a glance",
       lead: (teams: number, staff: number) =>
@@ -620,6 +628,10 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     sim: {
       greetings: ["Good morning!", "Clocking in ✨", "Let's go!", "Coffee first…"],
       ready: "The operator's office is ready. Waiting for the start button.",
+      realReady: "Real view: rooms marked LIVE show their real state. The demo day plays only when you press “Watch demo”.",
+      demoOnly: "That order moves the demo's staff, so it works only while the demo plays.",
+      statusReal: "This is the real view, as read when the page opened.",
+      demoEnded: "Back to the real view.",
       welcome: (name: string) => `Operator, this is ${name} at the digest desk. Ask me anything here.`,
       arrival: (count: number) => `07:00 — demo day starting. ${count} AI staff are coming in!`,
       seated: "Everyone is seated. The day begins.",
@@ -751,9 +763,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       todo: "📋 운영자 할 일",
     },
     shell: {
-      chip: "껍데기 · 데모",
+      chip: "데모 재생 중",
       notice:
-        "껍데기 화면입니다. 이 오피스의 직원·상태·대사·결재는 모두 데모 시나리오입니다. 단, '실제' 표시가 붙은 방은 그 팀의 실제 운영 상태(직전 회차 기록 여부, 마지막 성공)를 읽어요. 산출물 내용은 읽지 않습니다. 여기서 승인·병합·게시·발송되는 것은 없으며, 각 팀의 실제 기록은 프로필에서 열 수 있어요.",
+        "데모를 재생하고 있어요. 걷기·대사·회의·결재는 모두 데모 시나리오이고, '실제' 표시가 붙은 방은 데모 중에도 그 팀의 실제 운영 상태를 보여 줘요(산출물 내용은 읽지 않아요). 여기서 승인·병합·게시·발송되는 것은 없어요. '실제 화면으로'를 누르면 데모가 끝나요.",
     },
     company: {
       titlePrefix: "Tomverse",
@@ -1015,8 +1027,14 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     phaseApproved: "승인 완료 · 자리 복귀",
     live: {
       eyebrow: (count: number) => `LIVE OFFICE · ${count} AI STAFF · SIMULATION`,
+      eyebrowReal: (count: number) => `LIVE OFFICE · AI 직원 ${count}명 · 실제 화면`,
       lead: "출근하고, 자리에서 일하고, 승인 회의실에 모이고, 운영자실로 보고하러 갑니다.",
+      leadReal: "'실제' 표시가 붙은 방은 그 팀의 실제 상태이고, 나머지는 기록 화면이 연결됐는지를 보여 줘요. '데모 보기'를 누르면 사무실의 하루를 재생해요.",
       clockLabel: "SIM CLOCK",
+      clockReal: "읽은 시각",
+      realPhase: "실제 화면",
+      watchDemo: "▶ 데모 보기",
+      endDemo: "■ 실제 화면으로",
       start: "오늘 업무 시작하기",
       running: "직원들이 일하는 중…",
       restart: "다시 출근시키기",
@@ -1123,6 +1141,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     dashboard: {
       eyebrow: "TODAY · 07:00 SIMULATED START",
+      eyebrowReal: (time: string) => `실제 화면 · 읽은 시각 ${time}`,
+      watchDemo: "▶ 데모 보기",
       titleBefore: "오늘 에이전트 팀이 어떻게 움직이는지 ",
       titleAccent: "한눈에",
       lead: (teams: number, staff: number) =>
@@ -1342,6 +1362,10 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     sim: {
       greetings: ["좋은 아침이에요!", "출근합니다 ✨", "오늘도 화이팅!", "커피부터…"],
       ready: "운영자실 준비 완료. 출근 버튼을 기다리는 중이에요.",
+      realReady: "실제 화면이에요. '실제' 방은 실제 상태를 보여 주고, 데모 하루는 '데모 보기'를 누를 때만 재생돼요.",
+      demoOnly: "그 지시는 데모 직원을 움직이는 거라, 데모를 볼 때만 돼요.",
+      statusReal: "페이지를 연 시각에 읽은 실제 화면이에요.",
+      demoEnded: "실제 화면으로 돌아왔어요.",
       welcome: (name: string) => `운영자님, 다이제스트실 ${name}입니다. 궁금한 건 여기에 바로 물어보세요.`,
       arrival: (count: number) => `07:00 데모 하루를 시작합니다. AI 직원 ${count}명 입장!`,
       seated: "전원 착석 완료. 오늘 업무를 시작합니다.",

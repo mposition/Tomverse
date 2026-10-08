@@ -16,6 +16,7 @@ import {
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
+  utcStamp,
   type AgentOfficeAmuxView,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
@@ -264,16 +265,21 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
             </div>
           </nav>
 
-          <div className={cx("shell-notice")} role="note" data-testid="agent-office-shell-notice">
-            <span className={cx("mini-badge demo")}>{m.shell.chip}</span>
-            <p>{m.shell.notice}</p>
-          </div>
+          {/* The real view needs no banner: what it shows is real or says it
+              is waiting on a link. The demo says it is a demo while it plays. */}
+          {snap.demo ? (
+            <div className={cx("shell-notice")} role="note" data-testid="agent-office-shell-notice">
+              <span className={cx("mini-badge demo")}>{m.shell.chip}</span>
+              <p>{m.shell.notice}</p>
+            </div>
+          ) : null}
 
           {view === "live" ? (
             <LiveView
               m={m}
               engine={engine}
               amuxView={amuxView}
+              readAt={live.readAt}
               snap={snap}
               follow={follow}
               setFollow={setFollow}
@@ -292,6 +298,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               filter={filter}
               setFilter={setFilter}
               snap={snap}
+              readAt={live.readAt}
               onStart={start}
               onApprove={approve}
               onSelect={(id) => setSelectedId(id)}
@@ -365,6 +372,7 @@ function LiveView({
   m,
   engine,
   amuxView,
+  readAt,
   snap,
   follow,
   setFollow,
@@ -377,6 +385,8 @@ function LiveView({
   m: OfficeCopy;
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
+  /** When the server read the live rooms (UTC ISO). */
+  readAt: string;
   snap: Snapshot;
   follow: boolean;
   setFollow: (value: boolean) => void;
@@ -394,26 +404,55 @@ function LiveView({
     <>
       <header className={cx("live-hero")}>
         <div>
-          <p className={cx("eyebrow")}>{m.live.eyebrow(engine.staff.length)}</p>
+          <p className={cx("eyebrow")}>
+            {snap.demo ? m.live.eyebrow(engine.staff.length) : m.live.eyebrowReal(engine.staff.length)}
+          </p>
           <h2 className={cx("office-title")}>
             {m.company.titlePrefix} <em className={cx("highlight")}>{m.company.titleAccent}</em>
           </h2>
-          <p>{m.live.lead}</p>
+          <p>{snap.demo ? m.live.lead : m.live.leadReal}</p>
         </div>
-        <div className={cx("live-clock")}>
-          <span>{m.live.clockLabel}</span>
-          <b data-testid="agent-office-clock">{snap.clock}</b>
-          <small>{snap.phase}</small>
-        </div>
+        {snap.demo ? (
+          <div className={cx("live-clock")}>
+            <span>{m.live.clockLabel}</span>
+            <b data-testid="agent-office-clock">{snap.clock}</b>
+            <small>{snap.phase}</small>
+          </div>
+        ) : (
+          <div className={cx("live-clock")}>
+            <span>{m.live.clockReal}</span>
+            <b data-testid="agent-office-clock">{utcStamp(readAt)}</b>
+            <small>{m.live.realPhase}</small>
+          </div>
+        )}
       </header>
 
       <section className={cx("live-bar")}>
-        <button type="button" className={cx("btn btn-primary")} onClick={onStart} disabled={snap.running}>
-          {snap.running ? m.live.running : snap.dayComplete ? m.live.restart : m.live.start}
+        <button
+          type="button"
+          className={cx("btn btn-primary")}
+          onClick={onStart}
+          disabled={snap.running}
+          data-testid="agent-office-watch-demo"
+        >
+          {snap.running ? m.live.running : snap.dayComplete ? m.live.restart : m.live.watchDemo}
         </button>
-        <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.togglePause()}>
-          {snap.paused ? m.live.play : m.live.pause}
-        </button>
+        {snap.demo ? (
+          <button
+            type="button"
+            className={cx("btn btn-ghost")}
+            onClick={() => engine.endDemo()}
+            data-testid="agent-office-end-demo"
+          >
+            {m.live.endDemo}
+          </button>
+        ) : null}
+        {snap.demo ? (
+          <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.togglePause()}>
+            {snap.paused ? m.live.play : m.live.pause}
+          </button>
+        ) : null}
+        {snap.demo ? (
         <div className={cx("speed-wrap")}>
           <span className={cx("speed-label")} title={m.live.speedHint}>
             {m.live.speedLabel}
@@ -442,6 +481,7 @@ function LiveView({
             </button>
           </div>
         </div>
+        ) : null}
         <button
           type="button"
           className={cx("btn btn-ghost", follow && "on")}
@@ -453,12 +493,14 @@ function LiveView({
         <button type="button" className={cx("btn btn-ghost")} disabled title={m.live.publishHint}>
           {m.live.publish}
         </button>
-        <div className={cx("live-progress")}>
-          <span>{m.live.progress(snap.phase, progress)}</span>
-          <i>
-            <b style={{ width: `${progress}%` }} />
-          </i>
-        </div>
+        {snap.demo ? (
+          <div className={cx("live-progress")}>
+            <span>{m.live.progress(snap.phase, progress)}</span>
+            <i>
+              <b style={{ width: `${progress}%` }} />
+            </i>
+          </div>
+        ) : null}
         <div className={cx("live-counts")}>
           <span className={cx("lc on-duty")}>{m.live.onDuty(onDuty)}</span>
           <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
@@ -883,6 +925,7 @@ function DashboardView({
   filter,
   setFilter,
   snap,
+  readAt,
   onStart,
   onApprove,
   onSelect,
@@ -894,6 +937,8 @@ function DashboardView({
   filter: Filter;
   setFilter: (value: Filter) => void;
   snap: Snapshot;
+  /** When the server read the live rooms (UTC ISO). */
+  readAt: string;
   onStart: () => void;
   onApprove: () => void;
   onSelect: (id: string) => void;
@@ -913,7 +958,9 @@ function DashboardView({
         </div>
         <div className={cx("hero-body")}>
           <div className={cx("hero-copy")}>
-            <p className={cx("eyebrow")}>{m.dashboard.eyebrow}</p>
+            <p className={cx("eyebrow")}>
+              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(utcStamp(readAt))}
+            </p>
             <h2 className={cx("office-title")}>
               {m.dashboard.titleBefore}
               <em className={cx("highlight")}>{m.dashboard.titleAccent}</em>
@@ -922,8 +969,13 @@ function DashboardView({
           </div>
           <div className={cx("hero-actions")}>
             <button type="button" className={cx("btn btn-primary")} onClick={onStart} disabled={snap.running}>
-              {snap.running ? m.dashboard.running : m.dashboard.start}
+              {snap.running ? m.dashboard.running : m.dashboard.watchDemo}
             </button>
+            {snap.demo ? (
+              <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.endDemo()}>
+                {m.live.endDemo}
+              </button>
+            ) : null}
             <span className={cx("trust-copy")}>{m.dashboard.trust}</span>
           </div>
         </div>
