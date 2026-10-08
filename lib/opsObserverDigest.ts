@@ -201,7 +201,10 @@ export async function readOpsObserverDigestItem(
           FROM "AgentDigestItem"
          WHERE id = ${itemId}::uuid AND "agentKey" = 'sre-ops' AND kind = ${DIGEST_KIND}`;
       if (!row) return null;
-      const parsed = row.payload === null ? null : parseDigestPayload(row.payload);
+      const parsed =
+        row.payload === null
+          ? null
+          : (parseDigestPayload(row.payload) as { ok: true; payload: unknown } | { ok: false; error: string });
       return {
         id: row.id,
         createdAt: row.createdAt.toISOString(),
