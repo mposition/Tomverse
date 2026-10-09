@@ -4,8 +4,8 @@
 상태(v22 이력): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
 상태(v23 이력): **v23 전용 Ubuntu runner 실행 위치 승인, 운영 활성화 별도.** 2026-10-01 운영자 `mposition`이 아래 v23 절을 승인했다. Claude의 독립 검토에서 정책 문구 승인 차단 사항이 없음을 확인했다. 이전 v22 상태 줄은 이력이다.
 상태(v24 이력): **v24 Ubuntu AMUX invariant 관측 게이트 정정 승인.** 2026-10-02 운영자 `mposition`이 아래 v24 절을 승인했다(그 절의 승인 기록). v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장은 v24 절의 계약으로 대체됐다. 이전 v23 상태 줄은 이력이다.
-상태(최신): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
-상태(v27 후보): **v27 승인 대기.** 2026-10-09 작성. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
+상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
+상태(최신): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -60,7 +60,7 @@ approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 | 23 | 2026-10-01 mposition | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. 이 승인 자체로 제품 bridge·claim·실행 API를 켜지 않는다. |
 | 24 | 2026-10-02 mposition | v23의 AMUX invariant confidence 일괄 `healthy` 요구를 실패 0건·unknown 사유별 증거 계약으로 정정한다. 다른 활성화 게이트와 권한은 바꾸지 않는다. 이 승인 자체로 bridge·claim·제품 실행을 켜지 않는다. |
 | 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
-| 27 | **승인 대기** | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
+| 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1224,7 +1224,7 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 ## 버전 27 — 전용 Ubuntu runner의 worker 목록과 Decision Maker 실행 주체
 
-상태: **승인 대기.** 2026-10-09 작성, 작성자 Claude. 운영자가 승인을 기록하기 전에는 효력이 없고, 작성자와 다른 공급사의 독립 검토를 아직 거치지 않았다. 번호: `develop`의 다음 빈 번호는 26이지만 `main`을 대상으로 한 draft PR #1888(2026-10-04 이후 갱신 없음)이 같은 문서에 다른 내용(CLI 사용량 보존·집계)의 v23~v26을 적고 있어 27을 쓰며, 두 번호 체계의 정리는 운영자가 한다.
+상태: **승인됨.** `approvedBy: mposition`, `approvedAt: 2026-10-09`. 2026-10-09 작성, 작성자 Claude. 작성자와 다른 공급사인 Codex의 독립 검토가 accept였다(r-20261009-005341-7cc18f). 같은 요청의 Cursor 검토는 결과 불명(`reviewer_exit_1`)이었고 다시 보내지 않았다. 이 승인 자체로 아래 활성화 게이트 2~7은 충족되지 않는다. 번호: `develop`의 다음 빈 번호는 26이지만 `main`을 대상으로 한 draft PR #1888(2026-10-04 이후 갱신 없음)이 같은 문서에 다른 내용(CLI 사용량 보존·집계)의 v23~v26을 적고 있어 27을 쓰며, 두 번호 체계의 정리는 운영자가 한다.
 
 이 버전은 v23 실행 위치 절의 “worker 8개”를 아래 목록으로 대체하고, Decision Maker(이하 DM)의 실행 주체 둘을 더한다. v13의 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 확인된 provider(`AMUX_VERIFIED_PROVIDERS`는 `claude`, `codex` 그대로)와 교차 검토, v18 실행 API 게이트, v22의 미구현 경계, v23의 격리·활성화 게이트, v24의 invariant 관측 계약은 그대로다. 이 승인 자체로 bridge 환경 변수, 제품 claim, 실행 API, worker catalog, 자동 승격, Publisher, 병합, 배포, DM 스위치를 켜거나 바꾸지 않는다.
 
