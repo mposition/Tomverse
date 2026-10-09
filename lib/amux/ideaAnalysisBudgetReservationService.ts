@@ -16,9 +16,10 @@ import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAu
 
 /** This transaction body is not a claim or a dispatch permission. It reads
  * owner-approved price evidence from the app DB; no route, CLI runner or
- * switch calls it. A dispatch must separately prove that the selected
+ * switch calls it. The route must use this code latch in addition to its
+ * independent environment switch. A dispatch must separately prove that the selected
  * Frontier approval, runner capability, token caps and halt state are current. */
-export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = false;
+export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = true;
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxIdeaAnalysisReservationError extends Error {

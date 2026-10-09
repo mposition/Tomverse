@@ -1,8 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
 /** An independent v4 intake bridge. The existing AMUX sync credential cannot
- * discover operator ideas, and this read latch remains dark until activation. */
-export const AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH = false;
+ * discover operator ideas, and the dedicated environment switch remains
+ * required after the v15 code activation. */
+export const AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH = true;
 export const AMUX_V4_ANALYSIS_QUEUE_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_QUEUE_READ";
 export const AMUX_V4_ANALYSIS_AGENT_SECRET_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET";
 export const AMUX_V4_ANALYSIS_AGENT_ID = "amux-intake";

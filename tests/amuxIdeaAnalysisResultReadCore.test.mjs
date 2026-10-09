@@ -45,9 +45,10 @@ test("analysis audit commitments reject a changed, missing or reordered unit", (
   ], units), false);
 });
 
-test("the owner result read remains dark even if its environment value is enabled", () => {
-  assert.equal(AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED, false);
-  assert.equal(amuxV4AnalysisResultReadEnabled("enabled"), false);
+test("the owner result read requires its exact environment switch", () => {
+  assert.equal(AMUX_V4_ANALYSIS_RESULT_READ_CODE_ENABLED, true);
+  assert.equal(amuxV4AnalysisResultReadEnabled("enabled"), true);
+  assert.equal(amuxV4AnalysisResultReadEnabled("disabled"), false);
   assert.equal(amuxV4AnalysisResultReadEnabled(undefined), false);
 });
 

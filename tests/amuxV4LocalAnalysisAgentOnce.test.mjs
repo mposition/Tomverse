@@ -34,17 +34,18 @@ const claim = { previewId, ideaId, holdId: "hold_1", leaseGeneration: 1,
   auditId: "audit_1" };
 const response = (body, status = 200) => Response.json(body, { status });
 
-test("retention hold writes remain code-latched off", () => {
+test("retention hold writes retain both independent environment switches", () => {
   const route = readFileSync(new URL(
     "../app/api/admin/amux/ideas/retention-holds/route.ts", import.meta.url),
   "utf8");
   assert.match(route, /const READ_CODE_LATCH = true;/);
-  assert.match(route, /const WRITE_CODE_LATCH = false;/);
+  assert.match(route, /const WRITE_CODE_LATCH = true;/);
   assert.match(route, /export async function GET[\s\S]*?if \(!READ_CODE_LATCH/);
   for (const method of ["POST", "DELETE"]) {
     const body = route.split(`export async function ${method}`)[1];
     assert.ok(body, `${method} route exists`);
     assert.match(body, /if \(!READ_CODE_LATCH \|\| !WRITE_CODE_LATCH/);
+    assert.match(body, /process\.env\[READ_ENV\] !== "enabled" \|\|\s*process\.env\[WRITE_ENV\] !== "enabled"/);
   }
 });
 
@@ -68,14 +69,14 @@ test("local one-shot entry point is closed before reading configuration", () => 
   assert.match(result.stderr, /AMUX_V4_LOCAL_ANALYSIS_REFUSED/);
 });
 
-test("live connector remains code-latched before any network access", async () => {
+test("live connector remains closed without its environment switch before network access", async () => {
   const previous = process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   delete process.env[AMUX_V4_LIVE_ANALYSIS_CLI_ENV];
   let called = 0;
   try {
     assert.equal(amuxV4LiveAnalysisCliEnabled(undefined), false);
     assert.equal(amuxV4LiveAnalysisCliEnabled("1"), false);
-    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), false);
+    assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), true);
     const result = await runAmuxV4LocalAnalysisAgentOnce({ origin: `${origin}/`,
       agentSecret: secret, fetchImpl: async () => { called += 1;
         throw new Error("live connector must remain closed"); } });
