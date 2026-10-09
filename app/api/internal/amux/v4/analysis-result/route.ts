@@ -18,9 +18,9 @@ import { createAmuxContentKeyRing,
   type AmuxContentKeyIdentity } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
-// Intentionally dark: a live result requires verified isolated runner, agent-
-// wide failure latch and S0 gates. An environment variable alone cannot open it.
-const RESULT_CODE_LATCH = false;
+// The v15 code latch does not bypass the verified isolated runner, agent-wide
+// failure latch, S0 evidence or the two independent environment switches.
+const RESULT_CODE_LATCH = true;
 const RESULT_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE";
 // Read-back remains available under its own authenticated, default-off gate
 // after result writes are killed. It returns only the content-free receipt.

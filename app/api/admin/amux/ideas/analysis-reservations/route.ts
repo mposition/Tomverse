@@ -13,6 +13,7 @@ import { authOptions } from "@/lib/auth";
 import { amuxV4ApprovedCliCostProfileMatches } from
   "@/lib/amux/ideaAnalysisApprovedCostProfile";
 import { AmuxIdeaAnalysisReservationError,
+  AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH,
   commitAmuxIdeaAnalysisBudgetReservation } from
   "@/lib/amux/ideaAnalysisBudgetReservationService";
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
@@ -20,7 +21,6 @@ import { prisma } from "@/lib/prisma";
 
 const WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE";
 const READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ";
-const WRITE_CODE_LATCH = true;
 const READ_CODE_LATCH = true;
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
@@ -65,7 +65,8 @@ export async function POST(request: Request): Promise<Response> {
       { status: 404, headers: noStore });
     if (session === "forbidden") return NextResponse.json({ error: "Forbidden." },
       { status: 403, headers: noStore });
-    if (!WRITE_CODE_LATCH || process.env[WRITE_ENV] !== "enabled" ||
+    if (!AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH ||
+        process.env[WRITE_ENV] !== "enabled" ||
         !READ_CODE_LATCH || process.env[READ_ENV] !== "enabled") {
       return NextResponse.json({ error: "analysis_reservation_disabled" },
         { status: 409, headers: noStore });

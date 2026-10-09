@@ -61,7 +61,7 @@ test("only the guarded claim route calls the production claim service", async ()
   assert.match(route, /commitAmuxIdeaOnlyAnalysisClaim\(tx,/);
   assert.match(service, /await takeAuditChainLock\(tx\);[\s\S]*?await enforceAmuxV4DailyClaimLimit\(tx\);[\s\S]*?writeSystemAuditLog\(/);
   assert.match(service, /to_char\(clock_timestamp\(\) AT TIME ZONE 'UTC', 'YYYY-MM-DD'\)/);
-  assert.match(route, /const CLAIM_CODE_LATCH = false/);
+  assert.match(route, /const CLAIM_CODE_LATCH = true/);
 });
 const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
   "https://tomverse.example/api/internal/amux/v4/analysis-queue", {
@@ -69,9 +69,11 @@ const request = (token, agentId = AMUX_V4_ANALYSIS_AGENT_ID) => new Request(
       "x-amux-agent-id": agentId },
   });
 
-test("AMUX v4 analysis queue uses a dedicated identity and stays dark", () => {
-  assert.equal(AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH, false);
-  assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), false);
+test("AMUX v4 analysis queue uses a dedicated identity and exact environment switch", () => {
+  assert.equal(AMUX_V4_ANALYSIS_QUEUE_CODE_LATCH, true);
+  assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), true);
+  assert.equal(amuxV4AnalysisQueueReadEnabled("disabled"), false);
+  assert.equal(amuxV4AnalysisQueueReadEnabled(undefined), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), secret), true);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), secret, secret), false);
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret, "amux-orchestrator"), secret), false);
@@ -80,7 +82,7 @@ test("AMUX v4 analysis queue uses a dedicated identity and stays dark", () => {
   assert.equal(isAmuxV4AnalysisAgentAuthorized(request(secret), "short"), false);
 });
 
-test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before DB", async () => {
+test("AMUX v4 queue route refuses unauthenticated and env-off requests before DB", async () => {
   const imported = await import("../app/api/internal/amux/v4/analysis-queue/route.ts");
   const POST = imported.POST ?? imported.default.POST;
   const originalSecret = process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
@@ -88,7 +90,7 @@ test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before
   const originalSyncSecret = process.env.TOMVERSE_AMUX_SYNC_SECRET;
   try {
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = secret;
-    process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV] = "enabled";
+    delete process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV];
     delete process.env.TOMVERSE_AMUX_SYNC_SECRET;
     const denied = await POST(new Request("https://tomverse.example/api/internal/amux/v4/analysis-queue",
       { method: "POST" }));
@@ -101,6 +103,9 @@ test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before
     const dark = await POST(request(secret));
     assert.equal(dark.status, 409);
     assert.deepEqual(await dark.json(), { available: false, reason: "analysis_queue_disabled" });
+    process.env[AMUX_V4_ANALYSIS_QUEUE_READ_ENV] = "enabled";
+    assert.equal((await POST(request(secret))).status, 415,
+      "enabled queue reaches request validation without touching the DB");
   } finally {
     if (originalSecret === undefined) delete process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV];
     else process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV] = originalSecret;
@@ -111,7 +116,7 @@ test("AMUX v4 queue route refuses unauthenticated and dark-latch requests before
   }
 });
 
-test("AMUX v4 claim route stays dark even with its dedicated secret and write env", async () => {
+test("AMUX v4 claim route requires both dedicated read and write environments", async () => {
   const imported = await import("../app/api/internal/amux/v4/analysis-claim/route.ts");
   const POST = imported.POST ?? imported.default.POST;
   const GET = imported.GET ?? imported.default.GET;
@@ -144,6 +149,12 @@ test("AMUX v4 claim route stays dark even with its dedicated secret and write en
     assert.deepEqual(await readDisabled.json(),
       { available: false, reason: "analysis_claim_read_disabled" });
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ = "enabled";
+    delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE;
+    const writeEnvOff = await POST(new Request(endpoint,
+      { method: "POST", headers, body }));
+    assert.equal(writeEnvOff.status, 409);
+    assert.deepEqual(await writeEnvOff.json(),
+      { available: false, reason: "analysis_claim_disabled" });
     const malformed = await GET(new Request(`${readEndpoint}&requestId=again`,
       { headers }));
     assert.equal(malformed.status, 400);
@@ -160,7 +171,7 @@ test("AMUX v4 claim route stays dark even with its dedicated secret and write en
   }
 });
 
-test("AMUX v4 result write and read-back routes stay dark with the agent secret", async () => {
+test("AMUX v4 result route requires independent read and write environments", async () => {
   const imported = await import("../app/api/internal/amux/v4/analysis-result/route.ts");
   const POST = imported.POST ?? imported.default.POST;
   const GET = imported.GET ?? imported.default.GET;
@@ -190,6 +201,12 @@ test("AMUX v4 result write and read-back routes stay dark with the agent secret"
       { available: false, reason: "analysis_result_read_disabled" });
     assert.match(blockedRead.headers.get("cache-control") ?? "", /no-store/);
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_READ = "enabled";
+    delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_RESULT_WRITE;
+    const writeEnvOff = await POST(new Request(endpoint,
+      { method: "POST", headers, body: "{}" }));
+    assert.equal(writeEnvOff.status, 409);
+    assert.deepEqual(await writeEnvOff.json(),
+      { available: false, reason: "analysis_result_disabled" });
     const malformedRead = await GET(new Request(
       `${endpoint}?requestId=r1&previewId=p1&previewId=p2`, { headers }));
     assert.equal(malformedRead.status, 400,

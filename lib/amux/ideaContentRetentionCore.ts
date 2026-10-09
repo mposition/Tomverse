@@ -1,9 +1,9 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
-/** This capability stays dark until legal-hold and external-key deletion
- * evidence have both passed staging. An environment value alone cannot open it. */
-export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = false;
+/** v15 activates the code path after the approved evidence. The dedicated
+ * secret, agent identity and environment switch remain mandatory. */
+export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = true;
 export const AMUX_V4_CONTENT_RETENTION_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION";
 export const AMUX_V4_CONTENT_RETENTION_SECRET_ENV =
