@@ -1696,10 +1696,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "5445379b7dca4746285caae806376aab0f74d9be6f278a10e881f9fd7a70b70b",
+    sha256: "ca0497c22e80e30eb3953de9df1ac47900dedbba7904f1cdb734229ee40c1117",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation reads the schema and _prisma_migrations before Prisma resolves the baseline. Catalogue probes use fixed SQL in read-only transactions with object names bound as parameters; function replacement compares an exact prior body digest. The only write is delegated to prisma migrate resolve.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",

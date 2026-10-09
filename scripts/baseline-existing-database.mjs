@@ -8,6 +8,9 @@ import {
   connectWithRetry,
 } from "./direct-database-connect-core.mjs";
 import {
+  checkDefinitionQuery,
+  checkReplacementAnswer,
+  checkReplacementSetAnswer,
   pendingProbes,
   presenceAnswer,
   presenceQueryFor,
@@ -75,8 +78,10 @@ import {
  * after, so on its own it would always be refused. Such a migration names the
  * relation it creates (`-- baseline-check: present-if-relation "Name"`), or the
  * function (`present-if-function "name"`) when it creates only a function.
- * A function replacement may instead pin the exact prior body digest. Only a
- * proven absent object or a proven prior function version permits the deploy.
+ * A function replacement may instead pin the exact prior body digest. A
+ * checksum-bound `baseline-check.json` may pin every exact prior CHECK
+ * definition for already-shipped SQL that cannot gain a header declaration.
+ * Only a proven absent object or an exact prior replacement state permits the deploy.
  * See `scripts/baseline-presence-core.mjs`.
  */
 
@@ -212,7 +217,15 @@ try {
     // may name the relation it creates; only proof that every one of them is
     // absent lets the deploy go on.
     const { probes, undeclared } = pendingProbes(pending, (name) =>
-      readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8")
+      readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8"),
+      (name) => {
+        try {
+          return readFileSync(joinPath(MIGRATIONS_DIR, name, "baseline-check.json"), "utf8");
+        } catch (error) {
+          if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+          throw error;
+        }
+      },
     );
     if (undeclared.length === 0) {
       const answers = new Map();
@@ -221,17 +234,32 @@ try {
         // One fixed question with the declared name bound as a parameter: a
         // migration supplies a name, never SQL. Read-only and rolled back as
         // well, though the fixed query has nothing to write.
-        await client.query("BEGIN READ ONLY");
+        await client.query(
+          probe.replacedChecks !== undefined
+            ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            : "BEGIN READ ONLY",
+        );
         try {
-          const { rows } = await client.query(presenceQueryFor(probe));
-          // A replacement must match the exact previous body. Other probes
-          // answer one boolean. Unknown or malformed answers fail closed.
-          answers.set(
-            name,
-            probe.previousBodySha256 !== undefined
-              ? replacementAnswer(rows, probe.previousBodySha256)
-              : presenceAnswer(rows)
-          );
+          if (probe.replacedChecks !== undefined) {
+            const checkAnswers = [];
+            for (const check of probe.replacedChecks) {
+              const { rows } = await client.query(checkDefinitionQuery(check));
+              checkAnswers.push(
+                checkReplacementAnswer(rows, check.previousDefinitionSha256),
+              );
+            }
+            answers.set(name, checkReplacementSetAnswer(checkAnswers));
+          } else {
+            const { rows } = await client.query(presenceQueryFor(probe));
+            // A replacement must match the exact previous body. Other probes
+            // answer one boolean. Unknown or malformed answers fail closed.
+            answers.set(
+              name,
+              probe.previousBodySha256 !== undefined
+                ? replacementAnswer(rows, probe.previousBodySha256)
+                : presenceAnswer(rows)
+            );
+          }
         } catch {
           answers.set(name, undefined);
         } finally {
@@ -241,12 +269,12 @@ try {
       const verdict = presenceVerdict(pending, answers);
       if (verdict.proceed) {
         log(
-          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function body. Letting migrate deploy apply them.",
+          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function/CHECK definition. Letting migrate deploy apply them.",
           { pending }
         );
       } else {
         fail(
-          "This database already matches schema.prisma, and at least one pending migration is neither proven absent nor an exact prior function version. Nothing has been changed.",
+          "This database already matches schema.prisma, and at least one pending migration is neither proven absent nor in its exact prior function/CHECK state. Nothing has been changed.",
           { pending, notProvenAbsent: verdict.notProvenAbsent }
         );
       }
