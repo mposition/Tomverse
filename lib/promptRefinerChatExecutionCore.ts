@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
 
 import {
@@ -8,17 +7,12 @@ import {
 } from "@/lib/promptRefinerChatHandoff";
 import {
   bindPromptRefinerSuggestion,
+  promptRefinerChatDecisionSchema,
   resolvePromptRefinerDecision,
 } from "@/lib/promptRefinerSuggestion";
 
-// A browser may name an offered decision, never supply the execution text.
-export const promptRefinerChatDecisionSchema = z.object({
-  suggestionId: z.string().uuid(),
-  scopeId: z.string().uuid(),
-  epoch: z.number().int().positive().max(2_147_483_647),
-  decision: z.enum(["accepted", "kept_original"]),
-}).strict();
-export type PromptRefinerChatDecision = z.infer<typeof promptRefinerChatDecisionSchema>;
+export { promptRefinerChatDecisionSchema } from "@/lib/promptRefinerSuggestion";
+export type { PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
 export class PromptRefinerChatExecutionError extends Error {
   readonly status = 409;

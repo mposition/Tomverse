@@ -12,8 +12,14 @@ import {
   PROMPT_REFINER_VERSION,
   type PromptRefinerRequest,
 } from "@/lib/promptRefinerSuggestion";
+import { PROMPT_REFINER_PRODUCT_TIMEOUT_MS } from
+  "@/lib/promptRefinerProductContract";
 
 const headers = { "Cache-Control": "no-store" };
+const unavailable = () => Response.json(
+  { code: "PROMPT_REFINER_UNAVAILABLE" },
+  { status: 503, headers }
+);
 
 const fixtureProposal = async (request: PromptRefinerRequest) => {
   const primary =
@@ -36,7 +42,20 @@ const fixtureProposal = async (request: PromptRefinerRequest) => {
  * and the product release store remains default-off without exact evidence.
  */
 export async function POST(request: Request): Promise<Response> {
+  const requestDeadline = { requestedAt: new Date(),
+    deadlineAtMonotonicMs: performance.now() +
+      PROMPT_REFINER_PRODUCT_TIMEOUT_MS };
   if (!isE2EFixtureMode()) {
+    try {
+      const { promptRefinerChatExecutionRelease } = await import(
+        "@/lib/promptRefinerChatExecutionRelease"
+      );
+      if (!(await promptRefinerChatExecutionRelease()).explicitEnabled) {
+        return unavailable();
+      }
+    } catch {
+      return unavailable();
+    }
     const [{ getServerSession }, { authOptions },
       { handlePromptRefinerProductProposal,
         promptRefinerProductApiErrorResponse },
@@ -54,7 +73,8 @@ export async function POST(request: Request): Promise<Response> {
         return Response.json({ code: "FORBIDDEN" },
           { status: 403, headers });
       }
-      return await handlePromptRefinerProductProposal(request, session.user.id);
+      return await handlePromptRefinerProductProposal(request, session.user.id,
+        requestDeadline);
     } catch (error) {
       return promptRefinerProductApiErrorResponse(error) ??
         Response.json({ code: "PROMPT_REFINER_FALLBACK_ORIGINAL",
@@ -62,10 +82,7 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
   if (promptRefinerKillSwitchEngaged(process.env)) {
-    return Response.json(
-      { code: "PROMPT_REFINER_UNAVAILABLE" },
-      { status: 503, headers }
-    );
+    return unavailable();
   }
 
   const { cookies } = await import("next/headers");
@@ -80,10 +97,7 @@ export async function POST(request: Request): Promise<Response> {
     }),
     adapterReady: fixtureAdapterReady,
   })) {
-    return Response.json(
-      { code: "PROMPT_REFINER_UNAVAILABLE" },
-      { status: 503, headers }
-    );
+    return unavailable();
   }
 
   const { handlePromptRefinerProposal } =

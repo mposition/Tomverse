@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { writeSystemAuditLog } from "@/lib/adminAudit";
+import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersistence";
 import { verifyDurableChatSourceMessage } from "@/lib/chatDurableSourceMessage";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
@@ -23,6 +23,8 @@ import {
 } from "@/lib/promptRefinerReceiptCore";
 import { promptRefinerProductProposalReadySchema } from
   "@/lib/promptRefinerProductApiContract";
+import { readPromptRefinerProductAutoGuard } from
+  "@/lib/promptRefinerProductOperationalGuard";
 import {
   writePromptRefinerProductDispositionReceipt,
   writePromptRefinerProductExecutionReceipt,
@@ -335,6 +337,15 @@ async function consumeWithRelease(
       WHERE m."id" = ${input.sourceMessageId} AND m."role" = 'user' AND c."id" = ${input.conversationId}
         AND c."userId" = ${input.userId} AND c."kind" = 'chat' AND c."productKey" = 'chat' FOR SHARE OF m, c`;
     if (rows.length !== 1 || source.length !== 1) return unavailable();
+    if (rows[0].mode === "auto") {
+      // Chat draft/scope writers already order Conversation -> audit. Preserve
+      // that order, then serialize the operational read behind every pause
+      // transition (audit -> guard) before consuming an Auto suggestion.
+      await takeAuditChainLock(tx);
+      if (!(await readPromptRefinerProductAutoGuard(tx)).active) {
+        return unavailable();
+      }
+    }
     const view = validatePromptRefinerChatExecution({ messages: input.messages, decision: choice,
       held: rows[0], facts: { ...source[0], ...release, userId: input.userId,
         conversationId: input.conversationId, sourceMessageId: input.sourceMessageId,

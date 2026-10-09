@@ -80,7 +80,8 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
         conversationId, scopeId: scope.id, epoch: scope.epoch });
       assert.equal((await store.claimPromptRefinerProductAttempt({
         snapshot: productSnapshot, mode: "explicit" })).outcome, "claimed");
-      const requestedAt = new Date(Date.now() - 30).toISOString();
+      const receiptNow = Date.now();
+      const requestedAt = new Date(receiptNow - 30).toISOString();
       const productHeld = await store.holdPromptRefinerProductChatSuggestion({
         snapshot: productSnapshot, mode: "explicit",
         deadlineAtMonotonicMs: performance.now() + 13_000, response: {
@@ -92,8 +93,8 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
           provider: "openai", modelId: "gpt-5-6-luna",
           adapterVersion: "prompt-refiner-product-adapter-v1", outcome: "suggested",
           failureLayer: "none", failureCode: null, requestedAt,
-          dispatchedAt: new Date(Date.now() - 20).toISOString(),
-          completedAt: new Date(Date.now() - 10).toISOString(), preparationLatencyMs: 20,
+          dispatchedAt: new Date(receiptNow - 20).toISOString(),
+          completedAt: new Date(receiptNow - 10).toISOString(), preparationLatencyMs: 20,
           inputTokens: 100, cachedInputTokens: 0, outputTokens: 20,
           reasoningTokens: 2, actualCostMicroUsd: 44, retryCount: 0,
         },

@@ -12,11 +12,14 @@ const world = {
   recent: true,
   activationWrites: 0,
   auditWrites: 0,
+  resumeWrites: 0,
   rateLimits: 0,
   activationOutcome: "ok" as "ok" | "refused" | "unknown",
   auditOutcome: "ok" as "ok" | "refused" | "unknown",
+  resumeOutcome: "ok" as "ok" | "refused" | "unknown",
   activationInput: null as unknown,
   auditInput: null as unknown,
+  resumeInput: null as unknown,
 };
 
 mock.module("next-auth/next", { namedExports: {
@@ -84,12 +87,25 @@ mock.module(mod("lib/promptRefinerProductReleaseStore.ts"), { namedExports: {
     }
     return { receiptId: "synthetic-limited-audit" };
   },
+  resumePromptRefinerProductAuto: async (input: unknown) => {
+    world.resumeWrites += 1; world.resumeInput = input;
+    if (world.resumeOutcome === "refused") {
+      throw new Error("prompt_refiner_product_auto_resume_stale");
+    }
+    if (world.resumeOutcome === "unknown") {
+      throw new Error("synthetic database outcome unknown");
+    }
+    return { resumeAuditLogId: "synthetic-resume", autoEnabled: true,
+      generation: 8 };
+  },
 } });
 
 const activationRoute = import(mod(
   "app/api/admin/prompt-refiner/product-activation/route.ts"));
 const auditRoute = import(mod(
   "app/api/admin/prompt-refiner/product-limited-audit/route.ts"));
+const resumeRoute = import(mod(
+  "app/api/admin/prompt-refiner/product-auto-resume/route.ts"));
 
 const activationBody = {
   stageId: "prompt-refiner-vnext-one-shot-v5",
@@ -107,6 +123,12 @@ const auditBody = {
   reviewedCaseCount: 3,
   confirmation: "RECORD_CONTENT_FREE_REFINER_LIMITED_AUDIT",
 };
+const resumeBody = {
+  expectedGeneration: 7,
+  expectedReasonCode: "unknown_dispatch_or_cost",
+  expectedPauseAuditLogId: "pause-audit",
+  confirmation: "RESUME_REFINER_PRODUCT_AUTO_AFTER_OPERATOR_REVIEW",
+};
 const request = (path: string, body: unknown, origin = "https://tomverse.test") =>
   new Request(`https://tomverse.test${path}`, { method: "POST",
     headers: { "content-type": "application/json", origin },
@@ -115,15 +137,19 @@ const request = (path: string, body: unknown, origin = "https://tomverse.test") 
 beforeEach(() => {
   world.session = { user: { id: "synthetic-owner" } };
   world.role = "owner"; world.recent = true;
-  world.activationWrites = 0; world.auditWrites = 0; world.rateLimits = 0;
+  world.activationWrites = 0; world.auditWrites = 0; world.resumeWrites = 0;
+  world.rateLimits = 0;
   world.activationOutcome = "ok"; world.auditOutcome = "ok";
-  world.activationInput = null; world.auditInput = null;
+  world.resumeOutcome = "ok";
+  world.activationInput = null; world.auditInput = null; world.resumeInput = null;
   delete process.env.PROMPT_REFINER_PRODUCT_ACTIVATION_WRITE_ENABLED;
   delete process.env.PROMPT_REFINER_PRODUCT_LIMITED_AUDIT_WRITE_ENABLED;
+  delete process.env.PROMPT_REFINER_PRODUCT_AUTO_RESUME_WRITE_ENABLED;
 });
 
 test("product release mutations require hidden owner, origin, recent auth and write gates", async () => {
   const activation = await activationRoute; const audit = await auditRoute;
+  const resume = await resumeRoute;
   const cases = [
     { session: null, role: "owner", recent: true, origin: "https://tomverse.test", status: 404 },
     { session: { user: { id: "synthetic-owner" } }, role: "admin", recent: true,
@@ -138,6 +164,8 @@ test("product release mutations require hidden owner, origin, recent auth and wr
       body: activationBody },
     { post: audit.POST, path: "/api/admin/prompt-refiner/product-limited-audit",
       body: auditBody },
+    { post: resume.POST, path: "/api/admin/prompt-refiner/product-auto-resume",
+      body: resumeBody },
   ]) {
     for (const item of cases) {
       world.session = item.session; world.role = item.role;
@@ -146,13 +174,15 @@ test("product release mutations require hidden owner, origin, recent auth and wr
       assert.equal(response.status, item.status);
       assert.equal(response.headers.get("cache-control"),
         "private, no-store, max-age=0");
-      assert.equal(world.activationWrites + world.auditWrites, 0);
+      assert.equal(world.activationWrites + world.auditWrites +
+        world.resumeWrites, 0);
     }
     world.session = { user: { id: "synthetic-owner" } };
     world.role = "owner"; world.recent = true;
     const disabled = await route.post(request(route.path, route.body));
     assert.equal(disabled.status, 409);
-    assert.equal(world.activationWrites + world.auditWrites, 0);
+    assert.equal(world.activationWrites + world.auditWrites +
+      world.resumeWrites, 0);
   }
 });
 
@@ -220,4 +250,46 @@ test("refused and unknown release writes are non-retryable safe failures", async
       retryAuthorized: false, humanReviewRequired: true });
     assert.equal(world[item.counter], 2);
   }
+});
+
+test("Auto resume binds exact paused evidence and never retries an unknown write", async () => {
+  const resume = await resumeRoute;
+  assert.equal((await resume.POST(request(
+    "/api/admin/prompt-refiner/product-auto-resume", resumeBody))).status, 409);
+  assert.equal(world.resumeWrites, 0);
+  process.env.PROMPT_REFINER_PRODUCT_AUTO_RESUME_WRITE_ENABLED = "1";
+  for (const invalid of [
+    { ...resumeBody, expectedGeneration: 0 },
+    { ...resumeBody, expectedReasonCode: "something_else" },
+    { ...resumeBody, expectedPauseAuditLogId: "" },
+    { ...resumeBody, confirmation: "yes" },
+    { ...resumeBody, operatorObserved: true },
+  ]) {
+    assert.equal((await resume.POST(request(
+      "/api/admin/prompt-refiner/product-auto-resume", invalid))).status, 400);
+  }
+  assert.equal(world.resumeWrites, 0);
+  const accepted = await resume.POST(request(
+    "/api/admin/prompt-refiner/product-auto-resume", resumeBody));
+  assert.equal(accepted.status, 201);
+  assert.deepEqual(await accepted.json(), { resumeAuditLogId: "synthetic-resume",
+    autoEnabled: true, generation: 8 });
+  assert.equal(world.resumeWrites, 1);
+  assert.equal(JSON.stringify(world.resumeInput).includes("confirmation"), false);
+
+  world.resumeOutcome = "refused";
+  const refused = await resume.POST(request(
+    "/api/admin/prompt-refiner/product-auto-resume", resumeBody));
+  assert.equal(refused.status, 409);
+  assert.deepEqual(await refused.json(), {
+    code: "PROMPT_REFINER_PRODUCT_AUTO_RESUME_REFUSED",
+    retryAuthorized: false, humanReviewRequired: true });
+  world.resumeOutcome = "unknown";
+  const unknown = await resume.POST(request(
+    "/api/admin/prompt-refiner/product-auto-resume", resumeBody));
+  assert.equal(unknown.status, 503);
+  assert.deepEqual(await unknown.json(), {
+    code: "PROMPT_REFINER_PRODUCT_AUTO_RESUME_OUTCOME_UNKNOWN",
+    retryAuthorized: false, humanReviewRequired: true });
+  assert.equal(world.resumeWrites, 3);
 });

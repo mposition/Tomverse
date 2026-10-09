@@ -80,6 +80,18 @@ export type PromptRefinerUiState =
 const promptRefinerDecisionSchema = z.enum(["accepted", "kept_original"]);
 export type PromptRefinerDecision = z.infer<typeof promptRefinerDecisionSchema>;
 
+// A browser may name one server-held decision. It cannot supply execution
+// text, mode, account, conversation or draft authority through this shape.
+export const promptRefinerChatDecisionSchema = z.object({
+  suggestionId: z.string().uuid(),
+  scopeId: z.string().uuid(),
+  epoch: z.number().int().positive().max(2_147_483_647),
+  decision: promptRefinerDecisionSchema,
+}).strict();
+export type PromptRefinerChatDecision = z.infer<
+  typeof promptRefinerChatDecisionSchema
+>;
+
 export type PromptRefinerResolution = {
   decision: PromptRefinerDecision;
   /** What remains visible in the composer after the decision. */

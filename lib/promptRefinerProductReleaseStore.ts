@@ -6,6 +6,13 @@ import type { Session } from "next-auth";
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
 import { prisma } from "@/lib/prisma";
+import { initializePromptRefinerProductAutoGuard,
+  latchPromptRefinerProductAutoStopInTransaction,
+  PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID,
+  readPromptRefinerProductAutoGuard,
+  type PromptRefinerProductImmediateAutoStopReason,
+  resumePromptRefinerProductAutoGuardInTransaction } from
+  "@/lib/promptRefinerProductOperationalGuard";
 import {
   PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
   PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
@@ -16,7 +23,7 @@ import {
   PROMPT_REFINER_AUTO_EXCEPTION_POLICY_SHA256,
   validatePromptRefinerProductReleaseEntry,
 } from "@/lib/promptRefinerProductRelease";
-import { readPromptRefinerVnextOneShotCandidateSource } from
+import { verifyPromptRefinerVnextOneShotCandidateSourceAtRoot } from
   "@/lib/promptRefinerVnextOneShotCandidateSourceReadback";
 import {
   readPromptRefinerVnextOneShotDisposition,
@@ -39,6 +46,9 @@ const LIMITED_SUMMARY =
 const ACTIVATION_ACTION = "prompt_refiner.product_release_activated";
 const ACTIVATION_SUMMARY =
   "Activated the exact-deployment Prompt Refiner product release.";
+const RESUME_ACTION = "prompt_refiner.product_auto_resumed";
+const RESUME_SUMMARY =
+  "Resumed Prompt Refiner Auto after explicit operator review.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -50,7 +60,25 @@ type EvidenceTarget = Readonly<{
   dispositionAuditLogId: string;
 }>;
 
-const limitedMetadata = (target: EvidenceTarget, reviewedCaseCount: number) => ({
+class PromptRefinerProductReleaseDriftError extends Error {
+  constructor(
+    readonly stopReason: PromptRefinerProductImmediateAutoStopReason,
+    code: string,
+  ) {
+    super(code);
+    this.name = "PromptRefinerProductReleaseDriftError";
+  }
+}
+
+const releaseDrift = (
+  reason: PromptRefinerProductImmediateAutoStopReason,
+  code: string,
+): never => { throw new PromptRefinerProductReleaseDriftError(reason, code); };
+
+export const promptRefinerProductLimitedAuditMetadata = (
+  target: EvidenceTarget,
+  reviewedCaseCount: number,
+) => ({
   version: "prompt-refiner-product-limited-audit-v1",
   policyCommit: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_COMMIT,
   policySha256: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_SHA256,
@@ -63,7 +91,7 @@ const limitedMetadata = (target: EvidenceTarget, reviewedCaseCount: number) => (
   adapterConfigDigest: PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST,
 });
 
-const activationMetadata = (input: EvidenceTarget & {
+export const promptRefinerProductActivationMetadata = (input: EvidenceTarget & {
   limitedAuditReceiptId: string;
   runtimeCommitSha: string;
   runtimeDeploymentId: string;
@@ -99,12 +127,21 @@ async function exactStageEvidence(tx: Tx, target: EvidenceTarget) {
       !disposition.valid ||
       disposition.dispositionAuditLogId !== target.dispositionAuditLogId ||
       disposition.finalDisposition !== "fail") {
-    throw new Error("prompt_refiner_product_quality_evidence_unavailable");
+    return releaseDrift("audit_failure",
+      "prompt_refiner_product_quality_evidence_unavailable");
   }
-  await readPromptRefinerVnextOneShotCandidateSource(tx, target.stageId);
+  try {
+    await verifyPromptRefinerVnextOneShotCandidateSourceAtRoot(
+      process.cwd(), process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase(),
+      stage);
+  } catch {
+    return releaseDrift("critical_safety_failure",
+      "prompt_refiner_product_candidate_source_drift");
+  }
   const price = await readPromptRefinerVnextOneShotPrice(tx);
   if (!price.pricePinMatchesRegistry || price.problems.length !== 0) {
-    throw new Error("prompt_refiner_product_price_evidence_unavailable");
+    return releaseDrift("unknown_dispatch_or_cost",
+      "prompt_refiner_product_price_evidence_unavailable");
   }
   return stage;
 }
@@ -123,7 +160,8 @@ async function readLimitedReceipt(tx: Tx, target: EvidenceTarget,
   const count = metadata.reviewedCaseCount;
   if (!Number.isInteger(count) || (count as number) < 0 || (count as number) > 8 ||
       canonicalBenchmarkJson(metadata) !==
-        canonicalBenchmarkJson(limitedMetadata(target, count as number)) ||
+        canonicalBenchmarkJson(promptRefinerProductLimitedAuditMetadata(
+          target, count as number)) ||
       !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, row)) return null;
   return row;
 }
@@ -156,7 +194,8 @@ export async function recordPromptRefinerProductLimitedAudit(input: {
       request: input.request, action: LIMITED_ACTION,
       targetType: "PromptRefinerVnextOneShotStage", targetId: input.target.stageId,
       summary: LIMITED_SUMMARY,
-      metadata: limitedMetadata(input.target, input.reviewedCaseCount) });
+      metadata: promptRefinerProductLimitedAuditMetadata(
+        input.target, input.reviewedCaseCount) });
     if (!await readLimitedReceipt(tx, input.target, receiptId)) {
       throw new Error("prompt_refiner_product_limited_audit_readback_invalid");
     }
@@ -198,15 +237,16 @@ export async function activatePromptRefinerProductRelease(input: {
       session: input.session, request: input.request,
       action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
       targetId: runtimeDeploymentId!, summary: ACTIVATION_SUMMARY,
-      metadata: activationMetadata(input.target),
+      metadata: promptRefinerProductActivationMetadata(input.target),
     });
+    await initializePromptRefinerProductAutoGuard(tx, approvalAuditLogId);
     const release = await readPromptRefinerProductRelease(tx, process.env);
-    if (!release.explicitEnabled || !release.autoEnabled ||
+    if (!release.explicitEnabled ||
         release.approvalAuditLogId !== approvalAuditLogId) {
       throw new Error("prompt_refiner_product_activation_readback_invalid");
     }
     return Object.freeze({ approvalAuditLogId,
-      explicitEnabled: true as const, autoEnabled: true as const,
+      explicitEnabled: true as const, autoEnabled: release.autoEnabled,
       runtimeCommitSha, runtimeDeploymentId });
   }, { maxWait: 5_000, timeout: 30_000 });
 }
@@ -228,12 +268,21 @@ export async function readPromptRefinerProductRelease(
     targetId: runtimeDeploymentId,
   } });
   const row = rows.length === 1 ? rows[0] : null;
+  if (rows.length === 0) return closed();
+  const latchDrift = async (
+    reason: PromptRefinerProductImmediateAutoStopReason,
+  ) => {
+    await latchPromptRefinerProductAutoStopInTransaction(tx, reason);
+    return closed();
+  };
   if (!row || row.summary !== ACTIVATION_SUMMARY || !row.actorUserId ||
       !row.metadata || typeof row.metadata !== "object" ||
-      Array.isArray(row.metadata)) return closed();
+      Array.isArray(row.metadata)) return latchDrift("audit_failure");
   const metadata = row.metadata as Record<string, unknown>;
   const stageId = metadata.stageId;
-  if (stageId !== V4_STAGE_ID && stageId !== V5_STAGE_ID) return closed();
+  if (stageId !== V4_STAGE_ID && stageId !== V5_STAGE_ID) {
+    return latchDrift("audit_failure");
+  }
   const target = {
     stageId,
     gateAuditLogId: String(metadata.gateAuditLogId ?? ""),
@@ -249,11 +298,16 @@ export async function readPromptRefinerProductRelease(
       target.limitedAuditReceiptId);
     if (!limited || limited.actorUserId !== row.actorUserId ||
         canonicalBenchmarkJson(metadata) !==
-          canonicalBenchmarkJson(activationMetadata(target)) ||
-        !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, row)) return closed();
+          canonicalBenchmarkJson(promptRefinerProductActivationMetadata(target)) ||
+        !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, row)) {
+      return latchDrift("audit_failure");
+    }
     approvedAt = row.createdAt.toISOString();
-  } catch {
-    return closed();
+  } catch (error) {
+    if (error instanceof PromptRefinerProductReleaseDriftError) {
+      return latchDrift(error.stopReason);
+    }
+    throw error;
   }
   const valid = validatePromptRefinerProductReleaseEntry({
     version: "prompt-refiner-product-release-v1", status: "active",
@@ -272,8 +326,64 @@ export async function readPromptRefinerProductRelease(
     runtimeCommitSha: runtimeCommitSha!, runtimeDeploymentId: runtimeDeploymentId!,
     explicitEnabled: true, autoEnabled: true,
   }, runtime);
-  return valid ? Object.freeze({ explicitEnabled: true, autoEnabled: true,
-    runtimeCommitSha, runtimeDeploymentId, approvalAuditLogId: row.id }) : closed();
+  if (!valid) return latchDrift("critical_safety_failure");
+  const operational = await readPromptRefinerProductAutoGuard(tx);
+  return Object.freeze({ explicitEnabled: true,
+    autoEnabled: operational.active,
+    runtimeCommitSha, runtimeDeploymentId, approvalAuditLogId: row.id });
+}
+
+export async function resumePromptRefinerProductAuto(input: {
+  session: Session;
+  request: Request;
+  expectedGeneration: number;
+  expectedReasonCode: string;
+  expectedPauseAuditLogId: string;
+}) {
+  const runtimeCommitSha = process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase();
+  const runtimeDeploymentId = process.env.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase();
+  if (!input.session.user?.id || adminAuditIntegrityKeys(process.env).length === 0 ||
+      !Number.isInteger(input.expectedGeneration) || input.expectedGeneration < 1 ||
+      !input.expectedPauseAuditLogId || !input.expectedReasonCode ||
+      !SHA.test(runtimeCommitSha ?? "") || !UUID.test(runtimeDeploymentId ?? "")) {
+    throw new Error("prompt_refiner_product_auto_resume_context_invalid");
+  }
+  return prisma.$transaction(async (tx) => {
+    await takeAuditChainLock(tx);
+    const release = await readPromptRefinerProductRelease(tx, process.env);
+    const guard = await readPromptRefinerProductAutoGuard(tx);
+    if (!release.explicitEnabled || release.runtimeDeploymentId !== runtimeDeploymentId ||
+        guard.active || guard.generation !== input.expectedGeneration ||
+        guard.reasonCode !== input.expectedReasonCode ||
+        guard.transitionAuditLogId !== input.expectedPauseAuditLogId) {
+      throw new Error("prompt_refiner_product_auto_resume_not_allowed");
+    }
+    const resumeAuditLogId = await writeAdminAuditLog({ tx,
+      session: input.session, request: input.request,
+      action: RESUME_ACTION,
+      targetType: "PromptRefinerProductOperationalGuard",
+      targetId: PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID,
+      summary: RESUME_SUMMARY,
+      metadata: {
+        version: "prompt-refiner-product-auto-resume-v1",
+        policyCommit: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_COMMIT,
+        policySha256: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_SHA256,
+        operatorConfirmedReasonCode: guard.reasonCode,
+        pauseAuditLogId: guard.transitionAuditLogId,
+        priorGeneration: guard.generation,
+        runtimeCommitSha,
+        runtimeDeploymentId,
+      },
+    });
+    const resumed = await resumePromptRefinerProductAutoGuardInTransaction(tx, {
+      expectedGeneration: input.expectedGeneration, resumeAuditLogId });
+    const readback = await readPromptRefinerProductAutoGuard(tx);
+    if (!readback.active || readback.generation !== resumed.generation) {
+      throw new Error("prompt_refiner_product_auto_resume_readback_invalid");
+    }
+    return Object.freeze({ resumeAuditLogId, autoEnabled: true as const,
+      generation: resumed.generation, runtimeCommitSha, runtimeDeploymentId });
+  }, { maxWait: 5_000, timeout: 30_000 });
 }
 
 export async function loadPromptRefinerProductRelease(

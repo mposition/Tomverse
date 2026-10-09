@@ -1271,6 +1271,23 @@ model PromptRefinerProductDispositionReceipt {
   @@index([outcome, observedAt])
 }
 
+/// Singleton Auto stop latch. It stores closed operational aggregates only.
+model PromptRefinerProductOperationalGuard {
+  id String @id
+  state String
+  generation Int
+  baselineAt DateTime @db.Timestamptz(3)
+  pausedAt DateTime? @db.Timestamptz(3)
+  reasonCode String?
+  sampleSize Int
+  p90LatencyMs Int?
+  fallbackCount Int?
+  lastTransitionAuditLogId String @unique(map: "PromptRefinerProductOperationalGua_lastTransitionAuditLogId_key")
+  transitionedAt DateTime @db.Timestamptz(3)
+
+  lastTransitionAudit AdminAuditLog @relation("PromptRefinerProductOperationalGuardTransitionAudit", fields: [lastTransitionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "PromptRefinerProductOperationalGu_lastTransitionAuditLogId_fkey")
+}
+
 // One durable execution identity for an authenticated Chat answer. The
 // primary key is the assistant id selected before dispatch. It is not an FK to
 // Message because claim must precede provider and reservation work, while the
@@ -2435,6 +2452,7 @@ model AdminAuditLog {
   promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
   promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
   promptRefinerAutoBudgetSettlements PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetSettlementAudit")
+  promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.

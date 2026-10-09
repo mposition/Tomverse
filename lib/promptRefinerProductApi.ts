@@ -27,6 +27,10 @@ const unavailable = () => Response.json(
   { code: "PROMPT_REFINER_UNAVAILABLE" }, { status: 503, headers });
 const stale = () => Response.json(
   { code: "PROMPT_REFINER_STALE" }, { status: 409, headers });
+export type PromptRefinerProductRequestDeadline = Readonly<{
+  requestedAt: Date;
+  deadlineAtMonotonicMs: number;
+}>;
 
 async function conversationAccessible(request: Request, userId: string,
   conversationId: string) {
@@ -68,10 +72,10 @@ async function capture(request: Request, userId: string, body: {
 }
 
 export async function handlePromptRefinerProductProposal(request: Request,
-  userId: string) {
-  const requestedAt = new Date();
-  const deadlineAtMonotonicMs = performance.now() +
-    PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
+  userId: string, requestDeadline?: PromptRefinerProductRequestDeadline) {
+  const requestedAt = requestDeadline?.requestedAt ?? new Date();
+  const deadlineAtMonotonicMs = requestDeadline?.deadlineAtMonotonicMs ??
+    performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
   await consumeApiRateLimit(request, userId, "prompt-refiner-product-proposal",
     { minute: 30, day: 1_000 });
   const body = await readLimitedJson(request, 4 * 1024,
@@ -92,10 +96,10 @@ export async function handlePromptRefinerProductProposal(request: Request,
 }
 
 export async function handlePromptRefinerProductPrepare(request: Request,
-  userId: string) {
-  const requestedAt = new Date();
-  const deadlineAtMonotonicMs = performance.now() +
-    PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
+  userId: string, requestDeadline?: PromptRefinerProductRequestDeadline) {
+  const requestedAt = requestDeadline?.requestedAt ?? new Date();
+  const deadlineAtMonotonicMs = requestDeadline?.deadlineAtMonotonicMs ??
+    performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
   await consumeApiRateLimit(request, userId, "prompt-refiner-product-prepare",
     { minute: 30, day: 1_000 });
   const body = await readLimitedJson(request, 4 * 1024,

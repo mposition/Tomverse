@@ -139,6 +139,16 @@ authority나 checked-in empty registry는 출시 승인이 아니다. 실제 act
 B03G latency-only disposition, content-free limited audit, exact candidate/price/config와
 현재 runtime commit/deployment를 canonical audit chain에서 함께 검증해야 한다.
 
+제품 Auto에는 영속적인 운영 중지 latch가 있다. 전체 제품 Refiner의 최근 완료
+100건에서 준비 지연 p90이 6,000ms를 넘거나 원문 fallback이 5건을 넘으면 Auto만
+중지한다. 중대한 safety 실패, dispatch·비용 unknown, 감사 실패는 즉시 중지한다.
+새 성공, rolling window 이동, 재배포 또는 새 activation은 이를 자동 해제하지 않는다.
+재개는 운영자가 확인한 정확한 pause generation·원인·canonical audit id를 CAS로
+결속한 owner action만 허용한다. pause가 먼저 commit된 뒤의 Auto decision consume은
+거부하고 원문 경로를 유지한다. 수동 제안의 명시적 채택은 별도 모드이며 Auto
+권한을 빌리지 않는다. 이 latch는 기존 품질 판정·Router gate·rollout flag 권한을
+대체하거나 통과시키지 않는다.
+
 fixture request에는 exact `prompt`와 opaque `requestId`만 들어간다. 제품 request는
 conversationId·scopeId·epoch·draftRevision만 보내고 서버가 exact prompt와 requestId를
 만든다. 응답의 requestId가

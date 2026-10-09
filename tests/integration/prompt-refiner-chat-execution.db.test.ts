@@ -58,12 +58,26 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       CREATE TABLE "ChatComposerDraft" ("id" TEXT PRIMARY KEY, "userId" TEXT, "conversationId" TEXT,
         "revision" INTEGER, "text" TEXT, "attachmentReferences" JSONB DEFAULT '[]');
       CREATE TABLE "Message" ("id" TEXT PRIMARY KEY, "conversationId" TEXT, "role" TEXT, "content" TEXT);
+      CREATE TABLE "AdminAuditLog" ("id" TEXT PRIMARY KEY, "action" TEXT NOT NULL,
+        "targetType" TEXT NOT NULL, "targetId" TEXT);
       CREATE TABLE "TestAudit" ("id" TEXT PRIMARY KEY, "action" TEXT, "metadata" JSONB);`);
     await client.query(await readFile(resolve(root, "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql"), "utf8"));
     await client.query(await readFile(resolve(root, "prisma/migrations/20261010100000_prompt_refiner_product_receipts/migration.sql"), "utf8"));
+    await client.query(await readFile(resolve(root, "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql"), "utf8"));
     await client.query(`INSERT INTO "User" VALUES ('owner'), ('other');
       INSERT INTO "Conversation" ("id","userId","kind","productKey") VALUES
       ('conversation','owner','chat','chat'), ('other-conversation','other','chat','chat');`);
+    const guardActivationAuditId = randomUUID();
+    await client.query(`INSERT INTO "AdminAuditLog"
+      ("id","action","targetType","targetId") VALUES
+      ($1,'prompt_refiner.product_release_activated',
+        'PromptRefinerProductOperationalGuard','auto')`, [guardActivationAuditId]);
+    await client.query(`INSERT INTO "PromptRefinerProductOperationalGuard" (
+      "id","state","generation","baselineAt","pausedAt","reasonCode",
+      "sampleSize","p90LatencyMs","fallbackCount",
+      "lastTransitionAuditLogId","transitionedAt"
+    ) SELECT 'auto','active',1,"now",NULL,NULL,0,NULL,NULL,$1,"now"
+      FROM (SELECT clock_timestamp() AS "now") clock`, [guardActivationAuditId]);
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
       $transaction: transaction,
       message: { findFirst: async ({ where }: { where: { id: string; conversationId: string; conversation: { userId: string } } }) => {
@@ -76,11 +90,21 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       lockChatRecoveryConversation: async () => {},
     } });
     mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: { promptRefinerChatExecutionRelease: () => release } });
-    mock.module(mod("lib/adminAudit.ts"), { namedExports: { writeSystemAuditLog: async (input: {
+    const takeTestAuditLock = async (tx: {
+      $executeRaw: (strings: TemplateStringsArray,
+        ...values: unknown[]) => Promise<unknown>;
+    }) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+        hashtext('tomverse-admin-audit-chain'))`;
+    };
+    mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+      takeAuditChainLock: takeTestAuditLock,
+      writeSystemAuditLog: async (input: {
       tx: { $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown> };
       systemActor: string; action: string; metadata: unknown;
     }) => {
       if (auditFailure) throw new Error("synthetic audit failure");
+      await takeTestAuditLock(input.tx);
       assert.ok(["prompt-refiner-chat-execution",
         "prompt-refiner-product-execution"].includes(input.systemActor));
       assert.equal(JSON.stringify(input.metadata).includes("source"), false);
@@ -214,6 +238,43 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       const view = await store.consumePromptRefinerChatExecution(f.input);
       assert.equal(view.executionMessages.at(-1).content, "Refined execution text");
       release = { explicitEnabled: true, autoEnabled: false };
+    });
+    await t.test("concurrent Auto consume and scope advance do not invert locks", async () => {
+      const f = await setup("auto"); await f.save();
+      release = { explicitEnabled: false, autoEnabled: true };
+      const timeout = new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("consume_scope_deadlock")), 2_000);
+      });
+      const results = await Promise.race([Promise.allSettled([
+        store.consumePromptRefinerChatExecution(f.input),
+        store.advancePromptRefinerChatScope({ userId: "owner",
+          conversationId: "conversation", surface: "chat",
+          mountId: randomUUID() }),
+      ]), timeout]);
+      assert.equal(results.length, 2);
+      assert.equal(results[1]?.status, "fulfilled");
+      release = { explicitEnabled: true, autoEnabled: false };
+    });
+    await t.test("a committed operational pause blocks Auto consume only", async () => {
+      const f = await setup("auto"); await f.save();
+      const pauseAuditId = randomUUID();
+      await client.query(`INSERT INTO "AdminAuditLog"
+        ("id","action","targetType","targetId") VALUES
+        ($1,'prompt_refiner.product_auto_paused',
+          'PromptRefinerProductOperationalGuard','auto')`, [pauseAuditId]);
+      await client.query(`UPDATE "PromptRefinerProductOperationalGuard"
+        SET "state"='paused', "pausedAt"=clock_timestamp(),
+          "reasonCode"='audit_failure', "sampleSize"=0,
+          "lastTransitionAuditLogId"=$1, "transitionedAt"=clock_timestamp()
+        WHERE "id"='auto'`, [pauseAuditId]);
+      release = { explicitEnabled: false, autoEnabled: true };
+      await refuse(f.input);
+      assert.equal((await row(f.held.suggestionId)).state, "ready");
+      release = { explicitEnabled: true, autoEnabled: false };
+      const manual = await setup(); await manual.save();
+      const manualView = await store.consumePromptRefinerChatExecution(manual.input);
+      assert.equal(manualView.executionMessages.at(-1).content,
+        "Refined execution text");
     });
     await t.test("kill switch refuses before consumption", async () => {
       const f = await setup(); await f.save(); process.env.PROMPT_REFINER_KILL_SWITCH = "test-stop";

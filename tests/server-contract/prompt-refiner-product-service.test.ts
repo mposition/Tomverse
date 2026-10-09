@@ -20,6 +20,10 @@ let releases = 0;
 let holds = 0;
 let receiptStates: string[] = [];
 let settlementDelayMs = 0;
+let autoGuardAvailable = true;
+let guardAdmissions = 0;
+let auditLatches = 0;
+let receiptError = false;
 
 class BudgetError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -87,8 +91,20 @@ mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"
 mock.module(mod("lib/promptRefinerProductReceiptStore.ts"), { namedExports: {
   recordPromptRefinerProductExecutionReceipt: async (receipt: Record<string, unknown>,
     _mode: string, state = "terminal") => {
+    if (receiptError) throw new Error("synthetic receipt audit failure");
     receiptStates.push(state);
     return { ...receipt, receiptId: receipt.receiptId ?? "receipt" };
+  },
+} });
+mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: {
+  requirePromptRefinerProductAutoAdmission: async () => {
+    guardAdmissions += 1;
+    if (!autoGuardAvailable) throw new Error("operationally paused");
+    return { active: true, generation: 1, reasonCode: null };
+  },
+  latchPromptRefinerProductAutoAuditFailure: async () => {
+    auditLatches += 1;
+    return { active: false, generation: 1, reasonCode: "audit_failure" };
   },
 } });
 mock.module(mod("lib/promptRefinerProductAdapter.ts"), { namedExports: {
@@ -142,6 +158,8 @@ beforeEach(() => {
   reserveError = null; providerCalls = 0; reserves = 0; dispatches = 0;
   settlements = 0; unknowns = 0; releases = 0; holds = 0;
   receiptStates = []; settlementDelayMs = 0;
+  autoGuardAvailable = true; guardAdmissions = 0; auditLatches = 0;
+  receiptError = false;
   delete process.env.PROMPT_REFINER_KILL_SWITCH;
 });
 
@@ -160,6 +178,11 @@ test("missing release, kill switch and budget exhaustion never call provider", a
   reserveError = new BudgetError("budget_exhausted");
   assert.equal((await prepare({ snapshot, mode: "explicit" })).reason,
     "budget_exhausted");
+  assert.equal(auditLatches, 0);
+  reserveError = new BudgetError("reservation_authority_mismatch");
+  assert.equal((await prepare({ snapshot, mode: "explicit" })).reason,
+    "unavailable");
+  assert.equal(auditLatches, 1);
   assert.equal(providerCalls, 0);
   assert.equal(dispatches, 0);
 });
@@ -203,5 +226,22 @@ test("expired preparation and late settlement cannot reserve late or publish", a
   assert.equal(late.reason, "timeout");
   assert.equal(settlements, 1); assert.equal(holds, 0);
   assert.deepEqual(receiptStates, ["terminal"]);
+});
+
+test("Auto operational pause blocks dispatch and receipt audit failure latches", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  autoGuardAvailable = false;
+  const paused = await prepare({ snapshot, mode: "auto" });
+  assert.deepEqual(paused, { outcome: "original_fallback", reason: "unavailable" });
+  assert.equal(guardAdmissions, 1); assert.equal(reserves, 0);
+  assert.equal(providerCalls, 0);
+
+  autoGuardAvailable = true; receiptError = true;
+  adapterOutcome = { ...timing(), ...telemetry, status: "invalid_response",
+    reason: "invalid_response" };
+  const failedAudit = await prepare({ snapshot, mode: "auto" });
+  assert.deepEqual(failedAudit, { outcome: "original_fallback",
+    reason: "audit_unavailable" });
+  assert.equal(auditLatches, 1); assert.equal(holds, 0);
 });
 

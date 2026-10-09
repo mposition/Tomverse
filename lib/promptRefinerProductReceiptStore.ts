@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { evaluatePromptRefinerProductAutoGuardInTransaction } from
+  "@/lib/promptRefinerProductOperationalGuard";
 import {
   promptRefinerDispositionReceiptSchema,
   promptRefinerExecutionReceiptSchema,
@@ -63,6 +65,7 @@ export async function writePromptRefinerProductExecutionReceipt(
       retryCount: receipt.retryCount,
     },
   });
+  await evaluatePromptRefinerProductAutoGuardInTransaction(tx);
   return receipt;
 }
 

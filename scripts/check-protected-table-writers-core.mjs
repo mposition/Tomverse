@@ -232,6 +232,11 @@ export const PROTECTED_TABLES = [
     contract: "docs/ui-contracts/prompt-refiner-suggestion.md",
   },
   {
+    table: "PromptRefinerProductOperationalGuard", delegate: "promptRefinerProductOperationalGuard",
+    writers: ["lib/promptRefinerProductOperationalGuard.ts"],
+    contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md §3",
+  },
+  {
     table: "PromptRefinerChatSuggestion",
     delegate: "promptRefinerChatSuggestion",
     writers: ["lib/promptRefinerChatExecutionStore.ts"],
@@ -1780,6 +1785,36 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: [3, 1][index], writeVerbs: 2,
     reason: "The locked authored-Message save transaction binds a held attempt to its exact draft id/revision before consuming that draft. Suggestion access is read-only; the sole attempt update and canonical audit are atomic with Message persistence, and cannot dispatch a provider.",
   })),
+  ...["AdminAuditLog", "PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt", "PromptRefinerProductAttempt", "PromptRefinerProductOperationalGuard", "PromptRefinerAutoBudgetHold"].map((table, index) => ({
+    path: "lib/promptRefinerProductOperationalGuard.ts", table,
+    tableMentions: [2, 5, 1, 2, 4, 6, 2][index], writeVerbs: 4,
+    reason: "The sole operational guard writer reads closed execution/disposition, attempt, budget and audit facts. It inserts the initial latch and updates only the latch for policy stop or a generation-bound human resume; all audits use the canonical writer in the same transaction. It never changes provider accounting or receipt history.",
+  })),
+  ...["AdminAuditLog", "PromptRefinerProductOperationalGuard"].map((table, index) => ({
+    path: "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql", table,
+    tableMentions: [1, 3][index], writeVerbs: 8,
+    reason: "The additive migration creates the content-free Auto latch and its transition/delete/truncate guards. Its audit mention is a restrictive foreign key; it never writes the audit table.",
+  })),
+  {
+    path: "lib/adminAuditSystemActors.ts", table: "PromptRefinerProductOperationalGuard",
+    tableMentions: 1, writeVerbs: 2,
+    reason: "The closed system-actor predicate names only the automatic pause audit target. It performs no SQL and grants no human resume authority.",
+  },
+  {
+    path: "lib/promptRefinerProductReceiptStore.ts", table: "PromptRefinerProductOperationalGuard",
+    tableMentions: 1, writeVerbs: 4,
+    reason: "The receipt transaction invokes the sole operational guard writer after recording the immutable receipt and canonical audit. It never writes the latch directly.",
+  },
+  {
+    path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductOperationalGuard",
+    tableMentions: 1, writeVerbs: 12,
+    reason: "Auto consume reads the operational latch after acquiring the canonical audit lock in the existing conversation-to-audit order. The store writes only its held suggestion and disposition; no direct latch mutation or resume is possible.",
+  },
+  {
+    path: "scripts/check-enum-constraints.mjs", table: "PromptRefinerProductOperationalGuard",
+    tableMentions: 2, writeVerbs: 20,
+    reason: "Two closed constraint-registry identifiers link the latch state and reason checks to their runtime lists. This checker reads source and migration SQL, holds no database client and executes no SQL.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

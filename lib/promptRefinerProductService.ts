@@ -36,6 +36,9 @@ import { promptRefinerChatExecutionRelease } from
 import {
   recordPromptRefinerProductExecutionReceipt,
 } from "@/lib/promptRefinerProductReceiptStore";
+import { latchPromptRefinerProductAutoAuditFailure,
+  requirePromptRefinerProductAutoAdmission } from
+  "@/lib/promptRefinerProductOperationalGuard";
 import {
   PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
   type PromptRefinerFailureCode,
@@ -118,6 +121,11 @@ const failedReceipt = (snapshot: PromptRefinerCapturedChatDraft,
   actualCostMicroUsd: outcome.actualCostMicroUsd, retryCount: 0 as const,
 });
 
+const latchProductAutoAuditFailure = async () => {
+  try { await latchPromptRefinerProductAutoAuditFailure(); }
+  catch { /* The request remains refused; a DB outage cannot persist a latch. */ }
+};
+
 const successFacts = (outcome: Extract<PromptRefinerProductAdapterOutcome,
   { status: "suggested" }>) => ({
   receiptVersion: PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
@@ -145,6 +153,7 @@ const recordRefusal = async (snapshot: PromptRefinerCapturedChatDraft,
       refusalReceipt(snapshot, code, layer, timing), mode);
     return true;
   } catch {
+    await latchProductAutoAuditFailure();
     return false;
   }
 };
@@ -158,6 +167,7 @@ const recordFailure = async (snapshot: PromptRefinerCapturedChatDraft,
       failedReceipt(snapshot, outcome, code, layer), mode, attemptState);
     return true;
   } catch {
+    await latchProductAutoAuditFailure();
     return false;
   }
 };
@@ -193,6 +203,10 @@ export async function preparePromptRefinerProductSuggestion(input: {
   const release = await promptRefinerChatExecutionRelease();
   if ((input.mode === "explicit" ? !release.explicitEnabled : !release.autoEnabled) ||
       !release.runtimeDeploymentId) return fallback("unavailable");
+  if (input.mode === "auto") {
+    try { await requirePromptRefinerProductAutoAdmission(); }
+    catch { return fallback("unavailable"); }
+  }
 
   let model;
   try {
@@ -247,6 +261,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
   } catch (error) {
     const exhausted = error instanceof PromptRefinerAutoBudgetError &&
       error.code === "budget_exhausted";
+    if (!exhausted) await latchProductAutoAuditFailure();
     const recorded = await recordRefusal(input.snapshot, input.mode,
       "execution_not_approved", "admission");
     return recorded ? fallback(exhausted ? "budget_exhausted" : "unavailable")
@@ -320,7 +335,8 @@ export async function preparePromptRefinerProductSuggestion(input: {
     const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),
       intent: null });
     undispatched.add(proof);
-    try { await authority.releaseConfirmedUndispatched(proof); } catch { /* safe hold */ }
+    try { await authority.releaseConfirmedUndispatched(proof); }
+    catch { await latchProductAutoAuditFailure(); }
     return await recordRefusal(input.snapshot, input.mode,
       "adapter_unavailable", "adapter")
       ? fallback("unavailable") : fallback("audit_unavailable");
@@ -334,6 +350,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
   } catch {
     // authorizeDispatch failed before generateText; no provider call occurred.
     // Keep the hold if its DB transition result is unknown rather than retrying.
+    await latchProductAutoAuditFailure();
     return await recordRefusal(input.snapshot, input.mode,
       "execution_not_approved", "admission")
       ? fallback("audit_unavailable") : fallback("audit_unavailable");
@@ -346,7 +363,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
     try {
       await authority.releaseConfirmedUndispatched(proof);
       released = true;
-    } catch { /* a transition uncertainty remains safely held */ }
+    } catch { await latchProductAutoAuditFailure(); }
     const recorded = await recordRefusal(input.snapshot, input.mode,
       "cancelled", "admission", outcome);
     return recorded && released ? fallback("timeout") :

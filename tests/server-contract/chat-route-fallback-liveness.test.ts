@@ -67,8 +67,20 @@ const REFINER_SCOPE_ID = "44444444-4444-4444-8444-444444444444";
 const REFINER_SUGGESTION_ID = "55555555-5555-4555-8555-555555555555";
 let refinerMode: "explicit" | "auto" | null = null;
 let refinerConsumes = 0;
+let pinnedResponse: Response | null = null;
+let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
 const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
+
+const realPinnedRoute = require(resolve(ROOT, "lib/pinnedDeploymentRoute.ts")) as typeof import("../../lib/pinnedDeploymentRoute");
+mock.module(mod("lib/pinnedDeploymentRoute.ts"), { namedExports: {
+  enterPinnedDeploymentChat: (input: Parameters<typeof realPinnedRoute.enterPinnedDeploymentChat>[0]) => {
+    if (!pinnedResponse) return realPinnedRoute.enterPinnedDeploymentChat(input);
+    pinnedInputs = input.messages;
+    return Promise.resolve({ route: "dispatched" as const, providerCalls: 1 as const,
+      hold: "settled" as const, response: pinnedResponse });
+  },
+} });
 
 // The real store's lock/CAS/audit boundary has separate PostgreSQL tests.
 // This fixture supplies its validated result to the real Chat orchestration;
@@ -1329,6 +1341,36 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 });
 
 /* ------------------------------------- what the override record may claim */
+
+for (const [mode, decision] of [
+  ["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"],
+] as const) test(`${mode} Refiner ${decision} preserves pinned response and execution notice`, async () => {
+  refinerMode = mode;
+  refinerConsumes = 0;
+  conversationSelectionMode = mode === "auto" ? "auto" : "manual";
+  pinnedResponse = new Response("Pinned synthetic answer.", { status: 202,
+    headers: { "X-Pinned-Receipt": "synthetic", "Set-Cookie": "synthetic=1; Path=/; HttpOnly" } });
+  const messages = [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }];
+  const authored = structuredClone(messages);
+  try {
+    const { response, body, streamError } = await ask("answers", "claimed", 202, false, messages, true, false, decision);
+    assert.equal(streamError, null);
+    assert.equal(body, "Pinned synthetic answer.");
+    assert.equal(response.headers.get("X-Pinned-Receipt"), "synthetic");
+    assert.ok(response.headers.get("Set-Cookie")?.includes("synthetic=1"));
+    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), decision === "accepted" ? "applied" : "original");
+    assert.equal(response.headers.get("X-Prompt-Refiner-Mode"), mode);
+    assert.equal(refinerConsumes, 1);
+    assert.deepEqual(pinnedInputs, [{ ...messages[0], content: decision === "accepted" ? REFINER_PROMPT : messages[0].content }]);
+    assert.deepEqual(messages, authored);
+    assert.equal(attempts.length, 0, "the successful pinned dispatch does not fall through to another provider");
+  } finally {
+    pinnedResponse = null;
+    pinnedInputs = null;
+    refinerMode = null;
+    conversationSelectionMode = "auto";
+  }
+});
 
 test("a routed drill turn is recorded as overridden, exactly once", async () => {
   await ask("answers");

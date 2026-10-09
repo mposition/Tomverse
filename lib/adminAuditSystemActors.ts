@@ -227,6 +227,7 @@ export const systemAuditActionAllowed = (
   (actor !== "prompt-refiner-product-execution" ||
     (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
     (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
+    (action === "prompt_refiner.product_auto_paused" && targetType === "PromptRefinerProductOperationalGuard") ||
      ((action === "prompt_refiner.product_attempt_claimed" || action === "prompt_refiner.product_attempt_transitioned" || action === "prompt_refiner.product_source_bound") && targetType === "PromptRefinerProductAttempt")) &&
   (actor !== "prompt-refiner-auto-budget" ||
     ((action === "prompt_refiner.auto_budget_reserved" ||

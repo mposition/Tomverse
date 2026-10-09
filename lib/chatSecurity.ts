@@ -1,7 +1,7 @@
 import "server-only";
 
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
-import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerChatExecutionCore";
+import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerSuggestion";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";

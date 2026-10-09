@@ -1194,7 +1194,15 @@ async function handleChatPost(
             return tracedJsonError(http.message, http.code, http.status, traceId);
         }
         if (pinnedDeployment.route === "dispatched") {
-            if (pinnedDeployment.response instanceof Response) return pinnedDeployment.response;
+            if (pinnedDeployment.response instanceof Response) {
+                if (!refinerExecution) return pinnedDeployment.response;
+                const response = pinnedDeployment.response;
+                const headers = new Headers(response.headers);
+                headers.set("X-Prompt-Refiner-Execution", refinerExecution.applied ? "applied" : "original");
+                headers.set("X-Prompt-Refiner-Mode", refinerExecution.mode);
+                return new Response(response.body, { status: response.status,
+                    statusText: response.statusText, headers });
+            }
             const http = pinnedRefusalHttp("provider_error");
             return tracedJsonError(http.message, http.code, http.status, traceId);
         }

@@ -82,6 +82,9 @@ test("product Refiner receipts cannot impersonate approval or budget actions", (
   const actor = "prompt-refiner-product-execution";
   assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_execution_recorded", "PromptRefinerProductExecutionReceipt"), true);
   assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_disposition_recorded", "PromptRefinerProductDispositionReceipt"), true);
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_auto_paused", "PromptRefinerProductOperationalGuard"), true);
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_auto_paused", "PromptRefinerProductAttempt"), false);
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_auto_resumed", "PromptRefinerProductOperationalGuard"), false);
   for (const action of ["prompt_refiner.product_attempt_claimed", "prompt_refiner.product_attempt_transitioned", "prompt_refiner.product_source_bound"]) {
     assert.equal(systemAuditActionAllowed(actor, action, "PromptRefinerProductAttempt"), true);
     assert.equal(systemAuditActionAllowed(actor, action, "PromptRefinerProductExecutionReceipt"), false);

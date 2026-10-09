@@ -1749,6 +1749,14 @@ Non-negotiable requirements:
   states cannot dispatch again. The Refiner product deadline is at most 13,000
   ms from the authenticated route handler through admission and held publish;
   retry count is zero and a late provider result cannot become a suggestion.
+- Product Auto has a durable operational stop latch. Across the latest 100
+  completed product Refiner requests, p90 preparation latency above 6,000 ms
+  or more than five original fallbacks pauses Auto; critical safety,
+  dispatch/cost unknown and audit failure pause it immediately. Later success,
+  a rolling-window change or a new deployment never resumes it. Resume requires
+  an owner review bound by CAS to the exact paused generation, cause and audit
+  record. Once a pause commits, a new Auto consume is refused; manual explicit
+  acceptance remains a separate mode and does not inherit Auto authority.
 - A Refiner request, ready proposal and accepted resolution are bound to both
   the exact draft bytes and the `identity + mounted surface + conversation`
   scope. Changing any scope member discards them even when the next draft has

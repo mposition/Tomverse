@@ -2,6 +2,10 @@
 
 상태: **default-off 제품 코드 구현·로컬 통합 검증. 독립 검토·활성 배포 미완료.**
 
+전체 Chat 진행률은 승인된 전체 기능 분모를 이번 회차에서 재검증하지 않아 산정을
+보류한다. CHAT-01의 구현·검증과 독립 검토·병합·활성 배포를 구분하며, pending인
+Router 출시 판정을 미구현 0%로 환산하지 않는다.
+
 ## 제품 연결 코드 확장
 
 아래 초기 경계 구현에 제품 scope/proposal/prepare API와 composer를 연결했다.
@@ -29,32 +33,69 @@ confirmed undispatched만 release하며, unknown은 전액 hold와 terminal로 �
 execution/disposition receipt는 content-free이며 UPDATE/DELETE/TRUNCATE를 막는다.
 상태·예산 전이와 canonical audit는 각각 같은 transaction에 묶인다.
 
+제품 운영 중단 경계도 구현했다. 최근 완료 100건의 p90 > 6,000ms
+또는 원문 fallback > 5건과 중대 불확실성을 content-free DB latch로 기록하며,
+새 성공·rolling window·재배포가 이를 지우지 않는다. owner의 recent authentication,
+정확한 중단 감사 ID·generation·원인 검토 확인에 결속한 별도 재개만 허용한다.
+중단 이후 Auto 소비와 수동 채택을 구분하며, 기존 conversation/audit 잠금 순서를
+보존하는 동시성 회귀를 검증했다. DB/audit 자체가 쓰기를 거부하면 durable latch를
+만들었다고 주장하지 않고 해당 요청을 닫으며, 다음 요청도 현재 사실을 재검증한다.
+
 최신 로컬 검증:
 
-- Chat execution 75/75: 기존 71 + 파일 있는 explicit 채택/원문 유지/Auto 3 + 검색
-  Auto 1. 실제 route에서 Router text/estimate, shadow text/profile, provider text와
+- Chat execution 78/78: 기존 71 + 파일 있는 explicit 채택/원문 유지/Auto 3 + 검색
+  Auto 1 + pinned 성공 응답의 세 모드 안내 3. 실제 route에서 Router text/estimate, shadow text/profile, provider text와
   단일 전송을 관측했다. 과거 authored Message와 첨부는 보존했다.
-- 제품 adapter/API/release/service와 owner release API 17/17, client 23/23.
-- 빈 loopback PostgreSQL 17 DB에 269개 migration 적용 및 Prisma schema drift 없음.
-  제품/예산 DB 통합 24/24. exact source bind, same-bytes revision ABA, canonical
-  hash chain, immutable receipts, 재접속/동시 소비, 예산 정산·unknown hold를 포함한다.
+- 제품 adapter/API/release/service/deadline과 owner release API 25/25, client 23/23.
+  기본 비활성 release는 auth/body/capture 전에 닫고 서비스의 최종 재검증도 유지한다.
+- 빈 loopback PostgreSQL 17 DB에 270개 migration 적용 및 Prisma schema drift 없음.
+  추가 migration 네 개의 실제 적용 checksum과 source checksum도 모두 일치한다.
+  제품/예산/운영 latch DB 통합 33/33. exact source bind, same-bytes revision ABA,
+  canonical hash chain, immutable receipts, 재접속/동시 소비, 예산 정산·unknown hold,
+  sticky pause와 owner generation-bound resume를 포함한다. DB는 정상 종료 후 보존했다.
 - audit/protected writer 35/35, security regression 196개 통과.
-- strict lint와 독립 생성 Prisma client의 8GB typecheck, 최종 production build 통과.
-  build의 기존 broad filesystem 탐색 경고 8건은 남아 있다.
+- 최종 source closure/pre-admission 수정까지 strict lint와 독립 생성 Prisma client의
+  8GB typecheck 및 production build가 통과했다. 기본 4GB typecheck의 OOM은 성공으로
+  처리하지 않았다. build의 기존 filesystem 탐색 경고 8건은 남았다. 자격증명 없는
+  로컬 prerender에서 auth MissingSecret/landing destination 진단이 출력되었으며,
+  실제 인증·staging 통과 기록으로 사용하지 않는다.
 - fixture 브라우저 회귀 96건 통과, 기존 project 조건으로 74건 건너뜀. Windows용
   기준 이미지가 없는 mobile composer 시각 비교 2건은 실패로 기록하며 golden을
   생성하거나 통과로 처리하지 않았다. canonical CI 비교는 별도다.
 - 새 검증 쿼리를 반영한 기존 maintenance/attachment mock 회귀 34/34 통과.
-  전체 server contract 재검증과 drawer/재접속 브라우저 회귀는 별도 기록한다.
+  최종 entry pre-admission 변경을 포함한 전체 server contract는 970개 통과,
+  기존 TODO 1개로 실패 0이다(전체 971건).
+- 첫 전체 unit 실행은 14,293건 중 14,263 통과·7 실패·23 skip이었다. 신규 파일의
+  git index 누락, 공유 Marketing fingerprint, 정책 section reference, 기본-off proposal
+  경로와 기존 Refiner source closure 회귀를 수정했다. PDF parser file-level 실패는
+  격리 재실행 4/4 통과했으나 원인 판정이나 기존 실패 삭제 없이 전체를 재실행했다.
+  Windows 기본 순차 실행 결과 전체 14,430건 중 14,407 통과·실패 0·기존 skip 23이다.
+  server lane 14,296건(14,273 pass/23 skip), working-tree serial 20/20,
+  client lane 114/114이며 최초 실패 기록도 보존했다.
+- 기존 Refiner closure 178개 local/190개 total, computed access 228개와 위치 제외
+  digest를 유지했다. 동일 strict decision schema를 기존 pure module에 공유하고
+  실제 변경 위치에 대한 digest만 provenance와 함께 갱신했다. 관련 46/46 통과다.
+- 공유 audit actor/schema를 포함하는 Marketing source fingerprint만 실제 closure에
+  맞춰 갱신했다. 기존 signed staging evidence는 stale이며 권한·서명·정책·activation은
+  변경하지 않았다.
+- drawer·draft·재접속 브라우저 회귀 43건 통과, 기존 project 조건 31건 건너뜀.
+- 별도로 실행한 기존 runner-candidate verifier는 pinned source에 failure-code 파일이
+  없어 실패했다. 해당 builder/manifest/source는 develop과 동일하며 수정하지 않았다.
+  공식 gate-source verifier는 통과했다. 이 결과를 candidate closure 또는 품질 통과로
+  인용하지 않는다.
 
-실제 staging readback(2026-10-09T17:39:23Z)은 READ ONLY transaction에서 내용 없는
+실제 staging readback(2026-10-09T18:58:19Z)은 READ ONLY transaction에서 내용 없는
 카운트와 boolean만 읽었다. v4/v5 각각 공식 B03G gate 0, owner disposition 0,
 limited audit 0이다. `feature.promptRefinerEnabled=false`, kill switch는 꺼져 있다.
+Railway 배포 readback에서 현재 staging은 `e66f91973ede615ebcb9053e5d7812a5fad16300`,
+deployment `7ac2d5a6-f003-489c-8c00-5b50c18e6574`의 SUCCESS이며 이번 제품 코드가 아니다.
 이것은 실제 제품 동작의 통과 기록이 아니다. signed 품질·제한 감사·exact deployment
 activation이 없으면 release는 explicit/auto 모두 닫힌다. 활성화 API도 별도 owner
 인증·recent authentication·origin·쓰기 off switch와 정확한 증거 결속을 요구한다.
 
 독립 검토는 초기 head의 첫 vendor만 accept이고 두 번째 vendor는 대기 중이다.
+서버 readback에서 Claude quota는 unknown, Cursor는 exhausted이며 작성자와 같은
+OpenAI는 제외된다. 다른 공급사로 직접 호출하거나 quota·작성자·규칙을 바꾸지 않았다.
 위 제품 코드 확장은 새 최종 head로 검토해야 한다. 아직 자체 PR/push/병합/배포,
 활성 flag readback, 실사용 회귀는 없다. Auto Router 세 출시 판정도 모두 pending이다.
 예외 정책 승인을 서버 연결 완료나 Router 출시 판정으로 대체하지 않는다.
