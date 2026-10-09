@@ -435,6 +435,11 @@ const main = async () => {
       if (sent.problem) say(`submission: ${sent.problem}`);
       else say(`recorded ${sent.recorded?.observationId ?? "a row"}: failed at timeout`);
       finish(1);
+      // And then the process goes, rather than being left to drain. `finish`
+      // clears the hard deadline, so after this there is nothing left that
+      // could end a run something is still holding open -- and a run that does
+      // not end is one Railway skips every later slot behind.
+      process.exit(process.exitCode ?? 1);
     });
   }, DEFAULT_RUN_TIMINGS.prepareMs);
 

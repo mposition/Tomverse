@@ -118,10 +118,75 @@ test("a command that does not exist answers instead of throwing", async () => {
   assert.ok(result.error, "a missing binary should be reported, not swallowed");
 });
 
-test("ending something already gone is not an error", () => {
-  // A watchdog is the last thing that should be taken down by its own cleanup.
+test("a child with no usable pid is refused, and nothing else is", () => {
+  // A watchdog is the last thing that should be taken down by its own cleanup,
+  // so this never throws. But the only thing it refuses is a pid it must not
+  // negate: `-0` is the caller's own process group and `-1` is every process
+  // it may signal, so a child that never started must not become a signal to
+  // everything.
   assert.equal(endChild(null, "SIGKILL"), false);
   assert.equal(endChild(undefined, "SIGKILL"), false);
-  assert.equal(endChild({ exitCode: 0, signalCode: null, pid: 1 }, "SIGKILL"), false);
-  assert.equal(endChild({ exitCode: null, signalCode: "SIGKILL", pid: 1 }, "SIGKILL"), false);
+  assert.equal(endChild({ pid: undefined }, "SIGKILL"), false);
+  assert.equal(endChild({ pid: 0 }, "SIGKILL"), false);
+  assert.equal(endChild({ pid: 1 }, "SIGKILL"), false);
+
+  // And it does **not** refuse because the child itself has exited. That guard
+  // was here and was wrong: SIGTERM can take the parent while a grandchild
+  // ignores it, and the child's `signalCode` is then set -- so the follow-up
+  // SIGKILL and both watchdogs' kills were refused by the guard meant to make
+  // them safe. A pid that is gone simply fails, which is caught.
+  assert.equal(
+    endChild({ pid: 2 ** 30, exitCode: 0, signalCode: "SIGTERM" }, "SIGKILL", {
+      platform: "linux",
+    }),
+    false,
+    "a stale pid answers false rather than throwing",
+  );
 });
+
+test("output is decoded per stream, not per chunk", async () => {
+  // The failure this holds shut is a silently wrong success. A multi-byte
+  // character split across two chunks becomes two replacement characters if
+  // each chunk is decoded alone -- and the report's JSON would still parse, so
+  // a corrupted issue title would be stored as a correct observation.
+  // `spawnSync`'s `encoding: "utf8"` did not have that failure, and neither
+  // may its replacement.
+  const line = "가".repeat(4_000);
+  const result = await node(
+    `const line = ${JSON.stringify(line)};
+for (let i = 0; i < 20; i += 1) process.stdout.write(line);`,
+    { timeoutMs: 20_000, maxBytes: 8 * 1024 * 1024 },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  // Enough output to have crossed a pipe boundary many times over.
+  assert.ok(Buffer.byteLength(result.stdout, "utf8") > 200_000);
+  assert.equal(result.stdout.includes("�"), false, "a character was split and lost");
+  assert.equal(result.stdout, line.repeat(20));
+});
+
+test(
+  "a grandchild that ignores SIGTERM is still killed after the parent goes",
+  { skip: process.platform === "win32" },
+  async () => {
+    // The exact shape the reviewer named: SIGTERM takes the parent, a
+    // grandchild ignores it and holds the pipes, so `close` never fires. If the
+    // follow-up SIGKILL is refused because the parent has exited, the run waits
+    // on a promise that never settles and outlives every deadline it has --
+    // which is the defect this whole change is about, in a subtler form.
+    const started = Date.now();
+    const result = await node(
+      [
+        "const { spawn } = require('node:child_process');",
+        // Inherits this process's stdout, so it holds the pipe open.
+        "spawn(process.execPath, ['-e', \"process.on('SIGTERM', () => {}); setInterval(()=>{},1000)\"], { stdio: 'inherit' });",
+        "setTimeout(() => process.exit(0), 100_000);",
+      // Joined with an explicit newline: the source below is a script, and a
+      // literal escape here is one more thing between the reader and it.
+      ].join(String.fromCharCode(10)),
+      { timeoutMs: 300 },
+    );
+    const elapsed = Date.now() - started;
+    assert.equal(result.timedOut, true);
+    assert.ok(elapsed < 300 + CHILD_KILL_GRACE_MS + 10_000, `${elapsed}ms`);
+  },
+);
