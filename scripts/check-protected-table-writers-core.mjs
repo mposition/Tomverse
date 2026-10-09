@@ -1224,6 +1224,13 @@ export const RUNTIME_SQL_ALLOWLIST = [
       "Local search benchmark: ANALYZE and EXPLAIN on ExternalMessage against a seeded database.",
   },
   {
+    path: "scripts/amux-v4-activation-preflight.mjs",
+    sha256: "9f97102e046c32707c45d474c57c6a10fbad8896ce65b22f1f9014ef23adb04b",
+    count: 1,
+    reason:
+      "AMUX v4 activation diagnostic: one pg import; a fixed allowlist of ciphertext/key columns yields counts only inside BEGIN REPEATABLE READ READ ONLY with statement and idle-transaction timeouts. No audit, model call, switch or body write. The S3 operation is a read-only version-listing probe in an unused namespace, not key deletion evidence. Fingerprint is bound to the complete reviewed script.",
+  },
+  {
     path: "scripts/baseline-existing-database.mjs",
     sha256: "5445379b7dca4746285caae806376aab0f74d9be6f278a10e881f9fd7a70b70b",
     count: 1,

@@ -16,7 +16,7 @@ export type AmuxVisibleAnalysisUnit = {
 };
 
 export type AmuxIdeaAnalysisResultView =
-  | { state: "pending" | "cancelled" | "provider_failed" }
+  | { state: "pending" | "cancelled" | "provider_failed" | "needs_new_preview" }
   | { state: "partial"; ideaId: string; previewId: string;
       completedAt: string; outcome: "propose";
       coveredScope: string | null; remainingScope: string | null;
@@ -67,7 +67,7 @@ export function parseAmuxIdeaAnalysisResultView(
 ): AmuxIdeaAnalysisResultView | null {
   if (status !== 200 || !ID.test(expectedIdeaId) || !record(body)) return null;
   if (body.state === "pending" || body.state === "cancelled" ||
-      body.state === "provider_failed") {
+      body.state === "provider_failed" || body.state === "needs_new_preview") {
     return keys(body, ["state"]) ? body as AmuxIdeaAnalysisResultView : null;
   }
   const partial = body.state === "partial";
