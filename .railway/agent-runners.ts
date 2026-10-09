@@ -138,6 +138,9 @@ const BILLING_FINANCE_OPS_VARIABLES = [
   "BILLING_FINANCE_OPS_DEADMAN_URL",
 ] as const;
 
+/** The marketing publisher's two variables (S2 plan, S2d1). */
+const MARKETING_PUBLISHER_VARIABLES = ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"] as const;
+
 /**
  * The Support Triage services' one variable each (docs/policy/support-triage.md
  * §3): their own route secret, nothing else. The same lists
@@ -254,6 +257,32 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: BILLING_FINANCE_OPS_VARIABLES,
       staging: BILLING_FINANCE_OPS_VARIABLES,
+    },
+  },
+  {
+    // The marketing publisher (S2 plan, S2d1). A clock and a supervisor: every
+    // five minutes it asks the app to run, with a deadline four minutes out,
+    // and kills its own worker at that deadline. The contract is
+    // `run deadline < cron period`; lib/marketingPublisherRunCore.ts holds the
+    // numbers and a test holds this schedule to them. The admin Jobs screen
+    // judges it through CRON_TRIGGERS.marketingPublisher in
+    // lib/scheduledJobsCore.ts, which a test holds to this schedule.
+    //
+    // Two variables and no others -- the plan's exhaustive list. No database,
+    // platform, object-store, GitHub or LLM credential: the service changes
+    // nothing itself, and the app route is where the work happens. Set both
+    // after the apply creates the service: this file preserves declared
+    // variables, it does not create them, and a service without its secret
+    // fails every five minutes.
+    key: "marketing_publisher",
+    service: "Marketing Publisher",
+    startCommand: "npm run maintenance:marketing-publisher",
+    cronSchedule: "*/5 * * * *",
+    environments: {
+      production: MARKETING_PUBLISHER_VARIABLES,
+      staging: MARKETING_PUBLISHER_VARIABLES,
+      // Not on dev (operator decision, 2026-10-07): the one job that acts on
+      // outside accounts, and dev runs every merge before anyone has verified it.
     },
   },
   {
