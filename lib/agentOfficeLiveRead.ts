@@ -17,20 +17,40 @@
 import "server-only";
 
 import type {
+  AgentOfficeReviewState,
   AgentOfficeAmuxState,
   AgentOfficeEngineeringState,
+  AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
+  AgentOfficeOperatorQueue,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
+import {
+  countAutoFixActionCases,
+  countAwaitingAmuxEscalations,
+  countPendingMarketingApprovals,
+} from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
+import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
   AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
+import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
+import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
+import {
+  BILLING_FINANCE_OPS_AGENT_KEY,
+  BILLING_FINANCE_OPS_ENVIRONMENTS,
+  type BillingFinanceOpsEnvironment,
+  billingFinanceOpsIdempotencyKey,
+} from "@/lib/billingFinanceOpsDigest";
+import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { REVIEW_ORCHESTRATOR_STATUS_KEY } from "@/lib/reviewOrchestratorStatusCore";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -122,6 +142,47 @@ async function readQa(): Promise<AgentOfficeQaState> {
 }
 
 /**
+ * Billing and finance: the switch row, whether this environment's digest for
+ * today exists, and when the newest digest was stored. The digest body is not
+ * selected -- the office says whether the day was recorded, never what the
+ * register held (docs/policy/billing-finance-ops.md §1.4).
+ */
+async function readFinance(): Promise<AgentOfficeFinanceState> {
+  try {
+    const environment = resolveDeploymentEnvironment();
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const runsHere = (BILLING_FINANCE_OPS_ENVIRONMENTS as readonly string[]).includes(environment);
+    const [control, recordedToday, latest] = await Promise.all([
+      readBillingFinanceOpsControl(prisma),
+      runsHere
+        ? prisma.agentDigestItem.count({
+            where: {
+              agentKey: BILLING_FINANCE_OPS_AGENT_KEY,
+              idempotencyKey: billingFinanceOpsIdempotencyKey(environment as BillingFinanceOpsEnvironment, today),
+            },
+          })
+        : Promise.resolve(0),
+      prisma.agentDigestItem.findFirst({
+        where: { agentKey: BILLING_FINANCE_OPS_AGENT_KEY },
+        orderBy: { createdAt: "desc" },
+        select: { createdAt: true },
+      }),
+    ]);
+    return agentOfficeFinanceState({
+      environment,
+      control,
+      recordedToday: recordedToday > 0,
+      latestDigestAt: latest?.createdAt ?? null,
+      now,
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "billing_finance_ops" });
+    return { kind: "unread" };
+  }
+}
+
+/**
  * Engineering: the switch settings, the agent's own halt reading, open owner
  * items counted by kind, how many runs are in progress and since when, and the
  * newest ended run's status, outcome and times. No patch body, reason, cause key or card is selected: the office says
@@ -191,12 +252,58 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   }
 }
 
+/**
+ * The independent review server: the latest status report it sent, the one
+ * row it may write. The report has no field for a job, a branch or a finding.
+ */
+async function readReview(): Promise<AgentOfficeReviewState> {
+  try {
+    const row = await prisma.appSetting.findUnique({
+      where: { key: REVIEW_ORCHESTRATOR_STATUS_KEY },
+      select: { value: true },
+    });
+    // Judged against a clock taken after the read: a report older than the
+    // threshold by then is stale, never fresh.
+    return agentOfficeReviewState({ stored: row?.value ?? null, now: new Date() });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "review_orchestrator" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * The operator to-do counts, each read on its own: one failing count is
+ * that count unknown, not the whole to-do zero (rule 8).
+ */
+async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
+  const [marketing, amuxEscalations, amuxHalts, autoFix] = await Promise.allSettled([
+    countPendingMarketingApprovals(),
+    countAwaitingAmuxEscalations(),
+    countOpenAmuxOrchestratorHalts(),
+    countAutoFixActionCases(),
+  ]);
+  const value = (result: PromiseSettledResult<number>, read: string) => {
+    if (result.status === "fulfilled") return result.value;
+    console.warn({ event: "admin_agent_office_read_failed", read });
+    return null;
+  };
+  return {
+    marketing: value(marketing, "operator_queue_marketing"),
+    amuxEscalations: value(amuxEscalations, "operator_queue_amux_escalations"),
+    amuxHalts: value(amuxHalts, "operator_queue_amux_halts"),
+    autoFix: value(autoFix, "operator_queue_autofix"),
+  };
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, engineering, amux] = await Promise.all([
+  const [research, qa, finance, engineering, amux, review, queue] = await Promise.all([
     readResearch(now),
     readQa(),
+    readFinance(),
     readEngineering(),
     readAmuxWorkers(),
+    readReview(),
+    readOperatorQueue(),
   ]);
-  return { readAt: now.toISOString(), research, qa, engineering, amux };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, queue };
 }
