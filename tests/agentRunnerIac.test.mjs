@@ -34,6 +34,7 @@ const recordingDsl = () => {
     PRESERVED,
     dsl: {
       github: (repo, options) => ({ repo, ...options }),
+      image: (reference, options) => ({ reference, ...options }),
       preserve: () => PRESERVED,
       service: (name, config) => ({ name, ...config }),
     },
@@ -142,7 +143,10 @@ test("the resource list is exactly the table for that environment, and refuses t
   const { PRESERVED, dsl } = recordingDsl();
 
   for (const [environment, branch] of Object.entries(AGENT_ENVIRONMENT_BRANCHES)) {
-    const expected = AGENT_RUNNER_SERVICES.filter((runner) => runner.environments[environment]);
+    // A service that runs an image is declared only once its digest is recorded.
+    const expected = AGENT_RUNNER_SERVICES.filter(
+      (runner) => runner.environments[environment] && (!runner.image || runner.image.digest !== null)
+    );
     const resources = buildAgentRunnerResources(environment, dsl);
     assert.deepEqual(
       resources.map((resource) => resource.name),
@@ -152,7 +156,12 @@ test("the resource list is exactly the table for that environment, and refuses t
 
     for (const runner of expected) {
       const resource = resources.find((entry) => entry.name === runner.service);
-      assert.deepEqual(resource.source, { repo: "mposition/Tomverse", branch });
+      assert.deepEqual(
+        resource.source,
+        runner.image
+          ? { reference: `${runner.image.reference}@${runner.image.digest}`, autoUpdates: { type: "disabled" } }
+          : { repo: "mposition/Tomverse", branch }
+      );
       assert.equal(resource.start, runner.startCommand);
       assert.deepEqual(
         resource.deploy,

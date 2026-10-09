@@ -1,13 +1,13 @@
 # Railway Infrastructure as Code
 
 Scope: two Railway projects, with a file for each. In `Tomverse`: the
-scheduled-job cron services and -- once their image digest is recorded -- the
-engineering agent's two production services
-(`docs/ops/engineering-agent-services.md`). The web service `Tomverse` itself is
-managed in the Railway dashboard and is deliberately not owned by any file here.
-In `Tomverse Agents`: the product-research agent's services
-(`docs/ops/product-research-agent.md`), in a project that holds no database
-service at all.
+scheduled-job cron services. The web service `Tomverse` itself is managed in
+the Railway dashboard and is deliberately not owned by any file here. In
+`Tomverse Agents`: the agents' services -- product research
+(`docs/ops/product-research-agent.md`), the engineering agent's two production
+services once their image digest is recorded
+(`docs/ops/engineering-agent-services.md`) and the others in
+`agent-runners.ts` -- in a project that holds no database service at all.
 
 - `scheduled-jobs.ts` -- the cron services as data (name, start command, cron,
   every variable name per environment).

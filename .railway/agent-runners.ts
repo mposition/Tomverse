@@ -34,6 +34,12 @@ export type AgentRunnerService = {
    * is left out entirely, and no resource is created for it there.
    */
   readonly environments: Partial<Record<RailwayEnvironment, readonly string[]>>;
+  /**
+   * A service Railway does not build: it runs this image, by digest, with
+   * automatic updates off. While `digest` is null the service is not declared
+   * in any environment. Absent for a service built from the repository.
+   */
+  readonly image?: { readonly reference: string; readonly digest: string | null };
 };
 
 export const AGENT_RAILWAY_PROJECT = "Tomverse Agents";
@@ -138,6 +144,72 @@ const OPS_OBSERVER_DIGEST_VARIABLES = [
   "RAILWAY_DOCKERFILE_PATH",
 ] as const;
 
+/**
+ * The engineering agent's two services (docs/policy/engineering-agent.md §8,
+ * §12): production only, each a cron that runs one cycle and stops. They are
+ * not built by Railway: they run the image .github/workflows/engineering-
+ * agent-image.yml builds on main, by digest, with automatic updates off.
+ *
+ * `digest` is null until a person records the digest that workflow printed,
+ * in a pull request they merge; while it is null the service is not declared
+ * at all, so nothing is deployed and nothing is owned. Changing it is that PR
+ * and an operator's apply -- never the agent (§13).
+ *
+ * Each environment list is the service's whole list. The runner holds no
+ * GitHub write, App key or database credential; the publisher holds no model
+ * key or database credential; neither holds an AMUX secret. The lists equal
+ * RUNNER_VARIABLES and PUBLISHER_VARIABLES in the scripts, which
+ * tests/engineeringAgentServices.test.mjs holds.
+ *
+ * Each schedule is longer than its service's hard deadline, so two cycles
+ * never overlap.
+ */
+export const ENGINEERING_AGENT_IMAGE = "ghcr.io/mposition/tomverse-engineering-agent";
+
+export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
+  {
+    key: "engineering_agent_runner",
+    service: "Engineering Agent Runner",
+    image: {
+      reference: ENGINEERING_AGENT_IMAGE,
+      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+    },
+    startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
+    cronSchedule: "*/30 * * * *",
+    environments: {
+      production: [
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_RUNNER_SECRET",
+        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
+        "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
+        "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
+      ],
+    },
+  },
+  {
+    key: "engineering_agent_publisher",
+    service: "Engineering Agent Publisher",
+    image: {
+      reference: ENGINEERING_AGENT_IMAGE,
+      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+    },
+    startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
+    cronSchedule: "*/10 * * * *",
+    environments: {
+      production: [
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_PUBLISHER_SECRET",
+        "ENGINEERING_AGENT_PUBLISHER_APP_ID",
+        "ENGINEERING_AGENT_PUBLISHER_INSTALLATION_ID",
+        "ENGINEERING_AGENT_PUBLISHER_PRIVATE_KEY",
+        "ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL",
+      ],
+    },
+  },
+];
+
+const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -202,10 +274,12 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     cronSchedule: null,
     environments: { staging: PRODUCT_RESEARCH_PROBE_VARIABLES },
   },
+  ...ENGINEERING_AGENT_SERVICES,
 ];
 
 type AgentRailwayDsl<Source, Preserved, Resource> = {
   readonly github: (repo: string, options: { branch: string }) => Source;
+  readonly image: (reference: string, options: { autoUpdates: { type: "disabled" } }) => Source;
   readonly preserve: () => Preserved;
   readonly service: (
     name: string,
@@ -237,11 +311,20 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
     // Absent here on purpose. Returning an empty env instead would declare the
     // service with no variables, and the apply would delete the ones it has.
     if (!variables) return [];
+    // No image recorded yet: not declared, so nothing is deployed or owned.
+    if (runner.image && runner.image.digest === null) return [];
+    if (runner.image && !IMAGE_DIGEST.test(runner.image.digest ?? "")) {
+      throw new Error(`${runner.service}: the image digest is not a sha256 digest.`);
+    }
     return [
       dsl.service(runner.service, {
-        source: dsl.github(AGENT_RAILWAY_REPOSITORY, {
-          branch: AGENT_ENVIRONMENT_BRANCHES[environment],
-        }),
+        source: runner.image
+          ? dsl.image(`${runner.image.reference}@${runner.image.digest}`, {
+              autoUpdates: { type: "disabled" },
+            })
+          : dsl.github(AGENT_RAILWAY_REPOSITORY, {
+              branch: AGENT_ENVIRONMENT_BRANCHES[environment],
+            }),
         start: runner.startCommand,
         deploy: {
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),

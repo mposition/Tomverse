@@ -17,7 +17,6 @@ import {
   PENDING_SCHEDULED_JOB_KEYS,
 } from "../lib/scheduledJobsCore.ts";
 import {
-  RAILWAY_AGENT_SERVICES,
   RAILWAY_CRON_SERVICES,
   RAILWAY_ENVIRONMENT_BRANCHES,
   buildScheduledJobResources,
@@ -119,21 +118,14 @@ test("the IaC resource list is exactly the table, per environment, and refuses t
   const PRESERVED = Symbol("preserve");
   const dsl = {
     github: (repo, options) => ({ repo, ...options }),
-    image: (reference, options) => ({ reference, ...options }),
     preserve: () => PRESERVED,
     service: (name, config) => ({ name, ...config }),
   };
   for (const [environment, branch] of Object.entries(RAILWAY_ENVIRONMENT_BRANCHES)) {
     const resources = buildScheduledJobResources(environment, dsl);
-    // The engineering agent's services follow the cron table, only where they
-    // have variables and a recorded digest; tests/engineeringAgentServices.test.mjs
-    // holds their shape.
-    const declaredAgents = RAILWAY_AGENT_SERVICES.filter(
-      (agent) => agent.variables[environment] !== undefined && agent.digest !== null
-    ).map((agent) => agent.service);
     assert.deepEqual(
       resources.map((resource) => resource.name),
-      [...RAILWAY_CRON_SERVICES.map((job) => job.service), ...declaredAgents],
+      RAILWAY_CRON_SERVICES.map((job) => job.service),
       `${environment}: the resource list drops or adds a service`
     );
     for (const job of RAILWAY_CRON_SERVICES) {
