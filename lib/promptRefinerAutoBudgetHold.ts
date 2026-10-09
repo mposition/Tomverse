@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
-import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
+import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 /** Product spending only; never the one-shot evaluation or user-credit budget. */
@@ -14,7 +14,9 @@ export const PROMPT_REFINER_AUTO_REQUEST_HOLD_MICRO_USD = 29_918n;
 const BRISBANE_UTC_OFFSET_MS = 10 * 60 * 60 * 1000;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const REQUEST_KEY = /^[A-Za-z0-9:_-]{1,128}$/;
+// This identifier is audited. Accept only opaque, server-minted UUIDs, not
+// caller text or a user/conversation identifier.
+const REQUEST_KEY = UUID;
 
 export class PromptRefinerAutoBudgetError extends Error {
   constructor(readonly code: "budget_exhausted" | "budget_unavailable" | "binding_invalid") {
@@ -70,8 +72,6 @@ async function book(tx: Prisma.TransactionClient, input: {
  * hold; no settlement or provider path is exposed by this module.
  */
 export async function reservePromptRefinerAutoBudget(input: {
-  session: Parameters<typeof writeAdminAuditLog>[0]["session"];
-  request: Request;
   requestKey: string;
   candidateDigest: string;
   pricePinDigest: string;
@@ -87,15 +87,12 @@ export async function reservePromptRefinerAutoBudget(input: {
   if (!REQUEST_KEY.test(input.requestKey) ||
       !HEX_64.test(input.candidateDigest) ||
       !HEX_64.test(input.pricePinDigest) ||
-      !UUID.test(input.runtimeDeploymentId) ||
-      !input.session.user?.id) {
+      !UUID.test(input.runtimeDeploymentId)) {
     throw new PromptRefinerAutoBudgetError("binding_invalid");
   }
 
   return prisma.$transaction(async (tx) => {
-    // Lock ordering matches the existing hash-chained audit writer. No
-    // provider or network I/O occurs while this transaction is open.
-    await takeAuditChainLock(tx);
+    // No provider or network I/O occurs while this transaction is open.
     const clock = await tx.$queryRaw<Array<{ dbNow: Date }>>`
       SELECT transaction_timestamp() AS "dbNow"
     `;
@@ -111,8 +108,8 @@ export async function reservePromptRefinerAutoBudget(input: {
       throw new PromptRefinerAutoBudgetError("budget_exhausted");
     }
     const id = randomUUID();
-    const reservationAuditLogId = await writeAdminAuditLog({
-      session: input.session, request: input.request, tx,
+    const reservationAuditLogId = await writeSystemAuditLog({
+      tx, systemActor: "prompt-refiner-auto-budget",
       action: "prompt_refiner.auto_budget_reserved",
       targetType: "PromptRefinerAutoBudgetHold", targetId: id,
       summary: "Reserved the bounded Prompt Refiner Auto product cost.",

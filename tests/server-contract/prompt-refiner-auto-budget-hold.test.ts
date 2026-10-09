@@ -52,23 +52,20 @@ const fakePrisma = {
 
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: fakePrisma } });
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
-  takeAuditChainLock: async (client: unknown) => {
-    assert.equal(client, tx); events.push("audit_lock");
-  },
-  writeAdminAuditLog: async (input: { tx: unknown }) => {
+  writeSystemAuditLog: async (input: { tx: unknown; systemActor: string }) => {
     assert.equal(input.tx, tx); events.push("audit_write");
+    assert.equal(input.systemActor, "prompt-refiner-auto-budget");
     return `audit-${events.filter((event) => event === "audit_write").length}`;
   },
 } });
 
 const load = () => import(mod("lib/promptRefinerAutoBudgetHold.ts"));
 const binding = (requestKey: string) => ({
-  session: { user: { id: "synthetic-user" } },
-  request: new Request("https://example.test/api/chat"),
   requestKey, candidateDigest: "a".repeat(64),
   pricePinDigest: "b".repeat(64),
   runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
 });
+const key = (ordinal: number) => `00000000-0000-4000-8000-${String(ordinal).padStart(12, "0")}`;
 const clear = () => { buckets.clear(); holds.clear(); events.length = 0; };
 
 test("Brisbane day and month boundaries use the DB instant", async () => {
@@ -86,13 +83,13 @@ test("Brisbane day and month boundaries use the DB instant", async () => {
 test("the product hold books day and month with its audit in one transaction", async () => {
   const budget = await load();
   clear(); dbNow = new Date("2026-10-08T13:59:59.999Z");
-  const result = await budget.reservePromptRefinerAutoBudget(binding("request-1") as never);
+  const result = await budget.reservePromptRefinerAutoBudget(binding(key(1)) as never);
   assert.equal(result.reservedMicroUsd, 29_918n);
   assert.equal(result.dispatchAuthorized, false);
-  assert.deepEqual(events, ["audit_lock", "book:brisbane_day",
+  assert.deepEqual(events, ["book:brisbane_day",
     "book:brisbane_month", "audit_write", "hold"]);
   assert.deepEqual([...buckets.values()], [29_918n, 29_918n]);
-  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding("request-1") as never),
+  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding(key(1)) as never),
     /duplicate_request_key/);
   assert.deepEqual([...buckets.values()], [29_918n, 29_918n],
     "duplicate request cannot spend both windows twice");
@@ -104,9 +101,24 @@ test("a refused month rolls back the day and does not create a hold", async () =
   const windows = budget.promptRefinerAutoBudgetWindows(dbNow);
   buckets.set(`brisbane_month:${windows.monthStart.toISOString()}`,
     budget.PROMPT_REFINER_AUTO_MONTH_LIMIT_MICRO_USD);
-  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding("request-2") as never),
+  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding(key(2)) as never),
     /budget_exhausted/);
   assert.equal(buckets.has(`brisbane_day:${windows.dayStart.toISOString()}`), false);
+  assert.equal(holds.size, 0);
+  assert.equal(events.includes("audit_write"), false);
+});
+
+test("an exhausted Brisbane day refuses before booking the month or audit", async () => {
+  const budget = await load();
+  clear(); dbNow = new Date("2026-10-08T13:59:59.999Z");
+  const windows = budget.promptRefinerAutoBudgetWindows(dbNow);
+  buckets.set(`brisbane_day:${windows.dayStart.toISOString()}`,
+    budget.PROMPT_REFINER_AUTO_DAY_LIMIT_MICRO_USD);
+  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding(key(3)) as never),
+    /budget_exhausted/);
+  assert.equal(buckets.get(`brisbane_day:${windows.dayStart.toISOString()}`),
+    budget.PROMPT_REFINER_AUTO_DAY_LIMIT_MICRO_USD);
+  assert.equal(buckets.has(`brisbane_month:${windows.monthStart.toISOString()}`), false);
   assert.equal(holds.size, 0);
   assert.equal(events.includes("audit_write"), false);
 });
@@ -115,8 +127,10 @@ test("invalid pins stop before either window or audit is touched", async () => {
   const budget = await load();
   clear();
   await assert.rejects(budget.reservePromptRefinerAutoBudget({
-    ...binding("request-3"), candidateDigest: "unverified",
+    ...binding(key(4)), candidateDigest: "unverified",
   } as never), /binding_invalid/);
+  await assert.rejects(budget.reservePromptRefinerAutoBudget(binding("user-supplied")),
+    /binding_invalid/);
   assert.deepEqual(events, []);
   assert.equal(buckets.size, 0);
 });
