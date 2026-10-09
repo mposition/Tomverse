@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { pickReviewer, planAssignments } from "../tools/review-orchestrator/lib/assign.mjs";
 import {
   claudeQuotaFromUsage, codexQuotaFromUsage, consumeManualQuota,
@@ -23,6 +24,49 @@ test("Claude and Codex quota responses block any exhausted usage window", () => 
     codex: { primary: { usedPercent: 20 }, secondary: { usedPercent: 50 } },
   } }), { state: "available", remainingPercent: 50 });
   assert.deepEqual(codexQuotaFromUsage({ rateLimits: { primary: {} } }), { state: "unknown" });
+});
+
+test("Codex quota keeps stdin open until the asynchronous account response", () => {
+  const root = mkdtempSync(join(tmpdir(), "review-codex-transport-"));
+  const quotaModule = pathToFileURL(resolve("tools/review-orchestrator/lib/quota.mjs")).href;
+  try {
+    for (const usedPercent of [40, 100]) {
+      // Node acts as the CLI: app-server is its script path, and EOF stops the
+      // process before an asynchronous response, as the real Codex runtime does.
+      writeFileSync(join(root, "app-server"), `
+        const readline = require("node:readline");
+        const input = readline.createInterface({ input: process.stdin });
+        const methods = [];
+        input.on("line", line => {
+          const request = JSON.parse(line);
+          methods.push(request.method);
+          if (request.id === 2) setTimeout(() => {
+            if (JSON.stringify(methods) !== JSON.stringify([
+              "initialize", "initialized", "account/rateLimits/read"
+            ])) process.exit(2);
+            console.log(JSON.stringify({ id: 2, result: {
+              rateLimits: { primary: { usedPercent: ${usedPercent} } }
+            }}));
+          }, 50);
+        });
+        process.stdin.on("end", () => process.exit(0));
+      `);
+      const script = `
+        import { probeProviderQuota } from ${JSON.stringify(quotaModule)};
+        console.log(JSON.stringify(await probeProviderQuota({
+          id: "codex", enabled: true, quotaProbe: "codex", command: process.execPath
+        }, ${JSON.stringify(root)})));
+      `;
+      const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script],
+        { cwd: root, encoding: "utf8", timeout: 5_000 });
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), {
+        state: usedPercent === 100 ? "exhausted" : "available", remainingPercent: 100 - usedPercent,
+      });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("stale, spent, or zero manual evidence cannot authorize assignment", async () => {

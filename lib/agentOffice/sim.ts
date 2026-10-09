@@ -94,6 +94,7 @@ const ORDER = {
   delay: /왜|늦|지연|막힘|블로|안 되|안돼|문제|why|slow|late|delay|stuck|block/i,
   status: /뭐|현황|상황|진행|보고|어디까지|status|what|progress|report/i,
   late: /왜|늦|지연|why|late|slow/i,
+  hello: /안녕|하이|좋은 ?아침|반가|\bhello\b|\bhi\b|good morning/i,
   /** A line that asks rather than orders: it may mention approval without giving it. */
   question: /[?？]|왜|언제|어떻게|뭐|why|when|how|what|whether/i,
 } as const;
@@ -915,7 +916,9 @@ export class AgentOffice {
 
   // ── The operator console ───────────────────────────────────
   pushChat(from: "operator" | "staff", name: string, text: string) {
-    this.chat.push({ id: this.logSeq++, time: this.clockText(), from, name, text });
+    // The real view has no simulated clock: a line is stamped with the time it was said.
+    const time = this.demo ? this.clockText() : `${new Date().toISOString().slice(11, 16)} UTC`;
+    this.chat.push({ id: this.logSeq++, time, from, name, text });
     if (this.chat.length > 60) this.chat.shift();
   }
 
@@ -927,6 +930,11 @@ export class AgentOffice {
 
     // ① A team or a person named
     const deptId = this.matchDept(text);
+    // The real view answers a greeting or a thank-you; the demo keeps its own cheer.
+    if (!this.demo && (ORDER.hello.test(text) || ORDER.cheer.test(text)) && !ORDER.question.test(text)) {
+      this.smallTalk(ORDER.cheer.test(text) ? "thanks" : "hello", deptId && !ORDER.everyone.test(text) ? deptId : null);
+      return;
+    }
     if (deptId && !ORDER.everyone.test(text)) {
       this.deptReport(deptId, text);
       return;
@@ -1083,7 +1091,9 @@ export class AgentOffice {
     const live = this.live[deptId];
 
     if (live) {
-      lines.push(this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
+      // The lead answers in its own voice, then with the record.
+      const voice = (this.copy.real.voices as Record<string, { answer: string }>)[deptId] ?? this.copy.real.voiceDefault;
+      lines.push(voice.answer, this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
     } else if (status === "working") {
       lines.push(s.deptWorking(this.deptTaskLabel(deptId), this.deptProgress(deptId)));
     } else if (status === "done") {
@@ -1112,6 +1122,35 @@ export class AgentOffice {
     }
     this.spotlightRoom(deptId, 8);
     this.pushLog("🎤", s.deptCheckLog(this.roomName(deptId)), "yellow");
+  }
+
+  /**
+   * The real view's small talk: a greeting or a thank-you is answered by the
+   * leads of the rooms that read a real record (or the one named), each in
+   * its own voice. The words are social, never a claim about the team's work,
+   * and on the floor a lead only reacts with an emoji for a moment -- its
+   * bubble otherwise stays the record's line.
+   */
+  private smallTalk(kind: "hello" | "thanks", deptId: string | null) {
+    const real = this.copy.real;
+    const rooms = (deptId ? [deptId] : Object.keys(this.live)).filter((dept) => this.live[dept] && this.deptLead[dept]);
+    if (rooms.length === 0) {
+      this.pushChat("staff", this.narratorName(), real.noLiveRoom);
+      return;
+    }
+    for (const dept of rooms) {
+      const lead = this.leadOf(dept);
+      const voice = (real.voices as Record<string, { hello: string; thanks: string }>)[dept] ?? real.voiceDefault;
+      this.pushChat("staff", this.copy.sim.speaker(lead.name, this.roomName(dept)), voice[kind]);
+      this.react(lead, real.reactions[kind]);
+    }
+  }
+
+  /** A moment's emoji over a lead's head; the record line comes back when it ends. */
+  private react(agent: Agent, emoji: string) {
+    agent.speech = emoji;
+    agent.speechKind = "talk";
+    agent.speechFor = 3;
   }
 
   // ── Orders ─────────────────────────────────────────────────
@@ -1306,12 +1345,20 @@ export class AgentOffice {
    * no other room moves.
    */
   setLive(live: Readonly<Record<string, AgentOfficeLiveDept>>) {
+    const previous = this.live;
     this.live = live;
     for (const [deptId, room] of Object.entries(live)) {
       if (deptId in this.deptStatus) this.deptStatus[deptId] = room.status;
       // A fresh reading replaces what the room's lead is saying.
       const lead = this.agentById.get(this.deptLead[deptId]?.id ?? "");
       if (lead) this.showRecordLine(lead, room.line);
+      // A room whose record changed since the last reading says so in the
+      // console, in its lead's name. The first reading is not a change, and a
+      // reading that only moved the read time (it lives in `detail`) is not one.
+      const before = previous[deptId];
+      if (lead && before && (before.status !== room.status || before.badge !== room.badge || before.line !== room.line)) {
+        this.pushChat("staff", lead.name, this.copy.real.changed(this.roomName(deptId), room.line));
+      }
     }
   }
 

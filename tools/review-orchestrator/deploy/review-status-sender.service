@@ -1,0 +1,36 @@
+[Unit]
+Description=Independent review server status sender (Tomverse Agent office)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Its own transient account, never the review account: every reviewer CLI runs
+# as review and could be asked by the change under review to print a file or
+# a process environment that account can read. This one holds the secret.
+DynamicUser=yes
+# Read by systemd as root (keep the file root-owned, mode 600), so the value
+# reaches only this service's environment. A missing file stops the unit from
+# starting ("Failed to load environment files").
+EnvironmentFile=/etc/review-status/secret.env
+Environment=REVIEW_STATUS_URL=https://tomverse.app/api/internal/review-orchestrator/status
+# The daemon's `statusSnapshot.dir` plus /snapshot.json.
+Environment=REVIEW_STATUS_SNAPSHOT=/var/lib/review-status/snapshot.json
+# A root-owned copy fetched from GitHub, never the review account's checkout:
+# code that account can edit must not run with this secret. The file imports
+# only Node built-ins, so nothing else is loaded from anywhere.
+ExecStart=/usr/bin/node /usr/local/lib/review-status-sender/review-status-sender.mjs
+Restart=on-failure
+RestartSec=30
+# 64 = the settings cannot run; restarting would not change them.
+RestartPreventExitStatus=64
+NoNewPrivileges=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

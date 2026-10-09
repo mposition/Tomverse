@@ -17,13 +17,20 @@
 import "server-only";
 
 import type {
+  AgentOfficeReviewState,
   AgentOfficeAmuxState,
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
+  AgentOfficeOperatorQueue,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
+import {
+  countAutoFixActionCases,
+  countAwaitingAmuxEscalations,
+  countPendingMarketingApprovals,
+} from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
 import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
@@ -31,7 +38,9 @@ import {
   agentOfficeEngineeringState,
 } from "@/lib/agentOfficeEngineeringState";
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
+import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
 import {
@@ -41,6 +50,7 @@ import {
   billingFinanceOpsIdempotencyKey,
 } from "@/lib/billingFinanceOpsDigest";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
+import { REVIEW_ORCHESTRATOR_STATUS_KEY } from "@/lib/reviewOrchestratorStatusCore";
 import { ENGINEERING_AGENT_KILL_SWITCH_ENV, OWNER_ITEM_KINDS } from "@/lib/engineeringAgentCore";
 import { currentEngineeringAgentHalt, readEngineeringAgentHaltState } from "@/lib/engineeringAgentStore";
 import { prisma } from "@/lib/prisma";
@@ -242,13 +252,58 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   }
 }
 
+/**
+ * The independent review server: the latest status report it sent, the one
+ * row it may write. The report has no field for a job, a branch or a finding.
+ */
+async function readReview(): Promise<AgentOfficeReviewState> {
+  try {
+    const row = await prisma.appSetting.findUnique({
+      where: { key: REVIEW_ORCHESTRATOR_STATUS_KEY },
+      select: { value: true },
+    });
+    // Judged against a clock taken after the read: a report older than the
+    // threshold by then is stale, never fresh.
+    return agentOfficeReviewState({ stored: row?.value ?? null, now: new Date() });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "review_orchestrator" });
+    return { kind: "unread" };
+  }
+}
+
+/**
+ * The operator to-do counts, each read on its own: one failing count is
+ * that count unknown, not the whole to-do zero (rule 8).
+ */
+async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
+  const [marketing, amuxEscalations, amuxHalts, autoFix] = await Promise.allSettled([
+    countPendingMarketingApprovals(),
+    countAwaitingAmuxEscalations(),
+    countOpenAmuxOrchestratorHalts(),
+    countAutoFixActionCases(),
+  ]);
+  const value = (result: PromiseSettledResult<number>, read: string) => {
+    if (result.status === "fulfilled") return result.value;
+    console.warn({ event: "admin_agent_office_read_failed", read });
+    return null;
+  };
+  return {
+    marketing: value(marketing, "operator_queue_marketing"),
+    amuxEscalations: value(amuxEscalations, "operator_queue_amux_escalations"),
+    amuxHalts: value(amuxHalts, "operator_queue_amux_halts"),
+    autoFix: value(autoFix, "operator_queue_autofix"),
+  };
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, engineering, amux] = await Promise.all([
+  const [research, qa, finance, engineering, amux, review, queue] = await Promise.all([
     readResearch(now),
     readQa(),
     readFinance(),
     readEngineering(),
     readAmuxWorkers(),
+    readReview(),
+    readOperatorQueue(),
   ]);
-  return { readAt: now.toISOString(), research, qa, finance, engineering, amux };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, queue };
 }

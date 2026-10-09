@@ -25,9 +25,10 @@ export function copilotQuota(provider, { spawnChild = spawn, sourceEnv = process
   const token = env.COPILOT_GITHUB_TOKEN;
   if (provider.passEnv?.includes("COPILOT_GITHUB_TOKEN") && !token) return Promise.resolve(UNKNOWN);
   return new Promise((resolve) => {
-    const args = ["--headless", "--stdio", "--no-auto-update", "--no-auto-login",
+    const args = ["--headless", "--stdio", "--no-auto-update",
       "--disable-builtin-mcps", "--no-custom-instructions", "--no-remote", "--no-remote-export"];
-    if (token) args.push("--auth-token-env", "COPILOT_GITHUB_TOKEN", "--secret-env-vars", "COPILOT_GITHUB_TOKEN");
+    // Match the SDK: disabling automatic login also disables stored CLI auth.
+    if (token) args.push("--no-auto-login", "--auth-token-env", "COPILOT_GITHUB_TOKEN", "--secret-env-vars", "COPILOT_GITHUB_TOKEN");
     const child = spawnChild(provider.command, args, {
       stdio: ["pipe", "pipe", "ignore"], env, cwd: env.HOME ?? homedir(),
       detached: process.platform !== "win32",

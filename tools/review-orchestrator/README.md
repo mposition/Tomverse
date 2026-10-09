@@ -4,8 +4,10 @@
 요청하면, Ubuntu 서버가 작성자와 **모델 공급사가 다른** reviewer를 부하에 따라
 골라 실행하는 개발 도구입니다.
 
-- 외부 게시, PR 코멘트, 앱 DB 쓰기, 병합을 하지 않습니다. 사람이 개발 세션에서
-  부르는 도구이며, 결과는 서버 디스크에만 남습니다.
+- 외부 게시, PR 코멘트, 병합을 하지 않고 앱 DB에 직접 쓰지 않습니다. 사람이 개발
+  세션에서 부르는 도구이며, 결과는 서버 디스크에만 남습니다. 앱으로 나가는 것은
+  설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 그것도 daemon이 아니라 별도 계정의
+  sender가 보내며, 앱이 그 최신값 한 행을 씁니다(아래 "Agent office 상태 보고").
 - 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록 하나로만
   읽고, 형식이 맞지 않으면 `unknown`입니다. blocker·major 지적이 있으면 reviewer가
   accept라고 해도 reject입니다.
@@ -347,6 +349,106 @@ SSH 키·다른 작업의 소스는 보이지 않습니다.
 | `maxPendingJobs` | 20 | `queue_full` |
 | `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
 | `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
+
+## Agent office 상태 보고
+
+앱은 이 서버에 접속할 수 없으므로(SSH 뒤에 있음), 1분마다 앱의
+`POST /api/internal/review-orchestrator/status`로 상태를 보냅니다. 운영자는 Admin의
+Agent office "독립 검토실"에서 그것을 봅니다.
+
+**보내는 일은 두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.**
+
+- **daemon(`review` 계정)은 자격증명을 갖지 않습니다.** reviewer CLI가 모두 같은 `review`
+  계정으로 돌고, 검토 대상 변경은 reviewer에게 그 계정이 읽을 수 있는 파일이나 프로세스
+  환경을 출력하라고 시킬 수 있습니다. 그래서 daemon은 `statusSnapshot.dir`에 내용 없는
+  `snapshot.json` 하나만 씁니다(1분마다, 원자적 교체, 0644).
+- **sender(`bin/review-status-sender.mjs`)는 systemd `DynamicUser`의 별도 계정으로 돕니다.**
+  secret은 root만 읽는 파일에서 systemd가 이 서비스 환경에만 넣으므로, `review` 계정은 그
+  파일도 그 프로세스 환경도 읽을 수 없습니다.
+- **sender가 실행하는 코드는 `review` 계정이 고칠 수 없는 곳에 있습니다.** sender는 Node
+  내장 모듈만 import하는 파일 하나이고, 운영자가 GitHub에서 root 소유 경로
+  (`/usr/local/lib/review-status-sender/`)로 직접 받습니다. `review` 계정의 checkout을 실행하거나
+  그곳에서 복사하지 않습니다 — 그 계정이 고친 코드가 재시작 때 secret을 가진 채 실행되기
+  때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
+- **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
+  (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
+  USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  계정 정보. daemon이 그런
+  값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
+  필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
+  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
+  않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
+- **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3분보다 오래되면(1분 쓰기 세 번
+  누락) 보내지 않으므로, 앱은 마지막 보고 뒤 5분이 지나면 검토실을 "보고 없음"으로
+  바꿉니다. 앱은 받은 시각을 **앱의 시계로** 적습니다. 이 시간들이 서로 맞물려 있으므로
+  주기는 설정으로 바꾸지 않습니다.
+- **기본은 꺼짐입니다.** config에 `statusSnapshot`이 없으면 파일을 쓰지 않고, sender
+  서비스를 설치하지 않으면 아무것도 보내지 않습니다.
+
+### 켜기
+
+앱 쪽 route와 이 sender가 **main**에 들어가 production에 배포된 뒤에 합니다(sender 파일을
+main에서 받습니다). 먼저 켜도 해는 없고, sender 로그에 `http_404` 한 줄이 남습니다. 아래
+경로는 이 서버의 현재 배치(`/home/review/...`) 기준입니다.
+
+**① Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** secret을 root만 읽는 파일에 바로
+씁니다. 값은 화면에 나오지 않습니다.
+
+```bash
+sudo install -d -m 0700 /etc/review-status
+sudo sh -c 'umask 077; printf "REVIEW_ORCHESTRATOR_STATUS_SECRET=%s\n" "$(openssl rand -hex 32)" > /etc/review-status/secret.env'
+```
+
+**② Railway 대시보드, production 앱 서비스의 Variables.** 같은 값을
+`REVIEW_ORCHESTRATOR_STATUS_SECRET`로 넣습니다. 값은 ①의 서버에서
+`sudo cat /etc/review-status/secret.env`로 보고 대시보드에 직접 붙입니다(대화나 문서에
+옮기지 않습니다). 변수 저장은 재배포를 일으킵니다.
+
+**③ 같은 서버 bash.** snapshot 폴더를 만들고 daemon config에 적은 뒤, 코드 업데이트와
+재시작을 위 "서버 업데이트 (drain)" 절차로 합니다.
+
+```bash
+sudo install -d -o review -m 0755 /var/lib/review-status
+sudo -u review nano /home/review/.config/review-orchestrator/config.json
+#   "statusSnapshot": { "dir": "/var/lib/review-status" }
+```
+
+`dir` 하나만 받습니다. 절대 경로여야 하고, URL·secret·주기 필드를 넣으면 설정 오류로
+시작하지 않습니다. 재시작 뒤
+`sudo journalctl -u review-orchestrator --since "5 min ago" | grep "status snapshot"`에
+`status snapshot written`이 보이면 됩니다.
+
+**④ 같은 서버 bash.** sender와 unit 파일을 GitHub의 main에서 root 소유로 받고 켭니다.
+`review` 계정의 checkout에서 복사하지 않습니다.
+
+```bash
+RAW=https://raw.githubusercontent.com/mposition/Tomverse/main/tools/review-orchestrator
+sudo install -d -m 0755 /usr/local/lib/review-status-sender
+sudo curl -fsSL -o /usr/local/lib/review-status-sender/review-status-sender.mjs "$RAW/bin/review-status-sender.mjs"
+sudo curl -fsSL -o /etc/systemd/system/review-status-sender.service "$RAW/deploy/review-status-sender.service"
+sudo chmod 0644 /usr/local/lib/review-status-sender/review-status-sender.mjs /etc/systemd/system/review-status-sender.service
+sudo systemctl daemon-reload && sudo systemctl enable --now review-status-sender
+sudo journalctl -u review-status-sender --since "5 min ago"
+```
+
+`status sender started` 다음에 `status report ok`가 나오면 끝입니다.
+
+- `http_401`: ①과 ②의 값이 다릅니다.
+- `status snapshot is stale`: ③의 daemon이 파일을 쓰지 않습니다.
+- `status snapshot unreadable: ENOENT`: ③의 `dir`과 unit의 `REVIEW_STATUS_SNAPSHOT`이
+  다릅니다.
+- `status sender not started: ...`: 그 줄이 말하는 설정이 빠졌습니다(종료 코드 64, 재시작하지
+  않습니다).
+- 서비스가 아예 시작하지 않고 `Failed to load environment files`가 보이면 ①의
+  `/etc/review-status/secret.env`가 없습니다.
+
+sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실행하고
+`sudo systemctl daemon-reload && sudo systemctl restart review-status-sender`를 합니다.
+끄려면 `sudo systemctl disable --now review-status-sender`입니다. 검토실은 5분 뒤 "보고
+없음"이 됩니다.
 
 ## 알려진 한계
 

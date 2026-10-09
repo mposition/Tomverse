@@ -2,7 +2,7 @@
 //
 // Contract: the S2 plan's "S2d1 -- Railway service and deadline that reaches
 // the work". Railway starts this every five minutes (`Marketing Publisher` in
-// .railway/scheduled-jobs.ts). It generates a run id, fixes an absolute
+// .railway/agent-runners.ts). It generates a run id, fixes an absolute
 // deadline four minutes out, starts the worker as a child process, and kills
 // that child at the deadline if it has not finished.
 //

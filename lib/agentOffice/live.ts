@@ -163,9 +163,48 @@ export type AgentOfficeFinanceState =
       latestDigestAt: string | null;
     };
 
+/** One reviewer of the independent review server, as its latest report shows it. */
+export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
+
+/** One reviewer's account quota, as the review server's probe last read it. */
+export type AgentOfficeReviewerQuota = {
+  state: "available" | "exhausted" | "unknown" | "disabled";
+  remaining: number | null;
+  unit: "percent" | "credits" | "usd" | null;
+};
+
+export type AgentOfficeReviewState =
+  | { kind: "unread" }
+  /** No report has ever been stored. */
+  | { kind: "not_reporting" }
+  /** A stored report that is not the report's shape. */
+  | { kind: "unreadable" }
+  | {
+      kind: "observed";
+      /** When the app received the latest report (UTC ISO). */
+      receivedAt: string;
+      /** No report for longer than the reporter's five missed beats. */
+      stale: boolean;
+      draining: boolean;
+      pendingJobs: number;
+      reviewers: {
+        id: string;
+        vendor: string;
+        state: AgentOfficeReviewerState;
+        running: number;
+        maxConcurrent: number;
+        /** Null when the server sent none (a server older than the field). */
+        quota: AgentOfficeReviewerQuota | null;
+      }[];
+      last24h: { accept: number; reject: number; unknown: number };
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
+  review: AgentOfficeReviewState;
+  /** The operator to-do counts (OPERATOR_QUEUE_KEYS). */
+  queue: AgentOfficeOperatorQueue;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
   finance: AgentOfficeFinanceState;
@@ -487,6 +526,18 @@ type AmuxCopy = {
   readAt: (time: string) => string;
 };
 
+/** A figure drawn seated at a desk from a real record: an AMUX worker or a reviewer. */
+export type AgentOfficeSeatedView = {
+  name: string;
+  state: string;
+  status: DeptStatus;
+  label: string;
+  /** Name, kind, state and when it was last heard, for the sprite's tooltip. */
+  title: string;
+  /** Not running at all: drawn faded. */
+  dim: boolean;
+};
+
 export type AgentOfficeAmuxWorkerView = {
   name: string;
   state: AgentOfficeAmuxWorkerState;
@@ -620,4 +671,282 @@ export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, 
   if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
   facts.push(read);
   return { status, badge: copy.badges[state.verdict], line, detail: facts.join(" · ") };
+}
+
+/** A reviewer's colour: reviewing is working, idle is ready, off waits, lost needs a look. */
+export function reviewerTone(state: AgentOfficeReviewerState): DeptStatus {
+  if (state === "reviewing") return "working";
+  if (state === "idle") return "done";
+  if (state === "lost") return "attention";
+  return "waiting";
+}
+
+type ReviewCopy = {
+  states: Record<AgentOfficeReviewerState, string>;
+  unread: string;
+  notReporting: string;
+  unreadable: string;
+  stale: (time: string) => string;
+  draining: string;
+  summary: (pending: number, accept: number, reject: number, unknown: number) => string;
+  lastReport: (time: string) => string;
+  load: (running: number, max: number) => string;
+  more: (count: number) => string;
+  readAt: (time: string) => string;
+};
+
+export type AgentOfficeReviewView = {
+  status: DeptStatus;
+  summary: string;
+  /** Words drawn in the room itself: why it is empty or quiet. */
+  note: string | null;
+  reviewers: AgentOfficeSeatedView[];
+};
+
+/** The independent review room: its colour, its summary and each reviewer's sprite. */
+export function reviewRoomView(
+  state: AgentOfficeReviewState,
+  readAt: string,
+  desks: number,
+  copy: ReviewCopy
+): AgentOfficeReviewView {
+  const read = copy.readAt(utcStamp(readAt));
+  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, reviewers: [] };
+  if (state.kind === "unreadable") {
+    return { status: "attention", summary: `${copy.unreadable} · ${read}`, note: copy.unreadable, reviewers: [] };
+  }
+  if (state.kind === "not_reporting") {
+    return { status: "waiting", summary: `${copy.notReporting} · ${read}`, note: copy.notReporting, reviewers: [] };
+  }
+
+  const last = utcStamp(state.receivedAt);
+  const everyone = state.reviewers.map((reviewer): AgentOfficeSeatedView => {
+    const label = copy.states[reviewer.state];
+    return {
+      name: reviewer.id,
+      state: reviewer.state,
+      status: reviewerTone(reviewer.state),
+      label,
+      title: [reviewer.id, reviewer.vendor, label, copy.load(reviewer.running, reviewer.maxConcurrent), copy.lastReport(last)].join(
+        " · "
+      ),
+      dim: reviewer.state === "off",
+    };
+  });
+  // The room speaks for every reviewer, drawn or not; only the people are cut to the desks.
+  const any = (tone: DeptStatus) => everyone.some((reviewer) => reviewer.status === tone);
+  const status: DeptStatus = state.stale
+    ? "attention"
+    : state.draining
+      ? "waiting"
+      : any("working")
+        ? "working"
+        : any("done")
+          ? "done"
+          : "waiting";
+  const summary = [
+    copy.summary(state.pendingJobs, state.last24h.accept, state.last24h.reject, state.last24h.unknown),
+    copy.lastReport(last),
+    read,
+  ].join(" · ");
+  const undrawn = Math.max(0, everyone.length - desks);
+  const note =
+    [state.stale ? copy.stale(last) : state.draining ? copy.draining : null, undrawn > 0 ? copy.more(undrawn) : null]
+      .filter((part): part is string => part !== null)
+      .join(" · ") || null;
+  return { status, summary, note, reviewers: everyone.slice(0, desks) };
+}
+
+/** Below this share left, an available quota is drawn as running low. */
+export const REVIEW_QUOTA_LOW_PERCENT = 20;
+
+type QuotaCopy = {
+  states: Record<"available" | "low" | "exhausted" | "unknown" | "disabled", string>;
+  percent: (value: string) => string;
+  credits: (value: string) => string;
+  usd: (value: string) => string;
+  noAmount: string;
+  notSent: string;
+  unread: string;
+  notReporting: string;
+  unreadable: string;
+  stale: (time: string) => string;
+  asOf: (time: string) => string;
+};
+
+export type AgentOfficeQuotaRow = {
+  id: string;
+  vendor: string;
+  status: DeptStatus;
+  label: string;
+  amount: string;
+};
+
+export type AgentOfficeQuotaView = {
+  rows: AgentOfficeQuotaRow[];
+  /** Why there are no rows, or how old the numbers are; null when fresh. */
+  note: string | null;
+};
+
+const quotaAmount = (quota: AgentOfficeReviewerQuota, copy: QuotaCopy) => {
+  if (quota.remaining === null || quota.unit === null) return copy.noAmount;
+  if (quota.unit === "percent") return copy.percent(String(Math.round(quota.remaining)));
+  if (quota.unit === "usd") return copy.usd(quota.remaining.toFixed(2));
+  return copy.credits(String(Math.round(quota.remaining)));
+};
+
+/**
+ * The CLI quota card: each reviewer's account quota from the review server's
+ * latest report. A stale report keeps its numbers but says how old they are,
+ * and draws every row grey -- they describe a moment that has passed.
+ */
+export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy): AgentOfficeQuotaView {
+  if (state.kind === "unread") return { rows: [], note: copy.unread };
+  if (state.kind === "unreadable") return { rows: [], note: copy.unreadable };
+  if (state.kind === "not_reporting") return { rows: [], note: copy.notReporting };
+  const withQuota = state.reviewers.filter((reviewer) => reviewer.quota !== null);
+  if (withQuota.length === 0) return { rows: [], note: copy.notSent };
+  const rows = withQuota.map((reviewer): AgentOfficeQuotaRow => {
+    const quota = reviewer.quota as AgentOfficeReviewerQuota;
+    const low =
+      quota.state === "available" && quota.unit === "percent" && (quota.remaining ?? 100) < REVIEW_QUOTA_LOW_PERCENT;
+    const key = low ? "low" : quota.state;
+    const status: DeptStatus = state.stale
+      ? "waiting"
+      : quota.state === "exhausted"
+        ? "attention"
+        : low
+          ? "working"
+          : quota.state === "available"
+            ? "done"
+            : "waiting";
+    return { id: reviewer.id, vendor: reviewer.vendor, status, label: copy.states[key], amount: quotaAmount(quota, copy) };
+  });
+  const time = utcStamp(state.receivedAt);
+  return { rows, note: state.stale ? copy.stale(time) : copy.asOf(time) };
+}
+
+/**
+ * The operator's to-do: real queues where an agent waits on a person. The
+ * same counts the console sidebar badges (lib/adminNavigationCounts.ts), and
+ * each links to the screen where it is acted on. Nothing here decides; the
+ * office only counts and points.
+ */
+export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts", "autoFix"] as const;
+export type OperatorQueueKey = (typeof OPERATOR_QUEUE_KEYS)[number];
+/** `null` is a count that could not be read: never shown as zero. */
+export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
+
+export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
+  marketing: "/admin/marketing",
+  amuxEscalations: "/admin/amux-execution?tab=assignment",
+  amuxHalts: "/admin/amux-execution?tab=halts",
+  autoFix: "/admin/support",
+};
+
+/** The to-do total over the counts that were read, and whether any could not be. */
+export function operatorQueueTotal(queue: AgentOfficeOperatorQueue): { total: number; unknown: boolean } {
+  let total = 0;
+  let unknown = false;
+  for (const key of OPERATOR_QUEUE_KEYS) {
+    const value = queue[key];
+    if (value === null) unknown = true;
+    else total += value;
+  }
+  return { total, unknown };
+}
+
+/**
+ * One automation the office reads for real, as the dashboard lists it: a team
+ * room with a live record, the AMUX execution room or the review server.
+ */
+export type AgentOfficeLiveRow = {
+  id: string;
+  name: string;
+  status: DeptStatus;
+  /** The state in a word or two. */
+  badge: string;
+  /** What the room says, from its record. */
+  line: string;
+  /** The console screen that holds its record, when there is one. */
+  href: string | null;
+};
+
+export type AgentOfficeBrief = {
+  /** Rows that need a look, in the order given. */
+  attention: AgentOfficeLiveRow[];
+  /** Rows at work right now. */
+  working: AgentOfficeLiveRow[];
+  /** How many rows are fine or waiting on their next run. */
+  quiet: number;
+};
+
+/**
+ * The digest desk's brief over the live rows: what needs a look first, then
+ * what is at work, then how many are quiet. It reads only the rows' states;
+ * nothing here is a demo figure.
+ */
+export function agentOfficeBrief(rows: readonly AgentOfficeLiveRow[]): AgentOfficeBrief {
+  const attention = rows.filter((row) => row.status === "attention" || row.status === "blocked");
+  const working = rows.filter((row) => row.status === "working");
+  return { attention, working, quiet: rows.length - attention.length - working.length };
+}
+
+type ReportCopy = {
+  title: (time: string) => string;
+  attention: (count: number) => string;
+  working: (count: number) => string;
+  quiet: (count: number) => string;
+  notConnected: (count: number) => string;
+  todo: (text: string) => string;
+  quota: string;
+  none: string;
+  footer: string;
+};
+
+/**
+ * The status report the operator copies or downloads: the same states the
+ * office shows, as plain Markdown. Content-free by construction -- it is
+ * built only from the rows' state words and record lines, the to-do counts
+ * and the quota rows, never from what an agent produced.
+ */
+export function agentOfficeReport(
+  input: {
+    readAt: string;
+    rows: readonly AgentOfficeLiveRow[];
+    notConnected: readonly string[];
+    queue: { label: string; count: number | null }[];
+    quota: AgentOfficeQuotaView;
+    unknownCount: string;
+  },
+  copy: ReportCopy
+): string {
+  const brief = agentOfficeBrief(input.rows);
+  const quiet = input.rows.filter((row) => !brief.attention.includes(row) && !brief.working.includes(row));
+  const item = (row: AgentOfficeLiveRow) => `- ${row.name} · ${row.badge} · ${row.line}`;
+  const section = (heading: string, lines: string[]) => [heading, ...(lines.length > 0 ? lines : [`- ${copy.none}`]), ""];
+  const known = input.queue.filter((entry) => entry.count !== null);
+  const total = known.reduce((sum, entry) => sum + (entry.count ?? 0), 0);
+  const todoText = known.length < input.queue.length ? `${total}+?` : String(total);
+  return [
+    copy.title(utcStamp(input.readAt)),
+    "",
+    ...section(copy.attention(brief.attention.length), brief.attention.map(item)),
+    ...section(copy.working(brief.working.length), brief.working.map(item)),
+    ...section(copy.quiet(quiet.length), quiet.map(item)),
+    ...section(copy.notConnected(input.notConnected.length), input.notConnected.map((name) => `- ${name}`)),
+    ...section(
+      copy.todo(todoText),
+      input.queue.map((entry) => `- ${entry.label}: ${entry.count === null ? input.unknownCount : entry.count}`)
+    ),
+    ...section(
+      copy.quota,
+      [
+        ...input.quota.rows.map((row) => `- ${row.id} (${row.vendor}) · ${row.label} · ${row.amount}`),
+        ...(input.quota.note ? [`- ${input.quota.note}`] : []),
+      ]
+    ),
+    copy.footer,
+    "",
+  ].join("\n");
 }

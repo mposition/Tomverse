@@ -174,14 +174,15 @@ fn copilot_probe_process(token: Option<&str>) -> tokio::process::Command {
         "--headless",
         "--stdio",
         "--no-auto-update",
-        "--no-auto-login",
         "--disable-builtin-mcps",
         "--no-custom-instructions",
         "--no-remote",
         "--no-remote-export",
     ];
     if token.is_some() {
+        // Match the SDK: no-auto-login disables saved CLI credentials too.
         args.extend([
+            "--no-auto-login",
             "--auth-token-env",
             "COPILOT_GITHUB_TOKEN",
             "--secret-env-vars",
@@ -664,6 +665,21 @@ mod tests {
     }
 
     #[test]
+    fn copilot_probe_preserves_saved_login_without_an_explicit_token() {
+        let command = copilot_probe_process(None);
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(args.contains("--headless --stdio --no-auto-update"));
+        assert!(!args.contains("--no-auto-login"));
+        assert!(!args.contains("--auth-token-env"));
+        assert!(!args.contains("--prompt"));
+    }
+
+    #[test]
     fn copilot_probe_flags_do_not_expose_token_or_create_a_session() {
         let command = copilot_probe_process(Some("secret-fixture"));
         let args = command
@@ -672,7 +688,8 @@ mod tests {
             .map(|s| s.to_string_lossy())
             .collect::<Vec<_>>()
             .join(" ");
-        assert!(args.contains("--headless --stdio --no-auto-update --no-auto-login"));
+        assert!(args.contains("--headless --stdio --no-auto-update"));
+        assert!(args.contains("--no-auto-login"));
         assert!(args.contains("--auth-token-env COPILOT_GITHUB_TOKEN"));
         assert!(!args.contains("secret-fixture"));
         assert!(!args.contains("--prompt"));

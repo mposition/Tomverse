@@ -26,16 +26,31 @@ import {
   financeTone,
   qaLiveDept,
   qaTone,
+  OPERATOR_QUEUE_HREFS,
+  OPERATOR_QUEUE_KEYS,
+  agentOfficeBrief,
+  agentOfficeReport,
+  operatorQueueTotal,
   researchLiveDept,
+  reviewQuotaView,
+  reviewRoomView,
   researchTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
 import { agentOfficeEngineeringState } from "../lib/agentOfficeEngineeringState.ts";
 import { agentOfficeFinanceState } from "../lib/agentOfficeFinanceState.ts";
 import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
+import { agentOfficeReviewState } from "../lib/agentOfficeReviewState.ts";
+import { recordReviewOrchestratorStatus } from "../lib/reviewOrchestratorStatus.ts";
+import {
+  REVIEW_ORCHESTRATOR_STATUS_SECRET_ENV,
+  parseStoredReviewStatus,
+  reviewStatusSnapshotSchema,
+} from "../lib/reviewOrchestratorStatusCore.ts";
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
   AMUX_ROOM,
+  REVIEW_ROOM,
   DEPT_ROOMS,
   ENTRANCE,
   LOUNGE_ROOM,
@@ -249,8 +264,11 @@ test("the console answers in the office's language and finds the team it names",
   ko.command("SRE팀 왜 늦어?");
   assert.match(ko.chat.at(-1).text, /기록 화면이 없어서/);
 
-  en.command("hello there");
+  en.command("banana split");
   assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.sim.unknown);
+  // A greeting on the real view is small talk; with no live room nobody is there to answer.
+  en.command("hello there");
+  assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
 });
 
 test("a question that mentions approval does not give it", () => {
@@ -987,15 +1005,12 @@ test("the office reads the engineering agent's state, never what it worked on", 
   assert.doesNotMatch(note, /onApprove|approve-button/);
   const briefing = panel.slice(panel.indexOf("function BriefingModal"), panel.indexOf("function DashboardView"));
   assert.match(briefing, /engineeringLive \? m\.dashboard\.decisionLive : m\.briefing\.decisionNone/);
-  assert.match(panel, /engineeringLive \? m\.live\.skipToEnd : m\.live\.skip/);
   // No copy shown while engineering is live claims there is nothing to decide.
   for (const locale of ["en", "ko"]) {
     const c = adminAgentOfficeMessages[locale];
     for (const value of [
       c.sim.briefSayLive,
       c.sim.skipLogDayEnd,
-      c.live.skipToEnd,
-      c.live.skipToEndHint,
       c.dashboard.decisionLive,
       c.approval.liveTitle,
       c.approval.liveBody,
@@ -1150,10 +1165,10 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   // Workers are drawn by their own layer: not engine agents, so the demo can
   // neither move them nor give them a line.
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  const layer = world.slice(world.indexOf("const WorkerLayer"), world.indexOf("const PropLayer"));
+  const layer = world.slice(world.indexOf("const SeatedLayer"), world.indexOf("const PropLayer"));
   assert.doesNotMatch(layer, /onPointerUp|onPick|engine/);
-  assert.match(world, /<WorkerLayer workers=\{amux\.workers\} \/>/);
-  assert.match(world, /isAmux && amux\.note \?/);
+  assert.match(world, /<SeatedLayer room=\{AMUX_ROOM\} people=\{amux\.workers\} \/>/);
+  assert.match(world, /\{real\?\.note \? \(/);
   assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
 });
 
@@ -1315,7 +1330,7 @@ test("on the real view the console answers questions and declines orders that wo
   });
   const s = adminAgentOfficeMessages.en.sim;
   const before = office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`);
-  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Thank you, everyone", "Hurry up"]) {
+  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Hurry up"]) {
     office.command(order);
     assert.equal(office.chat.at(-1).text, s.demoOnly, order);
   }
@@ -1384,16 +1399,486 @@ test("the demo plays on request, leaves the live rooms seated, and ends back on 
   }
 });
 
-test("the page says demo only while a demo plays", () => {
+test("the page offers no way into the demo, and says demo only if one plays", () => {
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  // Operator decision 2026-10-09: the office is live only. No control starts,
+  // paces or ends a demo day, and the camera-follow toggle is gone with it.
+  assert.doesNotMatch(panel, /engine\.start\(|engine\.endDemo\(|engine\.setSpeed\(|engine\.togglePause\(|skipToDecision\(/);
+  assert.doesNotMatch(panel, /agent-office-watch-demo|agent-office-end-demo|m\.live\.follow\(|m\.live\.onDuty\(/);
+  assert.doesNotMatch(panel, /m\.console\.focusOn|m\.console\.normal/);
   assert.match(panel, /\{snap\.demo \? \(\s*<div className=\{cx\("shell-notice"\)\}/);
   assert.match(panel, /snap\.demo \? m\.live\.eyebrow\(engine\.staff\.length\) : m\.live\.eyebrowReal/);
-  assert.match(panel, /data-testid="agent-office-end-demo"/);
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
-    assert.match(copy.live.watchDemo, locale === "en" ? /demo/i : /데모/);
     assert.match(copy.live.eyebrowReal(26), locale === "en" ? /REAL VIEW/ : /실제 화면/);
+    // The quick chips: the two questions the real view answers from records, and a thank-you.
+    assert.equal(copy.console.quick.length, 3);
   }
+});
+
+// ── Independent review room ───────────────────────────────────────────────
+
+const reviewSnapshot = (overrides = {}) => ({
+  schemaVersion: 1,
+  draining: false,
+  pendingJobs: 2,
+  providers: [
+    { id: "claude", vendor: "anthropic", enabled: true, running: 1, maxConcurrent: 2 },
+    { id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 2 },
+    { id: "devin", vendor: "cognition", enabled: false, running: 0, maxConcurrent: 2 },
+  ],
+  last24h: { accept: 9, reject: 3, unknown: 2 },
+  ...overrides,
+});
+const SECRET = "s".repeat(40);
+const statusRequest = (body, authorization = `Bearer ${SECRET}`, headers = {}) =>
+  new Request("https://tomverse.test/api/internal/review-orchestrator/status", {
+    method: "POST",
+    headers: { authorization, "content-type": "application/json", ...headers },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+const fakeDb = () => {
+  const writes = [];
+  return { writes, appSetting: { upsert: async (args) => (writes.push(args), args) } };
+};
+
+test("the review server's report is content-free by its schema", () => {
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot()).success, true);
+  // No field for a job, a branch, a scope or a finding.
+  for (const extra of [{ jobId: "r-1" }, { branch: "x" }, { scope: "y" }, { findings: [] }]) {
+    assert.equal(reviewStatusSnapshotSchema.safeParse({ ...reviewSnapshot(), ...extra }).success, false, Object.keys(extra)[0]);
+  }
+  assert.equal(
+    reviewStatusSnapshotSchema.safeParse(
+      reviewSnapshot({ providers: [{ id: "claude", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 1, note: "x" }] })
+    ).success,
+    false
+  );
+  // Reviewer ids are machine ids, unique.
+  assert.equal(
+    reviewStatusSnapshotSchema.safeParse(
+      reviewSnapshot({ providers: [{ id: "Claude Opus!", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 1 }] })
+    ).success,
+    false
+  );
+  const dup = { id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 1 };
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [dup, dup] })).success, false);
+  assert.equal(parseStoredReviewStatus("not json").state, "unreadable");
+  assert.equal(parseStoredReviewStatus(JSON.stringify({ receivedAt: "x", snapshot: reviewSnapshot() })).state, "unreadable");
+});
+
+test("the status route records the latest report only with the secret, and stamps it with the app's clock", async () => {
+  const env = { [REVIEW_ORCHESTRATOR_STATUS_SECRET_ENV]: SECRET };
+  const now = () => new Date("2026-10-09T01:02:03.000Z");
+
+  let db = fakeDb();
+  assert.deepEqual(await recordReviewOrchestratorStatus(statusRequest(reviewSnapshot(), "Bearer wrong"), env, db, now), {
+    status: 401,
+    body: { result: "unauthorized" },
+  });
+  // A short secret configured is no secret at all.
+  assert.equal(
+    (await recordReviewOrchestratorStatus(statusRequest(reviewSnapshot(), "Bearer short"), { [REVIEW_ORCHESTRATOR_STATUS_SECRET_ENV]: "short" }, db, now)).status,
+    401
+  );
+  assert.equal((await recordReviewOrchestratorStatus(statusRequest("{nope"), env, db, now)).status, 400);
+  assert.equal((await recordReviewOrchestratorStatus(statusRequest({ ...reviewSnapshot(), jobId: "r-1" }), env, db, now)).status, 400);
+  assert.equal(
+    (await recordReviewOrchestratorStatus(statusRequest(reviewSnapshot(), `Bearer ${SECRET}`, { "content-length": "99999" }), env, db, now)).status,
+    413
+  );
+  // No Content-Length at all: the read itself stops at the limit.
+  const flood = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode(" ".repeat(4096)));
+    },
+  });
+  const unsized = new Request("https://tomverse.test/api/internal/review-orchestrator/status", {
+    method: "POST",
+    headers: { authorization: `Bearer ${SECRET}` },
+    body: flood,
+    duplex: "half",
+  });
+  assert.equal(unsized.headers.get("content-length"), null);
+  assert.equal((await recordReviewOrchestratorStatus(unsized, env, db, now)).status, 413);
+  assert.equal(db.writes.length, 0, "a refused report was written");
+
+  db = fakeDb();
+  assert.deepEqual(await recordReviewOrchestratorStatus(statusRequest(reviewSnapshot()), env, db, now), {
+    status: 200,
+    body: { result: "recorded" },
+  });
+  assert.equal(db.writes.length, 1);
+  assert.equal(db.writes[0].where.key, "reviewOrchestrator.status");
+  const stored = parseStoredReviewStatus(db.writes[0].update.value);
+  assert.equal(stored.state, "observed");
+  assert.equal(stored.receivedAt, "2026-10-09T01:02:03.000Z");
+  assert.deepEqual(stored.snapshot, reviewSnapshot());
+
+  const route = readFileSync("app/api/internal/review-orchestrator/status/route.ts", "utf8");
+  assert.match(route, /"Cache-Control": "no-store"/);
+  assert.doesNotMatch(route, /snapshot|request\.json/, "the route answers with a code, never the report");
+});
+
+test("the review room shows each reviewer's real state, and a silent server as lost", () => {
+  const copy = adminAgentOfficeMessages.ko.real.review;
+  const readAt = "2026-10-09T01:05:00.000Z";
+  const stored = (snapshot, receivedAt = "2026-10-09T01:04:00.000Z") => JSON.stringify({ receivedAt, snapshot });
+  const state = (snapshot, receivedAt, now = "2026-10-09T01:05:00.000Z") =>
+    agentOfficeReviewState({ stored: stored(snapshot, receivedAt), now: at(now) });
+
+  const live = reviewRoomView(state(reviewSnapshot()), readAt, REVIEW_ROOM.desks.length, copy);
+  assert.equal(live.status, "working");
+  assert.equal(live.note, null);
+  assert.deepEqual(
+    live.reviewers.map((r) => [r.name, r.label, r.status, r.dim]),
+    [
+      ["claude", "검토 중", "working", false],
+      ["codex", "대기", "done", false],
+      ["devin", "꺼짐", "waiting", true],
+    ]
+  );
+  assert.equal(live.reviewers[0].title, "claude · anthropic · 검토 중 · 실행 1/2 · 마지막 보고 10-09 01:04 UTC");
+  assert.equal(
+    live.summary,
+    "대기 2 · 최근 24시간 accept 9 · reject 3 · unknown 2 · 마지막 보고 10-09 01:04 UTC · 읽은 시각 10-09 01:05 UTC"
+  );
+  const idle = reviewRoomView(
+    state(reviewSnapshot({ providers: [{ id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 2 }] })),
+    readAt,
+    6,
+    copy
+  );
+  assert.equal(idle.status, "done");
+
+  // Five missed beats: every reviewer is lost, and the room says since when.
+  const silent = reviewRoomView(state(reviewSnapshot(), "2026-10-09T00:58:00.000Z"), readAt, 6, copy);
+  assert.equal(silent.status, "attention");
+  assert.ok(silent.reviewers.every((r) => r.label === "보고 없음" && r.status === "attention"));
+  assert.equal(silent.note, "10-09 00:58 UTC 이후 보고 없음");
+  // Exactly at the threshold it is still fresh.
+  assert.equal(state(reviewSnapshot(), "2026-10-09T01:00:00.000Z").stale, false);
+
+  // More reviewers than desks: the room still speaks for all of them, and says how many are not drawn.
+  const crowd = Array.from({ length: 8 }, (_, i) => ({
+    id: `r${i}`,
+    vendor: "openai",
+    enabled: true,
+    running: i === 7 ? 1 : 0,
+    maxConcurrent: 1,
+  }));
+  const crowded = reviewRoomView(state(reviewSnapshot({ providers: crowd })), readAt, 6, copy);
+  assert.equal(crowded.reviewers.length, 6);
+  assert.equal(crowded.status, "working", "the one reviewing is past the desks, and still counts");
+  assert.equal(crowded.note, "여기 그리지 못한 검토자 2명");
+  assert.equal(
+    reviewRoomView(state(reviewSnapshot({ providers: crowd.slice(0, 7) })), readAt, 6, adminAgentOfficeMessages.en.real.review).note,
+    "1 more reviewer not drawn here"
+  );
+
+  const draining = reviewRoomView(state(reviewSnapshot({ draining: true })), readAt, 6, copy);
+  assert.equal(draining.status, "waiting");
+  assert.equal(draining.note, copy.draining);
+
+  const never = reviewRoomView(agentOfficeReviewState({ stored: null, now: at(readAt) }), readAt, 6, copy);
+  assert.equal(never.status, "waiting");
+  assert.equal(never.note, copy.notReporting);
+  const broken = reviewRoomView(agentOfficeReviewState({ stored: "{", now: at(readAt) }), readAt, 6, copy);
+  assert.equal(broken.status, "attention");
+  assert.equal(broken.note, copy.unreadable);
+  assert.equal(reviewRoomView({ kind: "unread" }, readAt, 6, copy).status, "attention");
+
+  for (const locale of ["en", "ko"]) {
+    const states = adminAgentOfficeMessages[locale].real.review.states;
+    for (const key of ["reviewing", "idle", "off", "lost"]) assert.ok(states[key], `${locale}: ${key}`);
+  }
+});
+
+test("the status report is what the screen shows, as Markdown, copied or downloaded and sent nowhere", () => {
+  const copy = adminAgentOfficeMessages.ko;
+  const row = (id, status, line) => ({ id, name: id, status, badge: status, line, href: null });
+  const report = agentOfficeReport(
+    {
+      readAt: "2026-10-09T02:13:00.000Z",
+      rows: [row("qa", "attention", "Digest silent"), row("engineering", "working", "1 run active"), row("research", "done", "recorded")],
+      notConnected: ["🎧 지원", "🛡️ 신뢰·안전"],
+      queue: [
+        { label: copy.queue.labels.marketing, count: 2 },
+        { label: copy.queue.labels.amuxEscalations, count: null },
+      ],
+      quota: { rows: [{ id: "claude", vendor: "anthropic", status: "done", label: "사용 가능", amount: "62% 남음" }], note: null },
+      unknownCount: copy.queue.unknown,
+    },
+    copy.report
+  );
+  assert.equal(
+    report,
+    [
+      "# Tomverse 에이전트 오피스 상태 보고 · 10-09 02:13 UTC",
+      "",
+      "## 확인 필요 (1)",
+      "- qa · attention · Digest silent",
+      "",
+      "## 진행 중 (1)",
+      "- engineering · working · 1 run active",
+      "",
+      "## 조용함 (1)",
+      "- research · done · recorded",
+      "",
+      "## 연동 대기 (2)",
+      "- 🎧 지원",
+      "- 🛡️ 신뢰·안전",
+      "",
+      "## 운영자 할 일 (2+?)",
+      "- 마케팅 게시 승인: 2",
+      "- AMUX 사람 확인 요청: 확인 불가",
+      "",
+      "## 검토 CLI quota",
+      "- claude (anthropic) · 사용 가능 · 62% 남음",
+      "",
+      copy.report.footer,
+      "",
+    ].join("\n")
+  );
+  const empty = agentOfficeReport(
+    { readAt: "2026-10-09T02:13:00.000Z", rows: [], notConnected: [], queue: [], quota: { rows: [], note: "보고 없음" }, unknownCount: "?" },
+    adminAgentOfficeMessages.en.report
+  );
+  assert.match(empty, /## Needs a look \(0\)\n- None/);
+  assert.match(empty, /## Reviewer CLI quota\n- 보고 없음/);
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /data-testid="agent-office-report-copy"/);
+  assert.match(panel, /data-testid="agent-office-report-download"/);
+  assert.match(panel, /navigator\.clipboard\.writeText\(reportText\(\)\)/);
+  // The report goes to the clipboard or a file; the page posts it nowhere.
+  assert.doesNotMatch(panel, /fetch\(|sendBeacon|m\.live\.publish/);
+});
+
+test("live leads answer a greeting or a thank-you in their own voice, and never claim anything", () => {
+  const live = (line) => ({ status: "done", badge: "Fresh", line, detail: "" });
+  const copy = adminAgentOfficeMessages.ko;
+  const office = new AgentOffice(copy, { qa: live("digest 받음"), research: live("기록됨") });
+  const lead = (dept) => office.agentById.get(office.deptLead[dept].id);
+
+  office.command("다들 수고했어요");
+  const replies = office.chat.slice(-2);
+  assert.deepEqual(replies.map((entry) => entry.text).sort(), [copy.real.voices.qa.thanks, copy.real.voices.research.thanks].sort());
+  assert.ok(replies.every((entry) => entry.name.includes(" · ")), "each reply names its lead and room");
+  // On the floor only an emoji, for a moment; then the record line is back.
+  assert.equal(lead("qa").speech, "😊");
+  for (let i = 0; i < 80; i += 1) office.tick(0.05);
+  assert.equal(lead("qa").speech, "digest 받음");
+
+  // A named team: only its lead answers. A question is not small talk.
+  const before = office.chat.length;
+  office.command("QA팀 안녕");
+  assert.equal(office.chat.length, before + 2);
+  assert.equal(office.chat.at(-1).text, copy.real.voices.qa.hello);
+  assert.equal(lead("qa").speech, "👋");
+  office.command("수고했어?");
+  assert.notEqual(office.chat.at(-1).text, copy.real.voices.qa.thanks);
+
+  // A team question is answered in the lead's voice, then with the record.
+  office.command("리서치팀 뭐해?");
+  assert.ok(office.chat.at(-1).text.startsWith(`${copy.real.voices.research.answer}\n`));
+  assert.match(office.chat.at(-1).text, /기록됨/);
+
+  // The demo keeps its own cheer; small talk is the real view's.
+  const demo = new AgentOffice(adminAgentOfficeMessages.en);
+  demo.start();
+  demo.command("Thank you, everyone");
+  assert.notEqual(demo.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
+
+  // No voice line states a fact about a team's work: no numbers, no times, no
+  // states, and no activity or promise -- the same words have to be true when
+  // the room's record is silent, its switch is off or it could not be read.
+  const activity = {
+    en: /\b(watch\w*|gather\w*|open|polish\w*|check\w*|runs?|signals?|ledgers?|inbox|keep|I'll|won't|will)\b/i,
+    ko: /지켜|모으|당번|열어|펼쳐|다듬|점검|볼게|할게|지킬|찾아|울리/,
+  };
+  for (const locale of ["en", "ko"]) {
+    const real = adminAgentOfficeMessages[locale].real;
+    for (const [dept, voice] of Object.entries({ ...real.voices, default: real.voiceDefault })) {
+      for (const line of [voice.hello, voice.thanks, voice.answer]) {
+        assert.doesNotMatch(line, /\d|UTC|\bdone\b|\bfailed\b|\bok\b|완료|실패|정상|없음/i, `${locale}.${dept}: ${line}`);
+        assert.doesNotMatch(line, activity[locale], `${locale}.${dept} claims activity: ${line}`);
+      }
+    }
+  }
+  // A room that could not be read, or whose switch is off, is greeted the same way.
+  for (const [badge, status] of [["읽지 못함", "attention"], ["스위치 꺼짐", "waiting"]]) {
+    const quiet = new AgentOffice(copy, { research: { status, badge, line: "기록을 읽지 못함", detail: "" } });
+    quiet.command("안녕");
+    assert.equal(quiet.chat.at(-1).text, copy.real.voices.research.hello, badge);
+  }
+});
+
+test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
+  const qa = (line, status = "done", detail = "read 10-09 01:00 UTC") => ({ status, badge: "Fresh", line, detail });
+  const office = new AgentOffice(adminAgentOfficeMessages.en, { qa: qa("Digest received · 10-09 00:55 UTC") });
+  const said = () => office.chat.filter((entry) => entry.text.startsWith("🔔")).map((entry) => entry.text);
+  // The first reading is not a change, nor is one that only moved the read time.
+  office.setLive({ qa: qa("Digest received · 10-09 00:55 UTC") });
+  office.setLive({ qa: qa("Digest received · 10-09 00:55 UTC", "done", "read 10-09 01:01 UTC") });
+  assert.deepEqual(said(), []);
+  office.setLive({ qa: qa("Digest silent · last received 10-09 00:55 UTC", "attention") });
+  assert.deepEqual(said(), ["🔔 QA & release · Digest silent · last received 10-09 00:55 UTC"]);
+  const line = office.chat.at(-1);
+  assert.equal(line.name, office.deptLead.qa.name, "the room's lead says it");
+  // Outside the demo a console line carries the real time, never the simulated clock.
+  assert.match(line.time, /^\d{2}:\d{2} UTC$/);
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /const LIVE_REFRESH_MS = 60_000;/);
+  assert.match(panel, /document\.visibilityState === "visible"\) router\.refresh\(\)/);
+  assert.match(panel, /window\.clearInterval\(id\)/);
+});
+
+test("the dashboard's three windows read the live rooms, not a demo day", () => {
+  const row = (id, status) => ({ id, name: id, status, badge: id, line: `${id} line`, href: null });
+  const brief = agentOfficeBrief([
+    row("qa", "attention"),
+    row("engineering", "working"),
+    row("research", "done"),
+    row("amux", "blocked"),
+    row("review", "waiting"),
+  ]);
+  assert.deepEqual(brief.attention.map((item) => item.id), ["qa", "amux"]);
+  assert.deepEqual(brief.working.map((item) => item.id), ["engineering"]);
+  assert.equal(brief.quiet, 2);
+  assert.deepEqual(agentOfficeBrief([]), { attention: [], working: [], quiet: 0 });
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  const dashboard = panel.slice(panel.indexOf("function DashboardView"));
+  // automation.status lists the live automations, the AMUX room and the review server.
+  assert.match(dashboard, /data-testid="agent-office-automation"/);
+  const rowsFor = panel.slice(panel.indexOf("function liveRowsFor"), panel.indexOf("type TeamRow"));
+  assert.match(rowsFor, /id: "amux",[\s\S]*href: AGENT_OFFICE_AMUX_RECORD_HREF/);
+  assert.match(rowsFor, /id: "review",[\s\S]*status: reviewView\.status/);
+  assert.match(dashboard, /const liveRows = liveRowsFor\(teams, amuxView, reviewView, m\)/);
+  // The brief is the live rows' brief; the record store links each live team's screen.
+  assert.match(dashboard, /const brief = agentOfficeBrief\(liveRows\)/);
+  assert.match(dashboard, /data-testid="agent-office-latest-record"/);
+  // None of the three reads the demo day.
+  assert.doesNotMatch(dashboard, /snap\.clock|snap\.phase\b|snap\.dayComplete|snap\.approvalPending|PHASE\.|m\.phases/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale].dashboard;
+    assert.doesNotMatch(copy.boardEyebrow, /SIMULATION/);
+    assert.doesNotMatch(copy.note("x", 8, 26), /simulation|시뮬레이션/i);
+    assert.match(copy.storageContentNote, locale === "en" ? /own screen/ : /각 에이전트 화면/);
+  }
+});
+
+test("the operator's to-do counts the real queues an agent waits on, the same sets the sidebar badges count", () => {
+  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0, autoFix: 0 }), { total: 3, unknown: false });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 0, autoFix: 4 }), { total: 5, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null, autoFix: null }), { total: 0, unknown: true });
+
+  // Every queue links to a console screen that exists, and to its tab when it names one.
+  for (const key of OPERATOR_QUEUE_KEYS) {
+    const href = new URL(OPERATOR_QUEUE_HREFS[key], "https://tomverse.test");
+    const entry = ADMIN_NAVIGATION.find((item) => item.href === href.pathname);
+    assert.ok(entry, `${key}: ${href.pathname} is not a console entry`);
+    const tab = href.searchParams.get("tab");
+    if (tab) assert.ok(entry.tabs?.some((item) => item.id === tab), `${key}: no tab ${tab} on ${href.pathname}`);
+  }
+  // Read with the badges' own count functions, each on its own.
+  const queue = readFunction("readOperatorQueue");
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()", "countAutoFixActionCases()"]) {
+    assert.ok(queue.includes(count), count);
+  }
+  assert.match(queue, /Promise\.allSettled/);
+  assert.match(queue, /return null;/);
+  const badges = readFileSync("lib/adminNavigationCounts.ts", "utf8");
+  for (const count of ["countPendingMarketingApprovals()", "countAutoFixActionCases()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
+    assert.ok(badges.includes(count), `the sidebar counts ${count} too`);
+  }
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /const todo = operatorQueueTotal\(live\.queue\)/);
+  assert.equal((panel.match(/<OperatorQueueList m=\{m\} queue=\{queue\} \/>/g) || []).length, 2);
+  // The office approves nothing: no demo approval is reachable from the page.
+  assert.doesNotMatch(panel, /engine\.approve\(|approve-button|agent-office-approve"/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale].queue;
+    for (const key of OPERATOR_QUEUE_KEYS) assert.ok(copy.labels[key], `${locale}: ${key}`);
+  }
+});
+
+test("the quota card shows each reviewer's quota as the review server read it, and says how old it is", () => {
+  const copy = adminAgentOfficeMessages.ko.real.quota;
+  const quotaProviders = [
+    { id: "claude", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "available", remaining: 62.4, unit: "percent" } },
+    { id: "codex", vendor: "openai", enabled: true, running: 1, maxConcurrent: 2, quota: { state: "available", remaining: 12, unit: "percent" } },
+    { id: "cursor", vendor: "xai", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "exhausted", remaining: 0, unit: "usd" } },
+    { id: "copilot", vendor: "moonshot", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "available", remaining: 340, unit: "credits" } },
+    { id: "devin", vendor: "cognition", enabled: false, running: 0, maxConcurrent: 2, quota: { state: "disabled", remaining: null, unit: null } },
+  ];
+  // The app takes the quota field and refuses one no probe could produce.
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: quotaProviders })).success, true);
+  const withQuota = (quota) =>
+    reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [{ ...quotaProviders[0], quota }] })).success;
+  for (const bad of [
+    { state: "available", remaining: 150, unit: "percent" },
+    { state: "available", remaining: 5, unit: null },
+    { state: "available", remaining: null, unit: "usd" },
+    { state: "disabled", remaining: 5, unit: "percent" },
+    { state: "available", remaining: 5, unit: "tokens" },
+    { state: "full", remaining: null, unit: null },
+    { state: "available", remaining: 5, unit: "percent", account: "someone@example.com" },
+  ]) {
+    assert.equal(withQuota(bad), false, JSON.stringify(bad));
+  }
+  // A server older than the field sends none, and is still a report.
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot()).success, true);
+
+  const stored = (providers, receivedAt = "2026-10-09T01:04:00.000Z") =>
+    JSON.stringify({ receivedAt, snapshot: reviewSnapshot({ providers }) });
+  const state = (providers, receivedAt) =>
+    agentOfficeReviewState({ stored: stored(providers, receivedAt), now: at("2026-10-09T01:05:00.000Z") });
+
+  const fresh = reviewQuotaView(state(quotaProviders), copy);
+  assert.deepEqual(
+    fresh.rows.map((row) => [row.id, row.status, row.label, row.amount]),
+    [
+      ["claude", "done", "사용 가능", "62% 남음"],
+      ["codex", "working", "얼마 안 남음", "12% 남음"],
+      ["cursor", "attention", "소진", "$0.00 남음"],
+      ["copilot", "done", "사용 가능", "340 credits 남음"],
+      ["devin", "waiting", "꺼짐", "—"],
+    ]
+  );
+  assert.equal(fresh.note, "검토 서버가 직접 조회한 값 · 10-09 01:04 UTC");
+  // Old numbers keep their values but are drawn grey and dated.
+  const silent = reviewQuotaView(state(quotaProviders, "2026-10-09T00:58:00.000Z"), copy);
+  assert.ok(silent.rows.every((row) => row.status === "waiting"));
+  assert.equal(silent.rows[0].amount, "62% 남음");
+  assert.equal(silent.note, "10-09 00:58 UTC 기준 · 이후 보고 없음");
+  // No quota field at all: the card says the server needs the update.
+  assert.deepEqual(reviewQuotaView(state(reviewSnapshot().providers), copy), { rows: [], note: copy.notSent });
+  assert.deepEqual(reviewQuotaView({ kind: "not_reporting" }, copy), { rows: [], note: copy.notReporting });
+  assert.deepEqual(reviewQuotaView({ kind: "unread" }, copy), { rows: [], note: copy.unread });
+  for (const locale of ["en", "ko"]) {
+    const c = adminAgentOfficeMessages[locale].real.quota;
+    for (const key of ["available", "low", "exhausted", "unknown", "disabled"]) assert.ok(c.states[key], `${locale}: ${key}`);
+  }
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /<QuotaCard m=\{m\} view=\{quotaView\} \/>/);
+});
+
+test("the review room has a desk for each reviewer and a way in, and the entrance stays outside it", () => {
+  assert.ok(REVIEW_ROOM.desks.length >= 5);
+  for (const desk of REVIEW_ROOM.desks) assert.ok(reaches(desk.seat), `review seat ${desk.seat.x},${desk.seat.y}`);
+  for (const door of REVIEW_ROOM.doors) assert.ok(walkable(door.x, door.y), "the review room's door is walled in");
+  assert.ok(ENTRANCE.y >= REVIEW_ROOM.y + REVIEW_ROOM.h, "the entrance opens into the review room");
+  // Reading it selects the one row the review server may write.
+  const review = readFunction("readReview");
+  assert.match(review, /where: \{ key: REVIEW_ORCHESTRATOR_STATUS_KEY \}/);
+  assert.match(review, /select: \{ value: true \}/);
+  assert.match(review, /read: "review_orchestrator"/);
+  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  assert.match(world, /<SeatedLayer room=\{REVIEW_ROOM\} people=\{review\.reviewers\}/);
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {

@@ -31,6 +31,10 @@ const REVIEWED_NOT_TREE_WRITERS = new Map([
     "searches a script's source text for its writeFileSync call; writes nothing",
   ],
   [
+    "tests/amuxV4SystemServiceInstall.test.mjs",
+    "reads installer source to assert its writeFileSync ordering and calls only the pure environment parser; never runs installation or writes files",
+  ],
+  [
     "tests/issueBacklogShaMode.test.mjs",
     "writes only inside the temporary repository tests/support/issueBacklogFixtureRepo.mjs creates with mkdtempSync; the mkdtemp call is in the helper, so this file's own source does not show one",
   ],
