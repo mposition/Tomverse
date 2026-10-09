@@ -31,6 +31,7 @@ import {
   cronTriggerIntervalMs,
   parseCronSchedule,
 } from "@/lib/scheduledJobsCore";
+import { AGENT_RUNNER_SERVICES } from "../.railway/agent-runners";
 import { RAILWAY_CRON_SERVICES } from "../.railway/scheduled-jobs";
 import {
   RUN_DEADLINE_MS,
@@ -157,8 +158,17 @@ test("the request is exactly { runId, deadline }", () => {
 // ---------------------------------------------------------------------------
 
 test("the service is declared once, every five minutes, with exactly two variables", () => {
-  const service = RAILWAY_CRON_SERVICES.find((job) => job.key === "marketingPublisher");
-  assert.ok(service, "the publisher is not in .railway/scheduled-jobs.ts");
+  // In the Agents project, which has no database service for a reference
+  // variable to resolve to, and no longer in the shared project's cron table.
+  assert.equal(
+    RAILWAY_CRON_SERVICES.some((job) => job.service === "Marketing Publisher"),
+    false,
+    "the publisher is still in .railway/scheduled-jobs.ts",
+  );
+  const matches = AGENT_RUNNER_SERVICES.filter((runner) => runner.key === "marketing_publisher");
+  assert.equal(matches.length, 1, "the publisher is not declared once in .railway/agent-runners.ts");
+  const service = matches[0];
+  assert.ok(service.cronSchedule);
   assert.equal(service.service, "Marketing Publisher");
   assert.equal(service.startCommand, "npm run maintenance:marketing-publisher");
   // The plan's exhaustive list. No database, platform, object-store, GitHub or
@@ -166,11 +176,14 @@ test("the service is declared once, every five minutes, with exactly two variabl
   // hold.
   for (const environment of ["production", "staging"] as const) {
     assert.deepEqual(
-      [...service.variables[environment]].sort(),
+      [...(service.environments[environment] ?? [])].sort(),
       ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
       environment,
     );
   }
+  // dev runs every develop merge before anyone has verified it, so it never
+  // holds the job that publishes to outside accounts.
+  assert.equal(service.environments.dev, undefined);
 
   const trigger = parseCronSchedule(service.cronSchedule);
   assert.ok(trigger);

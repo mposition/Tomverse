@@ -104,28 +104,6 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
       ],
     },
   },
-  {
-    // The marketing publisher (S2 plan, S2d1). A clock and a supervisor: every
-    // five minutes it asks the app to run, with a deadline four minutes out,
-    // and kills its own worker at that deadline. The contract is
-    // `run deadline < cron period`; lib/marketingPublisherRunCore.ts holds the
-    // numbers and a test holds this schedule to them.
-    //
-    // Two variables and no others, in both environments -- the plan's
-    // exhaustive list. No database, platform, object-store, GitHub or LLM
-    // credential: the service changes nothing itself, and the app route is
-    // where the work happens. Set both in the dashboard before the first apply:
-    // this file preserves declared variables, it does not create them, and a
-    // service without its secret fails every five minutes.
-    key: "marketingPublisher",
-    service: "Marketing Publisher",
-    startCommand: "npm run maintenance:marketing-publisher",
-    cronSchedule: "*/5 * * * *",
-    variables: {
-      production: ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
-      staging: ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
-    },
-  },
 ];
 
 
