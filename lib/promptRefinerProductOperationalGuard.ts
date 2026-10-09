@@ -117,7 +117,9 @@ async function observe(tx: Tx, guard: GuardRow): Promise<Observation | null> {
   const [unknown] = await tx.$queryRaw<Array<{ present: boolean }>>`
     SELECT EXISTS (
       SELECT 1 FROM "PromptRefinerProductAttempt" a
-      WHERE a."createdAt" >= ${guard.baselineAt} AND a."state" = 'unknown'
+      WHERE a."createdAt" >=
+          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
+        AND a."state" = 'unknown'
       UNION ALL
       SELECT 1 FROM "PromptRefinerAutoBudgetHold" h
       JOIN "PromptRefinerProductAttempt" a ON a."id" = h."requestKey"
@@ -136,15 +138,18 @@ async function observe(tx: Tx, guard: GuardRow): Promise<Observation | null> {
   const [auditFailure] = await tx.$queryRaw<Array<{ present: boolean }>>`
     SELECT EXISTS (
       SELECT 1 FROM "PromptRefinerProductAttempt" a
-      WHERE a."createdAt" >= ${guard.baselineAt}
+      WHERE a."createdAt" >=
+          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
         AND a."state" = 'preparing'
-        AND a."createdAt" <= clock_timestamp() - INTERVAL '13 seconds'
+        AND a."createdAt" <=
+          (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '13 seconds'
       UNION ALL
       SELECT 1 FROM "PromptRefinerProductAttempt" a
       JOIN "PromptRefinerAutoBudgetHold" h ON h."requestKey" = a."id"
       WHERE h."createdAt" >= ${guard.baselineAt}
         AND a."state" = 'preparing'
-        AND a."createdAt" <= clock_timestamp() - INTERVAL '13 seconds'
+        AND a."createdAt" <=
+          (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '13 seconds'
         AND h."status" IN ('settled', 'released')
       UNION ALL
       SELECT 1 FROM "PromptRefinerProductExecutionReceipt" r

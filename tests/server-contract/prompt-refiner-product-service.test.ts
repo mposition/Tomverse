@@ -24,6 +24,10 @@ let autoGuardAvailable = true;
 let guardAdmissions = 0;
 let auditLatches = 0;
 let receiptError = false;
+let adapterConstructionError = false;
+let executeErrorBeforeAuthorization = false;
+let dispatchIntentError = false;
+let releaseError = false;
 
 class BudgetError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -43,7 +47,9 @@ mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
   createPromptRefinerAutoBudgetTransitionAuthority: (verifiers: Record<string,
     (raw: unknown) => Promise<unknown>>) => ({
     recordDispatchIntent: async (raw: unknown) => {
-      await verifiers.verifyDispatchIntent(raw); dispatches += 1;
+      await verifiers.verifyDispatchIntent(raw);
+      if (dispatchIntentError) throw new Error("synthetic dispatch outcome unknown");
+      dispatches += 1;
     },
     settleVerifiedBilled: async (raw: unknown) => {
       await verifiers.verifyVerifiedBilling(raw);
@@ -55,7 +61,9 @@ mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
       await verifiers.verifyBillingUnknown(raw); unknowns += 1;
     },
     releaseConfirmedUndispatched: async (raw: unknown) => {
-      await verifiers.verifyUndispatched(raw); releases += 1;
+      await verifiers.verifyUndispatched(raw);
+      if (releaseError) throw new Error("synthetic release outcome unknown");
+      releases += 1;
     },
   }),
 } });
@@ -111,18 +119,24 @@ mock.module(mod("lib/promptRefinerProductAdapter.ts"), { namedExports: {
   createPromptRefinerProductAdapter: (dependencies: {
     authorizeDispatch: (intent: object) => Promise<void>;
   }) => {
+    if (adapterConstructionError) {
+      throw new Error("synthetic adapter construction failure");
+    }
     const intents = new WeakSet<object>();
     const billed = new WeakSet<object>();
     const unknown = new WeakSet<object>();
     const undispatched = new WeakSet<object>();
     return {
       execute: async () => {
-        providerCalls += 1;
+        if (executeErrorBeforeAuthorization) {
+          throw new Error("synthetic pre-authorization adapter failure");
+        }
         const intent = Object.freeze({ intentId:
           "44444444-4444-4444-8444-444444444444",
         adapterConfigDigest: "a".repeat(64) });
         intents.add(intent);
         await dependencies.authorizeDispatch(intent);
+        providerCalls += 1;
         const outcome = Object.freeze({ ...adapterOutcome });
         if (outcome.status === "billing_unknown") unknown.add(outcome);
         else if (outcome.status === "undispatched") undispatched.add(outcome);
@@ -160,6 +174,10 @@ beforeEach(() => {
   receiptStates = []; settlementDelayMs = 0;
   autoGuardAvailable = true; guardAdmissions = 0; auditLatches = 0;
   receiptError = false;
+  adapterConstructionError = false;
+  executeErrorBeforeAuthorization = false;
+  dispatchIntentError = false;
+  releaseError = false;
   delete process.env.PROMPT_REFINER_KILL_SWITCH;
 });
 
@@ -197,6 +215,58 @@ test("verified no-change settles once and falls back to authored text", async ()
   assert.equal(settlements, 1); assert.equal(unknowns, 0);
   assert.equal(releases, 0);
   assert.equal(holds, 0); assert.deepEqual(receiptStates, ["terminal"]);
+});
+
+test("confirmed pre-authorization failure releases once and records refusal", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  executeErrorBeforeAuthorization = true;
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback",
+    reason: "unavailable" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 0);
+  assert.equal(providerCalls, 0); assert.equal(releases, 1);
+  assert.equal(settlements, 0); assert.equal(unknowns, 0);
+  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.equal(auditLatches, 0);
+});
+
+test("unknown adapter-construction release stays held and fails closed", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  adapterConstructionError = true;
+  releaseError = true;
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback",
+    reason: "audit_unavailable" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 0);
+  assert.equal(providerCalls, 0); assert.equal(releases, 0);
+  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.equal(auditLatches, 1);
+});
+
+test("unknown authorization retains the full hold without provider or retry", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  dispatchIntentError = true;
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback",
+    reason: "unavailable" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 0);
+  assert.equal(providerCalls, 0); assert.equal(releases, 0);
+  assert.equal(settlements, 0); assert.equal(unknowns, 0);
+  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.equal(auditLatches, 1);
+});
+
+test("unknown pre-authorization release stays held and fails closed", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  executeErrorBeforeAuthorization = true;
+  releaseError = true;
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback",
+    reason: "audit_unavailable" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 0);
+  assert.equal(providerCalls, 0); assert.equal(releases, 0);
+  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.equal(auditLatches, 1);
 });
 
 test("billing unknown is retained terminal-unknown and never publishes", async () => {

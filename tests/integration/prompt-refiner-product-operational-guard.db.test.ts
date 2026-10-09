@@ -23,25 +23,34 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
     const query = (db: pg.PoolClient, strings: TemplateStringsArray,
       values: unknown[]) => db.query(strings.reduce((sql, part, index) =>
       sql + part + (index < values.length ? `$${index + 1}` : ""), ""), values);
-    const transaction = async <T>(work: (tx: {
-      $queryRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown[]>;
-      $executeRaw: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<number>;
-    }) => Promise<T>) => {
+    type TestTimeZone = "UTC" | "Australia/Brisbane" |
+      "America/Los_Angeles";
+    type TestTx = {
+      $queryRaw: (strings: TemplateStringsArray,
+        ...values: unknown[]) => Promise<unknown[]>;
+      $executeRaw: (strings: TemplateStringsArray,
+        ...values: unknown[]) => Promise<number>;
+    };
+    const transactionAtTimeZone = async <T>(timeZone: TestTimeZone,
+      work: (tx: TestTx) => Promise<T>, rollback = false) => {
       const db = await pool.connect();
       try {
         await db.query("BEGIN");
         await db.query(`SET LOCAL search_path TO "${schema}"`);
+        await db.query(`SET LOCAL TIME ZONE '${timeZone}'`);
         const result = await work({
           $queryRaw: async (strings, ...values) =>
             (await query(db, strings, values)).rows,
           $executeRaw: async (strings, ...values) =>
             (await query(db, strings, values)).rowCount ?? 0,
         });
-        await db.query("COMMIT"); return result;
+        await db.query(rollback ? "ROLLBACK" : "COMMIT"); return result;
       } catch (error) {
         await db.query("ROLLBACK"); throw error;
       } finally { db.release(); }
     };
+    const transaction = <T>(work: (tx: TestTx) => Promise<T>) =>
+      transactionAtTimeZone("UTC", work);
     try {
       await client.query(`CREATE SCHEMA "${schema}"`);
       await client.query(`SET search_path TO "${schema}"`);
@@ -52,8 +61,9 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         );
         CREATE TABLE "PromptRefinerProductAttempt" (
           "id" TEXT PRIMARY KEY, "mode" TEXT NOT NULL, "state" TEXT NOT NULL,
-          "createdAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-          "expiresAt" TIMESTAMPTZ NOT NULL
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT
+            (clock_timestamp() AT TIME ZONE 'UTC'),
+          "expiresAt" TIMESTAMP(3) NOT NULL
         );
         CREATE TABLE "PromptRefinerAutoBudgetHold" (
           "id" TEXT PRIMARY KEY, "requestKey" TEXT NOT NULL,
@@ -126,13 +136,50 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         reasonCode: string | null; transitionAuditLogId?: string | null };
       const evaluate = () => transaction(async tx => await
         guard.evaluatePromptRefinerProductAutoGuardInTransaction(tx as never) as GuardState);
+      const evaluateAtTimeZone = (timeZone: TestTimeZone, rollback = false) =>
+        transactionAtTimeZone(timeZone, async tx => await
+          guard.evaluatePromptRefinerProductAutoGuardInTransaction(
+            tx as never) as GuardState, rollback);
       const read = () => transaction(async tx => await
         guard.readPromptRefinerProductAutoGuard(tx as never) as GuardState);
+      const backdateActiveBaseline = async () => {
+        await client.query(`ALTER TABLE "PromptRefinerProductOperationalGuard"
+          DISABLE TRIGGER "PromptRefinerProductOperationalGuard_guard"`);
+        try {
+          await client.query(`UPDATE "PromptRefinerProductOperationalGuard"
+            SET "baselineAt" = clock_timestamp() - interval '30 seconds'
+            WHERE "id"='auto' AND "state"='active'`);
+        } finally {
+          await client.query(`ALTER TABLE "PromptRefinerProductOperationalGuard"
+            ENABLE TRIGGER "PromptRefinerProductOperationalGuard_guard"`);
+        }
+      };
 
       await t.test("the 100-request p90 latch survives rolling success and activation", async () => {
         const activationAuditId = await transitionAudit("activation");
         await transaction(tx => guard.initializePromptRefinerProductAutoGuard(
           tx as never, activationAuditId));
+        // Age only the synthetic activation baseline so the 13-second stale
+        // boundary can be exercised without a wall-clock sleep. The protected
+        // trigger is restored before any product code runs.
+        await backdateActiveBaseline();
+        const zonedAttemptId = randomUUID();
+        await client.query(`INSERT INTO "PromptRefinerProductAttempt"
+          ("id","mode","state","createdAt","expiresAt") VALUES
+          ($1,'auto','preparing',clock_timestamp() AT TIME ZONE 'UTC',
+            (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`,
+        [zonedAttemptId]);
+        assert.equal((await evaluateAtTimeZone(
+          "Australia/Brisbane", true)).active, true,
+        "a fresh UTC-naive attempt must not pause in a positive-offset session");
+        await client.query(`UPDATE "PromptRefinerProductAttempt"
+          SET "createdAt" = (clock_timestamp() AT TIME ZONE 'UTC') -
+            interval '14 seconds' WHERE "id" = $1`, [zonedAttemptId]);
+        assert.equal((await evaluateAtTimeZone(
+          "America/Los_Angeles", true)).reasonCode, "audit_failure",
+        "a stale UTC-naive attempt must pause in a negative-offset session");
+        await client.query(`DELETE FROM "PromptRefinerProductAttempt"
+          WHERE "id" = $1`, [zonedAttemptId]);
         for (let index = 0; index < 100; index += 1) {
           await insertReceipt({ latency: 6_001 });
         }
@@ -223,16 +270,23 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
+        await client.query(`DELETE FROM "PromptRefinerAutoBudgetHold"`);
+        await client.query(`DELETE FROM "PromptRefinerProductAttempt"`);
+        await client.query(`DELETE FROM "PromptRefinerProductExecutionContext"`);
+        await client.query(`DELETE FROM "PromptRefinerProductExecutionReceipt"`);
+        await backdateActiveBaseline();
         const strandedAttemptId = randomUUID();
         await client.query(`INSERT INTO "PromptRefinerProductAttempt"
           ("id","mode","state","expiresAt") VALUES ($1,'auto','preparing',
-          clock_timestamp() + interval '5 minutes')`, [strandedAttemptId]);
+          (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`,
+        [strandedAttemptId]);
         await client.query(`INSERT INTO "PromptRefinerAutoBudgetHold"
           ("id","requestKey","status") VALUES ($1,$2,'settled')`,
         [randomUUID(), strandedAttemptId]);
         assert.equal((await evaluate()).active, true);
         await client.query(`UPDATE "PromptRefinerProductAttempt"
-          SET "createdAt" = clock_timestamp() - interval '14 seconds'
+          SET "createdAt" = (clock_timestamp() AT TIME ZONE 'UTC') -
+            interval '14 seconds'
           WHERE "id" = $1`, [strandedAttemptId]);
         assert.equal((await evaluate()).reasonCode, "audit_failure");
 

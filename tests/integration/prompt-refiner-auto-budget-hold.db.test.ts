@@ -39,6 +39,19 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       await client.query(`CREATE TABLE "AdminAuditLog" ("id" TEXT PRIMARY KEY)`);
       await client.query(await readFile(baseMigration, "utf8"));
       await client.query(await readFile(transitionMigration, "utf8"));
+      const settlementCap = await client.query(`
+        SELECT pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid = '"PromptRefinerAutoBudgetHold"'::regclass
+          AND conname = 'PromptRefinerAutoBudgetHold_amount_check'`);
+      assert.equal(settlementCap.rowCount, 1);
+      const settlementCapDefinition = settlementCap.rows[0].definition as string;
+      assert.match(settlementCapDefinition, /"reservedMicroUsd" >= 1/);
+      assert.match(settlementCapDefinition, /"reservedMicroUsd" <= 29918/);
+      assert.match(settlementCapDefinition, /"settledMicroUsd" IS NULL/);
+      assert.match(settlementCapDefinition, /"settledMicroUsd" >= 0/);
+      assert.match(settlementCapDefinition,
+        /"settledMicroUsd" <= "reservedMicroUsd"/);
 
       const query = async (strings: TemplateStringsArray, values: unknown[]) => {
         const sql = strings.reduce((result, part, index) => result + part +
@@ -161,6 +174,63 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
         /prompt_refiner_auto_budget_delete_forbidden/);
       await assert.rejects(client.query(`TRUNCATE "PromptRefinerAutoBudgetWindow"`),
         /prompt_refiner_auto_budget_delete_forbidden/);
+
+      // The immutable base migration already carries the settlement cap. A
+      // direct transition writer must not bypass it, and the failed statement
+      // must leave both the hold and its two aggregate windows unchanged.
+      const cappedHold = await reserve(key(6));
+      const cappedBinding = binding(cappedHold.id, key(6));
+      await authority.recordDispatchIntent(raw({ binding: cappedBinding,
+        intentId: key(106), adapterConfigDigest }));
+      await client.query(`INSERT INTO "AdminAuditLog"("id") VALUES
+        ('audit-over-cap'), ('audit-equal-cap')`);
+      const beforeOverCap = await client.query(`SELECT "period",
+        "committedMicroUsd"::text AS cost
+        FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
+      await assert.rejects(client.query(`UPDATE "PromptRefinerAutoBudgetHold"
+        SET "status" = 'settled', "settledMicroUsd" = "reservedMicroUsd" + 1,
+            "settlementObservationId" = $1,
+            "settlementAuditLogId" = 'audit-over-cap'
+        WHERE "id" = $2 AND "status" = 'dispatching'`,
+      [key(206), cappedHold.id]), (error: unknown) => {
+        assert.ok(error instanceof pg.DatabaseError);
+        assert.equal(error.code, "23514");
+        assert.equal(error.constraint, "PromptRefinerAutoBudgetHold_amount_check");
+        assert.match(error.message,
+          /violates check constraint "PromptRefinerAutoBudgetHold_amount_check"/);
+        return true;
+      });
+      const rejectedHold = await client.query(`SELECT "status",
+        "settledMicroUsd"::text AS settled,
+        "settlementObservationId", "settlementAuditLogId", "closedAt"
+        FROM "PromptRefinerAutoBudgetHold" WHERE "id" = $1`, [cappedHold.id]);
+      assert.deepEqual(rejectedHold.rows, [{ status: "dispatching", settled: null,
+        settlementObservationId: null, settlementAuditLogId: null, closedAt: null }]);
+      const afterOverCap = await client.query(`SELECT "period",
+        "committedMicroUsd"::text AS cost
+        FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
+      assert.deepEqual(afterOverCap.rows, beforeOverCap.rows);
+
+      // Equality is valid. A full-cost settlement applies a zero aggregate
+      // delta, while the prior unknown row remains NULL and fully held.
+      assert.equal((await client.query(`UPDATE "PromptRefinerAutoBudgetHold"
+        SET "status" = 'settled', "settledMicroUsd" = "reservedMicroUsd",
+            "settlementObservationId" = $1,
+            "settlementAuditLogId" = 'audit-equal-cap'
+        WHERE "id" = $2 AND "status" = 'dispatching'`,
+      [key(207), cappedHold.id])).rowCount, 1);
+      const equalHold = await client.query(`SELECT "status",
+        "reservedMicroUsd"::text AS reserved, "settledMicroUsd"::text AS settled
+        FROM "PromptRefinerAutoBudgetHold" WHERE "id" = $1`, [cappedHold.id]);
+      assert.deepEqual(equalHold.rows, [{ status: "settled",
+        reserved: "29918", settled: "29918" }]);
+      assert.equal((await client.query(`SELECT "settledMicroUsd" AS settled
+        FROM "PromptRefinerAutoBudgetHold" WHERE "id" = $1`, [unknownHold.id]))
+        .rows[0].settled, null);
+      const afterEqualCap = await client.query(`SELECT "period",
+        "committedMicroUsd"::text AS cost
+        FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
+      assert.deepEqual(afterEqualCap.rows, beforeOverCap.rows);
 
       // Two terminal writers can race, but the row predicate permits one only.
       const concurrentHold = await reserve(key(4));

@@ -41,7 +41,7 @@ execution/disposition receipt는 content-free이며 UPDATE/DELETE/TRUNCATE를 �
 보존하는 동시성 회귀를 검증했다. DB/audit 자체가 쓰기를 거부하면 durable latch를
 만들었다고 주장하지 않고 해당 요청을 닫으며, 다음 요청도 현재 사실을 재검증한다.
 
-최신 로컬 검증:
+`2e534f5db` 제품 head의 전체 로컬 검증(재검토 보강 결과는 다음 절에 구분):
 
 - Chat execution 78/78: 기존 71 + 파일 있는 explicit 채택/원문 유지/Auto 3 + 검색
   Auto 1 + pinned 성공 응답의 세 모드 안내 3. 실제 route에서 Router text/estimate, shadow text/profile, provider text와
@@ -87,19 +87,49 @@ execution/disposition receipt는 content-free이며 UPDATE/DELETE/TRUNCATE를 �
 실제 staging readback(2026-10-09T18:58:19Z)은 READ ONLY transaction에서 내용 없는
 카운트와 boolean만 읽었다. v4/v5 각각 공식 B03G gate 0, owner disposition 0,
 limited audit 0이다. `feature.promptRefinerEnabled=false`, kill switch는 꺼져 있다.
-Railway 배포 readback에서 현재 staging은 `e66f91973ede615ebcb9053e5d7812a5fad16300`,
+해당 시점의 Railway 배포 readback에서 staging은 `e66f91973ede615ebcb9053e5d7812a5fad16300`,
 deployment `7ac2d5a6-f003-489c-8c00-5b50c18e6574`의 SUCCESS이며 이번 제품 코드가 아니다.
 이것은 실제 제품 동작의 통과 기록이 아니다. signed 품질·제한 감사·exact deployment
 activation이 없으면 release는 explicit/auto 모두 닫힌다. 활성화 API도 별도 owner
 인증·recent authentication·origin·쓰기 off switch와 정확한 증거 결속을 요구한다.
 
-독립 검토는 초기 head의 첫 vendor만 accept이고 두 번째 vendor는 대기 중이다.
-서버 readback에서 Claude quota는 unknown, Cursor는 exhausted이며 작성자와 같은
-OpenAI는 제외된다. 다른 공급사로 직접 호출하거나 quota·작성자·규칙을 바꾸지 않았다.
-위 제품 코드 확장은 새 최종 head로 검토해야 한다. 아직 자체 PR/push/병합/배포,
+제품 head `2e534f5db`의 전체 검토 `r-20261009-191201-ba33cf`는 첫 vendor의
+coverage-limit nit와 accept만 있고 두 번째 vendor는 대기 중이다. 운영자가 요청한
+Copilot 재검토 결과와 후속 수정은 다음 절에 따로 기록한다. 아직 자체 PR/push/병합/배포,
 활성 flag readback, 실사용 회귀는 없다. Auto Router 세 출시 판정도 모두 pending이다.
 예외 정책 승인을 서버 연결 완료나 Router 출시 판정으로 대체하지 않는다.
 실제 holdout 원문·정답·rubric·반례는 요청하거나 열람하지 않았다.
+
+## Copilot 재검토 보강
+
+운영자의 명시적 요청으로 같은 제품 head를 Copilot에 전체 재검토했다
+(`r-20261009-225742-5c89b9`, base `e66f91973`, head `2e534f5db`).
+첫 Copilot/Moonshot 판정은 accept와 minor 세 건이며 두 번째 다른 공급사 검토는
+대기 중이다. 이 결과를 두 명의 aggregate accept로 처리하지 않는다.
+
+- adapter execute 전에 trusted intent의 DB 전이를 시작하지 않은 throw는
+  closure-owned confirmed-undispatched proof로 예약을 한 번 해제한다.
+  생성 실패도 해제 성공 여부를 확인한다. 정상 감사로 거부가 기록되면
+  `unavailable`, 해제 또는 감사 결과가 확인되지 않으면 `audit_unavailable`이다.
+  intent 전이 시작 후 결과 불명은 전액 hold·운영 latch를 유지하며 provider
+  재호출이나 묵시적 재시도가 없다.
+- 운영 latch는 UTC wall clock으로 저장하는 `TIMESTAMP(3)` attempt를 동일한
+  UTC-naive clock·baseline과 비교한다. 실제 DDL과 같은 PostgreSQL fixture로
+  Brisbane session의 fresh attempt가 잘못 중단되지 않고 Los Angeles session의
+  14초 stale attempt가 감사 실패로 중단되는 것을 검증했다.
+- 정산 상한 지적은 오탐이다. 기존 base migration의 validated
+  `PromptRefinerAutoBudgetHold_amount_check`가 이미
+  `0 <= settledMicroUsd <= reservedMicroUsd`를 강제한다. 270개 migration을 적용한
+  실제 DB에서도 제약을 확인했고, 직접 SQL 초과 정산이 `23514`와 정확한 제약
+  이름으로 거부되며 hold와 일·월 창이 모두 불변임을 검증했다. 상한과 같은
+  정산은 허용되고 unknown/null은 전액 hold를 유지한다. 중복 migration을
+  추가하거나 기존 migration bytes를 변경하지 않았다.
+
+수정 후 관련 검증은 Chat execution 78/78, 제품 server/admin 29/29와 client 23/23,
+PostgreSQL 제품·예산·운영 latch 33/33이다. 이전 head의 전체 unit·server suite
+수치를 이번 수정 head의 전체 재실행으로 바꾸어 주장하지 않는다. 필수 독립 검토는
+수정 commit 이후의 focused round로 계속하며, source/price pin·출시 승인·권한·
+kill switch와 기본 비활성 상태는 유지한다.
 
 ## 초기 서버 경계 검증 기록
 

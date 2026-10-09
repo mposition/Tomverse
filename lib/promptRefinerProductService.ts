@@ -335,11 +335,16 @@ export async function preparePromptRefinerProductSuggestion(input: {
     const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),
       intent: null });
     undispatched.add(proof);
-    try { await authority.releaseConfirmedUndispatched(proof); }
+    let released = false;
+    try {
+      await authority.releaseConfirmedUndispatched(proof);
+      released = true;
+    }
     catch { await latchProductAutoAuditFailure(); }
-    return await recordRefusal(input.snapshot, input.mode,
-      "adapter_unavailable", "adapter")
-      ? fallback("unavailable") : fallback("audit_unavailable");
+    const recorded = await recordRefusal(input.snapshot, input.mode,
+      "adapter_unavailable", "adapter");
+    return recorded && released ? fallback("unavailable") :
+      fallback("audit_unavailable");
   }
 
   let outcome: PromptRefinerProductAdapterOutcome;
@@ -348,12 +353,31 @@ export async function preparePromptRefinerProductSuggestion(input: {
     outcome = await adapter.execute({ requestId: input.snapshot.requestId,
       sourceText: input.snapshot.sourcePrompt });
   } catch {
-    // authorizeDispatch failed before generateText; no provider call occurred.
-    // Keep the hold if its DB transition result is unknown rather than retrying.
-    await latchProductAutoAuditFailure();
-    return await recordRefusal(input.snapshot, input.mode,
-      "execution_not_approved", "admission")
-      ? fallback("audit_unavailable") : fallback("audit_unavailable");
+    // Until the service marks the trusted intent immediately before its DB
+    // transition, neither a durable intent nor a provider call can exist, so
+    // the reserved hold can be released through the closure-owned proof.
+    // Once marked, the transition result may be unknown: retain the full hold
+    // and never retry.
+    let releasedOrRetained = currentIntent !== null;
+    if (currentIntent === null) {
+      const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),
+        intent: null });
+      undispatched.add(proof);
+      try {
+        await authority.releaseConfirmedUndispatched(proof);
+        releasedOrRetained = true;
+      } catch {
+        await latchProductAutoAuditFailure();
+      }
+    } else {
+      await latchProductAutoAuditFailure();
+    }
+    const recorded = await recordRefusal(input.snapshot, input.mode,
+      currentIntent === null ? "adapter_unavailable" :
+        "execution_not_approved",
+      currentIntent === null ? "adapter" : "admission");
+    return recorded && releasedOrRetained ? fallback("unavailable") :
+      fallback("audit_unavailable");
   }
   if (outcome.status === "undispatched") {
     const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),
