@@ -51,7 +51,9 @@ export function installChatE04FixtureTransport(onEvidence: (value: ChatE04Transp
   const blocked = () => { evidence.blockedRequests++; emit(); return json({ code: "CHAT_E04_QA_REQUEST_BLOCKED" }, 503); };
   window.fetch = async (input, init) => {
     if (retired) return blocked();
-    const request = new Request(new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.origin), init ?? (input instanceof Request ? input : undefined));
+    const request = input instanceof Request
+      ? new Request(input, init)
+      : new Request(new URL(input, window.location.origin), init);
     if (request.signal.aborted) throw new DOMException("Aborted", "AbortError");
     const url = new URL(request.url);
     if (url.origin !== window.location.origin) return blocked();

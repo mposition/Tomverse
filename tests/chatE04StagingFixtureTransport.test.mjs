@@ -4,14 +4,20 @@ import { CHAT_E04_CONVERSATION, installChatE04FixtureTransport } from "../lib/ch
 import { parseChatMessageSaveResponse, parsePublicChatDraft } from "../components/chat/chatDurableRecoveryClient.ts";
 
 test("page-local QA transport blocks unknown requests, external URLs and late callbacks", async () => {
-  const values = new Map(); let forwarded = 0;
+  const values = new Map(); let forwarded = 0; const forwardedRequests = [];
   globalThis.window = { location: { origin: "https://staging.example.invalid" },
-    fetch: async () => { forwarded++; return Response.json({ synthetic: true }); } };
+    fetch: async (request) => { forwarded++; forwardedRequests.push({ method: request.method,
+      marker: request.headers.get("x-e04-marker"), body: await request.text() }); return Response.json({ synthetic: true }); } };
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: { sendBeacon: () => true } });
   globalThis.XMLHttpRequest = class { send() {} };
   globalThis.sessionStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
   const seen = []; const fixture = installChatE04FixtureTransport((evidence) => seen.push(evidence));
   assert.equal((await window.fetch("/api/chat", { method: "POST", body: JSON.stringify({ contextBundle: "e04-synthetic-context" }) })).status, 200);
+  const chatRequest = new Request("https://staging.example.invalid/api/chat", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contextBundle: "e04-synthetic-context" }) });
+  assert.equal((await window.fetch(chatRequest, { cache: "no-store" })).status, 200);
+  assert.equal(seen.at(-1).contextBundleReused, true);
+  assert.equal(seen.at(-1).chatRequests, 2);
   assert.equal((await window.fetch("/api/products/chat/conversations")).status, 200);
   assert.equal((await window.fetch("/api/admin/app-settings", { method: "PUT", body: "{}" })).status, 503);
   assert.equal((await window.fetch("https://provider.example.invalid/messages", { method: "POST", body: "{}" })).status, 503);
@@ -20,6 +26,12 @@ test("page-local QA transport blocks unknown requests, external URLs and late ca
   assert.equal(forwarded, 0);
   assert.equal((await window.fetch("/api/admin/chat-e2e-fixture", { method: "POST", body: '{"action":"accepted"}' })).status, 200);
   assert.equal(forwarded, 1);
+  const autoRequest = new Request("https://staging.example.invalid/api/admin/chat-e2e-fixture", {
+    method: "POST", headers: { "Content-Type": "application/json", "x-e04-marker": "preserved" }, body: '{"action":"kept_original"}',
+  });
+  assert.equal((await window.fetch(autoRequest, { cache: "no-store" })).status, 200);
+  assert.deepEqual(forwardedRequests.at(-1), { method: "POST", marker: "preserved", body: '{"action":"kept_original"}' });
+  assert.equal(forwarded, 2);
   const post = async (path, body, method = "POST") => window.fetch(path, { method, body: JSON.stringify(body) });
   const draftPath = "/api/products/chat/drafts/e04-unit-scope";
   const text = "E04 exact synthetic authored bytes. ";
@@ -35,6 +47,6 @@ test("page-local QA transport blocks unknown requests, external URLs and late ca
   fixture.retire();
   assert.equal((await lateFetch("/api/chat", { method: "POST", body: "{}" })).status, 503);
   assert.equal((await window.fetch("/api/admin/chat-e2e-fixture", { method: "POST", body: "{}" })).status, 503);
-  assert.equal(forwarded, 1);
+  assert.equal(forwarded, 2);
   for (const key of ["providerCalls", "costMicroUsd", "productDatabaseWrites", "auditWrites"]) assert.equal(seen.at(-1)[key], 0);
 });

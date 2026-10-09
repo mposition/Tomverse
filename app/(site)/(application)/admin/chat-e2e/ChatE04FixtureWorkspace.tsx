@@ -23,6 +23,7 @@ export function ChatE04FixtureWorkspace() {
     <div className="rounded border border-amber-500 p-3 text-sm" role="status">
       <h1 className="font-semibold">E04 synthetic Chat QA</h1>
       <p>Staging administrators only. Synthetic API, page cache and Auto stand-ins. Product flags remain off. Provider calls, cost, product database writes and audit writes: 0.</p>
+      <p>The zero values are construction/configuration markers, not measured telemetry.</p>
       <p>History, context, save and retry observations are synthetic client evidence. They do not verify product persistence, provider quality or holdout evaluation.</p>
     </div>
     <div className="flex flex-wrap gap-2">
