@@ -4,7 +4,8 @@
 상태(v22 이력): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
 상태(v23 이력): **v23 전용 Ubuntu runner 실행 위치 승인, 운영 활성화 별도.** 2026-10-01 운영자 `mposition`이 아래 v23 절을 승인했다. Claude의 독립 검토에서 정책 문구 승인 차단 사항이 없음을 확인했다. 이전 v22 상태 줄은 이력이다.
 상태(v24 이력): **v24 Ubuntu AMUX invariant 관측 게이트 정정 승인.** 2026-10-02 운영자 `mposition`이 아래 v24 절을 승인했다(그 절의 승인 기록). v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장은 v24 절의 계약으로 대체됐다. 이전 v23 상태 줄은 이력이다.
-상태(최신): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
+상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
+상태(최신): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -59,6 +60,7 @@ approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 | 23 | 2026-10-01 mposition | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. 이 승인 자체로 제품 bridge·claim·실행 API를 켜지 않는다. |
 | 24 | 2026-10-02 mposition | v23의 AMUX invariant confidence 일괄 `healthy` 요구를 실패 0건·unknown 사유별 증거 계약으로 정정한다. 다른 활성화 게이트와 권한은 바꾸지 않는다. 이 승인 자체로 bridge·claim·제품 실행을 켜지 않는다. |
 | 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
+| 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1219,3 +1221,81 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 - **바꾸지 않는 것.** 환경 변수, worker catalog, 용량 행, 자동 승격, 추천 풀, Railway 서비스와 IaC, 게시 GitHub App, engineering mode를 이 버전이 설정하거나 켜지 않는다. AMUX 비용 원장의 금액을 admission에 쓰는 것은 여전히 별도 버전이다.
 - **구현.** mode까지 읽는 판정과 publisher 결과의 닫힌 경로는 승인된 Authority 절의 구현이다. 이 버전과 별개의 변경으로 먼저 병합하며, 이 버전의 승인은 그 병합이 `develop`에 들어간 뒤에만 기록한다. 그 뒤 남는 것은 래치 상수를 true로 바꾸고 `tests/engineeringAgentAmuxAdapter.test.mjs`의 출고 값 기대를 이 버전으로 옮기는 것뿐이다.
 - **사고 대응.** 이상이 보이면 먼저 `docs/policy/engineering-agent.md` §12의 정지·mode `off`를 쓴다. 래치를 다시 false로 내리는 것은 그다음 코드 변경이다.
+
+## 버전 27 — 전용 Ubuntu runner의 worker 목록과 Decision Maker 실행 주체
+
+상태: **승인됨.** `approvedBy: mposition`, `approvedAt: 2026-10-09`. 2026-10-09 작성, 작성자 Claude. 작성자와 다른 공급사인 Codex의 독립 검토가 accept였다(r-20261009-005341-7cc18f). 같은 요청의 Cursor 검토는 결과 불명(`reviewer_exit_1`)이었고 다시 보내지 않았다. 이 승인 자체로 아래 활성화 게이트 2~7은 충족되지 않는다. 번호: `develop`의 다음 빈 번호는 26이지만 `main`을 대상으로 한 draft PR #1888(2026-10-04 이후 갱신 없음)이 같은 문서에 다른 내용(CLI 사용량 보존·집계)의 v23~v26을 적고 있어 27을 쓰며, 두 번호 체계의 정리는 운영자가 한다.
+
+이 버전은 v23 실행 위치 절의 “worker 8개”를 아래 목록으로 대체하고, Decision Maker(이하 DM)의 실행 주체 둘을 더한다. v13의 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 확인된 provider(`AMUX_VERIFIED_PROVIDERS`는 `claude`, `codex` 그대로)와 교차 검토, v18 실행 API 게이트, v22의 미구현 경계, v23의 격리·활성화 게이트, v24의 invariant 관측 계약은 그대로다. 이 승인 자체로 bridge 환경 변수, 제품 claim, 실행 API, worker catalog, 자동 승격, Publisher, 병합, 배포, DM 스위치를 켜거나 바꾸지 않는다.
+
+### 1. worker 목록과 역할
+
+| provider | 세션 | 수 |
+|---|---|---|
+| `claude` | v23의 기존 세션 | 4 |
+| `codex` | v23의 기존 세션 | 3 |
+| `cursor`(Cursor CLI) | `cursor-chore`, `cursor-impl`, `cursor-worker` | 3 |
+| `copilot`(GitHub Copilot CLI) | `copilot-chore`, `copilot-impl`, `copilot-worker` | 3 |
+
+- runner의 상주 worker 세션은 이 13개다. 목록 밖의 세션을 더하거나 제거한 세션을 다시 세우는 것은 이 문서의 새 버전이다.
+- 2026-10-09 운영자 지시로 `devin-worker`를 runner에서 제거했다. 제거 전에 그 worker에 묶인 열린 카드 0건을 read-back했고, Linux worktree는 보존했다. v23 범위를 좁히는 변경이므로 기록만 한다. 그 read-back이 v23의 identity별 제품 DB 조건(열린 attempt·소유 Todo·미해결 `AmuxOrchestratorWrite` 영수증 0건)까지 덮었는지는 활성화 게이트 2에서 따로 확인한다. 보존한 worktree는 실행 디렉터리가 아니다.
+- 새 여섯은 각자 Linux 파일시스템의 독립 Git worktree에서 v23의 규칙(Windows mount·WSL 경로 금지, 재부팅 자동 시작은 세션 시작만)으로 돈다.
+- `-chore`는 AGENTS.md “작업을 어느 모델에 보낼지” 표의 `chore`, `-impl`은 `impl`이다. v16 역할로는 각각 `chore`, `implementation`까지다.
+- `-worker`는 운영자가 역할을 정하지 않아 이 버전이 정한다. `impl`이 맡을 수 있는 범위 안의 일반 작업(구현, 조사, 재현, 문서 초안)이며 `impl`보다 넓지 않다. v16 역할로는 `implementation`까지다.
+- 여섯 모두 `contract`와 `review`를 맡지 않는다. AGENTS.md의 `contract` 대상이나 v16의 `AMUX_CONTRACT_PATHS` 경로를 바꾸는 작업도 맡지 않는다.
+
+### 2. 로그인과 자격증명 목록
+
+- 여섯은 worker 계정 `tommy`에 로그인 둘을 더한다. Cursor CLI 계정 로그인 하나와 GitHub Copilot CLI 로그인 하나(GitHub OAuth device flow)다. Copilot 로그인은 운영자가 2026-10-09, 이 버전 전에 이미 했다. v23이 사전 작업을 다룬 것처럼 이 승인은 그 로그인에 소급 권한을 주지 않는다.
+- 여섯 세션이 무엇이든 실행하기 전에(세션 시작과 로컬 카드 포함) 새 자격증명마다 발급 주체, 계정, 저장 위치와 파일 권한, scope, 실제로 닿는 범위를 운영 기록에 적는다. 비밀값은 적지 않는다. device flow가 준 것은 GitHub 토큰이므로 그 GitHub 권한도 적는다. worker 계정에 Devin CLI 로그인이 남아 있으면 쓰는 세션이 없는 자격증명이므로 남은 여부와 남긴 이유를 같은 목록에 적는다.
+- 다음 가운데 하나라도 닿으면 먼저 고치고(권한 축소, 재발급, 로그아웃) 다시 적는다. 제품 DB, 배포 권한, v23이 worker 계정에 이미 허용한 범위를 넘는 GitHub 쓰기, bridge 환경 파일·`TOMVERSE_AMUX_SYNC_SECRET`·bridge 프로세스 환경을 읽는 경로. v23의 실제 UID·파일 권한 검사는 새 자격증명에도 양쪽 방향(bridge가 그 자격증명을 읽지 못함 포함)으로 다시 한다.
+- 저장소의 `vendor/amux` 소스는 자동 승인 모드의 두 provider를 `--yolo`로 시작한다(`--yolo`는 Cursor에서 `--force`의 별칭이고, Copilot에서 도구·경로·URL을 모두 허용하는 `--allow-all`과 같다). 그러므로 CLI가 묻지 않고 할 수 있는 범위는 계정 경계와 이 목록이 정하며, CLI의 승인 화면을 격리로 세지 않는다.
+
+### 3. 실제 모델과 공급사
+
+- Cursor와 Copilot은 한 CLI로 여러 공급사의 모델을 돌리고, `vendor/amux` 소스는 두 provider의 기본 모델을 서비스가 고르는 `auto`로 둔다. provider 이름은 공급사를 정하지 않는다.
+- 여섯 세션의 CLI 호출마다 실제 모델 id, 그 공급사, 값의 출처(CLI 보고 또는 unknown)를 기록한다. 요청한 모델을 실제 모델로 적지 않는다.
+- 그 기록이 실행마다 실제 값을 남기는지 확인하고 이 문서와 DM 정책의 별도 버전이 승인되기 전에는 `cursor`·`copilot`을 `AMUX_VERIFIED_PROVIDERS`에 넣지 않는다. 여섯은 v16 교차 검토의 어느 쪽(develop 성공 행의 provider, review 담당)도 되지 않고 v22의 작성자·독립 리뷰 provider 쌍에도 들지 않는다. v16의 비교는 runtime 하나의 provider를 보지만 이 두 CLI는 실행마다 공급사가 달라질 수 있으므로, 편입은 비교 단위를 바꾸는 개정이다.
+- 여섯의 질문은 DM으로 가지 않고 운영자에게 간다(docs/policy/amux-decision-maker.md §3, §7).
+
+### 4. CLI 사용량
+
+- 두 provider의 모든 CLI 호출은 v22 절 5의 공통 사용량 사건을 같은 공통 실행 래퍼에서 남긴다. v22 절 5의 “Codex/Claude CLI 호출”은 이 runner에서 Cursor·Copilot CLI 호출을 포함한다.
+- CLI가 보고하지 않는 토큰·캐시 필드, 누락, 크래시는 0이 아니라 unknown이다. 실제 모델이 unknown이면 API 환산 예상액을 계산하지 않는다(v22 절 5의 가격 미확인 규칙).
+- unknown이 Task 비용 판정에 주는 효과는 v22 절 5 그대로다. 비용 상한을 사용량으로 판정하는 경우 read-back 전까지 그 범위의 새 attempt·claim을 보류하고, 운영자 해제는 최악 상한을 계속 점유한 채 재개하며, 강제 가능한 호출 전 상한이나 예약액이 없으면 운영자 해제로도 자동 실행하지 않는다.
+- 이 사건은 DM namespace(`amux-decision-maker`)가 아니다. 사용량의 보존·집계 규칙은 이 버전이 바꾸지 않는다.
+
+### 5. 제품 dispatch 전까지
+
+- 이 버전으로 여섯은 제품 claim·dispatch 대상이 되지 않는다. v16이 미확인 provider runtime에 남긴 비단계 카드 claim도 여섯에게는 열리지 않는다.
+- 그 전까지 허용되는 것은 절 2의 목록을 기록하고 고친 뒤 운영자가 직접 지시한 로컬 AMUX 카드뿐이다. 그 카드는 Tomverse 카드가 아니고 `Execution attempt:` 줄을 갖지 않으며 v15의 실행 영수증으로 연결되지 않는다. 결과는 v23의 worker 권한 안에 머문다.
+- 여섯을 worker catalog(`TOMVERSE_AMUX_WORKER_CATALOG_JSON`)에 넣지 않는다. 다른 worker를 위해 bridge를 켤 때는 `TOMVERSE_AMUX_WSL_SESSIONS`에 여섯을 뺀 허용 세션만 적는다. 이 변수를 설정하지 않으면 실행 중인 모든 세션이 runtime으로 등록되기 때문이다(apps/tomverse-orchestrator/src/wsl_bridge.rs).
+- 여섯의 제품 dispatch는 절 2·3·4가 확인되고 아래 게이트를 지나 운영자가 따로 활성화를 기록한 뒤에만 연다. 그 활성화는 절 3의 교차 검토·DM 편입을 포함하지 않는다.
+
+### 6. Decision Maker 실행 주체
+
+DM 정책(docs/policy/amux-decision-maker.md §5, §7, §12)의 두 인스턴스 `decision-maker-openai`(`codex`)와 `decision-maker-anthropic`(`claude`)을 이 runner의 실행 주체로 더한다. 조건은 그 정책 절 5 그대로이며 하나도 빼지 않는다.
+
+- 공급사마다 권한 없는 별도 OS 계정 하나와, 그 계정에 자기 공급사 CLI 인증 하나만 둔다. worker 계정 `tommy`의 로그인을 쓰거나 그 홈에서 읽지 않으며, Cursor·Copilot 로그인은 DM 계정에 두지 않는다.
+- broker는 worker, bridge, 두 공급사 계정과 다른 UID로 돌고 공급사 CLI 인증과 bridge 자격증명을 갖지 않는다. DM 계정과 broker에는 GitHub 로그인, git credential helper, SSH 키, 제품 DB·배포 자격증명, bridge 환경 파일이 없다.
+- 일반 worker launcher가 아니라 전용 launcher가 질문마다 비대화형 프로세스 하나를 고정 argv와 고정 환경(허용 목록)으로 시작하고, 시작 전에 설정 digest를 대조한다. 하나라도 기록과 다르면 시작하지 않는다.
+- 질문당 30분 hard timeout에 강제 종료한다.
+- 양방향 격리. worker는 요청 디렉터리, DM 프로세스, broker를 읽거나 ptrace하지 못한다. DM 계정과 broker는 worker 홈, 저장소 clone, 다른 공급사 계정, AMUX 상태 파일, bridge 환경 파일을 읽지 못한다.
+- 네트워크는 공급사 계정이 자기 공급사 API host만, broker가 GitHub 공개 host와 bridge 로컬 소켓만이다.
+- DM 정책의 S2 전에 S0의 양방향 계정 격리 실측 증거가 있어야 한다.
+
+두 주체는 상주 tmux worker 세션이 아니고, bridge가 runtime으로 등록하지 않으며, worker catalog에 없고, claim할 수 없다. 절 1의 13개, v22의 “검증된 worker 수”, 동시 실행 상한 어디에도 세지 않는다. 위 조건 가운데 하나라도 빠진 배치는 이 버전이 허락한 DM 주체가 아니다. worker 목록에 DM 이름을 더하거나, 일반 세션·launcher·`tommy`의 로그인으로 DM을 돌리는 것으로는 이 절을 충족하지 못한다. DM 인스턴스 스위치는 `off` 그대로다.
+
+### 활성화 게이트
+
+1. 이 버전의 승인 기록과, 작성자 Claude와 다른 공급사의 독립 검토.
+2. `devin-worker` identity의 v23 제품 DB 0건 조건을 read-back한다.
+3. 절 2의 자격증명 목록을 기록하고 넓은 범위를 고친다. 여섯 세션의 어떤 실행보다 먼저다.
+4. 절 3의 실제 모델 기록과 절 4의 사용량 사건을 여섯 세션 각각의 로컬 카드 실행으로 확인한다. 제품 dispatch보다 먼저다.
+5. v23 활성화 게이트 2·3과 v24 관측을 13개 세션으로 다시 한다. v24가 8개 부하로 적은 호스트 메모리는 13개 세션과 DM 프로세스를 함께 띄운 부하에서 다시 본다. `scripts/verify-amux-ubuntu-reboot.mjs`의 기대 목록은 아직 `devin-worker`를 포함한 8개이므로, 그 코드를 고치는 별도 변경 전에는 그 검사가 13개 목록의 증거가 되지 않는다.
+6. 여섯의 제품 dispatch는 운영자의 별도 활성화 기록 뒤, v23 활성화 게이트 4의 claim 차단 관측 창과 제한 실행 순서로만 연다.
+7. DM 주체는 S0 증거와 DM 정책 S2의 다른 선행 조건을 갖춘 뒤에만 설치·시작한다.
+
+### 이 버전이 하지 않는 것
+
+환경 변수, bridge·claim·실행 API, worker catalog, `AMUX_VERIFIED_PROVIDERS`, 동시 실행·대기열 상한, 용량 행, 자동 승격, Publisher, 병합, 배포, DM 스위치와 DM 정책, CLI 사용량의 보존·집계를 바꾸지 않는다. 위 검증 script를 포함해 어떤 코드도 바꾸지 않는다.
