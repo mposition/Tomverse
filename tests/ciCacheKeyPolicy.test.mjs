@@ -904,8 +904,9 @@ test("every widely readable workflow in this repository holds a read-only cache 
   }
   assert.deepEqual(missing, []);
   // Pinned so that a new workflow arriving without a declaration is a visible
-  // change here and not only a red gate somebody silences.
-  assert.equal(checked, 24);
+  // change here and not only a red gate somebody silences. 24 until
+  // 2026-10-08, when the develop push lane gained the unit tests.
+  assert.equal(checked, 25);
 });
 
 test("an explicit write stops being allowed the moment a wider trigger is added", () => {
