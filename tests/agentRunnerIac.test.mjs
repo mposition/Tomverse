@@ -457,7 +457,7 @@ test("the sre-ops digest service declares the supervisor's digest list, daily at
 });
 
 test("the AMUX orchestrator is a long-running production service that cannot run commands", () => {
-  // development-agent-orchestration.md, version 26.
+  // development-agent-orchestration.md, version 28.
   const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "amux_orchestrator");
   assert.ok(runner, "the orchestrator is not declared");
   assert.equal(runner.service, "AMUX Orchestrator");

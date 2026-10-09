@@ -1325,7 +1325,14 @@ DM 정책(docs/policy/amux-decision-maker.md §5, §7, §12)의 두 인스턴스
 5. 옛 서비스를 `Tomverse` project의 대시보드에서 지운다. 어떤 IaC 파일도 그 서비스를 소유하지 않으므로 apply는 지우지 않는다.
 6. `npm run railway:agents:plan`이 변경 없음을 보이는지 보고, `npm run railway:iac:use-staging`으로 CLI 연결을 되돌려 둔다.
 
-되돌리기는 5 전이면 3·4를 거꾸로 한다(새 서비스에서 지우고 옛 서비스에 넣는다). 5 뒤면 이 선언을 되돌리는 PR이 `main`에 들어간 뒤 `Tomverse` project에 대시보드로 서비스를 다시 만들고, `npm run railway:agents:plan`이 `AMUX Orchestrator` 삭제만 보일 때 apply한다.
+되돌리기도 두 orchestrator가 함께 돌지 않게 한다. 항상 **켜져 있는 쪽을 먼저 멈추고, 끝났음을 로그로 본 뒤** 다른 쪽을 켠다.
+
+- 5 전: 새 서비스에서 `TOMVERSE_AMUX_ENABLED`를 지우고 Deploy해 끝났음을 본 뒤, 옛 서비스에 넣고 Deploy해 4와 같은 로그를 본다.
+- 5 뒤:
+  1. 이 선언을 되돌리는 PR이 `main`에 들어간 뒤, `Tomverse` project에 대시보드로 같은 설정의 서비스를 다시 만들고 값을 넣는다. `TOMVERSE_AMUX_ENABLED`만 아직 넣지 않는다.
+  2. 새 서비스(`Tomverse Agents`)에서 `TOMVERSE_AMUX_ENABLED`를 지우고 Deploy해 끝났음을 본다.
+  3. 다시 만든 서비스에 `TOMVERSE_AMUX_ENABLED`를 넣고 Deploy해 4와 같은 로그를 본다.
+  4. `npm run railway:agents:use-production` → `npm run railway:agents:plan`이 `AMUX Orchestrator` 삭제만 보일 때 apply하고, CLI 연결을 staging으로 되돌린다.
 
 ### 이 버전이 하지 않는 것
 

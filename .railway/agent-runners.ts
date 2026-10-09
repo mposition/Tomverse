@@ -162,7 +162,7 @@ const BILLING_FINANCE_OPS_VARIABLES = [
 
 /**
  * The AMUX orchestrator's variables (development-agent-orchestration.md,
- * version 26): the four it had in production when it moved here, and
+ * version 28): the four it had in production when it moved here, and
  * TOMVERSE_AMUX_CLAIM, which the claim-only mode reads (version 15). The names
  * that make it run commands -- TOMVERSE_AMUX_EXECUTE,
  * TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON and the TOMVERSE_AMUX_WSL_* names -- are
@@ -441,12 +441,12 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   ...ENGINEERING_AGENT_SERVICES,
   {
     // The AMUX orchestrator (docs/policy/development-agent-orchestration.md,
-    // version 26): the long-running claim and recovery loop. It holds no
+    // version 28): the long-running claim and recovery loop. It holds no
     // product database credential and reaches the app at its public URL, so it
     // belongs in this project. Built from its Dockerfile, which runs the
     // binary as `nobody`; the start command is that binary.
     //
-    // Restarted after a non-zero exit, at most ten times (version 26 replaces
+    // Restarted after a non-zero exit, at most ten times (version 28 replaces
     // version 20 item 9's dashboard setting with this declaration).
     // `checkSuites: false` keeps the deployment it had (version 20 item 10):
     // a merge deploys at once, and an orchestrator that comes up before the
