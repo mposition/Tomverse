@@ -376,13 +376,29 @@ test("only the named AMUX receipt and admission routes open direct transactions"
     "app/api/internal/amux/v4/analysis-claim/route.ts",
     "app/api/internal/amux/v4/analysis-result/route.ts",
   ]);
-  // The analysis routes keep their writes dark and bound both write and
-  // receipt-read transactions independently of execution commit deadlines.
+  // Intake v15 opens only the code latches. The independent runtime write
+  // and receipt-read switches still fail closed before a transaction opens.
+  // Both transaction bounds remain independent of execution commit deadlines.
   const claim = "app/api/internal/amux/v4/analysis-claim/route.ts";
   const result = "app/api/internal/amux/v4/analysis-result/route.ts";
   for (const [path, latch] of [[claim, "CLAIM"], [result, "RESULT"]]) {
     const source = withoutComments(read(path));
-    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = false;`));
+    assert.match(source, new RegExp(`const ${latch}_CODE_LATCH = true;`));
+    assert.match(source, new RegExp(`const ${latch}_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_${latch}_WRITE";`));
+    assert.match(source, new RegExp(`const ${latch}_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_${latch}_READ";`));
+    const post = between(source, "export async function POST", "export async function GET");
+    const writeGate = `process.env[${latch}_WRITE_ENV] !== "enabled"`;
+    const readGate = `process.env[${latch}_RECEIPT_READ_ENV] !== "enabled"`;
+    assert.ok(post.includes(`!${latch}_CODE_LATCH || ${writeGate}`));
+    assert.ok(post.includes(`!${latch}_RECEIPT_READ_CODE_LATCH ||`));
+    assert.ok(post.includes(readGate));
+    assert.ok(post.indexOf(writeGate) < post.indexOf("prisma.$transaction"));
+    assert.ok(post.indexOf(readGate) < post.indexOf("prisma.$transaction"));
+    const receiptRead = source.slice(source.indexOf("export async function GET"));
+    assert.ok(receiptRead.includes(readGate));
+    assert.ok(!receiptRead.includes(`process.env[${latch}_WRITE_ENV]`));
+    assert.match(source, /isAmuxV4AnalysisAgentAuthorized/);
+    assert.match(source, /AMUX_V4_ANALYSIS_AGENT_SECRET_ENV/);
     assert.match(source, /maxWait: 5_000, timeout: 15_000/);
     assert.match(source, /maxWait: 5_000, timeout: 10_000/);
     assert.match(source, /callbackReturned = true/);
