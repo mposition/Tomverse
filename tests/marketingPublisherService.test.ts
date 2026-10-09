@@ -183,7 +183,7 @@ test("the service is declared once, every five minutes, with exactly two variabl
   }
   // dev runs every develop merge before anyone has verified it, so it never
   // holds the job that publishes to outside accounts.
-  assert.equal(service.environments.dev, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(service.environments, "dev"), false);
 
   const trigger = parseCronSchedule(service.cronSchedule);
   assert.ok(trigger);
