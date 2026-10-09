@@ -96,6 +96,39 @@ test("start refuses an unknown variable name, a short secret or an unusable sign
   assert.equal(p.calls.signal.length, 0);
 });
 
+test("the names the deployed image provides do not stop the trigger", async () => {
+  // Read in a live Railway container on 2026-10-09 (names only). The first
+  // scheduled runs that day, staging and production, refused on these.
+  const image = {
+    CI: "true",
+    NEXT_TELEMETRY_DISABLED: "1",
+    NPM_CONFIG_FETCH_RETRIES: "5",
+    NPM_CONFIG_FUND: "false",
+    NPM_CONFIG_PRODUCTION: "false",
+    NPM_CONFIG_UPDATE_NOTIFIER: "false",
+    RAILPACK_BUILT_AT: "x",
+    RAILPACK_VERSION: "x",
+    MISE_CACHE_DIR: "/mise/cache",
+    MISE_CONFIG_DIR: "/mise",
+    MISE_DATA_DIR: "/mise",
+    MISE_INSTALLS_DIR: "/mise/installs",
+    MISE_SHIMS_DIR: "/mise/shims",
+    RAILWAY_BETA_ENABLE_RUNTIME_V2: "1",
+    HOME: "/root",
+    NODE_VERSION: "22",
+    RAILWAY_SERVICE_NAME: "Billing Finance Ops Deadline",
+  };
+  const p = ports({ status: 201, body: { result: "created" } });
+  assert.deepEqual(await runBillingFinanceOpsService({ ...ENV, ...image }, p), {
+    exitCode: 0,
+    outcome: "ran",
+    result: "created",
+    signalled: true,
+  });
+  // A name in the same family that was not measured still stops it.
+  assert.equal((await runBillingFinanceOpsService({ ...ENV, ...image, NPM_CONFIG__AUTH: "x" }, p)).outcome, "refused_to_start");
+});
+
 test("the signal URL must be https without credentials", () => {
   assert.equal(billingFinanceOpsSignalUrlUsable("https://hc.example.invalid/ping/1"), true);
   assert.equal(billingFinanceOpsSignalUrlUsable("http://hc.example.invalid/ping/1"), false);
