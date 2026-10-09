@@ -1312,32 +1312,32 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerBody",
-    tableMentions: 10,
-    writeVerbs: 10,
+    tableMentions: 12,
+    writeVerbs: 11,
     reason:
-      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; since S1e it also reads a proposal's body digests for a person's judgment and writes an edited answer in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the judgment's audit; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
+      "The Decision Maker body store's single writer (docs/policy/amux-decision-maker.md §10). Its raw SQL names the body table in four constant SELECTs (a request's retention read, its bodies, a key period's state, the purge candidates), two constant DELETE ... RETURNING statements (the expiry purge of a request's bodies and the privacy erase of named fields, each under its audit of the same transaction, which the trigger requires) and, in the one statement that records an accepted result's detail, a constant INSERT ... SELECT FROM unnest(...) RETURNING of a DM output's bodies, written only with the detail; since S1e it also reads a proposal's body digests for a person's judgment and writes an edited answer in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the judgment's audit; since 2026-10-09 the routing composition writes a new DM request's card text in one constant INSERT ... SELECT ... WHERE the registry holds the key, RETURNING its digest, under the route audit the routing wrote in the same transaction, and a constant SELECT reads that card text back for Admin; every value is a bound parameter. The other verbs are the retention and key event INSERTs and the word in the errors raised when an insert returns no row or rows change under the lock. It never updates a body, and it writes the audit log only through writeAdminAuditLog and lib/amux/decisionMakerBodySystemAudit.ts.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerRetentionEvent",
     tableMentions: 7,
-    writeVerbs: 10,
+    writeVerbs: 11,
     reason:
       "The same module names the retention event table in its constant SELECTs (a request's retention and hold counts, a key period's open holds, the purge candidates) and in one constant INSERT ... RETURNING of a person's hold_set or hold_release; every value is a bound parameter. retention_set is written by the closing trigger, never here. It never updates or deletes a retention event.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerDigestKeyEvent",
-    tableMentions: 9,
-    writeVerbs: 10,
+    tableMentions: 11,
+    writeVerbs: 11,
     reason:
-      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), the same two under which an edited answer is written and the registry entry a judgment's proposal read returns (S1e), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
+      "The same module names the digest-key registry in a key period's state read (its rotation's key check value and whether its destruction is recorded), in the two EXISTS conditions under which a result's detail is written (the key it was digested under is registered and its period not destroyed), the same two under which an edited answer is written and the registry entry a judgment's proposal read returns (S1e), the same two under which a routing's card text is written (2026-10-09), and in two constant INSERT ... RETURNING statements, a rotation and a destruction; every value is a bound parameter. It never updates or deletes a registry event, and never writes a key.",
   },
   {
     path: "lib/amux/decisionMakerBodyStore.ts",
     table: "AmuxDecisionMakerResultDetail",
     tableMentions: 3,
-    writeVerbs: 10,
+    writeVerbs: 11,
     reason:
       "The same module writes a terminal result's structured detail in one constant data-modifying statement, INSERT ... SELECT ... WHERE the registry holds the key, with the bodies in a second CTE that inserts only beside it, and reads it in two constant SELECTs, the second the proposal a person's judgment checks (S1e); every value is a bound parameter. It never updates or deletes a detail.",
   },

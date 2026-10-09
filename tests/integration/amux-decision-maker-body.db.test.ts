@@ -25,11 +25,14 @@ import {
   purgeDecisionMakerBodies,
   readDecisionMakerBodies,
   readDecisionMakerBodyRetention,
+  readDecisionMakerCardText,
   readDecisionMakerResultDetail,
   recordDecisionMakerLegalHold,
+  recordDecisionMakerRequestWithCardText,
   rotateDecisionMakerDigestKey,
   submitDecisionMakerOutput,
 } from "@/lib/amux/decisionMakerBodyStore";
+import { dmCardText } from "@/lib/amux/decisionMakerCore";
 import {
   DecisionMakerRequestWriteError,
   discardDecisionMakerAssignment,
@@ -431,6 +434,153 @@ test("a body is never changed, and only READ COMMITTED writes one", async () => 
     ),
     /AMUX_DM_BODY_ISOLATION/,
   );
+});
+
+// ---------------------------------------------------------------------------
+// The card text, stored by the routing itself (2026-10-09): the request and
+// its card text are written together through the stores, never by SQL here.
+// ---------------------------------------------------------------------------
+
+const routingBindingFor = (askingProvider = "claude") => ({
+  cardId: `card-text-${randomUUID()}`,
+  questionRevision: 1,
+  askingWorkerId: "worker.claude-1",
+  amuxSessionId: "session:7",
+  amuxSessionAttempt: 1,
+  askingProvider,
+  termListVersion: "v1",
+  classificationVersion: "authority-manifest-1",
+  scannerVersion: "v1",
+});
+
+const ROUTED_CARD = {
+  askType: "decision",
+  resolution: null,
+  type: "task",
+  tags: ["needs:you"],
+  title: "Pick a cache key layout",
+  question: "Should the cache key include the locale or only the model id?",
+  options: [
+    { id: "a", label: "Model id only" },
+    { id: "b", label: "Model id and locale" },
+  ],
+  unblocks: "The cache module can be finished.",
+  context: "Both layouts pass the current tests.\nQuoted \"exactly\", with a back\\slash.",
+  contextPaths: ["lib/cache.ts"],
+};
+
+/** The route transaction's whole budget: the boundary's setup and fence, the routing and its card text. */
+const ROUTE_BOUNDARY = { operation: "dm_route_card_text_test", prismaCallCeiling: 12, isolation: "mutation" as const };
+
+test("a question routed to a DM keeps its card text from its own routing, and Admin reads it back", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  const binding = routingBindingFor();
+  // A card at §5's cap exactly, so the stored text is the largest the router sends.
+  const card = { ...ROUTED_CARD, context: "" };
+  card.context = "x".repeat(16 * 1024 - Buffer.byteLength(dmCardText(card), "utf8"));
+  assert.equal(Buffer.byteLength(dmCardText(card), "utf8"), 16 * 1024);
+  for (const routedCard of [ROUTED_CARD, card]) {
+    const routedBinding = routedCard === ROUTED_CARD ? binding : routingBindingFor();
+    const routed = await withAmuxDbBoundary(ROUTE_BOUNDARY, (tx) =>
+      recordDecisionMakerRequestWithCardText(tx, { binding: routedBinding, card: routedCard, keyRing: ring }),
+    );
+    assert.equal(routed.created, true);
+    assert.equal(routed.route, "dm_proposal");
+    const text = dmCardText(routedCard);
+    const digest = dmBodyDigest(dmRequestDigestKey(KEY, routed.requestId), "card_text", text);
+    assert.deepEqual(routed.cardText, { digest, keyPeriod: period, bytes: Buffer.byteLength(text, "utf8") });
+    // What Admin shows: the card as routed, its stored text and its keyed digest.
+    const read = await readDecisionMakerCardText(prisma, routed.requestId);
+    assert.ok(read);
+    assert.deepEqual(read.card, routedCard);
+    assert.equal(read.text, text);
+    assert.equal(read.digest, digest);
+    assert.equal(read.keyPeriod, period);
+    // One body, bound to the request row's own route audit -- the router's, of the routing's transaction.
+    const rows = await prisma.$queryRaw<Array<{ bodyAudit: string; requestAudit: string; action: string; actor: string; octets: number }>>`
+      SELECT b."auditLogId" AS "bodyAudit", r."auditLogId" AS "requestAudit", a."action", a."metadata" ->> 'systemActor' AS "actor",
+             octet_length(b."text") AS "octets"
+      FROM "AmuxDecisionMakerBody" b
+      JOIN "AmuxDecisionMakerRequest" r ON r."id" = b."requestId"
+      JOIN "AdminAuditLog" a ON a."id" = b."auditLogId"
+      WHERE b."requestId" = ${routed.requestId}
+    `;
+    assert.deepEqual(rows, [
+      {
+        bodyAudit: routed.routeAuditLogId,
+        requestAudit: routed.routeAuditLogId,
+        action: "amux.decision.route",
+        actor: "amux-decision-router",
+        octets: Buffer.byteLength(text, "utf8"),
+      },
+    ]);
+    assert.deepEqual((await readDecisionMakerBodies(prisma, routed.requestId)).map((body) => [body.field, body.digest]), [["card_text", digest]]);
+    // The audit entry names the request, never the card.
+    const audit = await prisma.$queryRaw<Array<{ metadata: unknown; summary: string }>>`
+      SELECT "metadata", "summary" FROM "AdminAuditLog" WHERE "id" = ${routed.routeAuditLogId}
+    `;
+    assert.doesNotMatch(JSON.stringify(audit), /cache key|Model id only|xxxxxxxx/);
+  }
+  // The same question again: its first routing stands, with its one card text.
+  const first = (await prisma.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "AmuxDecisionMakerRequest" WHERE "cardId" = ${binding.cardId}`)[0]!.id;
+  const again = await prisma.$transaction((tx) => recordDecisionMakerRequestWithCardText(tx, { binding, card: ROUTED_CARD, keyRing: ring }));
+  assert.deepEqual([again.created, again.requestId, again.sameBinding, again.cardText], [false, first, true, null]);
+  assert.deepEqual(await bodyFields(first), ["card_text"]);
+  // And it cannot be stored again later: the guard binds a card text to the routing's own transaction.
+  await rejectsWith(
+    prisma.$transaction(async (tx) => {
+      const audit = await writeAudit(tx, { kind: "system", actor: "amux-decision-router", action: "amux.decision.route", targetType: REQUEST, targetId: first });
+      await insertBodyRow(tx, first, period, { field: "card_text", text: "Another card.", auditLogId: audit });
+    }),
+    /AMUX_DM_BODY_UNAUDITED|AmuxDecisionMakerBody_requestId_field_key|unique/i,
+  );
+});
+
+test("a question routed to the operator stores no card text, and one the registry cannot key leaves no request", async () => {
+  const period = await currentPeriod();
+  const ring = new Map([[period, KEY]]);
+  // Built at runtime, so no literal in this file looks like a credential.
+  const pat = ["gh", "p_", "d".repeat(36)].join("");
+  const operatorCases: Array<[ReturnType<typeof routingBindingFor>, typeof ROUTED_CARD, string]> = [
+    [routingBindingFor("gemini"), ROUTED_CARD, "provider_unverified"],
+    [routingBindingFor(), { ...ROUTED_CARD, question: "Deploy the cache to production?" }, "irreversible_term"],
+    // Section 3-8: a card with a secret is never sent to a DM, and never stored.
+    [routingBindingFor(), { ...ROUTED_CARD, context: `see ${pat}` }, "card_secret_detected"],
+    // Section 5: over 16 KiB of card text.
+    [routingBindingFor(), { ...ROUTED_CARD, context: "x".repeat(16 * 1024) }, "input_limit_exceeded"],
+  ];
+  for (const [binding, card, refusal] of operatorCases) {
+    const routed = await prisma.$transaction((tx) => recordDecisionMakerRequestWithCardText(tx, { binding, card, keyRing: ring }));
+    assert.equal(routed.created, true, refusal);
+    assert.equal(routed.route, "operator", refusal);
+    assert.deepEqual(routed.refusalCodes, [refusal]);
+    assert.equal(routed.cardText, null, refusal);
+    assert.equal(await readDecisionMakerCardText(prisma, routed.requestId), null, refusal);
+    assert.deepEqual(await bodyFields(routed.requestId), [], refusal);
+  }
+  // The ring's key for the period is not the registered one: the card text is not stored, the
+  // store says so, and the routing's audit and request roll back with it.
+  const binding = routingBindingFor();
+  const audits = async () =>
+    Number((await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS "n" FROM "AdminAuditLog" WHERE "action" = 'amux.decision.route'`)[0]!.n);
+  const before = await audits();
+  let caught: unknown = null;
+  try {
+    await prisma.$transaction((tx) =>
+      recordDecisionMakerRequestWithCardText(tx, { binding, card: ROUTED_CARD, keyRing: new Map([[period, OTHER_KEY]]) }),
+    );
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught instanceof DecisionMakerBodyWriteError, String(caught));
+  assert.equal((caught as DecisionMakerBodyWriteError).code, "digest_key_unavailable");
+  assert.deepEqual(await prisma.$queryRaw`SELECT 1 FROM "AmuxDecisionMakerRequest" WHERE "cardId" = ${binding.cardId}`, []);
+  assert.equal(await audits(), before);
+  // The registered key routes the same question, with its card text.
+  const routed = await prisma.$transaction((tx) => recordDecisionMakerRequestWithCardText(tx, { binding, card: ROUTED_CARD, keyRing: ring }));
+  assert.equal(routed.route, "dm_proposal");
+  assert.deepEqual(await bodyFields(routed.requestId), ["card_text"]);
 });
 
 // ---------------------------------------------------------------------------

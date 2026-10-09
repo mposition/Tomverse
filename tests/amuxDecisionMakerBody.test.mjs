@@ -23,6 +23,9 @@ import {
   DM_ESCALATION_MAX_BYTES,
   DM_OPTION_ID_PATTERN,
   DM_RATIONALE_MAX_BYTES,
+  dmCardText,
+  dmCardTextBytes,
+  routeDmQuestion,
 } from "../lib/amux/decisionMakerCore.ts";
 import {
   DM_BODY_AUDIT_ACTIONS,
@@ -75,9 +78,11 @@ import {
   purgeDecisionMakerBodies,
   readDecisionMakerBodies,
   readDecisionMakerBodyRetention,
+  readDecisionMakerCardText,
   readDecisionMakerDigestKeyPeriod,
   readDecisionMakerResultDetail,
   recordDecisionMakerLegalHold,
+  recordDecisionMakerRequestWithCardText,
   rotateDecisionMakerDigestKey,
   submitDecisionMakerOutput,
 } from "../lib/amux/decisionMakerBodyStore.ts";
@@ -690,9 +695,10 @@ test("one module reads and writes the four tables, never updates a body or a det
   assert.equal((store.match(/INSERT INTO "AmuxDecisionMakerDigestKeyEvent"/g) ?? []).length, 2);
   assert.equal((store.match(/INSERT INTO "AmuxDecisionMakerResultDetail"/g) ?? []).length, 1);
   // A terminal result is recorded only through the composition that writes its detail under a
-  // registered key, and a broker key is handed out only through the keyed assignment: no other
-  // module calls the two ledger writes.
-  for (const call of [/\bsubmitDecisionMakerResult\(/, /\bassignDecisionMakerRequest\(/]) {
+  // registered key, a broker key is handed out only through the keyed assignment, and a question
+  // is routed only through the composition that stores its card text (2026-10-09): no other
+  // module calls the three ledger writes.
+  for (const call of [/\bsubmitDecisionMakerResult\(/, /\bassignDecisionMakerRequest\(/, /\brecordDecisionMakerRequest\(/]) {
     const callers = files.filter(
       (path) => path !== "lib/amux/decisionMakerRequestStore.ts" && call.test(withoutComments(readFileSync(join(root, path), "utf8"))),
     );
@@ -788,6 +794,20 @@ const PERMISSIVE_SWITCHES = [
   { scope: "decision-maker-anthropic", value: "proposal" },
 ];
 
+/** The routing read's request columns when the card revision has no request (S1c's shape). */
+const ROUTING_NO_REQUEST = Object.fromEntries(
+  [
+    "id", "cardId", "questionRevision", "askingWorkerId", "amuxSessionId", "amuxSessionAttempt", "askingProvider",
+    "optionSetDigest", "termListVersion", "classificationVersion", "scannerVersion", "route", "instance", "refusalCodes",
+    "createdAtEpochMs", "assignmentDeadlineAtEpochMs",
+  ].map((column) => [column, null]),
+);
+
+/** Where each value sits in the card text insert. */
+const CARD_INSERT = { requestId: 1, text: 2, keyPeriod: 3, keyCheck: 4, digest: 5, auditLogId: 6 };
+const cardInsertOf = (sent) =>
+  sent.find((statement) => statement.sql?.includes('INSERT INTO "AmuxDecisionMakerBody"') && statement.sql.includes("'card_text'"));
+
 const recordingTx = ({
   request = requestRow(),
   retention: retentionValues = retentionRow(),
@@ -796,6 +816,8 @@ const recordingTx = ({
   switches = PERMISSIVE_SWITCHES,
   candidates = [],
   registryHoldsKey = true,
+  existing = null,
+  cardTextRows = [],
 } = {}) => {
   const sent = [];
   const tx = {
@@ -807,13 +829,25 @@ const recordingTx = ({
       const sql = strings.join("$");
       sent.push({ kind: "query", sql, values });
       if (sql.includes("AT TIME ZONE 'UTC'")) return Promise.resolve([{ createdAt: new Date("2026-10-08T00:00:00.000Z") }]);
+      // The routing's reads and its request row (S1c), for the routing composition.
+      if (sql.includes('LEFT JOIN "AmuxDecisionMakerRequest" r')) {
+        return Promise.resolve([{ ...ROUTING_NO_REQUEST, ...(existing ?? {}), dbNowEpochMs: BigInt(NOW) }]);
+      }
+      if (sql.includes('AS "lastHour"')) return Promise.resolve([{ lastHour: 0n, lastDay: 0n }]);
       if (sql.includes('INSERT INTO "AmuxDecisionMakerResultDetail"')) {
         return Promise.resolve([{ details: registryHoldsKey ? 1n : 0n, fields: registryHoldsKey ? values[DETAIL.fields] : [] }]);
+      }
+      if (sql.includes('INSERT INTO "AmuxDecisionMakerBody"') && sql.includes("'card_text'")) {
+        return Promise.resolve(registryHoldsKey ? [{ digest: values[CARD_INSERT.digest] }] : []);
       }
       if (sql.includes('INSERT INTO "AmuxDecisionMakerRequestEvent"')) {
         return Promise.resolve([{ sequence: 41n, createdAtEpochMs: BigInt(NOW + 5), resultDeadlineAtEpochMs: null }]);
       }
+      if (sql.includes('INSERT INTO "AmuxDecisionMakerRequest"\n')) {
+        return Promise.resolve([{ createdAtEpochMs: BigInt(NOW), assignmentDeadlineAtEpochMs: BigInt(NOW + DM_ASSIGNMENT_WINDOW_MS) }]);
+      }
       if (sql.includes("INSERT INTO")) return Promise.resolve([{ sequence: 7n, createdAtEpochMs: BigInt(NOW + 5) }]);
+      if (sql.includes(`"field" = 'card_text'`)) return Promise.resolve(cardTextRows);
       if (sql.includes('DELETE FROM "AmuxDecisionMakerBody"')) {
         const fields = values.length > 1 ? values[1] : retentionValues.bodyFields;
         return Promise.resolve(fields.map((field) => ({ field })));
@@ -880,6 +914,31 @@ const resultBinding = () => ({
   scannerVersion: "v1",
   policyVersion: 1,
   transmission: { snapshotState: "none", snapshotTargetSha: null, snapshotManifestDigest: null, inputPayloadDigest: DIGEST_B },
+});
+/** A routing caller's binding: every value but the option set digest, which the routing store computes. */
+const ROUTING_BINDING = Object.freeze({
+  cardId: "card-41",
+  questionRevision: 3,
+  askingWorkerId: "worker.claude-1",
+  amuxSessionId: "session:9",
+  amuxSessionAttempt: 1,
+  askingProvider: "claude",
+  termListVersion: "v1",
+  classificationVersion: "authority-manifest-1",
+  scannerVersion: "v1",
+});
+/** The card a claude worker asks with, which the router sends to the openai DM. */
+const ROUTED_CARD = Object.freeze({
+  askType: "decision",
+  resolution: null,
+  type: "task",
+  tags: ["needs:you"],
+  title: "Pick a cache key layout",
+  question: "Should the cache key include the locale or only the model id?",
+  options: OPTIONS,
+  unblocks: "The cache module can be finished.",
+  context: "Both layouts pass the current tests.",
+  contextPaths: ["lib/cache.ts"],
 });
 
 test("the reads are one statement each", async () => {
@@ -1094,7 +1153,203 @@ for (const [label, integrityKey] of [
       }
     });
   });
+
+  // 2026-10-09: the routing stores the card text of a new request routed to a DM, in its own
+  // transaction, under its own route audit -- the only time the body guard accepts it.
+  test(`the routing composition stores the card text in ${9 + extra} statements ${label} an integrity key, within the budget`, async () => {
+    await withIntegrityKey(integrityKey, async () => {
+      const { tx, sent } = recordingTx();
+      const result = await recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card: ROUTED_CARD, keyRing: RING });
+      assert.equal(result.created, true);
+      assert.equal(result.route, "dm_proposal");
+      // The routing (lock, routing read, switches, throughput, route audit, request), then the card text.
+      assert.deepEqual(kindsOf(sent), ["execute", "query", "query", "query", ...auditKinds, "query", "query"]);
+      assert.equal(sent.length, 9 + extra);
+      assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
+      assert.match(sent[0].sql, LOCK);
+      const audit = auditOf(sent);
+      assert.equal(audit.action, "amux.decision.route");
+      assert.equal(audit.targetType, "AmuxDecisionMakerRequest");
+      assert.equal(audit.targetId, result.requestId);
+      // The audit metadata names no body: the card text is never in an audit entry.
+      assert.doesNotMatch(JSON.stringify(audit), /cache key|Model id only|card_text/);
+      const requestInsert = sent.at(-2);
+      assert.match(requestInsert.sql, /INSERT INTO "AmuxDecisionMakerRequest"\n/);
+      assert.equal(requestInsert.values.at(-1), "audit-row-1");
+      const insert = sent.at(-1);
+      assert.equal(insert, cardInsertOf(sent));
+      // Only while the registry holds this key, undestroyed.
+      assert.match(insert.sql, /WHERE EXISTS \(\s+SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k\s+WHERE k\."keyPeriod" = \$::integer AND k\."kind" = 'rotate' AND k\."keyCheck" = \$/);
+      assert.match(insert.sql, /AND NOT EXISTS \(\s+SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k\s+WHERE k\."keyPeriod" = \$::integer AND k\."kind" = 'destroy'/);
+      const text = dmCardText(ROUTED_CARD);
+      const digest = dmBodyDigest(dmRequestDigestKey(KEY, result.requestId), "card_text", text);
+      // The card text as the serializer writes it, keyed under the request's own key, bound to the
+      // route audit the routing just wrote and named in the request row.
+      assert.deepEqual(
+        [CARD_INSERT.requestId, CARD_INSERT.text, CARD_INSERT.keyPeriod, CARD_INSERT.keyCheck, CARD_INSERT.digest, CARD_INSERT.auditLogId].map(
+          (index) => insert.values[index],
+        ),
+        [result.requestId, text, PERIOD, CHECK, digest, "audit-row-1"],
+      );
+      assert.equal(result.routeAuditLogId, "audit-row-1");
+      assert.deepEqual(result.cardText, { digest, keyPeriod: PERIOD, bytes: Buffer.byteLength(text, "utf8") });
+    });
+  });
+
+  test(`a routing that stores no card text sends the routing's statements only ${label} an integrity key`, async () => {
+    await withIntegrityKey(integrityKey, async () => {
+      // Built at runtime, so no literal in this file looks like a credential.
+      const pat = ["gh", "p_", "b".repeat(36)].join("");
+      const overCap = { ...ROUTED_CARD, context: "x".repeat(DM_CARD_TEXT_MAX_BYTES) };
+      const cases = [
+        // Routed to the operator: the operator reads the card in AMUX, and the body guard refuses a
+        // body for a request closed from its creation.
+        ["the kill switch", { switches: [{ scope: "kill_switch", value: "on" }, ...PERMISSIVE_SWITCHES.slice(1)] }, ROUTED_CARD, ROUTING_BINDING, 8 + extra, ["kill_switch_on"]],
+        ["a provider without an instance", {}, ROUTED_CARD, { ...ROUTING_BINDING, askingProvider: "gemini" }, 7 + extra, ["provider_unverified"]],
+        ["an irreversible term", {}, { ...ROUTED_CARD, question: "Deploy the cache to production?" }, ROUTING_BINDING, 8 + extra, ["irreversible_term"]],
+        // Section 3-8: a secret in the card is never sent, and never stored.
+        ["a secret in the card", {}, { ...ROUTED_CARD, context: `see ${pat}` }, ROUTING_BINDING, 8 + extra, ["card_secret_detected"]],
+        // Section 5: over 16 KiB of card text is not a body the store could keep.
+        ["a card over 16 KiB", {}, overCap, ROUTING_BINDING, 8 + extra, ["input_limit_exceeded"]],
+      ];
+      for (const [name, options, card, routingBinding, statements, refusals] of cases) {
+        const { tx, sent } = recordingTx(options);
+        const result = await recordDecisionMakerRequestWithCardText(tx, { binding: routingBinding, card, keyRing: RING });
+        assert.equal(result.route, "operator", name);
+        assert.deepEqual(result.refusalCodes, refusals, name);
+        assert.equal(result.cardText, null, name);
+        assert.equal(sent.length, statements, name);
+        assert.equal(cardInsertOf(sent), undefined, name);
+        assert.ok(!sent.some((statement) => statement.sql?.includes("AmuxDecisionMakerBody")), name);
+      }
+      // An existing request: its first routing stands, and its card is not stored again.
+      const existingRow = {
+        id: REQUEST_ID,
+        ...ROUTING_BINDING,
+        optionSetDigest: dmOptionSetDigest(dmRequestDigestKey(KEY, REQUEST_ID), OPTIONS),
+        route: "dm_proposal",
+        instance: "decision-maker-openai",
+        refusalCodes: [],
+        createdAtEpochMs: BigInt(NOW - 10_000),
+        assignmentDeadlineAtEpochMs: BigInt(NOW - 10_000 + DM_ASSIGNMENT_WINDOW_MS),
+      };
+      const { tx, sent } = recordingTx({ existing: existingRow });
+      const again = await recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card: ROUTED_CARD, keyRing: RING });
+      assert.deepEqual([again.created, again.requestId, again.sameBinding, again.routeAuditLogId, again.cardText], [false, REQUEST_ID, true, null, null]);
+      assert.equal(sent.length, 2);
+    });
+  });
 }
+
+test("a card text the registry cannot key rolls the routing back; a malformed routing sends nothing", async () => {
+  await withIntegrityKey(null, async () => {
+    // The ring's key is not the registered one (or the period's key is destroyed): the insert
+    // stores nothing and the store throws, so the caller's transaction -- holding the route audit
+    // and the request row -- rolls back, and the question stays with the operator.
+    const { tx, sent } = recordingTx({ registryHoldsKey: false });
+    await assert.rejects(
+      recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card: ROUTED_CARD, keyRing: RING }),
+      (error) => error instanceof DecisionMakerBodyWriteError && error.code === "digest_key_unavailable",
+    );
+    assert.equal(sent.length, 9);
+    assert.ok(cardInsertOf(sent));
+  });
+  // The routing's own input checks, before any statement. Matched by name: the store reaches the
+  // request store through the `@/` alias, which tsx loads as another instance than this file's
+  // relative import, so the class is not the same object.
+  for (const [index, input] of [
+    { binding: ROUTING_BINDING, card: { ...ROUTED_CARD, extra: true }, keyRing: RING },
+    { binding: ROUTING_BINDING, card: { ...ROUTED_CARD, options: [{ id: "a" }] }, keyRing: RING },
+    { binding: ROUTING_BINDING, card: null, keyRing: RING },
+    { binding: ROUTING_BINDING, card: ROUTED_CARD, keyRing: { [PERIOD]: KEY } },
+    { binding: { ...ROUTING_BINDING, cardId: "" }, card: ROUTED_CARD, keyRing: RING },
+  ].entries()) {
+    const { tx, sent } = recordingTx();
+    await assert.rejects(
+      recordDecisionMakerRequestWithCardText(tx, input),
+      (error) => error?.name === "DecisionMakerRequestWriteError" && error.code === "invalid_input",
+      String(index),
+    );
+    assert.equal(sent.length, 0, String(index));
+  }
+});
+
+test("the routing and the stored text read one copy of the card: a change to the caller's object after the call starts reaches neither", async () => {
+  await withIntegrityKey(null, async () => {
+    const card = structuredClone(ROUTED_CARD);
+    const { tx, sent } = recordingTx();
+    const pending = recordDecisionMakerRequestWithCardText(tx, { binding: ROUTING_BINDING, card, keyRing: RING });
+    card.question = "Deploy the cache to production?";
+    card.options.push({ id: "c", label: "Something else" });
+    const result = await pending;
+    assert.equal(result.route, "dm_proposal");
+    assert.equal(cardInsertOf(sent).values[CARD_INSERT.text], dmCardText(ROUTED_CARD));
+  });
+});
+
+test("a card the router sends to a DM always passes the body store's checks, and one they would refuse is never sent", () => {
+  const routed = (card) => routeDmQuestion({ killSwitch: false, instanceMode: "proposal", card, askingProvider: "claude", throughput: { lastHour: 0, lastDay: 0 } });
+  const atCap = { ...ROUTED_CARD, context: "x".repeat(DM_CARD_TEXT_MAX_BYTES - dmCardTextBytes({ ...ROUTED_CARD, context: "" })) };
+  assert.equal(dmCardTextBytes(atCap), DM_CARD_TEXT_MAX_BYTES);
+  for (const card of [
+    ROUTED_CARD,
+    atCap,
+    { ...ROUTED_CARD, title: "제목\n\t\"quoted\" \\ back", tags: ["a,b", ""], contextPaths: [] },
+    { ...ROUTED_CARD, context: "lone \ud800 surrogate and \u0000 nul", options: [] },
+  ]) {
+    assert.equal(routed(card).route, "dm_proposal", JSON.stringify(card).slice(0, 60));
+    assert.equal(dmBodyRefusal("card_text", dmCardText(card)), null, JSON.stringify(card).slice(0, 60));
+  }
+  // One byte over, and a secret: the router refuses what the body store would refuse.
+  const pat = ["gh", "p_", "c".repeat(36)].join("");
+  for (const [card, refusals, bodyRefusal] of [
+    [{ ...atCap, context: `${atCap.context}x` }, ["input_limit_exceeded"], "too_long"],
+    [{ ...ROUTED_CARD, context: `see ${pat}` }, ["card_secret_detected"], "secret_detected"],
+    // Off the resolution list as well as a secret: both are recorded.
+    [{ ...ROUTED_CARD, resolution: pat }, ["input_limit_exceeded", "card_secret_detected"], "secret_detected"],
+  ]) {
+    assert.deepEqual(routed(card).refusals, refusals);
+    assert.equal(dmBodyRefusal("card_text", dmCardText(card)), bodyRefusal);
+  }
+});
+
+test("Admin reads a request's card text back as the card it was routed with, in one statement", async () => {
+  const text = dmCardText(ROUTED_CARD);
+  const row = { text, digest: "c".repeat(64), keyPeriod: PERIOD, createdAtEpochMs: BigInt(NOW + 5) };
+  {
+    const { tx, sent } = recordingTx({ cardTextRows: [row] });
+    assert.deepEqual(await readDecisionMakerCardText(tx, REQUEST_ID), {
+      card: ROUTED_CARD,
+      text,
+      digest: "c".repeat(64),
+      keyPeriod: PERIOD,
+      createdAt: new Date(NOW + 5).toISOString(),
+    });
+    assert.equal(sent.length, 1);
+    assert.match(sent[0].sql, /FROM "AmuxDecisionMakerBody"\s+WHERE "requestId" = \$ AND "field" = 'card_text'/);
+    assert.deepEqual(sent[0].values, [REQUEST_ID]);
+  }
+  // None stored: routed to the operator, or purged or erased.
+  {
+    const { tx } = recordingTx();
+    assert.equal(await readDecisionMakerCardText(tx, REQUEST_ID), null);
+  }
+  // A text the serializer did not write, or a digest the table could not hold, is never shown.
+  for (const tampered of [
+    { ...row, text: JSON.stringify(JSON.parse(text), null, 1) },
+    { ...row, text: text.replace("amux-dm-card-text-v1", "amux-dm-card-text-v0") },
+    { ...row, text: "Pick a cache key layout" },
+    { ...row, digest: "C".repeat(64) },
+  ]) {
+    const { tx } = recordingTx({ cardTextRows: [tampered] });
+    await assert.rejects(readDecisionMakerCardText(tx, REQUEST_ID), (error) => error instanceof DecisionMakerBodyWriteError && error.code === "state_unreadable");
+  }
+  {
+    const { tx, sent } = recordingTx();
+    await assert.rejects(readDecisionMakerCardText(tx, "not-a-uuid"), (error) => error instanceof DecisionMakerBodyWriteError && error.code === "invalid_input");
+    assert.equal(sent.length, 0);
+  }
+});
 
 test("a refusal writes nothing, in the statements up to the read that refused it", async () => {
   const cases = [
@@ -1331,7 +1586,8 @@ test("a malformed input sends nothing at all", async () => {
 test("the body store reads no switch: everything it does stays allowed under the kill switch", () => {
   const store = withoutComments(read(STORE));
   assert.doesNotMatch(store, /readDecisionMakerSwitches|DISTINCT ON/);
-  // The two compositions reach the switches only through the ledger writes they wrap.
+  // The three compositions reach the switches only through the ledger writes they wrap.
   assert.match(store, /await submitDecisionMakerResult\(tx,/);
   assert.match(store, /await assignDecisionMakerRequest\(tx,/);
+  assert.match(store, /await recordDecisionMakerRequest\(tx,/);
 });

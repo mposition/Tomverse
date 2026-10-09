@@ -1354,8 +1354,14 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
   스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
   그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
-  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 결과 제출과 배정은 이 store의 두 조합을
-  거쳐서만 부릅니다. cron·route·Admin 화면은 없습니다.
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 라우팅·결과 제출·배정은 이 store의 세
+  조합을 거쳐서만 부릅니다. **카드 본문은 라우팅이 같은 트랜잭션에서 씁니다**(2026-10-09) —
+  `recordDecisionMakerRequestWithCardText()`가 DM으로 라우팅된 새 요청에만 `dmCardText()`(S1a의 JSON
+  직렬화, `format` 표시 포함)를 그 route 감사에 묶어 저장하고, 운영자 라우팅은 본문이 없습니다. 본문
+  guard가 카드를 그 요청의 route 트랜잭션에만 받으므로 나중에 채울 수 없습니다.
+  docs/policy/amux-decision-maker.md §5의 16 KiB와 카드 secret 검사는 이 직렬화 바이트로 판정하므로 DM으로
+  가는 카드는 언제나 본문 store가 받습니다. Admin은
+  `readDecisionMakerCardText()`로 읽습니다. cron·route·Admin 화면은 없습니다.
 - **S1e(운영자 판정·전달)**: `lib/amux/decisionMakerJudgmentCore.ts`,
   `lib/amux/decisionMakerJudgmentStore.ts`, `lib/amux/decisionMakerJudgmentSystemAudit.ts`,
   `prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql`,

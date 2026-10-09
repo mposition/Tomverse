@@ -4,17 +4,23 @@ import { test } from "node:test";
 import {
   AMUX_ASK_TYPES,
   DM_ALLOWED_ASK_TYPES,
+  DM_CARD_TEXT_FORMAT,
+  DM_CARD_TEXT_KEYS,
   DM_CARD_TEXT_MAX_BYTES,
   DM_CONTEXT_PATHS_MAX,
   DM_INSTANCE_FOR_PROVIDER,
   DM_POLICY_VERSION,
+  DM_RESOLUTIONS,
   DM_THROUGHPUT_PER_DAY,
   DM_THROUGHPUT_PER_HOUR,
+  dmCardText,
+  dmCardTextBytes,
   encodeRepositoryPath,
   irreversibleTermCategories,
   isFetchableTreeMode,
   isSecretRepositoryPath,
   isSnapshotTargetSha,
+  parseDmCardText,
   repositoryPathRefusal,
   routeDmQuestion,
   validateDmOutput,
@@ -95,10 +101,16 @@ test("customer_outbound and unknown ask types never reach a DM", () => {
 
 test("credential, access and external need resolution decision_only", () => {
   for (const askType of ["credential", "access", "external"]) {
-    for (const resolution of [null, "needs_secret", "needs_permission_change", "needs_contact", "other"]) {
+    for (const resolution of [null, "needs_secret", "needs_permission_change", "needs_contact"]) {
       const decision = routeDmQuestion(input({ card: card({ askType, resolution }) }));
       assert.deepEqual(decision.refusals, ["resolution_not_decision_only"], `${askType}/${resolution}`);
     }
+    // A value off the list is also refused as input.
+    assert.deepEqual(
+      routeDmQuestion(input({ card: card({ askType, resolution: "other" }) })).refusals,
+      ["resolution_not_decision_only", "input_limit_exceeded"],
+      `${askType}/other`,
+    );
     assert.equal(routeDmQuestion(input({ card: card({ askType, resolution: "decision_only" }) })).route, "dm_proposal");
   }
   // Other types do not need a resolution.
@@ -180,6 +192,169 @@ test("a secret in the card is never sent", () => {
   for (const field of [{ context: `token ${key}` }, { question: key }, { options: [{ id: "a", label: key }] }, { contextPaths: [`lib/${key}.ts`] }]) {
     const decision = routeDmQuestion(input({ card: card({ ...field, options: field.options ?? card().options }) }));
     assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The card text (added 2026-10-09): the one serialization the body store keeps
+// as `card_text` (docs/policy/amux-decision-maker.md §10), and the bytes §5's
+// 16 KiB is measured on.
+// ---------------------------------------------------------------------------
+
+test("the card text is one JSON object, format first and every card field in a fixed order", () => {
+  assert.equal(DM_CARD_TEXT_FORMAT, "amux-dm-card-text-v1");
+  assert.deepEqual(
+    [...DM_CARD_TEXT_KEYS],
+    ["format", "askType", "resolution", "type", "tags", "title", "question", "options", "unblocks", "context", "contextPaths"],
+  );
+  // Pinned bytes: a change of layout is a new format value, never a silent one.
+  assert.equal(
+    dmCardText(card()),
+    '{"format":"amux-dm-card-text-v1","askType":"decision","resolution":null,"type":"task","tags":["needs:you"],' +
+      '"title":"Pick a cache key layout","question":"Should the cache key include the locale or only the model id?",' +
+      '"options":[{"id":"a","label":"Model id only"},{"id":"b","label":"Model id and locale"}],' +
+      '"unblocks":"The cache module can be finished.","context":"Both layouts pass the current tests.",' +
+      '"contextPaths":["lib/cache.ts"]}',
+  );
+  assert.deepEqual(Object.keys(JSON.parse(dmCardText(card()))), [...DM_CARD_TEXT_KEYS]);
+  // Deterministic: the same card is the same bytes whatever order its keys were written in.
+  const reordered = Object.fromEntries(Object.entries(card()).reverse());
+  reordered.options = card().options.map(({ id, label }) => ({ label, id }));
+  assert.equal(dmCardText(reordered), dmCardText(card()));
+  assert.equal(dmCardText(card()), dmCardText(card()));
+  // Only the card's fields: nothing else an object carries reaches the text.
+  assert.equal(dmCardText({ ...card(), extra: "x", options: card().options.map((option) => ({ ...option, effect: "x" })) }), dmCardText(card()));
+  assert.equal(dmCardTextBytes(card()), Buffer.byteLength(dmCardText(card()), "utf8"));
+});
+
+test("no field's text can pass for another field's, or for the text's structure", () => {
+  const texts = new Set(
+    [
+      card({ title: "ab", question: "c" }),
+      card({ title: "a", question: "bc" }),
+      card({ title: 'a","question":"b', question: "c" }),
+      card({ tags: ["a,b"] }),
+      card({ tags: ["a", "b"] }),
+      card({ tags: ['a","b'] }),
+      card({ options: [{ id: "a", label: 'x"},{"id":"b","label":"y' }] }),
+      card({ options: [{ id: "a", label: "x" }, { id: "b", label: "y" }] }),
+      card({ contextPaths: ["lib/a.ts", "lib/b.ts"] }),
+      card({ context: '"],"contextPaths":["lib/b.ts', contextPaths: ["lib/a.ts"] }),
+      card({ resolution: null }),
+      card({ resolution: "null" }),
+    ].map(dmCardText),
+  );
+  assert.equal(texts.size, 12);
+  // Whatever a field holds comes back as that field, and as nothing else.
+  for (const tricky of [
+    'a","question":"b',
+    "line\nbreak\ttab\rreturn",
+    "back\\slash \\u0041 escaped",
+    "\u0000 nul \u0001 control \u001f unit",
+    "lone \ud800 surrogate \udfff",
+    "line \u2028 and paragraph \u2029 separators",
+    "한글과 emoji 🙂",
+  ]) {
+    for (const field of ["title", "question", "unblocks", "context"]) {
+      const value = card({ [field]: tricky });
+      const text = dmCardText(value);
+      // Storable: well-formed, no NUL (PostgreSQL TEXT), so the body store can hold it.
+      assert.equal(text.isWellFormed(), true, JSON.stringify(tricky));
+      assert.equal(text.includes("\u0000"), false, JSON.stringify(tricky));
+      assert.deepEqual(parseDmCardText(text), value, `${field}: ${JSON.stringify(tricky)}`);
+    }
+    const inOptions = card({ tags: [tricky], options: [{ id: "a", label: tricky }] });
+    assert.deepEqual(parseDmCardText(dmCardText(inOptions)), inOptions, JSON.stringify(tricky));
+  }
+});
+
+test("a stored card text reads back only as the exact text the serializer writes", () => {
+  const text = dmCardText(card());
+  assert.deepEqual(parseDmCardText(text), card());
+  const object = JSON.parse(text);
+  const variants = [
+    JSON.stringify(object, null, 1), // whitespace
+    text.replace('"Model id only"', '"\\u004dodel id only"'), // the same string, escaped otherwise
+    JSON.stringify({ ...object, format: "amux-dm-card-text-v2" }),
+    JSON.stringify(Object.fromEntries(Object.entries(object).reverse())), // key order
+    JSON.stringify({ ...object, extra: "x" }),
+    JSON.stringify(Object.fromEntries(Object.entries(object).filter(([key]) => key !== "contextPaths"))),
+    JSON.stringify({ ...object, options: [{ id: "a", label: "x", effect: "y" }] }),
+    JSON.stringify({ ...object, options: [{ id: "a" }] }),
+    JSON.stringify({ ...object, tags: "needs:you" }),
+    JSON.stringify({ ...object, resolution: 1 }),
+    text.replace('"format":"amux-dm-card-text-v1"', '"format":"amux-dm-card-text-v1","format":"amux-dm-card-text-v1"'),
+    `${text} `,
+    text.slice(0, -1),
+    "[]",
+    "null",
+    "",
+  ];
+  for (const variant of variants) assert.equal(parseDmCardText(variant), null, variant.slice(0, 80));
+  for (const value of [null, undefined, 1, {}, Buffer.from(text)]) assert.equal(parseDmCardText(value), null);
+});
+
+test("§5's 16 KiB is measured on the card text: a card exactly at it goes to a DM, one byte over does not", () => {
+  const padTo = (bytes) => {
+    const base = card({ context: "" });
+    return card({ context: "x".repeat(bytes - dmCardTextBytes(base)) });
+  };
+  const atCap = padTo(DM_CARD_TEXT_MAX_BYTES);
+  assert.equal(dmCardTextBytes(atCap), DM_CARD_TEXT_MAX_BYTES);
+  assert.deepEqual(routeDmQuestion(input({ card: atCap })), { route: "dm_proposal", instance: "decision-maker-openai", refusals: [] });
+  const over = padTo(DM_CARD_TEXT_MAX_BYTES + 1);
+  assert.equal(dmCardTextBytes(over), DM_CARD_TEXT_MAX_BYTES + 1);
+  assert.deepEqual(routeDmQuestion(input({ card: over })).refusals, ["input_limit_exceeded"]);
+  // In bytes, not characters: three-byte characters at the cap and over it.
+  const korean = (characters, extra = "") => card({ context: "가".repeat(characters) + extra });
+  const koreanBase = dmCardTextBytes(korean(0));
+  const fits = Math.floor((DM_CARD_TEXT_MAX_BYTES - koreanBase) / 3);
+  const exact = korean(fits, "x".repeat(DM_CARD_TEXT_MAX_BYTES - koreanBase - fits * 3));
+  assert.equal(dmCardTextBytes(exact), DM_CARD_TEXT_MAX_BYTES);
+  assert.equal(routeDmQuestion(input({ card: exact })).route, "dm_proposal");
+  assert.deepEqual(routeDmQuestion(input({ card: korean(fits + 1) })).refusals, ["input_limit_exceeded"]);
+  // The card text's own bytes count: fields whose plain sum is well under the cap, written as
+  // text that escapes past it, are over it.
+  const escaped = card({ context: "\n".repeat(9_000) });
+  const plainSum = ["task", "needs:you", card().title, card().question, card().unblocks, "\n".repeat(9_000), "a", "Model id only", "b", "Model id and locale", "lib/cache.ts"]
+    .reduce((sum, value) => sum + Buffer.byteLength(value, "utf8"), 0);
+  assert.ok(plainSum < DM_CARD_TEXT_MAX_BYTES);
+  assert.ok(dmCardTextBytes(escaped) > DM_CARD_TEXT_MAX_BYTES);
+  assert.deepEqual(routeDmQuestion(input({ card: escaped })).refusals, ["input_limit_exceeded"]);
+  // The fields the old sum left out count too.
+  assert.deepEqual(routeDmQuestion(input({ card: card({ resolution: "x".repeat(DM_CARD_TEXT_MAX_BYTES) }) })).refusals, ["input_limit_exceeded"]);
+});
+
+test("the secret check reads the card text as the body store keeps it, and the fields as the worker wrote them", () => {
+  // Built at runtime, so no literal in this file looks like a credential.
+  const pat = ["gh", "p_", "a".repeat(36)].join("");
+  // A field the per-field scan never read: the card text carries it, and the scan finds it there.
+  for (const field of [{ resolution: pat }, { askType: pat }]) {
+    const decision = routeDmQuestion(input({ card: card(field) }));
+    assert.equal(decision.route, "operator", JSON.stringify(Object.keys(field)));
+    assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
+  }
+  // Escaping hides a quoted assignment from a scan of the card text alone; the fields' scan sees it.
+  const quoted = `${["api", "key"].join("_")}="${"Q7".repeat(10)}"`;
+  assert.match(dmCardText(card({ context: quoted })), /api_key=\\"/);
+  assert.ok(routeDmQuestion(input({ card: card({ context: quoted }) })).refusals.includes("card_secret_detected"));
+  // Every string field is read as written, the two routing fields included.
+  for (const field of [{ resolution: quoted }, { askType: quoted }]) {
+    const decision = routeDmQuestion(input({ card: card(field) }));
+    assert.equal(decision.route, "operator", JSON.stringify(Object.keys(field)));
+    assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
+  }
+});
+
+test("resolution is a closed list on every ask type, not only the three §3-4 checks", () => {
+  for (const askType of DM_ALLOWED_ASK_TYPES) {
+    const decision = routeDmQuestion(input({ card: card({ askType, resolution: "ask the team lead" }) }));
+    assert.equal(decision.route, "operator", askType);
+    assert.ok(decision.refusals.includes("input_limit_exceeded"), askType);
+  }
+  // A listed value or none still reaches a DM on a type §3-4 does not check.
+  for (const resolution of [null, ...DM_RESOLUTIONS]) {
+    assert.equal(routeDmQuestion(input({ card: card({ askType: "decision", resolution }) })).route, "dm_proposal", String(resolution));
   }
 });
 

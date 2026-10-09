@@ -1255,6 +1255,8 @@ for (const [label, key] of [
         sameBinding: true,
         createdAt: new Date(NOW).toISOString(),
         assignmentDeadlineAt: new Date(NOW + DM_ASSIGNMENT_WINDOW_MS).toISOString(),
+        // The route audit of this transaction, which the body store binds the card text to (2026-10-09).
+        routeAuditLogId: "audit-row-1",
       });
 
       // A provider with no instance has no throughput to read.
@@ -1293,6 +1295,8 @@ for (const [label, key] of [
         sameBinding: false,
         createdAt: new Date(NOW - 1).toISOString(),
         assignmentDeadlineAt: new Date(NOW - 1 + DM_ASSIGNMENT_WINDOW_MS).toISOString(),
+        // No audit was written for it in this transaction.
+        routeAuditLogId: null,
       });
       // The same binding and the same options, recomputed under that request's own key.
       const storedRow = {
