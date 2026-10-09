@@ -1383,6 +1383,18 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   stale close를 `720 hours`로 고정했습니다(이전 `30 days`는 DST에서 한 시간 어긋남). 함수 네 개를
   교체하는 migration은 header 선언이 하나뿐이라 이전 본문 digest를 첫 DO 블록에서 대조합니다.
   route·Admin 화면·bridge는 없습니다.
+- **S1f1(스위치 route)**: `app/api/admin/amux/decision-maker/switches/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerSwitchRead`·`decisionMakerSwitchChange`,
+  `tests/server-contract/admin-amux-decision-maker-switches-route.test.ts`. 읽기는 관리자 누구나이고
+  (kill switch 중에도 DM 기록 열람은 허용), 변경은 `ops:write`와 최근 step-up을 body보다 먼저 검사합니다.
+  두 handler는 첫 줄부터 `withAmuxRouteBudget` 안에서 돌므로 세션·rate limit·body에 쓴 시간이 15초
+  예산에서 빠지고, 남은 시간이 경계 예산보다 짧으면 트랜잭션을 시작하지 않습니다
+  (`tests/server-contract/admin-amux-decision-maker-switches-route-budget.test.ts`).
+  route는 S1b store를 AMUX DB 경계 안에서 직접 부르며 감사는 store가 씁니다. **경계 상한은 store의 가장
+  긴 문장 수 + setup + fence입니다** — `tests/amuxDecisionMakerSwitch.test.mjs`가 그 셈을, switch DB
+  테스트가 하나 줄인 상한의 거부를 고정하므로 store에 문장을 더하면 상한도 함께 올립니다. 결과를 모르면
+  `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
+  없습니다.
 
 # AI Review (교차검토) 품질과 M5
 

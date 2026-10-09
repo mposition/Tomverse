@@ -42,10 +42,12 @@ import {
   parseDmSwitchLatch,
   unreadableDecisionMakerSwitches,
 } from "../lib/amux/decisionMakerSwitchCore.ts";
+import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
 import {
   DecisionMakerSwitchWriteError,
   latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,
+  readDecisionMakerSwitchesOrThrow,
   recordDecisionMakerSwitchByOperator,
 } from "../lib/amux/decisionMakerSwitchStore.ts";
 
@@ -541,6 +543,29 @@ for (const [label, key, auditStatements] of [
     });
   });
 }
+
+test("the Admin route's DB boundaries are the store's statements at their largest, plus setup and fence", async () => {
+  // A ceiling below the count refuses every change; one above it lets a
+  // statement the tests here never counted run inside the budget.
+  const largest = await withIntegrityKey("unit-test-integrity-key", async () => {
+    const { tx, sent } = recordingTx();
+    await recordDecisionMakerSwitchByOperator(tx, { session, scope: "kill_switch", value: "on" });
+    return sent.length;
+  });
+  assert.equal(largest, 7);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerSwitchChange, {
+    operation: "decision_maker_switch_change",
+    prismaCallCeiling: largest + 2,
+    isolation: "mutation",
+  });
+  const { tx, sent } = recordingTx();
+  await readDecisionMakerSwitchesOrThrow(tx);
+  assert.deepEqual(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, {
+    operation: "decision_maker_switch_read",
+    prismaCallCeiling: sent.length + 2,
+    isolation: "read",
+  });
+});
 
 test("a person's change after a system latch is written as the latch release", async () => {
   await withIntegrityKey(null, async () => {

@@ -5,9 +5,11 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   latchDecisionMakerInstanceOff,
   readDecisionMakerSwitches,
+  readDecisionMakerSwitchesOrThrow,
   recordDecisionMakerSwitchByOperator,
 } from "@/lib/amux/decisionMakerSwitchStore";
 import { prisma } from "@/lib/prisma";
@@ -538,5 +540,51 @@ test("two people changing one scope at once commit one after the other, and the 
   // In sequence order, each commit is no earlier than the one before it.
   for (let index = 1; index < rows.length; index += 1) {
     assert.ok(rows[index]!.createdAt.getTime() >= rows[index - 1]!.createdAt.getTime());
+  }
+});
+
+test("the Admin route's boundary holds a person's change at its largest, and one call fewer refuses it", async () => {
+  // §9: a DM store operation runs inside the AMUX DB boundary, at READ
+  // COMMITTED for a mutation, which the switch guard requires. The change is
+  // largest with an integrity key (the administrator audit's fourth
+  // statement); the ceiling is that plus setup and fence, so one fewer must
+  // refuse it and leave nothing behind.
+  const names = ["ADMIN_AUDIT_INTEGRITY_KEY", "ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "dm-switch-route-db-test-key";
+  delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
+  try {
+    const session = operator();
+    const short = { ...AMUX_DB_BOUNDARIES.decisionMakerSwitchChange, prismaCallCeiling: 8 };
+    await assert.rejects(
+      withAmuxDbBoundary(short, (tx) =>
+        recordDecisionMakerSwitchByOperator(tx, { session, scope: "decision-maker-anthropic", value: "proposal" }),
+      ),
+      (error: unknown) =>
+        error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+    );
+    assert.equal((await rowsOf()).length, 0);
+    assert.equal(await prisma.adminAuditLog.count({ where: { actorUserId: session.user!.id } }), 0);
+
+    const changed = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchChange, (tx) =>
+      recordDecisionMakerSwitchByOperator(tx, { session, scope: "decision-maker-anthropic", value: "proposal" }),
+    );
+    assert.equal(changed.action, "amux.decision.mode");
+    const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: changed.auditLogId } });
+    assert.equal(audit.actorUserId, session.user!.id);
+    assert.equal(audit.targetId, changed.eventId);
+
+    const state = await withAmuxDbBoundary(AMUX_DB_BOUNDARIES.decisionMakerSwitchRead, (tx) =>
+      readDecisionMakerSwitchesOrThrow(tx),
+    );
+    assert.deepEqual(state, {
+      killSwitch: false,
+      instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "proposal" },
+    });
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
   }
 });
