@@ -76,6 +76,11 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                   {m.digestCounts}:{" "}
                   {counts.map(([kind, count]) => `${label("kind", kind)} ${count}`).join(", ")}
                 </p>
+                {!view.countsComplete ? (
+                  <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-counts-partial">
+                    {m.digestCountsFromList}
+                  </p>
+                ) : null}
                 {total > payload.reserved.length ? (
                   <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-truncated">
                     {m.digestListCapped

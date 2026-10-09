@@ -13,6 +13,7 @@ import {
   digestIdempotencyKey,
   parseDigestPayload,
   parseDigestRequest,
+  parseStoredDigestPayload,
 } from "../scripts/ops-observer/digest-schema-core.mjs";
 import { AGENT_DIGEST_KINDS, AGENT_DIGEST_MAX_PAYLOAD_BYTES } from "../lib/agentDigestContract.ts";
 
@@ -103,6 +104,20 @@ test("a date with more items than the list holds keeps the first twenty and coun
   assert.deepEqual(built.reservedCounts, { new_open: 20, worsening: 10, reopen: 0, recovery: 0 });
   assert.equal(Object.values(built.reservedCounts).reduce((a, b) => a + b, 0), 30);
   assert.equal(parseDigestPayload(built).ok, true);
+});
+
+test("a kept body reads back under the version it was stored with", () => {
+  const v2 = payload();
+  assert.deepEqual(parseStoredDigestPayload(v2, 2), { ok: true, payload: v2, countsComplete: true });
+  // Version 1 had no counts: still shown, its counts derived from its list.
+  const { reservedCounts, ...v1 } = v2;
+  assert.deepEqual(parseStoredDigestPayload(v1, 1), { ok: true, payload: { ...v1, reservedCounts }, countsComplete: false });
+  // Each version holds its own shape only, and no other version is read.
+  assert.equal(parseStoredDigestPayload(v1, 2).ok, false);
+  assert.equal(parseStoredDigestPayload(v2, 1).ok, false);
+  assert.equal(parseStoredDigestPayload({ ...v1, mode: "paused" }, 1).ok, false);
+  assert.equal(parseStoredDigestPayload(v2, 3).ok, false);
+  assert.equal(parseStoredDigestPayload(null, 1).ok, false);
 });
 
 test("the request names a deadline and a closed owner date, and nothing else", () => {

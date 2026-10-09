@@ -54,6 +54,7 @@ import {
   buildDigestPayload,
   digestIdempotencyKey,
   parseDigestPayload,
+  parseStoredDigestPayload,
 } from "@/scripts/ops-observer/digest-schema-core.mjs";
 import { digestReadinessNames } from "@/scripts/ops-observer/envelope-schema-core.mjs";
 import { settleWithin } from "@/scripts/ops-observer/snapshot-core.mjs";
@@ -187,6 +188,12 @@ export type OpsObserverDigestView = {
     reservedCounts: Record<string, number>;
     channelCheckTaken: boolean;
   } | null;
+  /**
+   * Whether reservedCounts covers every item of the date. False for a body
+   * kept under schema version 1, whose counts come from a list it may have
+   * cut at the cap.
+   */
+  countsComplete: boolean;
 };
 
 /**
@@ -208,8 +215,8 @@ export async function readOpsObserverDigestItem(
     async (tx): Promise<OpsObserverDigestView | null> => {
       // The body only while it is inside its retention by the database clock:
       // an expiry batch that has not run yet must not keep it readable (§10).
-      const [row] = await tx.$queryRaw<{ id: string; createdAt: Date; payload: unknown }[]>`
-        SELECT id::text AS id, "createdAt",
+      const [row] = await tx.$queryRaw<{ id: string; createdAt: Date; schemaVersion: number; payload: unknown }[]>`
+        SELECT id::text AS id, "createdAt", "schemaVersion",
                CASE WHEN "retentionUntil" > clock_timestamp() THEN payload END AS payload
           FROM "AgentDigestItem"
          WHERE id = ${itemId}::uuid AND "agentKey" = 'sre-ops' AND kind = ${DIGEST_KIND}`;
@@ -217,11 +224,14 @@ export async function readOpsObserverDigestItem(
       const parsed =
         row.payload === null
           ? null
-          : (parseDigestPayload(row.payload) as { ok: true; payload: unknown } | { ok: false; error: string });
+          : (parseStoredDigestPayload(row.payload, row.schemaVersion) as
+              | { ok: true; payload: unknown; countsComplete: boolean }
+              | { ok: false; error: string });
       return {
         id: row.id,
         createdAt: row.createdAt.toISOString(),
         payload: parsed && parsed.ok ? (parsed.payload as OpsObserverDigestView["payload"]) : null,
+        countsComplete: parsed && parsed.ok ? parsed.countsComplete : true,
       };
     },
     client,
