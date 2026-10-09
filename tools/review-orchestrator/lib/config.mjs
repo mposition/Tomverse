@@ -1,5 +1,6 @@
 import { readJson } from "./fsutil.mjs";
 import { isName } from "./assign.mjs";
+import { STATUS_REPORT_DEFAULT_INTERVAL_SECONDS, STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
 
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
@@ -44,6 +45,31 @@ export function globToRegExp(glob) {
 }
 
 /**
+ * `statusReport` is optional: { url, intervalSeconds? }. The URL is the app's
+ * status route over https, with no credentials or fragment in it -- the secret
+ * travels in a header, from the daemon's environment.
+ */
+function statusReportProblem(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "an object with url";
+  const unknown = Object.keys(value).filter((key) => key !== "url" && key !== "intervalSeconds");
+  if (unknown.length > 0) return `unknown field ${unknown[0]}`;
+  let url;
+  try {
+    url = new URL(value.url);
+  } catch {
+    return "url must be an absolute https URL";
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+    return "url must be https, without credentials or fragment";
+  }
+  const interval = value.intervalSeconds;
+  if (interval !== undefined && !(Number.isInteger(interval) && interval >= 30 && interval <= 3600)) {
+    return "intervalSeconds must be an integer from 30 to 3600";
+  }
+  return null;
+}
+
+/**
  * Validated configuration. Fails closed: an enabled provider without a known
  * vendor or without a command is a configuration error, not a provider that
  * silently never runs.
@@ -69,12 +95,22 @@ export function validateConfig(raw) {
   for (const key of ["maxChangeBytes", "maxPendingJobs", "maxStderrBytes", "retentionDays"]) {
     if (!(Number.isInteger(config[key]) && config[key] > 0)) errors.push(`${key}: positive integer`);
   }
+  if (config.statusReport !== undefined) {
+    const problem = statusReportProblem(config.statusReport);
+    if (problem) errors.push(`statusReport: ${problem}`);
+    else config.statusReport = { intervalSeconds: STATUS_REPORT_DEFAULT_INTERVAL_SECONDS, ...config.statusReport };
+  }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();
   for (const provider of config.providers ?? []) {
     const label = `providers.${provider?.id}`;
     if (!isName(provider?.id) || ids.has(provider.id)) errors.push(`${label}: id`);
     ids.add(provider?.id);
+    // The status-report secret belongs to the daemon. A reviewer reads the
+    // change under review, which could ask it to print its environment.
+    if (Array.isArray(provider?.passEnv) && provider.passEnv.includes(STATUS_REPORT_SECRET_ENV)) {
+      errors.push(`${label}: passEnv must not carry ${STATUS_REPORT_SECRET_ENV}`);
+    }
     if (provider?.enabled !== true) continue;
     if (!isName(provider.vendor) || provider.vendor === "unknown") {
       errors.push(`${label}: an enabled provider needs a measured vendor`);

@@ -4,8 +4,10 @@
 요청하면, Ubuntu 서버가 작성자와 **모델 공급사가 다른** reviewer를 부하에 따라
 골라 실행하는 개발 도구입니다.
 
-- 외부 게시, PR 코멘트, 앱 DB 쓰기, 병합을 하지 않습니다. 사람이 개발 세션에서
-  부르는 도구이며, 결과는 서버 디스크에만 남습니다.
+- 외부 게시, PR 코멘트, 병합을 하지 않고 앱 DB에 직접 쓰지 않습니다. 사람이 개발
+  세션에서 부르는 도구이며, 결과는 서버 디스크에만 남습니다. 앱으로 나가는 것은
+  설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 앱이 그 최신값 한 행을 씁니다
+  (아래 "Agent office 상태 보고").
 - 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록 하나로만
   읽고, 형식이 맞지 않으면 `unknown`입니다. blocker·major 지적이 있으면 reviewer가
   accept라고 해도 reject입니다.
@@ -347,6 +349,71 @@ SSH 키·다른 작업의 소스는 보이지 않습니다.
 | `maxPendingJobs` | 20 | `queue_full` |
 | `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
 | `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
+
+## Agent office 상태 보고
+
+앱은 이 서버에 접속할 수 없으므로(SSH 뒤에 있음), daemon이 약 1분마다 앱의
+`POST /api/internal/review-orchestrator/status`로 상태를 보냅니다. 운영자는 Admin의
+Agent office "독립 검토실"에서 그것을 봅니다.
+
+- **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, reviewer를
+  기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문. 보고를 만드는
+  코드(`lib/status-report.mjs`)가 그런 값을 읽지 않고, 앱은 모르는 필드가 있으면 거절합니다.
+- **검토에 영향을 주지 않습니다.** 응답을 기다리지 않고, 한 번에 하나만 보내며, 실패해도
+  재시도하지 않고 다음 주기에 새 보고를 보냅니다. 로그는 결과가 바뀔 때만 한 줄
+  (`status report ok`, `status report failed: http_404` 등)입니다.
+- **기본은 꺼짐입니다.** config에 `statusReport`가 없거나 secret이 없으면(또는 32자 미만이면)
+  보내지 않고, 검토 서버는 이전과 똑같이 돕니다.
+- secret은 daemon 환경에만 있습니다. reviewer는 환경 허용 목록만 받으므로 보이지 않고,
+  provider의 `passEnv`에 넣으면 설정 오류로 시작하지 않습니다(검토 대상 diff가 reviewer에게
+  환경을 출력하라고 시킬 수 있기 때문입니다).
+- 앱은 마지막 보고를 받은 시각을 **앱의 시계로** 적고, 5분 넘게 보고가 없으면 검토실이
+  "보고 없음"으로 바뀝니다.
+
+### 켜기
+
+앱 쪽 route가 production에 배포된 뒤에 합니다. 먼저 켜도 해는 없고, `http_404` 한 줄이
+남습니다.
+
+**① Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** secret을 만들어 `review` 계정만 읽는
+파일에 바로 씁니다. 값은 화면에 나오지 않습니다.
+
+```bash
+sudo -u review sh -c 'umask 077; printf "REVIEW_ORCHESTRATOR_STATUS_SECRET=%s\n" "$(openssl rand -hex 32)" > /home/review/.config/review-orchestrator/status-report.env'
+```
+
+**② Railway 대시보드, production 앱 서비스의 Variables.** 같은 값을
+`REVIEW_ORCHESTRATOR_STATUS_SECRET`로 넣습니다. 값은 ①의 서버에서
+`sudo cat /home/review/.config/review-orchestrator/status-report.env`로 보고 대시보드에 직접
+붙입니다(대화나 문서에 옮기지 않습니다). 변수 저장은 재배포를 일으킵니다.
+
+**③ Ubuntu 검토 서버의 관리 계정 bash.** service가 그 파일을 읽게 하고(기존
+`EnvironmentFile`은 그대로 둡니다), config에 보낼 곳을 적습니다.
+
+```bash
+sudo systemctl edit review-orchestrator
+#   [Service]
+#   EnvironmentFile=/home/review/.config/review-orchestrator/status-report.env
+sudo -u review nano /home/review/.config/review-orchestrator/config.json
+#   "statusReport": { "url": "https://tomverse.app/api/internal/review-orchestrator/status" }
+```
+
+`intervalSeconds`(30~3600, 기본 60)를 함께 줄 수 있습니다. URL은 https만 받고, 사용자
+정보나 `#`이 들어 있으면 설정 오류입니다.
+
+**④ 같은 셸.** 코드 업데이트와 재시작은 위 "서버 업데이트 (drain)" 절차 그대로입니다.
+재시작 뒤 확인합니다.
+
+```bash
+sudo journalctl -u review-orchestrator --since "10 min ago" | grep "status report"
+```
+
+`status report on` 다음에 `status report ok`가 나오면 끝입니다. `http_401`은 ①과 ②의 값이
+다르다는 뜻이고, `status report off: ...`는 ③의 `EnvironmentFile`이 읽히지 않았다는
+뜻입니다.
+
+끄려면 config에서 `statusReport`를 지우고 재시작합니다. 검토실은 5분 뒤 "보고 없음"이 됩니다.
 
 ## 알려진 한계
 
