@@ -45,6 +45,21 @@ An attestation expires. Readiness measures a system that keeps changing, and
 an attestation with no deadline would outlive what it described — so
 `expiresAt` is required, and the check fails once it passes.
 
+### Reading the running deployment
+
+The authenticated, read-only `GET /api/admin/routing-shadow` includes a
+`runtime` snapshot: observation time, public build/deployment identity, current
+readiness, effective shadow flag and dispatch instrumentation mode, and whether
+the manifest keyring resolves. It reads the serving process's environment and
+returns no keys, cohort salt or parser error prose. Responses use `no-store`.
+
+The top-level `measurementScope` is
+`historical_window_without_deployment_binding`. The build identifies the
+process answering the readback; it does **not** bind historical shadow rows to
+that deployment. Those rows still need separately verified traffic approval,
+version/window provenance and a human attestation. A green runtime readback
+does not approve any of the three gates or replace enforce-mode measurements.
+
 ## 3. Configuration
 
 Every default is off, so a deployment that sets nothing routes nobody. A
