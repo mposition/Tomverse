@@ -13,20 +13,21 @@
 -- the point of the table's constraints is that they hold for a writer nobody
 -- has reviewed.
 --
+-- One ALTER TABLE with both actions, so the swap is a single statement and the
+-- table is never momentarily unconstrained. It is also the shape the baseline
+-- guard reads: `replacedCheckTargetsIn` pairs each DROP with the ADD beside it
+-- in the same statement, and the sidecar beside this file pins the exact prior
+-- `pg_get_constraintdef` so a restore cannot be mistaken for a pending deploy.
+--
 -- Validated immediately rather than NOT VALID. A row that would violate this
 -- cannot exist: the only writer is that route, which has refused these two
 -- columns on a failed outcome since the table was created. There is no
 -- backfill to wait for, so there is nothing for a deferred validation to be
 -- deferred until.
--- Both statements in one transaction, as 20261002150000 does. Without it a
--- failed ADD after a successful DROP leaves the table with no shape check at
--- all, and the retry then fails on the DROP -- a migration that cannot be run
--- again and a table that is unconstrained until somebody repairs it by hand.
 BEGIN;
-ALTER TABLE "ProductResearchObservation"
-    DROP CONSTRAINT "ProductResearchObservation_outcome_shape_check";
 
 ALTER TABLE "ProductResearchObservation"
+    DROP CONSTRAINT "ProductResearchObservation_outcome_shape_check",
     ADD CONSTRAINT "ProductResearchObservation_outcome_shape_check"
         CHECK (
             ("outcome" = 'ok'

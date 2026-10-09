@@ -1426,6 +1426,14 @@ export const RAW_SQL_ALLOWLIST = [
       "The same module names the delivery event table in its one constant delivery read and in two constant INSERT ... RETURNING statements, the system's decision, receipt or unknown outcome and a person's resolution; every value is a bound parameter. It never updates or deletes a delivery event.",
   },
   {
+    path: "prisma/migrations/20261009130000_product_research_failed_row_has_no_commits/migration.sql",
+    table: "ProductResearchObservation",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "One ALTER TABLE that drops and re-adds the table's outcome shape CHECK, so the failed branch requires developSha and mainSha to be null as it already requires the payload columns to be. The two write verbs are that DROP and that ADD; the statement writes no row, reads no row and changes no column. The table's rows are still written only by lib/productResearchObservationStore.ts (docs/policy/product-research-agent.md §4), which this constrains rather than bypasses.",
+  },
+  {
     path: "prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
