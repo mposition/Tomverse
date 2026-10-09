@@ -1431,7 +1431,7 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: 1,
     writeVerbs: 2,
     reason:
-      "One ALTER TABLE that drops and re-adds the table's outcome shape CHECK, so the failed branch requires developSha and mainSha to be null as it already requires the payload columns to be. The two write verbs are that DROP and that ADD; the statement writes no row, reads no row and changes no column. The table's rows are still written only by lib/productResearchObservationStore.ts (docs/policy/product-research-agent.md §4), which this constrains rather than bypasses.",
+      "One ALTER TABLE that drops and re-adds the table's outcome shape CHECK, so the failed branch requires developSha and mainSha to be null as it already requires the payload columns to be. The two write verbs the pattern counts are that statement's ALTER and DROP -- it does not count ADD -- and the statement writes no row, reads no row and changes no column. The table's rows are still written only by lib/productResearchObservationStore.ts (docs/policy/product-research-agent.md §4), which this constrains rather than bypasses.",
   },
   {
     path: "prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql",

@@ -115,8 +115,11 @@ test("the table is insert-only, kept for its retention, and one row per slot", (
 const effectiveShapeCheck = () => {
   const root = new URL("../prisma/migrations/", import.meta.url);
   const marker = 'ADD CONSTRAINT "ProductResearchObservation_outcome_shape_check"';
-  const defining = readdirSync(root)
-    .filter((name) => !name.endsWith(".toml"))
+  // Directories, not "everything that is not the lock file": a README added
+  // here later would otherwise be opened as a migration and throw.
+  const defining = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
     .sort()
     .map((name) => ({
       name,
