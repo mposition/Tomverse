@@ -1,0 +1,31 @@
+[Unit]
+Description=Tomverse AMUX v4 analysis (system manager, non-root runner)
+After=network-online.target
+Wants=network-online.target
+ConditionFileNotEmpty=/opt/tomverse-amux-v4/analysis-agent-once.mjs
+ConditionPathExists=!/home/tommy/.local/state/tomverse-amux-v4-analysis/analysis-outcome-unknown.halt
+
+[Service]
+Type=oneshot
+User=tommy
+Group=tommy
+Environment=HOME=/home/tommy
+EnvironmentFile=/etc/tomverse-amux-v4/analysis-agent.env
+WorkingDirectory=/home/tommy
+# Exercise the child namespace before the app can consume a paid claim.
+# This fixed executable has no credentials, tools, provider or network call.
+ExecStartPre=/usr/bin/bwrap --unshare-all --die-with-parent --clearenv --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp /usr/bin/true
+ExecStart=/usr/bin/node /opt/tomverse-amux-v4/analysis-agent-once.mjs
+TimeoutStartSec=650s
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/tommy/.local/state/tomverse-amux-v4-analysis
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amux-v4-analysis-agent-system
+
+# No timer, restart policy or install target. Installation never starts analysis.
