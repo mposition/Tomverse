@@ -1421,6 +1421,167 @@ domains:
       registered, as with AmuxRecommendationAutoUnknown and
       AmuxRecommendationAutoCostEntry.
 
+  - domain: amuxDecisionMakerSwitchEvent
+    prismaModel: AmuxDecisionMakerSwitchEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker switch change or latch
+        (docs/policy/amux-decision-maker.md section 10, the append-only
+        decision ledger). A person's row names the administrator who set the
+        switch and is retained for security investigation and audit. The
+        retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who set the switch
+      and intentionally has no User foreign key; it is null on a system latch.
+      The row stores a closed scope, value and reason code and identifiers, not
+      a free-text reason, a question card or a customer's prompt or file. Rows
+      are never changed or removed by the application; the database refuses
+      both.
+
+  - domain: amuxDecisionMakerBody
+    prismaModel: AmuxDecisionMakerBody
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: ttl_purge
+    retentionPolicy: ttl
+    ttlDays: 120
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-decision-maker.md section 12 S1, the scheduled expiry
+      purge that calls purgeDecisionMakerBodies (stage S1d built the store
+      function and the database rules; nothing calls it on a schedule yet)
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: excluded
+    note: >-
+      An operational record (docs/policy/amux-decision-maker.md section 10):
+      the AMUX Decision Maker's five body fields -- question card text, the
+      DM's answer, rationale and escalation reason, and the operator's edited
+      answer. Worker-written free text may carry anyone's personal data, but
+      the table has no account key, so it is not in the per-account customer
+      export and account deletion does not reach it; a request to see or
+      delete a person's data is handled by an operator searching the bodies,
+      and section 10's privacy erase deletes them under a person's audit. A
+      row is deleted at most 120 days after its request was created (a stale
+      close at 30 days plus 90 days' retention); an open legal hold keeps it
+      until released. The userLinkageRole is nominal: no column names a person.
+
+  - domain: amuxDecisionMakerRetentionEvent
+    prismaModel: AmuxDecisionMakerRetentionEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker legal hold or its
+        release, and the system's retention start when a request closes
+        (docs/policy/amux-decision-maker.md section 10, the append-only
+        retention history). A hold row names the administrator who set or
+        released it and is retained for security investigation and audit. The
+        retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who set or released
+      a hold and intentionally has no User foreign key; it is null on the
+      system's retention_set. The row stores a closed kind, a key period, a
+      retention instant and identifiers, not a body or a free-text reason.
+      Rows are never changed or removed by the application; the database
+      refuses both.
+
+  - domain: amuxDecisionMakerJudgment
+    prismaModel: AmuxDecisionMakerJudgment
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker judgment -- a person's
+        confirmation, edited confirmation or rejection of a proposal and the
+        declaration accuracy they recorded (docs/policy/amux-decision-maker.md
+        sections 4 and 10, the append-only decision ledger). The row names
+        the administrator who judged and is retained for security
+        investigation and audit, and section 4's report is computed from it.
+        The retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      An operational record, not customer data. actorUserId is the operator id
+      of the administrator who judged and intentionally has no User foreign
+      key. The row stores closed codes (the kind, the accuracy and its items,
+      a snapshot state, an option id), keyed digests and identifiers -- never
+      the answer, which is a body row of amuxDecisionMakerBody. Rows are never
+      changed or removed by the application; the database refuses both.
+
+  - domain: amuxDecisionMakerDeliveryEvent
+    prismaModel: AmuxDecisionMakerDeliveryEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for the delivery of one confirmed AMUX Decision
+        Maker answer -- the system's delivery decision and its receipt or
+        unknown outcome, and a person's resolution of an unknown outcome
+        (docs/policy/amux-decision-maker.md sections 9 and 10, the append-only
+        decision ledger). A resolution names the administrator who checked it
+        and is retained for security investigation and audit. The retention
+        period is not a legal determination; it stays TBD until security and
+        legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who resolved an
+      unknown delivery and intentionally has no User foreign key; it is null on
+      the system's events. The row stores a closed kind and outcome and
+      identifiers, not the answer or any free text. Rows are never changed or
+      removed by the application; the database refuses both.
+
   # AMUX v4 tables are inert schema only. The operational content clocks in
   # amux-intake v5-v7 do not answer account deletion or unified export. Keep
   # both axes unverified until those paths are implemented and reviewed.

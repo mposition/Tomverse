@@ -2282,6 +2282,15 @@ model AdminAuditLog {
   amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
   amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
   amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
+  amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
+  amuxDecisionMakerRequest AmuxDecisionMakerRequest?
+  amuxDecisionMakerRequestEvent AmuxDecisionMakerRequestEvent?
+  amuxDecisionMakerBodies AmuxDecisionMakerBody[]
+  amuxDecisionMakerRetentionEvent AmuxDecisionMakerRetentionEvent?
+  amuxDecisionMakerDigestKeyEvent AmuxDecisionMakerDigestKeyEvent?
+  amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
+  amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
+  amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -8325,6 +8334,331 @@ model AmuxOrchestratorHalt {
 
   @@index([clearedAt, openedAt])
   @@index([requestId])
+}
+
+/// AMUX Decision Maker switch events (docs/policy/amux-decision-maker.md §8,
+/// §10): append-only, and a scope's state is its newest event. Single writer:
+/// lib/amux/decisionMakerSwitchStore.ts. Migration
+/// 20261008030000_amux_decision_maker_switch holds the CHECKs (kill switch
+/// `on`/`off`, an instance `off`/`proposal`, a person only as `operator`, the
+/// system only latching an instance `off`) and the trigger that binds each
+/// event to an audit row of its own transaction, keeps a scope's sequence
+/// increasing, sets `createdAt` from the database clock and refuses every
+/// update and delete. `actorUserId` is the operator's id on a person's event
+/// and intentionally has no User foreign key, like the other AMUX operator
+/// evidence.
+model AmuxDecisionMakerSwitchEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  scope       String
+  value       String
+  reasonCode  String
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scope, sequence])
+}
+
+/// AMUX Decision Maker requests (docs/policy/amux-decision-maker.md §2, §9,
+/// §10): one per (card id, question revision), with the binding values known
+/// when the question was routed and `routeDmQuestion()`'s decision. Immutable;
+/// the lifecycle is in `AmuxDecisionMakerRequestEvent`. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (the
+/// route, the provider's instance, the router's refusal codes and how they
+/// agree with the route) and the trigger that binds each row to the router's
+/// `amux.decision.route` audit row of its own transaction, sets `createdAt`
+/// from the database clock and `assignmentDeadlineAt` 2 minutes after it, and
+/// refuses every update and delete. No body is stored: identifiers, closed
+/// codes and opaque digests only, and no person's id.
+model AmuxDecisionMakerRequest {
+  id                    String   @id
+  cardId                String
+  questionRevision      Int
+  askingWorkerId        String
+  amuxSessionId         String
+  amuxSessionAttempt    Int
+  askingProvider        String
+  optionSetDigest       String
+  policyVersion         Int
+  termListVersion       String
+  classificationVersion String
+  scannerVersion        String
+  route                 String
+  instance              String?
+  refusalCodes          String[]
+  auditLogId            String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  /// Set by the insert trigger: `createdAt` plus 2 minutes.
+  assignmentDeadlineAt  DateTime @db.Timestamptz(3)
+
+  auditLog        AdminAuditLog                     @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events          AmuxDecisionMakerRequestEvent[]
+  bodies          AmuxDecisionMakerBody[]
+  retentionEvents AmuxDecisionMakerRetentionEvent[]
+  resultDetail    AmuxDecisionMakerResultDetail?
+  judgment        AmuxDecisionMakerJudgment?
+  deliveryEvents  AmuxDecisionMakerDeliveryEvent[]
+
+  @@unique([cardId, questionRevision])
+  @@index([instance, createdAt])
+}
+
+/// The append-only lifecycle of an `AmuxDecisionMakerRequest`
+/// (docs/policy/amux-decision-maker.md §2, §5, §6, §9, §10), ordered by
+/// `sequence`. `kind` is named after its §10 audit action. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (what
+/// each kind carries), the partial unique indexes (one assignment,
+/// transmission intent, transmission outcome, terminal result, unknown result
+/// and closing per request -- not expressible here), the guard trigger (the
+/// transition graph, the deadlines by the database clock, the audit row of
+/// its own transaction by the router or the request's instance, an increasing
+/// sequence, READ COMMITTED only, no update or delete) and the deferred
+/// constraint trigger that refuses a late assignment or DM output at COMMIT
+/// with SQLSTATE AX001. Since stage S1e (migration
+/// 20261008130100_amux_decision_maker_judgment_delivery) a person's judgment
+/// closes a request with an event of its kind (confirm, edit_confirm or
+/// reject), which the judgment table's trigger writes and the guard accepts
+/// only beside that judgment; since migration
+/// 20261008130000_amux_decision_maker_stale_close_hours the stale close is 720
+/// hours after the creation, a fixed length.
+model AmuxDecisionMakerRequestEvent {
+  id                     String    @id
+  sequence               BigInt    @unique @default(autoincrement())
+  requestId              String
+  kind                   String
+  instance               String?
+  vendor                 String?
+  inputPayloadDigest     String?
+  snapshotState          String?
+  snapshotTargetSha      String?
+  snapshotManifestDigest String?
+  resultKind             String?
+  resultDigest           String?
+  rejectionReason        String?
+  /// Set by the insert trigger on an assignment: its `createdAt` plus 30 minutes.
+  resultDeadlineAt       DateTime? @db.Timestamptz(3)
+  auditLogId             String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+
+  request      AmuxDecisionMakerRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultDetail AmuxDecisionMakerResultDetail?
+  judgment     AmuxDecisionMakerJudgment?
+
+  @@index([requestId, sequence])
+}
+
+/// AMUX Decision Maker bodies (docs/policy/amux-decision-maker.md §10): the
+/// five text fields Admin needs to judge a proposal, and nothing else -- the
+/// question card text (16 KiB), the DM's answer (8 KiB), rationale (4 KiB) and
+/// escalation reason (1 KiB, Admin only), and the operator's edited answer
+/// (8 KiB) -- one row per field per request, kept apart from the ledger.
+/// Worker-written free text may carry personal data. Each row names its key
+/// period and is identified by a keyed digest (HMAC-SHA256 under the
+/// request's key), never a plain hash. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs (field
+/// list, byte caps, formats) and the guard: an insert only for an open request
+/// routed to a DM, in its key period under the registered key and not after
+/// that key's destruction, at most 40 KiB per request, bound to the audit row
+/// of its own transaction that wrote what it belongs to; no update; a delete
+/// only with no hold open and either the router's expiry purge after the
+/// request's retention or a person's privacy erase, each audited in the same
+/// transaction.
+model AmuxDecisionMakerBody {
+  id         String   @id
+  requestId  String
+  field      String
+  text       String
+  keyPeriod  Int
+  keyCheck   String
+  digest     String
+  auditLogId String
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([requestId, field])
+  @@index([keyPeriod])
+  @@index([auditLogId])
+}
+
+/// The append-only retention history of a request's bodies
+/// (docs/policy/amux-decision-maker.md §10): `retention_set` once, written by
+/// the database when the request closes (retentionUntil = the close + 90 days
+/// by the database clock), and a person's `hold_set` / `hold_release`. An
+/// open hold is more hold_set than hold_release. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts, and the closing trigger of migration
+/// 20261008120000_amux_decision_maker_body_store, which also holds the CHECKs,
+/// the partial unique index (one retention per request -- not expressible
+/// here) and the guard: the hold transitions, each event bound to its own
+/// transaction's audit row (the person's `amux.decision.legal_hold`, or the
+/// closing event's router audit), the request's key period, an increasing
+/// sequence, READ COMMITTED only, no update or delete. `actorUserId` is the
+/// operator id and intentionally has no User foreign key.
+model AmuxDecisionMakerRetentionEvent {
+  id             String    @id
+  sequence       BigInt    @unique @default(autoincrement())
+  requestId      String
+  keyPeriod      Int
+  kind           String
+  /// Set by the insert trigger on `retention_set`: the close plus 90 days.
+  retentionUntil DateTime? @db.Timestamptz(3)
+  actorKind      String
+  actorUserId    String?
+  auditLogId     String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
+  @@index([keyPeriod, kind])
+}
+
+/// The AMUX Decision Maker digest-key registry (docs/policy/amux-decision-maker.md
+/// §10): for each 30-day key period, its rotation into use (with the key check
+/// value HMAC(K_P, constant) -- never the key, which lives only in the server's
+/// secret store) and its destruction. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs, the partial
+/// unique indexes (one rotation and one destruction per period) and the
+/// guard: a destruction only after the period ended and once no body of the
+/// period, no open hold on one of its requests and no open request routed to
+/// a DM remains; each event bound to the router's audit row of its own
+/// transaction; no update or delete.
+model AmuxDecisionMakerDigestKeyEvent {
+  id         String   @id
+  sequence   BigInt   @unique @default(autoincrement())
+  keyPeriod  Int
+  kind       String
+  keyCheck   String?
+  auditLogId String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// The structured detail of an AMUX Decision Maker request's terminal result
+/// (docs/policy/amux-decision-maker.md §6, §9, §10): part of the decision
+/// ledger, one immutable row per terminal result, written in the result's own
+/// transaction. It keeps what the ledger's result digest cannot and section 6
+/// needs on the stored proposal -- the output's kind, the option a select
+/// chose and the `irreversible` flag Admin shows before the operator judges --
+/// and the key period and key check value the result was digested under. No
+/// free text: the option id has the S1a grammar. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs (the shape
+/// per result kind, the option id grammar) and the guard: the request's own
+/// result event of the same transaction, kind and audit row; its key period
+/// under a registered, undestroyed key; no update or delete.
+model AmuxDecisionMakerResultDetail {
+  id            String   @id
+  requestId     String   @unique
+  resultEventId String   @unique
+  resultKind    String
+  outputKind    String?
+  optionId      String?
+  irreversible  Boolean?
+  keyPeriod     Int
+  keyCheck      String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A person's judgment of an AMUX Decision Maker proposal
+/// (docs/policy/amux-decision-maker.md §2-6, §4, §6, §10): one immutable row
+/// per request -- confirm, edit_confirm or reject -- with the values Admin
+/// showed beside the proposal (the keyed digests of its bodies, the select's
+/// option, the `irreversible` flag and the snapshot), the keyed digest of an
+/// edited answer (the answer itself is a body row), and §4's declaration
+/// accuracy (`matched`, `mismatched` with its wrong items, or the default
+/// `not_judged`). A judgment closes its request: its trigger writes the
+/// request's closing event of the same kind. Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs (the
+/// kind, accuracy and shape per kind), and the guard: an open request routed
+/// to a DM whose terminal result is the proposal it names, with that result's
+/// detail; no confirmation under the kill switch; every shown value equal to
+/// the stored one; the person's audit of the same transaction targeting the
+/// request; no update or delete. `actorUserId` is the operator's id and
+/// intentionally has no User foreign key.
+model AmuxDecisionMakerJudgment {
+  id                          String   @id
+  requestId                   String   @unique
+  resultEventId               String   @unique
+  instance                    String
+  kind                        String
+  actorUserId                 String
+  shownAnswerDigest           String?
+  shownRationaleDigest        String?
+  shownOptionId               String?
+  shownIrreversible           Boolean?
+  shownSnapshotState          String?
+  shownSnapshotTargetSha      String?
+  shownSnapshotManifestDigest String?
+  operatorAnswerDigest        String?
+  declarationAccuracy         String
+  /// Never NULL (a CHECK); empty unless `declarationAccuracy` is `mismatched`.
+  mismatchedItems             String[]
+  auditLogId                  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                   DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([instance, createdAt])
+}
+
+/// The append-only delivery history of a confirmed AMUX Decision Maker
+/// answer (docs/policy/amux-decision-maker.md §2-7, §9, §10): one delivery
+/// decision after a confirm or edit_confirm (refused under the kill switch),
+/// then one receipt or one unknown outcome, and for an unknown outcome one
+/// person's resolution (`delivered` or `not_delivered`). Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs, the
+/// partial unique indexes (one decision, one outcome and one resolution per
+/// request -- not expressible here) and the guard: the order above, the
+/// kill switch for the decision, the router's or the person's audit of the
+/// same transaction naming the event, an increasing sequence, READ COMMITTED
+/// only, no update or delete. `actorUserId` is the operator's id on a
+/// resolution and intentionally has no User foreign key.
+model AmuxDecisionMakerDeliveryEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  requestId   String
+  kind        String
+  outcome     String?
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
 }
 
 /// The shared agent digest table: one row per stored digest item of any agent

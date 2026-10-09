@@ -424,12 +424,18 @@ const compilerOptions = parsedConfig.options;
 // line or column -- a declaration above one, as here, or a comment above one.
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
+// 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main:
+// three actor names join the existing line of `SYSTEM_AUDIT_ACTORS`, their
+// array is declared at the end of `lib/adminAuditSystemActors.ts`, and the
+// fingerprint record in `lib/marketingAutomationAccess.ts` gains a note above
+// that file's accesses. No access is added; count 228 and the position-free
+// inventory are unchanged, so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "a1cf5224d93dcd87156cb0c5bbdd400f",
-  "0bb8b09336c509f33a8e512b339f4622",
+  "27bbe6a584469e2b14c52af5a782fa61",
+  "9c82381a8178deeaa24b26233904a5ec",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

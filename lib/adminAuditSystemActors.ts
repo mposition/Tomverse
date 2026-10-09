@@ -142,7 +142,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "qa-release-intake",
   "qa-release-merge-lane",
   "agent-digest-retention",
-  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake",
+  ...PRODUCT_RESEARCH_SYSTEM_AUDIT_ACTORS, "billing-finance-ops-intake", "amux-decision-router", "amux-decision-maker-openai", "amux-decision-maker-anthropic",
 ] as const;
 export type SystemAuditActor = (typeof SYSTEM_AUDIT_ACTORS)[number];
 
@@ -285,3 +285,18 @@ export const auditRowActorKind = (
   }
   return "system";
 };
+
+/**
+ * The AMUX Decision Maker's actors (docs/policy/amux-decision-maker.md §10):
+ * the app route that routes a question, and one per DM instance. A DM writes
+ * proposals, never approvals, so none of them is a person in any gate (§1).
+ * Declared at the end of the file, and listed above on an existing line, so no
+ * access above moves.
+ */
+export const AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS = [
+  "amux-decision-router",
+  "amux-decision-maker-openai",
+  "amux-decision-maker-anthropic",
+] as const satisfies readonly SystemAuditActor[];
+export type AmuxDecisionMakerSystemAuditActor =
+  (typeof AMUX_DECISION_MAKER_SYSTEM_AUDIT_ACTORS)[number];
