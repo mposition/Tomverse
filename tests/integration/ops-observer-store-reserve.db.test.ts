@@ -231,7 +231,7 @@ test("the ops-observer advance with a reservation", { skip: !rawUrl }, async (t)
       // derives that it is capped.
       const after = await current();
       const reopened = { ...after.keys, [P3_KEY]: evaluateKey(P3, after.keys[P3_KEY], "delayed", {
-        now: now + 1_800_000, ownerDate: "2026-10-06" }).state } as Record<string, never>;
+        now: now + 1_800_000, ownerDate: "2026-10-06" }).state } as unknown as Record<string, never>;
       const items = owedMessages(after.keys, reopened, "2026-10-06").map((o: { signal: string; scope: string; kind: string; openedAt: number }) => ({
         signal: o.signal, scope: o.scope, kind: o.kind, origin: incidentOrigin(reopened[P3_KEY]), openedAt: new Date(o.openedAt) }));
       assert.deepEqual(items.map((i: { kind: string }) => i.kind), ["reopen"]);

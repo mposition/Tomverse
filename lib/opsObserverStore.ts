@@ -652,7 +652,7 @@ export async function advanceOpsObserverState(
       // state the way the run reads it.
       if (deferred.length > 0) {
         const origins = deferred.map((item) =>
-          incidentOrigin(item.kind === "recovery" ? head.keys[item.key] : input.keys[item.key]),
+          incidentOrigin(item.kind === "recovery" ? (head.keys as Record<string, unknown>)[item.key] : input.keys[item.key]),
         );
         await tx.$executeRaw`
           INSERT INTO "OpsObserverDeferredItem" (id, "genesisId", mode, "ownerDate", signal, scope, kind, origin, "openedAt",
