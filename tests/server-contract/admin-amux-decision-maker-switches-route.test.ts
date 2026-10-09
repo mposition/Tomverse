@@ -35,6 +35,8 @@ type World = {
   changes: Array<{ scope: unknown; value: unknown }>;
   boundaryError: Error | null;
   storeError: Error | null;
+  budgetDepth: number;
+  sessionReadsInBudget: boolean[];
 };
 let world: World;
 const reset = (changes: Partial<World> = {}) => {
@@ -46,6 +48,8 @@ const reset = (changes: Partial<World> = {}) => {
     changes: [],
     boundaryError: null,
     storeError: null,
+    budgetDepth: 0,
+    sessionReadsInBudget: [],
     ...changes,
   };
 };
@@ -66,7 +70,13 @@ async function loadRoute(): Promise<Route> {
   if (!installed) {
     installed = true;
     mock.module("next-auth/next", {
-      namedExports: { getServerSession: async () => world.session },
+      namedExports: {
+        getServerSession: async () => {
+          // The budget starts before the first await of either handler.
+          world.sessionReadsInBudget.push(world.budgetDepth === 1);
+          return world.session;
+        },
+      },
     });
     mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
     mock.module(mod("lib/adminAuth.ts"), {
@@ -87,10 +97,19 @@ async function loadRoute(): Promise<Route> {
           decisionMakerSwitchChange: { operation: "decision_maker_switch_change" },
         },
         AmuxDbBoundaryError: FakeBoundaryError,
+        withAmuxRouteBudget: async (work: () => Promise<unknown>) => {
+          world.budgetDepth += 1;
+          try {
+            return await work();
+          } finally {
+            world.budgetDepth -= 1;
+          }
+        },
         withAmuxDbBoundary: async (
           boundary: { operation: string },
           work: (tx: unknown) => Promise<unknown>,
         ) => {
+          assert.equal(world.budgetDepth, 1, "a boundary runs only inside the route budget");
           world.boundaries.push(boundary.operation);
           if (world.boundaryError) throw world.boundaryError;
           return work({ fake: "tx" });
@@ -157,6 +176,7 @@ test("any administrator reads the switches through the read boundary; nobody els
   assert.deepEqual(await read.json(), STATE);
   assert.equal(read.headers.get("cache-control"), "private, no-store, max-age=0");
   assert.deepEqual(world.boundaries, ["decision_maker_switch_read"]);
+  assert.deepEqual(world.sessionReadsInBudget, [true]);
 
   reset({ boundaryError: new FakeBoundaryError("AMUX_DB_READ_BUSY") });
   const busy = await GET(get());
@@ -199,6 +219,7 @@ test("only ops:write with a recent step-up reaches a change, before the body is 
   });
   assert.deepEqual(world.boundaries, ["decision_maker_switch_change"]);
   assert.deepEqual(world.changes, [valid]);
+  assert.deepEqual(world.sessionReadsInBudget, [true]);
 });
 
 test("a body outside the strict shape never reaches the store, and the store's refusal is 400", async () => {
