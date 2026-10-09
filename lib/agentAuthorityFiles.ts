@@ -103,6 +103,8 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // Operator tooling that runs reviewer CLIs (the independent review
   // orchestrator): it decides who reviews whom, so no agent may change it.
   "tools/**",
+  // The app side of its status report: the secret check and the one row it may write.
+  "lib/reviewOrchestrator*",
   "tests/reviewOrchestrator*",
   "tests/fixtures/review-orchestrator/**",
   // §4-4: policy and contract documents.

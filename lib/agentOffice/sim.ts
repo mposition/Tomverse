@@ -94,6 +94,7 @@ const ORDER = {
   delay: /왜|늦|지연|막힘|블로|안 되|안돼|문제|why|slow|late|delay|stuck|block/i,
   status: /뭐|현황|상황|진행|보고|어디까지|status|what|progress|report/i,
   late: /왜|늦|지연|why|late|slow/i,
+  hello: /안녕|하이|좋은 ?아침|반가|\bhello\b|\bhi\b|good morning/i,
   /** A line that asks rather than orders: it may mention approval without giving it. */
   question: /[?？]|왜|언제|어떻게|뭐|why|when|how|what|whether/i,
 } as const;
@@ -175,6 +176,8 @@ export type Snapshot = {
   dayComplete: boolean;
   phase: string;
   phaseIndex: number;
+  /** A demo day is on screen; otherwise the office shows its real view. */
+  demo: boolean;
   /** Phases a live room replaces; they are neither played nor shown as done. */
   skippedPhases: number[];
   approvalPending: boolean;
@@ -250,6 +253,12 @@ export class AgentOffice {
   paused = false;
   running = false;
   dayComplete = false;
+  /**
+   * Whether a demo day is on screen. The office opens on its real view:
+   * everyone at their desk, every room at its real or link status, and nobody
+   * moving or speaking a scripted line. The demo plays only when started.
+   */
+  demo = false;
   phaseIndex = 0;
   approvalPending = false;
   approved = false;
@@ -325,7 +334,11 @@ export class AgentOffice {
     for (const seed of this.staff) {
       const pool = seats.get(seed.deptId);
       const home = pool?.shift() ?? { x: ENTRANCE.x, y: ENTRANCE.y - 2 };
-      this.spawn(seed, home, { x: ENTRANCE.x, y: ENTRANCE.y });
+      // Outside the demo everyone is at their desk. In the demo a demo room's
+      // staff start at the entrance and arrive; a live room's stay where they
+      // are, because the demo's day is not theirs.
+      const seated = !this.demo || this.isLive(seed.deptId);
+      this.spawn(seed, home, seated ? home : { x: ENTRANCE.x, y: ENTRANCE.y }, seated);
     }
     this.spawn(this.operatorSeed, OPERATOR_SEAT, OPERATOR_SEAT);
 
@@ -338,19 +351,19 @@ export class AgentOffice {
       this.deptStatus[room.id] =
         this.live[room.id]?.status ?? (AGENT_OFFICE_BLOCKED_DEPTS.has(room.id) ? "blocked" : "waiting");
     }
-    this.pushLog("🎛️", this.copy.sim.ready, "lav");
+    this.pushLog("🎛️", this.demo ? this.copy.sim.ready : this.copy.sim.realReady, "lav");
     this.pushChat("staff", this.narratorName(), this.copy.sim.welcome(this.narratorName()));
   }
 
-  private spawn(seed: StaffSeed, home: Pt, at: Pt) {
+  private spawn(seed: StaffSeed, home: Pt, at: Pt, seated = false) {
     const isOperator = seed.rank === "operator";
     const agent: Agent = {
       ...seed,
       x: at.x,
       y: at.y,
-      facing: "down",
-      anim: isOperator ? "sit" : "idle",
-      status: isOperator ? "working" : "offDuty",
+      facing: seated ? "up" : "down",
+      anim: isOperator || seated ? "sit" : "idle",
+      status: isOperator ? "working" : seated ? "idle" : "offDuty",
       home,
       progress: 0,
       taskLabel: isOperator ? seed.role : this.deptCopy(seed.deptId).task,
@@ -490,11 +503,22 @@ export class AgentOffice {
   }
 
   // ── The day ────────────────────────────────────────────────
+  /** Plays the demo day. */
   start() {
     if (this.running) return;
+    this.demo = true;
     this.reset();
     this.running = true;
     this.main.gen = this.dayScript();
+  }
+
+  /** Leaves the demo for the real view: everyone back at their desk, every room at its real or link status. */
+  endDemo() {
+    if (!this.demo) return;
+    this.demo = false;
+    this.turbo = false;
+    this.reset();
+    this.pushChat("staff", this.narratorName(), this.copy.sim.demoEnded);
   }
 
   private *dayScript(): Script {
@@ -502,7 +526,8 @@ export class AgentOffice {
 
     // ① 07:00 arrival
     this.phaseIndex = PHASE.arrival;
-    const workers = this.agents.filter((a) => a.rank !== "operator");
+    // A live room's staff are already at their desks; only the demo's arrive.
+    const workers = this.agents.filter((a) => a.rank !== "operator" && !this.isLive(a.deptId));
     this.pushLog("🚪", s.arrival(workers.length), "yellow");
     this.lock(workers);
     for (const agent of workers) {
@@ -891,7 +916,9 @@ export class AgentOffice {
 
   // ── The operator console ───────────────────────────────────
   pushChat(from: "operator" | "staff", name: string, text: string) {
-    this.chat.push({ id: this.logSeq++, time: this.clockText(), from, name, text });
+    // The real view has no simulated clock: a line is stamped with the time it was said.
+    const time = this.demo ? this.clockText() : `${new Date().toISOString().slice(11, 16)} UTC`;
+    this.chat.push({ id: this.logSeq++, time, from, name, text });
     if (this.chat.length > 60) this.chat.shift();
   }
 
@@ -903,24 +930,48 @@ export class AgentOffice {
 
     // ① A team or a person named
     const deptId = this.matchDept(text);
+    // The real view answers a greeting or a thank-you; the demo keeps its own cheer.
+    if (!this.demo && (ORDER.hello.test(text) || ORDER.cheer.test(text)) && !ORDER.question.test(text)) {
+      this.smallTalk(ORDER.cheer.test(text) ? "thanks" : "hello", deptId && !ORDER.everyone.test(text) ? deptId : null);
+      return;
+    }
     if (deptId && !ORDER.everyone.test(text)) {
       this.deptReport(deptId, text);
       return;
     }
 
-    // ② Orders that do something
-    if (ORDER.focusOff.test(text)) return this.setFocusMode(false);
-    if (ORDER.focusOn.test(text)) return this.setFocusMode(true);
-    if (ORDER.recall.test(text)) return this.recallAll();
-    if (ORDER.boost.test(text)) return this.boost();
-    if (ORDER.convene.test(text)) return this.convene();
-    if (ORDER.brief.test(text)) return this.briefNow();
-    if (ORDER.approve.test(text) && !ORDER.question.test(text) && this.approvalPending) {
-      this.approve();
-      this.pushChat("staff", this.narratorName(), this.copy.sim.approvedByOrder);
+    // ② Orders that do something. They move the demo's staff, so outside
+    // the demo they are declined rather than played over the real view.
+    const order = [
+      ORDER.focusOff,
+      ORDER.focusOn,
+      ORDER.recall,
+      ORDER.boost,
+      ORDER.convene,
+      ORDER.brief,
+      ORDER.approve,
+      ORDER.cheer,
+    ].some((pattern) => pattern.test(text));
+    if (order && !this.demo && !ORDER.question.test(text)) {
+      this.pushChat("staff", this.narratorName(), this.copy.sim.demoOnly);
       return;
     }
-    if (ORDER.cheer.test(text)) return this.cheer();
+    // Orders run only in the demo. On the real view a question that names one
+    // ("a meeting?") goes on to the questions below and moves nobody.
+    if (this.demo) {
+      if (ORDER.focusOff.test(text)) return this.setFocusMode(false);
+      if (ORDER.focusOn.test(text)) return this.setFocusMode(true);
+      if (ORDER.recall.test(text)) return this.recallAll();
+      if (ORDER.boost.test(text)) return this.boost();
+      if (ORDER.convene.test(text)) return this.convene();
+      if (ORDER.brief.test(text)) return this.briefNow();
+      if (ORDER.approve.test(text) && !ORDER.question.test(text) && this.approvalPending) {
+        this.approve();
+        this.pushChat("staff", this.narratorName(), this.copy.sim.approvedByOrder);
+        return;
+      }
+      if (ORDER.cheer.test(text)) return this.cheer();
+    }
 
     // ③ Questions
     if (ORDER.delay.test(text)) return this.reportDelay();
@@ -932,6 +983,18 @@ export class AgentOffice {
   // ── Reports ────────────────────────────────────────────────
   private reportStatus() {
     const s = this.copy.sim;
+    if (!this.demo) {
+      // The real view: what the live rooms read, and the counts.
+      const lines: string[] = [s.statusReal];
+      for (const [dept, status] of Object.entries(this.deptStatus)) {
+        const live = this.live[dept];
+        if (live && (status === "attention" || status === "working")) lines.push(`${this.roomName(dept)}: ${live.line}`);
+      }
+      const stats = this.snapshot().stats;
+      lines.push(s.statusCounts(stats.done, stats.attention, stats.blocked, this.onDutyCount()));
+      this.pushChat("staff", this.narratorName(), lines.join("\n"));
+      return;
+    }
     if (!this.running && !this.dayComplete) {
       this.pushChat("staff", this.narratorName(), s.notStarted);
       return;
@@ -1015,7 +1078,7 @@ export class AgentOffice {
     const away = this.agents.filter((a) => a.status === "onBreak").length;
     if (away) lines.push(s.delayAway(away));
 
-    if (!lines.length) lines.push(this.running ? s.delayNone : s.delayNotStarted);
+    if (!lines.length) lines.push(this.running || !this.demo ? s.delayNone : s.delayNotStarted);
     this.pushChat("staff", this.narratorName(), lines.join("\n"));
     this.speakNarrator(s.reportedDelay);
   }
@@ -1028,7 +1091,9 @@ export class AgentOffice {
     const live = this.live[deptId];
 
     if (live) {
-      lines.push(this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
+      // The lead answers in its own voice, then with the record.
+      const voice = (this.copy.real.voices as Record<string, { answer: string }>)[deptId] ?? this.copy.real.voiceDefault;
+      lines.push(voice.answer, this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
     } else if (status === "working") {
       lines.push(s.deptWorking(this.deptTaskLabel(deptId), this.deptProgress(deptId)));
     } else if (status === "done") {
@@ -1050,10 +1115,42 @@ export class AgentOffice {
     if (ORDER.late.test(question) && status === "waiting" && !live) lines.push(s.deptNotLate);
 
     this.pushChat("staff", s.speaker(lead.name, this.roomName(deptId)), lines.join("\n"));
-    this.say(lead, live ? live.line : s.reportHere, 3);
-    lead.anim = "talk";
+    // On the real view the answer is the console's alone: nobody speaks or stirs.
+    if (this.demo) {
+      this.say(lead, live ? live.line : s.reportHere, 3);
+      lead.anim = "talk";
+    }
     this.spotlightRoom(deptId, 8);
     this.pushLog("🎤", s.deptCheckLog(this.roomName(deptId)), "yellow");
+  }
+
+  /**
+   * The real view's small talk: a greeting or a thank-you is answered by the
+   * leads of the rooms that read a real record (or the one named), each in
+   * its own voice. The words are social, never a claim about the team's work,
+   * and on the floor a lead only reacts with an emoji for a moment -- its
+   * bubble otherwise stays the record's line.
+   */
+  private smallTalk(kind: "hello" | "thanks", deptId: string | null) {
+    const real = this.copy.real;
+    const rooms = (deptId ? [deptId] : Object.keys(this.live)).filter((dept) => this.live[dept] && this.deptLead[dept]);
+    if (rooms.length === 0) {
+      this.pushChat("staff", this.narratorName(), real.noLiveRoom);
+      return;
+    }
+    for (const dept of rooms) {
+      const lead = this.leadOf(dept);
+      const voice = (real.voices as Record<string, { hello: string; thanks: string }>)[dept] ?? real.voiceDefault;
+      this.pushChat("staff", this.copy.sim.speaker(lead.name, this.roomName(dept)), voice[kind]);
+      this.react(lead, real.reactions[kind]);
+    }
+  }
+
+  /** A moment's emoji over a lead's head; the record line comes back when it ends. */
+  private react(agent: Agent, emoji: string) {
+    agent.speech = emoji;
+    agent.speechKind = "talk";
+    agent.speechFor = 3;
   }
 
   // ── Orders ─────────────────────────────────────────────────
@@ -1212,6 +1309,7 @@ export class AgentOffice {
   }
 
   private speakNarrator(text: string) {
+    if (!this.demo) return;
     const narrator = this.agentById.get(AGENT_OFFICE_NARRATOR_ID);
     if (narrator && narrator.status !== "offDuty") this.say(narrator, text, 3);
   }
@@ -1247,10 +1345,33 @@ export class AgentOffice {
    * no other room moves.
    */
   setLive(live: Readonly<Record<string, AgentOfficeLiveDept>>) {
+    const previous = this.live;
     this.live = live;
     for (const [deptId, room] of Object.entries(live)) {
       if (deptId in this.deptStatus) this.deptStatus[deptId] = room.status;
+      // A fresh reading replaces what the room's lead is saying.
+      const lead = this.agentById.get(this.deptLead[deptId]?.id ?? "");
+      if (lead) this.showRecordLine(lead, room.line);
+      // A room whose record changed since the last reading says so in the
+      // console, in its lead's name. The first reading is not a change, and a
+      // reading that only moved the read time (it lives in `detail`) is not one.
+      const before = previous[deptId];
+      if (lead && before && (before.status !== room.status || before.badge !== room.badge || before.line !== room.line)) {
+        this.pushChat("staff", lead.name, this.copy.real.changed(this.roomName(deptId), room.line));
+      }
     }
+  }
+
+  /** The record line a live room's lead keeps on screen, or null for anyone else. */
+  private recordLine(agent: Agent): string | null {
+    const live = this.live[agent.deptId];
+    return live && agent.rank === "lead" ? live.line : null;
+  }
+
+  private showRecordLine(agent: Agent, line: string) {
+    agent.speech = line;
+    agent.speechKind = "talk";
+    agent.speechFor = Number.POSITIVE_INFINITY;
   }
 
   /** The live reading for a room, or null for a demo room. */
@@ -1328,6 +1449,10 @@ export class AgentOffice {
       agent.speechFor -= dt;
       if (agent.speechFor <= 0) agent.speech = null;
     }
+    // A live room's lead keeps its record's line on screen, demo or not: it is
+    // the room's real state in words, not a scripted line.
+    const recordLine = this.recordLine(agent);
+    if (recordLine !== null && agent.speech === null) this.showRecordLine(agent, recordLine);
 
     if (!agent.current) {
       const next = agent.queue.shift();
@@ -1439,6 +1564,8 @@ export class AgentOffice {
   /** Idle behaviour: a passing thought, a coffee, a word with a teammate. */
   private idleBrain(agent: Agent, dt: number) {
     if (agent.rank === "operator" || this.locked.has(agent.id)) return;
+    // The real view is still: a passing thought or a coffee run is the demo's.
+    if (!this.demo) return;
     // A live room's staff keep to their desks and say nothing of their own:
     // beside a LIVE chip, a passing thought would read as the agent's finding.
     if (this.live[agent.deptId]) return;
@@ -1511,6 +1638,7 @@ export class AgentOffice {
           ? this.copy.phaseApproved
           : this.phaseName(this.phaseIndex),
       phaseIndex: this.phaseIndex,
+      demo: this.demo,
       skippedPhases: this.skippedPhases(),
       approvalPending: this.approvalPending,
       approved: this.approved,
