@@ -10,6 +10,7 @@ import {
   DM_CONTEXT_PATHS_MAX,
   DM_INSTANCE_FOR_PROVIDER,
   DM_POLICY_VERSION,
+  DM_RESOLUTIONS,
   DM_THROUGHPUT_PER_DAY,
   DM_THROUGHPUT_PER_HOUR,
   dmCardText,
@@ -100,10 +101,16 @@ test("customer_outbound and unknown ask types never reach a DM", () => {
 
 test("credential, access and external need resolution decision_only", () => {
   for (const askType of ["credential", "access", "external"]) {
-    for (const resolution of [null, "needs_secret", "needs_permission_change", "needs_contact", "other"]) {
+    for (const resolution of [null, "needs_secret", "needs_permission_change", "needs_contact"]) {
       const decision = routeDmQuestion(input({ card: card({ askType, resolution }) }));
       assert.deepEqual(decision.refusals, ["resolution_not_decision_only"], `${askType}/${resolution}`);
     }
+    // A value off the list is also refused as input.
+    assert.deepEqual(
+      routeDmQuestion(input({ card: card({ askType, resolution: "other" }) })).refusals,
+      ["resolution_not_decision_only", "input_limit_exceeded"],
+      `${askType}/other`,
+    );
     assert.equal(routeDmQuestion(input({ card: card({ askType, resolution: "decision_only" }) })).route, "dm_proposal");
   }
   // Other types do not need a resolution.
@@ -331,6 +338,24 @@ test("the secret check reads the card text as the body store keeps it, and the f
   const quoted = `${["api", "key"].join("_")}="${"Q7".repeat(10)}"`;
   assert.match(dmCardText(card({ context: quoted })), /api_key=\\"/);
   assert.ok(routeDmQuestion(input({ card: card({ context: quoted }) })).refusals.includes("card_secret_detected"));
+  // Every string field is read as written, the two routing fields included.
+  for (const field of [{ resolution: quoted }, { askType: quoted }]) {
+    const decision = routeDmQuestion(input({ card: card(field) }));
+    assert.equal(decision.route, "operator", JSON.stringify(Object.keys(field)));
+    assert.ok(decision.refusals.includes("card_secret_detected"), JSON.stringify(Object.keys(field)));
+  }
+});
+
+test("resolution is a closed list on every ask type, not only the three §3-4 checks", () => {
+  for (const askType of DM_ALLOWED_ASK_TYPES) {
+    const decision = routeDmQuestion(input({ card: card({ askType, resolution: "ask the team lead" }) }));
+    assert.equal(decision.route, "operator", askType);
+    assert.ok(decision.refusals.includes("input_limit_exceeded"), askType);
+  }
+  // A listed value or none still reaches a DM on a type §3-4 does not check.
+  for (const resolution of [null, ...DM_RESOLUTIONS]) {
+    assert.equal(routeDmQuestion(input({ card: card({ askType: "decision", resolution }) })).route, "dm_proposal", String(resolution));
+  }
 });
 
 test("repository path grammar", () => {

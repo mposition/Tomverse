@@ -262,12 +262,14 @@ export const parseDmCardText = (text: unknown): DmCard | null => {
 /** Every card string a DM would receive, context paths included, in a fixed order. */
 const cardTextFields = (card: DmCard): Record<string, string> => {
   const fields: Record<string, string> = {
+    askType: card.askType,
     type: card.type,
     title: card.title,
     question: card.question,
     unblocks: card.unblocks,
     context: card.context,
   };
+  if (card.resolution !== null) fields.resolution = card.resolution;
   card.tags.forEach((tag, index) => {
     fields[`tag.${index}`] = tag;
   });
@@ -346,8 +348,11 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
 
   // §5's 16 KiB on the card text the body store keeps (`dmCardText()`), so a
   // card routed to a DM always fits its `card_text` row (§10).
+  // `resolution` is a closed list for every ask type, so a free-form value can
+  // never ride into the stored card text on a type that skips the §3-4 check.
   const cardText = dmCardText(card);
   if (
+    (card.resolution !== null && !(DM_RESOLUTIONS as readonly string[]).includes(card.resolution)) ||
     utf8Bytes(cardText) > DM_CARD_TEXT_MAX_BYTES ||
     card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
     card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
