@@ -28,6 +28,7 @@ import {
   qaTone,
   OPERATOR_QUEUE_HREFS,
   OPERATOR_QUEUE_KEYS,
+  agentOfficeBrief,
   operatorQueueTotal,
   researchLiveDept,
   reviewQuotaView,
@@ -1586,6 +1587,60 @@ test("the review room shows each reviewer's real state, and a silent server as l
   for (const locale of ["en", "ko"]) {
     const states = adminAgentOfficeMessages[locale].real.review.states;
     for (const key of ["reviewing", "idle", "off", "lost"]) assert.ok(states[key], `${locale}: ${key}`);
+  }
+});
+
+test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
+  const qa = (line, status = "done", detail = "read 10-09 01:00 UTC") => ({ status, badge: "Fresh", line, detail });
+  const office = new AgentOffice(adminAgentOfficeMessages.en, { qa: qa("Digest received · 10-09 00:55 UTC") });
+  const said = () => office.chat.filter((entry) => entry.text.startsWith("🔔")).map((entry) => entry.text);
+  // The first reading is not a change, nor is one that only moved the read time.
+  office.setLive({ qa: qa("Digest received · 10-09 00:55 UTC") });
+  office.setLive({ qa: qa("Digest received · 10-09 00:55 UTC", "done", "read 10-09 01:01 UTC") });
+  assert.deepEqual(said(), []);
+  office.setLive({ qa: qa("Digest silent · last received 10-09 00:55 UTC", "attention") });
+  assert.deepEqual(said(), ["🔔 QA & release · Digest silent · last received 10-09 00:55 UTC"]);
+  const line = office.chat.at(-1);
+  assert.equal(line.name, office.deptLead.qa.name, "the room's lead says it");
+  // Outside the demo a console line carries the real time, never the simulated clock.
+  assert.match(line.time, /^\d{2}:\d{2} UTC$/);
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /const LIVE_REFRESH_MS = 60_000;/);
+  assert.match(panel, /document\.visibilityState === "visible"\) router\.refresh\(\)/);
+  assert.match(panel, /window\.clearInterval\(id\)/);
+});
+
+test("the dashboard's three windows read the live rooms, not a demo day", () => {
+  const row = (id, status) => ({ id, name: id, status, badge: id, line: `${id} line`, href: null });
+  const brief = agentOfficeBrief([
+    row("qa", "attention"),
+    row("engineering", "working"),
+    row("research", "done"),
+    row("amux", "blocked"),
+    row("review", "waiting"),
+  ]);
+  assert.deepEqual(brief.attention.map((item) => item.id), ["qa", "amux"]);
+  assert.deepEqual(brief.working.map((item) => item.id), ["engineering"]);
+  assert.equal(brief.quiet, 2);
+  assert.deepEqual(agentOfficeBrief([]), { attention: [], working: [], quiet: 0 });
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  const dashboard = panel.slice(panel.indexOf("function DashboardView"));
+  // automation.status lists the live automations, the AMUX room and the review server.
+  assert.match(dashboard, /data-testid="agent-office-automation"/);
+  assert.match(dashboard, /id: "amux",[\s\S]*href: AGENT_OFFICE_AMUX_RECORD_HREF/);
+  assert.match(dashboard, /id: "review",[\s\S]*status: reviewView\.status/);
+  // The brief is the live rows' brief; the record store links each live team's screen.
+  assert.match(dashboard, /const brief = agentOfficeBrief\(liveRows\)/);
+  assert.match(dashboard, /data-testid="agent-office-latest-record"/);
+  // None of the three reads the demo day.
+  assert.doesNotMatch(dashboard, /snap\.clock|snap\.phase\b|snap\.dayComplete|snap\.approvalPending|PHASE\.|m\.phases/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale].dashboard;
+    assert.doesNotMatch(copy.boardEyebrow, /SIMULATION/);
+    assert.doesNotMatch(copy.note("x", 8, 26), /simulation|시뮬레이션/i);
+    assert.match(copy.storageContentNote, locale === "en" ? /own screen/ : /각 에이전트 화면/);
   }
 });
 
