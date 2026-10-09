@@ -121,7 +121,9 @@ function codexQuota(provider) {
       }
     });
     child.stdin.on("error", () => finish(unknown));
-    child.stdin.end([
+    // Codex stops on stdin EOF; keep the stream open until the asynchronous
+    // account response arrives. finish() still terminates the read-only runtime.
+    child.stdin.write([
       JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
         params: { clientInfo: { name: "review-orchestrator-usage", version: "1" },
           capabilities: { experimentalApi: true } } }),
