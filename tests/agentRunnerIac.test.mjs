@@ -120,17 +120,28 @@ test("the observation runner's declared variables are the ones the run checks fo
   }
 });
 
-test("the probe holds no means of submitting, and never runs in production", () => {
+test("the probe measures every environment's image and can submit in none", () => {
   const probe = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "product_research_probe");
-  // dev, where develop lands, and staging, which runs the release candidate.
-  assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "staging"]);
-  assert.deepEqual([...probe.environments.dev].sort(), [...probe.environments.staging].sort());
+  // Every environment, because each builds its own image and the probe's whole
+  // job is to say what an image can do. Production was the one left out, so its
+  // image was the only one never measured -- and P2's first condition is a
+  // production run (docs/policy/product-research-agent.md §9).
+  assert.deepEqual(Object.keys(probe.environments).sort(), ["dev", "production", "staging"]);
+  for (const environment of Object.keys(probe.environments)) {
+    assert.deepEqual(
+      [...probe.environments[environment]].sort(),
+      [...probe.environments.staging].sort(),
+      environment,
+    );
+  }
   // S0 measures what the image can do. Nothing about that needs the ability to
   // write a row, so the variables that would allow one are absent -- a probe
   // that could submit is a second writer for the same slot.
+  for (const [environment, names] of Object.entries(probe.environments)) {
+    assert.equal(names.includes("PRODUCT_RESEARCH_INGEST_URL"), false, environment);
+    assert.equal(names.includes("PRODUCT_RESEARCH_INGEST_SECRET"), false, environment);
+  }
   const variables = probe.environments.staging;
-  assert.equal(variables.includes("PRODUCT_RESEARCH_INGEST_URL"), false);
-  assert.equal(variables.includes("PRODUCT_RESEARCH_INGEST_SECRET"), false);
   // And it runs when an operator runs it, not on a schedule.
   assert.equal(probe.cronSchedule, null);
 
@@ -188,17 +199,24 @@ test("the resource list is exactly the table for that environment, and refuses t
   }
 
   // A service with no schedule must not pick one up by accident: Railway reads
-  // the absence of the key, not a null.
-  const staging = buildAgentRunnerResources("staging", dsl);
-  const probe = staging.find((resource) => resource.name === "Product Research Probe");
-  assert.equal(Object.prototype.hasOwnProperty.call(probe.deploy, "cronSchedule"), false);
-
-  // Production has no probe at all, rather than a probe with nothing in it.
-  const production = buildAgentRunnerResources("production", dsl);
-  assert.equal(
-    production.some((resource) => resource.name === "Product Research Probe"),
-    false
-  );
+  // the absence of the key, not a null. Checked in every environment the probe
+  // is declared for, because production is the one where a schedule would mean
+  // an unattended run against the image P2 is judged on.
+  for (const environment of ["production", "staging", "dev"]) {
+    const probe = buildAgentRunnerResources(environment, dsl).find(
+      (resource) => resource.name === "Product Research Probe"
+    );
+    assert.ok(probe, `${environment}: the probe is missing`);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(probe.deploy, "cronSchedule"),
+      false,
+      environment
+    );
+    // And it still cannot write a row there: the names that would let it are
+    // absent from the resource, not merely from the table.
+    assert.equal("PRODUCT_RESEARCH_INGEST_URL" in probe.env, false, environment);
+    assert.equal("PRODUCT_RESEARCH_INGEST_SECRET" in probe.env, false, environment);
+  }
 
   for (const environment of ["pr-1234", "Production", "", undefined, null]) {
     assert.throws(
