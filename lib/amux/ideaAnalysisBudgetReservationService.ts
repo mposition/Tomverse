@@ -14,11 +14,12 @@ import { assessAmuxIdeaAnalysisBudget,
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
 import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
 
-/** This transaction body is not a claim or a dispatch permission. It reads
- * owner-approved price evidence from the app DB; no route, CLI runner or
- * switch calls it. A dispatch must separately prove that the selected
- * Frontier approval, runner capability, token caps and halt state are current. */
-export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = false;
+/** This reservation service is not a claim or a dispatch permission. The
+ * owner-only reservation route calls it after its independent environment
+ * switch; no CLI runner or switch calls it directly. A dispatch must separately
+ * prove that the selected Frontier approval, runner capability, token caps and
+ * halt state are current. */
+export const AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = true;
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxIdeaAnalysisReservationError extends Error {
