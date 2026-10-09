@@ -28,7 +28,8 @@ switch의 구현과 검증, 기존 명시적 채택 UI 계약의 Auto 전용 예
 활성 배포에 대한 운영자 확인이 모두 끝나기 전에는 제품 flag, 실사용 자동 적용,
 추가 유료 provider 호출을 허용하지 않는다.
 
-정책 §1의 `B07`은 80건 실행에서 측정한 지연의 출처이고, 이 문단의 `B08`은
+[전면 Auto 출시 예외 v1](../policy/prompt-refiner-vnext-full-auto-release-exception-v1.md) §1의
+`B07`은 80건 실행에서 측정한 지연의 출처이고, 이 문단의 `B08`은
 그 측정치를 12,000ms 문턱에 대조하는 품질 판정 단계다. 둘은 같은 지연 실패를
 서로 다른 단계에서 가리킨다. 승인된 정책 바이트는 변경하지 않았다. 위
 `approvedPolicySha256`은 해당 `approvedPolicyCommit`의 정책 파일 바이트를
