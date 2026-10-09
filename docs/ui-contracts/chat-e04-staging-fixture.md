@@ -20,7 +20,7 @@ product contract.
 
 ## Entry and authorization
 
-The page and its only server action are fail-closed:
+The page and its only server endpoint are fail-closed:
 
 - the canonical deployment resolver must return `staging`;
 - the request must carry a real application session; and
@@ -45,6 +45,14 @@ object with exactly one `action` field. The only accepted values are:
 No prompt, message, comparison, model, provider, projection, authority, or
 arbitrary payload is accepted from the browser. A value outside this closed
 list fails before the synthetic action runs.
+
+The endpoint retains normal session and administrator authorization on every
+request. It deliberately adds neither step-up authentication nor a
+fixture-specific rate limiter: an accepted body can only select one of six
+fixed, pure synthetic actions, and those actions have no mutable state,
+irreversible effect, LLM or provider call, product writer, or cost. If any of
+those conditions changes, this rationale expires and the endpoint must fail
+closed until a new authorization and abuse-control contract is approved.
 
 Local browser tests may use the repository's existing loopback-only full-fixture
 guards and test session convention. This exception does not change those guards
@@ -76,14 +84,19 @@ uses a hard navigation to a fresh document; restoring a live product transport
 inside the QA document is forbidden.
 
 The diagnostic panel is always visible and identifies the surface as synthetic
-QA. The sealed transport must initialize its counters to zero provider calls,
-zero cost, zero product database writes, and zero audit writes before the Chat
-UI is permitted to mount, and the panel renders the latest counter snapshot.
-These are construction-time counters for the sealed fixture. They do not count
-or make a claim about the normal session, administrator layout, model, consent,
-or account reads that the server performs before the transport exists. They
-also do not erase or characterize authentication or audit activity that
-occurred before the observed fixture interaction.
+QA. The sealed transport initializes `providerCalls`, `costMicroUsd`,
+`productDatabaseWrites`, and `auditWrites` to literal zero before the Chat UI is
+permitted to mount. Those four fields are immutable construction markers, not
+measurement counters. They document the transport's declared shape and must
+not be cited as independent proof that no provider, cost, database, or audit
+activity occurred. Runtime evidence instead comes from the browser's native
+network observation, the closed transport allowlist, and `blockedRequests`.
+
+The construction markers do not count or make a claim about normal session,
+administrator layout, model, consent, or account reads that the server performs
+before the transport exists. They also do not erase or characterize
+authentication or audit activity that occurred before the observed fixture
+interaction.
 
 ## Synthetic behavior covered
 
@@ -92,7 +105,8 @@ transport:
 
 - existing conversation history, a new Chat send, context preparation and
   context-bundle reuse;
-- one fixed failure followed by retry on the real Chat UI;
+- one fixed failure, question restoration, and a subsequent explicit Send on
+  the real Chat UI;
 - Prompt Refiner proposal preview while the product remains default-off;
 - attachment prepare, document-local upload/finalize, message binding, and
   synthetic reload observation;
@@ -132,9 +146,9 @@ The server action runs the existing D02 synthetic Auto facade against
 server-owned fixed strings. Each closed action verifies its corresponding
 default-off, accepted, kept-original, stale, replay, or unknown-outcome branch.
 Every result must retain `dispatchAuthorized: false`, preserve the authored
-source contract, and report zero provider calls, cost, product database writes,
-and audit writes. The `unknown` action remains stopped; it is not retried or
-converted to success.
+source contract, and return the four literal zero construction markers. Those
+markers are not activity measurements. The `unknown` action remains stopped;
+it is not retried or converted to success.
 
 This fixture does not activate Auto, authorize dispatch, record a disposition,
 or demonstrate that a product Auto caller exists. It also supplies no release
@@ -145,17 +159,17 @@ gate evidence beyond the exact synthetic branch that was run.
 An E04 browser result is bound to the exact commit and exact staging deployment
 that served the page. A result from another build, an earlier deployment, a
 local run, or a later reload after deployment replacement does not transfer.
-The evidence record must retain the deployment identity and the observed
-network and diagnostic counters.
+The evidence record must retain the deployment identity, the browser-observed
+native request list after the Chat tree mounted, `blockedRequests`, and the
+diagnostic marker snapshot.
 
 The fixture can support the following claims for that exact build only:
 
 - the real Chat component tree completed the named synthetic interaction;
-- after the real Chat tree mounted, no request from the observed fixture
-  interaction escaped the registered transport;
-- the fixed D02 action returned `dispatchAuthorized: false`; and
-- the fixture counters remained at zero for provider, cost, product database,
-  and audit activity.
+- after the real Chat tree mounted, browser network observation found no native
+  request from the fixture interaction except the exact administrator action
+  endpoint, while unregistered attempts incremented `blockedRequests`; and
+- the fixed D02 action returned `dispatchAuthorized: false`.
 
 It cannot support claims about provider quality, model quality, product
 persistence, real attachment storage, real search, real artifact generation,
@@ -176,16 +190,18 @@ The exact candidate must keep all of these checks:
 - strict six-action parsing, the 512-byte cap, and rejection of client prompt,
   comparison, and dispatch-authority fields;
 - D02 synthetic action tests showing source preservation,
-  `dispatchAuthorized: false`, stopped unknown outcome, and all four zero
-  activity counters;
+  `dispatchAuthorized: false`, stopped unknown outcome, and all four literal
+  construction markers;
 - transport tests showing external and unregistered requests, beacon, XHR, and
   late callbacks are blocked while the one administrator action endpoint is the
   only native server request;
 - browser tests on the real Chat UI for default-off, proposal preview, context,
-  failure/retry, reload observation, attachment, search, artifact, fixed voice
-  wiring, and all six Auto actions; and
-- an exact-build staging observation that records the diagnostic counters and
-  deployment identity.
+  failure, question restoration, explicit resend, reload observation,
+  attachment, search, artifact, fixed voice wiring, and all six Auto actions;
+  and
+- an exact-build staging observation that records the deployment identity,
+  browser native request list, `blockedRequests`, and diagnostic marker
+  snapshot.
 
 Local tests and CI verify the contract's deterministic structure. Only the
 exact staging browser observation verifies that the deployed build exposed the
