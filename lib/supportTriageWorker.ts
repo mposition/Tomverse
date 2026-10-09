@@ -442,17 +442,30 @@ const writeGroups = async (
            ORDER BY m."groupId", m."feedbackId"`;
   const groupMembers = new Map<string, string[]>();
   for (const row of existing) groupMembers.set(row.groupId, [...(groupMembers.get(row.groupId) ?? []), row.feedbackId]);
+  // The memberships come from the member read, not the lock statement: a
+  // statement that waited for a group lock keeps the snapshot it took before
+  // waiting, so a member the other transaction just added is missing from it
+  // but present here. Reading both from one snapshot keeps a report from being
+  // counted as a member and a newcomer at once.
+  const groupInfo = new Map(current.map((row) => [row.groupId, row]));
+  const lockedIds = new Set(ids);
+  const memberships = new Map(
+    existing
+      .filter((row) => lockedIds.has(row.feedbackId))
+      .map((row) => {
+        const group = groupInfo.get(row.groupId) as (typeof current)[number];
+        return [
+          row.feedbackId,
+          { groupId: row.groupId, state: group.state, kind: group.kind, snapshotDigest: group.snapshotDigest },
+        ] as const;
+      })
+  );
   const facts = locked.map(groupFactsOf);
   const factsById = new Map(facts.map((row) => [row.feedbackId, row]));
   const plan = planGroups({
     reports: facts,
     arriving,
-    memberships: new Map(
-      current.map((row) => [
-        row.feedbackId,
-        { groupId: row.groupId, state: row.state, kind: row.kind, snapshotDigest: row.snapshotDigest },
-      ])
-    ),
+    memberships,
     groupMembers,
     membershipBudget,
   });

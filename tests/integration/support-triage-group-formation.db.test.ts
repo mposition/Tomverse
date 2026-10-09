@@ -358,3 +358,44 @@ test("the pass's membership budget leaves later groups for later", async () => {
   assert.equal(result.groups.budgetDeferred, 1);
   assert.equal(result.groups.membershipsUsed, 2);
 });
+
+test("a join that waited for another pass's join counts that member once, so the fiftieth still fits", async () => {
+  const existing = Array.from({ length: 48 }, (_, i) => `m${String(i).padStart(2, "0")}`);
+  for (const id of existing) await report(id, { userId: "user-gf-1" });
+  await runSupportTriageWorker();
+  const { id: groupId } = await onlyGroup();
+  assert.equal(await prisma.supportTriageGroupMember.count({ where: { groupId } }), 48);
+  await report("y", { userId: "user-gf-1" });
+  await report("z", { userId: "user-gf-1" });
+  const run = await startSupportTriageRun("worker");
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}z`]);
+  const peerIds = await readGroupPeers([`${PREFIX}z`]);
+
+  // Another pass joins y to the group and holds its lock uncommitted.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let inserted!: () => void;
+  const ready = new Promise<void>((resolve) => (inserted = resolve));
+  const digest = groupSnapshotDigest("user-gf-1");
+  const other = prisma.$transaction(
+    async (tx) => {
+      await tx.supportTriageGroupMember.create({
+        data: { groupId, feedbackId: `${PREFIX}y`, primarySnapshotDigest: digest },
+      });
+      inserted();
+      await held;
+    },
+    { timeout: 30_000 }
+  );
+  await ready;
+  // This result transaction waits for the group lock, then plans z's join.
+  const writing = writeSupportTriageResults(run, batch.token as string, batch.claimed, { peerIds });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  release();
+  await other;
+  const result = await writing;
+  assert.equal(result.groups.memberCapReached, 0);
+  assert.equal(result.groups.groupsJoined, 1);
+  assert.equal(result.groups.joinedMembers, 1);
+  assert.equal(await prisma.supportTriageGroupMember.count({ where: { groupId } }), 50);
+});
