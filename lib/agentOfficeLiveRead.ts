@@ -22,9 +22,15 @@ import type {
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
+  AgentOfficeOperatorQueue,
   AgentOfficeQaState,
   AgentOfficeResearchState,
 } from "@/lib/agentOffice/live";
+import {
+  countAutoFixActionCases,
+  countAwaitingAmuxEscalations,
+  countPendingMarketingApprovals,
+} from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
 import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
@@ -34,6 +40,7 @@ import {
 import { agentOfficeQaState } from "@/lib/agentOfficeQaState";
 import { agentOfficeReviewState } from "@/lib/agentOfficeReviewState";
 import { agentOfficeResearchState } from "@/lib/agentOfficeResearchState";
+import { countOpenAmuxOrchestratorHalts } from "@/lib/amux/orchestratorHaltStore";
 import { getConfiguredAmuxWorkerCatalog } from "@/lib/amux/routing";
 import { readBillingFinanceOpsControl } from "@/lib/billingFinanceOpsControl";
 import {
@@ -264,14 +271,39 @@ async function readReview(): Promise<AgentOfficeReviewState> {
   }
 }
 
+/**
+ * The operator to-do counts, each read on its own: one failing count is
+ * that count unknown, not the whole to-do zero (rule 8).
+ */
+async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
+  const [marketing, amuxEscalations, amuxHalts, autoFix] = await Promise.allSettled([
+    countPendingMarketingApprovals(),
+    countAwaitingAmuxEscalations(),
+    countOpenAmuxOrchestratorHalts(),
+    countAutoFixActionCases(),
+  ]);
+  const value = (result: PromiseSettledResult<number>, read: string) => {
+    if (result.status === "fulfilled") return result.value;
+    console.warn({ event: "admin_agent_office_read_failed", read });
+    return null;
+  };
+  return {
+    marketing: value(marketing, "operator_queue_marketing"),
+    amuxEscalations: value(amuxEscalations, "operator_queue_amux_escalations"),
+    amuxHalts: value(amuxHalts, "operator_queue_amux_halts"),
+    autoFix: value(autoFix, "operator_queue_autofix"),
+  };
+}
+
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, engineering, amux, review] = await Promise.all([
+  const [research, qa, finance, engineering, amux, review, queue] = await Promise.all([
     readResearch(now),
     readQa(),
     readFinance(),
     readEngineering(),
     readAmuxWorkers(),
     readReview(),
+    readOperatorQueue(),
   ]);
-  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, queue };
 }

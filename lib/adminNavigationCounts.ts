@@ -43,6 +43,19 @@ export const countAwaitingAmuxEscalations = () =>
     where: { status: { in: [...AMUX_ESCALATION_AWAITING_STATUSES] } },
   });
 
+/**
+ * Auto-fix cases waiting on an operator. Exported, like the two AMUX counts,
+ * because the Agent office's operator to-do counts the same set.
+ */
+export const countAutoFixActionCases = () =>
+  prisma.feedbackAutoFixCase.count({
+    where: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } },
+  });
+
+/** Marketing drafts waiting on a person's approval (docs/policy/marketing-automation.md §6). */
+export const countPendingMarketingApprovals = () =>
+  prisma.marketingPost.count({ where: { status: "pending_approval" } });
+
 export async function getAdminNavigationCounts(): Promise<{
   counts: AdminNavigationCounts;
   /** Whether every read succeeded, which the footer reports as API/DB health. */
@@ -81,9 +94,7 @@ export async function getAdminNavigationCounts(): Promise<{
         },
       },
     }),
-    prisma.feedbackAutoFixCase.count({
-      where: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } },
-    }),
+    countAutoFixActionCases(),
     prisma.privacyRequest.count({ where: { status: "open" } }),
     prisma.refundRequest.count({ where: { status: "pending" } }),
     prisma.adminActionApproval.count({
@@ -98,7 +109,7 @@ export async function getAdminNavigationCounts(): Promise<{
     abandonedLegalEmailCount(),
     countOpenWorkItems(),
     overdueCampaignWaveCount({ now }),
-    prisma.marketingPost.count({ where: { status: "pending_approval" } }),
+    countPendingMarketingApprovals(),
     countAwaitingAmuxEscalations(),
     // Orchestration policy version 20: halts no person has cleared.
     countOpenAmuxOrchestratorHalts(),

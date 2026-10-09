@@ -203,6 +203,8 @@ export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   review: AgentOfficeReviewState;
+  /** The operator to-do counts (OPERATOR_QUEUE_KEYS). */
+  queue: AgentOfficeOperatorQueue;
   research: AgentOfficeResearchState;
   qa: AgentOfficeQaState;
   finance: AgentOfficeFinanceState;
@@ -822,4 +824,34 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
   });
   const time = utcStamp(state.receivedAt);
   return { rows, note: state.stale ? copy.stale(time) : copy.asOf(time) };
+}
+
+/**
+ * The operator's to-do: real queues where an agent waits on a person. The
+ * same counts the console sidebar badges (lib/adminNavigationCounts.ts), and
+ * each links to the screen where it is acted on. Nothing here decides; the
+ * office only counts and points.
+ */
+export const OPERATOR_QUEUE_KEYS = ["marketing", "amuxEscalations", "amuxHalts", "autoFix"] as const;
+export type OperatorQueueKey = (typeof OPERATOR_QUEUE_KEYS)[number];
+/** `null` is a count that could not be read: never shown as zero. */
+export type AgentOfficeOperatorQueue = Record<OperatorQueueKey, number | null>;
+
+export const OPERATOR_QUEUE_HREFS: Record<OperatorQueueKey, string> = {
+  marketing: "/admin/marketing",
+  amuxEscalations: "/admin/amux-execution?tab=assignment",
+  amuxHalts: "/admin/amux-execution?tab=halts",
+  autoFix: "/admin/support",
+};
+
+/** The to-do total over the counts that were read, and whether any could not be. */
+export function operatorQueueTotal(queue: AgentOfficeOperatorQueue): { total: number; unknown: boolean } {
+  let total = 0;
+  let unknown = false;
+  for (const key of OPERATOR_QUEUE_KEYS) {
+    const value = queue[key];
+    if (value === null) unknown = true;
+    else total += value;
+  }
+  return { total, unknown };
 }
