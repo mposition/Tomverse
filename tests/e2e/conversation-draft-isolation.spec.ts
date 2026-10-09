@@ -197,6 +197,8 @@ async function openChat(page: Page, options: { lockedIds?: string[] } = {}) {
   await page.goto("/chat?lang=ko");
   await expect(textarea(page)).toBeVisible();
   await expectConversationOpen(page, CONVERSATION_A);
+  // The preseeded storage id precedes the app's actual restore selection.
+  await expect(page.locator('[data-message-role="user"]').filter({ hasText: "First question in A" }).first()).toBeVisible();
   return world;
 }
 
