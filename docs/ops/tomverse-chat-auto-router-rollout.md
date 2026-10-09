@@ -52,6 +52,8 @@ The authenticated, read-only `GET /api/admin/routing-shadow` includes a
 readiness, effective shadow flag and dispatch instrumentation mode, and whether
 the manifest keyring resolves. It reads the serving process's environment and
 returns no keys, cohort salt or parser error prose. Responses use `no-store`.
+The Routing workspace displays this snapshot, including when there are no shadow
+rows. An older response without it is labelled unknown, never ready or off.
 
 The top-level `measurementScope` is
 `historical_window_without_deployment_binding`. The build identifies the
