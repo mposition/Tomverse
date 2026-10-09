@@ -16,6 +16,7 @@ import {
   OPERATOR_QUEUE_HREFS,
   OPERATOR_QUEUE_KEYS,
   agentOfficeBrief,
+  agentOfficeReport,
   operatorQueueTotal,
   reviewQuotaView,
   reviewRoomView,
@@ -242,6 +243,37 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   );
 
   const filteredTeams = filter === "all" ? teams : teams.filter((team) => team.status === filter);
+
+  // The status report: what this screen shows, as Markdown, built when asked
+  // for. It goes to the clipboard or a download and nowhere else.
+  const reportText = () =>
+    agentOfficeReport(
+      {
+        readAt: live.readAt,
+        rows: liveRowsFor(teams, amuxView, reviewView, m),
+        notConnected: teams.filter((team) => !team.live).map((team) => `${team.icon} ${team.name}`),
+        queue: OPERATOR_QUEUE_KEYS.map((key) => ({ label: m.queue.labels[key], count: live.queue[key] })),
+        quota: quotaView,
+        unknownCount: m.queue.unknown,
+      },
+      m.report
+    );
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText());
+      showToast(m.live.reportCopied);
+    } catch {
+      showToast(m.live.reportCopyFailed);
+    }
+  };
+  const downloadReport = () => {
+    const url = URL.createObjectURL(new Blob([reportText()], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tomverse-agent-office-${live.readAt.slice(0, 16).replace(/[:T]/g, "-")}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
   const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
   // The operator's to-do is the real queues an agent waits on (OPERATOR_QUEUE_KEYS).
   const todo = operatorQueueTotal(live.queue);
@@ -305,6 +337,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               follow={follow}
               selectedId={selectedId}
               onSelect={onSelect}
+              onCopyReport={copyReport}
+              onDownloadReport={downloadReport}
             />
           ) : (
             <DashboardView
@@ -391,6 +425,8 @@ function LiveView({
   follow,
   selectedId,
   onSelect,
+  onCopyReport,
+  onDownloadReport,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
@@ -404,6 +440,8 @@ function LiveView({
   follow: boolean;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
+  onCopyReport: () => void;
+  onDownloadReport: () => void;
 }) {
   const engineeringLive = engine.liveDept("engineering") !== null;
 
@@ -435,8 +473,23 @@ function LiveView({
       </header>
 
       <section className={cx("live-bar")}>
-        <button type="button" className={cx("btn btn-ghost")} disabled title={m.live.publishHint}>
-          {m.live.publish}
+        <button
+          type="button"
+          className={cx("btn btn-ghost")}
+          onClick={onCopyReport}
+          title={m.live.reportHint}
+          data-testid="agent-office-report-copy"
+        >
+          {m.live.reportCopy}
+        </button>
+        <button
+          type="button"
+          className={cx("btn btn-ghost")}
+          onClick={onDownloadReport}
+          title={m.live.reportHint}
+          data-testid="agent-office-report-download"
+        >
+          {m.live.reportDownload}
         </button>
         <div className={cx("live-counts")}>
           <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
@@ -792,6 +845,51 @@ function BriefingModal({
   );
 }
 
+/**
+ * Every automation the office reads for real: the live team rooms, then the
+ * AMUX execution room and the review server. The dashboard lists them and the
+ * status report is built from them.
+ */
+function liveRowsFor(
+  teams: readonly TeamRow[],
+  amuxView: AgentOfficeAmuxView,
+  reviewView: AgentOfficeReviewView,
+  m: OfficeCopy
+): AgentOfficeLiveRow[] {
+  return [
+    ...teams.flatMap((team) =>
+      team.live
+        ? [
+            {
+              id: team.id,
+              name: `${team.icon} ${team.name}`,
+              status: team.status,
+              badge: team.live.badge,
+              line: team.live.line,
+              href: agentOfficeDept(team.id)?.recordHref ?? null,
+            },
+          ]
+        : []
+    ),
+    {
+      id: "amux",
+      name: `${AMUX_ROOM.icon} ${m.rooms.amux}`,
+      status: amuxView.status,
+      badge: m.deptStatus[amuxView.status],
+      line: amuxView.summary,
+      href: AGENT_OFFICE_AMUX_RECORD_HREF,
+    },
+    {
+      id: "review",
+      name: `${REVIEW_ROOM.icon} ${m.rooms.review}`,
+      status: reviewView.status,
+      badge: m.deptStatus[reviewView.status],
+      line: reviewView.summary,
+      href: null,
+    },
+  ];
+}
+
 type TeamRow = {
   id: string;
   icon: string;
@@ -835,40 +933,7 @@ function DashboardView({
   const liveCount = teams.filter((team) => team.live !== null).length;
   const engineeringLive = engine.liveDept("engineering") !== null;
   const todo = operatorQueueTotal(queue);
-  // Every automation the office reads for real: the live team rooms, then the
-  // AMUX execution room and the review server.
-  const liveRows: AgentOfficeLiveRow[] = [
-    ...teams.flatMap((team) =>
-      team.live
-        ? [
-            {
-              id: team.id,
-              name: `${team.icon} ${team.name}`,
-              status: team.status,
-              badge: team.live.badge,
-              line: team.live.line,
-              href: agentOfficeDept(team.id)?.recordHref ?? null,
-            },
-          ]
-        : []
-    ),
-    {
-      id: "amux",
-      name: `${AMUX_ROOM.icon} ${m.rooms.amux}`,
-      status: amuxView.status,
-      badge: m.deptStatus[amuxView.status],
-      line: amuxView.summary,
-      href: AGENT_OFFICE_AMUX_RECORD_HREF,
-    },
-    {
-      id: "review",
-      name: `${REVIEW_ROOM.icon} ${m.rooms.review}`,
-      status: reviewView.status,
-      badge: m.deptStatus[reviewView.status],
-      line: reviewView.summary,
-      href: null,
-    },
-  ];
+  const liveRows = liveRowsFor(teams, amuxView, reviewView, m);
   const notConnected = teams.filter((team) => !team.live);
   const notConnectedNames = notConnected.map((team) => team.name).join(" · ");
   const brief = agentOfficeBrief(liveRows);

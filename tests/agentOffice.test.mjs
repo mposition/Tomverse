@@ -29,6 +29,7 @@ import {
   OPERATOR_QUEUE_HREFS,
   OPERATOR_QUEUE_KEYS,
   agentOfficeBrief,
+  agentOfficeReport,
   operatorQueueTotal,
   researchLiveDept,
   reviewQuotaView,
@@ -1590,6 +1591,67 @@ test("the review room shows each reviewer's real state, and a silent server as l
   }
 });
 
+test("the status report is what the screen shows, as Markdown, copied or downloaded and sent nowhere", () => {
+  const copy = adminAgentOfficeMessages.ko;
+  const row = (id, status, line) => ({ id, name: id, status, badge: status, line, href: null });
+  const report = agentOfficeReport(
+    {
+      readAt: "2026-10-09T02:13:00.000Z",
+      rows: [row("qa", "attention", "Digest silent"), row("engineering", "working", "1 run active"), row("research", "done", "recorded")],
+      notConnected: ["🎧 지원", "🛡️ 신뢰·안전"],
+      queue: [
+        { label: copy.queue.labels.marketing, count: 2 },
+        { label: copy.queue.labels.amuxEscalations, count: null },
+      ],
+      quota: { rows: [{ id: "claude", vendor: "anthropic", status: "done", label: "사용 가능", amount: "62% 남음" }], note: null },
+      unknownCount: copy.queue.unknown,
+    },
+    copy.report
+  );
+  assert.equal(
+    report,
+    [
+      "# Tomverse 에이전트 오피스 상태 보고 · 10-09 02:13 UTC",
+      "",
+      "## 확인 필요 (1)",
+      "- qa · attention · Digest silent",
+      "",
+      "## 진행 중 (1)",
+      "- engineering · working · 1 run active",
+      "",
+      "## 조용함 (1)",
+      "- research · done · recorded",
+      "",
+      "## 연동 대기 (2)",
+      "- 🎧 지원",
+      "- 🛡️ 신뢰·안전",
+      "",
+      "## 운영자 할 일 (2+?)",
+      "- 마케팅 게시 승인: 2",
+      "- AMUX 사람 확인 요청: 확인 불가",
+      "",
+      "## 검토 CLI quota",
+      "- claude (anthropic) · 사용 가능 · 62% 남음",
+      "",
+      copy.report.footer,
+      "",
+    ].join("\n")
+  );
+  const empty = agentOfficeReport(
+    { readAt: "2026-10-09T02:13:00.000Z", rows: [], notConnected: [], queue: [], quota: { rows: [], note: "보고 없음" }, unknownCount: "?" },
+    adminAgentOfficeMessages.en.report
+  );
+  assert.match(empty, /## Needs a look \(0\)\n- None/);
+  assert.match(empty, /## Reviewer CLI quota\n- 보고 없음/);
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /data-testid="agent-office-report-copy"/);
+  assert.match(panel, /data-testid="agent-office-report-download"/);
+  assert.match(panel, /navigator\.clipboard\.writeText\(reportText\(\)\)/);
+  // The report goes to the clipboard or a file; the page posts it nowhere.
+  assert.doesNotMatch(panel, /fetch\(|sendBeacon|m\.live\.publish/);
+});
+
 test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
   const qa = (line, status = "done", detail = "read 10-09 01:00 UTC") => ({ status, badge: "Fresh", line, detail });
   const office = new AgentOffice(adminAgentOfficeMessages.en, { qa: qa("Digest received · 10-09 00:55 UTC") });
@@ -1629,8 +1691,10 @@ test("the dashboard's three windows read the live rooms, not a demo day", () => 
   const dashboard = panel.slice(panel.indexOf("function DashboardView"));
   // automation.status lists the live automations, the AMUX room and the review server.
   assert.match(dashboard, /data-testid="agent-office-automation"/);
-  assert.match(dashboard, /id: "amux",[\s\S]*href: AGENT_OFFICE_AMUX_RECORD_HREF/);
-  assert.match(dashboard, /id: "review",[\s\S]*status: reviewView\.status/);
+  const rowsFor = panel.slice(panel.indexOf("function liveRowsFor"), panel.indexOf("type TeamRow"));
+  assert.match(rowsFor, /id: "amux",[\s\S]*href: AGENT_OFFICE_AMUX_RECORD_HREF/);
+  assert.match(rowsFor, /id: "review",[\s\S]*status: reviewView\.status/);
+  assert.match(dashboard, /const liveRows = liveRowsFor\(teams, amuxView, reviewView, m\)/);
   // The brief is the live rows' brief; the record store links each live team's screen.
   assert.match(dashboard, /const brief = agentOfficeBrief\(liveRows\)/);
   assert.match(dashboard, /data-testid="agent-office-latest-record"/);
