@@ -15,6 +15,7 @@ import test from "node:test";
 
 import {
   buildObservationPayload,
+  observationPayloadDigest,
   summariseObservation,
 } from "../lib/productResearchObservationCore.mjs";
 import {
@@ -193,7 +194,17 @@ test("the runs below cannot find git", () => {
   assert.equal(git.status, null, `git was still reachable: ${git.stdout}`);
 });
 
-/** A stand-in for the ingest route that records what reached it. */
+/**
+ * A stand-in for the ingest route that records what reached it.
+ *
+ * It answers the way the route does -- the slot and outcome it stored, and
+ * the digest it computed from the payload -- because the run now checks that
+ * receipt. A stub that answered `{ recorded: true }` and nothing else would
+ * make every test here exercise a path the real route never produces.
+ *
+ * `reply.digest` substitutes a different one, which is the disagreement the
+ * whole comparison exists to catch.
+ */
 const ingestServer = async (reply = { status: 200 }) => {
   const received = [];
   const server = createServer((request, response) => {
@@ -209,10 +220,26 @@ const ingestServer = async (reply = { status: 200 }) => {
         body,
       });
       response.writeHead(reply.status, { "content-type": "application/json" });
+      let sent;
+      try {
+        sent = JSON.parse(body);
+      } catch {
+        sent = {};
+      }
       response.end(
         JSON.stringify(
           reply.status === 200
-            ? { recorded: true, observationId: "obs-2026-10-07-abcdef12" }
+            ? {
+                recorded: true,
+                observationId: "obs-2026-10-07-abcdef12",
+                slot: sent.slot,
+                outcome: sent.outcome,
+                payloadDigest:
+                  reply.digest ??
+                  (sent.payload === undefined
+                    ? null
+                    : observationPayloadDigest(sent.payload)),
+              }
             : { refused: "unauthorized" },
         ),
       );
@@ -540,3 +567,27 @@ test(
     }
   },
 );
+
+test("a row whose digest disagrees is reported, not retried", async () => {
+  // The route computes the digest from what it stored and answers with it for
+  // exactly this comparison. A disagreement means the row does not hold what
+  // the run observed -- and nothing was checking, so nobody could have found
+  // out. It is not retried: the row exists, and a second answer for one slot is
+  // worse than none.
+  const ingest = await ingestServer({ status: 200, digest: "f".repeat(64) });
+  try {
+    const result = await runAsync({
+      ...SERVICE_ENV,
+      PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      PATH: PATH_WITHOUT_GIT,
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stdout, /does not match what was sent/, result.stdout);
+    // One attempt only.
+    assert.equal(ingest.received.length, 1);
+    // And it does not claim the row is good.
+    assert.equal(/recorded obs-[^:]+: failed at clone_failed/.test(result.stdout), false);
+  } finally {
+    await ingest.close();
+  }
+});

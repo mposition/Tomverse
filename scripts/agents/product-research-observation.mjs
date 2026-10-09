@@ -38,6 +38,7 @@ import {
   OBSERVATION_SCHEMA_VERSION,
   OBSERVED_BRANCHES,
   buildObservationPayload,
+  observationPayloadDigest,
 } from "../../lib/productResearchObservationCore.mjs";
 import { endChild, runChild } from "../../lib/productResearchObservationChild.mjs";
 import {
@@ -57,6 +58,7 @@ import {
   readBranchTip,
   readLimitedBody,
   readReport,
+  readSubmissionReceipt,
   reportArgv,
   submissionBody,
 } from "../../lib/productResearchObservationStepCore.mjs";
@@ -97,6 +99,27 @@ const probeImage = async () => {
   return gitAvailable ? 0 : 1;
 };
 
+/**
+ * The submission, and the check that the row holds what was sent.
+ *
+ * One function because there are two callers -- the run and the preparation
+ * deadline -- and the deadline's one cannot be reached by a test without
+ * waiting fourteen minutes for it. Sharing the code is what closes that gap:
+ * the path a test does exercise is the path the deadline takes.
+ */
+const submitAndCheck = async (config, body, expected) => {
+  const sent = await submit(config, body);
+  if (sent.problem) return { problem: sent.problem };
+  // A 2xx is not a receipt. The route answers with the row it wrote and the
+  // digest it computed from what it stored, for exactly this comparison.
+  const receipt = readSubmissionReceipt(sent.recorded, expected);
+  if (receipt.problem) {
+    // Not retried and not repaired: the row exists, and a second answer for
+    // one slot is worse than none. The point is that somebody finds out.
+    return { problem: `the recorded row does not match what was sent: ${receipt.problem}` };
+  }
+  return { recorded: sent.recorded };
+};
 /**
  * The child this run is waiting on, so a watchdog can end it.
  *
@@ -427,11 +450,15 @@ const main = async () => {
     // The work still running is ended first. It cannot contribute to this
     // answer any more, and a clone left running would outlive the submission.
     endChild(liveChild, "SIGKILL");
-    void submit(plan.config, submissionBody({
-      schemaVersion: OBSERVATION_SCHEMA_VERSION,
-      slot,
-      failureStage: "timeout",
-    })).then((sent) => {
+    void submitAndCheck(
+      plan.config,
+      submissionBody({
+        schemaVersion: OBSERVATION_SCHEMA_VERSION,
+        slot,
+        failureStage: "timeout",
+      }),
+      { slot, outcome: "failed" },
+    ).then((sent) => {
       if (sent.problem) say(`submission: ${sent.problem}`);
       else say(`recorded ${sent.recorded?.observationId ?? "a row"}: failed at timeout`);
       finish(1);
@@ -466,9 +493,16 @@ const main = async () => {
     return state.exitCode ?? 1;
   }
 
-  const sent = await submit(
+  const sent = await submitAndCheck(
     plan.config,
     submissionBody({ schemaVersion: OBSERVATION_SCHEMA_VERSION, slot, ...outcome }),
+    {
+      slot,
+      outcome: outcome.failureStage ? "failed" : "ok",
+      ...(outcome.failureStage
+        ? {}
+        : { payloadDigest: observationPayloadDigest(outcome.payload) }),
+    },
   );
   if (sent.problem) {
     say(`submission: ${sent.problem}`);
