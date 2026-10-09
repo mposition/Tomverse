@@ -3,12 +3,16 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  classifyFrontierRegistrationReadFailure,
+  classifyFrontierRegistrationPost,
   clearFrontierRegistrationReceipt,
+  decideFrontierRegistrationRestart,
   readAvailableFrontierModels,
   readCheckedFrontierSelection,
   readFrontierCatalogApprovalReadBack,
   readFrontierCatalogApprovalWrite,
   readFrontierRegistrationReceipt,
+  reduceFrontierRegistrationPost,
   reserveFrontierRegistrationReceipt,
 } from "../lib/amux/ideaFrontierCatalogUiCore.ts";
 
@@ -73,6 +77,64 @@ test("exact-id read-back verifies identity and never turns absence into retry pe
     approval: { ...found.approval, allowedEfforts: ["high", "low"] } }, pending), null);
 });
 
+test("unknown registration failures retain the exact receipt without retired approval semantics", () => {
+  for (const body of [
+    { error: "outcome_unknown", retryWrite: false, approvalId: pending.approvalId },
+    { error: "request_already_seen", retryWrite: false, approvalId: pending.approvalId },
+    { error: "catalog_unavailable", retryWrite: false, approvalId: pending.approvalId },
+  ]) {
+    const decision = classifyFrontierRegistrationPost({ status:
+      body.error === "request_already_seen" ? 409 : 503, body }, pending);
+    assert.deepEqual(decision, { kind: "verify" });
+    assert.deepEqual(reduceFrontierRegistrationPost(decision, pending), {
+      state: "unknown", pendingRegistration: pending,
+      registrationConfirmed: false, receipt: "keep",
+      failure: { kind: "unknown", code: null, approvalId: null },
+    });
+  }
+});
+
+test("a definite reauthentication refusal clears the receipt and unlocks a reviewed retry", () => {
+  const decision = classifyFrontierRegistrationPost({ status: 428,
+    body: { error: "ADMIN_REAUTHENTICATION_REQUIRED" } }, pending);
+  assert.deepEqual(decision, { kind: "refused",
+    code: "ADMIN_REAUTHENTICATION_REQUIRED", requiresReauthentication: true });
+  assert.deepEqual(reduceFrontierRegistrationPost(decision, pending), {
+    state: "idle", pendingRegistration: null,
+    registrationConfirmed: false, receipt: "clear",
+    failure: { kind: "reauthentication", code: "ADMIN_REAUTHENTICATION_REQUIRED",
+      approvalId: null },
+  });
+});
+
+test("registration read-back never interprets an approval id as retired two-person state", () => {
+  assert.deepEqual(classifyFrontierRegistrationReadFailure({ status: 428,
+    body: { error: "ADMIN_REAUTHENTICATION_REQUIRED" } }), { kind: "reauthentication" });
+  assert.deepEqual(classifyFrontierRegistrationReadFailure({ status: 428,
+    body: { error: "ADMIN_REAUTHENTICATION_REQUIRED", approvalId: pending.approvalId } }),
+  { kind: "unknown" });
+  assert.deepEqual(classifyFrontierRegistrationReadFailure({ status: 503,
+    body: { error: "catalog_unavailable", approvalId: pending.approvalId } }),
+  { kind: "unknown" });
+});
+
+test("an exact version conflict unlocks editing but ambiguous conflicts keep the same id", () => {
+  const conflict = { error: "catalog_revision_changed", retryWrite: false,
+    approvalId: pending.approvalId };
+  const decision = classifyFrontierRegistrationPost({ status: 409, body: conflict }, pending);
+  assert.deepEqual(decision, { kind: "refused",
+    code: "catalog_revision_changed", requiresReauthentication: false });
+  const transition = reduceFrontierRegistrationPost(decision, pending);
+  assert.equal(transition.state, "idle");
+  assert.equal(transition.registrationConfirmed, false);
+  assert.equal(transition.pendingRegistration, null);
+  assert.equal(transition.receipt, "clear");
+  assert.deepEqual(classifyFrontierRegistrationPost({ status: 409,
+    body: { ...conflict, approvalId: crypto.randomUUID() } }, pending), { kind: "verify" });
+  assert.deepEqual(classifyFrontierRegistrationPost({ status: 503,
+    body: { ...conflict, error: "catalog_revision_changed" } }, pending), { kind: "verify" });
+});
+
 test("the unresolved registration receipt is actor-bound and contains no secret or free text", () => {
   const values = new Map();
   const storage = {
@@ -94,6 +156,15 @@ test("the unresolved registration receipt is actor-bound and contains no secret 
   assert.equal(readFrontierRegistrationReceipt(storage, "owner-1").kind, "present");
   clearFrontierRegistrationReceipt(storage, "owner-1", pending.approvalId);
   assert.deepEqual(readFrontierRegistrationReceipt(storage, "owner-1"), { kind: "absent" });
+  assert.deepEqual(decideFrontierRegistrationRestart(
+    readFrontierRegistrationReceipt(storage, "owner-1")), { kind: "ready" });
+  assert.equal(reserveFrontierRegistrationReceipt(storage, "owner-1", pending), true);
+  assert.deepEqual(decideFrontierRegistrationRestart(
+    readFrontierRegistrationReceipt(storage, "owner-1")), {
+    kind: "recover", registration: pending,
+  });
+  assert.deepEqual(decideFrontierRegistrationRestart({ kind: "unavailable" }),
+    { kind: "unavailable" });
 });
 
 test("Admin exposes the real write gate and freezes a submitted approval on exact-ID read-back", () => {
@@ -115,4 +186,10 @@ test("Admin exposes the real write gate and freezes a submitted approval on exac
     panel.indexOf("const checkSelection"));
   assert.match(readBack, /readFrontierCatalogApprovalReadBack/);
   assert.doesNotMatch(readBack, /method: "POST"/);
+  assert.doesNotMatch(readBack, /readAdminApiFailure/);
+  const post = panel.slice(panel.indexOf("const registerModel"),
+    panel.indexOf("const readRegistration"));
+  assert.match(post, /classifyFrontierRegistrationPost/);
+  assert.doesNotMatch(post, /readAdminApiFailure/);
+  assert.match(panel, /decideFrontierRegistrationRestart/);
 });
