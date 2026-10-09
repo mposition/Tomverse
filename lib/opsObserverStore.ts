@@ -324,6 +324,38 @@ export async function readOpsObserverState(
   return result;
 }
 
+/**
+ * Every item reserved on one owner date in one mode, whichever genesis
+ * reserved it -- what the daily digest reports (policy §1 item 3). The run
+ * budget above is per genesis (§5), but a digest kept under the date's key
+ * must not lose the reservations made before a recovery or activation
+ * replaced the head that day. A mode's items only: a live digest does not
+ * present shadow reservations as sent, and a shadow one shows no live sends.
+ */
+export async function readOpsObserverDateReservations(
+  ownerDate: string,
+  mode: string,
+  runDeadline: Date,
+  client: PrismaClient = prisma,
+): Promise<OpsObserverDailyBudget["reservedToday"]> {
+  const { result } = await withOpsObserverTransaction(
+    "state_read",
+    runDeadline,
+    async (tx) => {
+      const [row] = await tx.$queryRaw<{ items: OpsObserverDailyBudget["reservedToday"] }[]>`
+        SELECT coalesce((SELECT json_agg(json_build_object('key', i.signal || '#' || i.scope, 'kind', i.kind, 'capped', i.capped)
+                                ORDER BY i.signal, i.scope, i.kind, i."openedAt")
+                           FROM "OpsObserverDeliveryItem" i
+                           JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
+                          WHERE d."ownerDate" = ${ownerDate}::date AND d.mode = ${mode}), '[]'::json) AS items`;
+      return row.items;
+    },
+    client,
+  );
+  await assertNotLate(runDeadline, client);
+  return result;
+}
+
 /** What the Admin genesis screen shows, and what an approval there binds. */
 export type OpsObserverAdminView = {
   head: { genesisId: string; generation: number | null; mode: string; createdAt: string } | null;
@@ -962,7 +994,12 @@ export async function readOpsObserverDelivery(
                        ORDER BY i.signal, i.scope)
                   FROM "OpsObserverDeliveryItem" i WHERE i."deliveryId" = d.id) AS items
           FROM "OpsObserverDelivery" d
-         WHERE d.id = ${deliveryId}::uuid`;
+         WHERE d.id = ${deliveryId}::uuid
+           -- Past its retention (policy §10) it is absent, by the purge's own
+           -- condition, even before a retention batch has removed it.
+           AND NOT (d.status <> 'reserved'
+                    AND coalesce(d."confirmedAt", d."shadowedAt", d."abandonedAt")
+                        <= clock_timestamp() - make_interval(days => ${DELIVERY_RETENTION_DAYS}))`;
       if (!row) return null;
       return {
         id: row.id,
