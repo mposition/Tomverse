@@ -891,3 +891,62 @@ export function agentOfficeBrief(rows: readonly AgentOfficeLiveRow[]): AgentOffi
   const working = rows.filter((row) => row.status === "working");
   return { attention, working, quiet: rows.length - attention.length - working.length };
 }
+
+type ReportCopy = {
+  title: (time: string) => string;
+  attention: (count: number) => string;
+  working: (count: number) => string;
+  quiet: (count: number) => string;
+  notConnected: (count: number) => string;
+  todo: (text: string) => string;
+  quota: string;
+  none: string;
+  footer: string;
+};
+
+/**
+ * The status report the operator copies or downloads: the same states the
+ * office shows, as plain Markdown. Content-free by construction -- it is
+ * built only from the rows' state words and record lines, the to-do counts
+ * and the quota rows, never from what an agent produced.
+ */
+export function agentOfficeReport(
+  input: {
+    readAt: string;
+    rows: readonly AgentOfficeLiveRow[];
+    notConnected: readonly string[];
+    queue: { label: string; count: number | null }[];
+    quota: AgentOfficeQuotaView;
+    unknownCount: string;
+  },
+  copy: ReportCopy
+): string {
+  const brief = agentOfficeBrief(input.rows);
+  const quiet = input.rows.filter((row) => !brief.attention.includes(row) && !brief.working.includes(row));
+  const item = (row: AgentOfficeLiveRow) => `- ${row.name} · ${row.badge} · ${row.line}`;
+  const section = (heading: string, lines: string[]) => [heading, ...(lines.length > 0 ? lines : [`- ${copy.none}`]), ""];
+  const known = input.queue.filter((entry) => entry.count !== null);
+  const total = known.reduce((sum, entry) => sum + (entry.count ?? 0), 0);
+  const todoText = known.length < input.queue.length ? `${total}+?` : String(total);
+  return [
+    copy.title(utcStamp(input.readAt)),
+    "",
+    ...section(copy.attention(brief.attention.length), brief.attention.map(item)),
+    ...section(copy.working(brief.working.length), brief.working.map(item)),
+    ...section(copy.quiet(quiet.length), quiet.map(item)),
+    ...section(copy.notConnected(input.notConnected.length), input.notConnected.map((name) => `- ${name}`)),
+    ...section(
+      copy.todo(todoText),
+      input.queue.map((entry) => `- ${entry.label}: ${entry.count === null ? input.unknownCount : entry.count}`)
+    ),
+    ...section(
+      copy.quota,
+      [
+        ...input.quota.rows.map((row) => `- ${row.id} (${row.vendor}) · ${row.label} · ${row.amount}`),
+        ...(input.quota.note ? [`- ${input.quota.note}`] : []),
+      ]
+    ),
+    copy.footer,
+    "",
+  ].join("\n");
+}
