@@ -5,11 +5,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync,
   realpathSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const ANALYSIS_BUNDLE_SHA256 =
   "4f77a7dea96e100304f6c4e87d86154e91687b5f974424f16811754e5acd43fc";
+// This is the read-back hash of the installed, already-reviewed release bundle,
+// not the hash of its source entrypoint. A new bundle needs a reviewed pin.
 export const SYSTEM_UNIT = "amux-v4-analysis-agent-system.service";
+export const SYSTEM_UNIT_SHA256 =
+  "d319510cdf0df44e0e447a85c105d0689aa3739924d63bdea900c23e8695a7d8";
 export const SYSTEM_PROBE_PROPERTIES = Object.freeze([
   "User=tommy", "Group=tommy", "WorkingDirectory=/home/tommy",
   "NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=strict",
@@ -94,29 +99,35 @@ export function runSystemServiceInstall(mode) {
   }
   const env = disabledSystemEnvironment(regularFile(
     "/home/tommy/.config/tomverse-amux-v4/analysis-agent.env", uid, 0o600).toString("utf8"));
+  const unit = readFileSync(new URL("./systemd/amux-v4-analysis-agent-system.service", import.meta.url));
+  if (createHash("sha256").update(unit).digest("hex") !== SYSTEM_UNIT_SHA256) {
+    throw new Error("unit_mismatch");
+  }
   // No EnvironmentFile or credentials in the offline transient probe.
   command("/usr/bin/systemd-run", ["--quiet", "--wait", "--pipe", "--collect",
     "--service-type=oneshot", `--unit=amux-v4-offline-${randomUUID()}`,
     ...SYSTEM_PROBE_PROPERTIES.flatMap(property => ["--property", property]),
     "/usr/bin/bwrap", ...BWRAP_PROBE_ARGS]);
   if (mode === "--probe-only") return { offlineProbe: "passed", modelCalled: false, installed: false };
-  const unit = readFileSync(new URL("./systemd/amux-v4-analysis-agent-system.service", import.meta.url));
   const targets = ["/opt/tomverse-amux-v4/analysis-agent-once.mjs",
     "/etc/tomverse-amux-v4/analysis-agent.env", `/etc/systemd/system/${SYSTEM_UNIT}`];
   if (targets.some(path => existsSync(path))) throw new Error("target_exists");
   for (const parent of ["/opt", "/etc", "/etc/systemd", "/etc/systemd/system",
     "/opt/tomverse-amux-v4", "/etc/tomverse-amux-v4"]) rootDirectory(parent);
+  chmodSync("/etc/tomverse-amux-v4", 0o700);
   writeFileSync(targets[0], bundle, { flag: "wx", mode: 0o555 });
   writeFileSync(targets[1], env, { flag: "wx", mode: 0o600 });
-  chmodSync("/etc/tomverse-amux-v4", 0o700);
   writeFileSync(targets[2], unit, { flag: "wx", mode: 0o644 });
   command("/usr/bin/systemd-analyze", ["verify", targets[2]]);
   command("/usr/bin/systemctl", ["daemon-reload"]);
+  regularFile(targets[0], 0, 0o555);
+  regularFile(targets[1], 0, 0o600);
+  regularFile(targets[2], 0, 0o644);
   return { offlineProbe: "passed", modelCalled: false, installed: true,
     liveFlag: "disabled", timerCreated: false, oldUnitsPreserved: true };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     const mode = process.argv.length === 3 ? process.argv[2] : null;
     console.log(JSON.stringify(runSystemServiceInstall(mode)));
