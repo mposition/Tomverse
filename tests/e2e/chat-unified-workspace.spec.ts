@@ -957,8 +957,24 @@ async function chooseModel(page: Page, modelId: string) {
 }
 
 async function chooseConversation(page: Page, conversationId: string) {
-  const mobileShell = page.getByTestId("mobile-chat-shell");
-  if (await mobileShell.isVisible()) {
+  // ChatPageClient chooses its shell from a `(max-width: 767px)` media query,
+  // so a caller that resizes across that boundary immediately before this still
+  // has the outgoing shell mounted. Asking "is the mobile shell visible?" once
+  // could therefore be answered for the shell on its way out: on a resize down
+  // to mobile it opened no drawer, then spent the whole timeout clicking the
+  // unmounting desktop sidebar's item, which Playwright reported as "element
+  // was detached from the DOM, retrying". Instrumenting the helper showed the
+  // mobile branch had never run at all. So wait for the shell the current
+  // viewport implies, and for the other one to be gone -- while both are
+  // mounted the item below matches twice.
+  const mobile = (page.viewportSize()?.width ?? 0) <= 767;
+  await expect(
+    page.getByTestId(mobile ? "mobile-chat-shell" : "desktop-chat-shell")
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(mobile ? "desktop-chat-shell" : "mobile-chat-shell")
+  ).toHaveCount(0);
+  if (mobile) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
@@ -1115,14 +1131,32 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   test("a transport failure followed by a revision conflict clears the stale failure banner", async ({ page }) => {
     const sharedDrafts = new Map<string, DraftFixture>();
-    await openChat(page, {
+    // Two planned failures, not one. The product retries a failed persist by
+    // itself after 1_000 * 2 ** (failureCount - 1) ms
+    // (useConversationDrafts.ts), so the conflict this test is about is the
+    // product's own doing and arrives whether or not anything is clicked. With
+    // one failure it arrived at one second, which was both too soon to observe
+    // the banner reliably and exactly when the old test was clicking that
+    // banner's button: Playwright reported "element was detached from the DOM"
+    // on mobile-safari three nights in four. Two failures put the conflict at
+    // three seconds -- a retry at one second that fails again, then the one
+    // that meets the revision below.
+    const state = await openChat(page, {
       sharedDrafts,
-      draftFailurePlan: [{ method: "PUT", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+      ],
     });
+    // The hydrate read must see the store still empty, or this test would be
+    // about hydrating a server draft rather than a persist that failed.
+    await expect.poll(state.draftReadCount).toBeGreaterThan(0);
     await page.getByTestId("chat-textarea").fill("Keep this local version until I choose.");
-    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
 
     const now = "2026-09-13T00:00:00.000Z";
+    // Raised before the first PUT is even answered, so no part of this test
+    // races the retry timer. The planned failure is consumed ahead of the
+    // fixture's revision check, so that PUT still fails in transport.
     sharedDrafts.set(CONVERSATION, {
       scopeKey: CONVERSATION,
       text: "Server version after the transport failure.",
@@ -1132,13 +1166,22 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       createdAt: now,
       updatedAt: now,
     });
-    await page.getByTestId("draft-sync-retry").click();
+    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
+
+    // Waited for, not clicked. The retry button keeps its coverage in "draft
+    // sync failure is visible and retry keeps the local question", where every
+    // request fails and the banner therefore stays put long enough to click.
     const conflictNotice = page.getByTestId("draft-conflict-dialog");
-    await expect(conflictNotice).toBeVisible();
+    await expect(conflictNotice).toBeVisible({ timeout: 20_000 });
     await expect(conflictNotice).toHaveAttribute("role", "alert");
     await expect(conflictNotice).not.toHaveAttribute("aria-modal");
     await expect(page.getByTestId("draft-sync-failed")).toHaveCount(0);
 
+    // The assertion that carries this test's name is the last one, not the one
+    // above: while the conflict is open the banner is not rendered whatever the
+    // failure flag says. Removing applyConflict's `setSyncFailure(key, false)`
+    // leaves the one above green and fails the last one, because resolving the
+    // conflict lets the uncleared failure surface again.
     await page.getByTestId("draft-conflict-use-server").click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue(
       "Server version after the transport failure."
@@ -2714,8 +2757,19 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
     await page.getByTestId("model-only-send").first().click();
     await expect.poll(state.messageSaveStarted).toBe(true);
+    // Each swap is waited for rather than assumed. What this test forces is a
+    // remount, and the only thing that produces one here is crossing the
+    // shell's `(max-width: 767px)` boundary -- openChat starts every project at
+    // the desktop viewport, so these two resizes are meant to be two crossings.
+    // Back to back they are coalesced in WebKit: the mobile shell never
+    // rendered, the panes never remounted, and not one further history read
+    // followed, so the third cursored read below could not arrive and
+    // mobile-safari failed every night. Measured on the old test: the reads
+    // stopped at the two the first mount makes.
     await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
 
     state.releaseMessageSave();
