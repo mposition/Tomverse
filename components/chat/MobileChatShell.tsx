@@ -1242,12 +1242,15 @@ export function MobileChatShell({
           Now the two fixed controls never shrink, and the model button is
           the one that does. It gives up its label first and stops at a 44px
           icon (`min-w-11`). Below a 9.75rem content box even three 2.75rem
-          controls and their gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
-          so only there may the row wrap when New Chat is present. It is measured on the header's own
+          controls and their horizontal gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
+          so only there may the row wrap when New Chat is present. Wrapped rows
+          keep a compact 0.125rem vertical gap: all controls retain their full
+          44px target while a single viewport-height drag can still reach Send
+          at 300% page zoom. It is measured on the header's own
           width, so 320px and wider -- where all three fit at full size --
           lay out exactly as before.
         */}
-        <div className={`flex items-center gap-2 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
+        <div className={`flex items-center gap-x-2 gap-y-0.5 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
         <button
           type="button"
           onClick={(event) => openDrawer(event.currentTarget)}

@@ -56,10 +56,12 @@ test.beforeEach(async ({ page }, testInfo) => {
   const needsMultipleModels =
     testInfo.title.includes("model tab") ||
     testInfo.title.includes("horizontal swipe");
-  if (needsMultipleModels) {
-    await mockAuthenticatedApi(page, {
-      selectedModels: TWO_MODELS,
-      messages: SEEDED_MESSAGES,
+  const needsSavedAnswer = testInfo.title.includes("first answer survives reload");
+  let authenticatedState: Awaited<ReturnType<typeof mockAuthenticatedApi>> | undefined;
+  if (needsMultipleModels || needsSavedAnswer) {
+    authenticatedState = await mockAuthenticatedApi(page, {
+      selectedModels: needsMultipleModels ? TWO_MODELS : [TWO_MODELS[0]],
+      messages: needsMultipleModels ? SEEDED_MESSAGES : [],
     });
     // Without this the account lands on a *new* chat, where the selection comes
     // from GET /api/user/settings' single defaultModel and the seeded
@@ -67,7 +69,24 @@ test.beforeEach(async ({ page }, testInfo) => {
     // model and zero tabs while the fixture claimed two.
     await restoreActiveConversation(page);
   }
-  await mockChatStream(page, "Mobile QA response");
+  await mockChatStream(
+    page,
+    "Mobile QA response",
+    needsSavedAnswer
+      ? () => {
+          // The real /api/chat route stores the answer server-side. This
+          // per-test hook gives the mocked route that same persistence effect;
+          // all other mockChatStream callers keep their existing behavior.
+          authenticatedState!.persistServerMessage({
+            id: "qa-mobile-first-answer",
+            role: "assistant",
+            modelId: authenticatedState!.selectedModels[0],
+            content: "Mobile QA response",
+            status: "normal",
+          });
+        }
+      : undefined
+  );
   await page.goto("/chat");
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
@@ -122,6 +141,24 @@ test("sent message renders without leaving the active model", async ({ page }) =
   if (activeModelName) {
     await expect(selectedTab).toHaveText(activeModelName);
   }
+});
+
+test("mobile first answer survives reload in the saved conversation", async ({ page }) => {
+  const question = "Mobile first saved question";
+  await page.getByTestId("chat-textarea").fill(question);
+  await page.getByTestId("chat-send-button").click();
+
+  await expect(visibleMessages(page, "user").filter({ hasText: question })).toBeVisible();
+  await expect(
+    visibleMessages(page, "assistant").filter({ hasText: "Mobile QA response" })
+  ).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
+  await expect(visibleMessages(page, "user").filter({ hasText: question })).toBeVisible();
+  await expect(
+    visibleMessages(page, "assistant").filter({ hasText: "Mobile QA response" })
+  ).toBeVisible();
 });
 
 test("input remains reachable at virtual-keyboard height", async ({ page }) => {

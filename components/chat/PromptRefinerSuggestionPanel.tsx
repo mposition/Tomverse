@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 
 import type { Language } from "@/lib/language";
 import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
+import { diffPromptRefinerPreview } from "@/lib/promptRefinerPreviewDiff";
 import {
   promptRefinerPromptProblem,
   visiblePromptRefinerState,
@@ -221,6 +222,11 @@ export function PromptRefinerSuggestionPanel({
     );
   }
 
+  const previewDiff = diffPromptRefinerPreview(
+    visible.suggestion.sourcePrompt,
+    visible.suggestion.refinedPrompt
+  );
+
   if (visible.status === "accepted_preview") {
     return (
       <section
@@ -237,7 +243,16 @@ export function PromptRefinerSuggestionPanel({
           data-testid="prompt-refiner-accepted-preview-original"
           className="min-w-0 w-full max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
         >
-          {visible.suggestion.sourcePrompt}
+          {previewDiff.commonPrefix}
+          {previewDiff.removed ? (
+            <del
+              data-testid="prompt-refiner-accepted-preview-original-removed"
+              className="rounded-sm bg-red-100 text-red-800 decoration-2 dark:bg-red-950/60 dark:text-red-200"
+            >
+              {previewDiff.removed}
+            </del>
+          ) : null}
+          {previewDiff.commonSuffix}
         </p>
         <p className="mb-1.5 mt-3 text-xs font-bold text-zinc-700 dark:text-zinc-200">
           {copy.proposalLabel}
@@ -246,7 +261,16 @@ export function PromptRefinerSuggestionPanel({
           data-testid="prompt-refiner-accepted-preview-proposal"
           className="min-w-0 w-full max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
         >
-          {visible.suggestion.refinedPrompt}
+          {previewDiff.commonPrefix}
+          {previewDiff.added ? (
+            <ins
+              data-testid="prompt-refiner-accepted-preview-proposal-added"
+              className="rounded-sm bg-blue-100 text-blue-900 decoration-2 underline dark:bg-blue-950/60 dark:text-blue-100"
+            >
+              {previewDiff.added}
+            </ins>
+          ) : null}
+          {previewDiff.commonSuffix}
         </p>
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
           {copy.previewOnly}
@@ -288,7 +312,16 @@ export function PromptRefinerSuggestionPanel({
         data-testid="prompt-refiner-original"
         className="min-w-0 w-full max-h-32 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
       >
-        {visible.suggestion.sourcePrompt}
+        {previewDiff.commonPrefix}
+        {previewDiff.removed ? (
+          <del
+            data-testid="prompt-refiner-original-removed"
+            className="rounded-sm bg-red-100 text-red-800 decoration-2 dark:bg-red-950/60 dark:text-red-200"
+          >
+            {previewDiff.removed}
+          </del>
+        ) : null}
+        {previewDiff.commonSuffix}
       </p>
       <div className="mb-1.5 mt-3 flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
         <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
@@ -298,7 +331,16 @@ export function PromptRefinerSuggestionPanel({
         data-testid="prompt-refiner-proposal"
         className="min-w-0 w-full max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-5 text-zinc-800 dark:text-zinc-100"
       >
-        {visible.suggestion.refinedPrompt}
+        {previewDiff.commonPrefix}
+        {previewDiff.added ? (
+          <ins
+            data-testid="prompt-refiner-proposal-added"
+            className="rounded-sm bg-blue-100 text-blue-900 decoration-2 underline dark:bg-blue-950/60 dark:text-blue-100"
+          >
+            {previewDiff.added}
+          </ins>
+        ) : null}
+        {previewDiff.commonSuffix}
       </p>
       {visibleInteractionProblemCopy ? (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
@@ -306,6 +348,20 @@ export function PromptRefinerSuggestionPanel({
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          data-testid="prompt-refiner-dismiss-ready"
+          disabled={interactionBlocked}
+          aria-label={
+            interactionProblemCopy
+              ? `${copy.close}. ${interactionProblemCopy}`
+              : copy.close
+          }
+          onClick={() => onDismiss(visible.suggestion.requestId)}
+          className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          {copy.close}
+        </button>
         <button
           type="button"
           data-testid="prompt-refiner-keep-original"
