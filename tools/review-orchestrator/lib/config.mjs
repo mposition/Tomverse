@@ -1,6 +1,6 @@
 import { readJson } from "./fsutil.mjs";
 import { isName } from "./assign.mjs";
-import { STATUS_REPORT_DEFAULT_INTERVAL_SECONDS, STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
+import { STATUS_REPORT_SECRET_ENV, STATUS_SNAPSHOT_DEFAULT_INTERVAL_SECONDS } from "./status-report.mjs";
 
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
@@ -45,22 +45,17 @@ export function globToRegExp(glob) {
 }
 
 /**
- * `statusReport` is optional: { url, intervalSeconds? }. The URL is the app's
- * status route over https, with no credentials or fragment in it -- the secret
- * travels in a header, from the daemon's environment.
+ * `statusSnapshot` is optional: { dir, intervalSeconds? }. The daemon writes a
+ * content-free snapshot.json into `dir` for the separate status sender; it
+ * takes no URL and no secret, because the review account holds no credential
+ * for the app (lib/status-report.mjs).
  */
-function statusReportProblem(value) {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return "an object with url";
-  const unknown = Object.keys(value).filter((key) => key !== "url" && key !== "intervalSeconds");
+function statusSnapshotProblem(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "an object with dir";
+  const unknown = Object.keys(value).filter((key) => key !== "dir" && key !== "intervalSeconds");
   if (unknown.length > 0) return `unknown field ${unknown[0]}`;
-  let url;
-  try {
-    url = new URL(value.url);
-  } catch {
-    return "url must be an absolute https URL";
-  }
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
-    return "url must be https, without credentials or fragment";
+  if (typeof value.dir !== "string" || !value.dir.startsWith("/") || value.dir.split("/").includes("..")) {
+    return "dir must be an absolute path";
   }
   const interval = value.intervalSeconds;
   if (interval !== undefined && !(Number.isInteger(interval) && interval >= 30 && interval <= 3600)) {
@@ -95,10 +90,10 @@ export function validateConfig(raw) {
   for (const key of ["maxChangeBytes", "maxPendingJobs", "maxStderrBytes", "retentionDays"]) {
     if (!(Number.isInteger(config[key]) && config[key] > 0)) errors.push(`${key}: positive integer`);
   }
-  if (config.statusReport !== undefined) {
-    const problem = statusReportProblem(config.statusReport);
-    if (problem) errors.push(`statusReport: ${problem}`);
-    else config.statusReport = { intervalSeconds: STATUS_REPORT_DEFAULT_INTERVAL_SECONDS, ...config.statusReport };
+  if (config.statusSnapshot !== undefined) {
+    const problem = statusSnapshotProblem(config.statusSnapshot);
+    if (problem) errors.push(`statusSnapshot: ${problem}`);
+    else config.statusSnapshot = { intervalSeconds: STATUS_SNAPSHOT_DEFAULT_INTERVAL_SECONDS, ...config.statusSnapshot };
   }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();
@@ -106,8 +101,8 @@ export function validateConfig(raw) {
     const label = `providers.${provider?.id}`;
     if (!isName(provider?.id) || ids.has(provider.id)) errors.push(`${label}: id`);
     ids.add(provider?.id);
-    // The status-report secret belongs to the daemon. A reviewer reads the
-    // change under review, which could ask it to print its environment.
+    // The status-report secret belongs to the sender's own account. A reviewer
+    // reads the change under review, which could ask it to print its environment.
     if (Array.isArray(provider?.passEnv) && provider.passEnv.includes(STATUS_REPORT_SECRET_ENV)) {
       errors.push(`${label}: passEnv must not carry ${STATUS_REPORT_SECRET_ENV}`);
     }

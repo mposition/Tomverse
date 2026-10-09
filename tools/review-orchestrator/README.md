@@ -6,8 +6,8 @@
 
 - 외부 게시, PR 코멘트, 병합을 하지 않고 앱 DB에 직접 쓰지 않습니다. 사람이 개발
   세션에서 부르는 도구이며, 결과는 서버 디스크에만 남습니다. 앱으로 나가는 것은
-  설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 앱이 그 최신값 한 행을 씁니다
-  (아래 "Agent office 상태 보고").
+  설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 그것도 daemon이 아니라 별도 계정의
+  sender가 보내며, 앱이 그 최신값 한 행을 씁니다(아래 "Agent office 상태 보고").
 - 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록 하나로만
   읽고, 형식이 맞지 않으면 `unknown`입니다. blocker·major 지적이 있으면 reviewer가
   accept라고 해도 reject입니다.
@@ -352,68 +352,84 @@ SSH 키·다른 작업의 소스는 보이지 않습니다.
 
 ## Agent office 상태 보고
 
-앱은 이 서버에 접속할 수 없으므로(SSH 뒤에 있음), daemon이 약 1분마다 앱의
+앱은 이 서버에 접속할 수 없으므로(SSH 뒤에 있음), 약 1분마다 앱의
 `POST /api/internal/review-orchestrator/status`로 상태를 보냅니다. 운영자는 Admin의
 Agent office "독립 검토실"에서 그것을 봅니다.
 
+**보내는 일은 두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.**
+
+- **daemon(`review` 계정)은 자격증명을 갖지 않습니다.** reviewer CLI가 모두 같은 `review`
+  계정으로 돌고, 검토 대상 변경은 reviewer에게 그 계정이 읽을 수 있는 파일이나 프로세스
+  환경을 출력하라고 시킬 수 있습니다. 그래서 daemon은 `statusSnapshot.dir`에 내용 없는
+  `snapshot.json` 하나만 씁니다(약 1분마다, 원자적 교체, 0644).
+- **sender(`deploy/review-status-sender.service`)는 systemd `DynamicUser`의 별도 계정으로
+  돕니다.** secret은 root만 읽는 파일에서 systemd가 이 서비스 환경에만 넣으므로, `review`
+  계정은 그 파일도 그 프로세스 환경도 읽을 수 없습니다. sender는 review 설정·job·reviewer
+  원문을 읽지 않고 snapshot 파일만 읽습니다.
 - **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, reviewer를
   기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
-  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문. 보고를 만드는
-  코드(`lib/status-report.mjs`)가 그런 값을 읽지 않고, 앱은 모르는 필드가 있으면 거절합니다.
-- **검토에 영향을 주지 않습니다.** 응답을 기다리지 않고, 한 번에 하나만 보내며, 실패해도
-  재시도하지 않고 다음 주기에 새 보고를 보냅니다. 로그는 결과가 바뀔 때만 한 줄
-  (`status report ok`, `status report failed: http_404` 등)입니다.
-- **기본은 꺼짐입니다.** config에 `statusReport`가 없거나 secret이 없으면(또는 32자 미만이면)
-  보내지 않고, 검토 서버는 이전과 똑같이 돕니다.
-- secret은 daemon 환경에만 있습니다. reviewer는 환경 허용 목록만 받으므로 보이지 않고,
-  provider의 `passEnv`에 넣으면 설정 오류로 시작하지 않습니다(검토 대상 diff가 reviewer에게
-  환경을 출력하라고 시킬 수 있기 때문입니다).
-- 앱은 마지막 보고를 받은 시각을 **앱의 시계로** 적고, 5분 넘게 보고가 없으면 검토실이
-  "보고 없음"으로 바뀝니다.
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문. daemon이 그런
+  값을 snapshot에 넣지 않고, sender는 파일을 필드 단위로 다시 만들어 그 밖의 것은 버리며,
+  앱도 모르는 필드를 거절합니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
+  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
+  않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
+- **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3주기(기본 3분)보다 오래되면
+  보내지 않으므로, 앱은 마지막 보고 뒤 5분이 지나면 검토실을 "보고 없음"으로 바꿉니다.
+  앱은 받은 시각을 **앱의 시계로** 적습니다.
+- **기본은 꺼짐입니다.** config에 `statusSnapshot`이 없으면 파일을 쓰지 않고, sender
+  서비스를 설치하지 않으면 아무것도 보내지 않습니다.
 
 ### 켜기
 
-앱 쪽 route가 production에 배포된 뒤에 합니다. 먼저 켜도 해는 없고, `http_404` 한 줄이
-남습니다.
+앱 쪽 route가 production에 배포된 뒤에 합니다. 먼저 켜도 해는 없고, sender 로그에
+`http_404` 한 줄이 남습니다. 아래 경로는 이 서버의 현재 배치(`/home/review/...`)
+기준입니다. 다르면 unit 파일의 경로를 함께 고칩니다.
 
-**① Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** secret을 만들어 `review` 계정만 읽는
-파일에 바로 씁니다. 값은 화면에 나오지 않습니다.
+**① Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** secret을 root만 읽는 파일에 바로
+씁니다. 값은 화면에 나오지 않습니다.
 
 ```bash
-sudo -u review sh -c 'umask 077; printf "REVIEW_ORCHESTRATOR_STATUS_SECRET=%s\n" "$(openssl rand -hex 32)" > /home/review/.config/review-orchestrator/status-report.env'
+sudo install -d -m 0700 /etc/review-status
+sudo sh -c 'umask 077; printf "REVIEW_ORCHESTRATOR_STATUS_SECRET=%s\n" "$(openssl rand -hex 32)" > /etc/review-status/secret.env'
 ```
 
 **② Railway 대시보드, production 앱 서비스의 Variables.** 같은 값을
 `REVIEW_ORCHESTRATOR_STATUS_SECRET`로 넣습니다. 값은 ①의 서버에서
-`sudo cat /home/review/.config/review-orchestrator/status-report.env`로 보고 대시보드에 직접
-붙입니다(대화나 문서에 옮기지 않습니다). 변수 저장은 재배포를 일으킵니다.
+`sudo cat /etc/review-status/secret.env`로 보고 대시보드에 직접 붙입니다(대화나 문서에
+옮기지 않습니다). 변수 저장은 재배포를 일으킵니다.
 
-**③ Ubuntu 검토 서버의 관리 계정 bash.** service가 그 파일을 읽게 하고(기존
-`EnvironmentFile`은 그대로 둡니다), config에 보낼 곳을 적습니다.
+**③ 같은 서버 bash.** snapshot 폴더를 만들고 daemon config에 적은 뒤, 코드 업데이트와
+재시작을 위 "서버 업데이트 (drain)" 절차로 합니다.
 
 ```bash
-sudo systemctl edit review-orchestrator
-#   [Service]
-#   EnvironmentFile=/home/review/.config/review-orchestrator/status-report.env
+sudo install -d -o review -m 0755 /var/lib/review-status
 sudo -u review nano /home/review/.config/review-orchestrator/config.json
-#   "statusReport": { "url": "https://tomverse.app/api/internal/review-orchestrator/status" }
+#   "statusSnapshot": { "dir": "/var/lib/review-status" }
 ```
 
-`intervalSeconds`(30~3600, 기본 60)를 함께 줄 수 있습니다. URL은 https만 받고, 사용자
-정보나 `#`이 들어 있으면 설정 오류입니다.
+`intervalSeconds`(30~3600, 기본 60)를 함께 줄 수 있습니다. `dir`은 절대 경로이고 URL이나
+secret 필드를 넣으면 설정 오류로 시작하지 않습니다 — daemon은 그 둘을 받지 않습니다.
+재시작 뒤 `sudo journalctl -u review-orchestrator --since "5 min ago" | grep "status snapshot"`에
+`status snapshot written`이 보이면 됩니다.
 
-**④ 같은 셸.** 코드 업데이트와 재시작은 위 "서버 업데이트 (drain)" 절차 그대로입니다.
-재시작 뒤 확인합니다.
+**④ 같은 서버 bash.** sender 서비스를 설치하고 켭니다.
 
 ```bash
-sudo journalctl -u review-orchestrator --since "10 min ago" | grep "status report"
+sudo install -d /opt/review-status-sender
+sudo cp /home/review/review-orchestrator/tools/review-orchestrator/deploy/review-status-sender.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now review-status-sender
+sudo journalctl -u review-status-sender --since "5 min ago"
 ```
 
-`status report on` 다음에 `status report ok`가 나오면 끝입니다. `http_401`은 ①과 ②의 값이
-다르다는 뜻이고, `status report off: ...`는 ③의 `EnvironmentFile`이 읽히지 않았다는
-뜻입니다.
+`status sender started` 다음에 `status report ok`가 나오면 끝입니다. `http_401`은 ①과 ②의
+값이 다르다는 뜻이고, `status snapshot is stale`은 ③의 daemon이 파일을 쓰지 않는다는
+뜻이며, `status sender not started: ...`는 그 줄이 말하는 설정이 빠졌다는 뜻입니다.
+코드를 업데이트하면 `sudo systemctl restart review-status-sender`도 함께 합니다.
 
-끄려면 config에서 `statusReport`를 지우고 재시작합니다. 검토실은 5분 뒤 "보고 없음"이 됩니다.
+끄려면 `sudo systemctl disable --now review-status-sender`입니다. 검토실은 5분 뒤 "보고
+없음"이 됩니다.
 
 ## 알려진 한계
 

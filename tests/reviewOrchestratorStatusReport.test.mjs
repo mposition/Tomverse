@@ -1,24 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import {
   STATUS_REPORT_SECRET_ENV,
   buildStatusSnapshot,
-  createStatusReporter,
+  createStatusSender,
+  createStatusSnapshotWriter,
+  normaliseStatusSnapshot,
   sendStatusReport,
+  statusSenderSettings,
+  writeStatusSnapshot,
 } from "../tools/review-orchestrator/lib/status-report.mjs";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-09T01:00:00.000Z");
 const SECRET = "s".repeat(40);
 const URL_OK = "https://tomverse.example/api/internal/review-orchestrator/status";
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 const job = (id, slots, extra = {}) => ({
   job: { id, author: "claude", authorVendor: "anthropic", scope: "secret scope text", base: "abc", head: "def", ...extra },
   slots,
 });
 const done = (verdict, endedAt, provider = "codex") => ({ index: 0, status: "done", verdict, endedAt, provider, findings: [{ severity: "minor", summary: "finding text" }] });
+const SNAPSHOT = {
+  schemaVersion: 1,
+  draining: false,
+  pendingJobs: 2,
+  providers: [{ id: "claude", vendor: "anthropic", enabled: true, running: 1, maxConcurrent: 2 }],
+  last24h: { accept: 3, reject: 1, unknown: 0 },
+};
 
 test("the snapshot carries counts and reviewer names, nothing from a job", () => {
   const jobs = [
@@ -36,13 +50,7 @@ test("the snapshot carries counts and reviewer names, nothing from a job", () =>
     { id: "codex", vendor: "openai", enabled: true, command: "codex", args: [], passEnv: ["CODEX_HOME"] },
     { id: "devin", enabled: false },
   ];
-  const snapshot = buildStatusSnapshot({
-    jobs,
-    providers,
-    load: { claude: { running: 1, recent24h: 4 } },
-    draining: false,
-    now: NOW,
-  });
+  const snapshot = buildStatusSnapshot({ jobs, providers, load: { claude: { running: 1, recent24h: 4 } }, draining: false, now: NOW });
   assert.deepEqual(snapshot, {
     schemaVersion: 1,
     draining: false,
@@ -58,6 +66,7 @@ test("the snapshot carries counts and reviewer names, nothing from a job", () =>
   for (const leak of ["r-2026", "secret scope", "finding text", "CODEX_HOME", "abc", "def"]) {
     assert.ok(!text.includes(leak), `the snapshot carries ${leak}`);
   }
+  assert.deepEqual(normaliseStatusSnapshot(snapshot), snapshot, "what the daemon writes, the sender forwards unchanged");
 });
 
 test("the snapshot stays inside the app's limits", () => {
@@ -72,21 +81,47 @@ test("the snapshot stays inside the app's limits", () => {
   assert.deepEqual(snapshot.last24h, { accept: 0, reject: 0, unknown: 0 });
 });
 
-test("statusReport config: https only, no credentials, and the secret never reaches a reviewer", () => {
-  const base = { stateDir: "/tmp/x", repos: {}, providers: [{ id: "codex", vendor: "openai", enabled: true, command: "codex", args: [] }] };
-  assert.equal(validateConfig(base).statusReport, undefined);
-  assert.deepEqual(validateConfig({ ...base, statusReport: { url: URL_OK } }).statusReport, { intervalSeconds: 60, url: URL_OK });
-  assert.equal(validateConfig({ ...base, statusReport: { url: URL_OK, intervalSeconds: 120 } }).statusReport.intervalSeconds, 120);
-  for (const statusReport of [
-    { url: "http://tomverse.example/status" },
-    { url: "https://user:pass@tomverse.example/status" },
-    { url: `${URL_OK}#x` },
-    { url: "not a url" },
-    { url: URL_OK, intervalSeconds: 5 },
-    { url: URL_OK, secret: SECRET },
-    "https://tomverse.example/status",
+test("the sender forwards only the snapshot's own fields, whatever the file holds", () => {
+  const tampered = {
+    ...SNAPSHOT,
+    jobId: "r-20261009-000000-aaaaaa",
+    providers: [{ ...SNAPSHOT.providers[0], scope: "secret scope text" }],
+    last24h: { ...SNAPSHOT.last24h, findings: ["finding text"] },
+  };
+  assert.deepEqual(normaliseStatusSnapshot(tampered), SNAPSHOT);
+  const dup = SNAPSHOT.providers[0];
+  for (const bad of [
+    null,
+    [],
+    { ...SNAPSHOT, schemaVersion: 2 },
+    { ...SNAPSHOT, draining: "no" },
+    { ...SNAPSHOT, pendingJobs: -1 },
+    { ...SNAPSHOT, providers: [dup, dup] },
+    { ...SNAPSHOT, providers: [{ ...dup, id: "Claude Opus!" }] },
+    { ...SNAPSHOT, providers: [{ ...dup, maxConcurrent: 0 }] },
+    { ...SNAPSHOT, providers: [{ ...dup, running: 65 }] },
+    { ...SNAPSHOT, last24h: { accept: 1, reject: 1 } },
   ]) {
-    assert.throws(() => validateConfig({ ...base, statusReport }), /statusReport/, JSON.stringify(statusReport));
+    assert.equal(normaliseStatusSnapshot(bad), null, JSON.stringify(bad));
+  }
+});
+
+test("the daemon's config names a snapshot directory, never a URL or a secret", () => {
+  const base = { stateDir: "/tmp/x", repos: {}, providers: [{ id: "codex", vendor: "openai", enabled: true, command: "codex", args: [] }] };
+  assert.equal(validateConfig(base).statusSnapshot, undefined);
+  assert.deepEqual(validateConfig({ ...base, statusSnapshot: { dir: "/var/lib/review-status" } }).statusSnapshot, {
+    intervalSeconds: 60,
+    dir: "/var/lib/review-status",
+  });
+  for (const statusSnapshot of [
+    { dir: "relative/dir" },
+    { dir: "/var/lib/../etc" },
+    { dir: "/var/lib/review-status", intervalSeconds: 5 },
+    { dir: "/var/lib/review-status", url: URL_OK },
+    { dir: "/var/lib/review-status", secret: SECRET },
+    "/var/lib/review-status",
+  ]) {
+    assert.throws(() => validateConfig({ ...base, statusSnapshot }), /statusSnapshot/, JSON.stringify(statusSnapshot));
   }
   for (const enabled of [true, false]) {
     assert.throws(
@@ -96,91 +131,167 @@ test("statusReport config: https only, no credentials, and the secret never reac
   }
 });
 
+test("the review account holds no credential for the app: the daemon writes a file and never sends", () => {
+  for (const file of ["../tools/review-orchestrator/bin/review-orchestrator.mjs", "../tools/review-orchestrator/lib/service.mjs"]) {
+    const source = read(file);
+    assert.doesNotMatch(source, /REVIEW_ORCHESTRATOR_STATUS_SECRET|STATUS_REPORT_SECRET_ENV|statusReportSecret|sendStatusReport|createStatusSender|fetch\(/, file);
+  }
+  const daemonUnit = read("../tools/review-orchestrator/deploy/review-orchestrator.service");
+  assert.doesNotMatch(daemonUnit, /status-report|review-status|STATUS_SECRET/);
+  const senderUnit = read("../tools/review-orchestrator/deploy/review-status-sender.service");
+  assert.match(senderUnit, /^DynamicUser=yes$/m);
+  assert.doesNotMatch(senderUnit, /^User=/m, "the sender must not run as the review account");
+  assert.match(senderUnit, /^EnvironmentFile=\/etc\/review-status\/secret\.env$/m);
+  assert.match(senderUnit, /^Environment=REVIEW_STATUS_URL=https:\/\//m);
+  assert.match(senderUnit, /^ExecStart=\/usr\/bin\/node \/opt\/review-status-sender\/bin\/review-status-sender\.mjs$/m);
+  // The sender reads no review configuration, store or reviewer output.
+  const sender = read("../tools/review-orchestrator/bin/review-status-sender.mjs");
+  assert.doesNotMatch(sender, /loadConfig|Store|listJobs|reviewPath/);
+
+  const loop = read("../tools/review-orchestrator/bin/review-orchestrator.mjs");
+  const daemon = loop.slice(loop.indexOf("async function daemon"), loop.indexOf("async function drain"));
+  assert.match(daemon, /snapshotWriter\?\.maybeWrite\(\);/);
+  assert.ok(daemon.indexOf("orchestrator.tick(quotas)") < daemon.indexOf("snapshotWriter?.maybeWrite()"));
+});
+
+test("the snapshot writer replaces the file whole, paces itself and logs only changes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-status-"));
+  try {
+    writeStatusSnapshot(join(dir, "status"), SNAPSHOT);
+    const path = join(dir, "status", "snapshot.json");
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), SNAPSHOT);
+    if (process.platform !== "win32") {
+      assert.equal(statSync(path).mode & 0o777, 0o644, "the sender's account must be able to read it");
+    }
+
+    const lines = [];
+    let clock = 0;
+    const writes = [];
+    let fail = false;
+    const writer = createStatusSnapshotWriter({
+      config: { statusSnapshot: { dir: "/x", intervalSeconds: 60 } },
+      log: (line) => lines.push(line),
+      snapshot: () => SNAPSHOT,
+      now: () => clock,
+      write: (target, value) => {
+        if (fail) throw Object.assign(new Error("denied"), { code: "EACCES" });
+        writes.push([target, value]);
+      },
+    });
+    assert.equal(createStatusSnapshotWriter({ config: {}, log: () => {}, snapshot: () => SNAPSHOT }), null);
+    writer.maybeWrite();
+    clock = 30_000;
+    writer.maybeWrite();
+    assert.equal(writes.length, 1);
+    clock = 60_000;
+    writer.maybeWrite();
+    assert.equal(writes.length, 2);
+    assert.deepEqual(lines, ["status snapshot written"]);
+    fail = true;
+    clock = 120_000;
+    writer.maybeWrite();
+    clock = 180_000;
+    writer.maybeWrite();
+    assert.deepEqual(lines, ["status snapshot written", "status snapshot failed: EACCES"], "a failed write never throws into the tick");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sender settings: https only, an absolute snapshot path, and a real secret", () => {
+  const env = {
+    [STATUS_REPORT_SECRET_ENV]: SECRET,
+    REVIEW_STATUS_URL: URL_OK,
+    REVIEW_STATUS_SNAPSHOT: "/var/lib/review-status/snapshot.json",
+  };
+  assert.deepEqual(statusSenderSettings(env), { secret: SECRET, url: URL_OK, snapshotPath: env.REVIEW_STATUS_SNAPSHOT, intervalSeconds: 60 });
+  for (const [change, pattern] of [
+    [{ [STATUS_REPORT_SECRET_ENV]: undefined }, /SECRET/],
+    [{ [STATUS_REPORT_SECRET_ENV]: "tiny-secret-value" }, /SECRET/],
+    [{ REVIEW_STATUS_URL: "http://tomverse.example/status" }, /https/],
+    [{ REVIEW_STATUS_URL: "https://user:pass@tomverse.example/status" }, /credentials/],
+    [{ REVIEW_STATUS_URL: "not a url" }, /absolute https/],
+    [{ REVIEW_STATUS_SNAPSHOT: "snapshot.json" }, /absolute path/],
+    [{ REVIEW_STATUS_INTERVAL_SECONDS: "5" }, /INTERVAL/],
+  ]) {
+    const result = statusSenderSettings({ ...env, ...change });
+    assert.match(result.error ?? "", pattern, JSON.stringify(change));
+    assert.ok(!result.error.includes("tiny-secret-value"));
+  }
+});
+
 test("one report: the bearer goes to the configured URL only, and the answer is a status code", async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
     calls.push({ url, init });
     return new Response('{"result":"recorded"}', { status: 200 });
   };
-  const snapshot = { schemaVersion: 1 };
-  assert.deepEqual(await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot, fetchImpl }), { ok: true, outcome: "http_200" });
+  assert.deepEqual(await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot: SNAPSHOT, fetchImpl }), { ok: true, outcome: "http_200" });
   assert.equal(calls[0].url, URL_OK);
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.redirect, "error");
   assert.equal(calls[0].init.headers.authorization, `Bearer ${SECRET}`);
-  assert.equal(calls[0].init.body, JSON.stringify(snapshot));
+  assert.equal(calls[0].init.body, JSON.stringify(SNAPSHOT));
   assert.ok(calls[0].init.signal instanceof AbortSignal);
 
-  const refused = await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot, fetchImpl: async () => new Response("", { status: 401 }) });
+  const refused = await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot: SNAPSHOT, fetchImpl: async () => new Response("", { status: 401 }) });
   assert.deepEqual(refused, { ok: false, outcome: "http_401" });
-  const offline = await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot, fetchImpl: async () => { throw new TypeError("fetch failed"); } });
+  const offline = await sendStatusReport({ url: URL_OK, secret: SECRET, snapshot: SNAPSHOT, fetchImpl: async () => { throw new TypeError("fetch failed"); } });
   assert.deepEqual(offline, { ok: false, outcome: "network_error" });
 });
 
-test("the reporter is off without config or secret, paces itself and logs only changes", async () => {
-  const config = { statusReport: { url: URL_OK, intervalSeconds: 60 } };
-  const lines = [];
-  const log = (line) => lines.push(line);
-  const env = { [STATUS_REPORT_SECRET_ENV]: SECRET };
-  assert.equal(createStatusReporter({ config: {}, env, log, snapshot: () => ({}) }), null);
-  assert.equal(createStatusReporter({ config, env: {}, log, snapshot: () => ({}) }), null);
-  assert.equal(createStatusReporter({ config, env: { [STATUS_REPORT_SECRET_ENV]: "tiny-secret-value" }, log, snapshot: () => ({}) }), null);
-  assert.equal(lines.length, 2);
-  assert.ok(lines.every((line) => line.startsWith("status report off:") && !line.includes("tiny-secret-value")));
-  lines.length = 0;
+test("the sender sends a fresh snapshot, and goes quiet when the daemon stops writing", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-status-"));
+  try {
+    const path = join(dir, "snapshot.json");
+    writeStatusSnapshot(dir, { ...SNAPSHOT, extra: "dropped" });
+    const settings = { secret: SECRET, url: URL_OK, snapshotPath: path, intervalSeconds: 60 };
+    const lines = [];
+    const bodies = [];
+    let status = 200;
+    let clock = statSync(path).mtimeMs + 1000;
+    const sender = createStatusSender({
+      settings,
+      log: (line) => lines.push(line),
+      now: () => clock,
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(init.body));
+        return new Response("", { status });
+      },
+    });
+    await sender.sendOnce();
+    assert.deepEqual(bodies, [SNAPSHOT]);
+    await sender.sendOnce();
+    assert.equal(bodies.length, 2);
+    assert.deepEqual(lines, ["status report ok"]);
 
-  let clock = 0;
-  let answer = 404;
-  let sent = 0;
-  let release;
-  const fetchImpl = async () => {
-    sent += 1;
-    if (answer === "hang") await new Promise((resolve) => (release = resolve));
-    return new Response("", { status: answer === "hang" ? 200 : answer });
-  };
-  const reporter = createStatusReporter({ config, env, log, snapshot: () => ({ schemaVersion: 1 }), fetchImpl, now: () => clock });
-  reporter.maybeSend();
-  await reporter.settled();
-  assert.equal(sent, 1);
-  assert.deepEqual(lines, ["status report failed: http_404"]);
+    status = 401;
+    await sender.sendOnce();
+    assert.deepEqual(lines.at(-1), "status report failed: http_401");
 
-  // Not again before the interval, and the same failure is not logged twice.
-  clock = 30_000;
-  reporter.maybeSend();
-  assert.equal(sent, 1);
-  clock = 60_000;
-  reporter.maybeSend();
-  await reporter.settled();
-  assert.equal(sent, 2);
-  assert.deepEqual(lines, ["status report failed: http_404"]);
+    // Three missed writes: the file is left alone, and the app sees silence.
+    clock += 181_000;
+    await sender.sendOnce();
+    await sender.sendOnce();
+    assert.equal(bodies.length, 3);
+    assert.equal(lines.at(-1), "status snapshot is stale; not sending");
+    assert.equal(lines.filter((line) => line.includes("stale")).length, 1);
 
-  answer = 200;
-  clock = 120_000;
-  reporter.maybeSend();
-  await reporter.settled();
-  assert.deepEqual(lines, ["status report failed: http_404", "status report ok"]);
+    // Not a snapshot, or too large to be one: nothing is sent.
+    clock = Date.now() + 1000;
+    writeFileSync(path, "{nope");
+    utimesSync(path, new Date(), new Date());
+    await sender.sendOnce();
+    writeFileSync(path, JSON.stringify({ ...SNAPSHOT, padding: "x".repeat(9000) }));
+    await sender.sendOnce();
+    assert.equal(bodies.length, 3);
+    assert.equal(lines.at(-1), "status snapshot is not a valid snapshot; not sending");
 
-  // A report still in flight is never overlapped by the next one.
-  answer = "hang";
-  clock = 180_000;
-  reporter.maybeSend();
-  clock = 400_000;
-  reporter.maybeSend();
-  assert.equal(sent, 4, "a second report started while one was in flight");
-  release();
-  await reporter.settled();
-
-  // A snapshot that cannot be built is skipped, and nothing is sent.
-  const broken = createStatusReporter({ config, env, log, snapshot: () => { throw new Error("store unreadable"); }, fetchImpl, now: () => 0 });
-  broken.maybeSend();
-  assert.equal(sent, 4);
-  assert.equal(lines.at(-1), "status report skipped: store unreadable");
-});
-
-test("the daemon reports after each tick without waiting for the answer", () => {
-  const source = readFileSync(new URL("../tools/review-orchestrator/bin/review-orchestrator.mjs", import.meta.url), "utf8");
-  const loop = source.slice(source.indexOf("async function daemon"), source.indexOf("async function drain"));
-  assert.match(loop, /reporter\?\.maybeSend\(\);/);
-  assert.doesNotMatch(loop, /await reporter/);
-  assert.ok(loop.indexOf("orchestrator.tick(quotas)") < loop.indexOf("reporter?.maybeSend()"));
+    rmSync(path);
+    await sender.sendOnce();
+    assert.equal(lines.at(-1), "status snapshot unreadable: ENOENT");
+    assert.ok(lines.every((line) => !line.includes(SECRET)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
