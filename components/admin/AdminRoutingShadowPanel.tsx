@@ -7,6 +7,7 @@ import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
 import { adminRoutingShadowMessages } from "@/lib/adminMessages/routingShadow";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import type { autoRoutingRuntimeReadback } from "@/lib/autoRoutingRuntimeReadback";
 
 /**
  * The reader for `/api/admin/routing-shadow`.
@@ -40,6 +41,7 @@ type GroupAgreement = {
 };
 
 type ShadowReport = {
+    runtime?: ReturnType<typeof autoRoutingRuntimeReadback>;
     windowDays: number;
     since: string;
     truncated: boolean;
@@ -63,6 +65,49 @@ type ShadowReport = {
     decisionMicrosP50: number;
     decisionMicrosP95: number;
 };
+
+export function AdminRoutingRuntimeReadback({ runtime, messages }: {
+    runtime: ShadowReport["runtime"];
+    messages: typeof adminRoutingShadowMessages.en.runtime;
+}) {
+    // Project only the documented fields, even if a future response adds more.
+    const snapshot = runtime && {
+        observedAt: runtime.observedAt,
+        build: {
+            environment: runtime.build.environment,
+            commitSha: runtime.build.commitSha,
+            shortCommitSha: runtime.build.shortCommitSha,
+            builtAt: runtime.build.builtAt,
+            deploymentId: runtime.build.deploymentId,
+            deploymentStartedAt: runtime.build.deploymentStartedAt,
+            deployedAt: runtime.build.deployedAt,
+            deploymentStatus: runtime.build.deploymentStatus,
+        },
+        readiness: {
+            version: runtime.readiness.version,
+            ready: runtime.readiness.ready,
+            outstanding: runtime.readiness.outstanding,
+            problems: runtime.readiness.problems,
+        },
+        shadowEnabled: runtime.shadowEnabled,
+        dispatchInstrumentationMode: runtime.dispatchInstrumentationMode,
+        manifestKeyringConfigured: runtime.manifestKeyringConfigured,
+    };
+
+    return (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3" data-testid="admin-routing-runtime-readback">
+            <h3 className="text-sm font-bold text-zinc-200">{messages.title}</h3>
+            <p className="mt-2 text-xs leading-6 text-zinc-400">
+                {snapshot ? messages.caveat : messages.unavailable}
+            </p>
+            {snapshot && (
+                <pre className="mt-3 max-h-[32rem] overflow-auto whitespace-pre-wrap break-all text-xs leading-6 text-zinc-300" data-testid="admin-routing-runtime-snapshot">
+                    {JSON.stringify(snapshot, null, 2)}
+                </pre>
+            )}
+        </div>
+    );
+}
 
 const num = (value: number, locale: AdminLocale) =>
     value.toLocaleString(adminIntlLocale(locale));
@@ -236,6 +281,7 @@ export function AdminRoutingShadowPanel() {
             </div>
 
             <div className="space-y-4 p-5">
+                {report && <AdminRoutingRuntimeReadback runtime={report.runtime} messages={m.runtime} />}
                 {error && (
                     <p
                         className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"

@@ -789,7 +789,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     group: "AMUX",
     // Assignment decisions take `ops:write` (every /api/admin/amux/escalations
     // route checks it); the card list writes nothing. Clearing an orchestrator
-    // halt takes the owner role and a recent step-up in its own route.
+    // halt takes the owner role and a recent step-up in its own route, and so
+    // does a Decision Maker switch change, with ops:write
+    // (docs/policy/amux-decision-maker.md §8).
     writeRoles: ["owner", "ops"],
     // Escalations plus open orchestrator halts (orchestration policy
     // version 20, section 7).
@@ -808,6 +810,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "orchestrator",
       "halt",
       "outcome unknown",
+      "decision maker",
+      "kill switch",
     ],
     tabs: [
       {
@@ -827,6 +831,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         label: "Halts",
         description: "Orchestrator halts, the writes a person has to confirm, and clearing a halt",
         badge: "amuxOrchestratorHalts",
+      },
+      {
+        id: "decision-maker",
+        label: "Decision Maker",
+        description: "The Decision Maker kill switch and the mode of each instance",
       },
     ],
   },
