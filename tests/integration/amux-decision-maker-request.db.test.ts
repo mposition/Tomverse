@@ -513,8 +513,10 @@ test("one request per card question revision; the store returns the first", asyn
   const again = await prisma.$transaction((tx) =>
     recordDecisionMakerRequest(tx, { keyRing: RING, binding: { ...shared, amuxSessionAttempt: 2 }, card: { ...CARD, title: "Deploy it" } }),
   );
-  assert.deepEqual(again, { ...first, created: false, sameBinding: false });
+  // The second call wrote no route audit (2026-10-09: the first's is what its card text is bound to).
+  assert.deepEqual(again, { ...first, created: false, sameBinding: false, routeAuditLogId: null });
   const audit = await prisma.adminAuditLog.findFirstOrThrow({ where: { targetId: first.requestId, action: "amux.decision.route" } });
+  assert.equal(first.routeAuditLogId, audit.id);
   assert.deepEqual(audit.metadata, {
     request_id: first.requestId,
     route: "dm_proposal",

@@ -141,6 +141,124 @@ export type DmCard = {
 
 const utf8Bytes = (value: string) => Buffer.byteLength(value, "utf8");
 
+/**
+ * The card text: the one serialization of a card that the body store keeps
+ * as its `card_text` (docs/policy/amux-decision-maker.md §10: "질문 카드
+ * 텍스트(16 KiB)"), so Admin can show the operator the question and the
+ * option wording the request was routed with. Added 2026-10-09; before it no
+ * writer stored the card at all.
+ *
+ * It is the JSON text of one object whose keys are, in this order, `format`
+ * (always `DM_CARD_TEXT_FORMAT`), then every field of `DmCard` -- §5's card
+ * fields a DM receives: `askType`, `resolution`, `type`, `tags`, `title`,
+ * `question`, `options` (each `{ id, label }`, in the card's order),
+ * `unblocks`, `context` and `contextPaths`. `JSON.stringify` is fully
+ * specified (ECMA-262), so the same card is the same bytes on every run; a
+ * string is always quoted with `"` and `\` escaped, so no field's text can
+ * end a field or start another, and the escaping of control characters and
+ * lone surrogates leaves well-formed text without NUL, which PostgreSQL TEXT
+ * can hold. Changing the layout is a new `format` value.
+ *
+ * §5's 16 KiB is measured on these bytes (`dmCardTextBytes`), never on the
+ * sum of the fields: the stored text is what the cap is about, and a card the
+ * body store could not hold is never routed to a DM.
+ */
+export const DM_CARD_TEXT_FORMAT = "amux-dm-card-text-v1";
+
+/** The order of the card text's keys, `format` first. */
+export const DM_CARD_TEXT_KEYS = [
+  "format",
+  "askType",
+  "resolution",
+  "type",
+  "tags",
+  "title",
+  "question",
+  "options",
+  "unblocks",
+  "context",
+  "contextPaths",
+] as const;
+
+export const dmCardText = (card: DmCard): string =>
+  JSON.stringify({
+    format: DM_CARD_TEXT_FORMAT,
+    askType: card.askType,
+    resolution: card.resolution,
+    type: card.type,
+    tags: [...card.tags],
+    title: card.title,
+    question: card.question,
+    options: card.options.map((option) => ({ id: option.id, label: option.label })),
+    unblocks: card.unblocks,
+    context: card.context,
+    contextPaths: [...card.contextPaths],
+  });
+
+/** The UTF-8 bytes of the card text, which §5's 16 KiB caps. */
+export const dmCardTextBytes = (card: DmCard): number => utf8Bytes(dmCardText(card));
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+
+/**
+ * The card a stored card text holds, for Admin. Null unless the text is
+ * exactly what `dmCardText()` makes of that card -- the keys in order, the
+ * format, the types, and the same bytes again -- so a text this module did
+ * not write is never shown as a card.
+ */
+export const parseDmCardText = (text: unknown): DmCard | null => {
+  if (typeof text !== "string") return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== DM_CARD_TEXT_KEYS.length || !keys.every((key, index) => key === DM_CARD_TEXT_KEYS[index])) {
+    return null;
+  }
+  if (
+    value.format !== DM_CARD_TEXT_FORMAT ||
+    typeof value.askType !== "string" ||
+    (value.resolution !== null && typeof value.resolution !== "string") ||
+    typeof value.type !== "string" ||
+    !isStringList(value.tags) ||
+    typeof value.title !== "string" ||
+    typeof value.question !== "string" ||
+    !Array.isArray(value.options) ||
+    !value.options.every(
+      (option) =>
+        isPlainRecord(option) &&
+        Object.keys(option).length === 2 &&
+        typeof option.id === "string" &&
+        typeof option.label === "string",
+    ) ||
+    typeof value.unblocks !== "string" ||
+    typeof value.context !== "string" ||
+    !isStringList(value.contextPaths)
+  ) {
+    return null;
+  }
+  const card: DmCard = {
+    askType: value.askType,
+    resolution: value.resolution as string | null,
+    type: value.type,
+    tags: value.tags,
+    title: value.title,
+    question: value.question,
+    options: (value.options as Array<{ id: string; label: string }>).map(({ id, label }) => ({ id, label })),
+    unblocks: value.unblocks,
+    context: value.context,
+    contextPaths: value.contextPaths,
+  };
+  return dmCardText(card) === text ? card : null;
+};
+
 /** Every card string a DM would receive, context paths included, in a fixed order. */
 const cardTextFields = (card: DmCard): Record<string, string> => {
   const fields: Record<string, string> = {
@@ -162,9 +280,6 @@ const cardTextFields = (card: DmCard): Record<string, string> => {
   });
   return fields;
 };
-
-export const dmCardTextBytes = (card: DmCard): number =>
-  Object.values(cardTextFields(card)).reduce((total, value) => total + utf8Bytes(value), 0);
 
 export type DmRoutingInput = {
   /** `null` when the setting could not be read. */
@@ -229,8 +344,11 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
     refusals.push("throughput_exceeded");
   }
 
+  // §5's 16 KiB on the card text the body store keeps (`dmCardText()`), so a
+  // card routed to a DM always fits its `card_text` row (§10).
+  const cardText = dmCardText(card);
   if (
-    dmCardTextBytes(card) > DM_CARD_TEXT_MAX_BYTES ||
+    utf8Bytes(cardText) > DM_CARD_TEXT_MAX_BYTES ||
     card.contextPaths.length > DM_CONTEXT_PATHS_MAX ||
     card.contextPaths.some((path) => repositoryPathRefusal(path) !== null) ||
     !dmCardOptionsWellFormed(card.options)
@@ -238,7 +356,10 @@ export const routeDmQuestion = (input: DmRoutingInput): DmRoutingDecision => {
     refusals.push("input_limit_exceeded");
   }
 
-  if (detectSecretsInFields(cardTextFields(card)).length > 0) refusals.push("card_secret_detected");
+  // Section 3-8: every field as the worker wrote it, and the card text as the
+  // body store keeps it and scans it before storing (§10: "저장 전에 secret
+  // 검사를 통과해야 한다"), so a card routed to a DM always passes that scan.
+  if (detectSecretsInFields({ ...cardTextFields(card), cardText }).length > 0) refusals.push("card_secret_detected");
 
   if (refusals.length === 0 && instance !== null) {
     return { route: "dm_proposal", instance, refusals: [] };

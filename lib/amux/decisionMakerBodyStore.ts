@@ -5,7 +5,14 @@ import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
-import { validateDmOutput, type DmOutput, type DmOutputValidationFailure } from "@/lib/amux/decisionMakerCore";
+import {
+  dmCardText,
+  parseDmCardText,
+  validateDmOutput,
+  type DmCard,
+  type DmOutput,
+  type DmOutputValidationFailure,
+} from "@/lib/amux/decisionMakerCore";
 import {
   DM_BODY_AUDIT_ACTIONS,
   DM_BODY_DELETE_AUDIT_TARGET_TYPE,
@@ -53,14 +60,16 @@ import {
   writeDecisionMakerDigestKeyAudit,
 } from "@/lib/amux/decisionMakerBodySystemAudit";
 import { decisionMakerPeriodKey, type DmDigestKeyRing } from "@/lib/amux/decisionMakerDigestKeys";
-import { DM_RESULT_KINDS, isDmRequestId, type DmResultKind } from "@/lib/amux/decisionMakerRequestCore";
+import { DM_RESULT_KINDS, isDmRequestId, parseDmCard, type DmResultKind } from "@/lib/amux/decisionMakerRequestCore";
 import {
   assignDecisionMakerRequest,
   countOpenDecisionMakerRequestsCreatedBetween,
   readDecisionMakerRequestState,
+  recordDecisionMakerRequest,
   submitDecisionMakerResult,
   type DecisionMakerEventRecord,
   type DecisionMakerEventWrite,
+  type DecisionMakerRequestRecord,
   type DecisionMakerResultSubmission,
 } from "@/lib/amux/decisionMakerRequestStore";
 import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
@@ -83,10 +92,14 @@ import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  * person's edited answer, both for lib/amux/decisionMakerJudgmentStore.ts.
  *
  * It reads the request ledger only through lib/amux/decisionMakerRequestStore.ts,
- * the ledger's one reader, and composes two of that module's writes with
- * their digest keys: the assignment that hands the broker its request key,
- * and the result submission whose digest the app computes from the output it
- * stores.
+ * the ledger's one reader, and composes three of that module's writes with
+ * their digest keys: the routing, whose new request routed to a DM keeps its
+ * card text here in the same transaction (added 2026-10-09: until then no
+ * writer stored the card, so Admin could not show the question), the
+ * assignment that hands the broker its request key, and the result submission
+ * whose digest the app computes from the output it stores. No other module
+ * calls the three ledger writes; tests/amuxDecisionMakerBody.test.mjs fails on
+ * one that does.
  *
  * Every function runs on a transaction its caller owns and holds no lock
  * beyond it. Each sends a fixed list of statements -- no loop -- pinned by
@@ -105,9 +118,10 @@ import { isDmInstanceScope } from "@/lib/amux/decisionMakerSwitchCore";
  *
  * Under the kill switch every operation here stays allowed (§6's table: legal
  * hold, body deletion, stale close and expiry deletion), so none of them reads
- * the switches. The two compositions are the ledger writes they wrap, and
- * those read the switches themselves: a proposal under the kill switch is
- * recorded as a rejection, and then no body is stored.
+ * the switches. The three compositions are the ledger writes they wrap, and
+ * those read the switches themselves: a routing under the kill switch goes to
+ * the operator and a proposal under it is recorded as a rejection, and then no
+ * body is stored.
  *
  * No body reaches an audit entry, a log or an error: audit metadata is closed
  * keys and short tokens (field names, counts, ids), and the digest keys are
@@ -223,6 +237,54 @@ export async function readDecisionMakerBodies(
       createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
     };
   });
+}
+
+export type DecisionMakerCardTextRecord = {
+  /** The card as it was routed, parsed back from the stored text. */
+  card: DmCard;
+  /** The stored text itself (`dmCardText()` of the card), the bytes `digest` is over. */
+  text: string;
+  digest: string;
+  keyPeriod: number;
+  createdAt: string;
+};
+
+/**
+ * The card a request was routed to a DM with, as its `card_text` body keeps
+ * it (§10), for the person who judges its proposal in Admin: the question, the
+ * option wording and the rest of the card, beside the stored text and its
+ * keyed digest, in one statement. Null when the request has no card text --
+ * routed to the operator (who reads the card in AMUX), or its body purged or
+ * erased. A stored text this store could not have written is
+ * `state_unreadable`, never shown as a card. Reads only; the text is returned
+ * to the caller and never logged here.
+ */
+export async function readDecisionMakerCardText(
+  client: BodyReader,
+  requestId: string,
+): Promise<DecisionMakerCardTextRecord | null> {
+  if (!isDmRequestId(requestId)) throw new DecisionMakerBodyWriteError("invalid_input");
+  const rows = await client.$queryRaw<
+    Array<{ text: string; digest: string; keyPeriod: number; createdAtEpochMs: bigint | number }>
+  >`
+    SELECT "text", "digest", "keyPeriod",
+           floor(extract(epoch FROM "createdAt") * 1000)::bigint AS "createdAtEpochMs"
+    FROM "AmuxDecisionMakerBody"
+    WHERE "requestId" = ${requestId} AND "field" = 'card_text'
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  const card = parseDmCardText(row.text);
+  if (rows.length !== 1 || !card || typeof row.digest !== "string" || !/^[0-9a-f]{64}$/.test(row.digest)) {
+    throw new DecisionMakerBodyWriteError("state_unreadable");
+  }
+  return {
+    card,
+    text: row.text,
+    digest: row.digest,
+    keyPeriod: safeInteger(row.keyPeriod, "key period"),
+    createdAt: isoOf(safeInteger(row.createdAtEpochMs, "clock")),
+  };
 }
 
 /**
@@ -565,8 +627,96 @@ export async function destroyDecisionMakerDigestKey(
 }
 
 // ---------------------------------------------------------------------------
-// The two ledger writes that carry digest keys
+// The three ledger writes that carry digest keys
 // ---------------------------------------------------------------------------
+
+export type DecisionMakerRoutedRequest = DecisionMakerRequestRecord & {
+  /**
+   * The card text this call stored: only with a new request routed to a DM.
+   * Null for a request routed to the operator -- who reads the card in AMUX,
+   * and whose request is closed from its creation, so the body guard refuses
+   * it a body -- and for an existing request, whose first routing stands
+   * (§9).
+   */
+  cardText: { digest: string; keyPeriod: number; bytes: number } | null;
+};
+
+/**
+ * §2-2, §3, §10: routes one typed ask through the ledger's routing,
+ * `recordDecisionMakerRequest()`, and when that records a new request routed
+ * to a DM, stores the request's card text in the same transaction -- the
+ * question, the option wording and the rest of the card as
+ * `dmCardText()` serializes them (lib/amux/decisionMakerCore.ts), which is
+ * what Admin shows the operator beside a proposal -- bound to the router's
+ * `amux.decision.route` audit the routing has just written, as the body guard
+ * requires (migration 20261008120000_amux_decision_maker_body_store: the card
+ * text with the request row's own route audit of the same transaction, so it
+ * can never be added later). The application routes only through here.
+ *
+ * The text passes `dmBodyRefusal()`, the secret scan included (§10: "저장 전에
+ * secret 검사를 통과해야 한다"), before it is sent. The router never sends a
+ * card it would refuse: `routeDmQuestion()` measures §5's 16 KiB on the same
+ * text and scans it with the same scanner, so a card over the cap or with a
+ * secret goes to the operator (`input_limit_exceeded`,
+ * `card_secret_detected`) and stores nothing here. A refusal at this point
+ * would mean the two drifted apart; it throws, and the caller's transaction
+ * rolls back.
+ *
+ * The routing and the stored text read one private copy of the card, so the
+ * text is the card the routing decided on.
+ *
+ * The text is keyed under the request's key K_R and stored only while the
+ * registry holds the period's key undestroyed. If it does not, nothing is
+ * stored and this throws `digest_key_unavailable`, so the caller's
+ * transaction -- which already holds the routing's audit and request rows --
+ * rolls back and the question stays with the operator, as a route failure
+ * does (§2-1). Such a request could not have been assigned either: the keyed
+ * assignment refuses an unregistered key.
+ *
+ * Statements: the routing's own -- 2 for an existing request, 7 (8 with an
+ * integrity key) for a provider without an instance, 8 (9) otherwise -- and 1
+ * card text insert for a new request routed to a DM: 9, or 10. With the
+ * boundary's setup and fence, 12 at most (§9).
+ */
+export async function recordDecisionMakerRequestWithCardText(
+  tx: Prisma.TransactionClient,
+  input: { binding: unknown; card: unknown; keyRing: DmDigestKeyRing },
+): Promise<DecisionMakerRoutedRequest> {
+  const parsed = parseDmCard(input.card);
+  // An unreadable card goes to the routing as it came, which refuses it before any statement.
+  const card: unknown = parsed === null ? input.card : structuredClone(parsed);
+  const record = await recordDecisionMakerRequest(tx, { binding: input.binding, card, keyRing: input.keyRing });
+  if (!record.created || record.route !== "dm_proposal") return { ...record, cardText: null };
+  if (parsed === null || record.routeAuditLogId === null) {
+    throw new Error("AMUX Decision Maker routing recorded a request without its card or route audit");
+  }
+
+  const text = dmCardText(card as DmCard);
+  const refusal = dmBodyRefusal("card_text", text);
+  if (refusal) throw new Error(`AMUX Decision Maker routed a card the body store refuses: ${refusal}`);
+  const keyPeriod = dmKeyPeriodOf(Date.parse(record.createdAt));
+  const periodKey = decisionMakerPeriodKey(input.keyRing, keyPeriod);
+  if (!periodKey) throw new DecisionMakerBodyWriteError("digest_key_unavailable");
+  const keyCheck = dmDigestKeyCheck(periodKey);
+  const digest = dmBodyDigest(dmRequestDigestKey(periodKey, record.requestId), "card_text", text);
+  const rows = await tx.$queryRaw<Array<{ digest: string }>>`
+    INSERT INTO "AmuxDecisionMakerBody"
+      ("id", "requestId", "field", "text", "keyPeriod", "keyCheck", "digest", "auditLogId")
+    SELECT ${randomUUID()}, ${record.requestId}, 'card_text', ${text}, ${keyPeriod}::integer, ${keyCheck},
+           ${digest}, ${record.routeAuditLogId}
+    WHERE EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+        WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'rotate' AND k."keyCheck" = ${keyCheck}
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "AmuxDecisionMakerDigestKeyEvent" k
+        WHERE k."keyPeriod" = ${keyPeriod}::integer AND k."kind" = 'destroy'
+      )
+    RETURNING "digest"
+  `;
+  if (rows.length !== 1 || rows[0]!.digest !== digest) throw new DecisionMakerBodyWriteError("digest_key_unavailable");
+  return { ...record, cardText: { digest, keyPeriod, bytes: Buffer.byteLength(text, "utf8") } };
+}
 
 export type DecisionMakerKeyedAssignment =
   | { recorded: true; event: DecisionMakerEventRecord; keyPeriod: number; requestKey: Buffer }
