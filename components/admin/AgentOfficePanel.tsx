@@ -13,19 +13,33 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  OPERATOR_QUEUE_HREFS,
+  OPERATOR_QUEUE_KEYS,
+  agentOfficeBrief,
+  agentOfficeReport,
+  operatorQueueTotal,
+  reviewQuotaView,
+  reviewRoomView,
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
   utcStamp,
   type AgentOfficeAmuxView,
+  type AgentOfficeReviewView,
+  type AgentOfficeQuotaView,
+  type AgentOfficeOperatorQueue,
+  type AgentOfficeLiveRow,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
 } from "@/lib/agentOffice/live";
-import { AGENT_OFFICE_DEPTS, AGENT_OFFICE_TEAM_IDS, agentOfficeDept } from "@/lib/agentOffice/roster";
+import {
+  AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DEPTS,
+  AGENT_OFFICE_TEAM_IDS,
+  agentOfficeDept,
+} from "@/lib/agentOffice/roster";
 import {
   AgentOffice,
-  PHASE,
-  PHASE_COUNT,
   type Agent,
   type AgentStatus,
   type DeptStatus,
@@ -33,7 +47,7 @@ import {
   type Snapshot,
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
-import { AMUX_ROOM, DEPT_ROOMS } from "@/lib/agentOffice/world";
+import { AMUX_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -108,10 +122,16 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => amuxRoomView(live.amux, live.readAt, AMUX_ROOM.desks.length, m.real.amux),
     [live, m]
   );
+  const reviewView = useMemo(
+    () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
+    [live, m]
+  );
+  const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [follow, setFollow] = useState(true);
+  // The camera keeps the selected person in view when zoomed in.
+  const follow = true;
   const [briefing, setBriefing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [toast, setToast] = useState("");
@@ -140,6 +160,16 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   useEffect(() => {
     engine.setLive(liveDepts);
   }, [engine, liveDepts]);
+
+  // A fresh reading of the live rooms every minute while the tab is visible:
+  // the page's server component reads again and a room whose record changed
+  // says so (engine.setLive). Reading only -- nothing on the page writes.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") router.refresh();
+    }, LIVE_REFRESH_MS);
+    return () => window.clearInterval(id);
+  }, [router]);
 
   useEffect(() => {
     engine.setBriefingHandler(() => setBriefing(true));
@@ -198,18 +228,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     [engine, m, reveal]
   );
 
-  const start = () => {
-    engine.start();
-    setBriefing(false);
-    goLive();
-    showToast(m.live.toastStart(engine.staff.length));
-  };
-
-  const approve = () => {
-    engine.approve();
-    showToast(m.live.toastApproved);
-  };
-
   const teams = useMemo(
     () =>
       DEPT_ROOMS.map((room) => ({
@@ -225,9 +243,44 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   );
 
   const filteredTeams = filter === "all" ? teams : teams.filter((team) => team.status === filter);
+
+  // The status report: what this screen shows, as Markdown, built when asked
+  // for. It goes to the clipboard or a download and nowhere else.
+  const reportText = () =>
+    agentOfficeReport(
+      {
+        readAt: live.readAt,
+        rows: liveRowsFor(teams, amuxView, reviewView, m),
+        notConnected: teams.filter((team) => !team.live).map((team) => `${team.icon} ${team.name}`),
+        queue: OPERATOR_QUEUE_KEYS.map((key) => ({ label: m.queue.labels[key], count: live.queue[key] })),
+        quota: quotaView,
+        unknownCount: m.queue.unknown,
+      },
+      m.report
+    );
+  const copyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(reportText());
+      showToast(m.live.reportCopied);
+    } catch {
+      showToast(m.live.reportCopyFailed);
+    }
+  };
+  const downloadReport = () => {
+    const url = URL.createObjectURL(new Blob([reportText()], { type: "text/markdown;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `tomverse-agent-office-${live.readAt.slice(0, 16).replace(/[:T]/g, "-")}.md`;
+    // In the document while it is clicked, and the URL kept a moment after:
+    // some browsers abort a download whose object URL is revoked at once.
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  };
   const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
-  const todo = snap.approvalPending ? 1 : 0;
-  const onDuty = engine.agents.filter((a) => a.rank !== "operator" && a.status !== "offDuty").length;
+  // The operator's to-do is the real queues an agent waits on (OPERATOR_QUEUE_KEYS).
+  const todo = operatorQueueTotal(live.queue);
 
   return (
     <div className={cx("office")} data-testid="agent-office">
@@ -257,10 +310,11 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               </Link>
               <button
                 type="button"
-                className={cx("todo-tab", todo > 0 && "urgent")}
+                className={cx("todo-tab", todo.total > 0 && "urgent")}
                 onClick={() => reveal("agent-office-approval")}
+                title={todo.unknown ? m.queue.partial : undefined}
               >
-                {m.nav.todo} <i>{todo}</i>
+                {m.nav.todo} <i>{todo.unknown ? `${todo.total}+?` : todo.total}</i>
               </button>
             </div>
           </nav>
@@ -279,15 +333,16 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               m={m}
               engine={engine}
               amuxView={amuxView}
+              reviewView={reviewView}
+              quotaView={quotaView}
+              queue={live.queue}
               readAt={live.readAt}
               snap={snap}
               follow={follow}
-              setFollow={setFollow}
               selectedId={selectedId}
               onSelect={onSelect}
-              onStart={start}
-              onApprove={approve}
-              onDuty={onDuty}
+              onCopyReport={copyReport}
+              onDownloadReport={downloadReport}
             />
           ) : (
             <DashboardView
@@ -299,8 +354,9 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               setFilter={setFilter}
               snap={snap}
               readAt={live.readAt}
-              onStart={start}
-              onApprove={approve}
+              queue={live.queue}
+              amuxView={amuxView}
+              reviewView={reviewView}
               onSelect={(id) => setSelectedId(id)}
             />
           )}
@@ -334,6 +390,9 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
 
 const ENGINEERING_RECORD_HREF = agentOfficeDept("engineering")?.recordHref ?? null;
 
+/** How often the open office reads the live rooms again. */
+const LIVE_REFRESH_MS = 60_000;
+
 /**
  * The approval card while the engineering room reads its real record: the
  * demo plays no draft and no approval, and real decisions are made on the
@@ -362,32 +421,32 @@ function LiveView({
   m,
   engine,
   amuxView,
+  reviewView,
+  quotaView,
+  queue,
   readAt,
   snap,
   follow,
-  setFollow,
   selectedId,
   onSelect,
-  onStart,
-  onApprove,
-  onDuty,
+  onCopyReport,
+  onDownloadReport,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
+  quotaView: AgentOfficeQuotaView;
+  queue: AgentOfficeOperatorQueue;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
   snap: Snapshot;
   follow: boolean;
-  setFollow: (value: boolean) => void;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
-  onStart: () => void;
-  onApprove: () => void;
-  onDuty: number;
+  onCopyReport: () => void;
+  onDownloadReport: () => void;
 }) {
-  const progress = Math.round((snap.phaseIndex / (PHASE_COUNT - 1)) * 100);
-  const waitingNames = engine.approverNames();
   const engineeringLive = engine.liveDept("engineering") !== null;
 
   return (
@@ -420,79 +479,23 @@ function LiveView({
       <section className={cx("live-bar")}>
         <button
           type="button"
-          className={cx("btn btn-primary")}
-          onClick={onStart}
-          disabled={snap.running}
-          data-testid="agent-office-watch-demo"
+          className={cx("btn btn-ghost")}
+          onClick={onCopyReport}
+          title={m.live.reportHint}
+          data-testid="agent-office-report-copy"
         >
-          {snap.running ? m.live.running : snap.dayComplete ? m.live.restart : m.live.watchDemo}
+          {m.live.reportCopy}
         </button>
-        {snap.demo ? (
-          <button
-            type="button"
-            className={cx("btn btn-ghost")}
-            onClick={() => engine.endDemo()}
-            data-testid="agent-office-end-demo"
-          >
-            {m.live.endDemo}
-          </button>
-        ) : null}
-        {snap.demo ? (
-          <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.togglePause()}>
-            {snap.paused ? m.live.play : m.live.pause}
-          </button>
-        ) : null}
-        {snap.demo ? (
-        <div className={cx("speed-wrap")}>
-          <span className={cx("speed-label")} title={m.live.speedHint}>
-            {m.live.speedLabel}
-          </span>
-          <div className={cx("speed-group")} role="group" aria-label={m.live.speedLabel}>
-            {[1, 2, 4].map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={cx(!snap.turbo && snap.speed === value && "on")}
-                aria-pressed={!snap.turbo && snap.speed === value}
-                onClick={() => engine.setSpeed(value)}
-                title={value === 1 ? m.live.speedSlow : value === 4 ? m.live.speedFast : m.live.speedNormal}
-              >
-                {value}x
-              </button>
-            ))}
-            <button
-              type="button"
-              className={cx("skip", snap.turbo && "on")}
-              onClick={() => engine.skipToDecision()}
-              disabled={!snap.running || snap.approvalPending}
-              title={engineeringLive ? m.live.skipToEndHint : m.live.skipHint}
-            >
-              {snap.turbo ? m.live.skipping : engineeringLive ? m.live.skipToEnd : m.live.skip}
-            </button>
-          </div>
-        </div>
-        ) : null}
         <button
           type="button"
-          className={cx("btn btn-ghost", follow && "on")}
-          aria-pressed={follow}
-          onClick={() => setFollow(!follow)}
+          className={cx("btn btn-ghost")}
+          onClick={onDownloadReport}
+          title={m.live.reportHint}
+          data-testid="agent-office-report-download"
         >
-          {m.live.follow(follow)}
+          {m.live.reportDownload}
         </button>
-        <button type="button" className={cx("btn btn-ghost")} disabled title={m.live.publishHint}>
-          {m.live.publish}
-        </button>
-        {snap.demo ? (
-          <div className={cx("live-progress")}>
-            <span>{m.live.progress(snap.phase, progress)}</span>
-            <i>
-              <b style={{ width: `${progress}%` }} />
-            </i>
-          </div>
-        ) : null}
         <div className={cx("live-counts")}>
-          <span className={cx("lc on-duty")}>{m.live.onDuty(onDuty)}</span>
           <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
           <span className={cx("lc working")}>{m.live.working(snap.stats.working)}</span>
           <span className={cx("lc attention")}>{m.live.attention(snap.stats.attention)}</span>
@@ -504,6 +507,7 @@ function LiveView({
         <AgentOfficeWorld
           engine={engine}
           amux={amuxView}
+          review={reviewView}
           snap={snap}
           selectedId={selectedId}
           follow={follow}
@@ -520,120 +524,76 @@ function LiveView({
                 —　▢　✕
               </span>
             </div>
-            <div className={cx("win-body approval-body", snap.approvalPending && "pending")}>
-              {snap.approvalPending ? (
-                <>
-                  <div className={cx("approval-top")}>
-                    <span className={cx("approval-chips")}>
-                      <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                      <span className={cx("mini-badge yellow")}>{m.approval.badgePending}</span>
-                    </span>
-                    <span className={cx("score blink")}>{m.approval.awaiting}</span>
-                  </div>
-                  <h3>{m.approval.title}</h3>
-                  <p>{m.approval.waiting(waitingNames)}</p>
-                  <div className={cx("reason-list")}>
-                    {m.approval.reasons.map((reason) => (
-                      <span key={reason}>{reason}</span>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className={cx("btn approve-button")}
-                    onClick={onApprove}
-                    data-testid="agent-office-approve"
-                  >
-                    {m.approval.approve}
-                  </button>
-                </>
-              ) : engineeringLive ? (
-                <LiveDecisionNote m={m} />
-              ) : (
-                <>
-                  <div className={cx("approval-top")}>
-                    <span className={cx("approval-chips")}>
-                      <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                      <span className={cx("mini-badge mint")}>
-                        {snap.approved ? m.approval.badgeApproved : m.approval.badgeNone}
-                      </span>
-                    </span>
-                  </div>
-                  <h3>{snap.approved ? m.approval.approvedTitle : m.approval.noneTitle}</h3>
-                  <p>{snap.approved ? m.approval.approvedBody : m.approval.noneBody}</p>
-                </>
-              )}
+            <div className={cx("win-body approval-body")}>
+              <OperatorQueueList m={m} queue={queue} />
+              {engineeringLive ? <LiveDecisionNote m={m} /> : null}
             </div>
           </section>
 
-          <section className={cx("win rail-card feed-card")}>
-            <div className={cx("win-bar")}>
-              <span>{m.feed.windowTitle}</span>
-              <span className={cx("window-controls")} aria-hidden="true">
-                —　▢　✕
-              </span>
-            </div>
-            <div className={cx("win-body feed-body")}>
-              {snap.meetingTitle ? <div className={cx("feed-now")}>{m.feed.meetingNow(snap.meetingTitle)}</div> : null}
-              <ul className={cx("feed-list")}>
-                {snap.log.map((entry) => (
-                  <li key={entry.id} className={cx(entry.tone)}>
-                    <b>{entry.time}</b>
-                    <i aria-hidden="true">{entry.icon}</i>
-                    <span>{entry.text}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-
-          <section className={cx("win rail-card")}>
-            <div className={cx("win-bar")}>
-              <span>{m.roster.windowTitle}</span>
-              <span className={cx("window-controls")} aria-hidden="true">
-                —　▢　✕
-              </span>
-            </div>
-            <div className={cx("win-body roster-body")}>
-              {DEPT_ROOMS.map((room) => {
-                const status = snap.deptStatus[room.id] ?? "waiting";
-                return (
-                  <div className={cx("roster-dept")} key={room.id}>
-                    <p>
-                      <b>
-                        {room.icon} {engine.roomName(room.id)}
-                      </b>
-                      <i
-                        className={cx("rm-dot", status)}
-                        title={engine.liveDept(room.id)?.badge ?? m.deptStatus[status]}
-                      />
-                    </p>
-                    <div className={cx("roster-chips")}>
-                      {engine.staff
-                        .filter((seed) => seed.deptId === room.id)
-                        .map((seed) => {
-                          const agent = engine.agentById.get(seed.id);
-                          return (
-                            <button
-                              type="button"
-                              key={seed.id}
-                              className={cx("roster-chip", selectedId === seed.id && "on")}
-                              onClick={() => agent && onSelect(agent)}
-                            >
-                              <i style={{ background: seed.shirt, borderColor: seed.hair }} />
-                              {seed.name}
-                              <small>{m.agentStatus[agent?.status ?? "offDuty"]}</small>
-                            </button>
-                          );
-                        })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          <QuotaCard m={m} view={quotaView} />
         </aside>
       </section>
     </>
+  );
+}
+
+/**
+ * The operator's to-do: each queue an agent waits on, its count and the screen
+ * where it is acted on. The office decides nothing; an unread count says so
+ * and is never drawn as zero.
+ */
+function OperatorQueueList({ m, queue }: { m: OfficeCopy; queue: AgentOfficeOperatorQueue }) {
+  const { total, unknown } = operatorQueueTotal(queue);
+  return (
+    <div className={cx("queue")} data-testid="agent-office-operator-queue">
+      <ul className={cx("queue-list")}>
+        {OPERATOR_QUEUE_KEYS.map((key) => {
+          const count = queue[key];
+          return (
+            <li key={key} className={cx(count !== null && count > 0 && "waiting")}>
+              <span>{m.queue.labels[key]}</span>
+              <b>{count === null ? m.queue.unknown : count}</b>
+              <Link href={OPERATOR_QUEUE_HREFS[key]}>{m.queue.open}</Link>
+            </li>
+          );
+        })}
+      </ul>
+      {total === 0 && !unknown ? <p className={cx("queue-note")}>{m.queue.empty}</p> : null}
+      {unknown ? <p className={cx("queue-note")}>{m.queue.partial}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * The reviewers' account quota, from the review server's own check. Read
+ * only: it shows what the server last reported and how old that is.
+ */
+function QuotaCard({ m, view }: { m: OfficeCopy; view: AgentOfficeQuotaView }) {
+  return (
+    <section className={cx("win rail-card")} data-testid="agent-office-quota">
+      <div className={cx("win-bar")}>
+        <span>{m.real.quota.windowTitle}</span>
+        <span className={cx("window-controls")} aria-hidden="true">
+          —　▢　✕
+        </span>
+      </div>
+      <div className={cx("win-body quota-body")}>
+        {view.rows.length > 0 ? (
+          <ul className={cx("quota-list")}>
+            {view.rows.map((row) => (
+              <li key={row.id}>
+                <i className={cx("rm-dot", row.status)} aria-hidden="true" />
+                <b>{row.id}</b>
+                <small>{row.vendor}</small>
+                <span className={cx("quota-state")}>{row.label}</span>
+                <span className={cx("quota-amount")}>{row.amount}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {view.note ? <p className={cx("quota-note")}>{view.note}</p> : null}
+      </div>
+    </section>
   );
 }
 
@@ -664,13 +624,6 @@ function OperatorConsole({ m, engine, snap }: { m: OfficeCopy; engine: AgentOffi
         </span>
       </div>
       <div className={cx("win-body console-body")}>
-        <div className={cx("console-status")}>
-          <span className={cx("mini-badge", snap.focusMode ? "yellow" : "mint")}>
-            {snap.focusMode ? m.console.focusOn : m.console.normal}
-          </span>
-          {snap.busyWithOrder ? <span className={cx("mini-badge lav")}>{m.console.busy}</span> : null}
-        </div>
-
         <div className={cx("console-log")} ref={logRef} aria-live="polite" data-testid="agent-office-console-log">
           {snap.chat.map((entry) => (
             <div key={entry.id} className={cx("console-line", entry.from)}>
@@ -896,6 +849,51 @@ function BriefingModal({
   );
 }
 
+/**
+ * Every automation the office reads for real: the live team rooms, then the
+ * AMUX execution room and the review server. The dashboard lists them and the
+ * status report is built from them.
+ */
+function liveRowsFor(
+  teams: readonly TeamRow[],
+  amuxView: AgentOfficeAmuxView,
+  reviewView: AgentOfficeReviewView,
+  m: OfficeCopy
+): AgentOfficeLiveRow[] {
+  return [
+    ...teams.flatMap((team) =>
+      team.live
+        ? [
+            {
+              id: team.id,
+              name: `${team.icon} ${team.name}`,
+              status: team.status,
+              badge: team.live.badge,
+              line: team.live.line,
+              href: agentOfficeDept(team.id)?.recordHref ?? null,
+            },
+          ]
+        : []
+    ),
+    {
+      id: "amux",
+      name: `${AMUX_ROOM.icon} ${m.rooms.amux}`,
+      status: amuxView.status,
+      badge: m.deptStatus[amuxView.status],
+      line: amuxView.summary,
+      href: AGENT_OFFICE_AMUX_RECORD_HREF,
+    },
+    {
+      id: "review",
+      name: `${REVIEW_ROOM.icon} ${m.rooms.review}`,
+      status: reviewView.status,
+      badge: m.deptStatus[reviewView.status],
+      line: reviewView.summary,
+      href: null,
+    },
+  ];
+}
+
 type TeamRow = {
   id: string;
   icon: string;
@@ -916,8 +914,9 @@ function DashboardView({
   setFilter,
   snap,
   readAt,
-  onStart,
-  onApprove,
+  queue,
+  amuxView,
+  reviewView,
   onSelect,
 }: {
   m: OfficeCopy;
@@ -929,13 +928,21 @@ function DashboardView({
   snap: Snapshot;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
-  onStart: () => void;
-  onApprove: () => void;
+  queue: AgentOfficeOperatorQueue;
+  amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
   onSelect: (id: string) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
   const engineeringLive = engine.liveDept("engineering") !== null;
+  const todo = operatorQueueTotal(queue);
+  const liveRows = liveRowsFor(teams, amuxView, reviewView, m);
+  const notConnected = teams.filter((team) => !team.live);
+  const notConnectedNames = notConnected.map((team) => team.name).join(" · ");
+  const brief = agentOfficeBrief(liveRows);
+  const todoText = todo.unknown ? `${todo.total}+?` : String(todo.total);
+  const digestHref = agentOfficeDept("digest")?.recordHref ?? null;
 
   return (
     <>
@@ -958,14 +965,6 @@ function DashboardView({
             <p>{m.dashboard.lead(AGENT_OFFICE_TEAM_IDS.length, engine.staff.length)}</p>
           </div>
           <div className={cx("hero-actions")}>
-            <button type="button" className={cx("btn btn-primary")} onClick={onStart} disabled={snap.running}>
-              {snap.running ? m.dashboard.running : m.dashboard.watchDemo}
-            </button>
-            {snap.demo ? (
-              <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.endDemo()}>
-                {m.live.endDemo}
-              </button>
-            ) : null}
             <span className={cx("trust-copy")}>{m.dashboard.trust}</span>
           </div>
         </div>
@@ -989,7 +988,7 @@ function DashboardView({
         </article>
         <article className={cx("metric approval")}>
           <span>{m.dashboard.metricApproval}</span>
-          <strong>{snap.stats.approval}</strong>
+          <strong>{todo.unknown ? `${todo.total}+?` : todo.total}</strong>
           <small>{m.dashboard.stampApproval}</small>
         </article>
         <article className={cx("metric attention")}>
@@ -1014,33 +1013,26 @@ function DashboardView({
               </span>
             </div>
             <div className={cx("win-body")}>
-              <div className={cx("schedule-card")}>
-                <div>
-                  <span className={cx("tiny-label")}>{m.dashboard.scheduleLabel}</span>
-                  <strong>{m.dashboard.scheduleNone}</strong>
-                  <p>{m.dashboard.scheduleBody}</p>
-                </div>
-                <span className={cx("toggle-off")}>{m.dashboard.scheduleOff}</span>
-              </div>
-              <div className={cx("flow-list")}>
-                {m.phases.slice(PHASE.arrival, PHASE.dayOver).map((item, index) => {
-                  const phase = index + PHASE.arrival;
-                  // A phase a live room replaces is not played, so it is never ticked.
-                  const skipped = snap.skippedPhases.includes(phase);
-                  return (
-                    <div className={cx("flow-row", snap.phaseIndex > phase && !skipped && "past")} key={item}>
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                      <b>
-                        {item}
-                        {skipped ? <em className={cx("live-chip")}>{m.dashboard.phaseSkipped}</em> : null}
-                      </b>
-                      <i aria-hidden="true">
-                        {skipped ? "–" : snap.phaseIndex === phase ? "●" : snap.phaseIndex > phase ? "✓" : "·"}
-                      </i>
-                    </div>
-                  );
-                })}
-              </div>
+              <p className={cx("tiny-label")}>{m.dashboard.automationHeading}</p>
+              {liveRows.length > 0 ? (
+                <ul className={cx("auto-list")} data-testid="agent-office-automation">
+                  {liveRows.map((row) => (
+                    <li key={row.id}>
+                      <i className={cx("rm-dot", row.status)} aria-hidden="true" />
+                      <b>{row.name}</b>
+                      <span className={cx("status-pill", row.status)}>{row.badge}</span>
+                      <small>{row.line}</small>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className={cx("queue-note")}>{m.dashboard.automationEmpty}</p>
+              )}
+              {notConnected.length > 0 ? (
+                <p className={cx("queue-note")}>
+                  {m.dashboard.automationNotConnected(notConnectedNames, notConnected.length)}
+                </p>
+              ) : null}
             </div>
           </section>
 
@@ -1141,33 +1133,8 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body approval-body")}>
-                {engineeringLive && !snap.approvalPending ? (
-                  <LiveDecisionNote m={m} />
-                ) : (
-                  <>
-                    <div className={cx("approval-top")}>
-                      <span className={cx("approval-chips")}>
-                        <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                        <span className={cx("mini-badge yellow")}>{m.approval.dashboardBadge}</span>
-                      </span>
-                      <span className={cx("score")}>{m.approval.dashboardScore}</span>
-                    </div>
-                    <h3>{m.approval.title}</h3>
-                    <p>{m.approval.dashboardBody}</p>
-                    <button
-                      type="button"
-                      className={cx("btn approve-button", snap.approved && "approved")}
-                      onClick={onApprove}
-                      disabled={!snap.approvalPending}
-                    >
-                      {snap.approved
-                        ? m.approval.approvedButton
-                        : snap.approvalPending
-                          ? m.approval.approve
-                          : m.approval.noneButton}
-                    </button>
-                  </>
-                )}
+                <OperatorQueueList m={m} queue={queue} />
+                {engineeringLive ? <LiveDecisionNote m={m} /> : null}
               </div>
             </section>
 
@@ -1179,43 +1146,41 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body")}>
-                <p className={cx("brief-date")}>{m.dashboard.briefDate(snap.clock)}</p>
-                <h3>{snap.dayComplete ? m.dashboard.briefDoneTitle : m.dashboard.briefNowTitle}</h3>
-                <ul>
-                  <li>
-                    <span className={cx("dot green")} />
-                    {m.dashboard.briefPhase(snap.phase, snap.stats.done)}
-                  </li>
-                  <li>
-                    <span className={cx("dot", snap.approvalPending ? "yellow" : "green")} />
-                    {snap.approvalPending
-                      ? m.dashboard.briefApprovalNeeded
-                      : engineeringLive
-                        ? m.dashboard.decisionLive
-                        : m.dashboard.briefNoApproval}
-                  </li>
-                  {snap.stats.attention > 0 ? (
-                    <li>
+                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(utcStamp(readAt))}</p>
+                <h3>
+                  {brief.attention.length > 0
+                    ? m.dashboard.briefNeedsLook(brief.attention.length)
+                    : m.dashboard.briefAllClear}
+                </h3>
+                <ul data-testid="agent-office-brief">
+                  {brief.attention.map((row) => (
+                    <li key={row.id}>
                       <span className={cx("dot yellow")} />
-                      {m.dashboard.briefAttention(snap.stats.attention)}
+                      {row.name}: {row.line}
                     </li>
-                  ) : null}
+                  ))}
+                  {brief.working.map((row) => (
+                    <li key={row.id}>
+                      <span className={cx("dot green")} />
+                      {row.name}: {row.line}
+                    </li>
+                  ))}
                   <li>
                     <span className={cx("dot gray")} />
-                    {m.dashboard.briefBlocked}
+                    {[
+                      m.dashboard.briefWorking(brief.working.length),
+                      m.dashboard.briefQuiet(brief.quiet),
+                      m.dashboard.briefNotConnected(notConnected.length),
+                    ].join(" · ")}
                   </li>
                 </ul>
                 <div className={cx("decision-box")}>
-                  <span className={cx("tiny-label")}>{m.dashboard.decisionLabel}</span>
-                  <strong>
-                    {snap.approvalPending
-                      ? m.dashboard.decisionPending
-                      : snap.approved
-                        ? m.dashboard.decisionDone
-                        : engineeringLive
-                          ? m.dashboard.decisionLive
-                          : m.dashboard.decisionNone}
-                  </strong>
+                  <strong>{m.dashboard.briefTodo(todoText)}</strong>
+                  {digestHref ? (
+                    <Link href={digestHref} className={cx("btn")}>
+                      {m.dashboard.briefDigestLink}
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -1244,8 +1209,22 @@ function DashboardView({
               <span>{m.dashboard.storageStatus}</span>
               <span>{m.dashboard.storageLink}</span>
             </div>
-            <p className={cx("storage-empty")}>{m.dashboard.storageEmpty}</p>
+            {liveRows.filter((row) => row.href).length > 0 ? (
+              liveRows
+                .filter((row) => row.href)
+                .map((row) => (
+                  <div className={cx("result-row")} key={row.id} data-testid="agent-office-latest-record">
+                    <span>{row.line}</span>
+                    <span>{row.name}</span>
+                    <span className={cx("status-pill", row.status)}>{row.badge}</span>
+                    <Link href={row.href as string}>{m.dashboard.storageOpen}</Link>
+                  </div>
+                ))
+            ) : (
+              <p className={cx("storage-empty")}>{m.dashboard.storageEmpty}</p>
+            )}
           </div>
+          <p className={cx("queue-note")}>{m.dashboard.storageContentNote}</p>
         </div>
       </section>
 
