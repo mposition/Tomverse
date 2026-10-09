@@ -24,6 +24,7 @@ import { probeProviderQuotas, readQuotaStatus, recordManualQuota, writeQuotaStat
 import { loadConfig } from "../lib/config.mjs";
 import { Orchestrator, UsageError, isDraining, setDraining, submitJob } from "../lib/service.mjs";
 import { Store, isJobId, summarise } from "../lib/store.mjs";
+import { buildStatusSnapshot, createStatusSnapshotWriter } from "../lib/status-report.mjs";
 import { release, tryAcquire } from "../lib/fsutil.mjs";
 import { Transform } from "node:stream";
 
@@ -164,6 +165,27 @@ async function daemon(config) {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   log("review-orchestrator daemon started");
+  // Telemetry for the app's Agent office: a content-free snapshot file. The
+  // daemon holds no credential for the app -- a separate sender under its own
+  // account sends the file (lib/status-report.mjs), so nothing here waits on
+  // the network.
+  const snapshotWriter = createStatusSnapshotWriter({
+    config,
+    log,
+    snapshot: () => {
+      const jobs = orchestrator.store.listJobs();
+      const now = Date.now();
+      return buildStatusSnapshot({
+        jobs,
+        providers: config.providers,
+        load: computeLoad(jobs, now),
+        quotas: readQuotaStatus(config, now),
+        draining: isDraining(config),
+        now,
+      });
+    },
+  });
+  if (snapshotWriter) log("status snapshot on");
   let nextPrune = 0;
   while (!stopping) {
     try {
@@ -173,6 +195,7 @@ async function daemon(config) {
     } catch (error) {
       log(`tick failed: ${error.message}`);
     }
+    snapshotWriter?.maybeWrite();
     if (Date.now() >= nextPrune) {
       nextPrune = Date.now() + 60 * 60 * 1000;
       await orchestrator.prune().catch((error) => log(`prune failed: ${error.message}`));
