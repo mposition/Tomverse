@@ -211,6 +211,8 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
   assert.equal(JSON.stringify(rows[0].metadata).includes(stage.manifestRoot), false);
   assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
     tx as never, stage as never)).valid, true);
+  assert.deepEqual((await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never)).reasonCodes, []);
   process.env.PROMPT_REFINER_VNEXT_ONE_SHOT_GATE_PUBLIC_KEY_B64 = "rotated";
   assert.equal((await gate.readPromptRefinerVnextOneShotGateEvidence(
     tx as never, stage as never)).valid, true,
@@ -227,6 +229,53 @@ test("exact synthetic stage/run/shadow/80 audited slots record gate, then separa
   assert.equal(writes, 2);
   assert.equal((await gate.readPromptRefinerVnextOneShotDisposition(
     tx as never, stage as never)).valid, true);
+});
+
+test("verified v5 readback distinguishes latency-only failure without authorizing pass", async () => {
+  const gate = await load(); reset();
+  stage = { ...baseStage, id: v5StageId };
+  const absent = await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never, v5StageId);
+  assert.equal(absent.present, false);
+  assert.equal(absent.reasonCodes, null);
+  assert.equal(absent.latencyOnlyFailure, null);
+  const latencySummary = { ...summary,
+    latency: { ...summary.latency, maximumMs: 12_599 } };
+  const recorded = await gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation({ summary: latencySummary }),
+    stageId: v5StageId,
+  });
+  assert.equal(recorded.gateOutcome, "fail");
+  const readback = await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never, v5StageId);
+  assert.equal(readback.valid, true);
+  assert.equal(readback.gateOutcome, "fail");
+  assert.deepEqual(readback.reasonCodes, ["latency_ceiling_exceeded"]);
+  assert.equal(readback.latencyOnlyFailure, true);
+  assert.equal(gate.canRecordPromptRefinerVnextOneShotDisposition("fail", "pass"), false);
+
+  const metadata = rows[0].metadata as Record<string, unknown>;
+  rows[0].metadata = { ...metadata, reasonCodes: [] };
+  const tampered = await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never, v5StageId);
+  assert.equal(tampered.valid, false);
+  assert.equal(tampered.reasonCodes, null);
+  assert.equal(tampered.latencyOnlyFailure, null);
+
+  reset(); stage = { ...baseStage, id: v5StageId };
+  const mixedSummary = { ...latencySummary, directionIssues: {
+    ...summary.directionIssues, reason_mismatch: 1,
+  } };
+  await gate.recordPromptRefinerVnextOneShotGateEvidence({
+    session, request, attestation: await attestation({ summary: mixedSummary }),
+    stageId: v5StageId,
+  });
+  const mixed = await gate.readPromptRefinerVnextOneShotGateEvidence(
+    tx as never, stage as never, v5StageId);
+  assert.equal(mixed.valid, true);
+  assert.deepEqual(mixed.reasonCodes,
+    ["direction_mismatch", "latency_ceiling_exceeded"]);
+  assert.equal(mixed.latencyOnlyFailure, false);
 });
 
 test("v5 gate requires its own 80 terminal receipts and records only v5 audits", async () => {

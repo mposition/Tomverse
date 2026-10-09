@@ -108,6 +108,8 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
 ): Promise<Readonly<{
   present: boolean; valid: boolean; gateAuditLogId: string | null;
   gateOutcome: PromptRefinerVnextOneShotGateOutcome | null;
+  reasonCodes: readonly string[] | null;
+  latencyOnlyFailure: boolean | null;
 }>> {
   const rows = await tx.adminAuditLog.findMany({
     where: { action: GATE_ACTION, targetType: "PromptRefinerVnextOneShotStage",
@@ -115,6 +117,8 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
   });
   const entry = rows.length === 1 ? rows[0] : null;
   let outcome: PromptRefinerVnextOneShotGateOutcome | null = null;
+  let reasonCodes: readonly string[] | null = null;
+  let latencyOnlyFailure: boolean | null = null;
   if (entry && stage?.id === stageId && stage.runApprovalAuditLogId &&
       entry.actorUserId === stage.approvedBy && entry.summary === GATE_SUMMARY &&
       entry.metadata && typeof entry.metadata === "object" &&
@@ -138,7 +142,8 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
         attestation.summary);
     } catch {
       return Object.freeze({ present: true, valid: false,
-        gateAuditLogId: null, gateOutcome: null });
+        gateAuditLogId: null, gateOutcome: null, reasonCodes: null,
+        latencyOnlyFailure: null });
     }
     const shadow = await readPromptRefinerVnextOneShotOperationalShadow(tx, stage);
     const slots = await readPromptRefinerVnextOneShotStage(tx, stageId);
@@ -161,10 +166,14 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
           canonicalBenchmarkJson(gateMetadata(stage, attestation, evaluated, signer)) &&
         await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
       outcome = evaluated.outcome;
+      reasonCodes = Object.freeze([...evaluated.reasonCodes]);
+      latencyOnlyFailure = outcome === "fail" && reasonCodes.length === 1 &&
+        reasonCodes[0] === "latency_ceiling_exceeded";
     }
   }
   return Object.freeze({ present: rows.length !== 0, valid: outcome !== null,
-    gateAuditLogId: outcome === null ? null : entry!.id, gateOutcome: outcome });
+    gateAuditLogId: outcome === null ? null : entry!.id, gateOutcome: outcome,
+    reasonCodes, latencyOnlyFailure });
 }
 
 async function verifyConsumedSlotAudits(
