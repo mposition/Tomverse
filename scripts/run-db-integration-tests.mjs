@@ -470,9 +470,6 @@ run(
     // vNext one-shot storage remains dark but must commit exactly 80 fixed-
     // price slots and refuse consumption before run approval or any reuse.
     "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
-    // Product Auto's separate Brisbane day/month budget must reserve both
-    // windows and its audit/hold atomically under real PostgreSQL constraints.
-    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
@@ -822,6 +819,15 @@ run(
   { TEST_DATABASE_URL: oneShotTestUrl.toString(),
     DATABASE_URL: oneShotTestUrl.toString(),
     DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
+);
+// The budget suite mocks Prisma and the audit writer while exercising real
+// PostgreSQL constraints. Module mocks must be isolated from the batch above.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts"],
+  "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session
