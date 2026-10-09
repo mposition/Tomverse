@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  QA_RELEASE_IMAGE_VARIABLES,
   QA_RELEASE_SERVICE_VARIABLES,
   checkQaReleaseServiceEnv,
   decideQaReleaseServiceStart,
@@ -122,6 +123,11 @@ test("the names the deployed image provides do not stop a service", () => {
     decideQaReleaseServiceStart("monitor", { ...runtime, ...image, QA_RELEASE_MONITOR_SECRET: "m", QA_RELEASE_CONTROL_REVISION: "2" }),
     "run",
   );
+});
+
+test("the image list is exactly the measurement, so a name cannot be added without measuring", () => {
+  const imageOnly = MEASURED_IMAGE_NAMES.filter((name) => name !== "RAILWAY_BETA_ENABLE_RUNTIME_V2");
+  assert.deepEqual([...QA_RELEASE_IMAGE_VARIABLES].sort(), [...imageOnly].sort());
 });
 
 test("the image's families are admitted by exact name only, never by prefix", () => {
