@@ -184,7 +184,8 @@ agent produced stays on that screen. The status report copies or downloads
 that view as Markdown and is sent nowhere. While the tab is visible the page
 reads again every minute, and a live room whose record changed says so in the
 console in its lead's name. Live leads answer a greeting or a thank-you in
-their own voice with social lines only -- no figure, time or state, which a
+their own voice with social lines only -- no figure, time, state, activity or
+promise, so the words stay true when a room is silent, off or unread, which a
 test holds -- react on the floor with an emoji for a moment, and otherwise
 keep the record line.
 Those reads are read-only (the silence anchor is looked up rather than
