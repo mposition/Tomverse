@@ -6,6 +6,7 @@ import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
   nodeOptionsForBuild,
+  LARGE_HEAP_FLAG,
 } from "../scripts/run-next-build-core.mjs";
 
 test("GitHub build has a bounded larger heap without overriding an explicit operator limit", () => {
@@ -20,6 +21,29 @@ test("GitHub build has a bounded larger heap without overriding an explicit oper
     assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", NODE_OPTIONS: explicit }),
       explicit);
   }
+});
+
+test("a caller can ask for the same heap off CI without a deploy build getting it", () => {
+  // What `npm run build:local` passes: a local build has died in Mark-Compact
+  // at the default heap, and the remedy was an environment variable the
+  // developer had to know about. It does not reproduce on an idle machine, so
+  // this borrows CI's ceiling rather than fixing a deterministic failure.
+  assert.equal(nodeOptionsForBuild({}, { largeHeap: true }),
+    "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ NODE_OPTIONS: "--trace-warnings" }, { largeHeap: true }),
+    "--trace-warnings --max-old-space-size=6144");
+  // An operator's own limit still wins, exactly as it does on CI.
+  assert.equal(
+    nodeOptionsForBuild({ NODE_OPTIONS: "--max-old-space-size=5120" }, { largeHeap: true }),
+    "--max-old-space-size=5120");
+  // The reason this is a request rather than "not CI": Railway declares no
+  // build command, so it runs this same script. Raising its ceiling would
+  // change how a deploy build fails, which a local convenience does not decide.
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }), "");
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }, { largeHeap: false }),
+    "");
+  // Stripped before the rest are forwarded, so it has to look like a flag.
+  assert.match(LARGE_HEAP_FLAG, /^--[a-z-]+$/);
 });
 
 /**
