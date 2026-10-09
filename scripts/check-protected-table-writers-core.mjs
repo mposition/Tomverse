@@ -215,6 +215,18 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
   },
   {
+    table: "PromptRefinerChatScope",
+    delegate: "promptRefinerChatScope",
+    writers: ["lib/promptRefinerChatExecutionStore.ts"],
+    contract: "docs/ui-contracts/prompt-refiner-suggestion.md §2–3",
+  },
+  {
+    table: "PromptRefinerChatSuggestion",
+    delegate: "promptRefinerChatSuggestion",
+    writers: ["lib/promptRefinerChatExecutionStore.ts"],
+    contract: "docs/ui-contracts/prompt-refiner-suggestion.md §2–3",
+  },
+  {
     table: "PromptRefinerAutoBudgetHold",
     delegate: "promptRefinerAutoBudgetHold",
     writers: ["lib/promptRefinerAutoBudgetHold.ts"],
@@ -451,6 +463,10 @@ export const EXCLUDED_PREFIXES = [
 
 /** Non-type string literals equal to a protected delegate name, by file. */
 export const DELEGATE_NAME_ALLOWLIST = [
+  ...["promptRefinerChatScope", "promptRefinerChatSuggestion"].map(delegate => ({
+    path: "lib/accountDataExportDomains.ts", delegate, count: 1,
+    reason: "Account export domain key only; it is never used to index a client.",
+  })),
   {
     path: "app/api/admin/search/route.ts",
     delegate: "adminAuditLog",
@@ -1705,6 +1721,23 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
+  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
+    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [4, 9][index], writeVerbs: 9,
+    reason: "The sole default-off Chat binding writer advances epochs, holds validated snapshots, atomically consumes or purges bodies, and records canonical audit in the same transaction.",
+  })),
+  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
+    path: "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql", table,
+    tableMentions: [5, 7][index], writeVerbs: 18,
+    reason: "Additive binding DDL and scope/draft invalidation guards. No seed, activation, audit-table write or provider permission.",
+  })),
+  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map(table => ({
+    path: "lib/adminAuditSystemActors.ts", table, tableMentions: 1, writeVerbs: 2,
+    reason: "Exact audit target allowlist literals only; this module executes no SQL.",
+  })),
+  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map(table => ({
+    path: "lib/accountDataExportDomains.ts", table, tableMentions: 2, writeVerbs: 3,
+    reason: "Pure export declarations and withheld-reason prose. No database client or SQL execution.",
+  })),
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */

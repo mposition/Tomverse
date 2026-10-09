@@ -61,6 +61,17 @@ test("the Prompt Refiner Auto budget actor has only its reservation action", () 
 
 const ROOT = resolve(import.meta.dirname, "..");
 
+test("Refiner execution audit actor grants only binding lifecycle actions", () => {
+  for (const action of ["prompt_refiner.chat_suggestion_held", "prompt_refiner.chat_decision_consumed", "prompt_refiner.chat_suggestion_expired"]) {
+    assert.equal(systemAuditActionAllowed("prompt-refiner-chat-execution", action, "PromptRefinerChatSuggestion"), true);
+    assert.equal(systemAuditActionAllowed("prompt-refiner-chat-execution", action, "User"), false);
+  }
+  assert.equal(systemAuditActionAllowed("prompt-refiner-chat-execution", "prompt_refiner.chat_scope_advanced", "PromptRefinerChatScope"), true);
+  for (const action of ["prompt_refiner.auto_budget_reserved", "prompt_refiner.provider_dispatch", "admin.user.delete"]) {
+    assert.equal(systemAuditActionAllowed("prompt-refiner-chat-execution", action, "PromptRefinerChatSuggestion"), false);
+  }
+});
+
 test("the system actor list is closed and changes only by review", () => {
   // The policy names the publisher (docs/policy/marketing-automation.md §4);
   // retention and guard are the S1 plan's other two writers. This pins the
@@ -76,6 +87,7 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-shadow-runner",
     "prompt-refiner-vnext-one-shot-runner",
     "prompt-refiner-auto-budget",
+    "prompt-refiner-chat-execution",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",

@@ -226,6 +226,37 @@ domains:
       and attachment identifiers. Deleting this row never deletes the referenced
       upload or attachment; their existing lifecycle remains authoritative.
 
+  - domain: promptRefinerChatScope
+    prismaModel: PromptRefinerChatScope
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Default-off server execution binding, not activation authority. Account
+      and conversation deletion cascade. Surface and epoch are exported;
+      execution protocol identifiers are withheld.
+
+  - domain: promptRefinerChatSuggestion
+    prismaModel: PromptRefinerChatSuggestion
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Default-off transient server-held proposal bound to one draft revision.
+      Five-minute validity uses DB time. Consumption, invalidation and the
+      maintenance expiry sweep purge both bodies. Account and conversation
+      deletion cascade. Export includes available bodies, decisions and times
+      while withholding internal binding identifiers. This is not a Refiner
+      execution or disposition receipt and authorizes no paid dispatch.
+
   - domain: chatResponseAttempt
     prismaModel: ChatResponseAttempt
     userLinkageRole: subject

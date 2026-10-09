@@ -50,7 +50,10 @@ import {
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
-import { promptRefinerAutoMessageView } from "@/lib/promptRefinerChatHandoff";
+import { consumePromptRefinerChatExecution } from "@/lib/promptRefinerChatExecutionStore";
+import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
+import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
+import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
 import { decideAutoCohort } from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
@@ -1126,6 +1129,7 @@ async function handleChatPost(
             admissionToken,
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
+            promptRefinerDecision,
         } = validateChatPayload(body);
         persistenceSourceUserMessageId = sourceUserMessageId;
         {
@@ -1145,6 +1149,33 @@ async function handleChatPost(
                 }).length,
             };
         }
+        // The durable source remains authored. Only the server's atomic
+        // consume may select a different current-turn execution view.
+        let executionMessages = messages;
+        if (promptRefinerDecision !== undefined) {
+            if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
+                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+            const release = promptRefinerChatExecutionRelease();
+            if (!release.explicitEnabled && !release.autoEnabled) {
+                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+            await consumeApiRateLimit(req, session.user.id, "chat-durable-attempt", { minute: 60, day: 5_000 });
+            durableAttemptAdmissionConsumed = true;
+            const scopeAccess = await authorizeChatRecoveryScope({ request: req,
+                userId: session.user.id, scopeKey: conversationId });
+            if (!scopeAccess.ok) return scopeAccess.response;
+            try {
+                const view = await consumePromptRefinerChatExecution({
+                    userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,
+                    messages, decision: promptRefinerDecision,
+                });
+                executionMessages = [...view.executionMessages];
+            } catch (error) {
+                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
+                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+        }
         // A pinned internal account either finishes on this path or, when the
         // flag is off or the account is not the configured one, falls through
         // to the ordinary handler. A refusal is not that fall-through: the
@@ -1152,7 +1183,7 @@ async function handleChatPost(
         const pinnedDeployment = await enterPinnedDeploymentChat({
             authenticatedAccountId: session?.user?.id ?? null,
             traceId,
-            messages,
+            messages: executionMessages,
             webSearchMode: webSearchMode ?? null,
             deepResearchDepth: deepResearchDepth ?? null,
         });
@@ -1175,7 +1206,7 @@ async function handleChatPost(
             session?.user?.id &&
             conversationId &&
             assistantMessageId &&
-            sourceUserMessageId
+            sourceUserMessageId && !durableAttemptAdmissionConsumed
         ) {
             await consumeApiRateLimit(
                 req,
@@ -1394,12 +1425,9 @@ async function handleChatPost(
                       },
                   })
                 : null;
-        // Product Refiner has no server-held, one-time-consumed suggestion yet.
-        // Keep Auto on authored bytes until that authority can supply a
-        // validated projection; browser resolution is never a routing input.
-        const autoRoutingMessages = promptRefinerAutoMessageView({
-            authoredMessages: messages,
-        });
+        // Router profiling, estimates, shadow and provider formatting all read
+        // this same view. Ownership/source verification and storage read messages.
+        const autoRoutingMessages = executionMessages;
         // Measured, not declared. A size the client stated is a claim, and an
         // understated one would steer the Router to a model whose window the
         // real content does not fit -- leaving the user with a context-window
@@ -1561,7 +1589,7 @@ async function handleChatPost(
         const modelConfig = routedCatalogModel?.enabled && !routedCatalogModel.catalogDeleted
             ? routedCatalogModel
             : requestedModelConfig;
-        if (hasUnsupportedGeminiPrefill(modelConfig, messages)) {
+        if (hasUnsupportedGeminiPrefill(modelConfig, executionMessages)) {
             return tracedJsonError(
                 "Gemini 3.6 and later requests must end with a user message.",
                 "GEMINI_PREFILLED_MODEL_TURN_UNSUPPORTED",
@@ -1653,7 +1681,7 @@ async function handleChatPost(
                 ? (message.attachments as IncomingAttachment[])
                 : []
         );
-        const latestMessage = messages[messages.length - 1];
+        const latestMessage = executionMessages[executionMessages.length - 1];
         const latestMessageAttachmentCount = Array.isArray(
             latestMessage?.attachments
         )
@@ -2247,7 +2275,7 @@ async function handleChatPost(
             });
             const ownerId = randomUUID();
             const requestPayloadDigest = chatResponseAttemptRequestPayloadDigest({
-                messages,
+                messages: executionMessages,
                 requestedModelId,
                 webSearchMode: webSearchMode ?? "off",
                 context: verifiedContext?.requestIdentity ?? null,
@@ -2533,7 +2561,7 @@ async function handleChatPost(
             scope: "current_turn" | "past_turn";
         }> = [];
 
-        for (const msg of messages) {
+        for (const msg of executionMessages) {
             if (msg.role === "assistant") {
                 const content = String(msg.content ?? "");
                 const preserved = providerContextQueues.get(content)?.shift();
@@ -3437,13 +3465,6 @@ async function handleChatPost(
             const parts = Array.isArray(lastUserTurn?.content)
                 ? lastUserTurn.content
                 : [];
-            const profileText =
-                typeof lastUserTurn?.content === "string"
-                    ? lastUserTurn.content
-                    : parts
-                          .filter((part) => part.type === "text")
-                          .map((part) => ("text" in part ? part.text : ""))
-                          .join("\n");
             return {
                 traceId,
                 userId: access.userId ?? null,
@@ -3458,12 +3479,7 @@ async function handleChatPost(
                 // shadow decision consider a model the person cannot use.
                 plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
                 profile: buildTaskProfile({
-                    // Keep the existing formatted shadow text for ordinary
-                    // turns. A future accepted server projection must give
-                    // live Auto and shadow the same execution view.
-                    text: autoRoutingMessages === messages
-                        ? profileText
-                        : profileTextFor(autoRoutingMessages),
+                    text: profileTextFor(autoRoutingMessages),
                     attachments: parts
                         .filter((part) => part.type === "file")
                         .map((part) => ({

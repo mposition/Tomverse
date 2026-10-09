@@ -134,6 +134,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-shadow-runner",
   "prompt-refiner-vnext-one-shot-runner",
   "prompt-refiner-auto-budget",
+  "prompt-refiner-chat-execution",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR,
@@ -225,6 +226,10 @@ export const systemAuditActionAllowed = (
   (actor !== "prompt-refiner-auto-budget" ||
     (action === "prompt_refiner.auto_budget_reserved" &&
       targetType === "PromptRefinerAutoBudgetHold")) &&
+  (actor !== "prompt-refiner-chat-execution" ||
+    (action === "prompt_refiner.chat_scope_advanced" && targetType === "PromptRefinerChatScope") ||
+    ((action === "prompt_refiner.chat_suggestion_held" || action === "prompt_refiner.chat_decision_consumed" || action === "prompt_refiner.chat_suggestion_expired") &&
+      targetType === "PromptRefinerChatSuggestion")) &&
   (actor !== AMUX_V22_WORKER_CLAIM_AUDIT_ACTOR ||
     (action === "amux.v22.worker.assigned" &&
       targetType === "AmuxV22WorkerAssignment")) &&

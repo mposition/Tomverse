@@ -1,6 +1,7 @@
 import "server-only";
 
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import { promptRefinerChatDecisionSchema, type PromptRefinerChatDecision } from "@/lib/promptRefinerChatExecutionCore";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
@@ -5362,7 +5363,13 @@ export const validateChatPayload = (body: unknown) => {
         admissionToken?: unknown;
         contextBundle?: unknown;
         acknowledgedUnavailableAttachmentIds?: unknown;
+        promptRefinerDecision?: unknown;
     };
+    if (payload.promptRefinerDecision !== undefined &&
+        (!promptRefinerChatDecisionSchema.safeParse(payload.promptRefinerDecision).success ||
+          !payload.conversationId || !payload.sourceUserMessageId || !payload.assistantMessageId)) {
+        throw new ChatAccessError(400, "INVALID_PROMPT_REFINER_DECISION", "Invalid Prompt Refiner decision.");
+    }
     if (
         !Array.isArray(payload.messages) ||
         payload.messages.length === 0 ||
@@ -5612,6 +5619,7 @@ export const validateChatPayload = (body: unknown) => {
         admissionToken?: string;
         contextBundle?: string;
         acknowledgedUnavailableAttachmentIds?: string[];
+        promptRefinerDecision?: PromptRefinerChatDecision;
     };
 };
 

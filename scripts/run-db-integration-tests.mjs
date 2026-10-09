@@ -830,7 +830,9 @@ run(
   ["--conditions=react-server", "--experimental-test-module-mocks",
     "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
     "--test-concurrency=1",
-    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts"],
+    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
+    "tests/integration/prompt-refiner-chat-execution.db.test.ts",
+    "tests/integration/prompt-refiner-chat-execution-full-schema.db.test.ts"],
   "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
 // Runs apart from the batch above: it drives the real route handlers, which

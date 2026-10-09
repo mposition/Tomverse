@@ -5,9 +5,9 @@
   공개 `/chat`에 offer를 내릴 수 있는 adapter는 loopback Playwright fixture뿐이어서
   실제 `ChatInput`의 상태 전이는 검증되지만 제품 환경은 항상 `off`다. 아래의 E04
   관리자 staging 합성 QA 예외도 이 제품 readiness를 바꾸지 않는다. provider 호출,
-  과금, Router 입력 변경, Message schema 변경은 아직 연결하지 않았다. 아래의 순수
-  Chat projection은 구현됐지만 제품 route/runtime caller가 없고 이 상태나
-  readiness를 바꾸지 않는다.
+  과금과 제품 proposal/composer caller는 아직 연결하지 않았다. Chat route에는 아래의
+  서버 보관·소비 경계가 연결됐지만 explicit/auto release authority는 둘 다 default-off다.
+  이 구현은 제품 offer나 readiness를 바꾸지 않는다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - Chat 원문/실행 projection: `lib/promptRefinerChatHandoff.ts`
@@ -99,6 +99,37 @@ identityKey·mountedSurface·conversationId만
 방지나 authorization으로 설명하면 안 된다.
 
 ## 3. 한 요청은 한 draft snapshot에만 속한다
+
+### Default-off 서버 소비 경계
+
+`lib/promptRefinerChatExecutionStore.ts`는 server-only capture/hold seam에서 정확한
+DB draft id·revision·bytes와 owner·conversation·surface·mount epoch·recovery epoch를
+결속한다. 이 seam에는 제품 proposal/API writer나 유료 adapter caller가 없다.
+scope 전환은 동일 값으로 돌아와도 epoch를 증가시키며 draft UPDATE는 내용이
+동일해도 ready 제안을 무효화한다. draft DELETE는 Message 저장의 같은 transaction
+COMMIT 때 정확한 source Message가 생겼는지를 각 제안별로 확인한다.
+
+Chat POST의 `promptRefinerDecision`은 suggestionId·scopeId·epoch와 `accepted` 또는
+`kept_original`만 받는다. browser의 제안문·boolean·mode는 거부한다. release와 kill
+switch가 허용할 때만 서버 행과 저장된 source를 다시 읽고, row lock·DB clock·CAS로
+소비와 canonical content-free audit를 한 transaction에서 처리한다. 기본 배포는
+이 decision을 409로 거부하며 provider/credit 경로에 진입하지 않는다. decision이
+없는 일반 Chat는 기존 원문 경로를 사용한다. 오류·stale·replay·결속 실패는 자동
+전송이나 원문 재전송을 시작하지 않는다.
+
+성공한 execution view 하나가 Auto profiling·예약 token 추정·shadow와 provider
+formatting에 쓰인다. source 검증과 저장된 사용자 Message는 authored view다.
+Memory/profile context의 기존 signed preflight는 authored query로 검증한다.
+terminal tombstone에서는 원문·제안문을 즉시 지우며 5분 만료는 DB clock으로
+검사하고 maintenance가 최대 100개씩 만료 본문을 지운다. 수명 종료 후 maintenance
+실행 전까지 본문이 물리적으로 남을 수 있으므로 5분을 실제 삭제 완료 시간으로
+주장하지 않는다. account/conversation 삭제는 두 새 table에 cascade한다.
+
+자동 모드는 별도 서버 release authority와 Auto conversation을 요구한다. 테스트의
+합성 authority는 출시 승인이 아니다. 예외 v1 approval은 `approved_policy_not_activated`
+이며 현재 AGENTS의 명시적 채택 규칙은 유지한다. 제품 adapter, 비용 정산·execution/
+disposition receipt, composer caller, staging/정확 배포 증거와 활성화 권한이 모두
+완료되기 전에는 이 경계를 제품 연결 완료나 자동 적용 출시로 표시하지 않는다.
 
 request에는 exact `prompt`와 opaque `requestId`만 들어간다. 응답의 requestId가
 다르거나, 응답을 기다리는 동안 사용자가 한 글자라도 바꾸면 그 응답은 stale이다.

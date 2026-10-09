@@ -213,3 +213,23 @@ test("a model inside the stored selection passes the selection gate", async () =
   );
   assert.equal(spies.streamTextCalls, 0);
 });
+
+test("a Refiner decision on the default-off deployment refuses before model, credit or provider work", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  const response = await POST(new Request("http://127.0.0.1:3100/api/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source" }],
+      modelId: STORED_SELECTED_MODELS[0], conversationId: CONVERSATION_ID,
+      assistantMessageId: "11111111-1111-4111-8111-111111111111",
+      sourceUserMessageId: "22222222-2222-4222-8222-222222222222",
+      promptRefinerDecision: { suggestionId: "33333333-3333-4333-8333-333333333333",
+        scopeId: "44444444-4444-4444-8444-444444444444", epoch: 1, decision: "accepted" },
+    }),
+  }));
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+  assert.equal(spies.creditReservations, 0);
+  assert.equal(spies.streamTextCalls, 0);
+  assert.equal(spies.conversationReads, 0);
+});
