@@ -93,15 +93,21 @@
 7. `npm run railway:iac:use-staging`으로 CLI 연결을 되돌려 둡니다.
 
 **되돌리기.** 이 변경을 되돌리는 PR(revert)로 합니다. 옛 선언은 이 변경 바로 앞의
-`main` 커밋에 있습니다.
+`main` 커밋에 있습니다. IaC는 로컬 파일을 읽으므로 revert가 들어간 `main`을 먼저 받습니다.
 1. 모드를 `off`로 내립니다.
-2. revert가 `main`에 들어간 뒤 `npm run railway:iac:use-production` →
-   `npm run railway:iac:plan`을 봅니다. 두 서비스 추가만 있어야 합니다. 맞으면
-   `npm run railway:iac:apply`로 `Tomverse`에 옛 서비스를 다시 만듭니다.
-3. 3과 같은 값을 보관한 곳에서 다시 넣고 Deploy합니다.
-4. `npm run railway:agents:use-production` → `npm run railway:agents:plan`을 봅니다.
-   두 서비스 삭제만 있어야 합니다. 맞으면 `npm run railway:agents:apply`.
-5. 위 5·6·7과 같은 방법으로 확인한 뒤 모드를 켭니다.
+2. revert가 `main`에 병합된 뒤 clone 폴더에서 `git switch main` → `git pull --ff-only`.
+   `git log --oneline -1`이 그 revert 병합 커밋(또는 그 이후)인지,
+   `.railway/scheduled-jobs.ts`에 `Engineering Agent Runner`가 다시 있는지 확인합니다.
+3. `npm run railway:iac:use-production` → `npm run railway:iac:plan`. 두 서비스 추가만
+   있어야 합니다. 맞으면 `npm run railway:iac:apply`로 `Tomverse`에 옛 서비스를 다시
+   만들고, 값을 보관한 곳에서 변수 11개와 registry 자격증명을 넣어 Deploy합니다.
+4. `npm run railway:agents:use-production` → `npm run railway:agents:plan`. 두 서비스
+   삭제만 있어야 합니다. 맞으면 `npm run railway:agents:apply`.
+5. **복원된 서비스별 확인** — 4 이후 `Tomverse` project의 각 서비스 첫 회차 로그가
+   `finishedNormally: true`인지, 그 시각 이후 각 monitor에 ping이 들어왔는지 봅니다.
+   `npm run railway:iac:use-production` → `npm run railway:iac:plan`이 변경 없음을
+   보이는지도 봅니다(변수 이름이 선언과 같다는 뜻).
+6. 그다음에만 모드를 켜고, `npm run railway:iac:use-staging`으로 CLI 연결을 되돌립니다.
 
 ## 정지가 걸렸을 때
 
