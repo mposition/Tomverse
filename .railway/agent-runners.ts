@@ -34,6 +34,28 @@ export type AgentRunnerService = {
    * is left out entirely, and no resource is created for it there.
    */
   readonly environments: Partial<Record<RailwayEnvironment, readonly string[]>>;
+  /**
+   * A service Railway does not build: it runs this image, by digest, with
+   * automatic updates off. While `digest` is null the service is not declared
+   * in any environment. Absent for a service built from the repository.
+   */
+  readonly image?: { readonly reference: string; readonly digest: string | null };
+  /**
+   * A long-running service Railway restarts after a non-zero exit, up to
+   * `maxRetries` times. Absent: the service is never restarted (every cron
+   * here runs one cycle and stops).
+   */
+  readonly restart?: { readonly type: "ON_FAILURE"; readonly maxRetries: number };
+  /**
+   * Built from this Dockerfile, with the build context at the repository root,
+   * and rebuilt only when a watched path changes. Absent: Railpack.
+   */
+  readonly dockerfile?: { readonly path: string; readonly watchPatterns: readonly string[] };
+  /**
+   * `false`: deploy on a merge without waiting for the commit's checks.
+   * Absent: Railway's default.
+   */
+  readonly checkSuites?: false;
 };
 
 export const AGENT_RAILWAY_PROJECT = "Tomverse Agents";
@@ -107,6 +129,26 @@ const BILLING_FINANCE_OPS_VARIABLES = [
   "BILLING_FINANCE_OPS_DEADMAN_URL",
 ] as const;
 
+/** The marketing publisher's two variables (S2 plan, S2d1). */
+const MARKETING_PUBLISHER_VARIABLES = ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"] as const;
+
+/**
+ * The AMUX orchestrator's variables (development-agent-orchestration.md,
+ * version 28): the four it had in production when it moved here, and
+ * TOMVERSE_AMUX_CLAIM, which the claim-only mode reads (version 15). The names
+ * that make it run commands -- TOMVERSE_AMUX_EXECUTE,
+ * TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON and the TOMVERSE_AMUX_WSL_* names -- are
+ * absent, so an apply deletes any of them set here: commands run on the
+ * dedicated runner (version 23), never in this service.
+ */
+const AMUX_ORCHESTRATOR_VARIABLES = [
+  "TOMVERSE_AMUX_ENABLED",
+  "TOMVERSE_AMUX_SYNC_SECRET",
+  "TOMVERSE_INTERNAL_URL",
+  "TOMVERSE_AMUX_WORKER_CATALOG_JSON",
+  "TOMVERSE_AMUX_CLAIM",
+] as const;
+
 /**
  * The sre-ops page service's variables at S1b (docs/policy/sre-ops.md §7, §8):
  * the page service's list in scripts/ops-observer/runtime-variables-core.mjs
@@ -138,6 +180,72 @@ const OPS_OBSERVER_DIGEST_VARIABLES = [
   "RAILWAY_DOCKERFILE_PATH",
 ] as const;
 
+/**
+ * The engineering agent's two services (docs/policy/engineering-agent.md §8,
+ * §12): production only, each a cron that runs one cycle and stops. They are
+ * not built by Railway: they run the image .github/workflows/engineering-
+ * agent-image.yml builds on main, by digest, with automatic updates off.
+ *
+ * `digest` is null until a person records the digest that workflow printed,
+ * in a pull request they merge; while it is null the service is not declared
+ * at all, so nothing is deployed and nothing is owned. Changing it is that PR
+ * and an operator's apply -- never the agent (§13).
+ *
+ * Each environment list is the service's whole list. The runner holds no
+ * GitHub write, App key or database credential; the publisher holds no model
+ * key or database credential; neither holds an AMUX secret. The lists equal
+ * RUNNER_VARIABLES and PUBLISHER_VARIABLES in the scripts, which
+ * tests/engineeringAgentServices.test.mjs holds.
+ *
+ * Each schedule is longer than its service's hard deadline, so two cycles
+ * never overlap.
+ */
+export const ENGINEERING_AGENT_IMAGE = "ghcr.io/mposition/tomverse-engineering-agent";
+
+export const ENGINEERING_AGENT_SERVICES: readonly AgentRunnerService[] = [
+  {
+    key: "engineering_agent_runner",
+    service: "Engineering Agent Runner",
+    image: {
+      reference: ENGINEERING_AGENT_IMAGE,
+      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+    },
+    startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
+    cronSchedule: "*/30 * * * *",
+    environments: {
+      production: [
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_RUNNER_SECRET",
+        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
+        "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
+        "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
+      ],
+    },
+  },
+  {
+    key: "engineering_agent_publisher",
+    service: "Engineering Agent Publisher",
+    image: {
+      reference: ENGINEERING_AGENT_IMAGE,
+      digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
+    },
+    startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
+    cronSchedule: "*/10 * * * *",
+    environments: {
+      production: [
+        "ENGINEERING_AGENT_APP_URL",
+        "ENGINEERING_AGENT_PUBLISHER_SECRET",
+        "ENGINEERING_AGENT_PUBLISHER_APP_ID",
+        "ENGINEERING_AGENT_PUBLISHER_INSTALLATION_ID",
+        "ENGINEERING_AGENT_PUBLISHER_PRIVATE_KEY",
+        "ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL",
+      ],
+    },
+  },
+];
+
+const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -164,6 +272,32 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: BILLING_FINANCE_OPS_VARIABLES,
       staging: BILLING_FINANCE_OPS_VARIABLES,
+    },
+  },
+  {
+    // The marketing publisher (S2 plan, S2d1). A clock and a supervisor: every
+    // five minutes it asks the app to run, with a deadline four minutes out,
+    // and kills its own worker at that deadline. The contract is
+    // `run deadline < cron period`; lib/marketingPublisherRunCore.ts holds the
+    // numbers and a test holds this schedule to them. The admin Jobs screen
+    // judges it through CRON_TRIGGERS.marketingPublisher in
+    // lib/scheduledJobsCore.ts, which a test holds to this schedule.
+    //
+    // Two variables and no others -- the plan's exhaustive list. No database,
+    // platform, object-store, GitHub or LLM credential: the service changes
+    // nothing itself, and the app route is where the work happens. Set both
+    // after the apply creates the service: this file preserves declared
+    // variables, it does not create them, and a service without its secret
+    // fails every five minutes.
+    key: "marketing_publisher",
+    service: "Marketing Publisher",
+    startCommand: "npm run maintenance:marketing-publisher",
+    cronSchedule: "*/5 * * * *",
+    environments: {
+      production: MARKETING_PUBLISHER_VARIABLES,
+      staging: MARKETING_PUBLISHER_VARIABLES,
+      // Not on dev (operator decision, 2026-10-07): the one job that acts on
+      // outside accounts, and dev runs every merge before anyone has verified it.
     },
   },
   {
@@ -222,17 +356,52 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
       staging: PRODUCT_RESEARCH_PROBE_VARIABLES,
     },
   },
+  ...ENGINEERING_AGENT_SERVICES,
+  {
+    // The AMUX orchestrator (docs/policy/development-agent-orchestration.md,
+    // version 28): the long-running claim and recovery loop. It holds no
+    // product database credential and reaches the app at its public URL, so it
+    // belongs in this project. Built from its Dockerfile, which runs the
+    // binary as `nobody`; the start command is that binary.
+    //
+    // Restarted after a non-zero exit, at most ten times (version 28 replaces
+    // version 20 item 9's dashboard setting with this declaration).
+    // `checkSuites: false` keeps the deployment it had (version 20 item 10):
+    // a merge deploys at once, and an orchestrator that comes up before the
+    // web waits on `halt_unreadable` without writing.
+    //
+    // Production only: staging has no orchestrator service.
+    key: "amux_orchestrator",
+    service: "AMUX Orchestrator",
+    startCommand: "/usr/local/bin/tomverse-orchestrator",
+    cronSchedule: null,
+    restart: { type: "ON_FAILURE", maxRetries: 10 },
+    dockerfile: {
+      path: "apps/tomverse-orchestrator/Dockerfile",
+      watchPatterns: ["apps/tomverse-orchestrator/**", "crates/amux-core/**", "Cargo.toml", "Cargo.lock"],
+    },
+    checkSuites: false,
+    environments: {
+      production: AMUX_ORCHESTRATOR_VARIABLES,
+    },
+  },
 ];
 
 type AgentRailwayDsl<Source, Preserved, Resource> = {
-  readonly github: (repo: string, options: { branch: string }) => Source;
+  readonly github: (repo: string, options: { branch: string; checkSuites?: false }) => Source;
+  readonly image: (reference: string, options: { autoUpdates: { type: "disabled" } }) => Source;
   readonly preserve: () => Preserved;
   readonly service: (
     name: string,
     config: {
       source: Source;
       start: string;
-      deploy: { cronSchedule?: string; restartPolicyType: "NEVER" };
+      build?: { builder: "DOCKERFILE"; dockerfilePath: string; watchPatterns: string[] };
+      deploy: {
+        cronSchedule?: string;
+        restartPolicyType: "NEVER" | "ON_FAILURE";
+        restartPolicyMaxRetries?: number;
+      };
       replicas: Record<string, number>;
       env: Record<string, Preserved>;
     }
@@ -257,15 +426,36 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
     // Absent here on purpose. Returning an empty env instead would declare the
     // service with no variables, and the apply would delete the ones it has.
     if (!variables) return [];
+    // No image recorded yet: not declared, so nothing is deployed or owned.
+    if (runner.image && runner.image.digest === null) return [];
+    if (runner.image && !IMAGE_DIGEST.test(runner.image.digest ?? "")) {
+      throw new Error(`${runner.service}: the image digest is not a sha256 digest.`);
+    }
     return [
       dsl.service(runner.service, {
-        source: dsl.github(AGENT_RAILWAY_REPOSITORY, {
-          branch: AGENT_ENVIRONMENT_BRANCHES[environment],
-        }),
+        source: runner.image
+          ? dsl.image(`${runner.image.reference}@${runner.image.digest}`, {
+              autoUpdates: { type: "disabled" },
+            })
+          : dsl.github(AGENT_RAILWAY_REPOSITORY, {
+              branch: AGENT_ENVIRONMENT_BRANCHES[environment],
+              ...(runner.checkSuites === false ? { checkSuites: false as const } : {}),
+            }),
+        ...(runner.dockerfile
+          ? {
+              build: {
+                builder: "DOCKERFILE" as const,
+                dockerfilePath: runner.dockerfile.path,
+                watchPatterns: [...runner.dockerfile.watchPatterns],
+              },
+            }
+          : {}),
         start: runner.startCommand,
         deploy: {
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
-          restartPolicyType: "NEVER",
+          ...(runner.restart
+            ? { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }
+            : { restartPolicyType: "NEVER" as const }),
         },
         // One replica, placed. A cron that runs once a day needs no more, and
         // the region is the record's, not Railway's default.

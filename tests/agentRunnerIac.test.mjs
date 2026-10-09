@@ -34,6 +34,7 @@ const recordingDsl = () => {
     PRESERVED,
     dsl: {
       github: (repo, options) => ({ repo, ...options }),
+      image: (reference, options) => ({ reference, ...options }),
       preserve: () => PRESERVED,
       service: (name, config) => ({ name, ...config }),
     },
@@ -60,6 +61,16 @@ test("every runner's start command resolves: an npm script, or a node entry file
     const image = /^node (scripts\/ops-observer\/supervise\.mjs) (page|digest)$/.exec(runner.startCommand);
     if (image) {
       assert.ok(existsSync(join(process.cwd(), image[1])), `${runner.service}: ${image[1]} does not exist`);
+      continue;
+    }
+    // A service built from its own Dockerfile that runs a compiled binary: the
+    // start command is the binary that Dockerfile installs.
+    if (runner.dockerfile && runner.startCommand.startsWith("/usr/local/bin/")) {
+      const dockerfile = readFileSync(join(process.cwd(), runner.dockerfile.path), "utf8");
+      assert.ok(
+        dockerfile.includes(` ${runner.startCommand}`),
+        `${runner.service}: ${runner.dockerfile.path} does not install ${runner.startCommand}`
+      );
       continue;
     }
     const match = /^npm run ([a-z0-9:-]+)(?: -- .+)?$/.exec(runner.startCommand);
@@ -162,7 +173,10 @@ test("the resource list is exactly the table for that environment, and refuses t
   const { PRESERVED, dsl } = recordingDsl();
 
   for (const [environment, branch] of Object.entries(AGENT_ENVIRONMENT_BRANCHES)) {
-    const expected = AGENT_RUNNER_SERVICES.filter((runner) => runner.environments[environment]);
+    // A service that runs an image is declared only once its digest is recorded.
+    const expected = AGENT_RUNNER_SERVICES.filter(
+      (runner) => runner.environments[environment] && (!runner.image || runner.image.digest !== null)
+    );
     const resources = buildAgentRunnerResources(environment, dsl);
     assert.deepEqual(
       resources.map((resource) => resource.name),
@@ -172,13 +186,24 @@ test("the resource list is exactly the table for that environment, and refuses t
 
     for (const runner of expected) {
       const resource = resources.find((entry) => entry.name === runner.service);
-      assert.deepEqual(resource.source, { repo: "mposition/Tomverse", branch });
-      assert.equal(resource.start, runner.startCommand);
       assert.deepEqual(
-        resource.deploy,
-        runner.cronSchedule === null
-          ? { restartPolicyType: "NEVER" }
-          : { cronSchedule: runner.cronSchedule, restartPolicyType: "NEVER" }
+        resource.source,
+        runner.image
+          ? { reference: `${runner.image.reference}@${runner.image.digest}`, autoUpdates: { type: "disabled" } }
+          : { repo: "mposition/Tomverse", branch, ...(runner.checkSuites === false ? { checkSuites: false } : {}) }
+      );
+      assert.equal(resource.start, runner.startCommand);
+      assert.deepEqual(resource.deploy, {
+        ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
+        ...(runner.restart
+          ? { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }
+          : { restartPolicyType: "NEVER" }),
+      });
+      assert.deepEqual(
+        resource.build,
+        runner.dockerfile
+          ? { builder: "DOCKERFILE", dockerfilePath: runner.dockerfile.path, watchPatterns: [...runner.dockerfile.watchPatterns] }
+          : undefined
       );
       // One replica, in the region the approved APP 8 record names. Railway's
       // default for a new project is `sfo`, so an unnamed region is not a
@@ -361,4 +386,39 @@ test("the sre-ops digest service declares the supervisor's digest list, daily at
   assert.deepEqual([...digest.environments.production].sort(), [...SERVICE_VARIABLES.digest].sort());
   // The child the supervisor starts for it exists.
   assert.ok(existsSync(CHILD_SCRIPTS.digest), CHILD_SCRIPTS.digest);
+});
+
+test("the AMUX orchestrator is a long-running production service that cannot run commands", () => {
+  // development-agent-orchestration.md, version 28.
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "amux_orchestrator");
+  assert.ok(runner, "the orchestrator is not declared");
+  assert.equal(runner.service, "AMUX Orchestrator");
+  assert.equal(runner.cronSchedule, null, "a cron would stop the loop between runs");
+  assert.deepEqual(runner.restart, { type: "ON_FAILURE", maxRetries: 10 });
+  assert.equal(runner.checkSuites, false, "version 20 item 10: a merge deploys at once");
+  assert.deepEqual(Object.keys(runner.environments), ["production"], "staging has no orchestrator");
+  assert.deepEqual([...runner.environments.production].sort(), [
+    "TOMVERSE_AMUX_CLAIM",
+    "TOMVERSE_AMUX_ENABLED",
+    "TOMVERSE_AMUX_SYNC_SECRET",
+    "TOMVERSE_AMUX_WORKER_CATALOG_JSON",
+    "TOMVERSE_INTERNAL_URL",
+  ]);
+  for (const name of runner.environments.production) {
+    assert.doesNotMatch(name, /EXECUTE|EXECUTOR|WSL|DATABASE|API_KEY/, `${name} would let the service run commands or reach a store`);
+  }
+  // The build stays the one it had: its own Dockerfile, rebuilt only when the
+  // orchestrator's sources change.
+  assert.equal(runner.dockerfile.path, "apps/tomverse-orchestrator/Dockerfile");
+  assert.ok(existsSync(join(process.cwd(), runner.dockerfile.path)));
+  assert.deepEqual([...runner.dockerfile.watchPatterns], [
+    "apps/tomverse-orchestrator/**",
+    "crates/amux-core/**",
+    "Cargo.toml",
+    "Cargo.lock",
+  ]);
+  // Every other service still never restarts.
+  for (const other of AGENT_RUNNER_SERVICES.filter((entry) => entry !== runner)) {
+    assert.equal(other.restart, undefined, `${other.service} restarts`);
+  }
 });
