@@ -957,8 +957,24 @@ async function chooseModel(page: Page, modelId: string) {
 }
 
 async function chooseConversation(page: Page, conversationId: string) {
-  const mobileShell = page.getByTestId("mobile-chat-shell");
-  if (await mobileShell.isVisible()) {
+  // ChatPageClient chooses its shell from a `(max-width: 767px)` media query,
+  // so a caller that resizes across that boundary immediately before this still
+  // has the outgoing shell mounted. Asking "is the mobile shell visible?" once
+  // could therefore be answered for the shell on its way out: on a resize down
+  // to mobile it opened no drawer, then spent the whole timeout clicking the
+  // unmounting desktop sidebar's item, which Playwright reported as "element
+  // was detached from the DOM, retrying". Instrumenting the helper showed the
+  // mobile branch had never run at all. So wait for the shell the current
+  // viewport implies, and for the other one to be gone -- while both are
+  // mounted the item below matches twice.
+  const mobile = (page.viewportSize()?.width ?? 0) <= 767;
+  await expect(
+    page.getByTestId(mobile ? "mobile-chat-shell" : "desktop-chat-shell")
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(mobile ? "desktop-chat-shell" : "mobile-chat-shell")
+  ).toHaveCount(0);
+  if (mobile) {
     await page.getByTestId("mobile-sidebar-open").click();
     await expect(page.getByTestId("mobile-sidebar-drawer")).toBeVisible();
   }
@@ -1030,49 +1046,117 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   test("leaving a failed hydration scope cancels its retry without restarting the new scope", async ({ page }) => {
+    // Three failures, not one, so that a retry is still *pending* at the moment
+    // this scope is left -- the only state in which there is a cancel to
+    // observe. With one failure neither environment reached it. Locally the
+    // switch beat the one-second timer, so nothing was pending and removing the
+    // product's guard altogether did not fail this test. In CI the mobile
+    // drawer took longer than a second, so the timer had already fired, which
+    // is correct -- the user had not left yet -- and the old assertion of one
+    // read in total failed on behaviour that was right. Three failures leave a
+    // pending delay of 1_000 * 2 ** 2 (useConversationDrafts.ts): four seconds,
+    // which the drawer cannot outlast.
     const state = await openChat(page, {
       holdDraftHydrate: true,
-      draftFailurePlan: [{ method: "GET", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "GET", scopeKey: CONVERSATION },
+        { method: "GET", scopeKey: CONVERSATION },
+        { method: "GET", scopeKey: CONVERSATION },
+      ],
     });
     await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
+    const readsFor = (scopeKey: string) => state.draftRequests().filter(
+      (entry) => entry.method === "GET" && entry.scopeKey === scopeKey
+    ).length;
+    // Reads at roughly 0s, 1s and 3s; the third arms the four-second retry.
+    await expect.poll(() => readsFor(CONVERSATION), { timeout: 20_000 }).toBe(3);
 
     await chooseConversation(page, SECOND_CONVERSATION);
     await expect.poll(state.draftHydrateStarted).toBe(true);
-    await page.waitForTimeout(1_200);
+    // Exactly three, not "however many there are now". Taking the count as a
+    // baseline here would let a runner slow enough to miss the four-second
+    // window pass with no cancel at all: the fourth read would land before the
+    // switch, nothing would be pending, and the comparison below would hold.
+    // Independent review found that gap, which the earlier guard-removal check
+    // could not see because the switch always wins on a fast machine. Asserting
+    // the number says the scenario this test needs actually happened, and fails
+    // loudly rather than silently passing when it did not.
+    expect(readsFor(CONVERSATION)).toBe(3);
+    expect(readsFor(SECOND_CONVERSATION)).toBe(1);
 
-    const reads = state.draftRequests().filter(({ method }) => method === "GET");
-    expect(reads.filter(({ scopeKey }) => scopeKey === CONVERSATION)).toHaveLength(1);
-    expect(reads.filter(({ scopeKey }) => scopeKey === SECOND_CONVERSATION)).toHaveLength(1);
+    // Past that pending retry. Uncancelled it bumps the hydrate revision, and
+    // because the effect always reads the *active* scope the extra read lands
+    // on the scope just entered rather than the one left -- which is the half
+    // of this test's name the guard actually protects.
+    await page.waitForTimeout(5_000);
+    expect(readsFor(CONVERSATION)).toBe(3);
+    expect(readsFor(SECOND_CONVERSATION)).toBe(1);
     state.releaseDraftHydrate();
   });
 
   test("leaving a failed persistence scope cancels its background retry", async ({ page }) => {
+    // Three failures for the same reason as the hydration test above: with one,
+    // the retry had either already fired or was never pending by the time the
+    // mobile drawer finished, so neither a correct product nor a broken one
+    // changed the outcome. The third failure leaves a four-second retry pending.
     const state = await openChat(page, {
-      draftFailurePlan: [{ method: "PUT", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+      ],
     });
     await page.getByTestId("chat-textarea").fill("Do not retry this from another Chat.");
-    await expect.poll(() => state.draftRequests().filter(
-      ({ method, scopeKey }) => method === "PUT" && scopeKey === CONVERSATION
-    ).length).toBe(1);
+    const writesFor = (scopeKey: string) => state.draftRequests().filter(
+      (entry) => entry.method === "PUT" && entry.scopeKey === scopeKey
+    ).length;
+    await expect.poll(() => writesFor(CONVERSATION), { timeout: 20_000 }).toBe(3);
     await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
 
     await chooseConversation(page, SECOND_CONVERSATION);
-    await page.waitForTimeout(1_200);
-    expect(state.draftRequests().filter(
-      ({ method, scopeKey }) => method === "PUT" && scopeKey === CONVERSATION
-    )).toHaveLength(1);
+    // The new scope's own hydrate read is the signal that the switch has taken
+    // effect; the question is whether the write retry pending for the scope
+    // just left survives it. Here the uncancelled retry re-saves that same key,
+    // so the extra request lands on the scope left rather than the one entered.
+    await expect.poll(() => state.draftRequests().some(
+      (entry) => entry.method === "GET" && entry.scopeKey === SECOND_CONVERSATION
+    )).toBe(true);
+    // Still exactly three, for the reason given in the hydration test above: a
+    // baseline taken here would make a runner that missed the four-second
+    // window pass without any cancel having to happen.
+    expect(writesFor(CONVERSATION)).toBe(3);
+    await page.waitForTimeout(5_000);
+    expect(writesFor(CONVERSATION)).toBe(3);
   });
 
   test("a transport failure followed by a revision conflict clears the stale failure banner", async ({ page }) => {
     const sharedDrafts = new Map<string, DraftFixture>();
-    await openChat(page, {
+    // Two planned failures, not one. The product retries a failed persist by
+    // itself after 1_000 * 2 ** (failureCount - 1) ms
+    // (useConversationDrafts.ts), so the conflict this test is about is the
+    // product's own doing and arrives whether or not anything is clicked. With
+    // one failure it arrived at one second, which was both too soon to observe
+    // the banner reliably and exactly when the old test was clicking that
+    // banner's button: Playwright reported "element was detached from the DOM"
+    // on mobile-safari three nights in four. Two failures put the conflict at
+    // three seconds -- a retry at one second that fails again, then the one
+    // that meets the revision below.
+    const state = await openChat(page, {
       sharedDrafts,
-      draftFailurePlan: [{ method: "PUT", scopeKey: CONVERSATION }],
+      draftFailurePlan: [
+        { method: "PUT", scopeKey: CONVERSATION },
+        { method: "PUT", scopeKey: CONVERSATION },
+      ],
     });
+    // The hydrate read must see the store still empty, or this test would be
+    // about hydrating a server draft rather than a persist that failed.
+    await expect.poll(state.draftReadCount).toBeGreaterThan(0);
     await page.getByTestId("chat-textarea").fill("Keep this local version until I choose.");
-    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
 
     const now = "2026-09-13T00:00:00.000Z";
+    // Raised before the first PUT is even answered, so no part of this test
+    // races the retry timer. The planned failure is consumed ahead of the
+    // fixture's revision check, so that PUT still fails in transport.
     sharedDrafts.set(CONVERSATION, {
       scopeKey: CONVERSATION,
       text: "Server version after the transport failure.",
@@ -1082,13 +1166,22 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       createdAt: now,
       updatedAt: now,
     });
-    await page.getByTestId("draft-sync-retry").click();
+    await expect(page.getByTestId("draft-sync-failed")).toBeVisible();
+
+    // Waited for, not clicked. The retry button keeps its coverage in "draft
+    // sync failure is visible and retry keeps the local question", where every
+    // request fails and the banner therefore stays put long enough to click.
     const conflictNotice = page.getByTestId("draft-conflict-dialog");
-    await expect(conflictNotice).toBeVisible();
+    await expect(conflictNotice).toBeVisible({ timeout: 20_000 });
     await expect(conflictNotice).toHaveAttribute("role", "alert");
     await expect(conflictNotice).not.toHaveAttribute("aria-modal");
     await expect(page.getByTestId("draft-sync-failed")).toHaveCount(0);
 
+    // The assertion that carries this test's name is the last one, not the one
+    // above: while the conflict is open the banner is not rendered whatever the
+    // failure flag says. Removing applyConflict's `setSyncFailure(key, false)`
+    // leaves the one above green and fails the last one, because resolving the
+    // conflict lets the uncleared failure surface again.
     await page.getByTestId("draft-conflict-use-server").click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue(
       "Server version after the transport failure."
@@ -2664,8 +2757,19 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await page.getByTestId("model-only-input").first().fill("Show this accepted Review question while answering.");
     await page.getByTestId("model-only-send").first().click();
     await expect.poll(state.messageSaveStarted).toBe(true);
+    // Each swap is waited for rather than assumed. What this test forces is a
+    // remount, and the only thing that produces one here is crossing the
+    // shell's `(max-width: 767px)` boundary -- openChat starts every project at
+    // the desktop viewport, so these two resizes are meant to be two crossings.
+    // Back to back they are coalesced in WebKit: the mobile shell never
+    // rendered, the panes never remounted, and not one further history read
+    // followed, so the third cursored read below could not arrive and
+    // mobile-safari failed every night. Measured on the old test: the reads
+    // stopped at the two the first mount makes.
     await page.setViewportSize(MOBILE_VIEWPORT);
+    await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
     await page.setViewportSize(DESKTOP_VIEWPORT);
+    await expect(page.getByTestId("desktop-chat-shell")).toBeVisible();
     await expect.poll(state.historyPageFailureStarted).toBe(true);
 
     state.releaseMessageSave();
