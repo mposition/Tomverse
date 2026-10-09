@@ -87,6 +87,10 @@ test("product Auto budget holds are atomic and use separate durable windows",
         /prompt_refiner_auto_budget_delete_forbidden/);
       await assert.rejects(client.query(`TRUNCATE "PromptRefinerAutoBudgetWindow"`),
         /prompt_refiner_auto_budget_delete_forbidden/);
+      await assert.rejects(client.query(`TRUNCATE "PromptRefinerAutoBudgetHold"`),
+        /prompt_refiner_auto_budget_delete_forbidden/);
+      await assert.rejects(client.query(`TRUNCATE "AdminAuditLog" CASCADE`),
+        /prompt_refiner_auto_budget_delete_forbidden/);
       await assert.rejects(client.query(`UPDATE "PromptRefinerAutoBudgetHold"
         SET "status" = 'unknown'`), /prompt_refiner_auto_budget_hold_immutable/);
       await assert.rejects(client.query(`UPDATE "PromptRefinerAutoBudgetWindow"

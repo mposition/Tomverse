@@ -14,8 +14,8 @@ export const PROMPT_REFINER_AUTO_REQUEST_HOLD_MICRO_USD = 29_918n;
 const BRISBANE_UTC_OFFSET_MS = 10 * 60 * 60 * 1000;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-// This identifier is audited. Accept only opaque, server-minted UUIDs, not
-// caller text or a user/conversation identifier.
+// This identifier is audited. The format prevents plain user/conversation
+// text; the future caller must establish opaque server-side provenance.
 const REQUEST_KEY = UUID;
 
 export class PromptRefinerAutoBudgetError extends Error {
