@@ -253,10 +253,26 @@ const flow = async (answer: () => Promise<Response>, readResult: typeof DEFAULT 
 const released = (updates: DmSwitchUpdate[]) =>
   updates.findIndex((changes) => "pending" in changes && changes.pending === null);
 
+/** A response whose headers arrived and whose body then broke off. */
+const brokenBody = (status: number) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new Error("connection reset"));
+      },
+    }),
+    { status, headers: { "content-type": "application/json" } },
+  );
+
 for (const [label, answer] of [
   ["saved", () => Promise.resolve(json(200, { scope: "kill_switch", value: "on" }))],
   ["an unknown outcome", () => Promise.resolve(json(503, { error: "outcome_unknown" }))],
   ["no answer", () => Promise.reject(new TypeError("fetch failed"))],
+  // Not proof of a rollback: the body that would have said so never arrived.
+  ["a 503 whose body broke off", () => Promise.resolve(brokenBody(503))],
+  ["a 503 that is not the route's", () => Promise.resolve(new Response("<html>Bad gateway</html>", { status: 503 }))],
+  ["a 500", () => Promise.resolve(json(500, { error: "internal" }))],
+  ["a 502 from a proxy", () => Promise.resolve(new Response("bad gateway", { status: 502 }))],
 ] as const) {
   test(`${label}: sent once, the state read again, and controls released only after that read`, async () => {
     const { updates, posts, reads, log } = await flow(answer, AFTER);
@@ -288,6 +304,11 @@ for (const [label, answer] of [
 for (const [label, answer] of [
   ["a stale step-up", () => Promise.resolve(json(428, { code: "ADMIN_REAUTHENTICATION_REQUIRED" }))],
   ["a missing permission", () => Promise.resolve(json(403, { error: "Forbidden." }))],
+  ["no session", () => Promise.resolve(json(404, { error: "Not found." }))],
+  ["a bad body", () => Promise.resolve(json(400, { error: "Invalid request." }))],
+  ["a bad body whose answer broke off", () => Promise.resolve(brokenBody(400))],
+  ["an oversized body", () => Promise.resolve(json(413, { error: "Too large." }))],
+  ["the rate limit", () => Promise.resolve(json(429, { error: "Too many requests." }))],
   ["a rolled-back change", () => Promise.resolve(json(503, { error: "switch_change_failed" }))],
 ] as const) {
   test(`${label}: nothing was written, so the state shown stands and nothing is re-read`, async () => {

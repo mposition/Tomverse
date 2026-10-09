@@ -243,11 +243,31 @@ export type DmSwitchIo = {
 };
 
 /**
- * One change, start to finish. It is sent once. After any answer that may
- * mean it was recorded -- saved, an unknown outcome, or no answer at all --
- * the state is read again, and only after that read has landed (or failed,
- * leaving no state) is anything released. A refusal that wrote nothing
- * (403, 428, a rolled-back 503, an invalid value) leaves the state shown.
+ * Statuses the switch route answers before its transaction starts (a bad or
+ * oversized body, no session or permission, a stale step-up, the rate limit),
+ * or that a proxy answers without reaching it. Nothing was written.
+ */
+const DM_SWITCH_NO_WRITE_STATUSES: ReadonlySet<number> = new Set([400, 403, 404, 413, 428, 429]);
+
+/** The JSON `error` of a refusal, or `null` when the body cannot be read. */
+const refusalError = async (response: Response): Promise<unknown> => {
+  try {
+    const body = (await response.clone().json()) as { error?: unknown } | null;
+    return body?.error ?? null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * One change, start to finish. It is sent once. The state shown is kept only
+ * when the answer proves nothing was written: one of
+ * `DM_SWITCH_NO_WRITE_STATUSES`, or a 503 whose body was read and says the
+ * change was rolled back (`switch_change_failed`). Every other answer --
+ * saved, `outcome_unknown`, a body that could not be read, any other status,
+ * or no answer at all -- may mean it was recorded, so the state is read again,
+ * and only after that read has landed (or failed, leaving no state) is
+ * anything released.
  */
 export async function runDmSwitchChange(
   next: DmSwitchChange,
@@ -261,14 +281,16 @@ export async function runDmSwitchChange(
       const response = await io.post(next);
       if (response.ok) {
         outcome = "saved";
+      } else if (DM_SWITCH_NO_WRITE_STATUSES.has(response.status)) {
+        if (response.status === 400 && (await refusalError(response)) === "invalid_change") {
+          update({ notice: "invalid_change" });
+        } else {
+          update({ failure: await io.failureOf(response) });
+        }
+      } else if (response.status === 503 && (await refusalError(response)) === "switch_change_failed") {
+        update({ failure: await io.failureOf(response) });
       } else {
-        const body =
-          response.status === 503 || response.status === 400
-            ? ((await response.clone().json().catch(() => null)) as { error?: unknown } | null)
-            : null;
-        if (body?.error === "outcome_unknown") outcome = "outcome_unknown";
-        else if (body?.error === "invalid_change") update({ notice: "invalid_change" });
-        else update({ failure: await io.failureOf(response) });
+        outcome = "outcome_unknown";
       }
     } catch {
       outcome = "outcome_unknown";
