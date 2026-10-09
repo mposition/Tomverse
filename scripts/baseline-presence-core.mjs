@@ -18,8 +18,13 @@
  *     -- baseline-check: present-if-relation "Some_index_or_table_name"
  *
  * A CREATE OR REPLACE FUNCTION migration must instead pin the SHA-256 digest
- * of the existing function body. The guard proceeds only when that exact old
- * version is present; an absent, newer, or unknown version remains blocked.
+ * of the existing function body. A migration that replaces CHECK constraints
+ * after its SQL checksum has already shipped cannot add a header without
+ * invalidating Prisma's checksum. It may carry a `baseline-check.json` sidecar
+ * that pins the canonical migration digest and every exact prior
+ * `pg_get_constraintdef` digest instead. The guard proceeds only when every
+ * old version is present; an absent, newer, partial, or unknown state remains
+ * blocked.
  *
  * **A name, not SQL.** The guard asks the one fixed question itself --
  * `SELECT to_regclass($1) IS NOT NULL` with the name bound as a parameter -- so
@@ -50,6 +55,212 @@ const DECLARATION =
 const REPLACEMENT_DECLARATION =
   /^--[ \t]*baseline-check:[ \t]*replace-function-if-body-sha256[ \t]+"([^"]*)"[ \t]+"([0-9a-f]{64})"[ \t]*$/;
 const TEXT_FUNCTION_SIGNATURE = /^([A-Za-z_][A-Za-z0-9_]{0,62})\((text(?:,text){0,15})\)$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const SUPPLEMENTAL_KEYS = ["migrationSqlSha256", "replacedChecks", "version"];
+const CHECK_KEYS = ["constraint", "previousDefinitionSha256", "table"];
+
+const exactKeys = (value, expected) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  return actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index]);
+};
+
+/** Preserve every byte-level distinction except checkout CRLF conversion. */
+export const canonicalMigrationSqlSha256 = (sql) => {
+  if (typeof sql !== "string") return undefined;
+  return createHash("sha256")
+    .update(sql.replaceAll("\r\n", "\n"), "utf8")
+    .digest("hex");
+};
+
+/** Remove comments without treating comment markers in SQL literals as comments. */
+const withoutSqlComments = (sql) => {
+  let out = "";
+  let index = 0;
+  while (index < sql.length) {
+    if (sql[index] === "-" && sql[index + 1] === "-") {
+      while (index < sql.length && sql[index] !== "\n") index += 1;
+      out += "\n";
+      index += 1;
+      continue;
+    }
+    if (sql[index] === "/" && sql[index + 1] === "*") {
+      let depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql[index] === "/" && sql[index + 1] === "*") {
+          depth += 1;
+          index += 2;
+        } else if (sql[index] === "*" && sql[index + 1] === "/") {
+          depth -= 1;
+          index += 2;
+        } else {
+          if (sql[index] === "\n") out += "\n";
+          index += 1;
+        }
+      }
+      if (depth !== 0) return undefined;
+      continue;
+    }
+    if (sql[index] === "'" || sql[index] === '"') {
+      const quote = sql[index];
+      out += quote;
+      index += 1;
+      let closed = false;
+      while (index < sql.length) {
+        out += sql[index];
+        if (sql[index] === quote && sql[index + 1] === quote) {
+          out += sql[index + 1];
+          index += 2;
+          continue;
+        }
+        if (sql[index] === quote) {
+          index += 1;
+          closed = true;
+          break;
+        }
+        index += 1;
+      }
+      if (!closed) return undefined;
+      continue;
+    }
+    // CHECK-only proof intentionally has no procedural/dollar-quoted form.
+    if (/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.test(sql.slice(index))) return undefined;
+    out += sql[index];
+    index += 1;
+  }
+  return out;
+};
+
+/** Split only outside literals and balanced parentheses; uncertainty is invalid. */
+const splitSqlAt = (sql, delimiter) => {
+  const parts = [];
+  let start = 0;
+  let depth = 0;
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index];
+    if (char === "'" || char === '"') {
+      const quote = char;
+      let closed = false;
+      for (index += 1; index < sql.length; index += 1) {
+        if (sql[index] === quote && sql[index + 1] === quote) {
+          index += 1;
+          continue;
+        }
+        if (sql[index] === quote) {
+          closed = true;
+          break;
+        }
+      }
+      if (!closed) return undefined;
+      continue;
+    }
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      depth -= 1;
+      if (depth < 0) return undefined;
+    } else if (char === delimiter && depth === 0) {
+      parts.push(sql.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  if (depth !== 0) return undefined;
+  parts.push(sql.slice(start).trim());
+  return parts;
+};
+
+/**
+ * The entire grammar a CHECK sidecar may prove: optional BEGIN/COMMIT and one
+ * or more ALTER TABLE statements made solely of adjacent DROP + ADD CHECK
+ * pairs under the same table/name. Anything else is deliberately invalid.
+ */
+export const replacedCheckTargetsIn = (sql) => {
+  if (typeof sql !== "string") return { kind: "none" };
+  const uncommented = withoutSqlComments(sql);
+  const statements = uncommented === undefined ? undefined : splitSqlAt(uncommented, ";");
+  if (!statements) return { kind: "invalid" };
+  const checks = [];
+  const seen = new Set();
+  for (const statement of statements.filter(Boolean)) {
+    if (/^(?:BEGIN|COMMIT)$/i.test(statement)) continue;
+    const alter = /^ALTER\s+TABLE\s+(?:"public"\.)?"([A-Za-z_][A-Za-z0-9_]{0,62})"\s+([\s\S]+)$/i.exec(statement);
+    if (!alter) return { kind: "invalid" };
+    const actions = splitSqlAt(alter[2], ",");
+    if (!actions || actions.length === 0 || actions.length % 2 !== 0) {
+      return { kind: "invalid" };
+    }
+    for (let index = 0; index < actions.length; index += 2) {
+      const dropped = /^DROP\s+CONSTRAINT\s+"([A-Za-z_][A-Za-z0-9_]{0,62})"$/i.exec(
+        actions[index],
+      );
+      const added = /^ADD\s+CONSTRAINT\s+"([A-Za-z_][A-Za-z0-9_]{0,62})"\s+CHECK\s*\([\s\S]*\)$/i.exec(
+        actions[index + 1],
+      );
+      if (!dropped || !added || dropped[1] !== added[1]) return { kind: "invalid" };
+      const table = alter[1];
+      const constraint = dropped[1];
+      const identity = `${table}\0${constraint}`;
+      if (seen.has(identity)) return { kind: "invalid" };
+      seen.add(identity);
+      checks.push({ table, constraint });
+    }
+  }
+  return checks.length === 0 ? { kind: "none" } : { kind: "check-replacement", checks };
+};
+
+/**
+ * Validate the data-only sidecar against both the migration bytes and every
+ * CHECK replacement named by the SQL. The sidecar carries data, never SQL.
+ */
+export const supplementalProofIn = (sql, json) => {
+  if (json === undefined) return { kind: "none" };
+  if (typeof json !== "string") return { kind: "invalid" };
+  let proof;
+  try {
+    proof = JSON.parse(json);
+  } catch {
+    return { kind: "invalid" };
+  }
+  if (!exactKeys(proof, SUPPLEMENTAL_KEYS) || proof.version !== 1) {
+    return { kind: "invalid" };
+  }
+  const sqlDigest = canonicalMigrationSqlSha256(sql);
+  if (!SHA256.test(proof.migrationSqlSha256) || proof.migrationSqlSha256 !== sqlDigest) {
+    return { kind: "invalid" };
+  }
+  const replacements = replacedCheckTargetsIn(sql);
+  if (
+    replacements.kind !== "check-replacement" ||
+    !Array.isArray(proof.replacedChecks)
+  ) {
+    return { kind: "invalid" };
+  }
+  if (proof.replacedChecks.length !== replacements.checks.length) {
+    return { kind: "invalid" };
+  }
+  const checks = [];
+  for (let index = 0; index < proof.replacedChecks.length; index += 1) {
+    const entry = proof.replacedChecks[index];
+    const target = replacements.checks[index];
+    if (
+      !exactKeys(entry, CHECK_KEYS) ||
+      !RELATION_NAME.test(entry.table) ||
+      !RELATION_NAME.test(entry.constraint) ||
+      !SHA256.test(entry.previousDefinitionSha256) ||
+      entry.table !== target.table ||
+      entry.constraint !== target.constraint
+    ) {
+      return { kind: "invalid" };
+    }
+    checks.push({
+      table: entry.table,
+      constraint: entry.constraint,
+      previousDefinitionSha256: entry.previousDefinitionSha256,
+    });
+  }
+  return { kind: "check-replacement", checks };
+};
 
 /** The comment lines before the first statement; blank lines are skipped. */
 const headerLines = (sql) => {
@@ -125,6 +336,14 @@ export const functionBodyQuery = (name, functionArgs = []) =>
     values: [name, `public."${name}"(${functionArgs.join(",")})`], rowMode: "array",
   };
 
+/** Read only one named CHECK definition in public; both names stay bound data. */
+export const checkDefinitionQuery = ({ table, constraint }) => ({
+  text:
+    "SELECT pg_catalog.pg_get_constraintdef(c.oid, false) FROM pg_catalog.pg_constraint c JOIN pg_catalog.pg_class r ON r.oid = c.conrelid JOIN pg_catalog.pg_namespace n ON n.oid = r.relnamespace WHERE n.nspname = 'public' AND r.relname = $1 AND c.conname = $2 AND c.contype = 'c'",
+  values: [table, constraint],
+  rowMode: "array",
+});
+
 /** The fixed question for one probe from `pendingProbes`. */
 export const presenceQueryFor = (probe) =>
   probe.previousBodySha256 !== undefined
@@ -155,17 +374,50 @@ export const replacementAnswer = (rows, previousBodySha256) => {
   return actual === previousBodySha256 ? false : true;
 };
 
+/** Only the exact previous CHECK definition permits DROP + ADD replacement. */
+export const checkReplacementAnswer = (rows, previousDefinitionSha256) => {
+  if (!Array.isArray(rows) || rows.length !== 1) return undefined;
+  const row = rows[0];
+  if (!Array.isArray(row) || row.length !== 1 || typeof row[0] !== "string") {
+    return undefined;
+  }
+  const actual = createHash("sha256").update(row[0], "utf8").digest("hex");
+  return actual === previousDefinitionSha256 ? false : true;
+};
+
+/** All prior definitions are required; a mixed or unknown state stays blocked. */
+export const checkReplacementSetAnswer = (answers) => {
+  if (!Array.isArray(answers) || answers.length === 0) return undefined;
+  if (answers.some((answer) => answer === true)) return true;
+  if (answers.some((answer) => answer !== false)) return undefined;
+  return false;
+};
+
 /**
  * Which pending migrations name a relation, and which do not.
  *
  * Any entry in `undeclared` (no declaration, or an invalid one) means the guard
  * cannot prove absence for the set and must refuse as before.
  */
-export const pendingProbes = (pending, sqlOf) => {
+export const pendingProbes = (pending, sqlOf, supplementalOf = () => undefined) => {
   const probes = [];
   const undeclared = [];
   for (const name of pending) {
-    const declaration = presenceDeclarationIn(sqlOf(name));
+    const sql = sqlOf(name);
+    const declaration = presenceDeclarationIn(sql);
+    const supplemental = supplementalProofIn(sql, supplementalOf(name));
+    if (supplemental.kind === "invalid") {
+      undeclared.push(name);
+      continue;
+    }
+    if (supplemental.kind === "check-replacement") {
+      if (declaration.kind !== "none") {
+        undeclared.push(name);
+        continue;
+      }
+      probes.push({ name, replacedChecks: supplemental.checks });
+      continue;
+    }
     if (declaration.kind === "relation") probes.push({ name, relation: declaration.relation });
     else if (declaration.kind === "function") probes.push({ name, function: declaration.function });
     else if (declaration.kind === "function-replacement") {

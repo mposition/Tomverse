@@ -1904,10 +1904,10 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
-    sha256: "d04e571586ba42754dac9be8ffe8da55ece5ba5daea4517a2fa9b129aa0a517b",
+    sha256: "d6221d28efaf5d8a47e79d0587a56b8e093863937c460ea94b8692fa339bfca2",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Catalogue probes run inside BEGIN READ ONLY and ROLLBACK with object names bound as parameters, never migration-supplied SQL. For CREATE OR REPLACE FUNCTION, the fixed pg_catalog.pg_proc.prosrc query reads the existing zero-argument trigger body and the guard compares its SHA-256 to the declared prior version; absent, modified, or newer bodies block. The only write remains delegated to prisma migrate resolve for baseline history (reviewed 2026-09-17).",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals name no protected table. Existing relation and function probes remain fixed parameterized catalogue reads inside BEGIN READ ONLY and ROLLBACK. The CHECK-replacement path accepts only the four exact table/constraint names extracted from unchanged original migration SQL and bound to that SQL's canonical-LF SHA-256; it runs only a fixed parameterized pg_catalog.pg_get_constraintdef(c.oid, false) query inside BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY and ROLLBACK. A missing constraint, changed or new definition, unknown answer, or partial set refuses, and the sidecar supplies no SQL. This adds no protected-table or audit write; the only write remains delegated to prisma migrate resolve for baseline history.",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
