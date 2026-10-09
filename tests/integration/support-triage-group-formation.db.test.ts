@@ -3,7 +3,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
 import { resetTestFixture } from "./resetTestFixture";
-import { groupSnapshotDigest, OPEN_GROUP_SIGNAL_EXPIRES_AT } from "@/lib/supportTriageGroupCore";
+import { groupCandidateKey, groupSnapshotDigest, OPEN_GROUP_SIGNAL_EXPIRES_AT } from "@/lib/supportTriageGroupCore";
 import { startSupportTriageRun } from "@/lib/supportTriageRunStore";
 import {
   claimSupportTriageBatch,
@@ -145,18 +145,111 @@ test("a report arriving later forms a group with an already-triaged peer", async
   );
 });
 
-test("a third report of a grouped account waits for the join and is counted", async () => {
+const onlyGroup = () =>
+  prisma.supportTriageGroup.findFirstOrThrow({
+    select: { id: true, state: true, groupCandidateKey: true, groupInputDigest: true },
+  });
+
+const fingerprintCase = (id: string, fingerprint: string) =>
+  prisma.feedbackAutoFixCase.create({ data: { feedbackId: `${PREFIX}${id}`, traceId: `trace-gf-${id}`, fingerprint } });
+
+test("a third report of a grouped account joins the group, which is rebound to its new members", async () => {
   await report("a", { userId: "user-gf-1" });
   await report("b", { userId: "user-gf-1" });
   await runSupportTriageWorker();
+  const before = await onlyGroup();
+  await report("c", { userId: "user-gf-1" });
+  const result = await runSupportTriageWorker();
+  assert.equal(result.groupsCreated, 0);
+  assert.deepEqual(
+    (await groups()).map((g) => [g.state, g.members]),
+    [["candidate", ["a", "b", "c"]]]
+  );
+  const after = await onlyGroup();
+  assert.equal(after.id, before.id);
+  assert.equal(
+    after.groupCandidateKey,
+    groupCandidateKey({
+      primaryKind: "same_account",
+      primarySnapshotDigest: groupSnapshotDigest("user-gf-1"),
+      memberIds: ["a", "b", "c"].map((id) => `${PREFIX}${id}`),
+    })
+  );
+  assert.notEqual(after.groupInputDigest, before.groupInputDigest);
+  const audit = (await resultAudits()).at(-1);
+  assert.equal(audit?.groupsJoined, 1);
+  assert.equal(audit?.joinedMembers, 1);
+});
+
+test("a newcomer that does not share a secondary value takes that signal off the group", async () => {
+  await report("a", { userId: "user-gf-1" });
+  await report("b", { userId: "user-gf-1" });
+  await fingerprintCase("a", "fp-1");
+  await fingerprintCase("b", "fp-1");
+  await runSupportTriageWorker();
+  assert.deepEqual(
+    (await groups())[0].signals.map((s) => s[0]),
+    ["autofix_fingerprint", "same_account"]
+  );
+  await report("c", { userId: "user-gf-1" });
+  await runSupportTriageWorker();
+  const [grown] = await groups();
+  assert.deepEqual(grown.members, ["a", "b", "c"]);
+  assert.deepEqual(
+    grown.signals.map((s) => s[0]),
+    ["same_account"]
+  );
+});
+
+test("a confirmed group takes no new member; the newcomer waits and is counted", async () => {
+  await report("a", { userId: "user-gf-1" });
+  await report("b", { userId: "user-gf-1" });
+  await runSupportTriageWorker();
+  const { id } = await onlyGroup();
+  await prisma.supportTriageGroup.update({
+    where: { id },
+    data: { state: "confirmed", decision: "confirmed", decidedAt: new Date() },
+  });
   await report("c", { userId: "user-gf-1" });
   await runSupportTriageWorker();
   assert.deepEqual(
-    (await groups()).map((g) => g.members),
-    [["a", "b"]]
+    (await groups()).map((g) => [g.state, g.members]),
+    [["confirmed", ["a", "b"]]]
   );
-  const audits = await resultAudits();
-  assert.equal(audits.at(-1)?.joinDeferred, 1);
+  assert.equal((await resultAudits()).at(-1)?.joinDeferred, 1);
+});
+
+test("a join whose grown member set is a tombstoned key is undone; the group keeps its members and key", async () => {
+  await report("a", { userId: "user-gf-1" });
+  await report("b", { userId: "user-gf-1" });
+  await runSupportTriageWorker();
+  const before = await onlyGroup();
+  // A tombstone of exactly {a, b, c}, left by an earlier group.
+  const digest = groupSnapshotDigest("user-gf-1");
+  const tombstoneKey = groupCandidateKey({
+    primaryKind: "same_account",
+    primarySnapshotDigest: digest,
+    memberIds: ["a", "b", "c"].map((id) => `${PREFIX}${id}`),
+  });
+  await prisma.supportTriageGroup.create({
+    data: { id: "gf-tomb", primaryKind: "same_account", primarySnapshotDigest: digest, groupCandidateKey: tombstoneKey },
+  });
+  await prisma.supportTriageGroup.update({
+    where: { id: "gf-tomb" },
+    data: { state: "invalidated", primarySnapshotDigest: null },
+  });
+  await report("c", { userId: "user-gf-1" });
+  const result = await runSupportTriageWorker();
+  assert.equal(result.ready, 1);
+  const after = await prisma.supportTriageGroup.findUniqueOrThrow({
+    where: { id: before.id },
+    select: { groupCandidateKey: true, groupInputDigest: true, members: { select: { feedbackId: true } } },
+  });
+  assert.equal(after.groupCandidateKey, before.groupCandidateKey);
+  assert.equal(after.groupInputDigest, before.groupInputDigest);
+  assert.deepEqual(after.members.map((m) => m.feedbackId).sort(), [`${PREFIX}a`, `${PREFIX}b`]);
+  assert.equal(await prisma.supportTriageGroupMember.count({ where: { feedbackId: `${PREFIX}c` } }), 0);
+  assert.equal((await resultAudits()).at(-1)?.joinsUndone, 1);
 });
 
 test("closed and deleted-account reports are never members", async () => {
