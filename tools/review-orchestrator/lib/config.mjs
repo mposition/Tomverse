@@ -1,6 +1,6 @@
 import { readJson } from "./fsutil.mjs";
 import { isName } from "./assign.mjs";
-import { STATUS_REPORT_SECRET_ENV, STATUS_SNAPSHOT_DEFAULT_INTERVAL_SECONDS } from "./status-report.mjs";
+import { STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
 
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
@@ -45,21 +45,18 @@ export function globToRegExp(glob) {
 }
 
 /**
- * `statusSnapshot` is optional: { dir, intervalSeconds? }. The daemon writes a
- * content-free snapshot.json into `dir` for the separate status sender; it
+ * `statusSnapshot` is optional: { dir }. The daemon writes a content-free
+ * snapshot.json into `dir` once a minute for the separate status sender. It
  * takes no URL and no secret, because the review account holds no credential
- * for the app (lib/status-report.mjs).
+ * for the app, and no interval, because the sender's staleness rule depends on
+ * it (lib/status-report.mjs).
  */
 function statusSnapshotProblem(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return "an object with dir";
-  const unknown = Object.keys(value).filter((key) => key !== "dir" && key !== "intervalSeconds");
+  const unknown = Object.keys(value).filter((key) => key !== "dir");
   if (unknown.length > 0) return `unknown field ${unknown[0]}`;
   if (typeof value.dir !== "string" || !value.dir.startsWith("/") || value.dir.split("/").includes("..")) {
     return "dir must be an absolute path";
-  }
-  const interval = value.intervalSeconds;
-  if (interval !== undefined && !(Number.isInteger(interval) && interval >= 30 && interval <= 3600)) {
-    return "intervalSeconds must be an integer from 30 to 3600";
   }
   return null;
 }
@@ -93,7 +90,7 @@ export function validateConfig(raw) {
   if (config.statusSnapshot !== undefined) {
     const problem = statusSnapshotProblem(config.statusSnapshot);
     if (problem) errors.push(`statusSnapshot: ${problem}`);
-    else config.statusSnapshot = { intervalSeconds: STATUS_SNAPSHOT_DEFAULT_INTERVAL_SECONDS, ...config.statusSnapshot };
+    else config.statusSnapshot = { dir: config.statusSnapshot.dir };
   }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();

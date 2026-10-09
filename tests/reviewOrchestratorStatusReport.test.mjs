@@ -6,14 +6,20 @@ import { join } from "node:path";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import {
   STATUS_REPORT_SECRET_ENV,
+  STATUS_SNAPSHOT_INTERVAL_SECONDS,
   buildStatusSnapshot,
-  createStatusSender,
   createStatusSnapshotWriter,
+  writeStatusSnapshot,
+} from "../tools/review-orchestrator/lib/status-report.mjs";
+import {
+  SEND_INTERVAL_SECONDS,
+  SNAPSHOT_MAX_AGE_SECONDS,
+  STATUS_REPORT_SECRET_ENV as SENDER_SECRET_ENV,
+  createStatusSender,
   normaliseStatusSnapshot,
   sendStatusReport,
   statusSenderSettings,
-  writeStatusSnapshot,
-} from "../tools/review-orchestrator/lib/status-report.mjs";
+} from "../tools/review-orchestrator/bin/review-status-sender.mjs";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-09T01:00:00.000Z");
@@ -79,6 +85,16 @@ test("the snapshot stays inside the app's limits", () => {
   assert.equal(snapshot.providers[0].maxConcurrent, 64);
   assert.equal(snapshot.draining, true);
   assert.deepEqual(snapshot.last24h, { accept: 0, reject: 0, unknown: 0 });
+  // The sender keeps its own copy of these limits; they must agree at the edges.
+  assert.deepEqual(normaliseStatusSnapshot(snapshot), snapshot);
+});
+
+test("the daemon and the sender agree on the secret's name and the timing", () => {
+  assert.equal(SENDER_SECRET_ENV, STATUS_REPORT_SECRET_ENV);
+  // The sender calls a snapshot stale after three missed daemon writes, and
+  // the app calls five minutes without a report a lost server.
+  assert.equal(SNAPSHOT_MAX_AGE_SECONDS, 3 * STATUS_SNAPSHOT_INTERVAL_SECONDS);
+  assert.ok(SNAPSHOT_MAX_AGE_SECONDS + SEND_INTERVAL_SECONDS < 5 * 60);
 });
 
 test("the sender forwards only the snapshot's own fields, whatever the file holds", () => {
@@ -110,13 +126,13 @@ test("the daemon's config names a snapshot directory, never a URL or a secret", 
   const base = { stateDir: "/tmp/x", repos: {}, providers: [{ id: "codex", vendor: "openai", enabled: true, command: "codex", args: [] }] };
   assert.equal(validateConfig(base).statusSnapshot, undefined);
   assert.deepEqual(validateConfig({ ...base, statusSnapshot: { dir: "/var/lib/review-status" } }).statusSnapshot, {
-    intervalSeconds: 60,
     dir: "/var/lib/review-status",
   });
   for (const statusSnapshot of [
     { dir: "relative/dir" },
     { dir: "/var/lib/../etc" },
-    { dir: "/var/lib/review-status", intervalSeconds: 5 },
+    // No interval knob: the sender's staleness rule depends on the daemon's minute.
+    { dir: "/var/lib/review-status", intervalSeconds: 300 },
     { dir: "/var/lib/review-status", url: URL_OK },
     { dir: "/var/lib/review-status", secret: SECRET },
     "/var/lib/review-status",
@@ -143,9 +159,18 @@ test("the review account holds no credential for the app: the daemon writes a fi
   assert.doesNotMatch(senderUnit, /^User=/m, "the sender must not run as the review account");
   assert.match(senderUnit, /^EnvironmentFile=\/etc\/review-status\/secret\.env$/m);
   assert.match(senderUnit, /^Environment=REVIEW_STATUS_URL=https:\/\//m);
-  assert.match(senderUnit, /^ExecStart=\/usr\/bin\/node \/opt\/review-status-sender\/bin\/review-status-sender\.mjs$/m);
-  // The sender reads no review configuration, store or reviewer output.
+  // A root-owned copy, never the review account's checkout or anything mapped from it.
+  assert.match(senderUnit, /^ExecStart=\/usr\/bin\/node \/usr\/local\/lib\/review-status-sender\/review-status-sender\.mjs$/m);
+  assert.doesNotMatch(senderUnit, /\/home\/review|BindPaths|BindReadOnlyPaths/);
+  // The sender is one file that loads nothing but Node built-ins, and reads no
+  // review configuration, store or reviewer output.
   const sender = read("../tools/review-orchestrator/bin/review-status-sender.mjs");
+  const imports = [...sender.matchAll(/\bfrom\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']|\brequire\s*\(\s*["']([^"']+)["']/g)].map(
+    (match) => match[1] ?? match[2] ?? match[3]
+  );
+  assert.ok(imports.length > 0);
+  assert.deepEqual(imports.filter((specifier) => !specifier.startsWith("node:")), [], "the sender must import only node: built-ins");
+  assert.doesNotMatch(sender, /\bimport\s*\(\s*[^"'\s]/, "no dynamic import of a computed specifier");
   assert.doesNotMatch(sender, /loadConfig|Store|listJobs|reviewPath/);
 
   const loop = read("../tools/review-orchestrator/bin/review-orchestrator.mjs");
@@ -169,7 +194,7 @@ test("the snapshot writer replaces the file whole, paces itself and logs only ch
     const writes = [];
     let fail = false;
     const writer = createStatusSnapshotWriter({
-      config: { statusSnapshot: { dir: "/x", intervalSeconds: 60 } },
+      config: { statusSnapshot: { dir: "/x" } },
       log: (line) => lines.push(line),
       snapshot: () => SNAPSHOT,
       now: () => clock,
@@ -204,7 +229,7 @@ test("sender settings: https only, an absolute snapshot path, and a real secret"
     REVIEW_STATUS_URL: URL_OK,
     REVIEW_STATUS_SNAPSHOT: "/var/lib/review-status/snapshot.json",
   };
-  assert.deepEqual(statusSenderSettings(env), { secret: SECRET, url: URL_OK, snapshotPath: env.REVIEW_STATUS_SNAPSHOT, intervalSeconds: 60 });
+  assert.deepEqual(statusSenderSettings(env), { secret: SECRET, url: URL_OK, snapshotPath: env.REVIEW_STATUS_SNAPSHOT });
   for (const [change, pattern] of [
     [{ [STATUS_REPORT_SECRET_ENV]: undefined }, /SECRET/],
     [{ [STATUS_REPORT_SECRET_ENV]: "tiny-secret-value" }, /SECRET/],
@@ -212,7 +237,6 @@ test("sender settings: https only, an absolute snapshot path, and a real secret"
     [{ REVIEW_STATUS_URL: "https://user:pass@tomverse.example/status" }, /credentials/],
     [{ REVIEW_STATUS_URL: "not a url" }, /absolute https/],
     [{ REVIEW_STATUS_SNAPSHOT: "snapshot.json" }, /absolute path/],
-    [{ REVIEW_STATUS_INTERVAL_SECONDS: "5" }, /INTERVAL/],
   ]) {
     const result = statusSenderSettings({ ...env, ...change });
     assert.match(result.error ?? "", pattern, JSON.stringify(change));
@@ -245,7 +269,7 @@ test("the sender sends a fresh snapshot, and goes quiet when the daemon stops wr
   try {
     const path = join(dir, "snapshot.json");
     writeStatusSnapshot(dir, { ...SNAPSHOT, extra: "dropped" });
-    const settings = { secret: SECRET, url: URL_OK, snapshotPath: path, intervalSeconds: 60 };
+    const settings = { secret: SECRET, url: URL_OK, snapshotPath: path };
     const lines = [];
     const bodies = [];
     let status = 200;

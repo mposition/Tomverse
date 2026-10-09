@@ -10,15 +10,16 @@ Type=simple
 # a process environment that account can read. This one holds the secret.
 DynamicUser=yes
 # Read by systemd as root (keep the file root-owned, mode 600), so the value
-# reaches only this service's environment.
+# reaches only this service's environment. A missing file stops the unit from
+# starting ("Failed to load environment files").
 EnvironmentFile=/etc/review-status/secret.env
 Environment=REVIEW_STATUS_URL=https://tomverse.app/api/internal/review-orchestrator/status
 # The daemon's `statusSnapshot.dir` plus /snapshot.json.
 Environment=REVIEW_STATUS_SNAPSHOT=/var/lib/review-status/snapshot.json
-# The checkout sits under the review account's home, which this account cannot
-# traverse; the code is mapped in read-only instead.
-BindReadOnlyPaths=/home/review/review-orchestrator/tools/review-orchestrator:/opt/review-status-sender
-ExecStart=/usr/bin/node /opt/review-status-sender/bin/review-status-sender.mjs
+# A root-owned copy fetched from GitHub, never the review account's checkout:
+# code that account can edit must not run with this secret. The file imports
+# only Node built-ins, so nothing else is loaded from anywhere.
+ExecStart=/usr/bin/node /usr/local/lib/review-status-sender/review-status-sender.mjs
 Restart=on-failure
 RestartSec=30
 # 64 = the settings cannot run; restarting would not change them.
