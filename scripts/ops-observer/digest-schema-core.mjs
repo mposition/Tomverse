@@ -3,15 +3,19 @@
 // itself from what it reads -- the digest service only names the date -- and
 // held to this shape before the shared store keeps it.
 //
-// Payload, schema version 1:
+// Payload, schema version 2:
 //
-//   { ownerDate, mode, readiness, reserved, channelCheckTaken }
+//   { ownerDate, mode, readiness, reserved, reservedCounts, channelCheckTaken }
 //
 //   readiness: "unknown" or { checkName: boolean } -- the readiness checks
 //              that are not page keys (digestReadinessNames), at most 20.
 //   reserved:  the owner date's reservation items as the cap counted them,
 //              [{ key, kind, capped }], at most 20 -- in shadow, the
-//              would-have-paged list and, by kind, its expected counts.
+//              would-have-paged list.
+//   reservedCounts: { kind: count } for every message kind, over ALL of the
+//              date's items -- so a list cut at the cap still reports how
+//              many there were, by kind (version 1 had no counts and cut the
+//              list silently).
 //
 // Names, booleans, enums and dates only: no error text, no counts a person
 // produced, no URL. Every bound is fixed here, so a payload that parses is far
@@ -23,9 +27,11 @@ import { MESSAGE_KINDS } from "./notification-budget-core.mjs";
 import { REQUEST_BODY_MAX_BYTES, isOwnerDate, parseRunDeadline } from "./request-schema-core.mjs";
 import { ownerDateIsFinal } from "./owner-date-core.mjs";
 
-export const DIGEST_SCHEMA_VERSION = 1;
+export const DIGEST_SCHEMA_VERSION = 2;
 export const DIGEST_KIND = "daily_digest";
 export const DIGEST_MAX_ENTRIES = 20;
+/** No date can reserve more: a bound for the counts, not a cap on reservations. */
+export const DIGEST_MAX_COUNT = 10_000;
 
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
@@ -34,7 +40,7 @@ const isPlainObject = (value) =>
 const hasExactly = (value, keys) =>
   isPlainObject(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 
-const PAYLOAD_KEYS = Object.freeze(["ownerDate", "mode", "readiness", "reserved", "channelCheckTaken"]);
+const PAYLOAD_KEYS = Object.freeze(["ownerDate", "mode", "readiness", "reserved", "reservedCounts", "channelCheckTaken"]);
 const RESERVED_KEYS = Object.freeze(["key", "kind", "capped"]);
 const REQUEST_KEYS = Object.freeze(["runDeadline", "ownerDate"]);
 
@@ -65,6 +71,9 @@ export function buildDigestPayload({ ownerDate, mode, readiness, digestNames, bu
     reserved: budget.reservedToday
       .slice(0, DIGEST_MAX_ENTRIES)
       .map((item) => ({ key: item.key, kind: item.kind, capped: item.capped === true })),
+    reservedCounts: Object.fromEntries(
+      MESSAGE_KINDS.map((kind) => [kind, budget.reservedToday.filter((item) => item.kind === kind).length]),
+    ),
     channelCheckTaken: budget.channelCheckTaken === true,
   };
 }
@@ -73,7 +82,7 @@ export function buildDigestPayload({ ownerDate, mode, readiness, digestNames, bu
 export function parseDigestPayload(value) {
   const refuse = (error) => ({ ok: false, error });
   if (!hasExactly(value, PAYLOAD_KEYS)) return refuse("payload_shape");
-  const { ownerDate, mode, readiness, reserved, channelCheckTaken } = value;
+  const { ownerDate, mode, readiness, reserved, reservedCounts, channelCheckTaken } = value;
   if (!isOwnerDate(ownerDate)) return refuse("payload_shape");
   if (mode !== "shadow" && mode !== "live") return refuse("payload_shape");
   if (typeof channelCheckTaken !== "boolean") return refuse("payload_shape");
@@ -89,6 +98,13 @@ export function parseDigestPayload(value) {
     if (!S2_PAGE_KEYS.includes(item.key) || !MESSAGE_KINDS.includes(item.kind) || typeof item.capped !== "boolean") {
       return refuse("payload_shape");
     }
+  }
+  if (!hasExactly(reservedCounts, MESSAGE_KINDS)) return refuse("payload_shape");
+  for (const kind of MESSAGE_KINDS) {
+    const count = reservedCounts[kind];
+    if (!Number.isSafeInteger(count) || count < 0 || count > DIGEST_MAX_COUNT) return refuse("payload_shape");
+    // The list is the first items of the same reservations the counts cover.
+    if (reserved.filter((item) => item.kind === kind).length > count) return refuse("payload_shape");
   }
   return { ok: true, payload: value };
 }

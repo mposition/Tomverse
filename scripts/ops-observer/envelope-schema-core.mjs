@@ -97,7 +97,11 @@ export function observationsFromSnapshot({ healthOk, snapshot }) {
   }
   if (!healthOk) return out;
 
-  set("P1u", "snapshot", snapshot ? "ok" : "failed");
+  // P1u is "readiness cannot be judged" (policy §1): a snapshot that answered
+  // but could not compute readiness is that failure too, or a readiness
+  // computation that keeps throwing or timing out would leave the core keys
+  // unknown and page nothing.
+  set("P1u", "snapshot", snapshot && snapshot.readiness !== "unknown" ? "ok" : "failed");
   if (!snapshot) return out;
 
   if (snapshot.readiness !== "unknown") {
