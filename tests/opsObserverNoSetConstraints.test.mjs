@@ -26,9 +26,11 @@ const SKIPPED = new Set(["node_modules", ".git", ".next", "tests", "target", "di
 /**
  * SET and CONSTRAINTS with any whitespace or SQL comments between them. No word
  * boundary before SET: an escaped newline in a string literal ("\nSET ...")
- * puts a letter right before it. Over-matching only costs a review.
+ * puts a letter right before it. Over-matching only costs a review. The block
+ * comment is the unambiguous form (no lazy any-character run), so no input can
+ * make the match backtrack exponentially.
  */
-const STATEMENT = /SET(?:\s|\/\*[\s\S]*?\*\/|--[^\n]*\n)*CONSTRAINTS\b/gi;
+const STATEMENT = /SET(?:\s|\/\*(?:[^*]|\*+[^*/])*\*+\/|--[^\n]*\n)*CONSTRAINTS\b/gi;
 
 /** Comment prose that names the rule. Path (POSIX) -> exact number of matches. */
 const REVIEWED_MENTIONS = {

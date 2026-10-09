@@ -45,7 +45,8 @@ const trusted = (overrides = {}) => ({
 function fakeFetch(routes) {
   const calls = [];
   const fetchImpl = async (url, init) => {
-    const path = url.startsWith(APP) ? url.slice(APP.length) : url;
+    const parsed = new URL(url);
+    const path = parsed.origin === APP ? `${parsed.pathname}${parsed.search}` : url;
     calls.push({ path, method: init.method, auth: init.headers.authorization ?? null, body: init.body ? JSON.parse(init.body) : null });
     const answer = routes[path];
     if (answer === undefined) throw new Error(`unexpected ${path}`);
@@ -181,7 +182,7 @@ test("a withheld heartbeat is withheld, a refused advance beats nothing, and a l
     "/api/internal/ops-observer/advance": [200, { result: "advanced", sendPermitted: false, deliveryId: null, heartbeatWithheld: true, generation: 5 }],
   });
   assert.deepEqual(Object.values(await run(withheld)).slice(0, 2), [0, "heartbeat_withheld"]);
-  assert.ok(!withheld.paths().includes(HEARTBEAT));
+  assert.ok(withheld.paths().every((path) => path !== HEARTBEAT));
 
   const conflict = fakeFetch({
     "/api/health": [200, {}],
