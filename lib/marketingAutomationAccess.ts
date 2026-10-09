@@ -529,14 +529,21 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * model's columns aligned the way `prisma format` aligns them, which is the
  * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
  *
- * 2026-10-08: the sre-ops selective release adds the "ops-observer" audit
- * actor to `lib/adminAuditSystemActors.ts` and `writeSystemAuditLogEntry()`
- * to `lib/adminAudit.ts` (docs/policy/sre-ops.md §3-10), both in the
- * receiver's import closure. The receiver's calls and the rows it writes are unchanged; the fingerprint
- * moves because the closure's bytes did. Computed over the release tree.
+ * 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main
+ * (docs/policy/amux-decision-maker.md §10): three system actors join
+ * `lib/adminAuditSystemActors.ts` and the Decision Maker models add back
+ * relations to `AdminAuditLog` in the watched schema. The receiver's calls,
+ * descriptor and admission decisions are unchanged; the bytes moved, so
+ * evidence is stale.
+ *
+ * 2026-10-09, sre-ops selective release (docs/policy/sre-ops.md §3-10): the
+ * "ops-observer" actor joins `lib/adminAuditSystemActors.ts` and
+ * `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, both in the
+ * receiver's import closure. The receiver's calls and the rows it writes are
+ * unchanged; the fingerprint moves because the closure's bytes did.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "f7785f9f9a3161d988f846cfa136328119b3f8e9f5788c39772a08d7e66be2b7";
+  "b4419522a0de528f91375dc1037b093199dcf695e7dc6842bc84711dd5a37092";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

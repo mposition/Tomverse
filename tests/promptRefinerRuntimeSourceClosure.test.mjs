@@ -424,20 +424,23 @@ const compilerOptions = parsedConfig.options;
 // line or column -- a declaration above one, as here, or a comment above one.
 // Text added *below* every access in a file moves nothing. The check belongs
 // at the end of a change, not the start.
-//
-// 2026-10-08, sre-ops selective release: `lib/adminAuditSystemActors.ts`
-// gains the "ops-observer" actor (on an existing line, its constant at the end
-// of the file), `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, and
-// `lib/marketingAutomationAccess.ts` gains a dated fingerprint record above
-// its seven accesses. No element access is added; the count and the
-// position-free inventory are unchanged, so this repins positions only. The
-// value is computed over the release tree.
+// 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main:
+// three actor names join the existing line of `SYSTEM_AUDIT_ACTORS`, their
+// array is declared at the end of `lib/adminAuditSystemActors.ts`, and the
+// fingerprint record in `lib/marketingAutomationAccess.ts` gains a note above
+// that file's accesses. No access is added; count 228 and the position-free
+// inventory are unchanged, so this repins positions only.
+// 2026-10-09, sre-ops selective release: "ops-observer" joins the same line of
+// `SYSTEM_AUDIT_ACTORS` and its constant is declared at the end of
+// `lib/adminAuditSystemActors.ts`, `lib/adminAudit.ts` gains
+// `writeSystemAuditLogEntry()`, and the fingerprint record gains a note. No
+// access is added; count and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "dc5e0e67cb62610dbd3faa60471faeba",
-  "f2a7749a729c1c459df37c816e5fe090",
+  "34a24191c2e58e5c21c11dfded53ccd7",
+  "f40ae7adfc5efb53dc271fed2a1edb8d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
