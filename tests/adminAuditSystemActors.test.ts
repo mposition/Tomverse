@@ -43,6 +43,15 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "../lib/amux/ideaIdentityCore.ts";
 
+test("the Prompt Refiner Auto budget actor has only its reservation action", () => {
+  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
+    "prompt_refiner.auto_budget_reserved", "PromptRefinerAutoBudgetHold"), true);
+  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
+    "prompt_refiner.auto_budget_settled", "PromptRefinerAutoBudgetHold"), false);
+  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
+    "prompt_refiner.auto_budget_reserved", "AdminAuditLog"), false);
+});
+
 // The closed list of system actors and the reserved metadata key.
 //
 // Contract: docs/policy/marketing-automation.md §6. Several later checks ask
@@ -66,6 +75,7 @@ test("the system actor list is closed and changes only by review", () => {
     "marketing-webhook",
     "prompt-refiner-shadow-runner",
     "prompt-refiner-vnext-one-shot-runner",
+    "prompt-refiner-auto-budget",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",
