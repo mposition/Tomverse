@@ -241,6 +241,21 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 10,
     isolation: "mutation",
   },
+  // Decision Maker switches (docs/policy/amux-decision-maker.md §8): setup +
+  // the newest event of every scope + fence.
+  decisionMakerSwitchRead: {
+    operation: "decision_maker_switch_read",
+    prismaCallCeiling: 3,
+    isolation: "read",
+  },
+  // setup + a person's change at its largest (audit chain lock, the scope's
+  // newest event, the administrator audit's 4 with an integrity key, the
+  // event insert: 7, pinned by tests/amuxDecisionMakerSwitch.test.mjs) + fence
+  decisionMakerSwitchChange: {
+    operation: "decision_maker_switch_change",
+    prismaCallCeiling: 9,
+    isolation: "mutation",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**
