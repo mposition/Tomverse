@@ -32,7 +32,9 @@ import {
 } from "@/lib/amux/ideaInitialSourcePlanCore";
 import {
   AMUX_V4_FRONTIER_CATALOG_READ_ENV,
+  AMUX_V4_FRONTIER_CATALOG_WRITE_ENV,
   frontierCatalogReadPermitted,
+  frontierCatalogWritePermitted,
 } from "@/lib/amux/ideaFrontierCatalogWriteCore";
 import {
   AMUX_V4_TRANSFER_PREVIEW_READ_ENV,
@@ -97,6 +99,8 @@ export default async function AdminAmuxBacklogPage({
     initialPlanReadbackPermitted(process.env[AMUX_V4_INITIAL_PLAN_READBACK_ENV]);
   const frontierModelsAvailable = frontierCatalogReadPermitted(
     process.env[AMUX_V4_FRONTIER_CATALOG_READ_ENV]);
+  const frontierModelWriteAvailable = frontierModelsAvailable && frontierCatalogWritePermitted(
+    process.env[AMUX_V4_FRONTIER_CATALOG_WRITE_ENV]);
   const transferPreviewAvailable = initialPlanAvailable && frontierModelsAvailable &&
     transferPreviewWritePermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_WRITE_ENV]) &&
     transferPreviewReadPermitted(process.env[AMUX_V4_TRANSFER_PREVIEW_READ_ENV]);
@@ -134,6 +138,7 @@ export default async function AdminAmuxBacklogPage({
           sourceScopePreviewAvailable={sourceScopePreviewAvailable}
           initialPlanAvailable={initialPlanAvailable}
           frontierModelsAvailable={frontierModelsAvailable}
+          frontierModelWriteAvailable={frontierModelWriteAvailable}
           transferPreviewAvailable={transferPreviewAvailable}
           transferConfirmAvailable={transferConfirmAvailable}
           analysisResultAvailable={amuxV4AnalysisResultReadEnabled(
