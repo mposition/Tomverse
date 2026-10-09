@@ -68,6 +68,7 @@ import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import {
   bindPromptRefinerSuggestion,
   promptRefinerResponseSchema,
+  resolvePromptRefinerDecision,
   validatePromptRefinerFixtureHandoff,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerDraftScope,
@@ -75,6 +76,22 @@ import {
   type PromptRefinerResolution,
   type PromptRefinerUiState,
 } from "@/lib/promptRefinerSuggestion";
+import {
+  parsePromptRefinerProductAutoPrepare,
+  parsePromptRefinerProductProposal,
+  promptRefinerChatDecision,
+  promptRefinerAuthoredPromptForSend,
+  resolvePromptRefinerExplicitSend,
+  type PromptRefinerProductProposal,
+} from "@/components/chat/promptRefinerProductClient";
+import {
+  promptRefinerProductProposalRequestSchema,
+  promptRefinerProductScopeRequestSchema,
+  promptRefinerProductScopeResponseSchema,
+  type PromptRefinerProductChatDecision,
+  type PromptRefinerProductScope,
+} from "@/lib/promptRefinerProductApiContract";
+import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
@@ -681,6 +698,7 @@ export function ChatPageClient({
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
   promptRefinerMode = "off",
+  promptRefinerProductRelease = { explicitEnabled: false, autoEnabled: false },
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
   chatStarterEnabled = false,
@@ -709,6 +727,11 @@ export function ChatPageClient({
    * unrepresentable at this boundary.
    */
   promptRefinerMode?: "off" | "e2e_fixture";
+  /** Exact-deployment product authorities resolved on the server. */
+  promptRefinerProductRelease?: Readonly<{
+    explicitEnabled: boolean;
+    autoEnabled: boolean;
+  }>;
   /**
    * How many models one image comparison may fan out to, read from the running
    * server in page.tsx. Passed rather than resolved here: `process.env` in a
@@ -998,16 +1021,44 @@ export function ChatPageClient({
   const promptRefinerReadySuggestionRef = useRef<BoundPromptRefinerSuggestion | null>(null);
   const promptRefinerReadyScopeRef = useRef<PromptRefinerDraftScope | null>(null);
   const promptRefinerConsumedKeysRef = useRef(new Set<string>());
-  const promptRefinerOffered = promptRefinerMode === "e2e_fixture";
+  const promptRefinerFixtureOffered = promptRefinerMode === "e2e_fixture";
+  const [promptRefinerProductScope, setPromptRefinerProductScope] =
+    useState<PromptRefinerProductScope | null>(null);
+  const [promptRefinerProductSelection, setPromptRefinerProductSelection] =
+    useState<"none" | "accepted" | "kept_original">("none");
+  const [promptRefinerSkipAutoScope, setPromptRefinerSkipAutoScope] =
+    useState<string | null>(null);
+  const [promptRefinerMountId] = useState(() => crypto.randomUUID());
+  const promptRefinerScopeSequenceRef = useRef(0);
+  const promptRefinerScopeAbortRef = useRef<AbortController | null>(null);
+  const promptRefinerProductProposalRef =
+    useRef<PromptRefinerProductProposal | null>(null);
+  const promptRefinerProductDecisionRef =
+    useRef<PromptRefinerProductChatDecision | null>(null);
+  const promptRefinerProductPreparationRef = useRef<Promise<void> | null>(null);
+  const promptRefinerAttachmentKey = useMemo(
+    () => attachments.map((attachment) =>
+      attachment.attachmentId
+        ? `attachment:${attachment.attachmentId}`
+        : attachment.uploadId
+          ? `upload:${attachment.uploadId}`
+          : `local:${attachment.id}`
+    ).join("\0"),
+    [attachments]
+  );
+  const promptRefinerBoundAttachmentKeyRef = useRef<string | null>(null);
+  const promptRefinerCurrentAttachmentKeyRef = useRef(promptRefinerAttachmentKey);
   const promptRefinerScopeKey = JSON.stringify([
     identityKey ?? null,
     mountedSurface,
     currentChatId ?? null,
     promptRefinerMode,
+    promptRefinerProductRelease.explicitEnabled,
+    promptRefinerProductRelease.autoEnabled,
   ]);
   const promptRefinerScopeKeyRef = useRef(promptRefinerScopeKey);
 
-  const resetPromptRefinerFixture = useCallback(() => {
+  const resetPromptRefinerState = useCallback(() => {
     promptRefinerRequestSequenceRef.current += 1;
     promptRefinerAbortControllerRef.current?.abort();
     promptRefinerAbortControllerRef.current = null;
@@ -1015,26 +1066,38 @@ export function ChatPageClient({
     promptRefinerResolutionRef.current = null;
     promptRefinerReadySuggestionRef.current = null;
     promptRefinerReadyScopeRef.current = null;
+    promptRefinerProductProposalRef.current = null;
+    promptRefinerProductDecisionRef.current = null;
+    promptRefinerBoundAttachmentKeyRef.current = null;
+    setPromptRefinerProductSelection("none");
     setPromptRefinerState({ status: "idle" });
   }, []);
 
   useLayoutEffect(() => {
     promptRefinerDraftRef.current = inputValue;
+    promptRefinerCurrentAttachmentKeyRef.current = promptRefinerAttachmentKey;
     const boundDraft = promptRefinerBoundDraftRef.current;
-    if (boundDraft !== null && boundDraft !== inputValue) {
-      resetPromptRefinerFixture();
+    const boundAttachmentKey = promptRefinerBoundAttachmentKeyRef.current;
+    if (boundDraft !== null &&
+        (boundDraft !== inputValue ||
+          (boundAttachmentKey !== null &&
+            boundAttachmentKey !== promptRefinerAttachmentKey))) {
+      resetPromptRefinerState();
     }
     const resolution = promptRefinerResolutionRef.current;
-    if (resolution && resolution.displayPrompt !== inputValue) {
+    if (resolution &&
+        (resolution.persistedUserPrompt !== inputValue ||
+          promptRefinerBoundAttachmentKeyRef.current !== promptRefinerAttachmentKey)) {
       // The preview belongs only to the exact authored source bytes. An edit
       // starts a new draft; no old execution prompt may follow it.
-      resetPromptRefinerFixture();
+      resetPromptRefinerState();
     }
-  }, [inputValue, resetPromptRefinerFixture]);
+  }, [inputValue, promptRefinerAttachmentKey, resetPromptRefinerState]);
 
   useEffect(
     () => () => {
       promptRefinerAbortControllerRef.current?.abort();
+      promptRefinerScopeAbortRef.current?.abort();
     },
     []
   );
@@ -1060,12 +1123,177 @@ export function ChatPageClient({
     // Conversation, identity and the server-owned offer mode bind this
     // fixture epoch. A same-text draft or late response cannot survive a
     // scope change or an off/on transition.
-    resetPromptRefinerFixture();
-  }, [promptRefinerScopeKey, resetPromptRefinerFixture]);
+    setPromptRefinerProductScope(null);
+    resetPromptRefinerState();
+  }, [promptRefinerScopeKey, resetPromptRefinerState]);
+
+  useEffect(() => {
+    const productEnabled =
+      promptRefinerProductRelease.explicitEnabled ||
+      promptRefinerProductRelease.autoEnabled;
+    const eligible = productEnabled && mountedSurface === "chat" &&
+      identityKey?.startsWith("account:") === true && Boolean(currentChatId);
+    const sequence = ++promptRefinerScopeSequenceRef.current;
+    const requestedScopeKey = promptRefinerScopeKey;
+    promptRefinerScopeAbortRef.current?.abort();
+    if (!eligible || !currentChatId) return;
+
+    const controller = new AbortController();
+    promptRefinerScopeAbortRef.current = controller;
+    const body = promptRefinerProductScopeRequestSchema.parse({
+      mountId: promptRefinerMountId,
+      conversationId: currentChatId,
+      surface: mountedSurface,
+    });
+    void fetch("/api/chat/prompt-refiner/scope", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    }).then(async (response) => {
+      const parsed = promptRefinerProductScopeResponseSchema.safeParse(
+        await response.json().catch(() => null)
+      );
+      if (!response.ok || !parsed.success ||
+          sequence !== promptRefinerScopeSequenceRef.current ||
+          requestedScopeKey !== promptRefinerScopeKeyRef.current ||
+          controller.signal.aborted) return;
+      setPromptRefinerProductScope(parsed.data);
+    }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        console.error("Prompt Refiner scope request failed.");
+      }
+    }).finally(() => {
+      if (promptRefinerScopeAbortRef.current === controller) {
+        promptRefinerScopeAbortRef.current = null;
+      }
+    });
+    return () => controller.abort();
+  }, [
+    currentChatId,
+    identityKey,
+    mountedSurface,
+    promptRefinerMountId,
+    promptRefinerProductRelease.autoEnabled,
+    promptRefinerProductRelease.explicitEnabled,
+    promptRefinerScopeKey,
+  ]);
 
   const handlePromptRefinerRequest = useCallback(
     (sourcePrompt: string) => {
-      if (promptRefinerMode !== "e2e_fixture") return;
+      if (promptRefinerMode !== "e2e_fixture") {
+        const productScope = promptRefinerProductScope;
+        if (!promptRefinerProductRelease.explicitEnabled || !productScope ||
+            mountedSurface !== "chat" || !currentChatId || isGuestMode ||
+            promptRefinerProductPreparationRef.current ||
+            promptRefinerProductSelection !== "none") return;
+
+        const requestSequence = ++promptRefinerRequestSequenceRef.current;
+        const request: PromptRefinerRequest = {
+          requestId: crypto.randomUUID(),
+          prompt: sourcePrompt,
+        };
+        const requestScopeKey = promptRefinerScopeKeyRef.current;
+        const attachmentKey = promptRefinerAttachmentKey;
+        const controller = new AbortController();
+        promptRefinerAbortControllerRef.current = controller;
+        promptRefinerBoundDraftRef.current = sourcePrompt;
+        promptRefinerBoundAttachmentKeyRef.current = attachmentKey;
+        promptRefinerResolutionRef.current = null;
+        promptRefinerProductProposalRef.current = null;
+        promptRefinerProductDecisionRef.current = null;
+        promptRefinerReadySuggestionRef.current = null;
+        setPromptRefinerState({ status: "requesting", request });
+
+        const task = (async () => {
+          let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = null;
+          try {
+            const capture = captureDraftSend(
+              { text: sourcePrompt, attachments },
+              currentChatId
+            );
+            preparedDraft = await prepareDraftSend(capture);
+            if (!preparedDraft || controller.signal.aborted ||
+                requestSequence !== promptRefinerRequestSequenceRef.current ||
+                requestScopeKey !== promptRefinerScopeKeyRef.current ||
+                promptRefinerDraftRef.current !== sourcePrompt ||
+                promptRefinerCurrentAttachmentKeyRef.current !== attachmentKey) return;
+
+            const body = promptRefinerProductProposalRequestSchema.parse({
+              conversationId: currentChatId,
+              scopeId: productScope.scopeId,
+              epoch: productScope.epoch,
+              draftRevision: preparedDraft.revision,
+            });
+            const response = await fetch("/api/chat/prompt-refiner/proposal", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify(body),
+              signal: controller.signal,
+            });
+            const value = await response.json().catch(() => null);
+            if (controller.signal.aborted ||
+                requestSequence !== promptRefinerRequestSequenceRef.current ||
+                requestScopeKey !== promptRefinerScopeKeyRef.current ||
+                promptRefinerDraftRef.current !== sourcePrompt ||
+                promptRefinerCurrentAttachmentKeyRef.current !== attachmentKey) return;
+            const parsed = parsePromptRefinerProductProposal({
+              value,
+              expectedScope: productScope,
+              sourcePrompt,
+            });
+            if (response.ok && parsed?.outcome === "ready") {
+              promptRefinerProductProposalRef.current = parsed.proposal;
+              promptRefinerReadySuggestionRef.current = parsed.proposal.suggestion;
+              setPromptRefinerState({
+                status: "ready",
+                suggestion: parsed.proposal.suggestion,
+              });
+              return;
+            }
+            promptRefinerProductProposalRef.current = null;
+            promptRefinerReadySuggestionRef.current = null;
+            setPromptRefinerState(response.status === 409 ||
+              parsed?.outcome === "fallback_original"
+              ? { status: "idle" }
+              : {
+                  status: "failed",
+                  request,
+                  failureCode: "product_response_unavailable",
+                });
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") return;
+            if (requestSequence !== promptRefinerRequestSequenceRef.current ||
+                requestScopeKey !== promptRefinerScopeKeyRef.current) return;
+            promptRefinerProductProposalRef.current = null;
+            promptRefinerReadySuggestionRef.current = null;
+            setPromptRefinerState(
+              promptRefinerDraftRef.current === sourcePrompt &&
+              promptRefinerCurrentAttachmentKeyRef.current === attachmentKey
+                ? {
+                    status: "failed",
+                    request,
+                    failureCode: "product_request_failed",
+                  }
+                : { status: "idle" }
+            );
+          } finally {
+            if (preparedDraft) abortDraftSend(preparedDraft);
+            if (promptRefinerAbortControllerRef.current === controller) {
+              promptRefinerAbortControllerRef.current = null;
+            }
+          }
+        })();
+        promptRefinerProductPreparationRef.current = task;
+        void task.finally(() => {
+          if (promptRefinerProductPreparationRef.current === task) {
+            promptRefinerProductPreparationRef.current = null;
+          }
+        });
+        return;
+      }
       // A validated acceptance is a read-only preview until the authored
       // draft changes. Do not clear its provenance for a second request.
       if (promptRefinerResolutionRef.current?.decision === "accepted") return;
@@ -1138,11 +1366,69 @@ export function ChatPageClient({
           }
           setPromptRefinerFixtureSettledSequence(requestSequence);
         });
-    }, [promptRefinerMode, identityKey, mountedSurface, currentChatId]
+    }, [
+      abortDraftSend,
+      attachments,
+      captureDraftSend,
+      currentChatId,
+      identityKey,
+      isGuestMode,
+      mountedSurface,
+      prepareDraftSend,
+      promptRefinerAttachmentKey,
+      promptRefinerMode,
+      promptRefinerProductRelease.explicitEnabled,
+      promptRefinerProductScope,
+      promptRefinerProductSelection,
+    ]
   );
 
   const handlePromptRefinerDecision = useCallback((resolution: PromptRefinerResolution) => {
-    if (promptRefinerMode !== "e2e_fixture") return;
+    if (promptRefinerMode !== "e2e_fixture") {
+      const proposal = promptRefinerProductProposalRef.current;
+      const changingAcceptedToOriginal =
+        promptRefinerProductSelection === "accepted" &&
+        resolution.decision === "kept_original";
+      const readySuggestion = promptRefinerReadySuggestionRef.current ??
+        (changingAcceptedToOriginal ? proposal?.suggestion ?? null : null);
+      const productScope = promptRefinerProductScope;
+      if (!promptRefinerProductRelease.explicitEnabled || !proposal ||
+          !readySuggestion || !productScope || !currentChatId ||
+          mountedSurface !== "chat" || isGuestMode ||
+          (promptRefinerProductSelection !== "none" &&
+            !changingAcceptedToOriginal) ||
+          proposal.scope.scopeId !== productScope.scopeId ||
+          proposal.scope.epoch !== productScope.epoch ||
+          proposal.suggestion.suggestionId !== readySuggestion.suggestionId ||
+          promptRefinerCurrentAttachmentKeyRef.current !==
+            promptRefinerBoundAttachmentKeyRef.current) return;
+      try {
+        const expected = resolvePromptRefinerDecision({
+          suggestion: readySuggestion,
+          currentPrompt: inputValue,
+          decision: resolution.decision,
+        });
+        if (JSON.stringify(expected) !== JSON.stringify(resolution)) {
+          throw new Error("prompt_refiner_product_resolution_forged");
+        }
+        // Consume the rendered choice synchronously. A second click from the
+        // same React frame cannot mint another browser decision for this hold.
+        promptRefinerReadySuggestionRef.current = null;
+        promptRefinerProductDecisionRef.current = promptRefinerChatDecision(
+          proposal,
+          expected.decision
+        );
+        promptRefinerResolutionRef.current = expected;
+        promptRefinerBoundDraftRef.current = null;
+        setPromptRefinerProductSelection(expected.decision);
+        setPromptRefinerState(expected.decision === "accepted"
+          ? { status: "accepted_preview", suggestion: readySuggestion }
+          : { status: "idle" });
+      } catch {
+        resetPromptRefinerState();
+      }
+      return;
+    }
     const readySuggestion = promptRefinerReadySuggestionRef.current;
     const readyScope = promptRefinerReadyScopeRef.current;
     if (!readySuggestion || !readyScope) {
@@ -1181,13 +1467,32 @@ export function ChatPageClient({
       if (error instanceof Error && error.message === "prompt_refiner_handoff_duplicate") {
         return;
       }
-      resetPromptRefinerFixture();
+      resetPromptRefinerState();
       return;
     }
-  }, [promptRefinerMode, identityKey, mountedSurface, currentChatId, inputValue, resetPromptRefinerFixture]);
+  }, [
+    currentChatId,
+    identityKey,
+    inputValue,
+    isGuestMode,
+    mountedSurface,
+    promptRefinerMode,
+    promptRefinerProductRelease.explicitEnabled,
+    promptRefinerProductScope,
+    promptRefinerProductSelection,
+    resetPromptRefinerState,
+  ]);
 
   const handlePromptRefinerDismiss = useCallback((requestId: string) => {
-    if (promptRefinerMode !== "e2e_fixture") return false;
+    if (promptRefinerMode !== "e2e_fixture") {
+      if (promptRefinerState.status !== "failed" ||
+          promptRefinerState.request.requestId !== requestId ||
+          promptRefinerDraftRef.current !== promptRefinerState.request.prompt ||
+          promptRefinerCurrentAttachmentKeyRef.current !==
+            promptRefinerBoundAttachmentKeyRef.current) return false;
+      resetPromptRefinerState();
+      return true;
+    }
     const dismissable = promptRefinerState.status === "failed"
       ? promptRefinerState.request
       : promptRefinerState.status === "ready" ||
@@ -1204,9 +1509,9 @@ export function ChatPageClient({
     if (promptRefinerDraftRef.current !== sourcePrompt) return false;
     // Dismissal discards only fixture state. The controlled composer and
     // durable authored draft have never received the synthetic proposal.
-    resetPromptRefinerFixture();
+    resetPromptRefinerState();
     return true;
-  }, [promptRefinerMode, promptRefinerState, resetPromptRefinerFixture]);
+  }, [promptRefinerMode, promptRefinerState, resetPromptRefinerState]);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -1294,6 +1599,7 @@ export function ChatPageClient({
     admissionToken?: string | null;
     contextBundle?: string | null;
     contextLayout?: "single" | "comparison";
+    promptRefinerDecision?: PromptRefinerProductChatDecision;
   } | null>(null);
   const providerDispatchedPromptIdsRef = useRef<Set<string>>(new Set());
   const pendingDurableUndispatchedTurnsRef = useRef(new Map<string, {
@@ -1467,6 +1773,24 @@ export function ChatPageClient({
   const [selectionMode, setSelectionMode] = useState<"manual" | "auto">("manual");
   const [autoSelectionOffered, setAutoSelectionOffered] = useState(false);
   const [selectionModePending, setSelectionModePending] = useState(false);
+  const promptRefinerProductExplicitFlowVisible =
+    promptRefinerProductSelection !== "kept_original" &&
+    (promptRefinerProductSelection === "accepted" ||
+      promptRefinerState.status !== "idle" ||
+      selectionMode !== "auto" ||
+      !promptRefinerProductRelease.autoEnabled);
+  const promptRefinerProductExplicitOffered =
+    promptRefinerMode !== "e2e_fixture" &&
+    promptRefinerProductRelease.explicitEnabled &&
+    Boolean(promptRefinerProductScope) &&
+    mountedSurface === "chat" &&
+    !isGuestMode &&
+    Boolean(currentChatId) &&
+    promptRefinerProductExplicitFlowVisible;
+  const promptRefinerOffered =
+    promptRefinerFixtureOffered || promptRefinerProductExplicitOffered;
+  const promptRefinerProductMode =
+    !promptRefinerFixtureOffered && promptRefinerProductExplicitOffered;
   // What `inherit` currently resolves to, so the menu can say which way that
   // choice points rather than only that it follows something. Fetched once
   // per signed-in session; "on" until it answers, matching the server's own
@@ -2382,6 +2706,21 @@ export function ChatPageClient({
     },
     []
   );
+  const handlePromptRefinerExecution = useCallback((input: {
+    promptId: string | null;
+    execution: "applied" | "original";
+    mode: "explicit" | "auto";
+  }) => {
+    if (input.mode !== "auto" || input.execution !== "applied" ||
+        !input.promptId || promptPayload?.id !== input.promptId ||
+        promptPayload.chatId !== currentChatId || !promptRefinerProductScope) return;
+    const copy = promptRefinerCopy[lang] ?? promptRefinerCopy.en;
+    const skipScope = `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`;
+    showToast(copy.autoApplied, "info", {
+      label: copy.useOriginalNext,
+      onClick: () => setPromptRefinerSkipAutoScope(skipScope),
+    });
+  }, [currentChatId, lang, promptPayload, promptRefinerProductScope, showToast]);
 
   useEffect(() => {
     showToastRef.current = showToast;
@@ -3598,7 +3937,7 @@ export function ChatPageClient({
     }, [fetchConversations, mountedSurface, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
-        resetPromptRefinerFixture();
+        resetPromptRefinerState();
         if (mountedSurface === "continuation" && identityKey) {
             // This route transition unmounts the continuation tree. Promote
             // accepted turns before changing the selection ticket so their
@@ -3708,7 +4047,7 @@ export function ChatPageClient({
             // Chat draft to a second provider-facing workspace either.
             return;
         }
-        resetPromptRefinerFixture();
+        resetPromptRefinerState();
         conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
@@ -3781,7 +4120,7 @@ export function ChatPageClient({
     };
 
     const handleNewImage = () => {
-        resetPromptRefinerFixture();
+        resetPromptRefinerState();
         conversationSelectionTicketRef.current = allocateConversationSelectionTicket();
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
@@ -4882,6 +5221,19 @@ export function ChatPageClient({
     // left. See lib/chatContentState.ts.
     setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
     try {
+      const pendingRefinerPreparation = promptRefinerProductPreparationRef.current;
+      if (pendingRefinerPreparation) {
+        // Send means "use my original now" while an explicit proposal is
+        // pending. Abort the single paid attempt and wait for its durable draft
+        // freeze to be released before the ordinary send prepares that draft.
+        promptRefinerRequestSequenceRef.current += 1;
+        promptRefinerAbortControllerRef.current?.abort();
+        await pendingRefinerPreparation;
+        if (promptRefinerProductPreparationRef.current === pendingRefinerPreparation) {
+          promptRefinerProductPreparationRef.current = null;
+        }
+        resetPromptRefinerState();
+      }
       await runGlobalSubmit(options, owner);
     } finally {
       // Compare-and-delete, never plain clear: A may finish after B has
@@ -4944,6 +5296,58 @@ export function ChatPageClient({
     const isOverrideSend = typeof options?.overrideText === "string";
     if (!trimmed && isOverrideSend) return;
     if ((!trimmed && attachments.length === 0) || selectedModels.length === 0) return;
+    const productResolution = !isOverrideSend
+      ? promptRefinerResolutionRef.current
+      : null;
+    const productProposal = !isOverrideSend
+      ? promptRefinerProductProposalRef.current
+      : null;
+    const productDecision = !isOverrideSend
+      ? promptRefinerProductDecisionRef.current
+      : null;
+    const explicitProductSend = promptRefinerProductSelection !== "none"
+      ? resolvePromptRefinerExplicitSend({
+          proposal: productProposal,
+          resolution: productResolution,
+          decision: productDecision,
+          currentScope: promptRefinerProductScope,
+          currentPrompt: inputValue,
+          boundAttachmentKey: promptRefinerBoundAttachmentKeyRef.current,
+          currentAttachmentKey: promptRefinerAttachmentKey,
+        })
+      : null;
+    const explicitProductDecisionIsCurrent = Boolean(explicitProductSend);
+    if ((productDecision || productResolution || productProposal) &&
+        !explicitProductDecisionIsCurrent) {
+      resetPromptRefinerState();
+    }
+    const explicitPromptRefinerDecision = explicitProductDecisionIsCurrent
+      ? explicitProductSend!.decision
+      : null;
+    const explicitPromptRefinerClientRequestId = explicitProductDecisionIsCurrent
+      ? explicitProductSend!.clientRequestId
+      : null;
+    const autoProductConversationEligible = !isOverrideSend &&
+      mountedSurface === "chat" && !isGuestMode && Boolean(currentChatId) &&
+      selectionMode === "auto" && promptRefinerProductRelease.autoEnabled &&
+      Boolean(promptRefinerProductScope) && !explicitPromptRefinerDecision;
+    const productScopeToken = promptRefinerProductScope
+      ? `${promptRefinerProductScope.scopeId}:${promptRefinerProductScope.epoch}`
+      : null;
+    const skipAutoForThisTurn =
+      autoProductConversationEligible &&
+      promptRefinerSkipAutoScope === productScopeToken;
+    const requestAutoPrepare =
+      autoProductConversationEligible && !skipAutoForThisTurn;
+    // Product turns retain exact authored bytes. The browser never substitutes
+    // the proposed execution text into the Message or durable draft.
+    const authoredPrompt = explicitPromptRefinerDecision
+      ? explicitProductSend!.authoredPrompt
+      : promptRefinerAuthoredPromptForSend({
+          rawPrompt: inputValue,
+          ordinaryPrompt: trimmed,
+          productTurn: requestAutoPrepare || skipAutoForThisTurn,
+        });
     if (mountedSurface === "chat" && latestModelSettingsRef.current.models.length !== 1) {
       showToast(t("chat.singleModelRequired"), "info");
       return;
@@ -4957,7 +5361,7 @@ export function ChatPageClient({
     // cleared once this send has actually been accepted.
     const originScopeId = currentChatId;
     const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
-      ? captureDraftSend({ text: trimmed, attachments }, originScopeId)
+      ? captureDraftSend({ text: authoredPrompt, attachments }, originScopeId)
       : null;
     // A new blank draft is a new intent even when its id and model stay equal.
     const preparedSelectionTicket = conversationSelectionTicketRef.current;
@@ -5280,7 +5684,7 @@ export function ChatPageClient({
       const preflight = await runComparisonPreflight({
         comparisonId,
         conversationId: activeChatId,
-        prompt: trimmed,
+        prompt: authoredPrompt,
         promptAttachments,
         modelIds: activeModelIds,
         ...(options?.webSearchOverride
@@ -5302,12 +5706,9 @@ export function ChatPageClient({
           : await prepareChatContextBundle({
               conversationId: isGuestMode ? null : activeChatId,
               modelIds: activeModelIds,
-              prompt: trimmed,
+               prompt: authoredPrompt,
             });
 	  if (!chatSendIsCurrent()) return;
-	  const userRequestId = crypto.randomUUID();
-      let userMsgId = userRequestId;
-
       let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = null;
       if (draftSendCapture) {
         preparedDraft = await prepareDraftSend(draftSendCapture);
@@ -5322,6 +5723,45 @@ export function ChatPageClient({
           return;
         }
       }
+
+      let promptRefinerDecisionForSend = explicitPromptRefinerDecision;
+      let userRequestId = explicitPromptRefinerClientRequestId ??
+        crypto.randomUUID();
+      if (requestAutoPrepare && preparedDraft && promptRefinerProductScope) {
+        try {
+          const response = await fetch("/api/chat/prompt-refiner/prepare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify(promptRefinerProductProposalRequestSchema.parse({
+              conversationId: activeChatId,
+              scopeId: promptRefinerProductScope.scopeId,
+              epoch: promptRefinerProductScope.epoch,
+              draftRevision: preparedDraft.revision,
+            })),
+          });
+          const value = await response.json().catch(() => null);
+          const prepared = response.ok
+            ? parsePromptRefinerProductAutoPrepare(
+                value,
+                promptRefinerProductScope
+              )
+            : null;
+          if (prepared?.outcome === "auto_held") {
+            promptRefinerDecisionForSend = prepared.decision;
+            userRequestId = prepared.clientRequestId;
+          }
+        } catch {
+          // One attempt only. Transport and malformed responses fall back to
+          // the authored original and never trigger another Refiner or Chat
+          // request from this send path.
+        }
+        if (!chatSendIsCurrent()) {
+          abortDraftSend(preparedDraft);
+          return;
+        }
+      }
+      let userMsgId = userRequestId;
 
       /*
         The user's turn is saved with its files, not with their names.
@@ -5361,7 +5801,7 @@ export function ChatPageClient({
         } = {
           clientRequestId: userRequestId,
           role: "user" as const,
-          content: trimmed,
+          content: authoredPrompt,
           ...(carriesStoredAttachments
             ? { attachmentReferences: promptAttachmentReferences }
             : promptUploadIds.length
@@ -5658,11 +6098,11 @@ export function ChatPageClient({
       trackProductEvent(previousCount === 0 ? "chat_started" : "followup_sent",
         activeModelIds.length, { conversation_mode: isGuestMode ? "guest" : "account" });
       promptCountsRef.current.set(activeChatId, previousCount + 1);
-      if (previousCount === 0 && trimmed) {
+      if (previousCount === 0 && authoredPrompt.trim()) {
         firstTurnTitleTrackingRef.current.set(comparisonId, {
           chatId: activeChatId,
           interimTitle: justCreatedTitle ?? conversation?.title ?? t("sidebar.newChat"),
-          firstPromptText: trimmed,
+          firstPromptText: authoredPrompt,
         });
       }
 
@@ -5672,9 +6112,9 @@ export function ChatPageClient({
       contextRepreflightInputsRef.current.set(comparisonId, {
         conversationId: isGuestMode ? null : activeChatId,
         modelIds: activeModelIds,
-        prompt: trimmed,
+        prompt: authoredPrompt,
       });
-      localComparisonQuestionsRef.current.set(comparisonId, trimmed);
+      localComparisonQuestionsRef.current.set(comparisonId, authoredPrompt);
       /*
         The question a Deep Research expansion could be offered for, recorded
         at the one place a send is accepted.
@@ -5688,12 +6128,12 @@ export function ChatPageClient({
       setDeepResearchSuggestionTurn(
         options?.deepResearchDepth ||
           activeModelIds.includes(DEEP_RESEARCH_MODEL_ID) ||
-          !trimmed
+          !authoredPrompt.trim()
           ? null
           : {
               conversationId: activeChatId,
               promptId: comparisonId,
-              text: trimmed,
+              text: authoredPrompt,
               attachments: savedAttachments.map((attachment) => ({
                 name: attachment.name,
                 mediaType: attachment.mediaType,
@@ -5719,11 +6159,11 @@ export function ChatPageClient({
         options?.webSearchOverride === "always" ||
         isWebSearchEnabled(webSearchMode);
       setWebSearchSuggestionTurn(
-        trimmed
+        authoredPrompt.trim()
           ? {
               conversationId: activeChatId,
               promptId: comparisonId,
-              text: trimmed,
+              text: authoredPrompt,
               attachments: savedAttachments.map((attachment) => ({
                 name: attachment.name,
                 mediaType: attachment.mediaType,
@@ -5737,7 +6177,7 @@ export function ChatPageClient({
             }
           : null
       );
-      if (options?.webSearchOverride === "always" && trimmed) {
+      if (options?.webSearchOverride === "always" && authoredPrompt.trim()) {
         /*
           This send *is* the offer's re-run. Claimed here rather than in the
           handler because here is where a send stops being a request and
@@ -5749,7 +6189,7 @@ export function ChatPageClient({
         webSearchRetryOutcomeRef.current = {
           promptId: comparisonId,
           conversationId: activeChatId,
-          text: trimmed,
+          text: authoredPrompt,
           expected: activeModelIds.length,
           reported: new Set<string>(),
           searched: false,
@@ -5762,7 +6202,7 @@ export function ChatPageClient({
       if (pendingScreenDisabled) setDisabledPanels(pendingScreenDisabled);
       setPromptPayload({
         id: comparisonId,
-        text: trimmed,
+        text: authoredPrompt,
         chatId: activeChatId,
         userMessageId: userMsgId,
         messageWasDurablySaved: messageWasSaved,
@@ -5790,7 +6230,12 @@ export function ChatPageClient({
         // whenever the context had nothing to price.
         contextLayout,
         ...(contextBundle ? { contextBundle } : {}),
+        ...(promptRefinerDecisionForSend
+          ? { promptRefinerDecision: promptRefinerDecisionForSend }
+          : {}),
       });
+      if (skipAutoForThisTurn) setPromptRefinerSkipAutoScope(null);
+      if (explicitPromptRefinerDecision) resetPromptRefinerState();
       // The single point where a draft is cleared by sending: the prompt is
       // now on its way, so this conversation's draft is spent. Every earlier
       // return above -- no model, guest limit, conversation create, model
@@ -8199,9 +8644,11 @@ export function ChatPageClient({
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
+          promptRefinerProductMode={promptRefinerProductMode}
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
+          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -8341,9 +8788,11 @@ export function ChatPageClient({
           onVoiceTranscript={handleVoiceTranscript}
           promptRefinerOffered={promptRefinerOffered}
           promptRefinerState={promptRefinerState}
+          promptRefinerProductMode={promptRefinerProductMode}
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
           onPromptRefinerDismiss={handlePromptRefinerDismiss}
+          onPromptRefinerExecution={handlePromptRefinerExecution}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}

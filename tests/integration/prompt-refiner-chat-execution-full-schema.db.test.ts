@@ -9,6 +9,7 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
   if (!rawUrl) return;
   const url = new URL(rawUrl);
   assert.match(decodeURIComponent(url.pathname), /(?:^|[_-])test(?:[_-]|$)/);
+  assert.ok(["127.0.0.1", "localhost"].includes(url.hostname), "synthetic loopback database only");
   process.env.DATABASE_URL = rawUrl;
   Object.assign(process.env, { NODE_ENV: "test" });
   process.env.NEXTAUTH_SECRET ||= "refiner-full-schema-synthetic-secret";
@@ -71,6 +72,65 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
       const readback = await readChatResponseAttempt(userId, assistantMessageId, conversationId);
       assert.equal(readback?.sourceUserMessageId, snapshot.sourceMessageId);
       assert.equal((await prisma.chatResponseAttempt.count({ where: { userId } })), 1);
+    });
+    await t.test("product source binding and immutable receipts share the real authored Message transaction", async () => {
+      await prisma.chatComposerDraft.create({ data: { userId, scopeKey: conversationId,
+        conversationId, text: original, attachmentReferences: [] } });
+      const productSnapshot = await store.capturePromptRefinerChatDraft({ userId,
+        conversationId, scopeId: scope.id, epoch: scope.epoch });
+      assert.equal((await store.claimPromptRefinerProductAttempt({
+        snapshot: productSnapshot, mode: "explicit" })).outcome, "claimed");
+      const requestedAt = new Date(Date.now() - 30).toISOString();
+      const productHeld = await store.holdPromptRefinerProductChatSuggestion({
+        snapshot: productSnapshot, mode: "explicit",
+        deadlineAtMonotonicMs: performance.now() + 13_000, response: {
+          requestId: productSnapshot.requestId, suggestionId: randomUUID(),
+          refinedPrompt: "Product server-held execution text.", refinerVersion: "suggest-v2",
+          inputScope: "current_user_turn_text_only",
+        }, executionReceipt: {
+          receiptVersion: "prompt-refiner-execution-v1", refinerVersion: "suggest-v2",
+          provider: "openai", modelId: "gpt-5-6-luna",
+          adapterVersion: "prompt-refiner-product-adapter-v1", outcome: "suggested",
+          failureLayer: "none", failureCode: null, requestedAt,
+          dispatchedAt: new Date(Date.now() - 20).toISOString(),
+          completedAt: new Date(Date.now() - 10).toISOString(), preparationLatencyMs: 20,
+          inputTokens: 100, cachedInputTokens: 0, outputTokens: 20,
+          reasoningTokens: 2, actualCostMicroUsd: 44, retryCount: 0,
+        },
+      });
+      await prisma.$transaction(async tx => {
+        await consumeChatDraftForMessage(tx, { userId, conversationId,
+          draftConsume: { scopeKey: conversationId,
+            expectedRevision: productSnapshot.draftRevision,
+            messageId: productSnapshot.sourceMessageId },
+          message: { id: productSnapshot.sourceMessageId, content: original,
+            attachmentReferences: [] } });
+        await tx.message.create({ data: { id: productSnapshot.sourceMessageId,
+          conversationId, role: "user", content: original } });
+      });
+      const bound = await prisma.promptRefinerProductAttempt.findUniqueOrThrow({
+        where: { id: productSnapshot.requestId } });
+      assert.equal(bound.sourceMessageId, productSnapshot.sourceMessageId);
+      const productView = await store.consumePromptRefinerChatExecution({ userId,
+        conversationId, sourceMessageId: productSnapshot.sourceMessageId,
+        messages: [{ id: productSnapshot.sourceMessageId, role: "user", content: original }],
+        decision: { suggestionId: productHeld.suggestionId, scopeId: scope.id,
+          epoch: scope.epoch, decision: "accepted" } });
+      assert.equal(productView.executionMessages.at(-1)?.content, "Product server-held execution text.");
+      assert.equal((await prisma.message.findUniqueOrThrow({
+        where: { id: productSnapshot.sourceMessageId } })).content, original);
+      assert.equal(await prisma.promptRefinerProductDispositionReceipt.count({
+        where: { executionReceiptId: productHeld.executionReceiptId! } }), 1);
+      await assert.rejects(prisma.promptRefinerProductExecutionReceipt.update({
+        where: { id: productHeld.executionReceiptId! }, data: { retryCount: 0 } }), /immutable/);
+      const actions = await prisma.adminAuditLog.findMany({ where: {
+        targetId: productSnapshot.requestId }, orderBy: { createdAt: "asc" } });
+      assert.deepEqual(actions.map(row => row.action), [
+        "prompt_refiner.product_attempt_claimed", "prompt_refiner.product_attempt_transitioned",
+        "prompt_refiner.product_source_bound",
+      ]);
+      assert.equal(JSON.stringify(actions).includes(original), false);
+      assert.equal((await verifyAdminAuditIntegrity()).valid, true);
     });
   } finally {
     await prisma.user.deleteMany({ where: { id: userId } }); await prisma.$disconnect();

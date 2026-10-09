@@ -1152,11 +1152,12 @@ async function handleChatPost(
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
         let executionMessages = messages;
+        let refinerExecution: { mode: "explicit" | "auto"; applied: boolean } | null = null;
         if (promptRefinerDecision !== undefined) {
             if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
                 throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
             }
-            const release = promptRefinerChatExecutionRelease();
+            const release = await promptRefinerChatExecutionRelease();
             if (!release.explicitEnabled && !release.autoEnabled) {
                 throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
             }
@@ -1171,6 +1172,7 @@ async function handleChatPost(
                     messages, decision: promptRefinerDecision,
                 });
                 executionMessages = [...view.executionMessages];
+                refinerExecution = { mode: view.mode, applied: view.provenance.decision === "accepted" };
             } catch (error) {
                 throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
                     "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
@@ -6211,6 +6213,12 @@ async function handleChatPost(
         if (autoSelection.routed) {
             headers.set("X-Chat-Routed-Model", autoSelection.modelId);
             headers.set("X-Chat-Routed-Reason", autoSelection.record.selectionReason);
+        }
+        // These content-free facts describe the server-consumed decision.
+        // They carry no proposal text and grant no authority to a later send.
+        if (refinerExecution) {
+            headers.set("X-Prompt-Refiner-Execution", refinerExecution.applied ? "applied" : "original");
+            headers.set("X-Prompt-Refiner-Mode", refinerExecution.mode);
         }
         if (accessGrant.setCookie) {
             headers.append("Set-Cookie", accessGrant.setCookie);

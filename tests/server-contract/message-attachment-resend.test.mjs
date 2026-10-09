@@ -59,6 +59,12 @@ const db = {
     kind: state.conversationKind,
     productKey: state.conversationProductKey,
   } : null },
+  $queryRaw: async (strings) => {
+    const query = strings.join("?");
+    assert.match(query, /FROM "PromptRefinerProductAttempt" a/);
+    assert.match(query, /FOR UPDATE OF a/);
+    return []; // These ordinary attachment sends have no Refiner preparation.
+  },
   $executeRaw: async () => 1,
 };
 const prisma = { ...db, $transaction: async (callback) => {

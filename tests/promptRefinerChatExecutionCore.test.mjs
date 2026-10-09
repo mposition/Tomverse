@@ -52,8 +52,10 @@ test("automatic mode needs separate server authority and Auto conversation", () 
   input.facts.autoConversation = false; refuse(input);
   input.held.mode = "explicit"; input.facts.explicitEnabled = false; refuse(input);
 });
-test("the checked-in release has neither explicit nor automatic activation", () => {
-  assert.deepEqual(promptRefinerChatExecutionRelease(), { explicitEnabled: false, autoEnabled: false });
+test("the checked-in release has neither explicit nor automatic activation", async () => {
+  const release = await promptRefinerChatExecutionRelease();
+  assert.equal(release.explicitEnabled, false);
+  assert.equal(release.autoEnabled, false);
 });
 for (const [name, modify] of [
   ["replay", x => { x.held.state = "consumed"; }],

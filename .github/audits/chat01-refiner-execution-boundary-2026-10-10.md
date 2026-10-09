@@ -1,6 +1,69 @@
 # CHAT-01 Refiner Chat execution 경계 — 2026-10-10
 
-상태: **default-off 서버 경계 구현·로컬 검증. 제품 연결 완료 아님.**
+상태: **default-off 제품 코드 구현·로컬 통합 검증. 독립 검토·활성 배포 미완료.**
+
+## 제품 연결 코드 확장
+
+아래 초기 경계 구현에 제품 scope/proposal/prepare API와 composer를 연결했다.
+서버는 정확한 draft revision·scope epoch·mode별 durable attempt를 비용 예약 전에
+선점한다. 응답 유실은 같은 저장 제안 ID만 반환하고 preparing/terminal/unknown
+재요청은 재호출하지 않는다. Message 저장 transaction은 held draft id/revision과
+source Message를 결속한다. draft를 삭제해도 attempt tombstone은 남고 같은 바이트
+revision ABA는 거부된다. 브라우저는 identifier-only 결정을 보낸다.
+
+수동 제안은 채택 또는 원문 유지 후 통상 Send로 전송한다. 자동 적용은 이미 Auto인
+stored Chat 대화에서 승인된 release를 읽은 통상 Send 준비만 허용한다. 제안 API,
+브라우저 boolean, fixture나 flag 하나가 provider/Auto 권한을 만들지 않는다.
+AGENTS와 UI 계약에 이 좁은 예외 및 서버 경계를 정식 변경으로 포함했으며, 이 변경도
+필수 독립 검토 대상이다.
+
+제품 adapter는 기존 평가의 prompt/parser/validator/model/price pin을 재사용하고
+별도 13초 전체 요청 deadline과 retry 0을 적용한다. 늦은 admission은 dispatch하지
+않고, 늦은 provider/정산 결과는 held 제안으로 publish하지 않는다. one-shot 평가의
+15초 계약·slot·기존 migration은 변경하지 않았다.
+
+Brisbane 일 US$100·월 US$3,000의 공통 운영 예산에서 explicit/auto 비용을 별도
+mode로 기록한다. 사용자 credits와 분리해 최악 비용 29,918 microUSD를 예약하고,
+신뢰한 adapter intent 후 verified billed만 정산한다. 미사용 차액은 환급하고,
+confirmed undispatched만 release하며, unknown은 전액 hold와 terminal로 보존한다.
+execution/disposition receipt는 content-free이며 UPDATE/DELETE/TRUNCATE를 막는다.
+상태·예산 전이와 canonical audit는 각각 같은 transaction에 묶인다.
+
+최신 로컬 검증:
+
+- Chat execution 75/75: 기존 71 + 파일 있는 explicit 채택/원문 유지/Auto 3 + 검색
+  Auto 1. 실제 route에서 Router text/estimate, shadow text/profile, provider text와
+  단일 전송을 관측했다. 과거 authored Message와 첨부는 보존했다.
+- 제품 adapter/API/release/service와 owner release API 17/17, client 23/23.
+- 빈 loopback PostgreSQL 17 DB에 269개 migration 적용 및 Prisma schema drift 없음.
+  제품/예산 DB 통합 24/24. exact source bind, same-bytes revision ABA, canonical
+  hash chain, immutable receipts, 재접속/동시 소비, 예산 정산·unknown hold를 포함한다.
+- audit/protected writer 35/35, security regression 196개 통과.
+- strict lint와 독립 생성 Prisma client의 8GB typecheck, 최종 production build 통과.
+  build의 기존 broad filesystem 탐색 경고 8건은 남아 있다.
+- fixture 브라우저 회귀 96건 통과, 기존 project 조건으로 74건 건너뜀. Windows용
+  기준 이미지가 없는 mobile composer 시각 비교 2건은 실패로 기록하며 golden을
+  생성하거나 통과로 처리하지 않았다. canonical CI 비교는 별도다.
+- 새 검증 쿼리를 반영한 기존 maintenance/attachment mock 회귀 34/34 통과.
+  전체 server contract 재검증과 drawer/재접속 브라우저 회귀는 별도 기록한다.
+
+실제 staging readback(2026-10-09T17:39:23Z)은 READ ONLY transaction에서 내용 없는
+카운트와 boolean만 읽었다. v4/v5 각각 공식 B03G gate 0, owner disposition 0,
+limited audit 0이다. `feature.promptRefinerEnabled=false`, kill switch는 꺼져 있다.
+이것은 실제 제품 동작의 통과 기록이 아니다. signed 품질·제한 감사·exact deployment
+activation이 없으면 release는 explicit/auto 모두 닫힌다. 활성화 API도 별도 owner
+인증·recent authentication·origin·쓰기 off switch와 정확한 증거 결속을 요구한다.
+
+독립 검토는 초기 head의 첫 vendor만 accept이고 두 번째 vendor는 대기 중이다.
+위 제품 코드 확장은 새 최종 head로 검토해야 한다. 아직 자체 PR/push/병합/배포,
+활성 flag readback, 실사용 회귀는 없다. Auto Router 세 출시 판정도 모두 pending이다.
+예외 정책 승인을 서버 연결 완료나 Router 출시 판정으로 대체하지 않는다.
+실제 holdout 원문·정답·rubric·반례는 요청하거나 열람하지 않았다.
+
+## 초기 서버 경계 검증 기록
+
+아래는 제품 caller를 붙이기 전 단계의 기록이다. 위 확장이 구현 범위와 현재 상태를
+갱신하며, 아래 검증 수치를 최신 테스트 합계에 다시 더하지 않는다.
 
 ## 구현
 

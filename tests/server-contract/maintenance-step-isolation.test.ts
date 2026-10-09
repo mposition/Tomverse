@@ -103,6 +103,12 @@ const prismaStub = {
   mobileAuthEvent: { deleteMany: async () => ({ count: 32 }) },
   mobileLoginGrant: { deleteMany: async () => ({ count: 33 }) },
   mobileRefreshRotation: { deleteMany: async () => ({ count: 34 }) },
+  $queryRaw: async (strings: TemplateStringsArray) => {
+    const query = strings.join("?");
+    assert.match(query, /SELECT "id" FROM "PromptRefinerChatSuggestion"/);
+    assert.match(query, /FOR UPDATE SKIP LOCKED/);
+    return [];
+  },
   $executeRaw: async () => 9,
   $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(prismaStub),
 };

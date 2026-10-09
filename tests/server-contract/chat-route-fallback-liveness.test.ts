@@ -372,6 +372,16 @@ type MockStoredAttachment = {
 };
 let persistedSourceAttachments: MockStoredAttachment[] = [];
 let resolvedAttachmentRows: MockStoredAttachment[] = [];
+const syntheticR2Objects = new Map<string, Buffer>();
+const realR2 = require(resolve(ROOT, "lib/r2.ts")) as typeof import("../../lib/r2");
+mock.module(mod("lib/r2.ts"), { namedExports: {
+  ...realR2,
+  readR2Object: async (key: string) => {
+    const body = syntheticR2Objects.get(key);
+    assert.ok(body, "this contract suite must never read live storage");
+    return Buffer.from(body);
+  },
+} });
 let conversationProductKey: "chat" | "review" = "chat";
 let messageFindFirstArgs: Array<Record<string, unknown>> = [];
 let lastDurableClaimInput: Record<string, unknown> | null = null;
@@ -790,7 +800,8 @@ const ask = async (
   ],
   includeSourceUserMessageId = true,
   withInjectedPrimaryFault = true,
-  refinerDecision?: "accepted" | "kept_original"
+  refinerDecision?: "accepted" | "kept_original",
+  webSearchMode: "off" | "always" = "off"
 ) => {
   fallbackBehaviour = behaviour;
   injectPrimaryFault = withInjectedPrimaryFault;
@@ -831,6 +842,7 @@ const ask = async (
         modelId: REQUESTED_MODEL_ID,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
+        webSearchMode,
         ...(includeSourceUserMessageId
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
           : {}),
@@ -895,6 +907,77 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   // The primary's stream is cancelled at the swap, so it is not left open and
   // billing after another model took the turn over.
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
+});
+
+for (const [mode, decision] of [
+  ["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"],
+] as const) test(`${mode} Refiner ${decision} preserves owned file context beside the execution text`, async () => {
+  refinerMode = mode;
+  refinerConsumes = 0;
+  conversationSelectionMode = mode === "auto" ? "auto" : "manual";
+  const file: MockStoredAttachment = {
+    id: "refiner-bound-file", uploadId: null, userId: USER_ID,
+    conversationId: CONVERSATION_ID, name: "notes.txt", mediaType: "text/plain",
+    kind: "text", size: 48, objectKey: `${attachmentObjectPrefix}refiner-notes.txt`,
+    unavailableAt: null, unavailableReason: null,
+  };
+  persistedSourceAttachments = [file];
+  resolvedAttachmentRows = [file];
+  syntheticR2Objects.set(file.objectKey, Buffer.from("Synthetic attachment facts: the launch date is Friday."));
+  const messages = [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘",
+    attachments: [{ id: file.id, attachmentId: file.id, name: file.name,
+      kind: file.kind, mediaType: file.mediaType, size: file.size }] }];
+  const authored = structuredClone(messages);
+  const expected = decision === "accepted" ? REFINER_PROMPT : messages[0].content;
+  try {
+    const { streamError, response } = await ask("answers", "claimed", 200, false, messages, true, false, decision);
+    assert.equal(streamError, null);
+    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), decision === "accepted" ? "applied" : "original");
+    assert.equal(routerInputs[0].text, expected);
+    assert.equal(routerInputs[0].reservedInputTokens, preflightInputEstimate([
+      { ...messages[0], content: expected },
+    ]).estimatedInputTokens);
+    assert.equal(routerInputs[0].attachmentsUnmeasurable, false);
+    assert.deepEqual(shadowInputs[0].profile, buildTaskProfile({ text: expected,
+      attachments: [], webSearchRequested: false }));
+    assert.equal(attempts.length, 1);
+    const content = attempts[0].messages.at(-1)!.content;
+    const text = typeof content === "string" ? content
+      : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
+    assert.ok(text.startsWith(expected), "the provider starts with the same verified user execution text");
+    assert.ok(text.includes("Synthetic attachment facts: the launch date is Friday."));
+    assert.ok(text.includes("<<<ATTACHED_FILE>>>"));
+    assert.deepEqual(messages, authored);
+    assert.deepEqual(persistedSourceAttachments, [file]);
+    assert.equal(refinerConsumes, 1);
+    assert.equal(ledger.accessAcquisitions, 1);
+  } finally {
+    persistedSourceAttachments = [];
+    resolvedAttachmentRows = [];
+    syntheticR2Objects.clear();
+    refinerMode = null;
+    conversationSelectionMode = "auto";
+  }
+});
+
+test("an Auto Refiner search turn profiles and dispatches the verified execution text once", async () => {
+  refinerMode = "auto";
+  refinerConsumes = 0;
+  try {
+    const { streamError } = await ask("answers", "claimed", 200, false, undefined, true, false, "accepted", "always");
+    assert.equal(streamError, null);
+    assert.equal(routerInputs[0].text, REFINER_PROMPT);
+    assert.equal(shadowInputs[0].profile.needsCurrentInformation, true);
+    assert.equal(attempts.length, 1);
+    const content = attempts[0].messages.at(-1)!.content;
+    const text = typeof content === "string" ? content
+      : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
+    assert.equal(text, REFINER_PROMPT);
+    assert.equal(refinerConsumes, 1);
+    assert.equal(ledger.accessAcquisitions, 1);
+  } finally {
+    refinerMode = null;
+  }
 });
 
 test("the first visible token belongs to the attempt that answered, not the one that died", async () => {
@@ -1295,10 +1378,12 @@ for (const [mode, decision] of [
   const authored = structuredClone(messages);
   const expectedPrompt = decision === "accepted" ? REFINER_PROMPT : messages.at(-1)!.content;
   try {
-    const { body, streamError } = await ask("answers", "claimed", 200, false, messages, true, false, decision);
+    const { body, streamError, response } = await ask("answers", "claimed", 200, false, messages, true, false, decision);
     assert.equal(streamError, null);
     assert.ok(body.startsWith(ANSWER));
     assert.equal(refinerConsumes, 1);
+    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), decision === "accepted" ? "applied" : "original");
+    assert.equal(response.headers.get("X-Prompt-Refiner-Mode"), mode);
     assert.equal(ledger.accessAcquisitions, 1);
     assert.equal(attempts.length, 1, "Refiner admission does not send another turn or enable provider retry");
     assert.equal(durableAttemptAdmissionCalls, 1);

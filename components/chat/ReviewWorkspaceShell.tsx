@@ -51,6 +51,8 @@ import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime"
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
+import { promptRefinerChatExecutionRelease } from
+  "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
@@ -107,6 +109,10 @@ export async function ReviewWorkspaceShell({
   let promptRefinerAvailableToDeployment = false;
   let promptRefinerFixtureAdapterEnabled = false;
   let promptRefinerFixtureModeRefreshEnabled = false;
+  let promptRefinerProductRelease = {
+    explicitEnabled: false,
+    autoEnabled: false,
+  };
   /*
     Whether the welcome screen offers the starter catalogue at all
     (docs/ui-contracts/chat-starter-catalog.md section 5).
@@ -180,7 +186,8 @@ export async function ReviewWorkspaceShell({
   // fixture mode (loopback origin + both E2E env vars), and production
   // readiness fails outright if those vars are ever set there
   // (lib/securityEnvironment.ts e2eBypassDisabled).
-  if (isE2EFixtureMode()) {
+  const fixtureMode = isE2EFixtureMode();
+  if (fixtureMode) {
     const jar = await cookies();
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
@@ -247,6 +254,16 @@ export async function ReviewWorkspaceShell({
     });
   }
 
+  if (mountedSurface === "chat" && !fixtureMode) {
+    const release = await promptRefinerChatExecutionRelease();
+    // Content-free capabilities only. Deployment ids, approval receipts and
+    // policy evidence remain server-side and the Review surface stays off.
+    promptRefinerProductRelease = {
+      explicitEnabled: release.explicitEnabled,
+      autoEnabled: release.autoEnabled,
+    };
+  }
+
   const promptRefinerOffered = promptRefinerOfferDecision({
     available: promptRefinerAvailableToDeployment,
     adapterReady: promptRefinerFixtureAdapterEnabled,
@@ -294,6 +311,7 @@ export async function ReviewWorkspaceShell({
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
+        promptRefinerProductRelease={promptRefinerProductRelease}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This

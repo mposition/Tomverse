@@ -32,8 +32,19 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
         $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => (await query(db, strings, values)).rowCount,
         conversation: { findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
           (await db.query(`SELECT "id", "chatRecoveryEpoch" FROM "Conversation" WHERE "id"=$1 AND "userId"=$2 AND "kind"='chat' AND "productKey"='chat'`, [where.id, where.userId])).rows[0] ?? null },
-        chatComposerDraft: { findUnique: async ({ where }: { where: { userId_scopeKey: { userId: string; scopeKey: string } } }) =>
-          (await db.query(`SELECT "id", "revision", "text" FROM "ChatComposerDraft" WHERE "userId"=$1 AND "conversationId"=$2`, [where.userId_scopeKey.userId, where.userId_scopeKey.scopeKey])).rows[0] ?? null },
+        message: { findFirst: async ({ where }: { where: { id: string; conversationId: string } }) => {
+          const row = (await db.query(`SELECT * FROM "Message" WHERE "id"=$1 AND "conversationId"=$2`,
+            [where.id, where.conversationId])).rows[0];
+          return row ? { ...row, modelId: null, attachments: [] } : null;
+        } },
+        chatComposerDraft: {
+          findUnique: async ({ where }: { where: { userId_scopeKey: { userId: string; scopeKey: string } } }) =>
+            (await db.query(`SELECT "id", "revision", "text", "attachmentReferences" FROM "ChatComposerDraft" WHERE "userId"=$1 AND "conversationId"=$2`, [where.userId_scopeKey.userId, where.userId_scopeKey.scopeKey])).rows[0] ?? null,
+          deleteMany: async ({ where }: { where: { userId: string; scopeKey: string; revision: number } }) => ({
+            count: (await db.query(`DELETE FROM "ChatComposerDraft" WHERE "userId"=$1 AND "conversationId"=$2 AND "revision"=$3`,
+              [where.userId, where.scopeKey, where.revision])).rowCount,
+          }),
+        },
       };
       const result = await work(tx); await db.query("COMMIT"); return result;
     } catch (error) { await db.query("ROLLBACK"); throw error; }
@@ -49,6 +60,7 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       CREATE TABLE "Message" ("id" TEXT PRIMARY KEY, "conversationId" TEXT, "role" TEXT, "content" TEXT);
       CREATE TABLE "TestAudit" ("id" TEXT PRIMARY KEY, "action" TEXT, "metadata" JSONB);`);
     await client.query(await readFile(resolve(root, "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql"), "utf8"));
+    await client.query(await readFile(resolve(root, "prisma/migrations/20261010100000_prompt_refiner_product_receipts/migration.sql"), "utf8"));
     await client.query(`INSERT INTO "User" VALUES ('owner'), ('other');
       INSERT INTO "Conversation" ("id","userId","kind","productKey") VALUES
       ('conversation','owner','chat','chat'), ('other-conversation','other','chat','chat');`);
@@ -69,11 +81,13 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       systemActor: string; action: string; metadata: unknown;
     }) => {
       if (auditFailure) throw new Error("synthetic audit failure");
-      assert.equal(input.systemActor, "prompt-refiner-chat-execution");
+      assert.ok(["prompt-refiner-chat-execution",
+        "prompt-refiner-product-execution"].includes(input.systemActor));
       assert.equal(JSON.stringify(input.metadata).includes("source"), false);
       return input.tx.$executeRaw`INSERT INTO "TestAudit" VALUES (${randomUUID()}, ${input.action}, ${JSON.stringify(input.metadata)}::jsonb)`;
     } } });
     const store = await import(mod("lib/promptRefinerChatExecutionStore.ts"));
+    const { consumeChatDraftForMessage } = await import(mod("lib/chatDraftMessageConsume.ts"));
     const setup = async (mode = "explicit") => {
       const scope = await store.advancePromptRefinerChatScope({ userId: "owner", conversationId: "conversation", surface: "chat", mountId: randomUUID() });
       await client.query(`DELETE FROM "ChatComposerDraft"`);
@@ -96,6 +110,41 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     };
     const row = async (id: string) => (await client.query(`SELECT * FROM "PromptRefinerChatSuggestion" WHERE "id"=$1`, [id])).rows[0];
     const refuse = (input: unknown) => assert.rejects(store.consumePromptRefinerChatExecution(input), /no longer available|persisted source message/);
+    const setupProduct = async (text: string, revision = 7) => {
+      const scope = await store.advancePromptRefinerChatScope({ userId: "owner",
+        conversationId: "conversation", surface: "chat", mountId: randomUUID() });
+      await client.query(`DELETE FROM "ChatComposerDraft"`);
+      const draftId = randomUUID();
+      await client.query(`INSERT INTO "ChatComposerDraft" ("id","userId","conversationId","revision","text")
+        VALUES ($1,'owner','conversation',$2,$3)`, [draftId, revision, text]);
+      const capture = () => store.capturePromptRefinerChatDraft({ userId: "owner",
+        conversationId: "conversation", scopeId: scope.id, epoch: scope.epoch,
+        expectedDraftRevision: revision });
+      const first = await capture(); const second = await capture();
+      const claims = await Promise.all([
+        store.claimPromptRefinerProductAttempt({ snapshot: first, mode: "explicit" }),
+        store.claimPromptRefinerProductAttempt({ snapshot: second, mode: "explicit" }),
+      ]);
+      const snapshot = claims[0].outcome === "claimed" ? first : second;
+      const requestedAt = new Date();
+      const held = await store.holdPromptRefinerProductChatSuggestion({
+        snapshot, mode: "explicit", deadlineAtMonotonicMs: performance.now() + 5_000,
+        response: { requestId: snapshot.requestId, suggestionId: randomUUID(),
+          refinedPrompt: "Execute this refined product prompt.",
+          refinerVersion: "suggest-v2", inputScope: "current_user_turn_text_only" },
+        executionReceipt: {
+          receiptVersion: "prompt-refiner-execution-v1",
+          refinerVersion: "suggest-v2", provider: "openai",
+          modelId: "gpt-5-6-luna", adapterVersion: "prompt-refiner-product-adapter-v1",
+          outcome: "suggested", failureLayer: "none", failureCode: null,
+          requestedAt: requestedAt.toISOString(), dispatchedAt: requestedAt.toISOString(),
+          completedAt: requestedAt.toISOString(), preparationLatencyMs: 0,
+          inputTokens: 10, cachedInputTokens: 0, outputTokens: 5,
+          reasoningTokens: 1, actualCostMicroUsd: 9, retryCount: 0,
+        },
+      });
+      return { scope, draftId, snapshot, held, claims };
+    };
 
     await t.test("default-off refuses and does not consume", async () => {
       const f = await setup(); await f.save(); await refuse(f.input);
@@ -188,10 +237,82 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       assert.equal((await row(f.held.suggestionId)).sourcePrompt, null);
       await assert.rejects(store.expirePromptRefinerChatSuggestions(101), /no longer available/);
     });
+    await t.test("one draft epoch admits one product attempt and replays its held result", async () => {
+      const text = "product source remains authored";
+      const { scope, snapshot, held, claims } = await setupProduct(text);
+      assert.equal(claims.filter(value => value.outcome === "claimed").length, 1);
+      assert.equal(claims.filter(value => value.outcome === "duplicate").length, 1);
+      const capture = () => store.capturePromptRefinerChatDraft({ userId: "owner",
+        conversationId: "conversation", scopeId: scope.id, epoch: scope.epoch,
+        expectedDraftRevision: 7 });
+      const replay = await store.claimPromptRefinerProductAttempt({
+        snapshot: await capture(), mode: "explicit" });
+      assert.equal(replay.outcome, "replay");
+      if (replay.outcome === "replay") {
+        assert.equal(replay.held.suggestionId, held.suggestionId);
+        assert.equal(replay.held.clientRequestId, held.clientRequestId);
+      }
+      assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerProductAttempt"`)).rows[0].n, 1);
+      assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerProductExecutionReceipt"`)).rows[0].n, 1);
+
+      await transaction(async tx => {
+        await consumeChatDraftForMessage(tx as never, { userId: "owner",
+          conversationId: "conversation",
+          draftConsume: { scopeKey: "conversation", expectedRevision: 7,
+            messageId: snapshot.sourceMessageId },
+          message: { id: snapshot.sourceMessageId, content: text,
+            attachmentReferences: [] } });
+        await (tx.$executeRaw as (strings: TemplateStringsArray,
+          ...values: unknown[]) => Promise<unknown>)`
+          INSERT INTO "Message" VALUES (${snapshot.sourceMessageId},
+            'conversation', 'user', ${text})
+        `;
+      });
+      const boundAttempt = (await client.query(`SELECT "id", "sourceMessageId", "state", "suggestionId"
+        FROM "PromptRefinerProductAttempt"`)).rows[0];
+      assert.equal(boundAttempt.id, snapshot.requestId);
+      assert.equal(boundAttempt.sourceMessageId, snapshot.sourceMessageId);
+      assert.equal(boundAttempt.state, "held");
+      assert.equal(boundAttempt.suggestionId, held.suggestionId);
+      await store.consumePromptRefinerChatExecution({ userId: "owner",
+        conversationId: "conversation", sourceMessageId: snapshot.sourceMessageId,
+        messages: [{ id: snapshot.sourceMessageId, role: "user", content: text }],
+        decision: { suggestionId: held.suggestionId, scopeId: held.scopeId,
+          epoch: held.epoch, decision: "accepted" } });
+      const receiptId = (await client.query(`SELECT "id" FROM "PromptRefinerProductExecutionReceipt"`)).rows[0].id;
+      const dispositionId = (await client.query(`SELECT "id" FROM "PromptRefinerProductDispositionReceipt"`)).rows[0].id;
+      await assert.rejects(client.query(`UPDATE "PromptRefinerProductExecutionReceipt" SET "retryCount"=0 WHERE "id"=$1`, [receiptId]), /immutable/);
+      await assert.rejects(client.query(`DELETE FROM "PromptRefinerProductDispositionReceipt" WHERE "id"=$1`, [dispositionId]), /immutable/);
+      await assert.rejects(client.query(`TRUNCATE "PromptRefinerProductDispositionReceipt" CASCADE`), /truncate_forbidden/);
+    });
+    await t.test("same-bytes draft ABA cannot bind an old product attempt", async () => {
+      const text = "same bytes must not restore old authority";
+      const { draftId, snapshot, held } = await setupProduct(text, 11);
+      await client.query(`UPDATE "ChatComposerDraft" SET "revision"=12, "text"=$2
+        WHERE "id"=$1`, [draftId, text]);
+      assert.equal((await row(held.suggestionId)).state, "stale");
+      await assert.rejects(transaction(tx => consumeChatDraftForMessage(tx as never, {
+        userId: "owner", conversationId: "conversation",
+        draftConsume: { scopeKey: "conversation", expectedRevision: 12,
+          messageId: snapshot.sourceMessageId },
+        message: { id: snapshot.sourceMessageId, content: text,
+          attachmentReferences: [] },
+      })), /saved message does not match/);
+      const attempt = (await client.query(`SELECT "state", "sourceMessageId"
+        FROM "PromptRefinerProductAttempt" WHERE "id"=$1`, [snapshot.requestId])).rows[0];
+      assert.equal(attempt.state, "held");
+      assert.equal(attempt.sourceMessageId, null);
+      assert.equal((await client.query(`SELECT count(*)::int AS n FROM "Message"
+        WHERE "id"=$1`, [snapshot.sourceMessageId])).rows[0].n, 0);
+      await assert.rejects(store.claimPromptRefinerProductAttempt({
+        snapshot, mode: "explicit" }), /binding_invalid/);
+    });
     await t.test("account cascade removes both transient domains", async () => {
       await client.query(`DELETE FROM "User" WHERE "id"='owner'`);
       assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerChatSuggestion"`)).rows[0].n, 0);
       assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerChatScope"`)).rows[0].n, 0);
+      assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerProductAttempt"`)).rows[0].n, 0);
+      assert.equal((await client.query(`SELECT count(*)::int AS n FROM "PromptRefinerProductExecutionReceipt"`)).rows[0].n, 2);
     });
   } finally {
     await pool.end(); await client.query(`DROP SCHEMA "${schema}" CASCADE`); await client.end();

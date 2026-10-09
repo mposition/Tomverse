@@ -417,6 +417,11 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     withheldReason: "The transient source and proposal, mode, state, decision and timestamps are exported. Terminal bodies are purged. Internal binding, request and source identifiers are withheld execution protocol keys.",
   },
   {
+    domain: "promptRefinerProductAttempt", publicName: "prompt_refiner_preparations",
+    prismaModel: "PromptRefinerProductAttempt", state: "included_filtered",
+    withheldReason: "The preparation mode, state, draft revision, epoch and timestamps are exported. Internal owner, scope, draft, conversation, suggestion and request identifiers are withheld execution protocol keys. This contains no prompt, attachment or cost basis.",
+  },
+  {
     domain: "imageCreditReservation",
     publicName: "image_credit_usage",
     prismaModel: "ImageCreditReservation",

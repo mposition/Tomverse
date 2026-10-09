@@ -16,6 +16,7 @@ import {
 } from "@/lib/messageAttachmentCore";
 import { prisma } from "@/lib/prisma";
 import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersistence";
+import { writeSystemAuditLog } from "@/lib/adminAudit";
 
 const opaqueId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
 
@@ -232,6 +233,58 @@ export async function consumeChatDraftForMessage(
 ): Promise<{ replay: boolean }> {
   await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
   const inspection = await inspectChatDraftForMessage(tx, input);
+  const attempts = await tx.$queryRaw<Array<{
+    id: string;
+    state: string;
+    mode: string;
+    draftId: string;
+    draftRevision: number;
+    sourceMessageId: string | null;
+    suggestionSourceMessageId: string | null;
+    currentDraftId: string | null;
+  }>>`
+    SELECT a."id", a."state", a."mode", a."draftId", a."draftRevision",
+      a."sourceMessageId", s."sourceMessageId" AS "suggestionSourceMessageId",
+      d."id" AS "currentDraftId"
+    FROM "PromptRefinerProductAttempt" a
+    LEFT JOIN "PromptRefinerChatSuggestion" s ON s."id" = a."suggestionId"
+    LEFT JOIN "ChatComposerDraft" d ON d."id" = a."draftId"
+      AND d."userId" = ${input.userId}
+    WHERE s."sourceMessageId" = ${input.message.id}
+      AND a."userId" = ${input.userId}
+      AND a."conversationId" = ${input.conversationId}
+    FOR UPDATE OF a
+  `;
+  if (attempts.length > 1) throw new ChatDraftConsumeConflictError();
+  const attempt = attempts[0];
+  if (attempt) {
+    if (attempt.sourceMessageId !== null) {
+      if (attempt.sourceMessageId !== input.message.id ||
+          attempt.suggestionSourceMessageId !== input.message.id) {
+        throw new ChatDraftConsumeConflictError();
+      }
+    } else {
+      if (inspection.replay || attempt.state !== "held" ||
+          attempt.currentDraftId !== attempt.draftId ||
+          attempt.draftRevision !== input.draftConsume.expectedRevision ||
+          attempt.suggestionSourceMessageId !== input.message.id) {
+        throw new ChatDraftConsumeConflictError();
+      }
+      const changed = await tx.$executeRaw`
+        UPDATE "PromptRefinerProductAttempt"
+        SET "sourceMessageId" = ${input.message.id}
+        WHERE "id" = ${attempt.id} AND "state" = 'held'
+          AND "sourceMessageId" IS NULL
+      `;
+      if (changed !== 1) throw new ChatDraftConsumeConflictError();
+      await writeSystemAuditLog({ tx,
+        systemActor: "prompt-refiner-product-execution",
+        action: "prompt_refiner.product_source_bound",
+        targetType: "PromptRefinerProductAttempt", targetId: attempt.id,
+        summary: "Bound one Prompt Refiner attempt to its authored Message.",
+        metadata: { mode: attempt.mode } });
+    }
+  }
   // The exact Message is the durable receipt for the original consume. A
   // later draft may already occupy the same composer scope; a retry of the
   // old request must neither reject because of it nor delete it.

@@ -88,7 +88,8 @@ async function loadRouteWithSpies(): Promise<{
       if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
       consumedRefinerDecisions += 1;
       return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
-        ? { ...message, content: "Synthetic held execution prompt" } : message) };
+        ? { ...message, content: "Synthetic held execution prompt" } : message),
+        mode: "explicit", provenance: { decision: "accepted" } };
     },
   } });
   mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {

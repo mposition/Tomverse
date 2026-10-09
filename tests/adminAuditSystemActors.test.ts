@@ -43,13 +43,19 @@ import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
 } from "../lib/amux/ideaIdentityCore.ts";
 
-test("the Prompt Refiner Auto budget actor has only its reservation action", () => {
-  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
-    "prompt_refiner.auto_budget_reserved", "PromptRefinerAutoBudgetHold"), true);
-  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
-    "prompt_refiner.auto_budget_settled", "PromptRefinerAutoBudgetHold"), false);
+test("the Prompt Refiner Auto budget actor has only its audited hold transitions", () => {
+  for (const action of ["prompt_refiner.auto_budget_reserved",
+    "prompt_refiner.auto_budget_dispatch_intent_recorded",
+    "prompt_refiner.auto_budget_settled",
+    "prompt_refiner.auto_budget_unknown_retained",
+    "prompt_refiner.auto_budget_undispatched_released"]) {
+    assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
+      action, "PromptRefinerAutoBudgetHold"), true);
+  }
   assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
     "prompt_refiner.auto_budget_reserved", "AdminAuditLog"), false);
+  assert.equal(systemAuditActionAllowed("prompt-refiner-auto-budget",
+    "prompt_refiner.provider_dispatch", "PromptRefinerAutoBudgetHold"), false);
 });
 
 // The closed list of system actors and the reserved metadata key.
@@ -72,6 +78,20 @@ test("Refiner execution audit actor grants only binding lifecycle actions", () =
   }
 });
 
+test("product Refiner receipts cannot impersonate approval or budget actions", () => {
+  const actor = "prompt-refiner-product-execution";
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_execution_recorded", "PromptRefinerProductExecutionReceipt"), true);
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_disposition_recorded", "PromptRefinerProductDispositionReceipt"), true);
+  for (const action of ["prompt_refiner.product_attempt_claimed", "prompt_refiner.product_attempt_transitioned", "prompt_refiner.product_source_bound"]) {
+    assert.equal(systemAuditActionAllowed(actor, action, "PromptRefinerProductAttempt"), true);
+    assert.equal(systemAuditActionAllowed(actor, action, "PromptRefinerProductExecutionReceipt"), false);
+  }
+  for (const action of ["prompt_refiner.product_release_activated", "prompt_refiner.product_limited_audit_recorded", "prompt_refiner.auto_budget_settled", "admin.user.delete"]) {
+    assert.equal(systemAuditActionAllowed(actor, action, "PromptRefinerProductExecutionReceipt"), false);
+  }
+  assert.equal(systemAuditActionAllowed(actor, "prompt_refiner.product_execution_recorded", "AdminAuditLog"), false);
+});
+
 test("the system actor list is closed and changes only by review", () => {
   // The policy names the publisher (docs/policy/marketing-automation.md §4);
   // retention and guard are the S1 plan's other two writers. This pins the
@@ -88,6 +108,7 @@ test("the system actor list is closed and changes only by review", () => {
     "prompt-refiner-vnext-one-shot-runner",
     "prompt-refiner-auto-budget",
     "prompt-refiner-chat-execution",
+    "prompt-refiner-product-execution",
     "tomverse-amux-orchestrator",
     "amux-auto-promoter",
     "amux-v22-auto-admit",

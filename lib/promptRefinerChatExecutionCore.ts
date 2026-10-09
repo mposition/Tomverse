@@ -110,7 +110,8 @@ export function validatePromptRefinerChatExecution<Message extends PromptRefiner
       sourceMessageId: latest.id, serverSuggestion: suggestion,
       boundScope: scope, currentScope: scope, decision: choice.data.decision, suppliedResolution: resolution });
     const executionMessages = promptRefinerAutoMessageView({ authoredMessages: input.messages, projection, currentScope: scope });
-    return { authoredMessages: input.messages, executionMessages, provenance: projection.provenance };
+    return { authoredMessages: input.messages, executionMessages,
+      provenance: projection.provenance, mode: held.mode };
   } catch {
     return refuse();
   }

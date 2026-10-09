@@ -1657,8 +1657,11 @@ Before changing the Prompt Refiner surface or request boundary in
 
 Non-negotiable requirements:
 
-- A suggestion is shown before send and requires an explicit use-or-keep
-  decision. It never sends the turn by itself.
+- Manual mode shows a suggestion before send and requires an explicit
+  use-or-keep decision. The approved Auto exception may create only a
+  server-owned accepted decision during an ordinary human Send, and only for
+  a stored Chat conversation already in Auto mode with an exact-deployment
+  auto release. Neither mode sends a turn by itself.
 - The durable user Message keeps the user's original bytes. Only an accepted
   suggestion may become the Router/provider execution prompt.
 - One request is bound to one exact draft snapshot and request id. Editing the
@@ -1713,15 +1716,27 @@ Non-negotiable requirements:
   reusable lease. A future dispatch must use the exact digest returned by
   consume together with the checked-in execution/reservation contract constants,
   and must not reload/reinterpret the registry after that boundary. It has no stage
-  seed/admin writer, product caller or provider path. Existing v1 admission
+  seed/admin writer or product authority. Existing frozen v1 admission
   therefore still refuses before dispatch with
   `reservation_authority_unavailable`; a caller-made lease or atomic boolean is
   never proof. Only a separately approved new contract may connect an
-  authority consumed fact to `admitted: true`. Product mode remains unadmitted.
+  authority consumed fact to `admitted: true`. The product v1 authority is a
+  separate contract and must not consume these one-shot slots or tombstones.
 - The current server gate folds the default-off AppSetting, environment kill
-  switch and adapter readiness into one mode. The only active mode is the
-  loopback E2E fixture; a stored flag alone must never expose an inert product
-  control, and there is no product/provider mode yet.
+  switch, adapter readiness and exact-deployment release readback into one
+  answer. A stored flag or deployed adapter alone must never expose product
+  controls. Missing/invalid runtime identity, DB uncertainty, absent signed
+  B03G latency-only evidence, limited audit, candidate/price/config drift, or
+  kill switch keeps explicit and Auto closed. The loopback E2E fixture carries
+  no product authority.
+- Product proposal/prepare accepts only owner-bound conversation, scope epoch
+  and draft revision identifiers. The server captures exact draft bytes and
+  claims one durable `(owner, scope, epoch, draft, revision, mode)` attempt
+  before budget/provider work. Browser proposal text, mode and booleans grant
+  no authority. Concurrent duplicate, reconnect, terminal and billing-unknown
+  states cannot dispatch again. The Refiner product deadline is at most 13,000
+  ms from the authenticated route handler through admission and held publish;
+  retry count is zero and a late provider result cannot become a suggestion.
 - A Refiner request, ready proposal and accepted resolution are bound to both
   the exact draft bytes and the `identity + mounted surface + conversation`
   scope. Changing any scope member discards them even when the next draft has

@@ -135,6 +135,7 @@ export const SYSTEM_AUDIT_ACTORS = [
   "prompt-refiner-vnext-one-shot-runner",
   "prompt-refiner-auto-budget",
   "prompt-refiner-chat-execution",
+  "prompt-refiner-product-execution",
   AMUX_SYSTEM_AUDIT_ACTOR,
   AMUX_AUTO_PROMOTER_AUDIT_ACTOR,
   AMUX_V22_AUTO_ADMIT_AUDIT_ACTOR,
@@ -223,8 +224,16 @@ export const systemAuditActionAllowed = (
   actor: unknown, action: unknown, targetType: unknown,
 ): actor is SystemAuditActor =>
   isSystemAuditActor(actor) &&
+  (actor !== "prompt-refiner-product-execution" ||
+    (action === "prompt_refiner.product_execution_recorded" && targetType === "PromptRefinerProductExecutionReceipt") ||
+    (action === "prompt_refiner.product_disposition_recorded" && targetType === "PromptRefinerProductDispositionReceipt") ||
+     ((action === "prompt_refiner.product_attempt_claimed" || action === "prompt_refiner.product_attempt_transitioned" || action === "prompt_refiner.product_source_bound") && targetType === "PromptRefinerProductAttempt")) &&
   (actor !== "prompt-refiner-auto-budget" ||
-    (action === "prompt_refiner.auto_budget_reserved" &&
+    ((action === "prompt_refiner.auto_budget_reserved" ||
+      action === "prompt_refiner.auto_budget_dispatch_intent_recorded" ||
+      action === "prompt_refiner.auto_budget_settled" ||
+      action === "prompt_refiner.auto_budget_unknown_retained" ||
+      action === "prompt_refiner.auto_budget_undispatched_released") &&
       targetType === "PromptRefinerAutoBudgetHold")) &&
   (actor !== "prompt-refiner-chat-execution" ||
     (action === "prompt_refiner.chat_scope_advanced" && targetType === "PromptRefinerChatScope") ||

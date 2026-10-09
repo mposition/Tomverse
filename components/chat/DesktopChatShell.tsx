@@ -72,6 +72,8 @@ import type {
   PromptRefinerUiState,
 } from "@/lib/promptRefinerSuggestion";
 import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
+import type { PromptRefinerProductChatDecision } from
+  "@/lib/promptRefinerProductApiContract";
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -94,6 +96,7 @@ type PromptPayload = {
   admissionToken?: string | null;
   contextBundle?: string | null;
   contextLayout?: "single" | "comparison";
+  promptRefinerDecision?: PromptRefinerProductChatDecision;
 };
 
 type DesktopChatShellProps = {
@@ -120,9 +123,15 @@ type DesktopChatShellProps = {
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
+  promptRefinerProductMode?: boolean;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   onPromptRefinerDismiss?: (requestId: string) => boolean;
+  onPromptRefinerExecution?: (input: {
+    promptId: string | null;
+    execution: "applied" | "original";
+    mode: "explicit" | "auto";
+  }) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -405,9 +414,11 @@ export function DesktopChatShell({
   voiceInputEnabled = false,
   promptRefinerOffered = false,
   promptRefinerState,
+  promptRefinerProductMode = false,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
+  onPromptRefinerExecution,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1252,6 +1263,7 @@ export function DesktopChatShell({
                   onDurableUndispatchedAccepted={onDurableUndispatchedAccepted}
                   onProviderDispatchStarted={onProviderDispatchStarted}
                   onResponseComplete={onResponseComplete}
+                  onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
@@ -1421,6 +1433,7 @@ export function DesktopChatShell({
               onVoiceTranscript={onVoiceTranscript}
               promptRefinerOffered={promptRefinerOffered}
               promptRefinerState={promptRefinerState}
+              promptRefinerProductMode={promptRefinerProductMode}
               onPromptRefinerRequest={onPromptRefinerRequest}
               onPromptRefinerDecision={onPromptRefinerDecision}
               onPromptRefinerDismiss={onPromptRefinerDismiss}

@@ -220,6 +220,17 @@ export const PROTECTED_TABLES = [
     writers: ["lib/promptRefinerChatExecutionStore.ts"],
     contract: "docs/ui-contracts/prompt-refiner-suggestion.md §2–3",
   },
+  ...["PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt"].map(table => ({
+    table,
+    delegate: table[0].toLowerCase() + table.slice(1),
+    writers: ["lib/promptRefinerProductReceiptStore.ts"],
+    contract: "docs/ui-contracts/prompt-refiner-suggestion.md",
+  })),
+  {
+    table: "PromptRefinerProductAttempt", delegate: "promptRefinerProductAttempt",
+    writers: ["lib/promptRefinerChatExecutionStore.ts", "lib/promptRefinerProductReceiptStore.ts", "lib/chatDraftMessageConsume.ts"],
+    contract: "docs/ui-contracts/prompt-refiner-suggestion.md",
+  },
   {
     table: "PromptRefinerChatSuggestion",
     delegate: "promptRefinerChatSuggestion",
@@ -463,7 +474,7 @@ export const EXCLUDED_PREFIXES = [
 
 /** Non-type string literals equal to a protected delegate name, by file. */
 export const DELEGATE_NAME_ALLOWLIST = [
-  ...["promptRefinerChatScope", "promptRefinerChatSuggestion"].map(delegate => ({
+  ...["promptRefinerChatScope", "promptRefinerChatSuggestion", "promptRefinerProductAttempt"].map(delegate => ({
     path: "lib/accountDataExportDomains.ts", delegate, count: 1,
     reason: "Account export domain key only; it is never used to index a client.",
   })),
@@ -1691,19 +1702,11 @@ export const RAW_SQL_ALLOWLIST = [
   },
   {
     path: "lib/promptRefinerAutoBudgetHold.ts",
-    table: "PromptRefinerAutoBudgetWindow",
-    tableMentions: 3,
-    writeVerbs: 3,
-    reason:
-      "The sole registered product-budget writer books the exact Brisbane day/month rows with conditional bounded upserts in one transaction. Exact counts prevent an unreviewed additional statement.",
-  },
-  {
-    path: "lib/promptRefinerAutoBudgetHold.ts",
     table: "PromptRefinerAutoBudgetHold",
-    tableMentions: 2,
-    writeVerbs: 3,
+    tableMentions: 11,
+    writeVerbs: 6,
     reason:
-      "The sole registered product-budget writer inserts one content-free immutable hold after both windows and the same-transaction system audit. Exact counts prevent an unreviewed additional statement.",
+      "The sole registered budget writer reserves, records one dispatch intent, settles verified usage, retains unknown outcomes or releases a proven undispatched hold through branded transition authority. Database triggers update both windows; canonical audit shares each transaction.",
   },
   {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
@@ -1722,7 +1725,7 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
-    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [4, 9][index], writeVerbs: 9,
+    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [4, 10][index], writeVerbs: 12,
     reason: "The sole default-off Chat binding writer advances epochs, holds validated snapshots, atomically consumes or purges bodies, and records canonical audit in the same transaction.",
   })),
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
@@ -1734,9 +1737,48 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/adminAuditSystemActors.ts", table, tableMentions: 1, writeVerbs: 2,
     reason: "Exact audit target allowlist literals only; this module executes no SQL.",
   })),
-  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map(table => ({
+  ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion", "PromptRefinerProductAttempt"].map(table => ({
     path: "lib/accountDataExportDomains.ts", table, tableMentions: 2, writeVerbs: 3,
     reason: "Pure export declarations and withheld-reason prose. No database client or SQL execution.",
+  })),
+  ...["AdminAuditLog", "PromptRefinerAutoBudgetWindow", "PromptRefinerAutoBudgetHold"].map((table, index) => ({
+    path: "prisma/migrations/20261010110000_prompt_refiner_auto_budget_settlement/migration.sql", table,
+    tableMentions: [2, 12, 19][index], writeVerbs: 32,
+    reason: "Additive budget transition constraints and guards; audit mentions are restrictive references to canonical receipts. Only hold transitions update the paired Brisbane windows; no audit-table writes or seeded activation.",
+  })),
+  ...["PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt"].map((table, index) => ({
+    path: "lib/promptRefinerProductReceiptStore.ts", table,
+    tableMentions: [2, 1, 2][index], writeVerbs: 4,
+    reason: "The sole closed receipt writer inserts validated content-free execution/mode/disposition facts and canonical system audit in the caller's transaction. No user text, files or prompt digests are stored.",
+  })),
+  ...["PromptRefinerProductExecutionReceipt", "PromptRefinerProductDispositionReceipt", "PromptRefinerProductAttempt"].map(table => ({
+    path: "lib/adminAuditSystemActors.ts", table, tableMentions: 1, writeVerbs: 2,
+    reason: "Exact system audit action/target literals only; this module runs no SQL and cannot authorize a human approval.",
+  })),
+  {
+    path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductExecutionReceipt",
+    tableMentions: 2, writeVerbs: 12,
+    reason: "One locked read of the execution receipt identifies the disposition binding; writes remain delegated to the sole product receipt writer in the same consume transaction.",
+  },
+  {
+    path: "lib/promptRefinerChatExecutionStore.ts", table: "PromptRefinerProductAttempt",
+    tableMentions: 6, writeVerbs: 12,
+    reason: "Claims one immutable draft/scope/mode key before paid admission and binds a held suggestion in the same canonical-audit transaction. Concurrent copies only read the prior claim.",
+  },
+  {
+    path: "lib/promptRefinerProductReceiptStore.ts", table: "PromptRefinerProductAttempt",
+    tableMentions: 2, writeVerbs: 4,
+    reason: "One bounded preparing-to-terminal/unknown transition accompanies its content-free execution receipt and canonical audit. It never reopens or retries an attempt.",
+  },
+  ...["PromptRefinerChatScope", "PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt", "PromptRefinerProductAttempt", "PromptRefinerChatSuggestion"].map((table, index) => ({
+    path: "prisma/migrations/20261010100000_prompt_refiner_product_receipts/migration.sql", table,
+    tableMentions: [3, 9, 3, 5, 4, 4][index], writeVerbs: 29,
+    reason: "Additive private draft-attempt binding and immutable content-free receipt DDL, exact foreign keys, row and truncate guards. Reads of scopes/suggestions constrain ownership; no seeded activation or audit-table write.",
+  })),
+  ...["PromptRefinerProductAttempt", "PromptRefinerChatSuggestion"].map((table, index) => ({
+    path: "lib/chatDraftMessageConsume.ts", table,
+    tableMentions: [3, 1][index], writeVerbs: 2,
+    reason: "The locked authored-Message save transaction binds a held attempt to its exact draft id/revision before consuming that draft. Suggestion access is read-only; the sole attempt update and canonical audit are atomic with Message persistence, and cannot dispatch a provider.",
   })),
 ];
 

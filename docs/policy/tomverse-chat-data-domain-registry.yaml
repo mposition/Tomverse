@@ -257,6 +257,24 @@ domains:
       while withholding internal binding identifiers. This is not a Refiner
       execution or disposition receipt and authorizes no paid dispatch.
 
+  - domain: promptRefinerProductAttempt
+    prismaModel: PromptRefinerProductAttempt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Private preparation tombstone for one exact draft revision and scope
+      epoch. Account, conversation, scope and suggestion cascades remove
+      it with its source. A five-minute lifetime refuses late preparation;
+      expiry alone never makes the same revision eligible for another paid
+      attempt. Export includes mode, state, epoch, draft revision and times;
+      execution protocol identifiers are withheld. No prompt, attachment,
+      prompt digest or provider cost basis is stored here.
+
   - domain: chatResponseAttempt
     prismaModel: ChatResponseAttempt
     userLinkageRole: subject
