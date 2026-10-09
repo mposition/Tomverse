@@ -6,9 +6,9 @@
  * Ubuntu server and is reachable only over SSH, so the app cannot ask it
  * anything. It sends this report instead, about once a minute, to
  * `POST /api/internal/review-orchestrator/status`. The report is content-free
- * by its schema: per reviewer its id, vendor, whether it is enabled and how
- * many reviews it runs out of how many it may, how many jobs wait, and the
- * last 24 hours' verdict counts. No job id, branch, scope, diff, finding or
+ * by its schema: per reviewer its id, vendor, whether it is enabled, how
+ * many reviews it runs out of how many it may and its account quota (a state
+ * and one amount), how many jobs wait, and the last 24 hours' verdict counts. No job id, branch, scope, diff, finding or
  * reviewer text has a field to travel in, and an unknown field is refused.
  *
  * The app keeps only the latest report, in one AppSetting row, stamped with
@@ -25,6 +25,25 @@ export const REVIEW_ORCHESTRATOR_STATUS_MAX_BYTES = 8192;
 export const REVIEW_ORCHESTRATOR_STALE_AFTER_MS = 5 * 60 * 1000;
 
 const MIN_SECRET_LENGTH = 32;
+
+export const REVIEW_QUOTA_STATES = ["available", "exhausted", "unknown", "disabled"] as const;
+export const REVIEW_QUOTA_UNITS = ["percent", "credits", "usd"] as const;
+
+/**
+ * A reviewer's account quota as the review server's own probe last read it:
+ * one state and at most one amount. Optional, because a server older than
+ * the quota field sends none.
+ */
+const quotaSchema = z
+  .object({
+    state: z.enum(REVIEW_QUOTA_STATES),
+    remaining: z.number().min(0).max(1_000_000_000).nullable(),
+    unit: z.enum(REVIEW_QUOTA_UNITS).nullable(),
+  })
+  .strict()
+  .refine((quota) => (quota.remaining === null) === (quota.unit === null))
+  .refine((quota) => quota.unit !== "percent" || (quota.remaining ?? 0) <= 100)
+  .refine((quota) => quota.remaining === null || quota.state === "available" || quota.state === "exhausted");
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const count = z.number().int().min(0).max(100_000);
 
@@ -43,6 +62,7 @@ export const reviewStatusSnapshotSchema = z
             enabled: z.boolean(),
             running: z.number().int().min(0).max(64),
             maxConcurrent: z.number().int().min(1).max(64),
+            quota: quotaSchema.optional(),
           })
           .strict()
       )

@@ -166,6 +166,13 @@ export type AgentOfficeFinanceState =
 /** One reviewer of the independent review server, as its latest report shows it. */
 export type AgentOfficeReviewerState = "reviewing" | "idle" | "off" | "lost";
 
+/** One reviewer's account quota, as the review server's probe last read it. */
+export type AgentOfficeReviewerQuota = {
+  state: "available" | "exhausted" | "unknown" | "disabled";
+  remaining: number | null;
+  unit: "percent" | "credits" | "usd" | null;
+};
+
 export type AgentOfficeReviewState =
   | { kind: "unread" }
   /** No report has ever been stored. */
@@ -186,6 +193,8 @@ export type AgentOfficeReviewState =
         state: AgentOfficeReviewerState;
         running: number;
         maxConcurrent: number;
+        /** Null when the server sent none (a server older than the field). */
+        quota: AgentOfficeReviewerQuota | null;
       }[];
       last24h: { accept: number; reject: number; unknown: number };
     };
@@ -744,4 +753,73 @@ export function reviewRoomView(
       .filter((part): part is string => part !== null)
       .join(" · ") || null;
   return { status, summary, note, reviewers: everyone.slice(0, desks) };
+}
+
+/** Below this share left, an available quota is drawn as running low. */
+export const REVIEW_QUOTA_LOW_PERCENT = 20;
+
+type QuotaCopy = {
+  states: Record<"available" | "low" | "exhausted" | "unknown" | "disabled", string>;
+  percent: (value: string) => string;
+  credits: (value: string) => string;
+  usd: (value: string) => string;
+  noAmount: string;
+  notSent: string;
+  unread: string;
+  notReporting: string;
+  unreadable: string;
+  stale: (time: string) => string;
+  asOf: (time: string) => string;
+};
+
+export type AgentOfficeQuotaRow = {
+  id: string;
+  vendor: string;
+  status: DeptStatus;
+  label: string;
+  amount: string;
+};
+
+export type AgentOfficeQuotaView = {
+  rows: AgentOfficeQuotaRow[];
+  /** Why there are no rows, or how old the numbers are; null when fresh. */
+  note: string | null;
+};
+
+const quotaAmount = (quota: AgentOfficeReviewerQuota, copy: QuotaCopy) => {
+  if (quota.remaining === null || quota.unit === null) return copy.noAmount;
+  if (quota.unit === "percent") return copy.percent(String(Math.round(quota.remaining)));
+  if (quota.unit === "usd") return copy.usd(quota.remaining.toFixed(2));
+  return copy.credits(String(Math.round(quota.remaining)));
+};
+
+/**
+ * The CLI quota card: each reviewer's account quota from the review server's
+ * latest report. A stale report keeps its numbers but says how old they are,
+ * and draws every row grey -- they describe a moment that has passed.
+ */
+export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy): AgentOfficeQuotaView {
+  if (state.kind === "unread") return { rows: [], note: copy.unread };
+  if (state.kind === "unreadable") return { rows: [], note: copy.unreadable };
+  if (state.kind === "not_reporting") return { rows: [], note: copy.notReporting };
+  const withQuota = state.reviewers.filter((reviewer) => reviewer.quota !== null);
+  if (withQuota.length === 0) return { rows: [], note: copy.notSent };
+  const rows = withQuota.map((reviewer): AgentOfficeQuotaRow => {
+    const quota = reviewer.quota as AgentOfficeReviewerQuota;
+    const low =
+      quota.state === "available" && quota.unit === "percent" && (quota.remaining ?? 100) < REVIEW_QUOTA_LOW_PERCENT;
+    const key = low ? "low" : quota.state;
+    const status: DeptStatus = state.stale
+      ? "waiting"
+      : quota.state === "exhausted"
+        ? "attention"
+        : low
+          ? "working"
+          : quota.state === "available"
+            ? "done"
+            : "waiting";
+    return { id: reviewer.id, vendor: reviewer.vendor, status, label: copy.states[key], amount: quotaAmount(quota, copy) };
+  });
+  const time = utcStamp(state.receivedAt);
+  return { rows, note: state.stale ? copy.stale(time) : copy.asOf(time) };
 }

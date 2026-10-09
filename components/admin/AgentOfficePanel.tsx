@@ -13,6 +13,7 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  reviewQuotaView,
   reviewRoomView,
   financeLiveDept,
   qaLiveDept,
@@ -20,6 +21,7 @@ import {
   utcStamp,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
+  type AgentOfficeQuotaView,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
 } from "@/lib/agentOffice/live";
@@ -113,6 +115,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
     [live, m]
   );
+  const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -278,6 +281,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               engine={engine}
               amuxView={amuxView}
               reviewView={reviewView}
+              quotaView={quotaView}
               readAt={live.readAt}
               snap={snap}
               follow={follow}
@@ -358,6 +362,7 @@ function LiveView({
   engine,
   amuxView,
   reviewView,
+  quotaView,
   readAt,
   snap,
   follow,
@@ -369,6 +374,7 @@ function LiveView({
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  quotaView: AgentOfficeQuotaView;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
   snap: Snapshot;
@@ -484,9 +490,44 @@ function LiveView({
               )}
             </div>
           </section>
+
+          <QuotaCard m={m} view={quotaView} />
         </aside>
       </section>
     </>
+  );
+}
+
+/**
+ * The reviewers' account quota, from the review server's own check. Read
+ * only: it shows what the server last reported and how old that is.
+ */
+function QuotaCard({ m, view }: { m: OfficeCopy; view: AgentOfficeQuotaView }) {
+  return (
+    <section className={cx("win rail-card")} data-testid="agent-office-quota">
+      <div className={cx("win-bar")}>
+        <span>{m.real.quota.windowTitle}</span>
+        <span className={cx("window-controls")} aria-hidden="true">
+          —　▢　✕
+        </span>
+      </div>
+      <div className={cx("win-body quota-body")}>
+        {view.rows.length > 0 ? (
+          <ul className={cx("quota-list")}>
+            {view.rows.map((row) => (
+              <li key={row.id}>
+                <i className={cx("rm-dot", row.status)} aria-hidden="true" />
+                <b>{row.id}</b>
+                <small>{row.vendor}</small>
+                <span className={cx("quota-state")}>{row.label}</span>
+                <span className={cx("quota-amount")}>{row.amount}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {view.note ? <p className={cx("quota-note")}>{view.note}</p> : null}
+      </div>
+    </section>
   );
 }
 

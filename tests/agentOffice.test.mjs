@@ -27,6 +27,7 @@ import {
   qaLiveDept,
   qaTone,
   researchLiveDept,
+  reviewQuotaView,
   reviewRoomView,
   researchTone,
 } from "../lib/agentOffice/live.ts";
@@ -1583,6 +1584,67 @@ test("the review room shows each reviewer's real state, and a silent server as l
     const states = adminAgentOfficeMessages[locale].real.review.states;
     for (const key of ["reviewing", "idle", "off", "lost"]) assert.ok(states[key], `${locale}: ${key}`);
   }
+});
+
+test("the quota card shows each reviewer's quota as the review server read it, and says how old it is", () => {
+  const copy = adminAgentOfficeMessages.ko.real.quota;
+  const quotaProviders = [
+    { id: "claude", vendor: "anthropic", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "available", remaining: 62.4, unit: "percent" } },
+    { id: "codex", vendor: "openai", enabled: true, running: 1, maxConcurrent: 2, quota: { state: "available", remaining: 12, unit: "percent" } },
+    { id: "cursor", vendor: "xai", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "exhausted", remaining: 0, unit: "usd" } },
+    { id: "copilot", vendor: "moonshot", enabled: true, running: 0, maxConcurrent: 2, quota: { state: "available", remaining: 340, unit: "credits" } },
+    { id: "devin", vendor: "cognition", enabled: false, running: 0, maxConcurrent: 2, quota: { state: "disabled", remaining: null, unit: null } },
+  ];
+  // The app takes the quota field and refuses one no probe could produce.
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: quotaProviders })).success, true);
+  const withQuota = (quota) =>
+    reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [{ ...quotaProviders[0], quota }] })).success;
+  for (const bad of [
+    { state: "available", remaining: 150, unit: "percent" },
+    { state: "available", remaining: 5, unit: null },
+    { state: "available", remaining: null, unit: "usd" },
+    { state: "disabled", remaining: 5, unit: "percent" },
+    { state: "available", remaining: 5, unit: "tokens" },
+    { state: "full", remaining: null, unit: null },
+    { state: "available", remaining: 5, unit: "percent", account: "someone@example.com" },
+  ]) {
+    assert.equal(withQuota(bad), false, JSON.stringify(bad));
+  }
+  // A server older than the field sends none, and is still a report.
+  assert.equal(reviewStatusSnapshotSchema.safeParse(reviewSnapshot()).success, true);
+
+  const stored = (providers, receivedAt = "2026-10-09T01:04:00.000Z") =>
+    JSON.stringify({ receivedAt, snapshot: reviewSnapshot({ providers }) });
+  const state = (providers, receivedAt) =>
+    agentOfficeReviewState({ stored: stored(providers, receivedAt), now: at("2026-10-09T01:05:00.000Z") });
+
+  const fresh = reviewQuotaView(state(quotaProviders), copy);
+  assert.deepEqual(
+    fresh.rows.map((row) => [row.id, row.status, row.label, row.amount]),
+    [
+      ["claude", "done", "사용 가능", "62% 남음"],
+      ["codex", "working", "얼마 안 남음", "12% 남음"],
+      ["cursor", "attention", "소진", "$0.00 남음"],
+      ["copilot", "done", "사용 가능", "340 credits 남음"],
+      ["devin", "waiting", "꺼짐", "—"],
+    ]
+  );
+  assert.equal(fresh.note, "검토 서버가 직접 조회한 값 · 10-09 01:04 UTC");
+  // Old numbers keep their values but are drawn grey and dated.
+  const silent = reviewQuotaView(state(quotaProviders, "2026-10-09T00:58:00.000Z"), copy);
+  assert.ok(silent.rows.every((row) => row.status === "waiting"));
+  assert.equal(silent.rows[0].amount, "62% 남음");
+  assert.equal(silent.note, "10-09 00:58 UTC 기준 · 이후 보고 없음");
+  // No quota field at all: the card says the server needs the update.
+  assert.deepEqual(reviewQuotaView(state(reviewSnapshot().providers), copy), { rows: [], note: copy.notSent });
+  assert.deepEqual(reviewQuotaView({ kind: "not_reporting" }, copy), { rows: [], note: copy.notReporting });
+  assert.deepEqual(reviewQuotaView({ kind: "unread" }, copy), { rows: [], note: copy.unread });
+  for (const locale of ["en", "ko"]) {
+    const c = adminAgentOfficeMessages[locale].real.quota;
+    for (const key of ["available", "low", "exhausted", "unknown", "disabled"]) assert.ok(c.states[key], `${locale}: ${key}`);
+  }
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /<QuotaCard m=\{m\} view=\{quotaView\} \/>/);
 });
 
 test("the review room has a desk for each reviewer and a way in, and the entrance stays outside it", () => {
