@@ -59,7 +59,7 @@ function parseReadback(value: unknown): Readback | null {
 }
 
 export function AmuxAnalysisClaimResolutionPanel({ holdId, onResolved }: {
-  holdId: string; onResolved: () => void;
+  holdId: string; onResolved?: () => void;
 }) {
   const m = useAdminMessages(adminAmuxAnalysisBudgetMessages).resolution;
   const { locale } = useAdminLocale();
@@ -121,7 +121,7 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId, onResolved }: {
       if (body.holdId !== holdId || body.disposition !== disposition) {
         setUnknown(true); return;
       }
-      setComplete(disposition); onResolved();
+      setComplete(disposition); onResolved?.();
     } catch { setUnknown(true); }
     finally { setBusy(false); }
   };
@@ -146,7 +146,7 @@ export function AmuxAnalysisClaimResolutionPanel({ holdId, onResolved }: {
           requiresReauthentication: false, approvalId: null });
         return;
       }
-      setComplete(receipt.disposition); setUnknown(false); onResolved();
+      setComplete(receipt.disposition); setUnknown(false); onResolved?.();
     } catch {
       setFailure({ message: m.readFailed, tone: "error",
         requiresReauthentication: false, approvalId: null });
