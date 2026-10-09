@@ -95,11 +95,18 @@ test("a grandchild goes with its parent", { skip: process.platform === "win32" }
 });
 
 test("a child printing without end is stopped rather than buffered", async () => {
+  // `fs.writeSync(1, ...)` rather than `process.stdout.write`. In a tight
+  // synchronous loop the latter never flushes: writes to a pipe are queued on
+  // the event loop, and the loop never gets a turn, so the bytes pile up
+  // inside the child and none arrive. That is how this test first passed on
+  // Windows and then sat for its whole twenty-second deadline on Linux,
+  // receiving nothing -- it was the test that was wrong, not the cap.
   const result = await node(
-    "for (;;) process.stdout.write('x'.repeat(64 * 1024));",
+    "const fs = require('node:fs'); for (;;) fs.writeSync(1, 'x'.repeat(64 * 1024));",
     { maxBytes: 128 * 1024, timeoutMs: 20_000 },
   );
-  assert.equal(result.overflowed, true);
+  assert.equal(result.overflowed, true, "nothing overflowed, so the cap was never reached");
+  // And it was the cap that stopped it, not the deadline.
   assert.equal(result.timedOut, false);
   // Held output stays near the cap rather than growing to whatever the child
   // felt like sending.
