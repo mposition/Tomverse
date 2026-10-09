@@ -172,7 +172,7 @@ async function finishEvidence(
 // this does not claim MP4 bytes or real Safari microphone compatibility.
 async function installSyntheticRecorder(page: Page) {
   await page.addInitScript(() => {
-    const state = { grants: 0, liveTracks: 0, uploads: [] as number[] };
+    const state = { grants: 0, liveTracks: 0, recorderStarts: 0, uploads: [] as number[] };
     (window as unknown as { __e03Voice: typeof state }).__e03Voice = state;
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
@@ -207,6 +207,7 @@ async function installSyntheticRecorder(page: Page) {
       }
       start() {
         this.state = "recording";
+        state.recorderStarts += 1;
       }
       stop() {
         if (this.state === "inactive") return;
@@ -279,8 +280,11 @@ test("attachment input reaches Chat and its durable card survives reload", async
   expect(userMapping).toBeTruthy();
   const durableAttachments = boundSave.attachments.filter((attachment) => attachment.messageId === userMapping.messageId);
   expect(durableAttachments).toHaveLength(1);
+  expect(durableAttachments[0].attachmentId).toEqual(expect.any(String));
+  expect(newestUser(requests[0]).attachments).toHaveLength(1);
   const initialReference = newestUser(requests[0]).attachments?.[0];
-  expect(initialReference?.attachmentId || initialReference?.uploadId).toBeTruthy();
+  expect(initialReference?.attachmentId).toBe(durableAttachments[0].attachmentId);
+  expect(initialReference).not.toHaveProperty("uploadId");
   expect(JSON.stringify(requests)).not.toContain("objectKey");
   expect(JSON.stringify(saved)).not.toContain("attachments/");
   expect(uploads.finalizeCount).toBe(1);
@@ -335,16 +339,20 @@ test("voice transcription fills the draft and explicit Send reaches Chat once", 
   await expect(page.getByTestId("composer-voice-button")).toBeEnabled();
   await page.getByTestId("composer-voice-button").click();
   await expect(page.getByTestId("voice-input-status-row")).toBeVisible();
-  await page.waitForTimeout(1200);
+  // The client has a byte floor, not a minimum recording duration. Wait for
+  // actual recorder.start(), then stop; the synthetic clip supplies 4096 bytes.
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __e03Voice: { recorderStarts: number } }).__e03Voice.recorderStarts
+  )).toBe(1);
   await page.getByTestId("composer-voice-button").click();
   await expect(page.getByTestId("chat-textarea")).toHaveValue(transcript);
   await expect(page.getByTestId("voice-input-status-row")).toHaveCount(0);
   expect(requests).toHaveLength(0);
   expect(voiceRequests).toEqual([{ method: "POST", contentType: "audio/mp4" }]);
   const capture = await page.evaluate(() =>
-    (window as unknown as { __e03Voice: { grants: number; liveTracks: number; uploads: number[] } }).__e03Voice
+    (window as unknown as { __e03Voice: { grants: number; liveTracks: number; recorderStarts: number; uploads: number[] } }).__e03Voice
   );
-  expect(capture).toEqual({ grants: 1, liveTracks: 0, uploads: [4096] });
+  expect(capture).toEqual({ grants: 1, liveTracks: 0, recorderStarts: 1, uploads: [4096] });
   await sendDraft(page);
   await expect(visibleTurn(page, "assistant")).toContainText("Synthetic voice Chat answer.");
   expect(requests).toHaveLength(1);
