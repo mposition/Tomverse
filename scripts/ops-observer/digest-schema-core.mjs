@@ -41,6 +41,7 @@ const hasExactly = (value, keys) =>
   isPlainObject(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 
 const PAYLOAD_KEYS = Object.freeze(["ownerDate", "mode", "readiness", "reserved", "reservedCounts", "channelCheckTaken"]);
+const PAYLOAD_KEYS_V1 = Object.freeze(["ownerDate", "mode", "readiness", "reserved", "channelCheckTaken"]);
 const RESERVED_KEYS = Object.freeze(["key", "kind", "capped"]);
 const REQUEST_KEYS = Object.freeze(["runDeadline", "ownerDate"]);
 
@@ -107,6 +108,35 @@ export function parseDigestPayload(value) {
     if (reserved.filter((item) => item.kind === kind).length > count) return refuse("payload_shape");
   }
   return { ok: true, payload: value };
+}
+
+/**
+ * A kept digest read back under the schema version it was stored with:
+ * `{ ok: true, payload, countsComplete }` or `{ ok: false, error }`. A
+ * version 1 body (no counts) is still shown inside its retention -- its
+ * counts are derived from its list, which version 1 may have cut at the cap,
+ * so `countsComplete` is false. Any other version is refused.
+ */
+export function parseStoredDigestPayload(value, schemaVersion) {
+  if (schemaVersion === DIGEST_SCHEMA_VERSION) {
+    const parsed = parseDigestPayload(value);
+    return parsed.ok ? { ...parsed, countsComplete: true } : parsed;
+  }
+  if (schemaVersion !== 1 || !hasExactly(value, PAYLOAD_KEYS_V1) || !Array.isArray(value.reserved)) {
+    return { ok: false, error: "payload_shape" };
+  }
+  const upgraded = {
+    ownerDate: value.ownerDate,
+    mode: value.mode,
+    readiness: value.readiness,
+    reserved: value.reserved,
+    reservedCounts: Object.fromEntries(
+      MESSAGE_KINDS.map((kind) => [kind, value.reserved.filter((item) => item?.kind === kind).length]),
+    ),
+    channelCheckTaken: value.channelCheckTaken,
+  };
+  const parsed = parseDigestPayload(upgraded);
+  return parsed.ok ? { ...parsed, countsComplete: false } : parsed;
 }
 
 /**

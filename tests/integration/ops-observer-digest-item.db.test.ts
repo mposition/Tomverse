@@ -39,10 +39,10 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
     reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 0 },
     channelCheckTaken: false,
   };
-  const insert = async (agentKey: string, kind: string, body: unknown) => {
+  const insert = async (agentKey: string, kind: string, body: unknown, schemaVersion = 2) => {
     const id = randomUUID();
-    await q(`INSERT INTO "AgentDigestItem" (id, "agentKey", kind, payload) VALUES ($1, $2, $3, $4)`,
-      [id, agentKey, kind, body === null ? null : JSON.stringify(body)]);
+    await q(`INSERT INTO "AgentDigestItem" (id, "agentKey", kind, "schemaVersion", payload) VALUES ($1, $2, $3, $4, $5)`,
+      [id, agentKey, kind, schemaVersion, body === null ? null : JSON.stringify(body)]);
     return id;
   };
 
@@ -51,7 +51,7 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
     await q(`SET search_path TO "${schema}"`);
     await q(await readFile(path.resolve(here, "../../prisma/migrations/20261003060000_ops_observer_transaction_arm/migration.sql"), "utf8"));
     await q(`CREATE TABLE "AgentDigestItem" (id UUID PRIMARY KEY, "agentKey" TEXT NOT NULL, kind TEXT NOT NULL,
-      payload JSONB, "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp(),
+      "schemaVersion" INTEGER NOT NULL, payload JSONB, "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp(),
       "retentionUntil" TIMESTAMPTZ(3) NOT NULL DEFAULT clock_timestamp() + interval '90 days')`);
 
     await t.test("this agent's digest is read back in the closed shape", async () => {
@@ -59,7 +59,17 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
       const view = await readOpsObserverDigestItem(id, client);
       assert.equal(view?.id, id);
       assert.deepEqual(view?.payload, payload);
+      assert.equal(view?.countsComplete, true);
       assert.ok(view && Number.isFinite(Date.parse(view.createdAt)));
+    });
+
+    await t.test("a body kept under schema version 1 is still shown, its counts marked as from the list", async () => {
+      const { reservedCounts, ...v1 } = payload;
+      const view = await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v1, 1), client);
+      assert.deepEqual(view?.payload, { ...v1, reservedCounts });
+      assert.equal(view?.countsComplete, false);
+      // A version-2 body without its counts is not a version-1 body.
+      assert.equal((await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v1, 2), client))?.payload, null);
     });
 
     await t.test("another agent's item, an unknown id or a non-UUID is no digest", async () => {
