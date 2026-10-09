@@ -23,13 +23,19 @@
 
 ## 로컬 검증
 
-- `test:prompt-refiner-chat-execution`: 49 unit/API 사례 통과. 기존 제안형 계약,
+- `test:prompt-refiner-chat-execution`: 71 unit/API 사례 통과. 기존 제안형 계약,
   원문/실행 projection, 수동 채택/자동 authority 구분, 원문 유지, epoch/replay,
   Unicode·음성 전사형 text·첨부 reference 보존과 default-off HTTP 거부 포함.
   추가 HTTP 회귀는 소비 뒤 access 실패가 나도 재소비/추가 provider로 진행하지
   않음을 확인한다. source validation이 content string을 요구하므로 첨부가 있어도
   authored profile text는 비지 않는다. 실패 시 소비한 제안을 되살리거나 원문을
   자동 재전송하지 않으며, attempt가 이미 존재할 때의 exact reattach는 별도다.
+- 실제 Chat route의 Router selector에 넘긴 text·예약 토큰 추정 입력, shadow
+  profile과 `streamText()`의 현재 사용자 text를 합성 stream으로 관측했다.
+  수동 채택·원문 유지·자동 모드 3개가 각 기대한 공통 execution prompt를 받으며
+  과거 메시지와 authored transcript는 보존되고 provider dispatch는 한 번이다.
+  store의 release/소비 결과는 테스트 seam이고 DB 소비는 아래 PostgreSQL 테스트가 검증한다.
+  실제 Router readiness는 pending이라 이 관측을 전면 Auto 출시 증거로 쓰지 않는다.
 - 격리 loopback PostgreSQL 17: 14 store/DDL 시나리오 통과. 동시 1회 소비,
   audit 실패 rollback, draft 첨부/동일 text 변경, scope ABA, kill, 만료, 계정 cascade.
 - 별도 loopback DB에 267개 실제 migration 적용. 실제 draft consume → 원문

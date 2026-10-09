@@ -6,6 +6,9 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import * as aiModule from "ai";
+import { validatePromptRefinerChatExecution } from "@/lib/promptRefinerChatExecutionCore";
+import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
+import { buildTaskProfile } from "@/lib/taskProfileCore";
 
 /**
  * §7's automatic fallback, executed through the route that performs it.
@@ -59,6 +62,62 @@ const ASSISTANT_MESSAGE_ID = "33333333-4444-4555-8666-777777777777";
 const SOURCE_USER_MESSAGE_ID = "11111111-2222-4333-8444-555555555555";
 const REQUESTED_MODEL_ID = "claude-haiku-4-5";
 const ANSWER = "The second model finished the answer.";
+const REFINER_PROMPT = "이 질문에 답해 줘. 사용자가 작성한 질문을 그대로 이해하고, 필요한 설명을 충분히 제공해 줘.";
+const REFINER_SCOPE_ID = "44444444-4444-4444-8444-444444444444";
+const REFINER_SUGGESTION_ID = "55555555-5555-4555-8555-555555555555";
+let refinerMode: "explicit" | "auto" | null = null;
+let refinerConsumes = 0;
+const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
+const shadowInputs: Array<import("../../lib/routingShadow").RoutingShadowInput> = [];
+
+// The real store's lock/CAS/audit boundary has separate PostgreSQL tests.
+// This fixture supplies its validated result to the real Chat orchestration;
+// no checked-in release authority, AppSetting or provider key is enabled.
+mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+  promptRefinerChatExecutionRelease: () => ({
+    explicitEnabled: refinerMode === "explicit", autoEnabled: refinerMode === "auto",
+  }),
+} });
+mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
+  consumePromptRefinerChatExecution: async (
+    input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").consumePromptRefinerChatExecution>[0]
+  ) => {
+    assert.equal(refinerConsumes, 0);
+    assert.ok(refinerMode);
+    const view = validatePromptRefinerChatExecution({ ...input,
+      held: { id: REFINER_SUGGESTION_ID, userId: USER_ID, conversationId: CONVERSATION_ID,
+        surface: "chat", scopeId: REFINER_SCOPE_ID, scopeEpoch: 1, recoveryEpoch: 0,
+        sourceMessageId: SOURCE_USER_MESSAGE_ID, sourcePrompt: "이 질문에 답해 줘",
+        refinedPrompt: REFINER_PROMPT, requestId: "66666666-6666-4666-8666-666666666666",
+        refinerVersion: "suggest-v2", mode: refinerMode, state: "ready",
+        expiresAt: new Date("2026-10-10T00:05:00Z") },
+      facts: { userId: USER_ID, conversationId: CONVERSATION_ID,
+        sourceMessageId: SOURCE_USER_MESSAGE_ID, persistedSourcePrompt: "이 질문에 답해 줘",
+        recoveryEpoch: 0, scope: { id: REFINER_SCOPE_ID, epoch: 1, surface: "chat", conversationId: CONVERSATION_ID },
+        dbNow: new Date("2026-10-10T00:00:00Z"), explicitEnabled: refinerMode === "explicit",
+        autoEnabled: refinerMode === "auto", autoConversation: conversationSelectionMode === "auto", killSwitch: false },
+    });
+    refinerConsumes += 1;
+    return view;
+  },
+} });
+const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
+mock.module(mod("lib/autoModelSelection.ts"), { namedExports: {
+  ...realAutoSelection,
+  selectAutoModel: (input: Parameters<typeof realAutoSelection.selectAutoModel>[0]) => {
+    routerInputs.push(input);
+    return realAutoSelection.selectAutoModel(input);
+  },
+} });
+const realRoutingShadow = require(resolve(ROOT, "lib/routingShadow.ts")) as typeof import("../../lib/routingShadow");
+mock.module(mod("lib/routingShadow.ts"), { namedExports: {
+  ...realRoutingShadow,
+  isRouterShadowEnabled: () => refinerMode !== null || realRoutingShadow.isRouterShadowEnabled(),
+  scheduleRoutingShadowRun: (buildInput: () => import("../../lib/routingShadow").RoutingShadowInput) => {
+    if (refinerMode !== null) shadowInputs.push(buildInput());
+    else realRoutingShadow.scheduleRoutingShadowRun(buildInput);
+  },
+} });
 
 /** Milliseconds. Chosen the same way the keepalive file's are -- see there. */
 const KEEPALIVE_INTERVAL_MS = 25;
@@ -195,6 +254,7 @@ type Attempt = {
   modelId: string | null;
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
+  messages: Array<{ role: string; content: unknown }>;
 };
 
 const attempts: Attempt[] = [];
@@ -217,6 +277,7 @@ mock.module("ai", {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
         cancelledWith: null,
+        messages: options.messages as Attempt["messages"],
       };
       attempts.push(attempt);
       const index = attempts.length - 1;
@@ -728,7 +789,8 @@ const ask = async (
     { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
   ],
   includeSourceUserMessageId = true,
-  withInjectedPrimaryFault = true
+  withInjectedPrimaryFault = true,
+  refinerDecision?: "accepted" | "kept_original"
 ) => {
   fallbackBehaviour = behaviour;
   injectPrimaryFault = withInjectedPrimaryFault;
@@ -749,6 +811,8 @@ const ask = async (
   durableClaimCalls = 0;
   lastDurableClaimInput = null;
   messageFindFirstArgs = [];
+  routerInputs.length = 0;
+  shadowInputs.length = 0;
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -771,6 +835,8 @@ const ask = async (
           ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
           : {}),
         ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
+        ...(refinerDecision ? { promptRefinerDecision: { suggestionId: REFINER_SUGGESTION_ID,
+          scopeId: REFINER_SCOPE_ID, epoch: 1, decision: refinerDecision } } : {}),
       }),
     })
   );
@@ -1211,6 +1277,50 @@ test("a turn the override did not route records no override at all", async () =>
     assert.ok(streamError, "an unrouted turn has no recovery, so the stream errors");
     assert.equal(splitRoutingRetrySignal(body).signal, null);
   } finally {
+    conversationSelectionMode = "auto";
+  }
+});
+
+for (const [mode, decision] of [
+  ["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"],
+] as const) test(`${mode} Refiner ${decision} uses one execution prompt at Router, shadow and provider`, async () => {
+  refinerMode = mode;
+  refinerConsumes = 0;
+  conversationSelectionMode = mode === "auto" ? "auto" : "manual";
+  const messages = [
+    { id: "history-user", role: "user", content: "Earlier authored question." },
+    { id: "history-assistant", role: "assistant", content: "Earlier answer." },
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  const authored = structuredClone(messages);
+  const expectedPrompt = decision === "accepted" ? REFINER_PROMPT : messages.at(-1)!.content;
+  try {
+    const { body, streamError } = await ask("answers", "claimed", 200, false, messages, true, false, decision);
+    assert.equal(streamError, null);
+    assert.ok(body.startsWith(ANSWER));
+    assert.equal(refinerConsumes, 1);
+    assert.equal(ledger.accessAcquisitions, 1);
+    assert.equal(attempts.length, 1, "Refiner admission does not send another turn or enable provider retry");
+    assert.equal(durableAttemptAdmissionCalls, 1);
+    assert.equal(routerInputs.length, 1);
+    assert.equal(routerInputs[0].text, expectedPrompt);
+    assert.equal(routerInputs[0].reservedInputTokens, preflightInputEstimate([
+      ...messages.slice(0, -1), { ...messages.at(-1)!, content: expectedPrompt },
+    ]).estimatedInputTokens);
+    assert.equal(shadowInputs.length, 1, "pending Auto readiness does not become a routed production turn");
+    assert.deepEqual(shadowInputs[0].profile, buildTaskProfile({ text: expectedPrompt, attachments: [], webSearchRequested: false }));
+    const text = (content: unknown) => typeof content === "string" ? content
+      : (content as Array<{ type: string; text?: string }>).filter(part => part.type === "text").map(part => part.text).join("");
+    const providerMessages = attempts[0].messages.filter(message => message.role !== "system");
+    assert.equal(text(providerMessages.at(-1)!.content), expectedPrompt);
+    assert.equal(text(providerMessages[0].content), messages[0].content);
+    assert.equal(text(providerMessages[1].content), messages[1].content);
+    assert.deepEqual(messages, authored, "the authored transcript remains unchanged through the streamed answer");
+    assert.ok(messageFindFirstArgs.some(args => (args.where as { id?: string }).id === SOURCE_USER_MESSAGE_ID),
+      "durable source verification still checks the original stored Message");
+    assert.equal(warningEvents("chat_auto_readiness_overridden").length, 0);
+  } finally {
+    refinerMode = null;
     conversationSelectionMode = "auto";
   }
 });
