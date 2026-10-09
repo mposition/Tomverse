@@ -37,7 +37,7 @@ export function readPreparedIdeaTransferPreview(
       (chunkIndex > 0 && record.chunkIndex !== chunkIndex) ||
       record.previewId !== expectedPreviewId ||
       record.ideaId !== expectedIdeaId ||
-      record.templateVersion !== "amux-v4-analysis-prompt-v3" ||
+      record.templateVersion !== "amux-v4-analysis-prompt-v4" ||
       typeof record.prompt !== "string" || record.prompt.length === 0 ||
       new TextEncoder().encode(record.prompt).length > 65_536 ||
       model.provider !== selected.provider || model.modelId !== selected.modelId ||
