@@ -26,14 +26,20 @@ The page and its only server endpoint are fail-closed:
 - the request must carry a real application session; and
 - that session must pass the existing administrator check.
 
-Both the page and the action API repeat this decision on the server. Production,
+Both the page and the read API repeat this decision on the server. Production,
 development, anonymous, and non-administrator access return an unavailable
 surface rather than revealing a QA mode. The page is not linked from public
 Chat and is not a feature-flag activation path.
 
-`POST /api/admin/chat-e2e-fixture` additionally requires an accepted same-origin
-request, JSON content, and a body of at most 512 bytes. Its strict body is an
-object with exactly one `action` field. The only accepted values are:
+`GET /api/admin/chat-e2e-fixture?action=<value>` additionally requires explicit
+same-origin evidence accepted by the existing origin guard: a valid `Origin`,
+`Sec-Fetch-Site: same-origin`, or a valid same-origin `Referer`; missing evidence
+is rejected.
+Its raw encoded query component is capped at 512 UTF-8 bytes and must contain
+exactly one parameter named `action`. Duplicate `action` parameters, any
+additional parameter, a request body, and any other method are rejected. Every
+response produced by this read handler is `Cache-Control: private, no-store`.
+The only accepted values are:
 
 - `default_off`
 - `accepted`
@@ -44,19 +50,21 @@ object with exactly one `action` field. The only accepted values are:
 
 No prompt, message, comparison, model, provider, projection, authority, or
 arbitrary payload is accepted from the browser. A value outside this closed
-list fails before the synthetic action runs.
+list fails before the synthetic read runs.
 
 The endpoint retains normal session and administrator authorization on every
 request. It deliberately adds neither step-up authentication nor a
-fixture-specific rate limiter: an accepted body can only select one of six
-fixed, pure synthetic actions, and those actions have no mutable state,
+fixture-specific rate limiter: an accepted query can only select one of six
+fixed, pure synthetic results, and those results have no mutable state,
 irreversible effect, LLM or provider call, product writer, or cost. If any of
 those conditions changes, this rationale expires and the endpoint must fail
 closed until a new authorization and abuse-control contract is approved.
 
 Local browser tests may use the repository's existing loopback-only full-fixture
-guards and test session convention. This exception does not change those guards
-and must never enable an auth or database bypass on public staging.
+guards and local test-JWT convention. Real staging uses the normal owner or
+administrator sign-in and never accepts the local JWT. This exception does not
+change those guards and must never enable an auth or database bypass on public
+staging.
 
 ## The real UI and the sealed transport
 
@@ -76,7 +84,7 @@ For the lifetime of the document, the transport intercepts `fetch`,
 the explicitly registered same-origin Chat dependencies. An external URL, an
 unregistered path, an unsupported method, or an invalid body is blocked
 fail-closed. The sole request allowed through to the server is the exact
-administrator fixture action endpoint above.
+administrator fixture read endpoint above.
 
 Unmount retires the transport without restoring product networking. A callback
 that retained the old transport after retirement is still blocked. Leaving QA
@@ -142,7 +150,7 @@ composer. Previewing a proposal preserves the authored source. The fixture does
 not write the proposed text into a product draft or authorize a Chat dispatch
 from the preview state.
 
-The server action runs the existing D02 synthetic Auto facade against
+The stateless server read runs the existing D02 synthetic Auto facade against
 server-owned fixed strings. Each closed action verifies its corresponding
 default-off, accepted, kept-original, stale, replay, or unknown-outcome branch.
 Every result must retain `dispatchAuthorized: false`, preserve the authored
@@ -167,7 +175,7 @@ The fixture can support the following claims for that exact build only:
 
 - the real Chat component tree completed the named synthetic interaction;
 - after the real Chat tree mounted, browser network observation found no native
-  request from the fixture interaction except the exact administrator action
+  request from the fixture interaction except the exact administrator read
   endpoint, while unregistered attempts incremented `blockedRequests`; and
 - the fixed D02 action returned `dispatchAuthorized: false`.
 
@@ -186,14 +194,15 @@ or later evaluation must bind its own evidence to its own exact target.
 The exact candidate must keep all of these checks:
 
 - access tests for staging administrator success and production, development,
-  anonymous, non-administrator, and cross-origin refusal;
-- strict six-action parsing, the 512-byte cap, and rejection of client prompt,
-  comparison, and dispatch-authority fields;
+  anonymous, non-administrator, missing-origin, and cross-origin refusal;
+- strict GET-only six-action parsing, the 512-byte encoded-query cap, and
+  rejection of duplicate or additional parameters, request bodies, client
+  prompt, comparison, and dispatch-authority inputs;
 - D02 synthetic action tests showing source preservation,
   `dispatchAuthorized: false`, stopped unknown outcome, and all four literal
   construction markers;
 - transport tests showing external and unregistered requests, beacon, XHR, and
-  late callbacks are blocked while the one administrator action endpoint is the
+  late callbacks are blocked while the one administrator read endpoint is the
   only native server request;
 - browser tests on the real Chat UI for default-off, proposal preview, context,
   failure, question restoration, explicit resend, reload observation,

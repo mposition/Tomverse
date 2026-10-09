@@ -21,16 +21,19 @@
 
 E04 통합 검증에는 운영자가 승인한 좁은 관리자 전용 합성 QA 예외가 있다. 실제
 애플리케이션 session과 기존 administrator 판정, canonical `staging` 환경 판정을
-서버가 `/admin/chat-e2e` 페이지와 `/api/admin/chat-e2e-fixture` action endpoint에서
-각각 확인한 뒤에만 접근할 수 있다. 페이지는 닫힌 합성 transport를 실제
-`ChatPageClient`와 `ChatInput`보다 먼저 설치하며, Chat subtree에는 고정된 합성
-identity·conversation·content만 준다.
+서버가 `/admin/chat-e2e` 페이지와 `/api/admin/chat-e2e-fixture` read endpoint에서
+각각 확인한 뒤에만 접근할 수 있다. 실제 staging에서는 정상 owner 또는 관리자
+로그인을 사용하며 local test JWT는 사용할 수 없다. 페이지는 닫힌 합성 transport를
+실제 `ChatPageClient`와 `ChatInput`보다 먼저 설치하며, Chat subtree에는 고정된
+합성 identity·conversation·content만 준다.
 
-action endpoint는 server-owned 고정 action 여섯 개만 받고 prompt·message·비교값·
-dispatch 권한을 받지 않는다. 합성 action은 상태를 쓰지 않고 LLM·provider를 부르지
-않으며 비용과 되돌릴 수 없는 행위가 없다. 따라서 기존 관리자 인증은 매 요청에
-유지하되 별도 step-up과 fixture 전용 rate limit을 두지 않는다. 이 전제 중 하나라도
-바뀌면 예외는 더 이상 적용되지 않는다.
+read endpoint는 explicit same-origin인 GET의 `action` query 하나로 server-owned 고정
+결과 여섯 개만 고른다. encoded query는 512 bytes 이하이고 duplicate·추가 parameter,
+body, 다른 method를 거부하며 prompt·message·비교값·dispatch 권한을 받지 않는다.
+합성 결과는 상태를 쓰지 않고 LLM·provider를 부르지 않으며 비용과 되돌릴 수 없는
+행위가 없다. 따라서 기존 관리자 인증은 매 요청에 유지하되 별도 step-up과 fixture
+전용 rate limit을 두지 않는다. 이 전제 중 하나라도 바뀌면 예외는 더 이상 적용되지
+않는다.
 
 이 예외는 공개 `/chat`, 공개 proposal route, 기존 loopback `isE2EFixtureMode()`와
 auth/database bypass guard, rollout AppSetting, kill switch, product adapter readiness,
