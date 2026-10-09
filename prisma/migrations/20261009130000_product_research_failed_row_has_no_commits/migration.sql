@@ -18,6 +18,11 @@
 -- columns on a failed outcome since the table was created. There is no
 -- backfill to wait for, so there is nothing for a deferred validation to be
 -- deferred until.
+-- Both statements in one transaction, as 20261002150000 does. Without it a
+-- failed ADD after a successful DROP leaves the table with no shape check at
+-- all, and the retry then fails on the DROP -- a migration that cannot be run
+-- again and a table that is unconstrained until somebody repairs it by hand.
+BEGIN;
 ALTER TABLE "ProductResearchObservation"
     DROP CONSTRAINT "ProductResearchObservation_outcome_shape_check";
 
@@ -39,3 +44,5 @@ ALTER TABLE "ProductResearchObservation"
                 AND "payload" IS NULL
                 AND "payloadDigest" IS NULL)
         );
+
+COMMIT;
