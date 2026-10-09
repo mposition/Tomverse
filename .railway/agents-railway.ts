@@ -19,13 +19,14 @@
 // --file agents-railway.ts; the default scripts still plan ./railway.ts
 // against the shared project.
 
-import { defineRailway, github, preserve, project, service } from "railway/iac";
+import { defineRailway, github, image, preserve, project, service } from "railway/iac";
 import { AGENT_RAILWAY_PROJECT, buildAgentRunnerResources } from "./agent-runners.ts";
 
 export default defineRailway((ctx) =>
   project(AGENT_RAILWAY_PROJECT, {
     resources: buildAgentRunnerResources(ctx.environment, {
       github,
+      image,
       preserve,
       service,
     }),

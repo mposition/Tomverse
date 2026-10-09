@@ -4020,9 +4020,9 @@ const checks = [
     // docs/policy/engineering-agent.md §8: each service holds exactly its own
     // table row -- no database, AMUX, platform or other service's credential.
     name: "Engineering agent services declare only the variables their policy row names",
-    file: ".railway/scheduled-jobs.ts",
+    file: ".railway/agent-runners.ts",
     test: (source) => {
-      const start = source.indexOf("export const RAILWAY_AGENT_SERVICES");
+      const start = source.indexOf("export const ENGINEERING_AGENT_SERVICES");
       const stop = source.indexOf("];", start);
       if (start < 0 || stop < 0) return false;
       const block = source.slice(start, stop);
