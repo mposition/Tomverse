@@ -120,6 +120,8 @@ const MIGRATIONS_AFTER_COMMIT_DEADLINE = new Set([
   // check covers.
   "20261008130000_amux_decision_maker_stale_close_hours",
   "20261008130100_amux_decision_maker_judgment_delivery",
+  // AMUX intake v13: owner-only terminal accounting for a claimed analysis.
+  "20261008130000_amux_v4_claim_owner_resolution",
 ]);
 
 test("the migration is additive, later than every other AMUX migration but the ones named after it, and holds one table, one function and one trigger", () => {

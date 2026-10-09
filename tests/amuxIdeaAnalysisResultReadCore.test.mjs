@@ -73,6 +73,8 @@ test("Admin accepts only its exact idea's bounded result shape", () => {
   }, ideaId), null);
   assert.deepEqual(parseAmuxIdeaAnalysisResultView(200, { state: "pending" }, ideaId),
     { state: "pending" });
+  assert.deepEqual(parseAmuxIdeaAnalysisResultView(200,
+    { state: "needs_new_preview" }, ideaId), { state: "needs_new_preview" });
   assert.equal(parseAmuxIdeaAnalysisResultView(503, result, ideaId), null);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, result, "other-idea"), null);
   assert.equal(parseAmuxIdeaAnalysisResultView(200, {
