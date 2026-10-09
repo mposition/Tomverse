@@ -5800,7 +5800,7 @@ export function ChatPageClient({
       // question it carried came from a finished turn, not from the composer.
       if (!isOverrideSend && !preparedDraft) {
         const currentDraft = readDraft(activeChatId);
-        if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
+        if (chatDraftMatchesSubmission({
           submittedText: inputValue,
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,

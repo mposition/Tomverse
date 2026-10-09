@@ -1633,6 +1633,7 @@ Before changing the Prompt Refiner surface or request boundary in
 `tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
+- `docs/ui-contracts/chat-e04-staging-fixture.md`
 - `docs/policy/prompt-refiner-observability.md`
 - `docs/ops/prompt-refiner-shadow-harness.md`
 
