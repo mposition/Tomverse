@@ -874,7 +874,12 @@ pub async fn debug_scan() -> axum::Json<serde_json::Value> {
                      workers. A lane in demoted_structured spoke for itself (live protocol \
                      session); one in demoted_native was reported by its backend (herdr \
                      agent_status); one in scanned had its pane captured because neither \
-                     voice was available. A skip here leaves a trace on purpose (ethos rule 4).",
+                     voice was available. A skip here leaves a trace on purpose (ethos rule 4). \
+                     Only worker-registry lanes (_amux_workers with a live _amux_sessions row) \
+                     are considered: a lane started through the legacy session model \
+                     (~/.amux/sessions/<name>.env) is not a worker row, is never scanned here, \
+                     and takes its status from the sessions derivation instead, so n_considered \
+                     0 on an all-legacy fleet is that, not a stalled loop.",
             "now": now,
             "last_pass_at": s.last_pass_at,
             "last_pass_age_s": s.last_pass_at.map(|t| now - t),

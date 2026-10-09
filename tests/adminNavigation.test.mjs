@@ -322,7 +322,7 @@ test("the AMUX group holds Backlog, Promotion and Execution, with their sections
   );
   assert.deepEqual(
     adminNavItemTabs("amux-execution").map((tab) => tab.id),
-    ["cards", "assignment", "halts"]
+    ["cards", "assignment", "halts", "decision-maker"]
   );
   // Between Operations and Governance.
   assert.deepEqual(
@@ -396,9 +396,11 @@ test("the owner sees the whole AMUX group; every other role sees Execution's Ass
     assert.deepEqual(amux.map((item) => item.id), ["amux-execution"], `${role}: AMUX entries`);
     // Halts (orchestration policy version 20, section 7) is read by every
     // role the Execution badge counts it for; only the owner may clear one.
+    // Decision Maker is read by every role; a change takes ops:write
+    // (docs/policy/amux-decision-maker.md §8).
     assert.deepEqual(
       amux[0].tabs.map((tab) => tab.id),
-      ["assignment", "halts"],
+      ["assignment", "halts", "decision-maker"],
       `${role}: Execution sections`
     );
     // Nothing outside AMUX moves for this role.
@@ -418,7 +420,7 @@ test("a role that cannot be determined sees only what every role sees", () => {
       adminNavigationFor(role)
         .filter((item) => item.group === "AMUX")
         .map((item) => [item.id, item.tabs.map((tab) => tab.id)]),
-      [["amux-execution", ["assignment", "halts"]]]
+      [["amux-execution", ["assignment", "halts", "decision-maker"]]]
     );
   }
 });
@@ -473,8 +475,9 @@ test("Execution opens on Cards for the owner and on Assignment for everyone else
   for (const role of [...NON_OWNER_ROLES, null]) {
     const opened = resolveAdminTabFor(tabs, role, undefined);
     assert.equal(opened.tab.id, "assignment", String(role));
-    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment", "halts"]);
+    assert.deepEqual(opened.visible.map((tab) => tab.id), ["assignment", "halts", "decision-maker"]);
     assert.equal(resolveAdminTabFor(tabs, role, "halts").tab.id, "halts", String(role));
+    assert.equal(resolveAdminTabFor(tabs, role, "decision-maker").tab.id, "decision-maker", String(role));
     // A stale value that names no section still falls back...
     assert.equal(resolveAdminTabFor(tabs, role, "not-a-tab").tab.id, "assignment");
     // ...but naming the owner's section is a 404, not a silent substitute.

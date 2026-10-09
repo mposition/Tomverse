@@ -64,7 +64,7 @@ owner-only (rule 14).
 | Operations | Platform settings | `/admin/platform` | — |
 | AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
-| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment`, `halts` |
+| AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment`, `halts`, `decision-maker` |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
 | Governance | Audit log | `/admin/audit` | — |
 | Governance | Retention | `/admin/retention` | — |
@@ -223,7 +223,13 @@ has to confirm with their receipts, and the owner's clear, and carries the count
 of halts no person has cleared (`amuxOrchestratorHalts`). Every admin role reads
 it, because the Execution entry's badge counts it for every role; the clear
 takes the owner role and a recent step-up in its own route, and a stale step-up
-is answered with the way back (rule 7). The Execution entry's badge
+is answered with the way back (rule 7). Its **Decision Maker** tab
+(docs/policy/amux-decision-maker.md §8) shows the kill switch and each
+instance's mode to every admin role, as the switch route's read does; a change
+takes `ops:write` and a recent step-up in that route, a stale step-up is
+answered with the way back (rule 7), and an unknown outcome reads the state
+again rather than sending the change twice. It carries no badge: a switch is a
+setting, not work waiting for a person. The Execution entry's badge
 (`amuxExecution`) is the escalation count plus the halt count, and is drawn only
 when both are known: a partial sum would read as "no halt". Each gated section's tab carries a chip
 -- "Preview · apply off" or "Apply on", and "Behind server switch" or "Server
