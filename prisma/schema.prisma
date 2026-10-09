@@ -4001,6 +4001,12 @@ model RoutingRun {
   selectionVersion       String
   estimatorVersion       String
 
+  /// Writer-reported application provenance. All null on historical/unlabelled
+  /// rows; never backfilled. Corroborate with the exact deployment readback.
+  applicationCommitSha    String?
+  applicationDeploymentId String?
+  applicationEnvironment  String?
+
   /// How the candidate was picked, and what the pick was seeded on.
   ///
   /// Dark. Both null on every existing row, because every existing row was

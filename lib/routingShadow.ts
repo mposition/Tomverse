@@ -3,6 +3,7 @@ import "server-only";
 import { after } from "next/server";
 import { ACTIVE_ESTIMATOR_VERSION } from "@/lib/chatTokenEstimate";
 import { prisma } from "@/lib/prisma";
+import { routingApplicationIdentity } from "@/lib/routingApplicationIdentity";
 import {
     ROUTER_CANDIDATE_VERSION,
     filterRouterCandidates,
@@ -232,7 +233,9 @@ export async function recordRoutingShadowRun(
     if (!isRouterShadowEnabled(environment)) return { recorded: false };
     try {
         const decision = buildRoutingShadowDecision(input);
-        await prisma.routingRun.create({ data: decision });
+        await prisma.routingRun.create({
+            data: { ...decision, ...routingApplicationIdentity(environment) },
+        });
         return { recorded: true };
     } catch (error) {
         // Content-free, like the row it failed to write.
