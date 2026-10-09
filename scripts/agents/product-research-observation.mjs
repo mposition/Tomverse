@@ -38,6 +38,7 @@ import {
   OBSERVATION_SCHEMA_VERSION,
   OBSERVED_BRANCHES,
   buildObservationPayload,
+  observationPayloadDigest,
 } from "../../lib/productResearchObservationCore.mjs";
 import { endChild, runChild } from "../../lib/productResearchObservationChild.mjs";
 import {
@@ -57,6 +58,7 @@ import {
   readBranchTip,
   readLimitedBody,
   readReport,
+  readSubmissionReceipt,
   reportArgv,
   submissionBody,
 } from "../../lib/productResearchObservationStepCore.mjs";
@@ -432,7 +434,10 @@ const main = async () => {
       slot,
       failureStage: "timeout",
     })).then((sent) => {
-      if (sent.problem) say(`submission: ${sent.problem}`);
+      const prepared = sent.problem
+        ? { problem: sent.problem }
+        : readSubmissionReceipt(sent.recorded, { slot, outcome: "failed" });
+      if (prepared.problem) say(`submission: ${prepared.problem}`);
       else say(`recorded ${sent.recorded?.observationId ?? "a row"}: failed at timeout`);
       finish(1);
       // And then the process goes, rather than being left to drain. `finish`
@@ -472,6 +477,23 @@ const main = async () => {
   );
   if (sent.problem) {
     say(`submission: ${sent.problem}`);
+    finish(1);
+    return process.exitCode ?? 1;
+  }
+
+  // A 2xx is not a receipt. The route answers with the row it wrote and the
+  // digest it computed from what it stored, for exactly this comparison.
+  const receipt = readSubmissionReceipt(sent.recorded, {
+    slot,
+    outcome: outcome.failureStage ? "failed" : "ok",
+    ...(outcome.failureStage
+      ? {}
+      : { payloadDigest: observationPayloadDigest(outcome.payload) }),
+  });
+  if (receipt.problem) {
+    // Not retried and not repaired: the row exists, and a second answer for
+    // one slot is worse than none. The point is that somebody finds out.
+    say(`the recorded row does not match what was sent: ${receipt.problem}`);
     finish(1);
     return process.exitCode ?? 1;
   }
