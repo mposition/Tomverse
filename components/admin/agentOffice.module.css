@@ -1055,6 +1055,22 @@ a.integration-row:hover { border-color: var(--accent); }
 .score.blink { color: var(--accent-text); animation: blinkDot 1s steps(2) infinite; }
 .rail-card .approval-body h3 { margin: 8px 0; font-size: 16px; }
 .rail-card .approval-body p { margin: 0 0 10px; color: var(--text-soft); font-size: 13px; }
+.quota-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.quota-list li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, auto) minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.quota-list li b { font-weight: 800; }
+.quota-list li small { overflow: hidden; color: var(--text-faint); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.quota-state { color: var(--text-soft); font-size: 11px; font-weight: 700; }
+.quota-amount { font-variant-numeric: tabular-nums; font-weight: 800; text-align: right; }
+.quota-note { margin: 8px 0 0; color: var(--text-faint); font-size: 11px; }
 .dash-note { margin-top: 14px; text-align: center; font-size: 12px; color: var(--text-soft); }
 
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }

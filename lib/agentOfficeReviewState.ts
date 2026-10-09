@@ -30,6 +30,7 @@ export function agentOfficeReviewState(input: { stored: string | null; now: Date
       state: stale ? "lost" : !provider.enabled ? "off" : provider.running > 0 ? "reviewing" : "idle",
       running: provider.running,
       maxConcurrent: provider.maxConcurrent,
+      quota: provider.quota ?? null,
     })),
     last24h: snapshot.last24h,
   };
