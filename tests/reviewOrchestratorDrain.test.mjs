@@ -11,6 +11,8 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator, isDraining } from "../tools/review-orchestrator/lib/service.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
 
+const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
+
 const TOOL = resolve("tools/review-orchestrator");
 const CLIENT = join(TOOL, "client/review.mjs");
 const SERVER = join(TOOL, "bin/review-orchestrator.mjs");
@@ -72,11 +74,11 @@ test("while draining, submits are queued but nothing new starts; lifting the dra
     const { jobId } = JSON.parse(submitted.stdout);
 
     const orchestrator = new Orchestrator(f.config);
-    assert.deepEqual(orchestrator.tick(), []);
+    assert.deepEqual(orchestrator.tick(allAvailable(f.config)), []);
     assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).status, "queued");
 
     assert.equal(f.server("drain", "off").code, 0);
-    assert.equal(orchestrator.tick().length, 1);
+    assert.equal(orchestrator.tick(allAvailable(f.config)).length, 1);
     await orchestrator.idle();
     assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).verdict, "accept");
   } finally {

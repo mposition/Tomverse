@@ -89,6 +89,9 @@ export function AmuxIdeaAnalysisResultPanel({ ideaId, onContinuationReady }: {
     {view?.state === "pending" ? <p role="status">{m.analysisResultPending}</p> : null}
     {view?.state === "cancelled" ? <p role="status">{m.analysisResultCancelled}</p> : null}
     {view?.state === "provider_failed" ? <p role="alert">{m.analysisResultProviderFailed}</p> : null}
+    {view?.state === "needs_new_preview" ? <p role="status">
+      {m.analysisResultNeedsNewPreview}
+    </p> : null}
     {view?.state === "ready" || view?.state === "partial" ||
       view?.state === "needs_owner_input" ? <div className="space-y-3">
       <p className="text-xs text-zinc-600 dark:text-zinc-400">
