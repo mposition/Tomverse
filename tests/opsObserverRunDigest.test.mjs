@@ -103,7 +103,7 @@ test("a webhook that is not Slack's is never posted to, and a failed notice with
     const fake = fakeFetch({ [DIGEST]: [200, { result: "created", itemId: ITEM }], [WEBHOOK]: answer });
     const result = await run(fake);
     assert.deepEqual([result.exitCode, result.outcome], [1, "notice_failed"]);
-    assert.ok(!fake.urls().includes(HEARTBEAT));
+    assert.ok(fake.urls().every((url) => url !== HEARTBEAT));
   }
 });
 
