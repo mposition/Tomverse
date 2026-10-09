@@ -1,6 +1,6 @@
 # AMUX intake
 
-상태: **v1~v4 설계 승인, v5 구현 착수·보존 계약, v6~v10 보존·산출 계약, v11 단위별 결정·파생 이력, v12 실행 위치·식별자·권한 경계, v13 분석 호출 상한 및 v14 코드 전용 활성화 PR 승인.** 운영자 `mposition`이 2026-09-24에 v1, 2026-09-28에 v2, 2026-09-29에 v3를 승인하고, 2026-09-30에 v3 등록 래치 활성화와 v4 새 경로의 설계를 승인했다. 2026-10-01 v5는 18개 전체 작업의 정책·계약·코드·migration 파일 작성·로컬 합성 검증 착수를, 같은 날 v6~v12는 아래 계약을 승인했다. 2026-10-04 v13은 호출 시간·횟수만 확정했다. 2026-10-08 v14는 v4 코드 래치 전용 PR 작성을 승인했다. v4 운영 환경 값·라이브 모델 호출·production 스위치·자동 실행은 별도 gate다.
+상태: **v1~v4 설계 승인, v5 구현 착수·보존 계약, v6~v10 보존·산출 계약, v11 단위별 결정·파생 이력, v12 실행 위치·식별자·권한 경계, v13 분석 호출 상한, v14 코드 전용 활성화 PR 및 v15 순차 live 활성화 승인.** 운영자 `mposition`이 2026-09-24에 v1, 2026-09-28에 v2, 2026-09-29에 v3를 승인하고, 2026-09-30에 v3 등록 래치 활성화와 v4 새 경로의 설계를 승인했다. 2026-10-01 v5는 18개 전체 작업의 정책·계약·코드·migration 파일 작성·로컬 합성 검증 착수를, 같은 날 v6~v12는 아래 계약을 승인했다. 2026-10-04 v13은 호출 시간·횟수만 확정했다. 2026-10-08 v14는 v4 코드 래치 전용 PR 작성을 승인했다. 2026-10-09 v15는 남은 v4 live 활성화를 아래 순서와 독립 gate로 승인했다. v22 자동 승격과 worker 실행은 이 승인에 포함하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 1
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 3
@@ -15,6 +15,7 @@ approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 11
 approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 12
 approvedBy: mposition · approvedAt: 2026-10-04 · 정책 버전: 13
 approvedBy: mposition · approvedAt: 2026-10-08 · 정책 버전: 14
+approvedBy: mposition · approvedAt: 2026-10-09 · 정책 버전: 15
 
 v1~v3의 기록에 있는 `USD 상한 미정`은 그 이전 원천의 사실이다. **v4 분석 Agent의 API 월 USD 50은 2026-09-30 운영자가 이 버전에서 새로 승인한 값**이며, 구독형 CLI의 실제 청구액이라고 주장하지 않는다. v4 분석 경로의 **운영상** 보존·삭제 기간은 2026-10-01 v5에서 새로 승인했고, 미종료·미결정 체류와 brief·hold의 세부 수치는 같은 날 v6, 자동 만료 초안 본문 삭제 시점은 v7, 노드·카드 제목·설명의 기간은 v8, 카드 작업 본문의 기간은 v9에서 추가 승인했다. 이것은 법률 의견이 아니며, v1~v3 원천의 법적 보존 기간은 여전히 미정이다. 과거 기록을 소급 수정하지 않는다.
 
@@ -38,6 +39,7 @@ v1 승인은 설계 권고 16개를 승인했고 그때 법적 보존 기간과 
 | 12 | 2026-10-01 mposition | 공통 기반의 AMUX v4 전용 로컬 Ubuntu 분석 예외와 운영자 확인을 전제로 한 제한 GitHub 원문 전송 허용 범위를 승인하고, 이 원천의 식별자·owner 수동 쓰기·v22 자동 편입 경계를 확정한다. 아래 v12 절의 미완 S0·별도 활성화 gate는 유지한다. |
 | 13 | 2026-10-04 mposition | 분석 CLI 호출 1회 hard deadline 10분, Agent 전체 DB UTC 하루 최대 12회, 상한 초과 보류, 자동 재시도 금지를 승인한다. live runner·S0·운영 래치는 열지 않는다. |
 | 14 | 2026-10-08 mposition | v4 전용 코드 래치를 준비하는 단일 PR 작성을 승인한다. 분석 queue/result read/claim/result write·라이브 CLI·보존 삭제/hold write 래치는 그대로 닫고, 모든 v4 운영 환경 스위치와 라이브 호출·쓰기·자동 실행은 별도 검증·승인 전까지 열지 않는다. v22와 v1~v3 경로는 바꾸지 않는다. |
+| 15 | 2026-10-09 mposition | 남은 v4 live 활성화를 코드 래치 PR → production 합성 key 삭제 증거 → 승인 모델·가격 등록 → 전용 Ubuntu 서비스 연결·검증 순서로 승인한다. 각 단계는 앞 단계의 증거와 별도 환경 스위치를 요구하며 main 병합은 운영자만 한다. v22 자동 승격과 worker 실행은 열지 않는다. |
 
 아래 v3 절은 2026-09-29에 운영자 mposition이 승인했다. 더 세밀한 시각은 없다. 그 설계 승인은 코드 래치를 켜지 않고 환경 값을 설정하지 않는다. 2026-09-30 활성화 승인이 코드 래치를 켜고, 환경 값이 `enabled`일 때만 writer를 연다. v1과 v2의 writer는 바뀌지 않는다.
 
@@ -404,3 +406,13 @@ Agent 전체 호출 접수는 **DB UTC 00:00~다음 날 00:00에 최대 12회**�
 ## v14 — v4 코드 전용 활성화 PR [결정, 운영자 mposition 2026-10-08]
 
 운영자는 v4 활성화 전용 PR 작성을 요청했다. 이 단계에서는 v4 Admin 입력·미리보기·단위 결정 등의 코드 래치만 준비하고, 분석 queue·결과 본문 read·claim/result write·라이브 CLI·보존 삭제·retention hold write의 코드 래치는 v13의 미충족 조건을 닫을 때까지 **false**로 둔다. 각 경로의 기존 전용 환경 스위치·owner 재인증·비용·감사·격리·read-back Guard는 유지한다. 단위별 `no_commit` 복구 쓰기에는 일반 unit write와 별도로 기본 꺼짐인 `TOMVERSE_AMUX_V4_UNIT_RECOVERY_WRITE`를 요구한다. 코드 래치를 켰다는 사실만으로 운영 환경에서 쓰기나 라이브 CLI가 허용되지 않는다. 배포 전에는 모든 v4 환경 스위치의 실제 값을 확인하고, 미검증 경로가 `enabled`라면 배포를 중단한다. 이 PR은 환경 값 변경, migration 적용, 운영 스위치 활성화, 실제 아이디어 분석, v22 자동 편입·worker claim, 병합 또는 배포를 승인하지 않는다.
+
+## v15 — v4 live 순차 활성화 [결정, 운영자 mposition 2026-10-09]
+
+운영자는 recovery halt 해제를 확인했으며, 나머지 선행 조건을 각 단계에서 검증해 성공으로 확인하면서 남은 v4 live 활성화를 다음 순서로 진행하도록 승인했다. **(1)** 분석 queue·owner 결과 본문 read·월 비용 예약·claim/result write·격리 CLI 실행·v4 lifecycle 보존 삭제·owner retention hold write의 v4 전용 코드 래치만 켜는 좁은 PR, **(2)** production 전용 합성 단위 key의 생성·전체 버전 삭제·부재 증명, **(3)** 승인된 분석 모델과 가격 version 등록, **(4)** 전용 Ubuntu timer/service 연결과 end-to-end 검증. 각 단계는 앞 단계가 성공으로 확인된 뒤에만 진행하며, 결과가 불명하면 멈추고 read-back한다. main 병합은 운영자만 한다.
+
+현재 production의 v4 본문 13개 열 관측값은 encrypted 0건·legacy 0건이며, 앱 전용 content key 환경 값 다섯 개의 loader 검증과 S3 호환 저장소의 완전한 version/delete-marker 목록 지원이 확인됐다. owner 결과 불명 claim 정산 migration도 적용됐다. staging 합성 key 삭제 canary에 이어 production 합성 key 삭제 canary도 `VERIFIED`로 통과했고, 후자는 legacy 0건·`runtimeActivated=false`를 함께 확인했다. v4 runtime 환경 스위치는 계속 없고, 분석 모델·가격 행은 없으며, Ubuntu 분석·보존 timer는 비활성 상태다. 그러므로 코드 래치 PR만으로 production 호출·본문 read/write·비용 예약·삭제·hold 변경은 시작되지 않는다.
+
+production canary는 기존 자료를 조회하지 않고 이번 실행이 만든 난수 namespace의 합성 단위 key 하나만 생성·목록·삭제·부재 확인해야 한다. 기존 staging 경로와 호환되어야 하고, production 실행마다 별도의 명시적 승인 환경 값이 필요하다. script는 승인 값을 저장하지 않으며, 운영 helper는 해당 호출의 child process 환경에만 값을 넣고 프로세스 종료와 함께 폐기한다. 출력과 오류에는 bucket·object key·암호문·자격증명·기존 자료 식별자를 남기지 않는다. cleanup은 그 합성 단위 key 밖으로 확장하지 않으며, 삭제 결과가 불명하면 성공으로 표시하거나 다른 key를 정리하지 않는다.
+
+v1~v14의 owner 확인, 최근 재인증, same-origin/CSRF, 전용 secret, 단위별 외부 content key와 암호화, `agent/amux-intake` 월 **US$50**, DB UTC 하루 **12회**, 호출 hard deadline **600,000ms**, Agent 전체 실제 실행 **3회 연속 실패 정지**, 자동 재시도 금지, 결과 불명 즉시 정지·read-back·사람 인계, canonical 감사 및 사용자 credit 비접촉 조건은 모두 유지한다. 전용 환경 값 하나만 빠지거나 `enabled`가 아니면 해당 경로는 계속 닫힌다. 공유 retention route가 알고 있는 `AmuxV22TaskResult`·`AmuxV22TaskPatch` 본문의 90일 정리 경로는 v4 lifecycle 정리와 별도의 기본 꺼짐 코드·환경 gate 뒤에 두며 v15에서 켜지 않는다. 그 보존 구현을 폐기하는 것이 아니라 정확한 v22 retention 활성화 승인을 뒤에 받는다. 이 승인은 v22 자동 승격·worker claim·Task 실행·Git publication의 코드 또는 환경 래치를 켜지 않는다. 또한 코드 래치 변경만으로 운영 설정·호출·등록·서비스 시작·병합이 자동 승인된 것으로 간주하지 않으며, 해당 단계는 별도 운영 검증과 기존 승인 경계를 따른다. main 병합은 운영자 전용이다.

@@ -12,7 +12,7 @@ import { commitAmuxIdeaOnlyAnalysisClaim,
 import { loadAmuxContentKeyRing } from "@/lib/amux/ideaKeyStore";
 import { prisma } from "@/lib/prisma";
 
-const CLAIM_CODE_LATCH = false;
+const CLAIM_CODE_LATCH = true;
 const CLAIM_WRITE_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_WRITE";
 // Read-back is independently gated so turning off writes cannot prevent an
 // operator from reconciling a lost claim response. It never returns a prompt.
@@ -21,9 +21,9 @@ const CLAIM_RECEIPT_READ_ENV = "TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_READ";
 const id = z.string().regex(/^[A-Za-z0-9:_-]{1,128}$/);
 const bodySchema = z.object({ requestId: id, previewId: id }).strict();
 
-/** Deliberately dark. A future activation needs verified local isolation,
- * exact owner transfer, live model eligibility, bounded costs, failure latch
- * and an outcome-unknown read-back before this may dispatch a model call. */
+/** The v15 code latch still requires verified local isolation, exact owner
+ * transfer, live model eligibility, bounded costs, the failure latch, both
+ * environment switches and outcome-unknown read-back before a model call. */
 export async function POST(request: Request): Promise<Response> {
   if (!isAmuxV4AnalysisAgentAuthorized(request,
     process.env[AMUX_V4_ANALYSIS_AGENT_SECRET_ENV],
