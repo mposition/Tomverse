@@ -9,9 +9,15 @@ import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
+  clearFrontierRegistrationReceipt,
   readAvailableFrontierModels,
   readCheckedFrontierSelection,
+  readFrontierCatalogApprovalReadBack,
+  readFrontierCatalogApprovalWrite,
+  readFrontierRegistrationReceipt,
+  reserveFrontierRegistrationReceipt,
   type AvailableFrontierModel,
+  type PendingFrontierCatalogApproval,
 } from "@/lib/amux/ideaFrontierCatalogUiCore";
 import {
   readPreparedIdeaTransferPreview, readPreviewReceipt, reservePreviewReceipt,
@@ -29,15 +35,22 @@ type PreviewState =
 type ConfirmState =
   | { kind: "idle" | "pending" | "unknown" | "expired" | "refused" }
   | { kind: "confirmed"; value: ConfirmedIdeaTransfer };
+type RegistrationState = "idle" | "pending" | "unknown" | "not_visible" |
+  "approved" | "revoked" | "recovery_unavailable";
+
+const FRONTIER_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
+const FRONTIER_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
+const FRONTIER_VERSION = /^(0|[1-9]\d{0,8})$/;
 
 const receiptStore = (): Storage | null => {
   try { return window.sessionStorage; } catch { return null; }
 };
 
-export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAvailable,
+export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvailable, confirmAvailable,
   analysisBudgetAvailable, ideaId, planReady,
   declaredExternalSources, operatorId, chunkIndex = 0 }: {
-  available: boolean; previewAvailable: boolean; confirmAvailable: boolean;
+  available: boolean; writeAvailable: boolean;
+  previewAvailable: boolean; confirmAvailable: boolean;
   analysisBudgetAvailable: boolean;
   ideaId: string | null;
   planReady: boolean; declaredExternalSources: boolean; operatorId: string;
@@ -52,6 +65,17 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
   const [selectedEffort, setSelectedEffort] = useState("");
   const [checking, setChecking] = useState(false);
   const [checked, setChecked] = useState(false);
+  const [registrationProvider, setRegistrationProvider] =
+    useState<"openai" | "anthropic">("openai");
+  const [registrationModelId, setRegistrationModelId] = useState("");
+  const [registrationEfforts, setRegistrationEfforts] = useState<string[]>([]);
+  const [registrationVersion, setRegistrationVersion] = useState("0");
+  const [registrationConfirmed, setRegistrationConfirmed] = useState(false);
+  const [registrationRecoveryChecked, setRegistrationRecoveryChecked] = useState(false);
+  const [registrationState, setRegistrationState] = useState<RegistrationState>("idle");
+  const [pendingRegistration, setPendingRegistration] =
+    useState<PendingFrontierCatalogApproval | null>(null);
+  const [registrationFailure, setRegistrationFailure] = useState<AdminApiFailure | null>(null);
   const [preview, setPreview] = useState<PreviewState>({ kind: "idle" });
   const [confirmation, setConfirmation] = useState<ConfirmState>({ kind: "idle" });
   const selected = models?.find((model) => model.approvalId === selectedApprovalId);
@@ -196,6 +220,127 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
     void load();
   };
 
+  const registrationVersionValue = FRONTIER_VERSION.test(registrationVersion)
+    ? Number(registrationVersion) : null;
+  const registrationInputValid = FRONTIER_MODEL_ID.test(registrationModelId.trim()) &&
+    registrationEfforts.length > 0 && registrationVersionValue !== null &&
+    registrationVersionValue <= 999_999_999;
+  const registrationLocked = !writeAvailable || !registrationRecoveryChecked ||
+    registrationState !== "idle";
+
+  const toggleRegistrationEffort = (effort: string, checked: boolean) => {
+    setRegistrationEfforts((current) => FRONTIER_EFFORTS.filter((candidate) =>
+      candidate === effort ? checked : current.includes(candidate)));
+    setRegistrationConfirmed(false);
+  };
+
+  const registerModel = async () => {
+    if (!writeAvailable || !registrationRecoveryChecked || registrationState !== "idle" ||
+        !registrationConfirmed || !registrationInputValid ||
+        registrationVersionValue === null) return;
+    const registration: PendingFrontierCatalogApproval = {
+      approvalId: crypto.randomUUID(), provider: registrationProvider,
+      modelId: registrationModelId.trim(), allowedEfforts: [...registrationEfforts],
+      expectedPreviousVersion: registrationVersionValue,
+    };
+    if (!reserveFrontierRegistrationReceipt(receiptStore(), operatorId, registration)) {
+      setRegistrationState("recovery_unavailable");
+      return;
+    }
+    setPendingRegistration(registration);
+    setRegistrationState("pending");
+    setRegistrationFailure(null);
+    try {
+      const response = await adminFetch("/api/admin/amux/ideas/frontier-models", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, action: "approve", ...registration,
+          ownerConfirmedFrontierEligibility: true }),
+      });
+      if (!response.ok) {
+        setRegistrationFailure(await readAdminApiFailure(response, {
+          fallback: m.frontierRegistrationUnavailable, locale,
+        }));
+        setRegistrationState("unknown");
+        return;
+      }
+      const observed = readFrontierCatalogApprovalWrite(
+        response.status, await response.json(), registration);
+      if (!observed || observed.state !== "found") {
+        setRegistrationFailure({ message: m.frontierRegistrationInvalidResponse,
+          tone: "error", requiresReauthentication: false, approvalId: registration.approvalId });
+        setRegistrationState("unknown");
+        return;
+      }
+      setRegistrationState(observed.status);
+      clearFrontierRegistrationReceipt(receiptStore(), operatorId, registration.approvalId);
+      setLoading(true);
+      await load();
+    } catch {
+      setRegistrationState("unknown");
+    }
+  };
+
+  const readRegistration = useCallback(async (registration: PendingFrontierCatalogApproval) => {
+    setRegistrationState("pending");
+    setRegistrationFailure(null);
+    try {
+      const query = new URLSearchParams({ approvalId: registration.approvalId });
+      const response = await adminFetch(`/api/admin/amux/ideas/frontier-models?${query}`,
+        { cache: "no-store" });
+      if (!response.ok) {
+        setRegistrationFailure(await readAdminApiFailure(response, {
+          fallback: m.frontierRegistrationUnavailable, locale,
+        }));
+        setRegistrationState("unknown");
+        return;
+      }
+      const observed = readFrontierCatalogApprovalReadBack(
+        response.status, await response.json(), registration);
+      if (!observed) {
+        setRegistrationFailure({ message: m.frontierRegistrationInvalidResponse,
+          tone: "error", requiresReauthentication: false,
+          approvalId: registration.approvalId });
+        setRegistrationState("unknown");
+        return;
+      }
+      if (observed.state === "not_visible") {
+        setRegistrationState("not_visible");
+        return;
+      }
+      setRegistrationState(observed.status);
+      clearFrontierRegistrationReceipt(receiptStore(), operatorId, registration.approvalId);
+      setLoading(true);
+      await load();
+    } catch {
+      setRegistrationState("unknown");
+    }
+  }, [load, locale, m.frontierRegistrationInvalidResponse,
+    m.frontierRegistrationUnavailable, operatorId]);
+
+  useEffect(() => {
+    const receipt = readFrontierRegistrationReceipt(receiptStore(), operatorId);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setRegistrationRecoveryChecked(true);
+      if (receipt.kind === "unavailable") {
+        setRegistrationState("recovery_unavailable");
+        return;
+      }
+      if (receipt.kind === "present") {
+        const registration = receipt.registration;
+        setRegistrationProvider(registration.provider);
+        setRegistrationModelId(registration.modelId);
+        setRegistrationEfforts(registration.allowedEfforts);
+        setRegistrationVersion(String(registration.expectedPreviousVersion));
+        setPendingRegistration(registration);
+        setRegistrationState("pending");
+        void readRegistration(registration);
+      }
+    });
+    return () => { active = false; };
+  }, [operatorId, readRegistration]);
+
   const checkSelection = async () => {
     if (!selected || !selected.allowedEfforts.includes(selectedEffort) || checking) return;
     setChecking(true);
@@ -322,6 +467,94 @@ export function AmuxFrontierModelsPanel({ available, previewAvailable, confirmAv
         {m.frontierModelsTitle}
       </h3>
       <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
+      <div className="space-y-3 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
+        <h4 className="font-semibold text-zinc-900 dark:text-zinc-100">
+          {m.frontierRegistrationTitle}
+        </h4>
+        <p className="text-zinc-700 dark:text-zinc-300">{m.frontierRegistrationHint}</p>
+        {!writeAvailable ? <p role="status">{m.frontierRegistrationDisabled}</p> : null}
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-provider">
+            {m.frontierRegistrationProvider}
+            <select id="amux-v4-frontier-registration-provider"
+              value={registrationProvider}
+              disabled={registrationLocked}
+              onChange={(event) => {
+                setRegistrationProvider(event.target.value as "openai" | "anthropic");
+                setRegistrationConfirmed(false);
+              }}
+              className="min-h-11 rounded-lg border border-zinc-400 px-3 dark:border-zinc-600 dark:bg-zinc-900">
+              <option value="openai">openai</option>
+              <option value="anthropic">anthropic</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-model">
+            {m.frontierRegistrationModelId}
+            <input id="amux-v4-frontier-registration-model" value={registrationModelId}
+              maxLength={120} spellCheck={false}
+              disabled={registrationLocked}
+              onChange={(event) => {
+                setRegistrationModelId(event.target.value);
+                setRegistrationConfirmed(false);
+              }}
+              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-mono dark:border-zinc-600 dark:bg-zinc-900" />
+          </label>
+          <label className="flex flex-col gap-1" htmlFor="amux-v4-frontier-registration-version">
+            {m.frontierRegistrationExpectedVersion}
+            <input id="amux-v4-frontier-registration-version" value={registrationVersion}
+              inputMode="numeric" pattern="[0-9]*" maxLength={9}
+              disabled={registrationLocked}
+              onChange={(event) => {
+                setRegistrationVersion(event.target.value);
+                setRegistrationConfirmed(false);
+              }}
+              className="min-h-11 rounded-lg border border-zinc-400 px-3 font-mono dark:border-zinc-600 dark:bg-zinc-900" />
+          </label>
+          <fieldset className="space-y-1" disabled={registrationLocked}>
+            <legend>{m.frontierRegistrationEfforts}</legend>
+            <div className="flex flex-wrap gap-3">
+              {FRONTIER_EFFORTS.map((effort) => <label key={effort}
+                className="flex min-h-11 items-center gap-2">
+                <input type="checkbox" checked={registrationEfforts.includes(effort)}
+                  onChange={(event) => toggleRegistrationEffort(effort, event.target.checked)} />
+                {effort}
+              </label>)}
+            </div>
+          </fieldset>
+        </div>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={registrationConfirmed}
+            disabled={registrationLocked || !registrationInputValid}
+            onChange={(event) => setRegistrationConfirmed(event.target.checked)} />
+          <span>{m.frontierRegistrationConfirm}</span>
+        </label>
+        <button type="button" onClick={() => void registerModel()}
+          disabled={registrationLocked || !registrationConfirmed || !registrationInputValid}
+          className="min-h-11 rounded-lg border border-blue-700 px-4 text-blue-800 disabled:opacity-50 dark:border-blue-400 dark:text-blue-200">
+          {m.frontierRegistrationAction}
+        </button>
+        {pendingRegistration ? <p className="break-all text-xs">
+          {m.frontierRegistrationApprovalId}: {pendingRegistration.approvalId}
+        </p> : null}
+        {registrationState === "pending" ?
+          <p role="status">{m.frontierRegistrationPending}</p> : null}
+        {registrationFailure ? <AdminApiFailureNotice failure={registrationFailure} /> : null}
+        {registrationState === "unknown" ?
+          <p role="alert">{m.frontierRegistrationUnknown}</p> : null}
+        {registrationState === "not_visible" ?
+          <p role="alert">{m.frontierRegistrationNotVisible}</p> : null}
+        {registrationState === "recovery_unavailable" ?
+          <p role="alert">{m.frontierRegistrationRecoveryUnavailable}</p> : null}
+        {registrationState === "approved" ?
+          <p role="status">{m.frontierRegistrationApproved}</p> : null}
+        {registrationState === "revoked" ?
+          <p role="status">{m.frontierRegistrationRevoked}</p> : null}
+        {pendingRegistration && ["unknown", "not_visible"].includes(registrationState) ?
+          <button type="button" onClick={() => void readRegistration(pendingRegistration)}
+            className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+            {m.frontierRegistrationReadBack}
+          </button> : null}
+      </div>
       {!available ? <p>{m.frontierModelsUnavailable}</p> : null}
       {available ? <button type="button" onClick={refresh} disabled={loading || checking}
         className="min-h-11 rounded-lg border border-zinc-400 px-4 disabled:opacity-50 dark:border-zinc-600">

@@ -10,8 +10,17 @@ export const AMUX_V4_CONTENT_RETENTION_SECRET_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET";
 export const AMUX_V4_CONTENT_RETENTION_AGENT_ID = "amux-v4-intake-retention";
 
+/** The shared trigger also knows how to retire v22 task result and patch
+ * bodies. v15 does not activate that distinct retention path. */
+export const AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH = false;
+export const AMUX_V22_TASK_RESULT_RETENTION_ENV =
+  "TOMVERSE_AMUX_V22_TASK_RESULT_RETENTION";
+
 export const amuxV4ContentRetentionEnabled = (value: string | undefined) =>
   AMUX_V4_CONTENT_RETENTION_CODE_LATCH && value === "enabled";
+
+export const amuxV22TaskResultRetentionEnabled = (value: string | undefined) =>
+  AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH && value === "enabled";
 
 export const amuxV4ContentRetentionRequestSchema = z.object({
   schemaVersion: z.literal(1),

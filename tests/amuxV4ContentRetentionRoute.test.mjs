@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { POST } from "../app/api/internal/amux/v4/content-retention/route.ts";
 import { AMUX_V4_CONTENT_RETENTION_AGENT_ID,
   amuxV4ContentRetentionEnabled,
+  amuxV22TaskResultRetentionEnabled,
   isAmuxV4ContentRetentionAuthorized } from
   "../lib/amux/ideaContentRetentionCore.ts";
 
@@ -40,4 +42,14 @@ test("retention route has a separate secret and stays closed without its environ
     if (previousSwitch === undefined) delete process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION;
     else process.env.TOMVERSE_AMUX_V4_CONTENT_RETENTION = previousSwitch;
   }
+});
+
+test("v15 does not activate v22 task result or patch retention", () => {
+  assert.equal(amuxV22TaskResultRetentionEnabled(undefined), false);
+  assert.equal(amuxV22TaskResultRetentionEnabled("disabled"), false);
+  assert.equal(amuxV22TaskResultRetentionEnabled("enabled"), false);
+  const route = readFileSync(new URL(
+    "../app/api/internal/amux/v4/content-retention/route.ts", import.meta.url), "utf8");
+  assert.match(route, /amuxV22TaskResultRetentionEnabled\(\s*process\.env\[AMUX_V22_TASK_RESULT_RETENTION_ENV\]\)/);
+  assert.match(route, /\? await purgeDueAmuxV22TaskResults\(\)/);
 });
