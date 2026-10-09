@@ -171,6 +171,13 @@ test("the names measured in the deployed Agents image are accepted", async () =>
       HOME: "/root",
       NODE_VERSION: "22",
       RAILWAY_SERVICE_NAME: "Support Triage",
+      // Named by the retention service's refusal on 2026-10-09, the first
+      // time it ran on Railway.
+      NPM_CONFIG_FETCH_RETRIES: "5",
+      NPM_CONFIG_FUND: "false",
+      NPM_CONFIG_PRODUCTION: "false",
+      NPM_CONFIG_UPDATE_NOTIFIER: "false",
+      RAILWAY_BETA_ENABLE_RUNTIME_V2: "1",
     };
     assert.deepEqual(
       await runSupportTriageService(kind, image, answering(200, { result: "ok" }).post),
