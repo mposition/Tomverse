@@ -155,74 +155,6 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
   },
 ];
 
-/**
- * The engineering agent's two services (docs/policy/engineering-agent.md §8,
- * §12): production only, each a cron that runs one cycle and stops. They are
- * not built by Railway: they run the image .github/workflows/engineering-
- * agent-image.yml builds on main, by digest, with automatic updates off.
- *
- * `digest` is null until a person records the digest that workflow printed,
- * in a pull request they merge; while it is null the service is not declared
- * at all, so nothing is deployed and nothing is owned. Changing it is that PR
- * and an operator's apply -- never the agent (§13).
- *
- * `variables` is the service's whole list. The runner holds no GitHub write,
- * App key or database credential; the publisher holds no model key or
- * database credential; neither holds an AMUX secret. The lists equal
- * RUNNER_VARIABLES and PUBLISHER_VARIABLES in the scripts, which
- * tests/engineeringAgentServices.test.mjs holds.
- *
- * Each schedule is longer than its service's hard deadline, so two cycles
- * never overlap.
- */
-export type RailwayAgentService = {
-  readonly key: string;
-  readonly service: string;
-  readonly digest: string | null;
-  readonly startCommand: string;
-  readonly cronSchedule: string;
-  readonly variables: Readonly<Partial<Record<RailwayEnvironment, readonly string[]>>>;
-};
-
-export const ENGINEERING_AGENT_IMAGE = "ghcr.io/mposition/tomverse-engineering-agent";
-
-export const RAILWAY_AGENT_SERVICES: readonly RailwayAgentService[] = [
-  {
-    key: "engineeringAgentRunner",
-    service: "Engineering Agent Runner",
-    digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
-    startCommand: "node --experimental-strip-types scripts/engineering-agent-runner.mjs",
-    cronSchedule: "*/30 * * * *",
-    variables: {
-      production: [
-        "ENGINEERING_AGENT_APP_URL",
-        "ENGINEERING_AGENT_RUNNER_SECRET",
-        "ENGINEERING_AGENT_ANTHROPIC_API_KEY",
-        "ENGINEERING_AGENT_GITHUB_READ_TOKEN",
-        "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
-      ],
-    },
-  },
-  {
-    key: "engineeringAgentPublisher",
-    service: "Engineering Agent Publisher",
-    digest: "sha256:465e6eb26f88abd08dde8294b51608b509a74c5ff60b48ec26ab01164a871a4d",
-    startCommand: "node --experimental-strip-types scripts/engineering-agent-publisher.mjs",
-    cronSchedule: "*/10 * * * *",
-    variables: {
-      production: [
-        "ENGINEERING_AGENT_APP_URL",
-        "ENGINEERING_AGENT_PUBLISHER_SECRET",
-        "ENGINEERING_AGENT_PUBLISHER_APP_ID",
-        "ENGINEERING_AGENT_PUBLISHER_INSTALLATION_ID",
-        "ENGINEERING_AGENT_PUBLISHER_PRIVATE_KEY",
-        "ENGINEERING_AGENT_PUBLISHER_DEADMAN_URL",
-      ],
-    },
-  },
-];
-
-const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 
 /**
  * The DSL functions `railway.ts` passes in from the SDK. Injected rather than
@@ -232,7 +164,6 @@ const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
  */
 export type RailwayDsl<Source, Preserved, Resource> = {
   readonly github: (repo: string, options: { branch: string }) => Source;
-  readonly image: (reference: string, options: { autoUpdates: { type: "disabled" } }) => Source;
   readonly preserve: () => Preserved;
   readonly service: (
     name: string,
@@ -275,24 +206,5 @@ export const buildScheduledJobResources = <Source, Preserved, Resource>(
       })
     );
   }
-  const agents: Resource[] = [];
-  for (const agent of RAILWAY_AGENT_SERVICES) {
-    const variables = agent.variables[environment];
-    // Not in this environment, or no image recorded yet: not declared.
-    if (variables === undefined || agent.digest === null) continue;
-    if (!IMAGE_DIGEST.test(agent.digest)) {
-      throw new Error(`${agent.service}: the image digest is not a sha256 digest.`);
-    }
-    agents.push(
-      dsl.service(agent.service, {
-        source: dsl.image(`${ENGINEERING_AGENT_IMAGE}@${agent.digest}`, {
-          autoUpdates: { type: "disabled" },
-        }),
-        start: agent.startCommand,
-        deploy: { cronSchedule: agent.cronSchedule, restartPolicyType: "NEVER" },
-        env: Object.fromEntries(variables.map((name) => [name, dsl.preserve()])),
-      })
-    );
-  }
-  return [...cron, ...agents];
+  return cron;
 };
