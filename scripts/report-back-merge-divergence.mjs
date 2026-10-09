@@ -33,8 +33,27 @@ const theirs = flag("theirs") ?? "origin/main";
 // a literal control character, which check:encoding:strict refuses in source.
 const NUL = String.fromCharCode(0);
 
+/**
+ * Runs git with its stderr captured rather than inherited.
+ *
+ * Several of the reads here are expected to fail -- `git show <base>:<path>`
+ * for a path the base does not have is how `blob()` learns the path is new, and
+ * `git merge-tree` exits non-zero on the very conflict this report exists to
+ * describe. With stderr inherited, each of those printed a `fatal:` line into
+ * the job log: on 2026-10-08 one run emitted ten of them above its own output.
+ * The report's whole purpose is a log a person can read, so the noise was not
+ * cosmetic.
+ *
+ * Nothing is lost by capturing. Every call that must not fail already catches
+ * its own error and prints a sentence of its own, and a captured stderr is
+ * still on the thrown error for a caller that wants it.
+ */
 const git = (args) =>
-    execFileSync("git", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    execFileSync("git", args, {
+        encoding: "utf8",
+        maxBuffer: 256 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+    });
 
 /**
  * One side of a path: its text, or why there is none.

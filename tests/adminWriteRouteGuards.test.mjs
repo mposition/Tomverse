@@ -122,8 +122,11 @@ const RESOLUTION_PREVIEW_REVIEWED_FILES = [
 // The owner-resolved readback remains read-only. Its two changed reader modules
 // were accepted in r-20261008-135430-282645; the operator waived the unavailable
 // Cursor retry on 2026-10-09. The closure and its mutation checks stay unchanged.
-const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "fa5fb1014b57f38e157fe9efb307662604a74f71f10a33a836fad4c4686831ca";
-const RESOLUTION_PREVIEW_DISABLED_DIGEST = "74531134dd7406f88767022054143d04af2d541583a444a2e1b9c8d03ff977a7";
+// Intake v15 changes only ideaAnalysisResultReadCore's code latch in this
+// unchanged 14-file closure (r-20261009-040434-905dfc accepted that activation).
+// Repin both resolution-preview states without exempting a new file or writer.
+const RESOLUTION_PREVIEW_REVIEWED_DIGEST = "33db27df6a4f83d5bb9aff204c0e1190b96586560c03dc37c065fa250cbe82e8";
+const RESOLUTION_PREVIEW_DISABLED_DIGEST = "5af599e128c96f62f326afa783c6348eb296821a3443aa42dfe346bf75328d8a";
 const REPOSITORY_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
 const amuxBusinessClosure = (overrides = new Map(), root = SOURCE_SCOPE_ROUTE) => {

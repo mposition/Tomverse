@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { amuxV4AnalysisQueueReadEnabled } from "../lib/amux/ideaAnalysisQueueCore.ts";
 import { amuxV4AnalysisResultReadEnabled } from "../lib/amux/ideaAnalysisResultReadCore.ts";
+import { AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH } from
+  "../lib/amux/ideaAnalysisBudgetReservationService.ts";
 import { amuxV4ContentRetentionEnabled } from "../lib/amux/ideaContentRetentionCore.ts";
 import { frontierCatalogReadPermitted, frontierCatalogWritePermitted } from
   "../lib/amux/ideaFrontierCatalogWriteCore.ts";
@@ -32,16 +34,15 @@ test("v4 code activation keeps every exposed stage closed without its environmen
     transferConfirmWritePermitted, transferConfirmReadPermitted,
     amuxV4ResolutionPreviewEnabled, amuxV4UnitWriteEnabled,
     amuxV4PortfolioWriteEnabled, amuxV4TaskCatalogWriteEnabled,
+    amuxV4ContentRetentionEnabled, amuxV4LiveAnalysisCliEnabled,
+    amuxV4AnalysisQueueReadEnabled, amuxV4AnalysisResultReadEnabled,
   ];
   for (const gate of gates) {
     assert.equal(gate(undefined), false, `${gate.name}: missing switch`);
     assert.equal(gate("disabled"), false, `${gate.name}: disabled switch`);
     assert.equal(gate("enabled"), true, `${gate.name}: explicit switch`);
   }
-  assert.equal(amuxV4ContentRetentionEnabled("enabled"), false);
-  assert.equal(amuxV4LiveAnalysisCliEnabled("enabled"), false);
-  assert.equal(amuxV4AnalysisQueueReadEnabled("enabled"), false);
-  assert.equal(amuxV4AnalysisResultReadEnabled("enabled"), false);
+  assert.equal(AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH, true);
   const claimRoute = readFileSync(new URL(
     "../app/api/internal/amux/v4/analysis-claim/route.ts", import.meta.url), "utf8");
   const resultRoute = readFileSync(new URL(
@@ -50,10 +51,17 @@ test("v4 code activation keeps every exposed stage closed without its environmen
     "../lib/amux/ideaAnalysisBudgetReservationService.ts", import.meta.url), "utf8");
   const retentionHoldRoute = readFileSync(new URL(
     "../app/api/admin/amux/ideas/retention-holds/route.ts", import.meta.url), "utf8");
-  assert.match(claimRoute, /const CLAIM_CODE_LATCH = false;/);
-  assert.match(resultRoute, /const RESULT_CODE_LATCH = false;/);
-  assert.match(budgetService, /AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = false;/);
-  assert.match(retentionHoldRoute, /const WRITE_CODE_LATCH = false;/);
+  const budgetRoute = readFileSync(new URL(
+    "../app/api/admin/amux/ideas/analysis-reservations/route.ts", import.meta.url), "utf8");
+  assert.match(claimRoute, /const CLAIM_CODE_LATCH = true;/);
+  assert.match(resultRoute, /const RESULT_CODE_LATCH = true;/);
+  assert.match(budgetService, /AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH = true;/);
+  assert.match(budgetRoute, /!AMUX_V4_ANALYSIS_BUDGET_RESERVE_CODE_LATCH \|\|\s*process\.env\[WRITE_ENV\] !== "enabled"/);
+  assert.match(retentionHoldRoute, /const WRITE_CODE_LATCH = true;/);
+  assert.match(retentionHoldRoute, /process\.env\[READ_ENV\] !== "enabled" \|\|\s*process\.env\[WRITE_ENV\] !== "enabled"/);
+  for (const source of [claimRoute, resultRoute, retentionHoldRoute]) {
+    assert.match(source, /process\.env\[[A-Z_]+ENV\] !== "enabled"/);
+  }
 });
 
 test("unit no-commit recovery has a separate default-off switch", () => {
@@ -62,4 +70,19 @@ test("unit no-commit recovery has a separate default-off switch", () => {
     import.meta.url), "utf8");
   assert.match(source, /UNIT_RECOVERY_WRITE_ENV = "TOMVERSE_AMUX_V4_UNIT_RECOVERY_WRITE"/);
   assert.match(source, /!AMUX_V4_UNIT_WRITE_CODE_ENABLED \|\|\s*process\.env\[UNIT_RECOVERY_WRITE_ENV\] !== "enabled"/);
+});
+
+test("v15 leaves every v22 execution and graduation code latch closed", () => {
+  const sources = [
+    ["../lib/amux/v22AutoPromotionCore.ts", "AMUX_V22_AUTO_PROMOTION_CODE_LATCH"],
+    ["../lib/amux/v22WorkerClaimCore.ts", "AMUX_V22_WORKER_CLAIM_CODE_LATCH"],
+    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_TASK_EXECUTION_CODE_LATCH"],
+    ["../lib/amux/v22TaskExecutionCore.ts", "AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH"],
+    ["../lib/amux/v22OutcomeObservationCore.ts", "AMUX_V22_OUTCOME_WRITE_CODE_LATCH"],
+    ["../lib/amux/v22OneShotSidecar.mjs", "AMUX_V22_SIDECAR_CODE_LATCH"],
+  ];
+  for (const [path, name] of sources) {
+    const source = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(source, new RegExp(`export const ${name} = false;`), name);
+  }
 });

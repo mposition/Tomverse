@@ -1,17 +1,26 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
-/** This capability stays dark until legal-hold and external-key deletion
- * evidence have both passed staging. An environment value alone cannot open it. */
-export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = false;
+/** v15 activates the code path after the approved evidence. The dedicated
+ * secret, agent identity and environment switch remain mandatory. */
+export const AMUX_V4_CONTENT_RETENTION_CODE_LATCH = true;
 export const AMUX_V4_CONTENT_RETENTION_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION";
 export const AMUX_V4_CONTENT_RETENTION_SECRET_ENV =
   "TOMVERSE_AMUX_V4_CONTENT_RETENTION_SECRET";
 export const AMUX_V4_CONTENT_RETENTION_AGENT_ID = "amux-v4-intake-retention";
 
+/** The shared trigger also knows how to retire v22 task result and patch
+ * bodies. v15 does not activate that distinct retention path. */
+export const AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH = false;
+export const AMUX_V22_TASK_RESULT_RETENTION_ENV =
+  "TOMVERSE_AMUX_V22_TASK_RESULT_RETENTION";
+
 export const amuxV4ContentRetentionEnabled = (value: string | undefined) =>
   AMUX_V4_CONTENT_RETENTION_CODE_LATCH && value === "enabled";
+
+export const amuxV22TaskResultRetentionEnabled = (value: string | undefined) =>
+  AMUX_V22_TASK_RESULT_RETENTION_CODE_LATCH && value === "enabled";
 
 export const amuxV4ContentRetentionRequestSchema = z.object({
   schemaVersion: z.literal(1),
