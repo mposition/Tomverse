@@ -18,20 +18,20 @@ import {
 import { AGENT_DIGEST_KINDS, AGENT_DIGEST_MAX_PAYLOAD_BYTES } from "../lib/agentDigestContract.ts";
 
 const DAY = "2026-10-07";
-const budget = {
-  reservedToday: [
-    { key: "P3#credit_reservation_reconciliation", kind: "new_open", capped: false },
-    { key: "P3#credit_reservation_reconciliation", kind: "recovery", capped: true },
-  ],
-  channelCheckTaken: false,
-};
+const KEY = "P3#credit_reservation_reconciliation";
+const items = [
+  { key: KEY, kind: "new_open", capped: false, mode: "shadow", status: "reserved" },
+  { key: KEY, kind: "recovery", capped: true, mode: "shadow", status: "deferred" },
+  { key: KEY, kind: "reopen", capped: true, mode: "live", status: "reserved" },
+];
 const payload = () =>
   buildDigestPayload({
     ownerDate: DAY,
-    mode: "shadow",
+    mode: "live",
     readiness: { database: true, imageProviderBudget: false, emailUnsubscribeKeyring: true, unknownCheck: "x" },
     digestNames: ["emailUnsubscribeKeyring", "imageProviderBudget", "unknownCheck"],
-    budget,
+    items,
+    channelCheckTaken: false,
   });
 
 test("the kind and key are the shared contract's for sre-ops", () => {
@@ -39,22 +39,30 @@ test("the kind and key are the shared contract's for sre-ops", () => {
   assert.equal(digestIdempotencyKey(DAY), "sre-ops:daily:2026-10-07");
 });
 
-test("a built payload holds only the non-page checks and the reserved items, and parses back", () => {
+test("a built payload holds the non-page checks and every message of the date, both modes and statuses", () => {
   const built = payload();
   assert.deepEqual(built, {
     ownerDate: DAY,
-    mode: "shadow",
+    mode: "live",
     readiness: { emailUnsubscribeKeyring: true, imageProviderBudget: false },
-    reserved: budget.reservedToday,
-    reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 1 },
+    items,
+    counts: [
+      { mode: "shadow", status: "reserved", kind: "new_open", count: 1 },
+      { mode: "shadow", status: "deferred", kind: "recovery", count: 1 },
+      { mode: "live", status: "reserved", kind: "reopen", count: 1 },
+    ],
     channelCheckTaken: false,
   });
   assert.deepEqual(parseDigestPayload(built), { ok: true, payload: built });
-  assert.equal(buildDigestPayload({ ownerDate: DAY, mode: "live", readiness: "unknown", digestNames: [], budget }).readiness, "unknown");
+  assert.equal(
+    buildDigestPayload({ ownerDate: DAY, mode: "shadow", readiness: "unknown", digestNames: [], items: [], channelCheckTaken: true }).readiness,
+    "unknown",
+  );
 });
 
 test("anything outside the closed shape is refused", () => {
   const good = payload();
+  const row = good.counts[0];
   for (const bad of [
     { ...good, extra: 1 },
     { ...good, ownerDate: "2026-02-30" },
@@ -62,61 +70,77 @@ test("anything outside the closed shape is refused", () => {
     { ...good, channelCheckTaken: "no" },
     { ...good, readiness: { "bad name": true } },
     { ...good, readiness: { database: "yes" } },
-    { ...good, reserved: [{ key: "P9#unknown", kind: "new_open", capped: false }] },
-    { ...good, reserved: [{ key: "P1a#database", kind: "page", capped: false }] },
-    { ...good, reserved: [{ key: "P1a#database", kind: "reopen", capped: true, note: "x" }] },
-    { ...good, reserved: Array.from({ length: DIGEST_MAX_ENTRIES + 1 }, () => good.reserved[0]) },
+    { ...good, items: [{ ...items[0], key: "P9#unknown" }] },
+    { ...good, items: [{ ...items[0], kind: "page" }] },
+    { ...good, items: [{ ...items[0], mode: "paused" }] },
+    { ...good, items: [{ ...items[0], status: "sent" }] },
+    { ...good, items: [{ ...items[0], note: "x" }] },
+    { ...good, items: Array.from({ length: DIGEST_MAX_ENTRIES + 1 }, () => items[0]) },
     { ...good, readiness: Object.fromEntries(Array.from({ length: DIGEST_MAX_ENTRIES + 1 }, (_, i) => [`c${i}`, true])) },
-    // Counts: every kind, whole numbers, and never fewer than the list holds.
-    { ...good, reservedCounts: { new_open: 1, worsening: 0, reopen: 0 } },
-    { ...good, reservedCounts: { ...good.reservedCounts, page: 0 } },
-    { ...good, reservedCounts: { ...good.reservedCounts, worsening: -1 } },
-    { ...good, reservedCounts: { ...good.reservedCounts, worsening: 1.5 } },
-    { ...good, reservedCounts: { ...good.reservedCounts, worsening: "2" } },
-    { ...good, reservedCounts: { ...good.reservedCounts, new_open: 0 } },
-    { ...good, reservedCounts: { ...good.reservedCounts, worsening: DIGEST_MAX_COUNT + 1 } },
+    // Counts: whole, positive, one row per combination, and never fewer than the list holds.
+    { ...good, counts: [{ ...row, count: 0 }, ...good.counts.slice(1)] },
+    { ...good, counts: [{ ...row, count: 1.5 }, ...good.counts.slice(1)] },
+    { ...good, counts: [{ ...row, count: DIGEST_MAX_COUNT + 1 }, ...good.counts.slice(1)] },
+    { ...good, counts: [...good.counts, row] },
+    { ...good, counts: [{ ...row, status: "sent" }, ...good.counts.slice(1)] },
+    { ...good, counts: [{ ...row, extra: 1 }, ...good.counts.slice(1)] },
+    { ...good, counts: good.counts.slice(1) },
   ]) {
-    assert.deepEqual(parseDigestPayload(bad), { ok: false, error: "payload_shape" }, JSON.stringify(bad).slice(0, 80));
+    assert.deepEqual(parseDigestPayload(bad), { ok: false, error: "payload_shape" }, JSON.stringify(bad).slice(0, 120));
   }
 });
 
 test("the largest payload the shape allows is far under the shared 16 KiB limit", () => {
+  const counts = [];
+  for (const mode of ["shadow", "live"]) {
+    for (const status of ["reserved", "deferred"]) {
+      for (const kind of ["new_open", "worsening", "reopen", "recovery"]) counts.push({ mode, status, kind, count: DIGEST_MAX_COUNT });
+    }
+  }
   const largest = {
     ownerDate: DAY,
     mode: "shadow",
     readiness: Object.fromEntries(Array.from({ length: DIGEST_MAX_ENTRIES }, (_, i) => [`c${"x".repeat(60)}${i}`, true])),
-    reserved: Array.from({ length: DIGEST_MAX_ENTRIES }, () => ({
-      key: "P3#credit_reservation_reconciliation", kind: "worsening", capped: true })),
-    reservedCounts: { new_open: DIGEST_MAX_COUNT, worsening: DIGEST_MAX_COUNT, reopen: DIGEST_MAX_COUNT, recovery: DIGEST_MAX_COUNT },
+    items: Array.from({ length: DIGEST_MAX_ENTRIES }, () => ({ key: KEY, kind: "worsening", capped: true, mode: "shadow", status: "deferred" })),
+    counts,
     channelCheckTaken: true,
   };
   assert.equal(parseDigestPayload(largest).ok, true);
-  assert.ok(Buffer.byteLength(JSON.stringify(largest)) < AGENT_DIGEST_MAX_PAYLOAD_BYTES / 4);
+  // Version 3 carries both modes and statuses; still half the shared limit at most.
+  assert.ok(Buffer.byteLength(JSON.stringify(largest)) < AGENT_DIGEST_MAX_PAYLOAD_BYTES / 2);
 });
 
-test("a date with more items than the list holds keeps the first twenty and counts them all", () => {
+test("a date with more messages than the list holds keeps the first twenty and counts them all", () => {
   const many = Array.from({ length: 30 }, (_, i) => ({
-    key: "P3#credit_reservation_reconciliation", kind: i % 3 === 0 ? "worsening" : "new_open", capped: i % 2 === 0 }));
-  const built = buildDigestPayload({ ownerDate: DAY, mode: "shadow", readiness: "unknown", digestNames: [],
-    budget: { reservedToday: many, channelCheckTaken: true } });
-  assert.equal(built.reserved.length, DIGEST_MAX_ENTRIES);
-  assert.deepEqual(built.reserved, many.slice(0, DIGEST_MAX_ENTRIES));
-  assert.deepEqual(built.reservedCounts, { new_open: 20, worsening: 10, reopen: 0, recovery: 0 });
-  assert.equal(Object.values(built.reservedCounts).reduce((a, b) => a + b, 0), 30);
+    key: KEY, kind: i % 3 === 0 ? "worsening" : "new_open", capped: i % 2 === 0, mode: "shadow",
+    status: i < 25 ? "reserved" : "deferred" }));
+  const built = buildDigestPayload({ ownerDate: DAY, mode: "shadow", readiness: "unknown", digestNames: [], items: many,
+    channelCheckTaken: true });
+  assert.equal(built.items.length, DIGEST_MAX_ENTRIES);
+  assert.deepEqual(built.items, many.slice(0, DIGEST_MAX_ENTRIES));
+  assert.equal(built.counts.reduce((sum, r) => sum + r.count, 0), 30);
   assert.equal(parseDigestPayload(built).ok, true);
 });
 
-test("a kept body reads back under the version it was stored with", () => {
-  const v2 = payload();
-  assert.deepEqual(parseStoredDigestPayload(v2, 2), { ok: true, payload: v2, countsComplete: true });
-  // Version 1 had no counts: still shown, its counts derived from its list.
-  const { reservedCounts, ...v1 } = v2;
-  assert.deepEqual(parseStoredDigestPayload(v1, 1), { ok: true, payload: { ...v1, reservedCounts }, countsComplete: false });
+test("a kept body reads back under the version it was stored with, upgraded to the current shape", () => {
+  const v3 = payload();
+  assert.deepEqual(parseStoredDigestPayload(v3, 3), { ok: true, payload: v3, countsComplete: true });
+  const v1 = { ownerDate: DAY, mode: "shadow", readiness: "unknown",
+    reserved: [{ key: KEY, kind: "new_open", capped: false }], channelCheckTaken: false };
+  const upgradedItems = [{ key: KEY, kind: "new_open", capped: false, mode: "shadow", status: "reserved" }];
+  assert.deepEqual(parseStoredDigestPayload(v1, 1), { ok: true, countsComplete: false, payload: {
+    ownerDate: DAY, mode: "shadow", readiness: "unknown", items: upgradedItems,
+    counts: [{ mode: "shadow", status: "reserved", kind: "new_open", count: 1 }], channelCheckTaken: false } });
+  const v2 = { ...v1, reservedCounts: { new_open: 4, worsening: 0, reopen: 0, recovery: 0 } };
+  assert.deepEqual(parseStoredDigestPayload(v2, 2).payload.counts, [{ mode: "shadow", status: "reserved", kind: "new_open", count: 4 }]);
+  assert.equal(parseStoredDigestPayload(v2, 2).countsComplete, false);
   // Each version holds its own shape only, and no other version is read.
   assert.equal(parseStoredDigestPayload(v1, 2).ok, false);
   assert.equal(parseStoredDigestPayload(v2, 1).ok, false);
-  assert.equal(parseStoredDigestPayload({ ...v1, mode: "paused" }, 1).ok, false);
   assert.equal(parseStoredDigestPayload(v2, 3).ok, false);
+  assert.equal(parseStoredDigestPayload(v3, 2).ok, false);
+  assert.equal(parseStoredDigestPayload({ ...v2, reservedCounts: { new_open: 0, worsening: 0, reopen: 0, recovery: 0 } }, 2).ok, false);
+  assert.equal(parseStoredDigestPayload(v3, 4).ok, false);
   assert.equal(parseStoredDigestPayload(null, 1).ok, false);
 });
 

@@ -9277,6 +9277,7 @@ model OpsObserverGenesis {
   state               OpsObserverState?
   deliveries          OpsObserverDelivery[]
   transitions         OpsObserverTransition[]
+  deferredItems       OpsObserverDeferredItem[]
 }
 
 /// The key state of one genesis. Every update is exactly the next generation
@@ -9377,6 +9378,36 @@ model SupportTriageRun {
   blocked                 Int?
 
   @@index([kind, createdAt])
+}
+
+/// One message the daily cap held back (docs/policy/sre-ops.md §1 item 3,
+/// §5): written by the advance that moved its key, from the owed messages the
+/// app derives itself, so the digest can still report it. Never changed;
+/// deleted 90 days after it was written. Triggers in
+/// migrations/20261009120000_ops_observer_deferred_item.
+model OpsObserverDeferredItem {
+  id               String             @id @db.Uuid
+  genesisId        String             @db.Uuid
+  genesis          OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The owner's calendar date the cap counted against.
+  ownerDate        DateTime           @db.Date
+  signal           String
+  scope            String
+  /// One of MESSAGE_KINDS.
+  kind             String
+  /// One of ITEM_ORIGINS.
+  origin           String
+  openedAt         DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  deferredAt       DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion Int
+  /// The deadline of the advance that wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime           @db.Timestamptz(3)
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeferredItem_incident_kind_key")
+  @@index([ownerDate, mode])
 }
 
 /// The sre-ops run guard: one row per daily digest, its transaction's last

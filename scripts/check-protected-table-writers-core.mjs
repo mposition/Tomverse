@@ -557,9 +557,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/opsObserverStore.ts",
     table: "AdminAuditLog",
     tableMentions: 2,
-    writeVerbs: 13,
+    writeVerbs: 16,
     reason:
-      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its thirteen write verbs are four SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged, its own closed reservations a retention batch skips when held), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation and its items, an INSERT into its own transition ledger, the owner genesis INSERTs of its own genesis and generation-0 state rows, and the retention DELETE of its own closed reservations past ninety days. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
+      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its sixteen write verbs are five SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged, its own closed reservations and its own deferred items a retention batch skips when held), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation, its items and the items the daily cap deferred, an INSERT into its own transition ledger, the owner genesis INSERTs of its own genesis and generation-0 state rows, and the retention DELETEs of its own closed reservations and deferred items past ninety days. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
   },
   {
     path: "lib/promptRefinerVnextOneShotTerminalReceipt.ts",
@@ -1896,6 +1896,12 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 9,
     reason:
       "Nine uses in the sre-ops transition ledger guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: on delete it locks its genesis FOR SHARE and reads whether it was superseded, and its verified checkpoint with whether the ledger row at that checkpoint exists; on insert it locks its genesis FOR SHARE and reads whether it was superseded, reads its state row FOR SHARE (generation, key stamp, whether this transaction wrote it), reads whether the previous generation's row exists, reads the linked AdminAuditLog row FOR KEY SHARE (hash, action, target, actor, metadata generation and key stamp, whether this transaction wrote it), and calls the deadline claim function. The schema is the trigger own, never input, quoted with %I (the ledger's own name via TG_TABLE_NAME); every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261009120000_ops_observer_deferred_item/migration.sql",
+    count: 3,
+    reason:
+      "Three uses in the sre-ops deferred item guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the deadline claim on the inserted row, the genesis mode read FOR SHARE, and whether a later genesis supersedes it -- the reservation guard's own three. The schema is the trigger's own, never input, quoted with %I, and every value is bound with USING. It reads and never writes.",
   },
   {
     path: "prisma/migrations/20261008020000_ops_observer_run_guard/migration.sql",
