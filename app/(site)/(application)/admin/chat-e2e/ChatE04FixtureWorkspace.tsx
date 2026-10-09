@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { SessionProvider } from "next-auth/react";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 import { CHAT_E04_AUTO_ACTIONS } from "@/lib/chatE04StagingFixture";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { CHAT_E04_CONVERSATION, CHAT_E04_SESSION, installChatE04FixtureTransport,
   type ChatE04TransportEvidence } from "@/lib/chatE04StagingFixtureTransport";
 
@@ -41,7 +42,11 @@ export function ChatE04FixtureWorkspace() {
         data-testid={`e04-auto-${action}`} className="min-h-11 rounded border px-3" onClick={async () => {
           try {
             const response = await fetch("/api/admin/chat-e2e-fixture", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
-            setAuto(response.ok ? await response.json() : { unavailable: true, status: response.status });
+            if (response.ok) setAuto(await response.json());
+            else {
+              await discardResponseBody(response);
+              setAuto({ unavailable: true, status: response.status });
+            }
           } catch { setAuto({ unavailable: true }); }
         }}>{action}</button>)}</div>
       <pre data-testid="e04-auto-evidence" className="overflow-auto text-xs" aria-live="polite">{JSON.stringify(auto)}</pre>
