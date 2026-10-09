@@ -1645,6 +1645,14 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
+  {
+    path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 10,
+    reason:
+      "The product Auto budget migration only creates its own windows/holds, constraints, and delete guards. Both AdminAuditLog mentions are restrictive foreign-key references to the existing sole audit writer; no audit row is inserted, updated, or deleted here.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
