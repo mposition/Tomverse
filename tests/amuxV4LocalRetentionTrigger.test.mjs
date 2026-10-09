@@ -101,7 +101,8 @@ test("retention accepts the deployed route shape only with v22 retention disable
 });
 
 test("missing, active, or malformed task retention results halt without retry", async () => {
-  const { taskResults: _taskResults, ...legacy } = completed;
+  const legacy = { ...completed };
+  delete legacy.taskResults;
   for (const body of [
     legacy,
     { ...completed, taskResults: { bodiesPurged: 0, keysDeleted: 0, scanned: 0, batchLimit: 8 } },
