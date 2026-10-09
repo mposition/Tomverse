@@ -201,8 +201,7 @@ export async function readProductResearchConsole(
   // Two different questions, and they must not share an answer.
   //
   // The silence check asks when this agent last worked, so it looks back for
-  // the newest success however old -- which is why it is its own query below
-  // rather than a search of the rows the table shows. The screen's "newest recorded slot" asks
+  // the newest success however old. The screen's "newest recorded slot" asks
   // what the current state of the backlog is, and only the slot that just
   // passed can answer that: showing yesterday's rows under today's failed or
   // missing slot would put an earlier success's content on a screen reporting
@@ -210,12 +209,12 @@ export async function readProductResearchConsole(
   // (docs/policy/product-research-agent.md §2, condition 8). Yesterday's
   // observation is not wrong, but it is not the answer to the question the
   // heading asks.
-  // Asked of the whole table, not of the rows above. Those are the newest
-  // thirty slots, so thirty failures would hide a success that is still well
-  // inside the ninety-day retention -- the screen would say the agent had
-  // never worked and count the silence from the day it was switched on, while
-  // the maintenance incident, which asks unbounded, said something else. Two
-  // readings of one fact, disagreeing, is worse than either.
+  //
+  // So the first question gets its own query. Answered from the rows above it
+  // would be bounded by them: thirty failures would hide a success still well
+  // inside the ninety-day retention, and the screen would report a silence the
+  // maintenance incident -- which asks unbounded -- does not. Two readings of
+  // one fact, disagreeing, is worse than either.
   const newestSuccess = enabled ? await latestProductResearchSuccess() : null;
   const displayable = displayableObservationSlot(series, {
     // Any row, not just a successful one. Keyed on successes, a table holding
