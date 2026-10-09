@@ -9,12 +9,15 @@ import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxIdeaInputMessages } from "@/lib/adminMessages/amuxIdeaInput";
 import {
+  classifyFrontierRegistrationReadFailure,
+  classifyFrontierRegistrationPost,
   clearFrontierRegistrationReceipt,
+  decideFrontierRegistrationRestart,
   readAvailableFrontierModels,
   readCheckedFrontierSelection,
   readFrontierCatalogApprovalReadBack,
-  readFrontierCatalogApprovalWrite,
   readFrontierRegistrationReceipt,
+  reduceFrontierRegistrationPost,
   reserveFrontierRegistrationReceipt,
   type AvailableFrontierModel,
   type PendingFrontierCatalogApproval,
@@ -234,6 +237,32 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     setRegistrationConfirmed(false);
   };
 
+  const applyRegistrationPost = (
+    decision: ReturnType<typeof classifyFrontierRegistrationPost>,
+    registration: PendingFrontierCatalogApproval,
+  ) => {
+    const transition = reduceFrontierRegistrationPost(decision, registration);
+    if (transition.receipt === "clear") {
+      clearFrontierRegistrationReceipt(receiptStore(), operatorId, registration.approvalId);
+    }
+    setRegistrationState(transition.state);
+    setPendingRegistration(transition.pendingRegistration);
+    setRegistrationConfirmed(transition.registrationConfirmed);
+    if (!transition.failure) {
+      setRegistrationFailure(null);
+      return transition.state === "approved" || transition.state === "revoked";
+    }
+    const message = transition.failure.kind === "reauthentication"
+      ? m.frontierRegistrationReauthentication
+      : transition.failure.kind === "refused"
+        ? m.frontierRegistrationRefused(transition.failure.code ?? "unknown")
+        : m.frontierRegistrationUnknown;
+    setRegistrationFailure({ message, tone: "error",
+      requiresReauthentication: transition.failure.kind === "reauthentication",
+      approvalId: transition.failure.approvalId });
+    return false;
+  };
+
   const registerModel = async () => {
     if (!writeAvailable || !registrationRecoveryChecked || registrationState !== "idle" ||
         !registrationConfirmed || !registrationInputValid ||
@@ -256,27 +285,16 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
         body: JSON.stringify({ schemaVersion: 1, action: "approve", ...registration,
           ownerConfirmedFrontierEligibility: true }),
       });
-      if (!response.ok) {
-        setRegistrationFailure(await readAdminApiFailure(response, {
-          fallback: m.frontierRegistrationUnavailable, locale,
-        }));
-        setRegistrationState("unknown");
-        return;
+      const decision = classifyFrontierRegistrationPost({
+        status: response.status,
+        body: await response.json().catch(() => null),
+      }, registration);
+      if (applyRegistrationPost(decision, registration)) {
+        setLoading(true);
+        await load();
       }
-      const observed = readFrontierCatalogApprovalWrite(
-        response.status, await response.json(), registration);
-      if (!observed || observed.state !== "found") {
-        setRegistrationFailure({ message: m.frontierRegistrationInvalidResponse,
-          tone: "error", requiresReauthentication: false, approvalId: registration.approvalId });
-        setRegistrationState("unknown");
-        return;
-      }
-      setRegistrationState(observed.status);
-      clearFrontierRegistrationReceipt(receiptStore(), operatorId, registration.approvalId);
-      setLoading(true);
-      await load();
     } catch {
-      setRegistrationState("unknown");
+      applyRegistrationPost({ kind: "verify" }, registration);
     }
   };
 
@@ -288,9 +306,18 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
       const response = await adminFetch(`/api/admin/amux/ideas/frontier-models?${query}`,
         { cache: "no-store" });
       if (!response.ok) {
-        setRegistrationFailure(await readAdminApiFailure(response, {
-          fallback: m.frontierRegistrationUnavailable, locale,
-        }));
+        const failure = classifyFrontierRegistrationReadFailure({
+          status: response.status,
+          body: await response.json().catch(() => null),
+        });
+        setRegistrationFailure({
+          message: failure.kind === "reauthentication"
+            ? m.frontierRegistrationReadBackReauthentication
+            : m.frontierRegistrationUnavailable,
+          tone: "error",
+          requiresReauthentication: failure.kind === "reauthentication",
+          approvalId: null,
+        });
         setRegistrationState("unknown");
         return;
       }
@@ -299,7 +326,7 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
       if (!observed) {
         setRegistrationFailure({ message: m.frontierRegistrationInvalidResponse,
           tone: "error", requiresReauthentication: false,
-          approvalId: registration.approvalId });
+          approvalId: null });
         setRegistrationState("unknown");
         return;
       }
@@ -314,8 +341,38 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
     } catch {
       setRegistrationState("unknown");
     }
-  }, [load, locale, m.frontierRegistrationInvalidResponse,
+  }, [load, m.frontierRegistrationInvalidResponse,
+    m.frontierRegistrationReadBackReauthentication,
     m.frontierRegistrationUnavailable, operatorId]);
+
+  const startAnotherRegistration = () => {
+    if (registrationState !== "approved" && registrationState !== "revoked") return;
+    const restart = decideFrontierRegistrationRestart(
+      readFrontierRegistrationReceipt(receiptStore(), operatorId));
+    setRegistrationConfirmed(false);
+    setRegistrationFailure(null);
+    if (restart.kind === "unavailable") {
+      setRegistrationState("recovery_unavailable");
+      return;
+    }
+    if (restart.kind === "recover") {
+      const registration = restart.registration;
+      setRegistrationProvider(registration.provider);
+      setRegistrationModelId(registration.modelId);
+      setRegistrationEfforts(registration.allowedEfforts);
+      setRegistrationVersion(String(registration.expectedPreviousVersion));
+      setPendingRegistration(registration);
+      setRegistrationState("pending");
+      void readRegistration(registration);
+      return;
+    }
+    setRegistrationProvider("openai");
+    setRegistrationModelId("");
+    setRegistrationEfforts([]);
+    setRegistrationVersion("0");
+    setPendingRegistration(null);
+    setRegistrationState("idle");
+  };
 
   useEffect(() => {
     const receipt = readFrontierRegistrationReceipt(receiptStore(), operatorId);
@@ -549,6 +606,11 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
           <p role="status">{m.frontierRegistrationApproved}</p> : null}
         {registrationState === "revoked" ?
           <p role="status">{m.frontierRegistrationRevoked}</p> : null}
+        {registrationState === "approved" || registrationState === "revoked" ?
+          <button type="button" onClick={startAnotherRegistration}
+            className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">
+            {m.frontierRegistrationAnother}
+          </button> : null}
         {pendingRegistration && ["unknown", "not_visible"].includes(registrationState) ?
           <button type="button" onClick={() => void readRegistration(pendingRegistration)}
             className="min-h-11 rounded-lg border border-zinc-400 px-4 dark:border-zinc-600">

@@ -20,6 +20,23 @@ export type FrontierCatalogApprovalObservation =
   | { state: "found"; status: "approved" | "revoked"; approvalVersion: number }
   | { state: "not_visible" };
 
+export type FrontierRegistrationPostDecision =
+  | { kind: "recorded"; status: "approved" | "revoked" }
+  | { kind: "refused"; code: string; requiresReauthentication: boolean }
+  | { kind: "verify" };
+
+export type FrontierRegistrationPostTransition = {
+  state: "idle" | "unknown" | "approved" | "revoked";
+  pendingRegistration: PendingFrontierCatalogApproval | null;
+  registrationConfirmed: false;
+  receipt: "clear" | "keep";
+  failure: null | {
+    kind: "reauthentication" | "refused" | "unknown";
+    code: string | null;
+    approvalId: null;
+  };
+};
+
 type FrontierRegistrationStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max", "ultra"]);
@@ -27,6 +44,23 @@ const APPROVAL_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
 const AUDIT_ID = /^[A-Za-z0-9_-]{8,100}$/;
 const REGISTRATION_RECEIPT_PREFIX = "amux-v4-frontier-registration:";
+const KNOWN_FRONTIER_REGISTRATION_REFUSALS: Readonly<Record<string, number>> = {
+  write_disabled: 503,
+  forbidden: 403,
+  ADMIN_REAUTHENTICATION_REQUIRED: 428,
+  content_type_refused: 415,
+  API_RATE_LIMITED: 429,
+  schema_rejected: 400,
+  too_large: 413,
+  audit_unavailable: 503,
+  catalog_revision_changed: 409,
+  catalog_state_unverified: 503,
+};
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 
 const exactEfforts = (actual: unknown, expected: readonly string[]): boolean =>
   Array.isArray(actual) && actual.length === expected.length &&
@@ -194,4 +228,85 @@ export function readFrontierCatalogApprovalReadBack(
       (approval.status !== "approved" && approval.status !== "revoked")) return null;
   return { state: "found", status: approval.status,
     approvalVersion: expected.expectedPreviousVersion + 1 };
+}
+
+/** Only exact refusals that happen before a write, or are rolled back before
+ * audit creation, permit a fresh approval ID. Every ambiguous response keeps
+ * the original receipt for exact-ID read-back. */
+export function classifyFrontierRegistrationPost(
+  reply: { status: number; body: unknown },
+  expected: PendingFrontierCatalogApproval,
+): FrontierRegistrationPostDecision {
+  const recorded = readFrontierCatalogApprovalWrite(reply.status, reply.body, expected);
+  if (recorded?.state === "found") {
+    return { kind: "recorded", status: recorded.status };
+  }
+  const body = record(reply.body);
+  if (!body) return { kind: "verify" };
+  const bodyCode = typeof body.code === "string" ? body.code : null;
+  const bodyError = typeof body.error === "string" ? body.error : null;
+  const code = bodyCode && KNOWN_FRONTIER_REGISTRATION_REFUSALS[bodyCode] === reply.status
+    ? bodyCode
+    : bodyError && KNOWN_FRONTIER_REGISTRATION_REFUSALS[bodyError] === reply.status
+      ? bodyError
+      : null;
+  if (!code) return { kind: "verify" };
+  if (Object.hasOwn(body, "approvalId") && body.approvalId !== expected.approvalId) {
+    return { kind: "verify" };
+  }
+  if (Object.hasOwn(body, "retryWrite") && body.retryWrite !== false) {
+    return { kind: "verify" };
+  }
+  return { kind: "refused", code,
+    requiresReauthentication: code === "ADMIN_REAUTHENTICATION_REQUIRED" };
+}
+
+/** This transition is shared by the live handler and tests so a refusal can
+ * unlock editing without teaching an unknown outcome to retry. */
+export function reduceFrontierRegistrationPost(
+  decision: FrontierRegistrationPostDecision,
+  pendingRegistration: PendingFrontierCatalogApproval,
+): FrontierRegistrationPostTransition {
+  if (decision.kind === "recorded") {
+    return { state: decision.status, pendingRegistration,
+      registrationConfirmed: false, receipt: "clear", failure: null };
+  }
+  if (decision.kind === "refused") {
+    return { state: "idle", pendingRegistration: null,
+      registrationConfirmed: false, receipt: "clear",
+      failure: {
+        kind: decision.requiresReauthentication ? "reauthentication" : "refused",
+        code: decision.code,
+        approvalId: null,
+      } };
+  }
+  return { state: "unknown", pendingRegistration,
+    registrationConfirmed: false, receipt: "keep",
+    failure: { kind: "unknown", code: null, approvalId: null } };
+}
+
+/** Read-back is no-write, but only the route's exact 428 contract is treated
+ * as reauthentication. Every other failure stays generic and never inherits
+ * the retired two-person approval interpretation of an approvalId field. */
+export function classifyFrontierRegistrationReadFailure(
+  reply: { status: number; body: unknown },
+): { kind: "reauthentication" } | { kind: "unknown" } {
+  const body = record(reply.body);
+  if (reply.status === 428 && body && !Object.hasOwn(body, "approvalId") &&
+      (body.error === "ADMIN_REAUTHENTICATION_REQUIRED" ||
+       body.code === "ADMIN_REAUTHENTICATION_REQUIRED")) {
+    return { kind: "reauthentication" };
+  }
+  return { kind: "unknown" };
+}
+
+export function decideFrontierRegistrationRestart(
+  receipt: ReturnType<typeof readFrontierRegistrationReceipt>,
+): { kind: "ready" } | { kind: "recover"; registration: PendingFrontierCatalogApproval } |
+   { kind: "unavailable" } {
+  if (receipt.kind === "absent") return { kind: "ready" };
+  if (receipt.kind === "present") {
+    return { kind: "recover", registration: receipt.registration };
+  }
+  return { kind: "unavailable" };
 }
