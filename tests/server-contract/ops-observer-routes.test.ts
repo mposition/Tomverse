@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 import { before, beforeEach, mock, test } from "node:test";
 
 import { S2_PAGE_KEYS, initialKeyState } from "../../scripts/ops-observer/classify-core.mjs";
+import { ownerDateOf } from "../../scripts/ops-observer/owner-date-core.mjs";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relative: string) => pathToFileURL(resolve(ROOT, relative)).href;
@@ -88,6 +89,7 @@ const bodies: Record<string, () => unknown> = {
     runId: "run-1",
     baseGenesisId: DELIVERY,
     baseGeneration: 3,
+    ownerDate: ownerDateOf(Date.now()),
     keys: Object.fromEntries(S2_PAGE_KEYS.map((key) => [key, initialKeyState()])),
     reservation: null,
   }),
@@ -143,9 +145,10 @@ test("each route hands the store its parsed request and passes its answer throug
   assert.deepEqual(await response.json(), world.next);
   const [call] = world.calls;
   assert.equal(call.fn, "advance");
-  const input = call.input as { runDeadline: Date; baseGeneration: number; reservation: unknown };
+  const input = call.input as { runDeadline: Date; baseGeneration: number; ownerDate: string; reservation: unknown };
   assert.ok(input.runDeadline instanceof Date);
   assert.equal(input.baseGeneration, 3);
+  assert.equal(input.ownerDate, ownerDateOf(Date.now()));
   assert.equal(input.reservation, null);
 
   world.calls = [];
