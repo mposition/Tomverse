@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { BWRAP_PROBE_ARGS, disabledSystemEnvironment, SYSTEM_PROBE_PROPERTIES } from
+import { BWRAP_PROBE_ARGS, disabledSystemEnvironment, SYSTEM_PROBE_PROPERTIES,
+  SYSTEM_UNIT_SHA256 } from
   "../scripts/install-amux-v4-system-service.mjs";
 
 const script = readFileSync(new URL("../scripts/install-amux-v4-system-service.mjs", import.meta.url), "utf8");
@@ -11,6 +13,7 @@ const environment = "TOMVERSE_AMUX_V4_LIVE_ANALYSIS_CLI=enabled\n" +
   `TOMVERSE_AMUX_V4_ANALYSIS_AGENT_SECRET=${"x".repeat(64)}\n`;
 
 test("system manager runs both fixed probe and analysis as tommy with existing isolation", () => {
+  assert.equal(createHash("sha256").update(unit).digest("hex"), SYSTEM_UNIT_SHA256);
   for (const line of ["User=tommy", "Group=tommy", "NoNewPrivileges=true",
     "PrivateTmp=true", "ProtectSystem=strict", "ProtectHome=read-only",
     "TimeoutStartSec=650s", "KillMode=control-group", "UMask=0077"]) {
