@@ -3,9 +3,14 @@
 // reservation. Closed, and checked against itself before any transaction
 // opens:
 //
-//   { runDeadline, runId, baseGenesisId, baseGeneration, keys, reservation }
+//   { runDeadline, runId, baseGenesisId, baseGeneration, ownerDate, keys, reservation }
 //   reservation: null | { ownerDate, channelCheck, items: [{ signal, scope,
 //                kind, origin, openedAt }] }
+//
+// ownerDate is the run's owner date, always present: the store derives what
+// the move owes for that date even when nothing is reserved, so a message the
+// daily cap holds back is recorded rather than lost (§5). A reservation names
+// the same date.
 //
 // The request does not say whether an item counts against the daily cap, and
 // its kind is not taken on trust either: new_open and a key's first worsening
@@ -31,7 +36,7 @@ import {
 /** The largest epoch millisecond a Date can hold. */
 const MAX_DATE_MS = 8.64e15;
 
-const BODY_KEYS = Object.freeze(["runDeadline", "runId", "baseGenesisId", "baseGeneration", "keys", "reservation"]);
+const BODY_KEYS = Object.freeze(["runDeadline", "runId", "baseGenesisId", "baseGeneration", "ownerDate", "keys", "reservation"]);
 const RESERVATION_KEYS = Object.freeze(["ownerDate", "channelCheck", "items"]);
 const ITEM_KEYS = Object.freeze(["signal", "scope", "kind", "origin", "openedAt"]);
 
@@ -176,17 +181,20 @@ export function parseAdvanceRequest(bodyText, nowMs) {
     return refuse("not_json");
   }
   if (!hasExactly(body, BODY_KEYS)) return refuse("shape");
-  const { runDeadline, runId, baseGenesisId, baseGeneration, keys, reservation } = body;
+  const { runDeadline, runId, baseGenesisId, baseGeneration, ownerDate, keys, reservation } = body;
   const deadline = parseRunDeadline(runDeadline, nowMs);
   if (!deadline) return refuse("deadline_invalid");
   if (typeof runId !== "string" || !RUN_ID_PATTERN.test(runId)) return refuse("shape");
   if (typeof baseGenesisId !== "string" || !UUID_PATTERN.test(baseGenesisId)) return refuse("shape");
   if (!Number.isSafeInteger(baseGeneration) || baseGeneration < 0) return refuse("shape");
+  if (!isOwnerDate(ownerDate)) return refuse("shape");
+  if (!admissibleReservationDates(nowMs).includes(ownerDate)) return refuse("owner_date_refused");
   if (!keysAreValid(keys)) return refuse("keys_invalid");
   const parsedReservation = parseReservation(reservation, keys, nowMs);
   if (!parsedReservation.ok) return parsedReservation;
+  if (parsedReservation.value && parsedReservation.value.ownerDate !== ownerDate) return refuse("reservation_invalid");
   return {
     ok: true,
-    value: { runDeadline: deadline, runId, baseGenesisId, baseGeneration, keys, reservation: parsedReservation.value },
+    value: { runDeadline: deadline, runId, baseGenesisId, baseGeneration, ownerDate, keys, reservation: parsedReservation.value },
   };
 }

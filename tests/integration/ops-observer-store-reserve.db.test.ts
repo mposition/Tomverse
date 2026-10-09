@@ -17,6 +17,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { computeAdminAuditEntryHash } from "../../lib/adminAuditIntegrityCore";
 import { S2_PAGE_KEYS, S2_PAGE_SIGNALS, evaluateKey, initialKeyState } from "../../scripts/ops-observer/classify-core.mjs";
 import { admitOwedItems } from "../../scripts/ops-observer/notification-budget-core.mjs";
+import { incidentOrigin, owedMessages } from "../../scripts/ops-observer/advance-request-core.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrations = [
@@ -26,6 +27,7 @@ const migrations = [
   "20261004030000_ops_observer_transition",
   "20261005030000_ops_observer_retention_deadline",
   "20261008020000_ops_observer_run_guard",
+  "20261009120000_ops_observer_deferred_item",
 ].map((name) => path.resolve(here, `../../prisma/migrations/${name}/migration.sql`));
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_reserve_${randomUUID().replaceAll("-", "")}`;
@@ -43,7 +45,8 @@ test("the ops-observer advance with a reservation", { skip: !rawUrl }, async (t)
     "only a dedicated test database is accepted");
   process.env.DATABASE_URL ||= rawUrl;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = KEY;
-  const { advanceOpsObserverState, readOpsObserverState } = await import("@/lib/opsObserverStore");
+  const { advanceOpsObserverState, purgeOpsObserverDeliveries, readOpsObserverDateItems, readOpsObserverState } =
+    await import("@/lib/opsObserverStore");
 
   const admin = new pg.Client({ connectionString: rawUrl });
   await admin.connect();
@@ -57,9 +60,10 @@ test("the ops-observer advance with a reservation", { skip: !rawUrl }, async (t)
     assert.equal(state.trust, "trusted");
     return state;
   };
-  const advance = (base: number, keys: Record<string, unknown>, reservation: unknown, runId = `run-${randomUUID().slice(0, 8)}`) =>
+  const advance = (base: number, keys: Record<string, unknown>, reservation: unknown, runId = `run-${randomUUID().slice(0, 8)}`,
+    ownerDate = (reservation as { ownerDate?: string } | null)?.ownerDate ?? OWNER_DATE) =>
     advanceOpsObserverState(
-      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: base, keys, reservation: reservation as never },
+      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: base, ownerDate, keys, reservation: reservation as never },
       client,
     );
   const rowCounts = async () =>
@@ -195,14 +199,60 @@ test("the ops-observer advance with a reservation", { skip: !rawUrl }, async (t)
       assert.equal(admitOwedItems({ reservedToday: tomorrow.reservedToday, owed }).admitted.length, 1);
 
       const before = await rowCounts();
+      const deferredRows = async () =>
+        (await q(`SELECT mode, to_char("ownerDate", 'YYYY-MM-DD') AS "ownerDate", signal, scope, kind, origin
+                    FROM "OpsObserverDeferredItem" ORDER BY "deferredAt"`)).rows;
       assert.deepEqual(await advance(state.generation, keys, { ownerDate: OWNER_DATE, channelCheck: false, items: [recovery] }),
         { result: "rejected", sendPermitted: false });
       assert.deepEqual(await rowCounts(), before);
-      // On another owner date the same message fits.
-      const nextDay = await advance(state.generation, keys, { ownerDate: "2026-10-06", channelCheck: false, items: [recovery] });
+      // On another owner date the message fits, so leaving it out is refused:
+      // a run may not drop what the cap admits.
+      assert.deepEqual(await advance(state.generation, keys, null, undefined, "2026-10-06"),
+        { result: "reservation_not_owed", sendPermitted: false });
+      assert.deepEqual([await rowCounts(), await deferredRows()], [before, []]);
+
+      // Today it is held back: the advance moves the key, reserves nothing and
+      // records what the cap deferred, derived by the store.
+      const held = await advance(state.generation, keys, null);
+      assert.deepEqual([held.result, held.sendPermitted], ["advanced", false]);
+      assert.deepEqual(await deferredRows(), [{ mode: "shadow", ownerDate: OWNER_DATE, signal: "P3",
+        scope: "credit_reservation_reconciliation", kind: "recovery", origin: "new" }]);
+      // The digest reports it as held back, with the reservations of the date.
+      const dateItems = await readOpsObserverDateItems(OWNER_DATE, inSeconds(120), client);
+      assert.deepEqual(dateItems.filter((i) => i.status === "deferred"),
+        [{ key: P3_KEY, kind: "recovery", capped: true, mode: "shadow", status: "deferred" }]);
+      assert.equal(dateItems[0].status, "reserved");
+      // Rows never change and stay their retention.
+      await assert.rejects(q(`UPDATE "OpsObserverDeferredItem" SET kind = 'reopen'`), /deferred_item_immutable/);
+      await assert.rejects(q(`DELETE FROM "OpsObserverDeferredItem"`), /deferred_item_retained/);
+      await assert.rejects(q(`TRUNCATE "OpsObserverDeferredItem"`), /deferred_item_retained/);
+
+      // P3 reopens: another capped message. The next day it fits and the store
+      // derives that it is capped.
+      const after = await current();
+      const reopened = { ...after.keys, [P3_KEY]: evaluateKey(P3, after.keys[P3_KEY], "delayed", {
+        now: now + 1_800_000, ownerDate: "2026-10-06" }).state } as unknown as Record<string, never>;
+      const items = owedMessages(after.keys, reopened, "2026-10-06").map((o: { signal: string; scope: string; kind: string; openedAt: number }) => ({
+        signal: o.signal, scope: o.scope, kind: o.kind, origin: incidentOrigin(reopened[P3_KEY]), openedAt: new Date(o.openedAt) }));
+      assert.deepEqual(items.map((i: { kind: string }) => i.kind), ["reopen"]);
+      const nextDay = await advance(after.generation, reopened, { ownerDate: "2026-10-06", channelCheck: false, items });
       assert.equal(nextDay.result, "advanced");
       const { rows } = await q(`SELECT capped FROM "OpsObserverDeliveryItem" WHERE "deliveryId" = $1`, [(nextDay as { deliveryId: string }).deliveryId]);
       assert.deepEqual(rows, [{ capped: true }]);
+    });
+
+    await t.test("a deferred item past ninety days goes with the retention batch, a younger one stays", async () => {
+      await q(`ALTER TABLE "OpsObserverDeferredItem" DISABLE TRIGGER USER`);
+      try {
+        await q(`UPDATE "OpsObserverDeferredItem" SET "deferredAt" = "deferredAt" - interval '91 days'`);
+      } finally {
+        await q(`ALTER TABLE "OpsObserverDeferredItem" ENABLE TRIGGER USER`);
+      }
+      const { deleted } = await purgeOpsObserverDeliveries(500, client);
+      assert.ok(deleted >= 1);
+      assert.equal((await q(`SELECT count(*)::int AS n FROM "OpsObserverDeferredItem"`)).rows[0].n, 0);
+      const audit = (await q(`SELECT metadata FROM "AdminAuditLog" WHERE action = 'ops_observer.deliveries_purged'`)).rows;
+      assert.equal(audit.at(-1).metadata.deferredCount, 1);
     });
   } finally {
     await client.$disconnect().catch(() => undefined);
