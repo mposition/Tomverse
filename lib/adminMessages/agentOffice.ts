@@ -325,6 +325,18 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       toastStart: (count: number) => `07:00 — ${count} AI staff are coming in ✨`,
       toastApproved: "Approved in the demo. Engineering is preparing the PR",
     },
+    queue: {
+      labels: {
+        marketing: "Marketing posts to approve",
+        amuxEscalations: "AMUX asks for a person",
+        amuxHalts: "AMUX halts to clear",
+        autoFix: "Auto-fix cases to act on",
+      },
+      unknown: "Unread",
+      open: "Open",
+      empty: "Nothing is waiting on you right now.",
+      partial: "Some counts could not be read; the total leaves them out.",
+    },
     approval: {
       windowTitle: "✅ operator.approval",
       demoChip: "DEMO",
@@ -1076,6 +1088,18 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       blocked: (count: number) => `연동대기 ${count}`,
       toastStart: (count: number) => `07:00 — AI 직원 ${count}명이 출근합니다 ✨`,
       toastApproved: "데모 승인 완료! 엔지니어링팀이 PR을 준비해요",
+    },
+    queue: {
+      labels: {
+        marketing: "마케팅 게시 승인",
+        amuxEscalations: "AMUX 사람 확인 요청",
+        amuxHalts: "AMUX 정지 해제 대기",
+        autoFix: "자동 수정 조치 대기",
+      },
+      unknown: "확인 불가",
+      open: "열기",
+      empty: "지금 운영자를 기다리는 일이 없어요.",
+      partial: "일부 건수를 읽지 못했어요. 합계에는 빠져 있어요.",
     },
     approval: {
       windowTitle: "✅ operator.approval",

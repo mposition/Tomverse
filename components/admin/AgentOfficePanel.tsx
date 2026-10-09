@@ -13,6 +13,9 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import {
   amuxRoomView,
   engineeringLiveDept,
+  OPERATOR_QUEUE_HREFS,
+  OPERATOR_QUEUE_KEYS,
+  operatorQueueTotal,
   reviewQuotaView,
   reviewRoomView,
   financeLiveDept,
@@ -22,6 +25,7 @@ import {
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
   type AgentOfficeQuotaView,
+  type AgentOfficeOperatorQueue,
   type AgentOfficeLiveDept,
   type AgentOfficeLiveRooms,
 } from "@/lib/agentOffice/live";
@@ -207,11 +211,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     [engine, m, reveal]
   );
 
-  const approve = () => {
-    engine.approve();
-    showToast(m.live.toastApproved);
-  };
-
   const teams = useMemo(
     () =>
       DEPT_ROOMS.map((room) => ({
@@ -228,7 +227,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
 
   const filteredTeams = filter === "all" ? teams : teams.filter((team) => team.status === filter);
   const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
-  const todo = snap.approvalPending ? 1 : 0;
+  // The operator's to-do is the real queues an agent waits on (OPERATOR_QUEUE_KEYS).
+  const todo = operatorQueueTotal(live.queue);
 
   return (
     <div className={cx("office")} data-testid="agent-office">
@@ -258,10 +258,11 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               </Link>
               <button
                 type="button"
-                className={cx("todo-tab", todo > 0 && "urgent")}
+                className={cx("todo-tab", todo.total > 0 && "urgent")}
                 onClick={() => reveal("agent-office-approval")}
+                title={todo.unknown ? m.queue.partial : undefined}
               >
-                {m.nav.todo} <i>{todo}</i>
+                {m.nav.todo} <i>{todo.unknown ? `${todo.total}+?` : todo.total}</i>
               </button>
             </div>
           </nav>
@@ -282,12 +283,12 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               amuxView={amuxView}
               reviewView={reviewView}
               quotaView={quotaView}
+              queue={live.queue}
               readAt={live.readAt}
               snap={snap}
               follow={follow}
               selectedId={selectedId}
               onSelect={onSelect}
-              onApprove={approve}
             />
           ) : (
             <DashboardView
@@ -299,7 +300,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               setFilter={setFilter}
               snap={snap}
               readAt={live.readAt}
-              onApprove={approve}
+              queue={live.queue}
               onSelect={(id) => setSelectedId(id)}
             />
           )}
@@ -363,27 +364,26 @@ function LiveView({
   amuxView,
   reviewView,
   quotaView,
+  queue,
   readAt,
   snap,
   follow,
   selectedId,
   onSelect,
-  onApprove,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
   quotaView: AgentOfficeQuotaView;
+  queue: AgentOfficeOperatorQueue;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
   snap: Snapshot;
   follow: boolean;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
-  onApprove: () => void;
 }) {
-  const waitingNames = engine.approverNames();
   const engineeringLive = engine.liveDept("engineering") !== null;
 
   return (
@@ -446,48 +446,9 @@ function LiveView({
                 —　▢　✕
               </span>
             </div>
-            <div className={cx("win-body approval-body", snap.approvalPending && "pending")}>
-              {snap.approvalPending ? (
-                <>
-                  <div className={cx("approval-top")}>
-                    <span className={cx("approval-chips")}>
-                      <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                      <span className={cx("mini-badge yellow")}>{m.approval.badgePending}</span>
-                    </span>
-                    <span className={cx("score blink")}>{m.approval.awaiting}</span>
-                  </div>
-                  <h3>{m.approval.title}</h3>
-                  <p>{m.approval.waiting(waitingNames)}</p>
-                  <div className={cx("reason-list")}>
-                    {m.approval.reasons.map((reason) => (
-                      <span key={reason}>{reason}</span>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className={cx("btn approve-button")}
-                    onClick={onApprove}
-                    data-testid="agent-office-approve"
-                  >
-                    {m.approval.approve}
-                  </button>
-                </>
-              ) : engineeringLive ? (
-                <LiveDecisionNote m={m} />
-              ) : (
-                <>
-                  <div className={cx("approval-top")}>
-                    <span className={cx("approval-chips")}>
-                      <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                      <span className={cx("mini-badge mint")}>
-                        {snap.approved ? m.approval.badgeApproved : m.approval.badgeNone}
-                      </span>
-                    </span>
-                  </div>
-                  <h3>{snap.approved ? m.approval.approvedTitle : m.approval.noneTitle}</h3>
-                  <p>{snap.approved ? m.approval.approvedBody : m.approval.noneBody}</p>
-                </>
-              )}
+            <div className={cx("win-body approval-body")}>
+              <OperatorQueueList m={m} queue={queue} />
+              {engineeringLive ? <LiveDecisionNote m={m} /> : null}
             </div>
           </section>
 
@@ -495,6 +456,33 @@ function LiveView({
         </aside>
       </section>
     </>
+  );
+}
+
+/**
+ * The operator's to-do: each queue an agent waits on, its count and the screen
+ * where it is acted on. The office decides nothing; an unread count says so
+ * and is never drawn as zero.
+ */
+function OperatorQueueList({ m, queue }: { m: OfficeCopy; queue: AgentOfficeOperatorQueue }) {
+  const { total, unknown } = operatorQueueTotal(queue);
+  return (
+    <div className={cx("queue")} data-testid="agent-office-operator-queue">
+      <ul className={cx("queue-list")}>
+        {OPERATOR_QUEUE_KEYS.map((key) => {
+          const count = queue[key];
+          return (
+            <li key={key} className={cx(count !== null && count > 0 && "waiting")}>
+              <span>{m.queue.labels[key]}</span>
+              <b>{count === null ? m.queue.unknown : count}</b>
+              <Link href={OPERATOR_QUEUE_HREFS[key]}>{m.queue.open}</Link>
+            </li>
+          );
+        })}
+      </ul>
+      {total === 0 && !unknown ? <p className={cx("queue-note")}>{m.queue.empty}</p> : null}
+      {unknown ? <p className={cx("queue-note")}>{m.queue.partial}</p> : null}
+    </div>
   );
 }
 
@@ -803,7 +791,7 @@ function DashboardView({
   setFilter,
   snap,
   readAt,
-  onApprove,
+  queue,
   onSelect,
 }: {
   m: OfficeCopy;
@@ -815,12 +803,13 @@ function DashboardView({
   snap: Snapshot;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
-  onApprove: () => void;
+  queue: AgentOfficeOperatorQueue;
   onSelect: (id: string) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
   const engineeringLive = engine.liveDept("engineering") !== null;
+  const todo = operatorQueueTotal(queue);
 
   return (
     <>
@@ -866,7 +855,7 @@ function DashboardView({
         </article>
         <article className={cx("metric approval")}>
           <span>{m.dashboard.metricApproval}</span>
-          <strong>{snap.stats.approval}</strong>
+          <strong>{todo.unknown ? `${todo.total}+?` : todo.total}</strong>
           <small>{m.dashboard.stampApproval}</small>
         </article>
         <article className={cx("metric attention")}>
@@ -1018,33 +1007,8 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body approval-body")}>
-                {engineeringLive && !snap.approvalPending ? (
-                  <LiveDecisionNote m={m} />
-                ) : (
-                  <>
-                    <div className={cx("approval-top")}>
-                      <span className={cx("approval-chips")}>
-                        <span className={cx("mini-badge demo")}>{m.approval.demoChip}</span>
-                        <span className={cx("mini-badge yellow")}>{m.approval.dashboardBadge}</span>
-                      </span>
-                      <span className={cx("score")}>{m.approval.dashboardScore}</span>
-                    </div>
-                    <h3>{m.approval.title}</h3>
-                    <p>{m.approval.dashboardBody}</p>
-                    <button
-                      type="button"
-                      className={cx("btn approve-button", snap.approved && "approved")}
-                      onClick={onApprove}
-                      disabled={!snap.approvalPending}
-                    >
-                      {snap.approved
-                        ? m.approval.approvedButton
-                        : snap.approvalPending
-                          ? m.approval.approve
-                          : m.approval.noneButton}
-                    </button>
-                  </>
-                )}
+                <OperatorQueueList m={m} queue={queue} />
+                {engineeringLive ? <LiveDecisionNote m={m} /> : null}
               </div>
             </section>
 

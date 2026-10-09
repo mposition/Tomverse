@@ -26,6 +26,9 @@ import {
   financeTone,
   qaLiveDept,
   qaTone,
+  OPERATOR_QUEUE_HREFS,
+  OPERATOR_QUEUE_KEYS,
+  operatorQueueTotal,
   researchLiveDept,
   reviewQuotaView,
   reviewRoomView,
@@ -1583,6 +1586,42 @@ test("the review room shows each reviewer's real state, and a silent server as l
   for (const locale of ["en", "ko"]) {
     const states = adminAgentOfficeMessages[locale].real.review.states;
     for (const key of ["reviewing", "idle", "off", "lost"]) assert.ok(states[key], `${locale}: ${key}`);
+  }
+});
+
+test("the operator's to-do counts the real queues an agent waits on, the same sets the sidebar badges count", () => {
+  assert.deepEqual(operatorQueueTotal({ marketing: 2, amuxEscalations: 1, amuxHalts: 0, autoFix: 0 }), { total: 3, unknown: false });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: 1, amuxHalts: 0, autoFix: 4 }), { total: 5, unknown: true });
+  assert.deepEqual(operatorQueueTotal({ marketing: null, amuxEscalations: null, amuxHalts: null, autoFix: null }), { total: 0, unknown: true });
+
+  // Every queue links to a console screen that exists, and to its tab when it names one.
+  for (const key of OPERATOR_QUEUE_KEYS) {
+    const href = new URL(OPERATOR_QUEUE_HREFS[key], "https://tomverse.test");
+    const entry = ADMIN_NAVIGATION.find((item) => item.href === href.pathname);
+    assert.ok(entry, `${key}: ${href.pathname} is not a console entry`);
+    const tab = href.searchParams.get("tab");
+    if (tab) assert.ok(entry.tabs?.some((item) => item.id === tab), `${key}: no tab ${tab} on ${href.pathname}`);
+  }
+  // Read with the badges' own count functions, each on its own.
+  const queue = readFunction("readOperatorQueue");
+  for (const count of ["countPendingMarketingApprovals()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()", "countAutoFixActionCases()"]) {
+    assert.ok(queue.includes(count), count);
+  }
+  assert.match(queue, /Promise\.allSettled/);
+  assert.match(queue, /return null;/);
+  const badges = readFileSync("lib/adminNavigationCounts.ts", "utf8");
+  for (const count of ["countPendingMarketingApprovals()", "countAutoFixActionCases()", "countAwaitingAmuxEscalations()", "countOpenAmuxOrchestratorHalts()"]) {
+    assert.ok(badges.includes(count), `the sidebar counts ${count} too`);
+  }
+
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /const todo = operatorQueueTotal\(live\.queue\)/);
+  assert.equal((panel.match(/<OperatorQueueList m=\{m\} queue=\{queue\} \/>/g) || []).length, 2);
+  // The office approves nothing: no demo approval is reachable from the page.
+  assert.doesNotMatch(panel, /engine\.approve\(|approve-button|agent-office-approve"/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale].queue;
+    for (const key of OPERATOR_QUEUE_KEYS) assert.ok(copy.labels[key], `${locale}: ${key}`);
   }
 });
 
