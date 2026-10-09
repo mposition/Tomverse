@@ -22,7 +22,7 @@ export type RailwayEnvironment = "production" | "staging" | "dev";
  * production and staging must list every job: a job missing from either is a
  * service the partial deletes there. dev is opt-in per job, and a job without
  * a dev list is not declared in dev at all (operator decision, 2026-10-07:
- * dev does not run Provider Probe, Provider Usage Sync or Marketing Publisher).
+ * dev does not run Provider Probe or Provider Usage Sync).
  */
 export type RailwayCronVariables = Readonly<
   Record<Exclude<RailwayEnvironment, "dev">, readonly string[]> &
@@ -127,30 +127,6 @@ export const RAILWAY_CRON_SERVICES: readonly RailwayCronService[] = [
         "PROVIDER_USAGE_SYNC_URL",
       ],
       // Not on dev (operator decision, 2026-10-07).
-    },
-  },
-  {
-    // The marketing publisher (S2 plan, S2d1). A clock and a supervisor: every
-    // five minutes it asks the app to run, with a deadline four minutes out,
-    // and kills its own worker at that deadline. The contract is
-    // `run deadline < cron period`; lib/marketingPublisherRunCore.ts holds the
-    // numbers and a test holds this schedule to them.
-    //
-    // Two variables and no others, in both environments -- the plan's
-    // exhaustive list. No database, platform, object-store, GitHub or LLM
-    // credential: the service changes nothing itself, and the app route is
-    // where the work happens. Set both in the dashboard before the first apply:
-    // this file preserves declared variables, it does not create them, and a
-    // service without its secret fails every five minutes.
-    key: "marketingPublisher",
-    service: "Marketing Publisher",
-    startCommand: "npm run maintenance:marketing-publisher",
-    cronSchedule: "*/5 * * * *",
-    variables: {
-      production: ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
-      staging: ["MARKETING_PUBLISH_SECRET", "MARKETING_PUBLISH_URL"],
-      // Not on dev (operator decision, 2026-10-07): the one job that acts on
-      // outside accounts, and dev runs every merge before anyone has verified it.
     },
   },
 ];

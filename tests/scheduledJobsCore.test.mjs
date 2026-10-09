@@ -21,6 +21,7 @@ import {
   RAILWAY_ENVIRONMENT_BRANCHES,
   buildScheduledJobResources,
 } from "../.railway/scheduled-jobs.ts";
+import { AGENT_RUNNER_SERVICES } from "../.railway/agent-runners.ts";
 
 // SCHED-DRIFT-001. railway.credit-reconciliation.json moved from */5 to */15
 // and lib/scheduledJobs.ts was not moved with it, so the credit-reconciliation
@@ -48,12 +49,17 @@ const jobByKey = (key) => {
   return definition;
 };
 
+// A trigger's service is in one of the two Railway projects: the shared
+// project's cron table, or the Agents project's table (the marketing
+// publisher, which holds no database credential).
 const railwayCronService = (serviceName) => {
-  const matches = RAILWAY_CRON_SERVICES.filter((job) => job.service === serviceName);
+  const matches = [...RAILWAY_CRON_SERVICES, ...AGENT_RUNNER_SERVICES].filter(
+    (job) => job.service === serviceName
+  );
   assert.equal(
     matches.length,
     1,
-    `.railway/scheduled-jobs.ts declares "${serviceName}" ${matches.length} times`
+    `.railway/scheduled-jobs.ts and .railway/agent-runners.ts declare "${serviceName}" ${matches.length} times`
   );
   return matches[0];
 };
@@ -81,13 +87,22 @@ test("every deployed cron service is claimed by exactly one trigger", () => {
   // The other direction. Without it a new cron service could be deployed with
   // no catalogue entry, and the dashboard would simply never mention the job it
   // runs -- which reads identically to a job that is healthy.
+  // Every shared-project cron is claimed. The Agents project's services have
+  // their own runs and screens; only the ones a trigger names are judged here.
   const deployed = RAILWAY_CRON_SERVICES.map((job) => job.service);
   const claimed = Object.values(CRON_TRIGGERS).map((entry) => entry.railwayService);
-  assert.deepEqual([...claimed].sort(), [...deployed].sort());
+  const agentServices = new Set(AGENT_RUNNER_SERVICES.map((runner) => runner.service));
+  assert.deepEqual(
+    claimed.filter((service) => !agentServices.has(service)).sort(),
+    [...deployed].sort()
+  );
   assert.equal(new Set(claimed).size, claimed.length, "two triggers share a service");
   assert.deepEqual(
     RAILWAY_CRON_SERVICES.map((job) => job.key).sort(),
-    Object.keys(CRON_TRIGGERS).sort(),
+    Object.entries(CRON_TRIGGERS)
+      .filter(([, entry]) => !agentServices.has(entry.railwayService))
+      .map(([key]) => key)
+      .sort(),
     "the IaC table and the catalogue key the same jobs differently"
   );
 });
