@@ -624,6 +624,46 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one orchestrator halt, not customer data. The cleared-by id is the administrator who cleared the halt and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed reason code and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxDecisionMakerSwitchEvent",
+    publicName: "amux_decision_maker_switch_events",
+    prismaModel: "AmuxDecisionMakerSwitchEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker switch change or latch, not customer data. The actor id is the administrator who set the switch and is intentionally not a User foreign key, so account deletion cannot rewrite it; a latch carries no person. The row stores a closed scope, value and reason code and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerBody",
+    publicName: "amux_decision_maker_bodies",
+    prismaModel: "AmuxDecisionMakerBody",
+    state: "excluded",
+    exclusionReason:
+      "An operational record of the AMUX Decision Maker (docs/policy/amux-decision-maker.md section 10): worker-written question cards, DM answers and the operator's edits. The table has no account key, so no row can be attributed to an account for a per-account export; a person's request to see or erase their data is handled by an operator searching the bodies, and section 10's privacy erase removes them under a person's audit. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerRetentionEvent",
+    publicName: "amux_decision_maker_retention_events",
+    prismaModel: "AmuxDecisionMakerRetentionEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker legal hold or its release, or the system's retention start when a request closes, not customer data. The actor id is the administrator who set or released the hold and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind, a key period and identifiers, not a body. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerJudgment",
+    publicName: "amux_decision_maker_judgments",
+    prismaModel: "AmuxDecisionMakerJudgment",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker judgment -- a person's confirmation, edited confirmation or rejection of a proposal and the declaration accuracy they recorded -- not customer data. The actor id is the administrator who judged and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores closed codes, keyed digests and identifiers, never the answer. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerDeliveryEvent",
+    publicName: "amux_decision_maker_delivery_events",
+    prismaModel: "AmuxDecisionMakerDeliveryEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for the delivery of one confirmed AMUX Decision Maker answer, not customer data. The actor id, on a resolution only, is the administrator who checked an unknown delivery and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind and outcome and identifiers, not the answer. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIdeaFrontierModelApproval",
     publicName: "amux_idea_frontier_model_approvals",
     prismaModel: "AmuxIdeaFrontierModelApproval",

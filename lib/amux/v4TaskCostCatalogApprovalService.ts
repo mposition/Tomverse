@@ -16,7 +16,7 @@ import { calculateV4TaskCeilingFromCatalog,
 const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const MAX_BYTES = 262_144;
-export const AMUX_V4_TASK_CATALOG_WRITE_CODE_ENABLED = false;
+export const AMUX_V4_TASK_CATALOG_WRITE_CODE_ENABLED = true;
 export const AMUX_V4_TASK_CATALOG_WRITE_ENV =
   "TOMVERSE_AMUX_V4_TASK_CATALOG_WRITE";
 export const amuxV4TaskCatalogWriteEnabled = (value: string | undefined) =>

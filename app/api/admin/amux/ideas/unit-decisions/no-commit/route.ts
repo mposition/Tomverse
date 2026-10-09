@@ -16,14 +16,15 @@ import { AMUX_V4_UNIT_WRITE_CODE_ENABLED, AmuxV4UnitDecisionError,
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
+const UNIT_RECOVERY_WRITE_ENV = "TOMVERSE_AMUX_V4_UNIT_RECOVERY_WRITE";
 const body = z.object({
   decisionId: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),
   consumeRequestId: z.string().regex(/^[a-f0-9-]{36}$/),
   confirmation: z.literal("no_commit"),
 }).strict();
 
-/** Recovery remains available after the runtime write switch is closed,
- * but never while the reviewed code-level v4 writer is still dark. */
+/** Recovery can remain available after ordinary writes close, but it needs
+ * its own default-off switch as well as the reviewed code-level writer. */
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -36,7 +37,8 @@ export async function POST(request: Request) {
         { status: 403, headers: noStore });
     }
     await assertRecentAdminAuthentication(session);
-    if (!AMUX_V4_UNIT_WRITE_CODE_ENABLED) {
+    if (!AMUX_V4_UNIT_WRITE_CODE_ENABLED ||
+        process.env[UNIT_RECOVERY_WRITE_ENV] !== "enabled") {
       return NextResponse.json({ error: "unit_write_disabled", retryWrite: false },
         { status: 503, headers: noStore });
     }

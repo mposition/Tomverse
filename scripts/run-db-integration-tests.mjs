@@ -216,6 +216,9 @@ run(
     "--test",
     "--test-concurrency=1",
     "tests/integration/credit-finance.db.test.ts",
+    // An existing migration prefix through the actual pre-deploy db:migrate
+    // path: CHECK-only changes are invisible to Prisma's structural diff.
+    "tests/integration/migration-baseline-check-replacement.db.test.mjs",
     "tests/integration/chat-concurrency.db.test.ts",
     "tests/integration/chat-rate-limit.db.test.ts",
     "tests/integration/chat-token-quota.db.test.ts",
@@ -250,6 +253,16 @@ run(
     // Its single writer: one row and one system audit entry in one transaction,
     // a replay or a conflict writes neither, and a refusal never opens one.
     "tests/integration/agent-digest-store.db.test.ts",
+    // The billing-finance-ops stage W run: an enabled run records one digest
+    // per environment and UTC day, a run past its deadline is refused by the
+    // database and leaves nothing, and an unreadable switch is a fault.
+    "tests/integration/billing-finance-ops-run.db.test.ts",
+    // Its silence check (signal 2): today's digest, an incident when it is
+    // missing, and an unreadable switch reported as itself, never as off.
+    "tests/integration/billing-finance-ops-silence.db.test.ts",
+    // Its two operator writes (W2): the switch and the monitor check, each with
+    // its administrator audit entry in one transaction.
+    "tests/integration/billing-finance-ops-control.db.test.ts",
     // The QA-release operator control record: consecutive revisions, each
     // audited by a person in its own transaction, and nothing ever changed.
     "tests/integration/qa-release-operator-control.db.test.ts",
@@ -294,6 +307,31 @@ run(
     "tests/integration/amux-reconciliation.db.test.ts",
     "tests/integration/amux-recommendation-pool.db.test.ts",
     "tests/integration/amux-auto-promotion.db.test.ts",
+    // AMUX Decision Maker switches (docs/policy/amux-decision-maker.md §8,
+    // §10): only off/proposal for an instance and on/off for the kill switch,
+    // each event bound to its own transaction's audit by the right actor and
+    // action, the newest event wins, and nothing is changed or removed.
+    "tests/integration/amux-decision-maker-switch.db.test.ts",
+    // AMUX Decision Maker request ledger (docs/policy/amux-decision-maker.md
+    // §2, §6, §9, §10): one request per card revision, the transition graph
+    // against the core's own, the deadlines by the database clock at the
+    // insert and at COMMIT, one terminal result idempotent on its pair, each
+    // event audited by the router or its instance, READ COMMITTED only.
+    "tests/integration/amux-decision-maker-request.db.test.ts",
+    // AMUX Decision Maker body store (docs/policy/amux-decision-maker.md
+    // §10): the five fields within their caps, each bound to its own
+    // transaction's audit and its request's registered key period, the
+    // retention set at the close, holds, the expiry purge and the privacy
+    // erase, the key destroyed only once nothing of its period remains, and
+    // all of it allowed under the kill switch.
+    "tests/integration/amux-decision-maker-body.db.test.ts",
+    // AMUX Decision Maker judgment and delivery (docs/policy/amux-decision-maker.md
+    // §2-6, §2-7, §4, §6, §9): one judgment per request closing it with its own
+    // event and retention, a confirmation only on what Admin showed and never
+    // under the kill switch, an edited answer stored with its judgment, the
+    // delivery decision once and its outcome once, §4's report, and the stale
+    // close at 720 hours across a daylight-saving change.
+    "tests/integration/amux-decision-maker-judgment.db.test.ts",
     // Engineering adapter: the run is written in the AMUX writer's own
     // transaction after every AMUX lock, one fact or neither, and its
     // settlement meets delivery ack and expired recovery without a deadlock.

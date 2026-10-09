@@ -527,10 +527,17 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * because the whole Prisma schema is deliberately watched. Descriptor and
  * admission decisions are unchanged. The value below is computed with that
  * model's columns aligned the way `prisma format` aligns them, which is the
- * state the file is committed in.
+ * state the file is committed in. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged.
+ *
+ * 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main
+ * (docs/policy/amux-decision-maker.md §10): three system actors join
+ * `lib/adminAuditSystemActors.ts` and the Decision Maker models add back
+ * relations to `AdminAuditLog` in the watched schema. The receiver's calls,
+ * descriptor and admission decisions are unchanged; the bytes moved, so
+ * evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "18efce8aa0c113e07187d9b6f0497500374c07f06cdd80adfc0f1d71f9bd4e6f";
+  "48cedc9040da022bba0804b8ebdb6d06da7454da34f361728f349f61a1800a52";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

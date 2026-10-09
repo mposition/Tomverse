@@ -9,10 +9,13 @@ import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { auditRowActorKind,
   AMUX_V4_ANALYSIS_BUDGET_EXPIRE_SCOPE,
   AMUX_V4_ANALYSIS_BUDGET_SETTLE_SCOPE,
+  AMUX_V4_ANALYSIS_CLAIM_ACTION,
   AMUX_V4_ANALYSIS_OUTCOME_UNKNOWN_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_ACTION,
   AMUX_V4_FIRST_DRAFT_SAVED_SCOPE,
   AMUX_V4_FIRST_DRAFT_SAVED_TARGET,
+  AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+  AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
   AMUX_V4_IDEA_SYSTEM_ACTOR } from "@/lib/adminAuditSystemActors";
 import { isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import { commitFrontierCatalogDecision } from "@/lib/amux/ideaFrontierCatalogWrite";
@@ -41,6 +44,11 @@ import { commitAmuxKnownIdeaAnalysisSettlement,
   AmuxIdeaAnalysisSettlementError } from "@/lib/amux/ideaAnalysisBudgetSettlementService";
 import { commitAmuxIdeaAnalysisUnknownOutcome,
   AmuxIdeaAnalysisUnknownOutcomeError } from "@/lib/amux/ideaAnalysisUnknownOutcomeService";
+import { commitAmuxIdeaAnalysisClaimResolution,
+  readAmuxIdeaAnalysisClaimResolution,
+  readAmuxIdeaAnalysisClaimResolutionReceipt,
+  AmuxIdeaAnalysisClaimResolutionError } from
+  "@/lib/amux/ideaAnalysisClaimResolutionService";
 import { commitAmuxFirstIdeaAnalysisDraft,
   AmuxFirstAnalysisDraftError } from "@/lib/amux/ideaFirstAnalysisDraftService";
 import { readAmuxFirstIdeaAnalysisResult,
@@ -727,6 +735,366 @@ async function syntheticFirstClaim() {
     commitAmuxIdeaOnlyAnalysisClaim(tx, { requestId: randomUUID(), previewId, keys }));
   return { claim, previewId, holdId, selectedModelId, frontierApprovalId };
 }
+
+async function syntheticFirstClaimInTransaction(tx: Prisma.TransactionClient) {
+  const selectedModelId = modelId();
+  const frontierApprovalId = randomUUID();
+  const frontier = inspectFrontierCatalogWrite(JSON.stringify({ schemaVersion: 1,
+    action: "approve", approvalId: frontierApprovalId, provider: "openai",
+    modelId: selectedModelId, allowedEfforts: ["high"],
+    expectedPreviousVersion: 0, ownerConfirmedFrontierEligibility: true }));
+  assert.equal(frontier.ok, true);
+  if (!frontier.ok) throw new Error("synthetic frontier request invalid");
+  await commitFrontierCatalogDecision(tx,
+    { session, request, decision: frontier.request });
+
+  const ideaId = randomUUID();
+  const inspected = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: randomUUID(), input: { version: 1,
+      idea: `SYNTHETIC_BUDGET_${randomUUID()}`, repositories: [], pullRequests: [] },
+  }));
+  if (!inspected.ok) throw new Error(inspected.code);
+  await commitIdeaSubmission(tx, { session, request, inspected, ideaId, keys });
+  await commitInitialIdeaSourcePlan(tx, { session, request, ideaId, keys });
+  const choice = { previewId: randomUUID(), ideaId, provider: "openai" as const,
+    modelId: selectedModelId, reasoningEffort: "high" as const,
+    approvalId: frontierApprovalId, approvalVersion: 1 };
+  const prepared = await commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice, keys, browserNonce });
+  await commitIdeaTransferConfirmation(tx,
+    { session, request, choice: { previewId: choice.previewId, ideaId,
+      payloadDigest: prepared.payloadDigest,
+      payloadDigestKeyId: prepared.payloadDigestKeyId }, browserNonce, keys });
+
+  const priceVersionId = randomUUID();
+  const priceApproval = { id: priceVersionId, provider: "openai" as const,
+    modelId: selectedModelId, mode: "subscription_cli" as const,
+    expectedPreviousVersion: 0, inputTokensCap: 1_000, outputTokensCap: 2_000,
+    inputMicroUsdPerMillion: 1_000_000,
+    outputMicroUsdPerMillion: 2_000_000,
+    evidenceDigest: randomBytes(32).toString("hex"),
+    ownerConfirmedWorstTier: true as const,
+    verifiedAt: new Date(Date.now() - 24 * 60 * 60_000),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60_000) };
+  await commitAmuxIdeaAnalysisPriceApproval(tx,
+    { session, request, approval: priceApproval });
+  await tx.amuxIdeaAnalysisBudgetWindow.upsert({
+    where: { namespace_monthStart: { namespace, monthStart } },
+    create: { namespace, monthStart, limitMicroUsd: BigInt(50_000_000) },
+    update: {},
+  });
+  const holdId = randomUUID();
+  await commitAmuxIdeaAnalysisBudgetReservation(tx,
+    { holdId, previewId: choice.previewId, priceVersionId, runner, keys });
+  const claim = await commitAmuxIdeaOnlyAnalysisClaim(tx,
+    { requestId: randomUUID(), previewId: choice.previewId, keys });
+  return { claim, previewId: choice.previewId, holdId };
+}
+
+async function simulateClaimedIdeaDeadlineCancellation(
+  tx: Prisma.TransactionClient, ideaId: string,
+) {
+  await takeAuditChainLock(tx);
+  const idea = await tx.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: ideaId },
+  });
+  if (idea.state !== "analyzing" || idea.cancelledAt !== null ||
+      idea.analysisCompletedAt !== null || !(idea.rawPurgeAfter instanceof Date)) {
+    throw new Error("invalid synthetic claimed cancellation fixture");
+  }
+  // Exercise the real post-canceller database shape without waiting seven days.
+  // The immutable deadline remains the cancellation anchor.
+  const cancelledAt = idea.analysisDeadlineAt;
+  const auditId = await writeSystemAuditLog({ tx,
+    systemActor: AMUX_V4_IDEA_SYSTEM_ACTOR,
+    action: AMUX_V4_IDEA_AUTO_CANCEL_ACTION,
+    targetType: AMUX_V4_IDEA_AUTO_CANCEL_TARGET,
+    targetId: idea.id,
+    summary: "Stopped an unfinished AMUX v4 idea analysis at its seven-day deadline.",
+    metadata: { submittedAt: idea.submittedAt.toISOString(),
+      analysisDeadlineAt: idea.analysisDeadlineAt.toISOString(),
+      rawPurgeAfter: idea.rawPurgeAfter.toISOString() },
+  });
+  const updated = await tx.amuxIdeaSubmission.updateMany({ where: {
+    id: idea.id, state: "analyzing", analysisCompletedAt: null, cancelledAt: null,
+  }, data: { state: "cancelled", cancelledAt } });
+  if (updated.count !== 1) {
+    throw new Error("synthetic claimed cancellation fixture raced");
+  }
+  return { auditId, cancelledAt, analysisDeadlineAt: idea.analysisDeadlineAt,
+    rawPurgeAfter: idea.rawPurgeAfter };
+}
+
+test("owner proof of non-execution releases a claimed hold as zero and fences late results", async () => {
+  const { claim, previewId, holdId, selectedModelId,
+    frontierApprovalId } = await syntheticFirstClaim();
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "in_flight");
+  assert.equal(readback.claimRequestId.length > 0, true);
+  const resolutionRequestId = randomUUID();
+  const input = { session, request, resolutionRequestId, holdId,
+    readbackDigest: readback.readbackDigest,
+    evidenceDigest: randomBytes(32).toString("hex"),
+    disposition: "not_started_proven" as const };
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, input));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd, closed.duplicate],
+    ["0", readback.reservedMicroUsd, false]);
+  const [hold, preview, chunk, idea, after, receipt] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+    prisma.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+      ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+    prisma.$transaction((tx) => readAmuxIdeaAnalysisClaimResolutionReceipt(tx,
+      { session, resolutionRequestId })),
+  ]);
+  assert.deepEqual([hold.status, hold.settledMicroUsd, preview.state,
+    chunk.state, chunk.leaseGeneration, idea.state],
+  ["owner_released_unstarted", BigInt(0), "owner_resolved",
+    "awaiting_preview", 0, "submitted"]);
+  assert.deepEqual(await readAmuxFirstIdeaAnalysisResult(session, claim.ideaId, keys),
+    { state: "needs_new_preview" });
+  assert.equal(after.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(after.spentMicroUsd, before.spentMicroUsd);
+  assert.equal(receipt.status, "committed");
+  assert.equal((await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, input))).duplicate, true);
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { ...input,
+      evidenceDigest: randomBytes(32).toString("hex") })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "conflict");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisResult(tx, { requestId: randomUUID(),
+      ideaId: claim.ideaId, previewId, holdId, leaseGeneration: 1,
+      outcome: "invocation_failed", rawModelOutput: null,
+      inputTokens: 0, outputTokens: 0, keys })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisResultError &&
+    error.code === "not_ready");
+  const nextPreviewId = randomUUID();
+  const prepared = await prisma.$transaction((tx) => commitIdeaOnlyTransferPreview(tx,
+    { session, request, choice: { previewId: nextPreviewId, ideaId: claim.ideaId,
+      provider: "openai", modelId: selectedModelId, reasoningEffort: "high",
+      approvalId: frontierApprovalId, approvalVersion: 1 }, keys, browserNonce }));
+  assert.equal(prepared.previewId, nextPreviewId,
+    "resolution returns only to the owner preview boundary, never blind dispatch");
+});
+
+test("insufficient evidence consumes the full reported-unknown reservation", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+    requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+    leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
+    inputTokens: null, outputTokens: null, keys,
+  }));
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "outcome_unknown");
+  assert.ok(readback.resultRequestId);
+  assert.deepEqual([readback.resultOutcome, readback.resultEffectiveOutcome,
+    readback.resultFailureReason, readback.zeroReleaseEligible],
+  ["outcome_unknown", "outcome_unknown", null, false]);
+  const evidenceDigest = randomBytes(32).toString("hex");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "not_started_proven" })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "not_resolvable");
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest,
+      disposition: "evidence_insufficient" }));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+    [readback.reservedMicroUsd, "0"]);
+  const [hold, window] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+  ]);
+  assert.equal(hold.status, "owner_consumed");
+  assert.equal(window.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(window.spentMicroUsd,
+    before.spentMicroUsd + BigInt(readback.reservedMicroUsd));
+});
+
+test("a usage-unverified receipt forbids zero release and consumes the full reservation", async () => {
+  const { claim, previewId, holdId } = await syntheticFirstClaim();
+  const rawModelOutput = JSON.stringify({ schemaVersion: 2, previewId,
+    chunkIndex: 0, outcome: "reject", coverageStatus: "complete",
+    continuationKind: null, ownerQuestion: null,
+    coveredScope: "The synthetic idea was reviewed.", remainingScope: null,
+    units: [] });
+  await prisma.$transaction((tx) => commitAmuxIdeaAnalysisResult(tx, {
+    requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+    leaseGeneration: 1, outcome: "verified_success", rawModelOutput,
+    inputTokens: 1_000_001, outputTokens: 0, keys,
+  }));
+  const before = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  const readback = await prisma.$transaction((tx) =>
+    readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId }));
+  assert.equal(readback.holdStatus, "outcome_unknown");
+  assert.ok(readback.resultRequestId);
+  assert.deepEqual([readback.resultOutcome, readback.resultEffectiveOutcome,
+    readback.resultFailureReason, readback.zeroReleaseEligible],
+  ["verified_success", "outcome_unknown", "usage_unverified", false]);
+  const evidenceDigest = randomBytes(32).toString("hex");
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "not_started_proven" })),
+  (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+    error.code === "not_resolvable");
+  const afterRefusal = await prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+    where: { namespace_monthStart: { namespace, monthStart } },
+  });
+  assert.deepEqual([afterRefusal.reservedMicroUsd, afterRefusal.spentMicroUsd],
+    [before.reservedMicroUsd, before.spentMicroUsd]);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "amux.v4.analysis_claim.owner_resolved", targetId: holdId,
+  } }), 0);
+  const closed = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest,
+      disposition: "evidence_insufficient" }));
+  assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+    [readback.reservedMicroUsd, "0"]);
+  const [hold, window] = await Promise.all([
+    prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+    prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } } }),
+  ]);
+  assert.equal(hold.status, "owner_consumed");
+  assert.equal(window.reservedMicroUsd,
+    before.reservedMicroUsd - BigInt(readback.reservedMicroUsd));
+  assert.equal(window.spentMicroUsd,
+    before.spentMicroUsd + BigInt(readback.reservedMicroUsd));
+});
+
+test("a cancelled in-flight claim can release zero without reopening analysis", async () => {
+  const claimCountBefore = await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  });
+  const rollback = new Error("rollback cancelled in-flight claim fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    const previewCount = await tx.amuxIdeaTransferPreview.count({
+      where: { ideaId: claim.ideaId },
+    });
+    const cancellation = await simulateClaimedIdeaDeadlineCancellation(tx, claim.ideaId);
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId });
+    assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
+      readback.zeroReleaseEligible],
+    ["cancelled", cancellation.cancelledAt.toISOString(), true]);
+    const closed = await commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest,
+      evidenceDigest: randomBytes(32).toString("hex"),
+      disposition: "not_started_proven" });
+    assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+      ["0", readback.reservedMicroUsd]);
+    const [idea, preview, chunk, hold, previewCountAfter] = await Promise.all([
+      tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+      tx.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+      tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+        ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+      tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+      tx.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
+    ]);
+    assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
+      idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      cancellation.analysisDeadlineAt.toISOString(),
+      cancellation.rawPurgeAfter.toISOString()]);
+    assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
+      chunk.currentPreviewId, hold.status, previewCountAfter],
+    ["in_flight", "in_flight", 1, previewId,
+      "owner_released_unstarted", previewCount]);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  }), claimCountBefore);
+});
+
+test("a cancelled unknown claim consumes the full reservation without reopening analysis", async () => {
+  const claimCountBefore = await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  });
+  const rollback = new Error("rollback cancelled unknown claim fixture");
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    const { claim, previewId, holdId } = await syntheticFirstClaimInTransaction(tx);
+    await commitAmuxIdeaAnalysisResult(tx, {
+      requestId: randomUUID(), ideaId: claim.ideaId, previewId, holdId,
+      leaseGeneration: 1, outcome: "outcome_unknown", rawModelOutput: null,
+      inputTokens: null, outputTokens: null, keys,
+    });
+    const previewCount = await tx.amuxIdeaTransferPreview.count({
+      where: { ideaId: claim.ideaId },
+    });
+    const cancellation = await simulateClaimedIdeaDeadlineCancellation(tx, claim.ideaId);
+    const readback = await readAmuxIdeaAnalysisClaimResolution(tx, { session, holdId });
+    assert.deepEqual([readback.ideaState, readback.ideaCancelledAt,
+      readback.resultOutcome, readback.resultFailureReason,
+      readback.zeroReleaseEligible],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      "outcome_unknown", null, false]);
+    const evidenceDigest = randomBytes(32).toString("hex");
+    await assert.rejects(commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "not_started_proven" }),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisClaimResolutionError &&
+      error.code === "not_resolvable");
+    const closed = await commitAmuxIdeaAnalysisClaimResolution(tx, { session, request,
+      resolutionRequestId: randomUUID(), holdId,
+      readbackDigest: readback.readbackDigest, evidenceDigest,
+      disposition: "evidence_insufficient" });
+    assert.deepEqual([closed.settledMicroUsd, closed.releasedMicroUsd],
+      [readback.reservedMicroUsd, "0"]);
+    const [idea, preview, chunk, hold, previewCountAfter] = await Promise.all([
+      tx.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: claim.ideaId } }),
+      tx.amuxIdeaTransferPreview.findUniqueOrThrow({ where: { id: previewId } }),
+      tx.amuxIdeaAnalysisChunk.findUniqueOrThrow({ where: {
+        ideaId_chunkIndex: { ideaId: claim.ideaId, chunkIndex: 0 } } }),
+      tx.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
+      tx.amuxIdeaTransferPreview.count({ where: { ideaId: claim.ideaId } }),
+    ]);
+    assert.deepEqual([idea.state, idea.cancelledAt?.toISOString(),
+      idea.analysisDeadlineAt.toISOString(), idea.rawPurgeAfter?.toISOString()],
+    ["cancelled", cancellation.cancelledAt.toISOString(),
+      cancellation.analysisDeadlineAt.toISOString(),
+      cancellation.rawPurgeAfter.toISOString()]);
+    assert.deepEqual([preview.state, chunk.state, chunk.leaseGeneration,
+      chunk.currentPreviewId, hold.status, previewCountAfter],
+    ["outcome_unknown", "outcome_unknown", 1, previewId,
+      "owner_consumed", previewCount]);
+    throw rollback;
+  }, { timeout: 30_000 }), (error: unknown) => error === rollback);
+  assert.equal(await prisma.adminAuditLog.count({
+    where: { action: AMUX_V4_ANALYSIS_CLAIM_ACTION },
+  }), claimCountBefore);
+});
 
 test("seventeen idea-only cards remain three bounded pages without an idea-wide cap", async () => {
   const { claim, previewId, holdId, selectedModelId,

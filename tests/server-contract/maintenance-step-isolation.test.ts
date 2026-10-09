@@ -206,6 +206,14 @@ mock.module(mod("lib/productResearchObservationStore.ts"), {
     readProductResearchEnabledSince: async () => new Date("2026-09-01T00:00:00.000Z"),
   },
 });
+// The billing-finance-ops silence check (docs/policy/billing-finance-ops.md
+// §1.3 signal 2). Mocked as a module: it reads AppSetting and AgentDigestItem
+// through the database clock, which this stub does not model.
+mock.module(mod("lib/billingFinanceOpsSilence.ts"), {
+  namedExports: {
+    checkBillingFinanceOpsSilence: async () => "recorded",
+  },
+});
 mock.module(mod("lib/productResearchObservationRouteAuth.ts"), {
   namedExports: {
     // On, so the silence step does its reads: off would make it report
@@ -398,6 +406,7 @@ test("a step that throws does not skip the steps behind it", async () => {
   assert.equal(result.scheduledAccountsDeleted, 1);
   assert.equal(result.agentDigestBodiesExpired, 37);
   assert.equal(result.agentDigestMetaPurged, 41);
+  assert.equal(result.billingFinanceOpsSilence, "recorded");
 
   // So did everything after it, all the way to the last step.
   assert.equal(result.sessions, 2);

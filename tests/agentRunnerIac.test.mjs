@@ -7,7 +7,7 @@
 // able to reach.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
@@ -40,7 +40,7 @@ const recordingDsl = () => {
   };
 };
 
-test("every runner's start command is a real npm script", () => {
+test("every runner's start command resolves: an npm script, or a node entry file that exists", () => {
   const scripts = JSON.parse(
     readFileSync(join(process.cwd(), "package.json"), "utf8")
   ).scripts;
@@ -48,8 +48,15 @@ test("every runner's start command is a real npm script", () => {
     // `npm run <name>` and `npm run <name> -- <flag>` both have to resolve: a
     // start command Railway cannot run is a cron that fails every night, and
     // the deploy log is the only place it would say so.
+    // A runner whose start check refuses unknown variable names starts node
+    // directly: npm run adds npm_*, INIT_CWD and NODE to the environment.
+    const direct = /^node --experimental-strip-types (scripts\/[a-z0-9/-]+\.mjs)$/.exec(runner.startCommand);
+    if (direct) {
+      assert.ok(existsSync(join(process.cwd(), direct[1])), `${runner.service}: ${direct[1]} does not exist`);
+      continue;
+    }
     const match = /^npm run ([a-z0-9:-]+)(?: -- .+)?$/.exec(runner.startCommand);
-    assert.ok(match, `${runner.service}: start command is not an npm run invocation`);
+    assert.ok(match, `${runner.service}: start command is neither npm run nor a node entry`);
     assert.ok(scripts[match[1]], `${runner.service}: package.json has no "${match[1]}" script`);
   }
   assert.equal(
@@ -271,4 +278,16 @@ test("the repository the run clones is the one the services deploy from", () => 
   // would answer for a backlog that is not this product's while looking
   // exactly like a correct run, and nothing downstream could tell.
   assert.equal(OBSERVED_REPOSITORY, AGENT_RAILWAY_REPOSITORY);
+});
+
+test("the billing-finance-ops trigger declares exactly the variables its start check accepts, and starts node directly", async () => {
+  const { BILLING_FINANCE_OPS_SERVICE_VARIABLES } = await import("../lib/billingFinanceOpsServiceCore.ts");
+  const runner = AGENT_RUNNER_SERVICES.find((entry) => entry.key === "billing_finance_ops_deadline");
+  assert.ok(runner);
+  for (const environment of ["production", "staging"]) {
+    assert.deepEqual([...runner.environments[environment]].sort(), [...BILLING_FINANCE_OPS_SERVICE_VARIABLES].sort(), environment);
+  }
+  // docs/policy/billing-finance-ops.md §1.1: once a day at 01:00 UTC.
+  assert.equal(runner.cronSchedule, "0 1 * * *");
+  assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
 });
