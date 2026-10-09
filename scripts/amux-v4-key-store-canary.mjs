@@ -11,8 +11,10 @@ const STAGING_ENVIRONMENT_ID = "9347d760-66f6-430b-8f2f-36fd5dbef333";
 const RAILWAY_ENVIRONMENT_ID =
   /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
-/** Production requires an explicit one-run approval bound to the Railway
- * supplied environment identity. Staging keeps its existing exact-ID gate. */
+/** Production requires explicit approval values for each invocation, bound to
+ * the Railway-supplied environment identity. This script stores no approval
+ * state; a caller that supplies the values only to this child process discards
+ * them when it exits. Staging keeps its existing exact-ID gate. */
 export function approvedAmuxV4KeyCanaryTarget(env) {
   if (env.RAILWAY_ENVIRONMENT_ID === STAGING_ENVIRONMENT_ID &&
       env.AMUX_V4_STAGING_KEY_CANARY === "approved") return "staging";

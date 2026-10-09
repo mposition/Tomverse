@@ -6,7 +6,9 @@ import { purgeDueAmuxAnalysisContent } from
   "@/lib/amux/ideaAnalysisContentPurgeService";
 import { AMUX_V4_CONTENT_RETENTION_ENV,
   AMUX_V4_CONTENT_RETENTION_SECRET_ENV,
+  AMUX_V22_TASK_RESULT_RETENTION_ENV,
   amuxV4ContentRetentionEnabled, amuxV4ContentRetentionRequestSchema,
+  amuxV22TaskResultRetentionEnabled,
   isAmuxV4ContentRetentionAuthorized } from
   "@/lib/amux/ideaContentRetentionCore";
 import { cancelOverdueAmuxIdeaAnalyses, purgeDueAmuxRawIdeas } from
@@ -43,7 +45,10 @@ export async function POST(request: Request): Promise<Response> {
     const cancellation = await cancelOverdueAmuxIdeaAnalyses();
     const raw = await purgeDueAmuxRawIdeas();
     const analysis = await purgeDueAmuxAnalysisContent();
-    const taskResults = await purgeDueAmuxV22TaskResults();
+    const taskResults = amuxV22TaskResultRetentionEnabled(
+      process.env[AMUX_V22_TASK_RESULT_RETENTION_ENV])
+      ? await purgeDueAmuxV22TaskResults()
+      : { available: false, reason: "v22_task_result_retention_disabled" };
     return amuxJsonNoStore({ holdNotices, cancellation, raw, analysis,
       taskResults });
   } catch {
