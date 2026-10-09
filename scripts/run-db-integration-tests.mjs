@@ -470,6 +470,9 @@ run(
     // vNext one-shot storage remains dark but must commit exactly 80 fixed-
     // price slots and refuse consumption before run approval or any reuse.
     "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    // Product Auto's separate Brisbane day/month budget must reserve both
+    // windows and its audit/hold atomically under real PostgreSQL constraints.
+    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
