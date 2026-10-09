@@ -264,8 +264,11 @@ test("the console answers in the office's language and finds the team it names",
   ko.command("SRE팀 왜 늦어?");
   assert.match(ko.chat.at(-1).text, /기록 화면이 없어서/);
 
-  en.command("hello there");
+  en.command("banana split");
   assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.sim.unknown);
+  // A greeting on the real view is small talk; with no live room nobody is there to answer.
+  en.command("hello there");
+  assert.equal(en.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
 });
 
 test("a question that mentions approval does not give it", () => {
@@ -1327,7 +1330,7 @@ test("on the real view the console answers questions and declines orders that wo
   });
   const s = adminAgentOfficeMessages.en.sim;
   const before = office.agents.map((agent) => `${agent.id}@${agent.x},${agent.y}`);
-  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Thank you, everyone", "Hurry up"]) {
+  for (const order of ["Everyone back to your desks", "Call a meeting with every team", "Hurry up"]) {
     office.command(order);
     assert.equal(office.chat.at(-1).text, s.demoOnly, order);
   }
@@ -1408,8 +1411,8 @@ test("the page offers no way into the demo, and says demo only if one plays", ()
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
     assert.match(copy.live.eyebrowReal(26), locale === "en" ? /REAL VIEW/ : /실제 화면/);
-    // The quick chips are the two questions the real view answers from records.
-    assert.equal(copy.console.quick.length, 2);
+    // The quick chips: the two questions the real view answers from records, and a thank-you.
+    assert.equal(copy.console.quick.length, 3);
   }
 });
 
@@ -1650,6 +1653,52 @@ test("the status report is what the screen shows, as Markdown, copied or downloa
   assert.match(panel, /navigator\.clipboard\.writeText\(reportText\(\)\)/);
   // The report goes to the clipboard or a file; the page posts it nowhere.
   assert.doesNotMatch(panel, /fetch\(|sendBeacon|m\.live\.publish/);
+});
+
+test("live leads answer a greeting or a thank-you in their own voice, and never claim anything", () => {
+  const live = (line) => ({ status: "done", badge: "Fresh", line, detail: "" });
+  const copy = adminAgentOfficeMessages.ko;
+  const office = new AgentOffice(copy, { qa: live("digest 받음"), research: live("기록됨") });
+  const lead = (dept) => office.agentById.get(office.deptLead[dept].id);
+
+  office.command("다들 수고했어요");
+  const replies = office.chat.slice(-2);
+  assert.deepEqual(replies.map((entry) => entry.text).sort(), [copy.real.voices.qa.thanks, copy.real.voices.research.thanks].sort());
+  assert.ok(replies.every((entry) => entry.name.includes(" · ")), "each reply names its lead and room");
+  // On the floor only an emoji, for a moment; then the record line is back.
+  assert.equal(lead("qa").speech, "😊");
+  for (let i = 0; i < 80; i += 1) office.tick(0.05);
+  assert.equal(lead("qa").speech, "digest 받음");
+
+  // A named team: only its lead answers. A question is not small talk.
+  const before = office.chat.length;
+  office.command("QA팀 안녕");
+  assert.equal(office.chat.length, before + 2);
+  assert.equal(office.chat.at(-1).text, copy.real.voices.qa.hello);
+  assert.equal(lead("qa").speech, "👋");
+  office.command("수고했어?");
+  assert.notEqual(office.chat.at(-1).text, copy.real.voices.qa.thanks);
+
+  // A team question is answered in the lead's voice, then with the record.
+  office.command("리서치팀 뭐해?");
+  assert.ok(office.chat.at(-1).text.startsWith(`${copy.real.voices.research.answer}\n`));
+  assert.match(office.chat.at(-1).text, /기록됨/);
+
+  // The demo keeps its own cheer; small talk is the real view's.
+  const demo = new AgentOffice(adminAgentOfficeMessages.en);
+  demo.start();
+  demo.command("Thank you, everyone");
+  assert.notEqual(demo.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
+
+  // No voice line states a fact about a team's work: no numbers, no times, no states.
+  for (const locale of ["en", "ko"]) {
+    const voices = adminAgentOfficeMessages[locale].real.voices;
+    for (const [dept, voice] of Object.entries(voices)) {
+      for (const line of [voice.hello, voice.thanks, voice.answer]) {
+        assert.doesNotMatch(line, /\d|UTC|\bdone\b|\bfailed\b|\bok\b|완료|실패|정상|없음/i, `${locale}.${dept}: ${line}`);
+      }
+    }
+  }
 });
 
 test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
