@@ -360,10 +360,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quick: [
         { label: "Status", command: "Status report" },
         { label: "Why so slow?", command: "Why is it slow?" },
-        { label: "Call a meeting", command: "Call a meeting with every team" },
-        { label: "Brief me", command: "Brief me now" },
-        { label: "Focus mode", command: "Focus mode" },
-        { label: "Speed up", command: "Speed it up" },
       ],
       placeholder: "e.g. What is engineering doing? / Why is it slow?",
       inputLabel: "Operator order",
@@ -1102,10 +1098,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quick: [
         { label: "현황 보고", command: "현황 보고해줘" },
         { label: "왜 늦어져?", command: "왜 늦어지고 있어?" },
-        { label: "회의 소집", command: "전 팀 회의 소집" },
-        { label: "지금 브리핑", command: "지금 브리핑 올라와" },
-        { label: "집중 모드", command: "집중 모드" },
-        { label: "속도 올려", command: "속도 좀 올려줘" },
       ],
       placeholder: "예: 엔지니어링팀 지금 뭐해? / 왜 늦어져?",
       inputLabel: "운영자 지시 입력",
