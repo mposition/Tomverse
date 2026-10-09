@@ -1302,12 +1302,13 @@ test("a card the router sends to a DM always passes the body store's checks, and
   }
   // One byte over, and a secret: the router refuses what the body store would refuse.
   const pat = ["gh", "p_", "c".repeat(36)].join("");
-  for (const [card, refusal, bodyRefusal] of [
-    [{ ...atCap, context: `${atCap.context}x` }, "input_limit_exceeded", "too_long"],
-    [{ ...ROUTED_CARD, context: `see ${pat}` }, "card_secret_detected", "secret_detected"],
-    [{ ...ROUTED_CARD, resolution: pat }, "card_secret_detected", "secret_detected"],
+  for (const [card, refusals, bodyRefusal] of [
+    [{ ...atCap, context: `${atCap.context}x` }, ["input_limit_exceeded"], "too_long"],
+    [{ ...ROUTED_CARD, context: `see ${pat}` }, ["card_secret_detected"], "secret_detected"],
+    // Off the resolution list as well as a secret: both are recorded.
+    [{ ...ROUTED_CARD, resolution: pat }, ["input_limit_exceeded", "card_secret_detected"], "secret_detected"],
   ]) {
-    assert.deepEqual(routed(card).refusals, [refusal]);
+    assert.deepEqual(routed(card).refusals, refusals);
     assert.equal(dmBodyRefusal("card_text", dmCardText(card)), bodyRefusal);
   }
 });
