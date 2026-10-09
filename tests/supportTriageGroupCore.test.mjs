@@ -223,10 +223,17 @@ test("duplicate report ids are refused", () => {
   assert.throws(() => groupCandidatesFrom([report("a"), report("a")]), RangeError);
 });
 
-const { planNewGroups, OPEN_GROUP_SIGNAL_EXPIRES_AT } = await import("../lib/supportTriageGroupCore.ts");
+const { planGroups, groupBinding, OPEN_GROUP_SIGNAL_EXPIRES_AT } = await import("../lib/supportTriageGroupCore.ts");
 
-const plan = (reports, arriving, memberships = new Map(), membershipBudget = 50) =>
-  planNewGroups({ reports, arriving, memberships, membershipBudget });
+/** memberships: report id -> { kind, snapshotDigest, groupId?, state? }; groupMembers derived from it. */
+const plan = (reports, arriving, memberships = new Map(), membershipBudget = 50) => {
+  const full = new Map(
+    [...memberships].map(([id, m]) => [id, { groupId: `g-${m.kind}`, state: "candidate", ...m }])
+  );
+  const groupMembers = new Map();
+  for (const [id, m] of full) groupMembers.set(m.groupId, [...(groupMembers.get(m.groupId) ?? []), id]);
+  return planGroups({ reports, arriving, memberships: full, groupMembers, membershipBudget });
+};
 
 test("a new group forms only around an arriving report", () => {
   const reports = [report("a", { userId: "u1" }), report("b", { userId: "u1" })];
@@ -268,7 +275,7 @@ test("a report already in an open group is not put in a new one", () => {
   assert.equal(result.moveDeferred, 1);
 });
 
-test("a class with an open group of its own kind and value waits for the join", () => {
+test("an arriving report joins the open group of its kind and value instead of forming a second one", () => {
   const reports = [report("a", { userId: "u1" }), report("b", { userId: "u1" }), report("c", { userId: "u1" })];
   const digest = groupSnapshotDigest("u1");
   const memberships = new Map([
@@ -277,7 +284,63 @@ test("a class with an open group of its own kind and value waits for the join", 
   ]);
   const result = plan(reports, ["c"], memberships);
   assert.equal(result.planned.length, 0);
-  assert.equal(result.joinDeferred, 1);
+  assert.deepEqual(result.joins, [
+    { groupId: "g-same_account", kind: "same_account", snapshotDigest: digest, existingIds: ["a", "b"], newcomerIds: ["c"] },
+  ]);
+  assert.equal(result.membershipsUsed, 1);
+  assert.equal(result.joinDeferred, 0);
+  // Nothing new arriving among the free reports: nothing to do.
+  assert.deepEqual(plan(reports, ["a"], memberships).joins, []);
+});
+
+test("a confirmed group, or one whose member left or changed, is not joined", () => {
+  const digest = groupSnapshotDigest("u1");
+  const reports = [report("a", { userId: "u1" }), report("b", { userId: "u1" }), report("c", { userId: "u1" })];
+  const confirmed = new Map([
+    ["a", { kind: "same_account", snapshotDigest: digest, state: "confirmed" }],
+    ["b", { kind: "same_account", snapshotDigest: digest, state: "confirmed" }],
+  ]);
+  const decided = plan(reports, ["c"], confirmed);
+  assert.equal(decided.joins.length, 0);
+  assert.equal(decided.joinDeferred, 1);
+  // b is no longer eligible (its facts were not locked): no join.
+  const gone = planGroups({
+    reports: [reports[0], reports[2]],
+    arriving: ["c"],
+    memberships: new Map([["a", { groupId: "g", state: "candidate", kind: "same_account", snapshotDigest: digest }]]),
+    groupMembers: new Map([["g", ["a", "b"]]]),
+    membershipBudget: 50,
+  });
+  assert.equal(gone.joins.length, 0);
+  assert.equal(gone.joinDeferred, 1);
+});
+
+test("a join stays within the member cap and the budget", () => {
+  const digest = groupSnapshotDigest("u1");
+  const existing = Array.from({ length: GROUP_MEMBER_CAP }, (_, i) => `m${String(i).padStart(3, "0")}`);
+  const reports = [...existing, "z"].map((id) => report(id, { userId: "u1" }));
+  const full = plan(reports, ["z"], new Map(existing.map((id) => [id, { kind: "same_account", snapshotDigest: digest }])), 100);
+  assert.equal(full.joins.length, 0);
+  assert.equal(full.memberCapReached, 1);
+  const small = [report("a", { userId: "u1" }), report("b", { userId: "u1" }), report("c", { userId: "u1" })];
+  const memberships = new Map([
+    ["a", { kind: "same_account", snapshotDigest: digest }],
+    ["b", { kind: "same_account", snapshotDigest: digest }],
+  ]);
+  const none = plan(small, ["c"], memberships, 0);
+  assert.equal(none.joins.length, 0);
+  assert.equal(none.budgetDeferred, 1);
+});
+
+test("the binding of a group is its key, input digest and shared signals over exactly its members", () => {
+  const members = [report("a", { userId: "u1" }), report("b", { userId: "u1" })];
+  const digest = groupSnapshotDigest("u1");
+  const binding = groupBinding("same_account", digest, members);
+  assert.equal(
+    binding.groupCandidateKey,
+    groupCandidateKey({ primaryKind: "same_account", primarySnapshotDigest: digest, memberIds: ["a", "b"] })
+  );
+  assert.throws(() => groupBinding("same_account", "0".repeat(64), members), RangeError);
 });
 
 test("a class over the cap is counted, never written", () => {

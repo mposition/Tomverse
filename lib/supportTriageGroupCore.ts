@@ -233,7 +233,41 @@ export const OPEN_GROUP_SIGNAL_EXPIRES_AT = new Date("9999-12-31T00:00:00.000Z")
 export const GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX = 50;
 
 /** The open group a report is a member of now. */
-export type OpenMembership = { readonly kind: GroupKind; readonly snapshotDigest: string };
+export type OpenMembership = {
+  readonly groupId: string;
+  readonly state: string;
+  readonly kind: GroupKind;
+  readonly snapshotDigest: string;
+};
+
+export type GroupSignalPlan = { readonly kind: GroupKind; readonly snapshotDigest: string; readonly expiresAt: Date };
+
+/** What a group over exactly these members is bound to: its key, input digest and signals. */
+export const groupBinding = (kind: GroupKind, snapshotDigest: string, members: readonly GroupFacts[]) => {
+  const signals: GroupSignalPlan[] = sharedGroupSignals(kind, members).map((signal) => ({
+    ...signal,
+    expiresAt:
+      signal.kind === "server_evidence_match" ? serverEvidenceSignalExpiresAt(members) : OPEN_GROUP_SIGNAL_EXPIRES_AT,
+  }));
+  const primary = signals.find((signal) => signal.kind === kind);
+  if (!primary || primary.snapshotDigest !== snapshotDigest) {
+    throw new RangeError("the members do not share the group's primary value");
+  }
+  const key = groupCandidateKey({
+    primaryKind: kind,
+    primarySnapshotDigest: snapshotDigest,
+    memberIds: members.map((member) => member.feedbackId),
+  });
+  return {
+    groupCandidateKey: key,
+    groupInputDigest: groupInputDigest({
+      groupCandidateKey: key,
+      members: members.map((member) => ({ feedbackId: member.feedbackId, status: member.status })),
+      signals,
+    }),
+    signals,
+  };
+};
 
 export type PlannedGroup = {
   readonly kind: GroupKind;
@@ -241,14 +275,29 @@ export type PlannedGroup = {
   readonly memberIds: readonly string[];
   readonly groupCandidateKey: string;
   readonly groupInputDigest: string;
-  readonly signals: readonly { readonly kind: GroupKind; readonly snapshotDigest: string; readonly expiresAt: Date }[];
+  readonly signals: readonly GroupSignalPlan[];
 };
 
-export type NewGroupPlan = {
+export type PlannedJoin = {
+  readonly groupId: string;
+  readonly kind: GroupKind;
+  readonly snapshotDigest: string;
+  /** The group's members when it was locked. */
+  readonly existingIds: readonly string[];
+  /** Reports in no open group that join it. */
+  readonly newcomerIds: readonly string[];
+};
+
+export type GroupPlan = {
   readonly planned: PlannedGroup[];
+  readonly joins: PlannedJoin[];
   /** A class over the member cap: never written (policy section 6, loss (2)). */
   readonly memberCapReached: number;
-  /** A class that already has an open group of its kind and value; joining it comes later. */
+  /**
+   * A class whose open group cannot be joined now: it is confirmed (a person
+   * decided on its members), or one of its members is no longer eligible or
+   * no longer shares the value. Retention and the key recheck deal with those.
+   */
   readonly joinDeferred: number;
   /** A class some of whose members sit in a lower-kind group; moving them comes later. */
   readonly moveDeferred: number;
@@ -258,19 +307,29 @@ export type NewGroupPlan = {
 };
 
 /**
- * New groups only. Every class with an arriving report (one just made ready
- * in this batch) is considered in priority order; a report already in an
- * open group, or given to a higher-priority class in this plan, is left out
- * of a new one, and what remains must still be two or more and within the
- * cap. Classes are admitted as a prefix while their memberships fit the
- * remaining budget.
+ * New groups and joins. Every class with an arriving report (one just made
+ * ready in this batch) is considered in priority order.
+ *
+ * When the class already has an open group of its kind and value, the reports
+ * of the class that are in no open group join it (the lowest group id, when a
+ * concurrent pass made two). Only a candidate group is joined, and only when
+ * every current member is still eligible and still shares the value.
+ *
+ * Otherwise a new group is made from the reports in no open group, and not
+ * given to a higher-priority class in this plan; it must still be two or more.
+ *
+ * Either way the result must stay within the member cap, and classes are
+ * admitted as a prefix while their new memberships fit the remaining budget.
+ * The caller locks every group in `groupMembers` before calling, so the member
+ * lists cannot change before its writes.
  */
-export const planNewGroups = (input: {
+export const planGroups = (input: {
   readonly reports: readonly GroupFacts[];
   readonly arriving: readonly string[];
   readonly memberships: ReadonlyMap<string, OpenMembership>;
+  readonly groupMembers: ReadonlyMap<string, readonly string[]>;
   readonly membershipBudget: number;
-}): NewGroupPlan => {
+}): GroupPlan => {
   if (!Number.isSafeInteger(input.membershipBudget) || input.membershipBudget < 0) {
     throw new RangeError("membershipBudget must be a non-negative integer");
   }
@@ -279,55 +338,73 @@ export const planNewGroups = (input: {
   for (const id of arriving) if (!byId.has(id)) throw new RangeError("an arriving report has no facts");
   const assigned = new Set<string>();
   const planned: PlannedGroup[] = [];
+  const joins: PlannedJoin[] = [];
   let memberCapReached = 0;
   let joinDeferred = 0;
   let moveDeferred = 0;
   let budgetDeferred = 0;
   let used = 0;
+  const admit = (count: number) => {
+    // A prefix only: once one class is left out for budget, every later one is too.
+    if (budgetDeferred > 0 || used + count > input.membershipBudget) {
+      budgetDeferred += 1;
+      return false;
+    }
+    used += count;
+    return true;
+  };
   for (const candidate of groupCandidatesFrom(input.reports)) {
     if (!candidate.memberIds.some((id) => arriving.has(id))) continue;
     const current = candidate.memberIds.map((id) => input.memberships.get(id) ?? null);
-    if (current.some((m) => m !== null && m.kind === candidate.kind && m.snapshotDigest === candidate.snapshotDigest)) {
-      joinDeferred += 1;
+    if (current.some((m) => m !== null && membershipAction(m.kind, candidate.kind) === "move")) moveDeferred += 1;
+    const free = candidate.memberIds.filter((id) => !input.memberships.has(id) && !assigned.has(id));
+    const sameValue = current.filter(
+      (m): m is OpenMembership =>
+        m !== null && m.kind === candidate.kind && m.snapshotDigest === candidate.snapshotDigest
+    );
+    if (sameValue.length > 0) {
+      if (!free.some((id) => arriving.has(id))) continue;
+      const target = [...sameValue].sort((a, b) => (a.groupId < b.groupId ? -1 : a.groupId > b.groupId ? 1 : 0))[0];
+      const existingIds = input.groupMembers.get(target.groupId);
+      if (existingIds === undefined) throw new RangeError("a target group's members were not read");
+      const joinable =
+        target.state === "candidate" &&
+        existingIds.every((id) => {
+          const facts = byId.get(id);
+          return facts !== undefined && reportSnapshotDigest(candidate.kind, facts) === candidate.snapshotDigest;
+        });
+      if (!joinable) {
+        joinDeferred += 1;
+        continue;
+      }
+      if (existingIds.length + free.length > GROUP_MEMBER_CAP) {
+        memberCapReached += 1;
+        continue;
+      }
+      if (!admit(free.length)) continue;
+      joins.push({
+        groupId: target.groupId,
+        kind: candidate.kind,
+        snapshotDigest: candidate.snapshotDigest,
+        existingIds: sortedIds(existingIds),
+        newcomerIds: free,
+      });
+      for (const id of free) assigned.add(id);
       continue;
     }
-    if (current.some((m) => m !== null && membershipAction(m.kind, candidate.kind) === "move")) moveDeferred += 1;
-    const memberIds = candidate.memberIds.filter((id) => !input.memberships.has(id) && !assigned.has(id));
-    if (memberIds.length < 2 || !memberIds.some((id) => arriving.has(id))) continue;
-    if (memberIds.length > GROUP_MEMBER_CAP) {
+    if (free.length < 2 || !free.some((id) => arriving.has(id))) continue;
+    if (free.length > GROUP_MEMBER_CAP) {
       memberCapReached += 1;
       continue;
     }
-    // A prefix only: once one class is left out for budget, every later one is too.
-    if (budgetDeferred > 0 || used + memberIds.length > input.membershipBudget) {
-      budgetDeferred += 1;
-      continue;
-    }
-    const members = memberIds.map((id) => byId.get(id) as GroupFacts);
-    const signals = sharedGroupSignals(candidate.kind, members).map((signal) => ({
-      ...signal,
-      expiresAt:
-        signal.kind === "server_evidence_match" ? serverEvidenceSignalExpiresAt(members) : OPEN_GROUP_SIGNAL_EXPIRES_AT,
-    }));
-    const key = groupCandidateKey({
-      primaryKind: candidate.kind,
-      primarySnapshotDigest: candidate.snapshotDigest,
-      memberIds,
-    });
-    planned.push({
-      kind: candidate.kind,
-      snapshotDigest: candidate.snapshotDigest,
-      memberIds,
-      groupCandidateKey: key,
-      groupInputDigest: groupInputDigest({
-        groupCandidateKey: key,
-        members: members.map((member) => ({ feedbackId: member.feedbackId, status: member.status })),
-        signals,
-      }),
-      signals,
-    });
-    for (const id of memberIds) assigned.add(id);
-    used += memberIds.length;
+    if (!admit(free.length)) continue;
+    const binding = groupBinding(
+      candidate.kind,
+      candidate.snapshotDigest,
+      free.map((id) => byId.get(id) as GroupFacts)
+    );
+    planned.push({ kind: candidate.kind, snapshotDigest: candidate.snapshotDigest, memberIds: free, ...binding });
+    for (const id of free) assigned.add(id);
   }
-  return { planned, memberCapReached, joinDeferred, moveDeferred, budgetDeferred, membershipsUsed: used };
+  return { planned, joins, memberCapReached, joinDeferred, moveDeferred, budgetDeferred, membershipsUsed: used };
 };
