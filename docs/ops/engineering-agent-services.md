@@ -58,6 +58,32 @@
    같다는 뜻입니다. 두 서비스는 모드가 `off`인 동안 회차를 끝까지 돌고 아무것도
    하지 않으며, 정상 종료마다 dead-man monitor에 성공 신호를 보냅니다.
 
+## `Tomverse` project에서 옮길 때 (한 번)
+
+2026-10-07에 두 서비스는 `Tomverse` project에 공유 partial(`railway:iac:*`)로 처음
+배포됐습니다. `railway:agents:apply`는 `Tomverse Agents`만 바꾸므로 옛 서비스는
+자격증명과 cron을 가진 채 남습니다. 두 쌍이 함께 돌면 같은 앱 route를 두 번 부르고,
+같은 dead-man URL에 옛 서비스가 성공 신호를 보내 새 서비스의 장애를 가립니다.
+그래서 **옛 서비스를 먼저 없앤 뒤** 새 서비스를 확인합니다. 모두 로컬 PC의
+PowerShell, clone 폴더(`main`, 이 변경이 들어간 커밋 이후) 안에서 합니다.
+
+1. Admin에서 모드를 `off`로 내리고, 화면에 `off`가 보이는지 확인합니다.
+2. **옛 서비스 제거** — `npm run railway:iac:use-production` → `npm run railway:iac:plan`.
+   plan은 `Engineering Agent Runner`·`Engineering Agent Publisher` **두 서비스 삭제만**
+   보여야 합니다. 그 밖의 변경이 있으면 멈춥니다. 맞으면 `npm run railway:iac:apply`.
+   대시보드의 `Tomverse` project에 두 서비스가 없는지 봅니다.
+   이때부터 새 서비스가 돌 때까지 두 monitor가 down 알림을 보낼 수 있으며, 예상된
+   알림입니다.
+3. **새 서비스 생성** — 위 "처음 켤 때"의 3·4·7을 `Tomverse Agents`에서 합니다.
+   변수 값은 옛 서비스와 같습니다(같은 secret, 같은 dead-man URL).
+4. **새 서비스별 확인** — 각 서비스의 첫 회차 로그가 `finishedNormally: true`인지,
+   그 시각 이후 각 dead-man monitor에 ping이 들어왔는지 봅니다. 옛 서비스가 없으므로
+   이 ping은 새 서비스의 것입니다.
+5. 그다음에만 모드를 다시 켭니다(armed gate가 최근 종료와 monitor 확인을 다시 봅니다).
+
+되돌리기: 이 변경 이전 커밋에서 `railway:iac:apply`를 하면 옛 서비스가 다시
+선언되고, `Tomverse Agents`의 두 서비스는 대시보드에서 지웁니다.
+
 ## 정지가 걸렸을 때
 
 로컬 PC의 PowerShell, 이 저장소 clone 폴더 안에서 실행합니다. Node 22와 `npm ci`가
