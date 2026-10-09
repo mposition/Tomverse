@@ -378,6 +378,51 @@ run(
     "tests/integration/amuxV4DerivationService.db.test.mjs",
     "tests/integration/amuxV4TaskCostCatalog.db.test.mjs",
     "tests/integration/amuxV4UnitUnknownService.db.test.mjs",
+    // sre-ops transaction bounds: the arming function refuses a short budget,
+    // sets the statement and idle timers, and on PostgreSQL 17 replaces an
+    // inherited transaction_timeout so the session ends at ours.
+    "tests/integration/ops-observer-transaction-bounds.db.test.ts",
+    // sre-ops genesis chain and state: chain shape, compare-and-set generation,
+    // checkpoint order, trigger stamps, immutability, and no late COMMIT.
+    "tests/integration/ops-observer-genesis-state.db.test.ts",
+    // sre-ops transaction wrapper: READ COMMITTED, timers armed by statement 1,
+    // the statement ceiling rolls back, assertNotLate refuses at the deadline.
+    "tests/integration/ops-observer-transaction.db.test.ts",
+    // sre-ops reservations: reserved then closed once by mode, one open at a
+    // time, items only in their reservation's transaction and once per
+    // incident kind, retention-only deletion, no late COMMIT.
+    "tests/integration/ops-observer-delivery.db.test.ts",
+    // sre-ops transition ledger: a row per advance in its own transaction, no
+    // skipped generation, the signed audit entry's hash, append-only with
+    // seven-year checkpoint-bound deletion, no late COMMIT.
+    "tests/integration/ops-observer-transition.db.test.ts",
+    // sre-ops trust check T3a: the migrations' catalogue is exactly the
+    // expected one, and a dropped or re-deferred rule is seen.
+    "tests/integration/ops-observer-catalog.db.test.ts",
+    // sre-ops state read: the trust facts gathered in one bounded transaction,
+    // trusted with the state or the reason only (own throwaway schema).
+    "tests/integration/ops-observer-store-read.db.test.ts",
+    // sre-ops advance: state, checkpoint, audit entry and ledger row in one
+    // transaction; stale base, untrusted chain and unchanged keys write nothing.
+    "tests/integration/ops-observer-store-advance.db.test.ts",
+    // sre-ops advance with a reservation: owed items only, replay, channel
+    // check, the daily cap counted in the store; refusals write nothing.
+    "tests/integration/ops-observer-store-reserve.db.test.ts",
+    // sre-ops confirm: the close decided by the genesis mode, replay, abandoned
+    // and untrusted refusals.
+    "tests/integration/ops-observer-store-confirm.db.test.ts",
+    // sre-ops genesis: the owner's approval bound to the head, the transition
+    // and seven-day rules, and a created chain the state read trusts.
+    "tests/integration/ops-observer-store-genesis.db.test.ts",
+    // sre-ops retention: closed reservations past ninety days deleted in
+    // bounded batches with their items; reserved and recent rows stay.
+    "tests/integration/ops-observer-store-retention.db.test.ts",
+    // sre-ops run guard: born with its claimed deadline, immutable, kept 90 days,
+    // and a late COMMIT rolls the whole transaction back.
+    "tests/integration/ops-observer-run-guard.db.test.ts",
+    // sre-ops digest item read: this agent's kept digest by id, bounded, and an
+    // expired or malformed body shown as absent.
+    "tests/integration/ops-observer-digest-item.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.

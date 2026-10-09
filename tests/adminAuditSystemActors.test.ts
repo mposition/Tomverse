@@ -95,6 +95,8 @@ test("the system actor list is closed and changes only by review", () => {
     "amux-decision-router",
     "amux-decision-maker-openai",
     "amux-decision-maker-anthropic",
+    // docs/policy/sre-ops.md §3-10: the sre-ops store's transitions and retention.
+    "ops-observer",
   ]);
   assert.equal(SYSTEM_AUDIT_ACTOR_METADATA_KEY, "systemActor");
   assert.equal(isSystemAuditActor("marketing-guard"), true);

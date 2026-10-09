@@ -171,6 +171,9 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
       DB_INTEGRATION_GROUP: ${{ matrix.group }}
+      # The image above is 17; the ops-observer bounds suite fails rather than
+      # skipping its 17 fixtures if the server is ever not.
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "17"
 
     steps:
       - name: Checkout
@@ -194,6 +197,53 @@ jobs:
       # just pushed -- and restores the shared npm cache, so anything it can
       # read, that code can read. The alert lives in `report-red-lane` below,
       # which never runs this tree.
+
+  # The sre-ops transaction arming function branches on the server version
+  # (docs/policy/sre-ops.md §6 item 3): on PostgreSQL 16 it must neither read
+  # nor set transaction_timeout, and production's version is not known to this
+  # repository. Every other lane runs PostgreSQL 17, so this job is the only
+  # place the 16 branch is observed. It runs one file, which installs the
+  # migration into a throwaway schema itself, and holds no secret.
+  ops-observer-pg16:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop')
+    name: Ops observer transaction bounds (PostgreSQL 16)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tomverse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tomverse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tomverse_test
+      OPS_OBSERVER_EXPECT_SERVER_MAJOR: "16"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the transaction bounds suite on PostgreSQL 16
+        run: node --conditions=react-server --import tsx --test tests/integration/ops-observer-transaction-bounds.db.test.ts
 
   # Only the release-branch lane is worth an alert, and the notifier enforces
   # that itself rather than trusting this condition -- a run on any other
@@ -289,14 +339,17 @@ jobs:
   credit-finance-db-result:
     name: Credit and finance PostgreSQL scenarios
     runs-on: ubuntu-latest
-    needs: credit-finance-db
+    needs: [credit-finance-db, ops-observer-pg16]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft || github.base_ref == 'develop' || (github.base_ref == 'main' && github.head_ref != 'develop'))
     steps:
       - name: Require every lane to have passed
         env:
           RESULT: ${{ needs.credit-finance-db.result }}
+          PG16_RESULT: ${{ needs.ops-observer-pg16.result }}
         run: |
           echo "Matrix result: $RESULT"
+          echo "PostgreSQL 16 bounds result: $PG16_RESULT"
+          test "$PG16_RESULT" = "success"
           # `success` is the only pass. `skipped` included: the matrix is not
           # conditional, so a skip means something stopped it from running and
           # that is not the same as the suite agreeing.

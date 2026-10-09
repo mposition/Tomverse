@@ -107,6 +107,37 @@ const BILLING_FINANCE_OPS_VARIABLES = [
   "BILLING_FINANCE_OPS_DEADMAN_URL",
 ] as const;
 
+/**
+ * The sre-ops page service's variables at S1b (docs/policy/sre-ops.md §7, §8):
+ * the page service's list in scripts/ops-observer/runtime-variables-core.mjs
+ * without OPS_OBSERVER_PAGE_WEBHOOK_URL, which exists from S2 only. The
+ * supervisor refuses to start on any other name; the IaC test holds the two
+ * lists to that difference. RAILWAY_DOCKERFILE_PATH points the build at
+ * docker/ops-observer.Dockerfile, which the operator sets.
+ */
+const OPS_OBSERVER_PAGE_S1B_VARIABLES = [
+  "OPS_OBSERVER_SECRET",
+  "OPS_OBSERVER_HEARTBEAT_URL",
+  "OPS_OBSERVER_ENABLED",
+  "OPS_OBSERVER_APP_URL",
+  "RAILWAY_DOCKERFILE_PATH",
+] as const;
+
+/**
+ * The sre-ops digest service's variables (docs/policy/sre-ops.md §7): the
+ * digest list in scripts/ops-observer/runtime-variables-core.mjs, all of it --
+ * the digest notice goes to the owner's Slack channel from S1b on. The IaC
+ * test holds the two equal.
+ */
+const OPS_OBSERVER_DIGEST_VARIABLES = [
+  "OPS_OBSERVER_DIGEST_SECRET",
+  "OPS_OBSERVER_DIGEST_WEBHOOK_URL",
+  "OPS_OBSERVER_DIGEST_HEARTBEAT_URL",
+  "OPS_OBSERVER_ENABLED",
+  "OPS_OBSERVER_APP_URL",
+  "RAILWAY_DOCKERFILE_PATH",
+] as const;
+
 export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
   {
     key: "product_research_observation",
@@ -133,6 +164,35 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     environments: {
       production: BILLING_FINANCE_OPS_VARIABLES,
       staging: BILLING_FINANCE_OPS_VARIABLES,
+    },
+  },
+  {
+    // docs/policy/sre-ops.md §1 item 1, §8 S1b: every ten minutes, built from
+    // docker/ops-observer.Dockerfile. The start command replaces the image's
+    // ENTRYPOINT in exec form, so it names the supervisor and its service
+    // argument itself, with no shell and nothing npm would add.
+    // Production only: the supervisor refuses any app URL but production's
+    // (scripts/ops-observer/supervise.mjs), and §3 rule 9's no-restart policy
+    // is the deploy setting below.
+    key: "ops_observer_page",
+    service: "Ops Observer",
+    startCommand: "node scripts/ops-observer/supervise.mjs page",
+    cronSchedule: "*/10 * * * *",
+    environments: {
+      production: OPS_OBSERVER_PAGE_S1B_VARIABLES,
+    },
+  },
+  {
+    // docs/policy/sre-ops.md §1 item 3: once a day at 21:00 UTC, which is
+    // 07:00 Australia/Brisbane (decision T-1) -- yesterday's owner date is
+    // closed by then. Same image and supervisor as the page service; the
+    // argument picks the digest child.
+    key: "ops_observer_digest",
+    service: "Ops Observer Digest",
+    startCommand: "node scripts/ops-observer/supervise.mjs digest",
+    cronSchedule: "0 21 * * *",
+    environments: {
+      production: OPS_OBSERVER_DIGEST_VARIABLES,
     },
   },
   {

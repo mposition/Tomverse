@@ -535,9 +535,15 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * relations to `AdminAuditLog` in the watched schema. The receiver's calls,
  * descriptor and admission decisions are unchanged; the bytes moved, so
  * evidence is stale.
+ *
+ * 2026-10-09, sre-ops selective release (docs/policy/sre-ops.md §3-10): the
+ * "ops-observer" actor joins `lib/adminAuditSystemActors.ts` and
+ * `lib/adminAudit.ts` gains `writeSystemAuditLogEntry()`, both in the
+ * receiver's import closure. The receiver's calls and the rows it writes are
+ * unchanged; the fingerprint moves because the closure's bytes did.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "48cedc9040da022bba0804b8ebdb6d06da7454da34f361728f349f61a1800a52";
+  "b4419522a0de528f91375dc1037b093199dcf695e7dc6842bc84711dd5a37092";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

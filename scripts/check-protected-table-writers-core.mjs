@@ -496,6 +496,22 @@ export const DELEGATE_NAME_ALLOWLIST = [
  */
 export const RAW_SQL_ALLOWLIST = [
   {
+    path: "lib/opsObserverDigest.ts",
+    table: "AgentDigestItem",
+    tableMentions: 2,
+    writeVerbs: 1,
+    reason:
+      "The sre-ops digest intake reads AgentDigestItem in two plain SELECTs of its own rows: the item already kept for an owner date, so a retry answers that item instead of rebuilding it, and one item by id for the Admin screen the digest notice links to. Its one write verb is the INSERT of its own run guard row, the shared transaction's last write; the digest row itself is written only by lib/agentDigestStore.ts.",
+  },
+  {
+    path: "lib/opsObserverStore.ts",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 13,
+    reason:
+      "The sre-ops store reads AdminAuditLog in two SELECTs -- the genesis approval row and the rows the transition ledger names -- to verify their HMACs for the trust check. Its thirteen write verbs are four SELECT ... FOR UPDATE locks (its own state row at the base, its own reservation in confirm, the head state row before a genesis is judged, its own closed reservations a retention batch skips when held), two UPDATEs closing its own reservations (abandon in advance, the close in confirm), an UPDATE of its own state row, INSERTs of its own reservation and its items, an INSERT into its own transition ledger, the owner genesis INSERTs of its own genesis and generation-0 state rows, and the retention DELETE of its own closed reservations past ninety days. It writes the audit table only through $appendSystemAudit (writeSystemAuditLogEntry) and $appendAdminAudit (writeAdminAuditLog), both in lib/adminAudit.ts.",
+  },
+  {
     path: "lib/engineeringAgentStore.ts",
     table: "EngineeringAgentRegistration",
     tableMentions: 3,
@@ -779,6 +795,14 @@ export const RAW_SQL_ALLOWLIST = [
       "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for billing-finance-ops (docs/policy/billing-finance-ops.md §7 W1a). The only row it writes is the agent's AppSetting switch; it writes no AgentDigestItem row.",
   },
   {
+    path: "prisma/migrations/20261008010000_agent_digest_sre_ops/migration.sql",
+    table: "AgentDigestItem",
+    tableMentions: 6,
+    writeVerbs: 7,
+    reason:
+      "Widens the shared digest table's agentKey and kind CHECKs and its insert trigger's retention CASE for sre-ops (docs/policy/sre-ops.md §1 item 3, §10). It writes no row of any table.",
+  },
+  {
     path: "scripts/check-enum-constraints.mjs",
     table: "AgentDigestItem",
     tableMentions: 1,
@@ -809,6 +833,14 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 14,
     reason:
       "The stage-admission migration adds a restrictive foreign key to AdminAuditLog and reads the linked authorization row from its insert guard. Its write verbs create or constrain the Prompt Refiner stage and reservation tables; it never writes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 13,
+    reason:
+      "The sre-ops transition ledger migration keeps the audit entry id as a plain column (no foreign key; AdminAuditLog is append-only already) and reads the linked audit row (hash, action, target, actor, metadata generation and key stamp, and whether this transaction wrote it) under a key-share lock in the ledger's insert guard. Its write verbs create or guard the ledger table, including a statement-level TRUNCATE guard; it never writes AdminAuditLog.",
   },
   {
     path: "prisma/migrations/20260920120000_prompt_refiner_shadow_run_writer/migration.sql",
@@ -1532,6 +1564,12 @@ export const RAW_SQL_ALLOWLIST = [
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
+    path: "scripts/ops-observer/statement-ceiling-core.mjs",
+    count: 2,
+    reason:
+      "The two uses are tx.$queryRaw(...args) and tx.$executeRaw(...args) inside the sre-ops statement ceiling's facade: they forward the callback's own call to the transaction client it was given, after rawCallIsSingleStatement() has required a tagged template with no ';' in its text and no interpolated Prisma.raw/sql fragment, and after the statement is counted. The module builds no SQL and names no table; what runs is the caller's template, and the callers are ops-observer store code under docs/policy/sre-ops.md §6. Every other client method, every delegate and every nested function refuses.",
+  },
+  {
     path: "prisma/migrations/20261007180000_amux_v4_prless_review_evidence/migration.sql",
     count: 3,
     reason:
@@ -1542,6 +1580,36 @@ export const RUNTIME_SQL_ALLOWLIST = [
     count: 1,
     reason:
       "One read, FOR SHARE, with EXECUTE over a name built from TG_TABLE_SCHEMA -- for the reason the permission ledger gives: an unqualified name resolves through the session search path and a hard-coded public. is wrong under ?schema=. The trigger reads the delivery a replacement claims to supersede, to hold it to having been skipped as display_contract_changed: a replacement exists because its predecessor contract moved, and any other reason on a superseded row would mean a message was re-enqueued for a reason that does not produce one. The schema is the trigger own, never input, quoted with %I, and the id is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261004030000_ops_observer_transition/migration.sql",
+    count: 9,
+    reason:
+      "Nine uses in the sre-ops transition ledger guard, all with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: on delete it locks its genesis FOR SHARE and reads whether it was superseded, and its verified checkpoint with whether the ledger row at that checkpoint exists; on insert it locks its genesis FOR SHARE and reads whether it was superseded, reads its state row FOR SHARE (generation, key stamp, whether this transaction wrote it), reads whether the previous generation's row exists, reads the linked AdminAuditLog row FOR KEY SHARE (hash, action, target, actor, metadata generation and key stamp, whether this transaction wrote it), and calls the deadline claim function. The schema is the trigger own, never input, quoted with %I (the ledger's own name via TG_TABLE_NAME); every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261008020000_ops_observer_run_guard/migration.sql",
+    count: 1,
+    reason:
+      "One use in the sre-ops run guard trigger, with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: it calls the deadline claim function on the inserted row's deadline. The schema is the trigger own, never input, quoted with %I, and the deadline is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261005030000_ops_observer_retention_deadline/migration.sql",
+    count: 1,
+    reason:
+      "One use in the sre-ops retention deadline trigger, with EXECUTE because the function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: it calls the deadline claim function on the deadline the retention batch named for its transaction. The schema is the trigger own, never input, quoted with %I, and the deadline is bound with USING. It reads and never writes.",
+  },
+  {
+    path: "prisma/migrations/20261003090000_ops_observer_delivery/migration.sql",
+    count: 4,
+    reason:
+      "Four uses in the sre-ops reservation guards, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the reservation guard calls the deadline claim function in its own schema, locks its genesis FOR SHARE and reads whether it was superseded; the item guard locks its reservation FOR SHARE and reads its status, mode and whether this transaction wrote it. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
+  },
+  {
+    path: "prisma/migrations/20261003070000_ops_observer_genesis_state/migration.sql",
+    count: 5,
+    reason:
+      "Five uses in the sre-ops guard triggers, all with EXECUTE because every function pins search_path to pg_catalog, pg_temp, where an unqualified name would not resolve, and a hard-coded public. is wrong under ?schema=: the genesis guard reads the chain head of its own table (TG_TABLE_SCHEMA and TG_TABLE_NAME) FOR UPDATE and calls the deadline claim function in its own schema; the state guard locks its own genesis FOR SHARE, reads whether that genesis has been superseded, and calls the same claim function. The schema is the trigger own, never input, quoted with %I; every value is bound with USING. They read, lock and never write.",
   },
   {
     path: "prisma/migrations/20260929200000_amux_commit_deadline_check/migration.sql",

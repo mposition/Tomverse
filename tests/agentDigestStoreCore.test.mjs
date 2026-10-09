@@ -27,7 +27,16 @@ test("a valid submission is prepared with the canonical size and hash of the rec
 });
 
 test("agent, kind and schema version come from closed lists and ranges", () => {
-  assert.deepEqual(prepareAgentDigestItem(submission({ agentKey: "sre-ops" })), { ok: false, reason: "unknown_agent" });
+  assert.deepEqual(prepareAgentDigestItem(submission({ agentKey: "unregistered-agent" })), { ok: false, reason: "unknown_agent" });
+  // A registered agent keeps to its own kinds.
+  assert.deepEqual(prepareAgentDigestItem(submission({ agentKey: "sre-ops", kind: "price_deadline_digest" })), {
+    ok: false,
+    reason: "unknown_kind",
+  });
+  const sreOps = prepareAgentDigestItem(
+    submission({ agentKey: "sre-ops", kind: "daily_digest", idempotencyKey: "sre-ops:digest:2026-10-08" }),
+  );
+  assert.equal(sreOps.ok, true, JSON.stringify(sreOps));
   assert.deepEqual(prepareAgentDigestItem(submission({ agentKey: "__proto__" })), { ok: false, reason: "unknown_agent" });
   assert.deepEqual(prepareAgentDigestItem(submission({ kind: "page" })), { ok: false, reason: "unknown_kind" });
   for (const schemaVersion of [0, 1001, 1.5, Number.NaN]) {

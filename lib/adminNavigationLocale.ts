@@ -238,6 +238,11 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
       },
     },
   },
+  "sre-ops": {
+    label: "SRE 에이전트",
+    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
+    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
+  },
   "agent-digests": {
     label: "Agent digest",
     description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
@@ -352,6 +357,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
+  },
+  "sre-ops-item": {
+    label: "운영 감시 메시지",
+    description: "page 메시지 하나가 무엇에 관한 것이었는지: 신호, 메시지 종류, 시각",
   },
   "campaign-detail": {
     label: "캠페인 상세",

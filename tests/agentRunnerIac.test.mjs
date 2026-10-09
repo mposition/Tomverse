@@ -55,6 +55,13 @@ test("every runner's start command resolves: an npm script, or a node entry file
       assert.ok(existsSync(join(process.cwd(), direct[1])), `${runner.service}: ${direct[1]} does not exist`);
       continue;
     }
+    // A Dockerfile-built runner: the start command replaces the image's
+    // ENTRYPOINT in exec form, so it is node, an entry file and one argument.
+    const image = /^node (scripts\/ops-observer\/supervise\.mjs) (page|digest)$/.exec(runner.startCommand);
+    if (image) {
+      assert.ok(existsSync(join(process.cwd(), image[1])), `${runner.service}: ${image[1]} does not exist`);
+      continue;
+    }
     const match = /^npm run ([a-z0-9:-]+)(?: -- .+)?$/.exec(runner.startCommand);
     assert.ok(match, `${runner.service}: start command is neither npm run nor a node entry`);
     assert.ok(scripts[match[1]], `${runner.service}: package.json has no "${match[1]}" script`);
@@ -290,4 +297,39 @@ test("the billing-finance-ops trigger declares exactly the variables its start c
   // docs/policy/billing-finance-ops.md §1.1: once a day at 01:00 UTC.
   assert.equal(runner.cronSchedule, "0 1 * * *");
   assert.equal(runner.startCommand, "node --experimental-strip-types scripts/billing-finance-ops-trigger-service.mjs");
+});
+
+test("the sre-ops page service declares the supervisor's page list at S1b, production only", async () => {
+  // docs/policy/sre-ops.md §7, §8: the supervisor refuses a name outside its
+  // page list, and the page webhook exists from S2 only. Declaring it here
+  // would put a send capability on a shadow service.
+  const { SERVICE_VARIABLES } = await import("../scripts/ops-observer/runtime-variables-core.mjs");
+  const { PRODUCTION_ORIGIN } = await import("../scripts/ops-observer/content-guard-core.mjs");
+  const page = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "ops_observer_page");
+  assert.ok(page, "the page service is declared");
+  assert.equal(page.service, "Ops Observer");
+  assert.equal(page.startCommand, "node scripts/ops-observer/supervise.mjs page");
+  assert.equal(page.cronSchedule, "*/10 * * * *");
+  assert.deepEqual(Object.keys(page.environments), ["production"]);
+  assert.equal(PRODUCTION_ORIGIN, "https://tomverse.app");
+  assert.deepEqual(
+    [...page.environments.production].sort(),
+    SERVICE_VARIABLES.page.filter((name) => name !== "OPS_OBSERVER_PAGE_WEBHOOK_URL").sort(),
+  );
+  assert.equal(page.environments.production.includes("OPS_OBSERVER_PAGE_WEBHOOK_URL"), false);
+});
+
+test("the sre-ops digest service declares the supervisor's digest list, daily at 07:00 Brisbane, production only", async () => {
+  const { SERVICE_VARIABLES } = await import("../scripts/ops-observer/runtime-variables-core.mjs");
+  const { CHILD_SCRIPTS } = await import("../scripts/ops-observer/supervise.mjs");
+  const digest = AGENT_RUNNER_SERVICES.find((runner) => runner.key === "ops_observer_digest");
+  assert.ok(digest, "the digest service is declared");
+  assert.equal(digest.service, "Ops Observer Digest");
+  assert.equal(digest.startCommand, "node scripts/ops-observer/supervise.mjs digest");
+  // 21:00 UTC is 07:00 in Brisbane (UTC+10, no daylight saving).
+  assert.equal(digest.cronSchedule, "0 21 * * *");
+  assert.deepEqual(Object.keys(digest.environments), ["production"]);
+  assert.deepEqual([...digest.environments.production].sort(), [...SERVICE_VARIABLES.digest].sort());
+  // The child the supervisor starts for it exists.
+  assert.ok(existsSync(CHILD_SCRIPTS.digest), CHILD_SCRIPTS.digest);
 });

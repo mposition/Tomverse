@@ -430,12 +430,17 @@ const compilerOptions = parsedConfig.options;
 // fingerprint record in `lib/marketingAutomationAccess.ts` gains a note above
 // that file's accesses. No access is added; count 228 and the position-free
 // inventory are unchanged, so this repins positions only.
+// 2026-10-09, sre-ops selective release: "ops-observer" joins the same line of
+// `SYSTEM_AUDIT_ACTORS` and its constant is declared at the end of
+// `lib/adminAuditSystemActors.ts`, `lib/adminAudit.ts` gains
+// `writeSystemAuditLogEntry()`, and the fingerprint record gains a note. No
+// access is added; count and the position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "27bbe6a584469e2b14c52af5a782fa61",
-  "9c82381a8178deeaa24b26233904a5ec",
+  "34a24191c2e58e5c21c11dfded53ccd7",
+  "f40ae7adfc5efb53dc271fed2a1edb8d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -520,6 +520,49 @@ test("a system entry without metadata still carries its actor", async () => {
   assert.deepEqual(createCall().data.metadata, { systemActor: "marketing-guard" });
 });
 
+test("the entry writer returns the hash it inserted with the id, and the id writer only the id", async () => {
+  const { writeSystemAuditLogEntry } = await import(mod("lib/adminAudit.ts"));
+  const input = {
+    tx: recordingClient("caller-tx") as never,
+    systemActor: "ops-observer" as const,
+    action: "ops_observer.state_advanced",
+    targetType: "OpsObserverState",
+    targetId: "genesis-1",
+    summary: "Advanced.",
+  };
+  const appended = await writeSystemAuditLogEntry(input);
+  assert.deepEqual(appended, { id: "created-by-caller-tx", entryHash: createCall().data.entryHash });
+  assert.match(String(appended.entryHash), /^[0-9a-f]{64}$/);
+  assert.deepEqual(kinds(), ["executeRaw", "queryRaw", "findFirst", "create"]);
+  // The ops-observer statement ceiling charges an append this many statements.
+  const { AUDIT_APPEND_STATEMENT_COST } = await import(mod("scripts/ops-observer/statement-ceiling-core.mjs"));
+  assert.equal(kinds().length, AUDIT_APPEND_STATEMENT_COST);
+
+  await loadSystemWriter();
+  assert.equal(await systemWriter({ ...input, tx: recordingClient("caller-tx") as never }), "created-by-caller-tx");
+});
+
+test("with no integrity key the entry writer returns a null hash", async () => {
+  const { writeSystemAuditLogEntry } = await import(mod("lib/adminAudit.ts"));
+  delete process.env.ADMIN_AUDIT_INTEGRITY_KEY;
+  const previousNextAuthSecret = process.env.NEXTAUTH_SECRET;
+  delete process.env.NEXTAUTH_SECRET;
+  try {
+    const appended = await writeSystemAuditLogEntry({
+      tx: recordingClient("caller-tx") as never,
+      systemActor: "ops-observer",
+      action: "ops_observer.state_advanced",
+      targetType: "OpsObserverState",
+      summary: "Unkeyed.",
+    });
+    assert.deepEqual(appended, { id: "created-by-caller-tx", entryHash: null });
+  } finally {
+    if (previousNextAuthSecret !== undefined) {
+      process.env.NEXTAUTH_SECRET = previousNextAuthSecret;
+    }
+  }
+});
+
 const refusedBeforeAnyStatement = async (write: () => Promise<unknown>) => {
   await assert.rejects(write, (error: unknown) => error instanceof RefusedError);
   assert.deepEqual(kinds(), [], "a refused entry must not lock, read or insert");

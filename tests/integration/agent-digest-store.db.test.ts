@@ -322,3 +322,70 @@ test("billing_finance_ops_assert_deadline passes before the deadline and raises 
     /billing_finance_ops_deadline_passed/,
   );
 });
+
+// docs/policy/sre-ops.md §1 item 3, §10: the registration migration widens the
+// CHECKs and the retention CASE for sre-ops. Its daily_digest row is accepted
+// with a 90-day body and recorded by the agent's one listed actor; another
+// agent's kind under sre-ops is refused by the database itself.
+test("sre-ops is registered with its kind, retention and intake actor", async () => {
+  const result = await recordAgentDigestItem({
+    agentKey: "sre-ops",
+    kind: "daily_digest",
+    schemaVersion: 1,
+    idempotencyKey: `sre-ops:test:${randomUUID()}`,
+    payload: { verdict: "quiet", items: [] },
+  });
+  assert.equal(result.status, "created");
+  if (result.status !== "created") return;
+  createdIds.push(result.id);
+
+  const row = await prisma.agentDigestItem.findUniqueOrThrow({ where: { id: result.id } });
+  assert.equal(row.retentionUntil.getTime() - row.createdAt.getTime(), 90 * 86_400_000);
+  const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditLogId } });
+  assert.equal((audit.metadata as Record<string, unknown>).systemActor, "ops-observer");
+
+  await assert.rejects(
+    prisma.$executeRawUnsafe(
+      `INSERT INTO "AgentDigestItem" ("id", "agentKey", "kind", "schemaVersion", "idempotencyKey", "payload", "payloadSha256", "sizeBytes")
+       VALUES ($1::uuid, 'sre-ops', 'price_deadline_digest', 1, $2, '{}'::jsonb, $3, 2)`,
+      randomUUID(),
+      `sre-ops:test:${randomUUID()}`,
+      "0".repeat(64),
+    ),
+    /AgentDigestItem_kind_check/,
+  );
+});
+
+// A caller whose policy fixes its own limits (docs/policy/sre-ops.md §6): its
+// arming replaces the shared defaults as the transaction's first statement,
+// and what it armed holds for the rest of the transaction.
+test("a caller's own limits arm the transaction first, in place of the defaults", async () => {
+  const seen: string[] = [];
+  const result = await recordAgentDigestItem(
+    {
+      agentKey: "sre-ops",
+      kind: "daily_digest",
+      schemaVersion: 1,
+      idempotencyKey: `sre-ops:test:${randomUUID()}`,
+      payload: { verdict: "quiet", items: [] },
+    },
+    undefined,
+    async (tx) => {
+      const [row] = await tx.$queryRaw<{ timeout: string }[]>`SELECT current_setting('statement_timeout') AS timeout`;
+      seen.push(`admit:${row.timeout}`);
+      return null;
+    },
+    undefined,
+    {
+      arm: async (tx) => {
+        seen.push("arm");
+        await tx.$executeRaw`SELECT set_config('statement_timeout', '1234', true)`;
+      },
+      prismaTimeoutMs: 55_000,
+    },
+  );
+  assert.equal(result.status, "created");
+  if (result.status === "created") createdIds.push(result.id);
+  // The arming ran, and before anything the caller sees: the default 2 s is not in force.
+  assert.deepEqual(seen, ["arm", "admit:1234ms"]);
+});

@@ -608,6 +608,15 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
   },
   {
+    id: "sre-ops",
+    label: "SRE agent",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
+    group: "Operations",
+    writeRoles: ["owner"],
+    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
+  },
+  {
     id: "agent-digests",
     label: "Agent digests",
     href: "/admin/agent-digests",
@@ -972,6 +981,18 @@ export const ADMIN_DETAIL_ROUTES = [
       "The copy this campaign sends, who has attested to what, and whether it may go out",
     parentLabel: "Email campaigns",
     parentHref: "/admin/email-campaigns",
+    group: "Operations" as const,
+  },
+  {
+    // The ops-observer page message link (docs/policy/sre-ops.md §3 rule 1).
+    // Its path is fixed by scripts/ops-observer/content-guard-core.mjs, so it
+    // lives under /admin/agents rather than beside its parent entry.
+    id: "sre-ops-item",
+    pattern: /^\/admin\/agents\/sre-ops\/items\/[^/]+$/,
+    label: "Ops observer message",
+    description: "What one page message was about: its signals, message kinds and times",
+    parentLabel: "SRE agent",
+    parentHref: "/admin/sre-ops",
     group: "Operations" as const,
   },
   {

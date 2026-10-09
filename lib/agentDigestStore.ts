@@ -33,6 +33,9 @@ import { prisma } from "@/lib/prisma";
 const INTAKE_ACTOR: Readonly<Record<AgentDigestAgentKey, SystemAuditActor>> = Object.freeze({
   "qa-release": "qa-release-intake",
   "billing-finance-ops": "billing-finance-ops-intake",
+  // The agent's one listed actor; its digest intake is a different action from
+  // the state advance the trust check binds (docs/policy/sre-ops.md §3 rule 10).
+  "sre-ops": "ops-observer",
 });
 
 export type AgentDigestRecordResult =
@@ -66,11 +69,24 @@ class AgentDigestNotAdmitted extends Error {
 
 type Db = Pick<typeof prisma, "$transaction">;
 
+/**
+ * A caller's own transaction limits, for an agent whose policy fixes them
+ * (docs/policy/sre-ops.md §6): `arm` replaces the default limits as the
+ * transaction's first statement, and `prismaTimeoutMs` replaces the default
+ * Prisma timeout. It must still be one statement, so the statement count is
+ * unchanged. Absent, the shared defaults apply as before.
+ */
+export type AgentDigestTransactionLimits = {
+  arm: (tx: Prisma.TransactionClient) => Promise<void>;
+  prismaTimeoutMs: number;
+};
+
 export async function recordAgentDigestItem(
   submission: AgentDigestSubmission,
   db: Db = prisma,
   admit?: AgentDigestAdmission,
   confirm?: AgentDigestAdmission,
+  limits?: AgentDigestTransactionLimits,
 ): Promise<AgentDigestRecordResult> {
   const prepared = prepareAgentDigestItem(submission);
   if (!prepared.ok) {
@@ -92,7 +108,8 @@ export async function recordAgentDigestItem(
         // (transaction_timeout only where PostgreSQL 17+ has it). They arm
         // for the statements after this one, which is why the lock is not
         // folded in here.
-        await tx.$executeRaw`SELECT
+        if (limits) await limits.arm(tx);
+        else await tx.$executeRaw`SELECT
           set_config('statement_timeout', ${String(LIMITS.statementMs)}, true),
           set_config('idle_in_transaction_session_timeout', ${String(LIMITS.idleMs)}, true),
           CASE WHEN current_setting('server_version_num')::int >= 170000
@@ -167,7 +184,7 @@ export async function recordAgentDigestItem(
       },
       // Policy section 10: Prisma's timeout is the transaction maximum plus five
       // seconds, never its default.
-      { maxWait: 5_000, timeout: LIMITS.prismaMs },
+      { maxWait: 5_000, timeout: limits?.prismaTimeoutMs ?? LIMITS.prismaMs },
     );
   } catch (error) {
     if (error instanceof AgentDigestNotAdmitted) return { status: "not_admitted", reason: error.reason };

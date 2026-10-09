@@ -9814,3 +9814,146 @@ model AmuxV4TaskCostCatalogApproval {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 }
+
+/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
+/// only by the Admin genesis action; never updated or deleted. The migration's
+/// trigger enforces the chain: one first genesis (shadow), every later one
+/// replacing the current head -- recovery in the same mode, activation shadow
+/// to live once.
+model OpsObserverGenesis {
+  id                  String            @id @db.Uuid
+  /// The database clock, set by the trigger.
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  /// One of GENESIS_REASONS.
+  reason              String
+  /// One of GENESIS_MODES.
+  mode                String
+  /// The head this genesis replaced; null only on the first genesis.
+  supersedesGenesisId String?           @unique @db.Uuid
+  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
+  rootMarker          Int?              @unique
+  /// sha256 of the canonical genesis request the owner approved.
+  requestDigest       String
+  invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime              @db.Timestamptz(3)
+  state               OpsObserverState?
+  deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
+}
+
+/// The key state of one genesis. Every update is exactly the next generation
+/// (the compare-and-set); the trigger writes the stamps and refuses a state
+/// write whose genesis has been superseded or whose run deadline has passed by
+/// COMMIT.
+model OpsObserverState {
+  genesisId                 String             @id @db.Uuid
+  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation                Int
+  keys                      Json
+  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion          Int
+  stampGeneration           Int
+  stampKeysSha256           String
+  verifiedThroughGeneration Int                @default(0)
+  verifiedThroughAuditId    String?
+  verifiedThroughAuditHash  String?
+  stampCheckpointSha256     String
+  /// The deadline the writing run claimed; checked again at COMMIT.
+  runDeadlineAt             DateTime           @db.Timestamptz(3)
+}
+
+/// One reservation of the sre-ops agent: what a run may send, at most once
+/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
+/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
+/// open at a time. The migration's triggers enforce all of it.
+model OpsObserverDelivery {
+  id               String                    @id @db.Uuid
+  genesisId        String                    @db.Uuid
+  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The run that reserved it; one reservation per run.
+  runId            String                    @unique
+  /// One of DELIVERY_STATUSES.
+  status           String
+  /// 1 while reserved, null once closed; unique, so one reservation is open.
+  reservedMarker   Int?                      @unique
+  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  confirmedAt      DateTime?                 @db.Timestamptz(3)
+  shadowedAt       DateTime?                 @db.Timestamptz(3)
+  abandonedAt      DateTime?                 @db.Timestamptz(3)
+  /// The owner's calendar date the daily budget counts against.
+  ownerDate        DateTime                  @db.Date
+  /// Set on the reservation that carries the weekly channel check; one per date.
+  channelCheckDate DateTime?                 @unique @db.Date
+  /// The AgentDigestItem the page links to; null for a check-only message.
+  digestItemId     String?                   @db.Uuid
+  invariantVersion Int
+  stampStatus      String
+  /// The deadline of the run that last wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime                  @db.Timestamptz(3)
+  items            OpsObserverDeliveryItem[]
+
+  @@index([genesisId, ownerDate])
+}
+
+/// One message kind for one incident inside a reservation. Written in the
+/// reservation's own transaction and never changed; (mode, signal, scope,
+/// kind, openedAt) is unique, so each kind is reserved once per incident.
+model OpsObserverDeliveryItem {
+  id         String              @id @db.Uuid
+  deliveryId String              @db.Uuid
+  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  /// Copied from the reservation by the trigger.
+  mode       String
+  signal     String
+  scope      String
+  /// One of MESSAGE_KINDS.
+  kind       String
+  /// One of ITEM_ORIGINS.
+  origin     String
+  openedAt   DateTime            @db.Timestamptz(3)
+  /// Whether this item counted against the shared daily cap.
+  capped     Boolean
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
+  @@index([deliveryId])
+}
+
+/// The sre-ops run guard: one row per daily digest, its transaction's last
+/// write, whose deferred trigger refuses a late COMMIT of the shared rows
+/// written before it (docs/policy/sre-ops.md §6 item 5). Triggers in
+/// migrations/20261008020000_ops_observer_run_guard.
+model OpsObserverRunGuard {
+  /// sre-ops:daily:<owner date>.
+  runId            String   @id
+  /// One of RUN_GUARD_KINDS.
+  kind             String
+  /// The database clock, set by the trigger.
+  startedAt        DateTime @default(now()) @db.Timestamptz(3)
+  /// The deadline the run claimed; checked again at COMMIT.
+  runDeadlineAt    DateTime @db.Timestamptz(3)
+  invariantVersion Int
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
+  auditLogId     String             @unique
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
+}
+

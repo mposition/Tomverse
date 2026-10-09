@@ -38,6 +38,7 @@ const NAV_LABELS = [
   "Email delivery",
   "Marketing",
   "Engineering agent",
+  "SRE agent",
   "Agent digests",
   "Agent office",
   "Platform settings",

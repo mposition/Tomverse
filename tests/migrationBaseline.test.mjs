@@ -631,3 +631,33 @@ test("the Decision Maker stale-close interval pins the S1c request event guard b
     });
   assert.deepEqual(between, []);
 });
+
+test("the sre-ops digest registration pins the billing migration's insert trigger body", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS, "20261008010000_agent_digest_sre_ops", "migration.sql"), "utf8");
+  // The body this replacement may overwrite is the last definition before it:
+  // 20261004000000_agent_digest_billing_finance_ops, which itself replaced the
+  // first migration's.
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261004000000_agent_digest_billing_finance_ops", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /FUNCTION agent_digest_item_before_insert\(\) RETURNS trigger[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "agent_digest_item_before_insert",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
+  // No migration between the two redefines the function.
+  const between = readdirSync(MIGRATIONS)
+    .filter((name) => name > "20261004000000_agent_digest_billing_finance_ops" && name < "20261008010000_agent_digest_sre_ops")
+    .filter((name) => {
+      try {
+        return /FUNCTION agent_digest_item_before_insert\(/.test(readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8"));
+      } catch {
+        return false;
+      }
+    });
+  assert.deepEqual(between, []);
+});
