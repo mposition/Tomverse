@@ -80,6 +80,21 @@ const resultAudits = async () =>
     (row) => row.metadata as Record<string, number>
   );
 
+/**
+ * Resolves once some backend of this database is waiting on a lock, so a test
+ * releases the other transaction only after the one under test is blocked.
+ */
+const waitUntilALockIsAwaited = async () => {
+  for (let i = 0; i < 200; i += 1) {
+    const [row] = await prisma.$queryRaw<{ waiting: number }[]>`
+      SELECT pg_catalog.count(*)::integer AS "waiting" FROM pg_catalog.pg_stat_activity
+       WHERE "datname" = pg_catalog.current_database() AND "wait_event_type" = 'Lock'`;
+    if (row.waiting > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("the transaction under test never waited for a lock");
+};
+
 beforeEach(reset);
 
 after(async () => {
@@ -317,7 +332,7 @@ test("a group missing one planned member is emptied and invalidated, keeping eve
   await ready;
   // The result transaction plans {a, b, c}; inserting c waits on the other transaction.
   const writing = writeSupportTriageResults(run, batch.token as string, batch.claimed, { peerIds: [] });
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await waitUntilALockIsAwaited();
   release();
   await other;
   const result = await writing;
@@ -390,7 +405,7 @@ test("a join that waited for another pass's join counts that member once, so the
   await ready;
   // This result transaction waits for the group lock, then plans z's join.
   const writing = writeSupportTriageResults(run, batch.token as string, batch.claimed, { peerIds });
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await waitUntilALockIsAwaited();
   release();
   await other;
   const result = await writing;
