@@ -1,6 +1,7 @@
 import { PROMPT_REFINER_INPUT_SCOPE } from "@/lib/promptRefinerSuggestion";
 import { buildArtifactProgressChunk } from "@/lib/generatedArtifactProgressSignal";
 import { buildChatStreamTrailerChunk } from "@/lib/webSearchStreamTrailer";
+import { parseChatE04AutoAction } from "@/lib/chatE04StagingFixture";
 
 export const CHAT_E04_CONVERSATION = "e0400000-0000-4000-8000-000000000001";
 export const CHAT_E04_SESSION = { user: { id: "e04-synthetic-user", name: "E04 Synthetic QA",
@@ -58,7 +59,12 @@ export function installChatE04FixtureTransport(onEvidence: (value: ChatE04Transp
     const url = new URL(request.url);
     if (url.origin !== window.location.origin) return blocked();
     const path = url.pathname; const method = request.method;
-    if (path === "/api/admin/chat-e2e-fixture" && method === "POST") {
+    if (path === "/api/admin/chat-e2e-fixture") {
+      const query = url.search.slice(1);
+      const parameters = [...url.searchParams.entries()];
+      if (method !== "GET" || request.body !== null || new TextEncoder().encode(query).byteLength > 512
+        || query.split("&").length !== 1 || parameters.length !== 1 || parameters[0][0] !== "action"
+        || !parseChatE04AutoAction({ action: parameters[0][1] })) return blocked();
       evidence.serverAutoRequests++; emit(); return nativeFetch.call(window, request);
     }
     if (path === "/api/chat/voice-transcription" && method === "POST") {

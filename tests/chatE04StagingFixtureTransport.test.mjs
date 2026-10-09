@@ -24,13 +24,19 @@ test("page-local QA transport blocks unknown requests, external URLs and late ca
   assert.equal(navigator.sendBeacon("https://provider.example.invalid", "body"), false);
   assert.throws(() => new XMLHttpRequest().send(), /CHAT_E04_QA_REQUEST_BLOCKED/);
   assert.equal(forwarded, 0);
-  assert.equal((await window.fetch("/api/admin/chat-e2e-fixture", { method: "POST", body: '{"action":"accepted"}' })).status, 200);
+  const autoPath = "/api/admin/chat-e2e-fixture";
+  for (const query of ["", "?action=other", "?action=accepted&action=accepted", "?action=accepted&prompt=arbitrary", "?action=accepted&", `?action=${"%61".repeat(171)}`]) {
+    assert.equal((await window.fetch(autoPath + query)).status, 503);
+  }
+  assert.equal((await window.fetch(autoPath + "?action=accepted", { method: "POST", body: "{}" })).status, 503);
+  assert.equal(forwarded, 0);
+  assert.equal((await window.fetch(autoPath + "?action=accepted")).status, 200);
   assert.equal(forwarded, 1);
-  const autoRequest = new Request("https://staging.example.invalid/api/admin/chat-e2e-fixture", {
-    method: "POST", headers: { "Content-Type": "application/json", "x-e04-marker": "preserved" }, body: '{"action":"kept_original"}',
+  const autoRequest = new Request("https://staging.example.invalid/api/admin/chat-e2e-fixture?action=kept_original", {
+    method: "GET", headers: { "x-e04-marker": "preserved" },
   });
   assert.equal((await window.fetch(autoRequest, { cache: "no-store" })).status, 200);
-  assert.deepEqual(forwardedRequests.at(-1), { method: "POST", marker: "preserved", body: '{"action":"kept_original"}' });
+  assert.deepEqual(forwardedRequests.at(-1), { method: "GET", marker: "preserved", body: "" });
   assert.equal(forwarded, 2);
   const post = async (path, body, method = "POST") => window.fetch(path, { method, body: JSON.stringify(body) });
   const draftPath = "/api/products/chat/drafts/e04-unit-scope";
@@ -46,7 +52,7 @@ test("page-local QA transport blocks unknown requests, external URLs and late ca
   const lateFetch = window.fetch;
   fixture.retire();
   assert.equal((await lateFetch("/api/chat", { method: "POST", body: "{}" })).status, 503);
-  assert.equal((await window.fetch("/api/admin/chat-e2e-fixture", { method: "POST", body: "{}" })).status, 503);
+  assert.equal((await window.fetch(autoPath + "?action=accepted")).status, 503);
   assert.equal(forwarded, 2);
   for (const key of ["providerCalls", "costMicroUsd", "productDatabaseWrites", "auditWrites"]) assert.equal(seen.at(-1)[key], 0);
 });

@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Request as BrowserRequest } from "@playwright/test";
 import { encode } from "next-auth/jwt";
 import { readFile } from "node:fs/promises";
+import { parseChatE04AutoAction } from "../../lib/chatE04StagingFixture";
 
 const enabled = process.env.E04_QA_BROWSER_SUPPORTED === "1";
 const networkObservations = new WeakMap<Page, { requests: string[]; observe: (request: BrowserRequest) => void }>();
@@ -13,7 +14,11 @@ async function observeReadyQa(page: Page, baseURL: string) {
     const origin = new URL(baseURL).origin;
     observation = { requests, observe: (request) => {
       const url = new URL(request.url());
-      const serverAuto = url.origin === origin && url.pathname === "/api/admin/chat-e2e-fixture" && request.method() === "POST";
+      const parameters = [...url.searchParams.entries()];
+      const query = url.search.slice(1);
+      const serverAuto = url.origin === origin && url.pathname === "/api/admin/chat-e2e-fixture" && request.method() === "GET"
+        && request.postData() === null && new TextEncoder().encode(query).byteLength <= 512 && query.split("&").length === 1
+        && parameters.length === 1 && parameters[0][0] === "action" && parseChatE04AutoAction({ action: parameters[0][1] });
       if (!serverAuto && (url.origin !== origin || url.pathname.startsWith("/api/"))) requests.push(`${request.method()} ${request.url()}`);
     } };
     networkObservations.set(page, observation);
@@ -39,8 +44,10 @@ async function openQa(page: Page, baseURL: string) {
 }
 
 test("QA action API denies unauthenticated callers", async ({ request, baseURL }) => {
-  const response = await request.post("/api/admin/chat-e2e-fixture", { headers: { Origin: baseURL! }, data: { action: "accepted" } });
+  const response = await request.get("/api/admin/chat-e2e-fixture?action=accepted", { headers: { Origin: baseURL! } });
   expect(response.status()).toBe(404);
+  const post = await request.post("/api/admin/chat-e2e-fixture?action=accepted", { headers: { Origin: baseURL! }, data: {} });
+  expect(post.status()).toBe(405);
 });
 
 test.describe("isolated admin staging fixture harness", () => {

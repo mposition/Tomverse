@@ -41,7 +41,7 @@ export function ChatE04FixtureWorkspace() {
       <div className="flex flex-wrap gap-2">{CHAT_E04_AUTO_ACTIONS.map((action) => <button key={action} type="button"
         data-testid={`e04-auto-${action}`} className="min-h-11 rounded border px-3" onClick={async () => {
           try {
-            const response = await fetch("/api/admin/chat-e2e-fixture", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+            const response = await fetch(`/api/admin/chat-e2e-fixture?action=${encodeURIComponent(action)}`, { method: "GET", cache: "no-store" });
             if (response.ok) setAuto(await response.json());
             else {
               await discardResponseBody(response);

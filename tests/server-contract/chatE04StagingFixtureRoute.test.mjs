@@ -11,19 +11,21 @@ const unavailable = new Error("NEXT_NOT_FOUND");
 const Workspace = () => null;
 mock.module(mod("node_modules/next/navigation.js"), { namedExports: { notFound: () => { throw unavailable; } } });
 mock.module(mod("app/(site)/(application)/admin/chat-e2e/ChatE04FixtureWorkspace.tsx"), { namedExports: { ChatE04FixtureWorkspace: Workspace } });
-const { POST } = await import(mod("app/api/admin/chat-e2e-fixture/route.ts"));
+const route = await import(mod("app/api/admin/chat-e2e-fixture/route.ts"));
+const { GET } = route;
 const { default: QaPage } = await import(mod("app/(site)/(application)/admin/chat-e2e/page.tsx"));
-const request = (body = { action: "accepted" }, origin = "https://staging.example.invalid") => new Request("https://staging.example.invalid/api/admin/chat-e2e-fixture", {
-  method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: typeof body === "string" ? body : JSON.stringify(body),
+const request = (query = "action=accepted", origin = "https://staging.example.invalid") => new Request(`https://staging.example.invalid/api/admin/chat-e2e-fixture?${query}`, {
+  method: "GET", headers: origin === null ? {} : { Origin: origin },
 });
 
 test("the server route rejects anonymous, nonadmin, production, development and cross-origin before running Auto", async () => {
   process.env.APP_ENV = "staging";
-  authenticated = false; assert.equal((await POST(request())).status, 404);
-  authenticated = true; administrator = false; assert.equal((await POST(request())).status, 404);
-  administrator = true; process.env.APP_ENV = "production"; assert.equal((await POST(request())).status, 404);
-  process.env.APP_ENV = "development"; assert.equal((await POST(request())).status, 404);
-  process.env.APP_ENV = "staging"; assert.equal((await POST(request(undefined, "https://hostile.example.invalid"))).status, 403);
+  authenticated = false; assert.equal((await GET(request())).status, 404);
+  authenticated = true; administrator = false; assert.equal((await GET(request())).status, 404);
+  administrator = true; process.env.APP_ENV = "production"; assert.equal((await GET(request())).status, 404);
+  process.env.APP_ENV = "development"; assert.equal((await GET(request())).status, 404);
+  process.env.APP_ENV = "staging"; assert.equal((await GET(request(undefined, "https://hostile.example.invalid"))).status, 403);
+  assert.equal((await GET(request(undefined, null))).status, 403);
 });
 
 test("the actual page rejects production, development, anonymous and nonadmin before rendering the QA workspace", async () => {
@@ -40,16 +42,24 @@ test("the actual page rejects production, development, anonymous and nonadmin be
   assert.equal((await QaPage()).type, Workspace);
 });
 
-test("the API accepts fixed actions only, caps bytes and returns no-store synthetic results", async () => {
+test("the read-only API accepts one fixed action only, refuses body/method and returns no-store results", async () => {
   process.env.APP_ENV = "staging"; authenticated = true; administrator = true;
-  for (const body of ["broken-json", " ".repeat(513), { action: "accepted", prompt: "client cannot supply this" }]) {
-    assert.equal((await POST(request(body))).status, 400);
+  for (const query of ["", "action=other", "action=accepted&action=accepted", "action=accepted&prompt=arbitrary", "action=accepted&", `action=${"%61".repeat(171)}`]) {
+    assert.equal((await GET(request(query))).status, 400);
   }
-  const response = await POST(request());
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "private, no-store");
-  const result = await response.json();
-  assert.equal(result.inputSource, "accepted_proposal");
-  assert.equal(result.dispatchAuthorized, false);
-  assert.equal(result.providerCalls, 0); assert.equal(result.productDatabaseWrites, 0); assert.equal(result.auditWrites, 0);
+  const bodyRequest = request();
+  Object.defineProperty(bodyRequest, "body", { value: new ReadableStream({ start: (controller) => controller.close() }) });
+  assert.equal((await GET(bodyRequest)).status, 400);
+  assert.equal("POST" in route, false);
+  assert.equal((await GET(new Request(request().url, { method: "POST" }))).status, 405);
+  for (const action of ["default_off", "accepted", "kept_original", "stale", "replay", "unknown"]) {
+    const response = await GET(request(`action=${action}`));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    const result = await response.json();
+    assert.equal(result.action, action);
+    assert.equal(result.dispatchAuthorized, false);
+    for (const key of ["providerCalls", "costMicroUsd", "productDatabaseWrites", "auditWrites"]) assert.equal(result[key], 0);
+    assert.deepEqual(await (await GET(request(`action=${action}`))).json(), result);
+  }
 });
