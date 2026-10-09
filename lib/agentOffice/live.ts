@@ -680,6 +680,7 @@ type ReviewCopy = {
   summary: (pending: number, accept: number, reject: number, unknown: number) => string;
   lastReport: (time: string) => string;
   load: (running: number, max: number) => string;
+  more: (count: number) => string;
   readAt: (time: string) => string;
 };
 
@@ -708,7 +709,7 @@ export function reviewRoomView(
   }
 
   const last = utcStamp(state.receivedAt);
-  const reviewers = state.reviewers.slice(0, desks).map((reviewer): AgentOfficeSeatedView => {
+  const everyone = state.reviewers.map((reviewer): AgentOfficeSeatedView => {
     const label = copy.states[reviewer.state];
     return {
       name: reviewer.id,
@@ -721,7 +722,8 @@ export function reviewRoomView(
       dim: reviewer.state === "off",
     };
   });
-  const any = (tone: DeptStatus) => reviewers.some((reviewer) => reviewer.status === tone);
+  // The room speaks for every reviewer, drawn or not; only the people are cut to the desks.
+  const any = (tone: DeptStatus) => everyone.some((reviewer) => reviewer.status === tone);
   const status: DeptStatus = state.stale
     ? "attention"
     : state.draining
@@ -736,6 +738,10 @@ export function reviewRoomView(
     copy.lastReport(last),
     read,
   ].join(" · ");
-  const note = state.stale ? copy.stale(last) : state.draining ? copy.draining : null;
-  return { status, summary, note, reviewers };
+  const undrawn = Math.max(0, everyone.length - desks);
+  const note =
+    [state.stale ? copy.stale(last) : state.draining ? copy.draining : null, undrawn > 0 ? copy.more(undrawn) : null]
+      .filter((part): part is string => part !== null)
+      .join(" · ") || null;
+  return { status, summary, note, reviewers: everyone.slice(0, desks) };
 }

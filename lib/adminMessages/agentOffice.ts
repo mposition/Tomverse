@@ -597,6 +597,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           `${pending} waiting · last 24h ${accept} accept · ${reject} reject · ${unknown} unknown`,
         lastReport: (time: string) => `last report ${time}`,
         load: (running: number, max: number) => `${running}/${max} running`,
+        more: (count: number) =>
+          count === 1 ? "1 more reviewer not drawn here" : `${count} more reviewers not drawn here`,
         readAt: (time: string) => `read ${time}`,
       },
       amux: {
@@ -1341,6 +1343,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           `대기 ${pending} · 최근 24시간 accept ${accept} · reject ${reject} · unknown ${unknown}`,
         lastReport: (time: string) => `마지막 보고 ${time}`,
         load: (running: number, max: number) => `실행 ${running}/${max}`,
+        more: (count: number) => `여기 그리지 못한 검토자 ${count}명`,
         readAt: (time: string) => `읽은 시각 ${time}`,
       },
       amux: {
