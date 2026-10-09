@@ -65,6 +65,8 @@
     "test:amux-v4-activation-preflight": "node --conditions=react-server --import tsx --test tests/amuxV4ActivationPreflight.test.mjs",
     "verify:amux-v4-staging-key-canary": "node --conditions=react-server --import tsx scripts/amux-v4-key-store-canary.mjs",
     "test:amux-v4-staging-key-canary": "node --conditions=react-server --import tsx --test tests/amuxV4KeyStoreCanary.test.mjs",
+    "verify:amux-v4-key-canary": "node --conditions=react-server --import tsx scripts/amux-v4-key-store-canary.mjs",
+    "test:amux-v4-key-canary": "node --conditions=react-server --import tsx --test tests/amuxV4KeyStoreCanary.test.mjs",
     "test:amux-v4-disabled-install": "node --test tests/amuxV4DisabledServiceInstall.test.mjs",
     "test:amux-v4-analysis-budget-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/amux-v4-analysis-budget.db.test.ts",
     "review": "node tools/review-orchestrator/client/review.mjs",
