@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { computeLoad, independentVendorCount, isName, planAssignments, resolveAuthorVendor } from "./assign.mjs";
 import { requiredReviewers } from "./config.mjs";
 import { withLock } from "./fsutil.mjs";
+import { reviewerEnv } from "./env.mjs";
+export { reviewerEnv } from "./env.mjs";
 import {
   addWorktree,
   changedFiles,
@@ -18,6 +20,7 @@ import {
   SHA,
 } from "./git.mjs";
 import { buildPrompt } from "./prompt.mjs";
+import { consumeManualQuota } from "./quota.mjs";
 import { Store, newJobId } from "./store.mjs";
 import { parseReviewerOutput } from "./verdict.mjs";
 
@@ -83,6 +86,25 @@ function reviewedHead(store, repoName, head) {
     );
 }
 
+function checkReviewerProviders(config, ids, authorVendor) {
+  if (ids === undefined) return [];
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 3 || !ids.every(isName)) {
+    throw new UsageError("reviewer_providers_invalid", "pass one to three configured provider ids");
+  }
+  if (new Set(ids).size !== ids.length) throw new UsageError("reviewer_providers_duplicate");
+  const vendors = new Set();
+  for (const id of ids) {
+    const provider = config.providers.find((p) => p.id === id);
+    if (!provider || provider.enabled !== true) throw new UsageError("reviewer_unavailable", id);
+    if (!isName(provider.vendor) || provider.vendor === "unknown" || provider.vendor === authorVendor) {
+      throw new UsageError("reviewer_not_independent", id);
+    }
+    if (vendors.has(provider.vendor)) throw new UsageError("reviewer_vendors_duplicate", id);
+    vendors.add(provider.vendor);
+  }
+  return [...ids];
+}
+
 export async function submitJob(config, request, bundlePath, { now = new Date() } = {}) {
   const { repo: repoName, base, head, author, authorVendor: statedVendor, scope } = request;
   const repo = config.repos[repoName];
@@ -99,6 +121,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
   if (!Number.isInteger(requested) || requested < 1 || requested > 3) {
     throw new UsageError("reviewers_invalid");
   }
+  const reviewerProviders = checkReviewerProviders(config, request.reviewerProviders, authorVendor);
   if (statSync(bundlePath).size > config.maxBundleBytes) throw new UsageError("bundle_too_large");
 
   const store = new Store(config.stateDir);
@@ -134,7 +157,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       // contract change before it, so then the whole base..head range counts.
       const focusReviewed = focus !== null && reviewedHead(store, repoName, focus);
       const contractFiles = focusReviewed ? focusFiles : files;
-      const { reviewers, touchesContract } = requiredReviewers(config, requested, contractFiles);
+      const { reviewers, touchesContract } = requiredReviewers(config, Math.max(requested, reviewerProviders.length), contractFiles);
       const available = independentVendorCount(config.providers, authorVendor);
       if (available < reviewers) {
         throw new UsageError(
@@ -151,6 +174,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         author,
         authorVendor,
         reviewers,
+        reviewerProviders,
         touchesContract,
         scope: typeof scope === "string" ? scope.slice(0, 4000) : "",
         fileCount: files.length,
@@ -159,7 +183,7 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
         submittedAt: now.getTime(),
       };
       store.publish(job);
-      return { jobId: id, reviewers, touchesContract, fileCount: files.length, focus, focusFileCount: focusFiles.length };
+      return { jobId: id, reviewers, reviewerProviders, touchesContract, fileCount: files.length, focus, focusFileCount: focusFiles.length };
     } catch (error) {
       store.discardStaging(id);
       // A refused job leaves no review ref behind either.
@@ -167,16 +191,6 @@ export async function submitJob(config, request, bundlePath, { now = new Date() 
       throw error;
     }
   });
-}
-
-/** Environment a reviewer process gets: an allowlist, never the daemon's own. */
-export function reviewerEnv(provider, source = process.env) {
-  const names = ["PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR",
-    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "SYSTEMROOT", "USERPROFILE", "APPDATA",
-    "LOCALAPPDATA", ...(provider.passEnv ?? [])];
-  const env = {};
-  for (const name of names) if (source[name] !== undefined) env[name] = source[name];
-  return env;
 }
 
 export function expandArgs(provider, workdir, promptFile = "", promptDir = "") {
@@ -278,7 +292,8 @@ export class Orchestrator {
     return recovered;
   }
 
-  tick() {
+  tick(quotas) {
+    if (!quotas || typeof quotas !== "object") throw new Error("quota_snapshot_required");
     // Draining: start nothing new, let running reviews finish. Submits are still
     // accepted and wait in the queue until the drain is lifted.
     if (isDraining(this.config)) return [];
@@ -289,6 +304,11 @@ export class Orchestrator {
       providers: this.config.providers,
       load: computeLoad(jobs, now),
       now,
+      // The daemon supplies a fresh account-specific snapshot each pass.
+      // A missing, failed, or stale probe cannot authorize a new review.
+      blockedProviders: new Set(this.config.providers
+        .filter((provider) => quotas[provider.id]?.state !== "available")
+        .map((provider) => provider.id)),
     });
     const byId = new Map(jobs.map((entry) => [entry.job.id, entry]));
     for (const decision of decisions) {
@@ -300,6 +320,7 @@ export class Orchestrator {
       }
       if (this.store.readSlot(job.id, slot.index).status !== "queued") continue;
       const provider = this.config.providers.find((p) => p.id === decision.provider);
+      if (provider.quotaProbe === "manual" && !consumeManualQuota(this.config, provider.id, now)) continue;
       const running = { ...slot, status: "running", provider: provider.id, vendor: provider.vendor, assignedAt: now, startedAt: now };
       this.store.writeSlot(job.id, running);
       const task = this.runReview(job, running, provider).finally(() => this.inflight.delete(task));

@@ -11,6 +11,8 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator } from "../tools/review-orchestrator/lib/service.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
 
+const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
+
 const TOOL = resolve("tools/review-orchestrator");
 const CLIENT = join(TOOL, "client/review.mjs");
 const SERVER = join(TOOL, "bin/review-orchestrator.mjs");
@@ -66,7 +68,7 @@ async function reviewAndReadPrompt(f) {
   process.env.FAKE_REVIEWER_PROMPT_OUT = f.promptOut;
   try {
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     return readFileSync(f.promptOut, "utf8");
   } finally {
