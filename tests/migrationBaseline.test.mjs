@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -278,6 +278,194 @@ test("the guard asks one fixed question with the name bound, and accepts one boo
   }
 });
 
+test("a checksum-bound sidecar names every CHECK replacement without changing migration SQL", async () => {
+  const {
+    canonicalMigrationSqlSha256,
+    pendingProbes,
+    replacedCheckTargetsIn,
+    supplementalProofIn,
+  } = await import("../scripts/baseline-presence-core.mjs");
+  const name = "20261008130000_amux_v4_claim_owner_resolution";
+  const directory = join(MIGRATIONS, name);
+  const sql = readFileSync(join(directory, "migration.sql"), "utf8");
+  const proofText = readFileSync(join(directory, "baseline-check.json"), "utf8");
+  const proof = JSON.parse(proofText);
+  const targets = [
+    {
+      table: "AmuxIdeaAnalysisBudgetHold",
+      constraint: "AmuxIdeaAnalysisBudgetHold_status_check",
+    },
+    {
+      table: "AmuxIdeaAnalysisBudgetHold",
+      constraint: "AmuxIdeaAnalysisBudgetHold_lifecycle_check",
+    },
+    {
+      table: "AmuxIdeaTransferPreview",
+      constraint: "AmuxIdeaTransferPreview_state_check",
+    },
+    {
+      table: "AmuxIdeaTransferPreview",
+      constraint: "AmuxIdeaTransferPreview_state_confirm_check",
+    },
+  ];
+  const expected = targets.map((target, index) => ({
+    ...target,
+    previousDefinitionSha256: proof.replacedChecks[index].previousDefinitionSha256,
+  }));
+
+  assert.equal(canonicalMigrationSqlSha256(sql), proof.migrationSqlSha256);
+  assert.equal(
+    canonicalMigrationSqlSha256(sql.replaceAll("\n", "\r\n")),
+    proof.migrationSqlSha256,
+    "checkout CRLF conversion must not invalidate the proof",
+  );
+  assert.notEqual(
+    canonicalMigrationSqlSha256(`${sql} `),
+    proof.migrationSqlSha256,
+    "no other SQL change may retain the proof",
+  );
+  assert.deepEqual(replacedCheckTargetsIn(sql), {
+    kind: "check-replacement",
+    checks: targets,
+  });
+  assert.deepEqual(supplementalProofIn(sql, proofText), {
+    kind: "check-replacement",
+    checks: expected,
+  });
+  assert.deepEqual(
+    pendingProbes([name], () => sql, () => proofText),
+    { probes: [{ name, replacedChecks: expected }], undeclared: [] },
+  );
+});
+
+test("CHECK replacement sidecars reject unbound, partial, ambiguous, and mixed declarations", async () => {
+  const {
+    canonicalMigrationSqlSha256,
+    pendingProbes,
+    replacedCheckTargetsIn,
+    supplementalProofIn,
+  } = await import("../scripts/baseline-presence-core.mjs");
+  const directory = join(MIGRATIONS, "20261008130000_amux_v4_claim_owner_resolution");
+  const sql = readFileSync(join(directory, "migration.sql"), "utf8");
+  const proof = JSON.parse(readFileSync(join(directory, "baseline-check.json"), "utf8"));
+  const encoded = (value) => JSON.stringify(value);
+  const invalid = [
+    ["malformed JSON", "{"],
+    ["changed SQL", encoded(proof), `${sql} `],
+    ["partial list", encoded({ ...proof, replacedChecks: proof.replacedChecks.slice(0, -1) })],
+    ["unknown target", encoded({
+      ...proof,
+      replacedChecks: proof.replacedChecks.map((entry, index) =>
+        index === 0 ? { ...entry, constraint: "Unknown_check" } : entry),
+    })],
+    ["extra registry field", encoded({ ...proof, query: "SELECT true" })],
+  ];
+  for (const [label, proofText, candidateSql = sql] of invalid) {
+    assert.deepEqual(supplementalProofIn(candidateSql, proofText), { kind: "invalid" }, label);
+  }
+  assert.deepEqual(supplementalProofIn(sql, undefined), { kind: "none" });
+
+  const ambiguousSql = `ALTER TABLE "T"
+    DROP CONSTRAINT "old_check",
+    ADD CONSTRAINT "new_check" CHECK (true);\n`;
+  const ambiguousProof = encoded({
+    version: 1,
+    migrationSqlSha256: canonicalMigrationSqlSha256(ambiguousSql),
+    replacedChecks: [],
+  });
+  assert.deepEqual(supplementalProofIn(ambiguousSql, ambiguousProof), { kind: "invalid" });
+
+  const mixedSql = `${sql}\nCREATE TABLE "AlreadyPresent" ("id" TEXT PRIMARY KEY);\n`;
+  const mixedSqlProof = encoded({
+    ...proof,
+    migrationSqlSha256: canonicalMigrationSqlSha256(mixedSql),
+  });
+  assert.deepEqual(
+    supplementalProofIn(mixedSql, mixedSqlProof),
+    { kind: "invalid" },
+    "the CHECK proof cannot excuse any other pending DDL",
+  );
+
+  const oneReplacement = `ALTER TABLE "T"
+    DROP CONSTRAINT "T_state_check",
+    ADD CONSTRAINT "T_state_check" CHECK ("state" IN ('a', 'b'));`;
+  assert.deepEqual(replacedCheckTargetsIn(oneReplacement), {
+    kind: "check-replacement",
+    checks: [{ table: "T", constraint: "T_state_check" }],
+  });
+  for (const [label, suffix] of [
+    ["ADD COLUMN", `, ADD COLUMN "extra" TEXT`],
+    ["RENAME", `, RENAME COLUMN "state" TO "other"`],
+    ["ENABLE TRIGGER", `, ENABLE TRIGGER "guard"`],
+  ]) {
+    const withExtraAction = oneReplacement.replace(/;$/, `${suffix};`);
+    assert.deepEqual(
+      replacedCheckTargetsIn(withExtraAction),
+      { kind: "invalid" },
+      `the sidecar does not prove an ${label} action in the same ALTER TABLE`,
+    );
+  }
+  const quotedFake = `SELECT 'ALTER TABLE "T" DROP CONSTRAINT "T_state_check", ` +
+    `ADD CONSTRAINT "T_state_check" CHECK (true);';`;
+  assert.deepEqual(replacedCheckTargetsIn(quotedFake), { kind: "invalid" });
+  assert.deepEqual(
+    replacedCheckTargetsIn(`-- ${oneReplacement.replaceAll("\n", " ")}\n`),
+    { kind: "none" },
+    "DDL written only in a comment is not a replacement",
+  );
+  assert.deepEqual(
+    replacedCheckTargetsIn(`DO $$ BEGIN EXECUTE '${oneReplacement}'; END $$;`),
+    { kind: "invalid" },
+    "procedural and dollar-quoted SQL is outside the approved sidecar grammar",
+  );
+
+  const headerSql = `-- baseline-check: present-if-relation "X"\n${sql}`;
+  const headerProof = encoded({
+    ...proof,
+    migrationSqlSha256: canonicalMigrationSqlSha256(headerSql),
+  });
+  assert.deepEqual(
+    pendingProbes(["mixed"], () => headerSql, () => headerProof),
+    { probes: [], undeclared: ["mixed"] },
+  );
+});
+
+test("CHECK replacement probes use a fixed read-only catalog question and fail closed", async () => {
+  const {
+    checkDefinitionQuery,
+    checkReplacementAnswer,
+    checkReplacementSetAnswer,
+    presenceVerdict,
+  } = await import("../scripts/baseline-presence-core.mjs");
+  const target = { table: "T", constraint: "T_state_check" };
+  const query = checkDefinitionQuery(target);
+  assert.deepEqual(query.values, ["T", "T_state_check"]);
+  assert.equal(query.rowMode, "array");
+  assert.match(query.text, /pg_catalog\.pg_get_constraintdef\(c\.oid, false\)/);
+  assert.match(query.text, /n\.nspname = 'public'/);
+  assert.match(query.text, /c\.contype = 'c'/);
+  assert.doesNotMatch(query.text, /T_state_check|\bT\b/);
+
+  const prior = "CHECK ((status = 'reserved'::text) IS TRUE)";
+  const priorDigest = createHash("sha256").update(prior).digest("hex");
+  assert.equal(checkReplacementAnswer([[prior]], priorDigest), false);
+  assert.equal(checkReplacementAnswer([[`${prior} `]], priorDigest), true);
+  for (const rows of [[], [[prior], [prior]], [[null]], [[false]], undefined]) {
+    assert.equal(checkReplacementAnswer(rows, priorDigest), undefined, JSON.stringify(rows));
+  }
+  assert.equal(checkReplacementSetAnswer([false, false, false, false]), false);
+  assert.equal(checkReplacementSetAnswer([false, true, false, false]), true);
+  assert.equal(checkReplacementSetAnswer([false, undefined, false, false]), undefined);
+  assert.equal(checkReplacementSetAnswer([]), undefined);
+  assert.equal(presenceVerdict(["m"], new Map([["m", false]])).proceed, true);
+  for (const answer of [true, undefined]) {
+    assert.deepEqual(
+      presenceVerdict(["m"], new Map([["m", answer]])),
+      { proceed: false, notProvenAbsent: ["m"] },
+    );
+  }
+});
+
 test("the guard proceeds only when every pending migration proves absence", async () => {
   const { pendingProbes, presenceVerdict } = await import("../scripts/baseline-presence-core.mjs");
   const sql = {
@@ -318,8 +506,15 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   assert.ok(guard.includes("client.query(presenceQueryFor(probe))"));
   assert.ok(guard.includes("replacementAnswer(rows, probe.previousBodySha256)"));
   const readOnly = guard.indexOf('"BEGIN READ ONLY"', probe);
+  const repeatableRead = guard.indexOf(
+    '"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"',
+    probe,
+  );
   const rollback = guard.indexOf('"ROLLBACK"', readOnly);
-  assert.ok(match > 0 && probe > match && readOnly > probe && rollback > readOnly);
+  assert.ok(
+    match > 0 && probe > match && readOnly > probe &&
+      repeatableRead > probe && rollback > readOnly,
+  );
   // An undeclared migration still meets the original refusal.
   assert.ok(guard.includes("undeclared,"));
 });
@@ -447,11 +642,11 @@ test("the B06 v3 recovery migration pins the deployed v2 supersession function",
  * detector removes all three before reading, and statementsOf below records the
  * two drafts that got that wrong.
  *
- * What it deliberately does not ask. A migration that only adds a CHECK
- * constraint, or only writes rows, is equally invisible to the diff and would
- * be refused the same way -- but no declaration can prove it absent, so
- * demanding one would be an unmeetable gate. Those stay out of scope and keep
- * the guard's original refusal.
+ * A newly added CHECK cannot be proven absent safely, so it stays out of this
+ * declaration sweep and keeps the guard's original refusal. A CHECK replaced
+ * under the same table/name can prove the exact prior definition through the
+ * checksum-bound sidecar, and the separate sweep below requires that proof for
+ * every such check-only migration from the first supported one onward.
  */
 
 /**
@@ -733,6 +928,61 @@ test("every migration the diff cannot see declares a presence probe", async () =
   assert.ok(
     swept.length >= 8,
     `expected the sweep to still reach the declared migrations, reached ${swept.length}`,
+  );
+});
+
+test("every new CHECK-only replacement migration carries complete supplemental proof", async () => {
+  const { replacedCheckTargetsIn, supplementalProofIn } = await import(
+    "../scripts/baseline-presence-core.mjs"
+  );
+  const requiredFrom = "20261008130000_amux_v4_claim_owner_resolution";
+  const missing = [];
+  const swept = [];
+  for (const name of migrationNames()) {
+    if (name < requiredFrom) continue;
+    const sql = readFileSync(join(MIGRATIONS, name, "migration.sql"), "utf8");
+    const { statements, certain } = scanStatements(sql);
+    if (!certain) {
+      missing.push(`${name} (uncertain SQL)`);
+      continue;
+    }
+    if (DIFF_VISIBLE.some((pattern) => pattern.test(statements))) continue;
+    if (
+      !/\bDROP\s+CONSTRAINT\b/i.test(statements) ||
+      !/\bADD\s+CONSTRAINT\b[\s\S]*?\bCHECK\b/i.test(statements)
+    ) {
+      continue;
+    }
+    const remainder = statements
+      .replace(
+        /\bALTER\s+TABLE\s+(?:"public"\.)?"[A-Za-z_][A-Za-z0-9_]{0,62}"[\s\S]*?;/gi,
+        "",
+      )
+      .replace(/\b(?:BEGIN|COMMIT)\s*;/gi, "")
+      .trim();
+    if (remainder !== "") continue;
+    swept.push(name);
+    const replacements = replacedCheckTargetsIn(sql);
+    if (replacements.kind !== "check-replacement") {
+      missing.push(`${name} (${replacements.kind})`);
+      continue;
+    }
+    const proofPath = join(MIGRATIONS, name, "baseline-check.json");
+    const proof = supplementalProofIn(
+      sql,
+      existsSync(proofPath) ? readFileSync(proofPath, "utf8") : undefined,
+    );
+    if (proof.kind !== "check-replacement") missing.push(`${name} (${proof.kind})`);
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `these new CHECK-only replacements are invisible to migrate diff and lack a ` +
+      `complete checksum-bound baseline-check.json: ${missing.join(", ")}`,
+  );
+  assert.ok(
+    swept.includes(requiredFrom),
+    `expected the CHECK-only sweep to reach ${requiredFrom}`,
   );
 });
 
