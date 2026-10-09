@@ -1395,6 +1395,13 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   테스트가 하나 줄인 상한의 거부를 고정하므로 store에 문장을 더하면 상한도 함께 올립니다. 결과를 모르면
   `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
   없습니다.
+- **S1f2(스위치 화면)**: `components/admin/AmuxDecisionMakerSwitchPanel.tsx`,
+  `lib/adminMessages/amuxDecisionMaker.ts`, `/admin/amux-execution?tab=decision-maker`(`lib/adminNavigation.ts`,
+  `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-execution/page.tsx`),
+  `tests/client/amuxDecisionMakerSwitchRender.test.tsx`. 화면은 S1f1 route만 부르고, 바꿀 수 있는 값은
+  `dmSwitchChangesFor()`가 정책 목록에서 지금 값만 뺀 것입니다(읽을 수 없는 scope는 전부). 권한이 없으면
+  상태와 이유만 보이고, 428은 `AdminApiFailureNotice`로 재인증 링크를 보입니다. 결과 불명(503
+  `outcome_unknown`)과 응답 없음은 다시 보내지 않고 상태를 다시 읽습니다. 탭에 badge는 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
