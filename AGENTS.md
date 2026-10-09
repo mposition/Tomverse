@@ -1400,9 +1400,11 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   `lib/adminNavigationLocale.ts`, `app/(site)/(application)/admin/amux-execution/page.tsx`),
   `tests/client/amuxDecisionMakerSwitchRender.test.tsx`. 화면은 S1f1 route만 부르고, 바꿀 수 있는 값은
   `dmSwitchChangesFor()`가 정책 목록에서 지금 값만 뺀 것입니다(읽을 수 없는 scope는 전부). 권한이 없으면
-  상태와 이유만 보이고, 428은 `AdminApiFailureNotice`로 재인증 링크를 보입니다. **기록됐을 수 있는
-  변경(저장·결과 불명·응답 없음) 뒤에는 `runDmSwitchChange()`가 GET으로 상태를 다시 읽고, 그 읽기가
-  끝나기 전에는 어떤 버튼도 풀지 않습니다.** 다시 읽기에 실패하면 상태를 표시하지 않고 "다시 읽기"만
+  상태와 이유만 보이고, 428은 `AdminApiFailureNotice`로 재인증 링크를 보입니다. **표시 중인 상태를
+  유지하는 것은 아무것도 쓰지 않았음이 증명된 답뿐입니다** — 쓰기 전 거절(400·403·404·413·428·429)과
+  본문까지 읽은 503 `switch_change_failed`. 그 밖의 모든 답(저장, `outcome_unknown`, 본문을 못 읽은 503,
+  다른 status, 응답 없음) 뒤에는 `runDmSwitchChange()`가 GET으로 상태를 다시 읽고, 그 읽기가 끝나기
+  전에는 어떤 버튼도 풀지 않습니다. 다시 읽기에 실패하면 상태를 표시하지 않고 "다시 읽기"만
   남깁니다 — 확인되지 않은 상태 위에서 같은 변경을 다시 보내 latch를 풀 수 없게 하기 위해서입니다. 탭에
   badge는 없습니다.
 
