@@ -27,7 +27,6 @@ import { AGENT_OFFICE_DEPTS, AGENT_OFFICE_TEAM_IDS, agentOfficeDept } from "@/li
 import {
   AgentOffice,
   PHASE,
-  PHASE_COUNT,
   type Agent,
   type AgentStatus,
   type DeptStatus,
@@ -117,7 +116,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [follow, setFollow] = useState(true);
+  // The camera keeps the selected person in view when zoomed in.
+  const follow = true;
   const [briefing, setBriefing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [toast, setToast] = useState("");
@@ -204,13 +204,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     [engine, m, reveal]
   );
 
-  const start = () => {
-    engine.start();
-    setBriefing(false);
-    goLive();
-    showToast(m.live.toastStart(engine.staff.length));
-  };
-
   const approve = () => {
     engine.approve();
     showToast(m.live.toastApproved);
@@ -233,7 +226,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   const filteredTeams = filter === "all" ? teams : teams.filter((team) => team.status === filter);
   const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
   const todo = snap.approvalPending ? 1 : 0;
-  const onDuty = engine.agents.filter((a) => a.rank !== "operator" && a.status !== "offDuty").length;
 
   return (
     <div className={cx("office")} data-testid="agent-office">
@@ -289,12 +281,9 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               readAt={live.readAt}
               snap={snap}
               follow={follow}
-              setFollow={setFollow}
               selectedId={selectedId}
               onSelect={onSelect}
-              onStart={start}
               onApprove={approve}
-              onDuty={onDuty}
             />
           ) : (
             <DashboardView
@@ -306,7 +295,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               setFilter={setFilter}
               snap={snap}
               readAt={live.readAt}
-              onStart={start}
               onApprove={approve}
               onSelect={(id) => setSelectedId(id)}
             />
@@ -373,12 +361,9 @@ function LiveView({
   readAt,
   snap,
   follow,
-  setFollow,
   selectedId,
   onSelect,
-  onStart,
   onApprove,
-  onDuty,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
@@ -388,14 +373,10 @@ function LiveView({
   readAt: string;
   snap: Snapshot;
   follow: boolean;
-  setFollow: (value: boolean) => void;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
-  onStart: () => void;
   onApprove: () => void;
-  onDuty: number;
 }) {
-  const progress = Math.round((snap.phaseIndex / (PHASE_COUNT - 1)) * 100);
   const waitingNames = engine.approverNames();
   const engineeringLive = engine.liveDept("engineering") !== null;
 
@@ -427,81 +408,10 @@ function LiveView({
       </header>
 
       <section className={cx("live-bar")}>
-        <button
-          type="button"
-          className={cx("btn btn-primary")}
-          onClick={onStart}
-          disabled={snap.running}
-          data-testid="agent-office-watch-demo"
-        >
-          {snap.running ? m.live.running : snap.dayComplete ? m.live.restart : m.live.watchDemo}
-        </button>
-        {snap.demo ? (
-          <button
-            type="button"
-            className={cx("btn btn-ghost")}
-            onClick={() => engine.endDemo()}
-            data-testid="agent-office-end-demo"
-          >
-            {m.live.endDemo}
-          </button>
-        ) : null}
-        {snap.demo ? (
-          <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.togglePause()}>
-            {snap.paused ? m.live.play : m.live.pause}
-          </button>
-        ) : null}
-        {snap.demo ? (
-        <div className={cx("speed-wrap")}>
-          <span className={cx("speed-label")} title={m.live.speedHint}>
-            {m.live.speedLabel}
-          </span>
-          <div className={cx("speed-group")} role="group" aria-label={m.live.speedLabel}>
-            {[1, 2, 4].map((value) => (
-              <button
-                type="button"
-                key={value}
-                className={cx(!snap.turbo && snap.speed === value && "on")}
-                aria-pressed={!snap.turbo && snap.speed === value}
-                onClick={() => engine.setSpeed(value)}
-                title={value === 1 ? m.live.speedSlow : value === 4 ? m.live.speedFast : m.live.speedNormal}
-              >
-                {value}x
-              </button>
-            ))}
-            <button
-              type="button"
-              className={cx("skip", snap.turbo && "on")}
-              onClick={() => engine.skipToDecision()}
-              disabled={!snap.running || snap.approvalPending}
-              title={engineeringLive ? m.live.skipToEndHint : m.live.skipHint}
-            >
-              {snap.turbo ? m.live.skipping : engineeringLive ? m.live.skipToEnd : m.live.skip}
-            </button>
-          </div>
-        </div>
-        ) : null}
-        <button
-          type="button"
-          className={cx("btn btn-ghost", follow && "on")}
-          aria-pressed={follow}
-          onClick={() => setFollow(!follow)}
-        >
-          {m.live.follow(follow)}
-        </button>
         <button type="button" className={cx("btn btn-ghost")} disabled title={m.live.publishHint}>
           {m.live.publish}
         </button>
-        {snap.demo ? (
-          <div className={cx("live-progress")}>
-            <span>{m.live.progress(snap.phase, progress)}</span>
-            <i>
-              <b style={{ width: `${progress}%` }} />
-            </i>
-          </div>
-        ) : null}
         <div className={cx("live-counts")}>
-          <span className={cx("lc on-duty")}>{m.live.onDuty(onDuty)}</span>
           <span className={cx("lc done")}>{m.live.done(snap.stats.done)}</span>
           <span className={cx("lc working")}>{m.live.working(snap.stats.working)}</span>
           <span className={cx("lc attention")}>{m.live.attention(snap.stats.attention)}</span>
@@ -607,13 +517,6 @@ function OperatorConsole({ m, engine, snap }: { m: OfficeCopy; engine: AgentOffi
         </span>
       </div>
       <div className={cx("win-body console-body")}>
-        <div className={cx("console-status")}>
-          <span className={cx("mini-badge", snap.focusMode ? "yellow" : "mint")}>
-            {snap.focusMode ? m.console.focusOn : m.console.normal}
-          </span>
-          {snap.busyWithOrder ? <span className={cx("mini-badge lav")}>{m.console.busy}</span> : null}
-        </div>
-
         <div className={cx("console-log")} ref={logRef} aria-live="polite" data-testid="agent-office-console-log">
           {snap.chat.map((entry) => (
             <div key={entry.id} className={cx("console-line", entry.from)}>
@@ -859,7 +762,6 @@ function DashboardView({
   setFilter,
   snap,
   readAt,
-  onStart,
   onApprove,
   onSelect,
 }: {
@@ -872,7 +774,6 @@ function DashboardView({
   snap: Snapshot;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
-  onStart: () => void;
   onApprove: () => void;
   onSelect: (id: string) => void;
 }) {
@@ -901,14 +802,6 @@ function DashboardView({
             <p>{m.dashboard.lead(AGENT_OFFICE_TEAM_IDS.length, engine.staff.length)}</p>
           </div>
           <div className={cx("hero-actions")}>
-            <button type="button" className={cx("btn btn-primary")} onClick={onStart} disabled={snap.running}>
-              {snap.running ? m.dashboard.running : m.dashboard.watchDemo}
-            </button>
-            {snap.demo ? (
-              <button type="button" className={cx("btn btn-ghost")} onClick={() => engine.endDemo()}>
-                {m.live.endDemo}
-              </button>
-            ) : null}
             <span className={cx("trust-copy")}>{m.dashboard.trust}</span>
           </div>
         </div>

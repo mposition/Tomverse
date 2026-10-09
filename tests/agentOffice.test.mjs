@@ -996,15 +996,12 @@ test("the office reads the engineering agent's state, never what it worked on", 
   assert.doesNotMatch(note, /onApprove|approve-button/);
   const briefing = panel.slice(panel.indexOf("function BriefingModal"), panel.indexOf("function DashboardView"));
   assert.match(briefing, /engineeringLive \? m\.dashboard\.decisionLive : m\.briefing\.decisionNone/);
-  assert.match(panel, /engineeringLive \? m\.live\.skipToEnd : m\.live\.skip/);
   // No copy shown while engineering is live claims there is nothing to decide.
   for (const locale of ["en", "ko"]) {
     const c = adminAgentOfficeMessages[locale];
     for (const value of [
       c.sim.briefSayLive,
       c.sim.skipLogDayEnd,
-      c.live.skipToEnd,
-      c.live.skipToEndHint,
       c.dashboard.decisionLive,
       c.approval.liveTitle,
       c.approval.liveBody,
@@ -1393,15 +1390,20 @@ test("the demo plays on request, leaves the live rooms seated, and ends back on 
   }
 });
 
-test("the page says demo only while a demo plays", () => {
+test("the page offers no way into the demo, and says demo only if one plays", () => {
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  // Operator decision 2026-10-09: the office is live only. No control starts,
+  // paces or ends a demo day, and the camera-follow toggle is gone with it.
+  assert.doesNotMatch(panel, /engine\.start\(|engine\.endDemo\(|engine\.setSpeed\(|engine\.togglePause\(|skipToDecision\(/);
+  assert.doesNotMatch(panel, /agent-office-watch-demo|agent-office-end-demo|m\.live\.follow\(|m\.live\.onDuty\(/);
+  assert.doesNotMatch(panel, /m\.console\.focusOn|m\.console\.normal/);
   assert.match(panel, /\{snap\.demo \? \(\s*<div className=\{cx\("shell-notice"\)\}/);
   assert.match(panel, /snap\.demo \? m\.live\.eyebrow\(engine\.staff\.length\) : m\.live\.eyebrowReal/);
-  assert.match(panel, /data-testid="agent-office-end-demo"/);
   for (const locale of ["en", "ko"]) {
     const copy = adminAgentOfficeMessages[locale];
-    assert.match(copy.live.watchDemo, locale === "en" ? /demo/i : /데모/);
     assert.match(copy.live.eyebrowReal(26), locale === "en" ? /REAL VIEW/ : /실제 화면/);
+    // The quick chips are the two questions the real view answers from records.
+    assert.equal(copy.console.quick.length, 2);
   }
 });
 
