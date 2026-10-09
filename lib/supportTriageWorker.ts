@@ -359,7 +359,7 @@ export type GroupWriteCounts = {
   readonly groupsCreated: number;
   readonly groupMembers: number;
   readonly groupSignals: number;
-  /** Created, then left with fewer than two members by a concurrent pass, and invalidated. */
+  /** Created, then missing a planned member taken by a concurrent pass, and invalidated. */
   readonly groupsLost: number;
   readonly memberCapReached: number;
   readonly joinDeferred: number;
@@ -386,8 +386,9 @@ const NO_GROUP_WRITES: GroupWriteCounts = Object.freeze({
  * Every member's report is already locked FOR SHARE by this transaction with
  * its eligibility re-checked. A key that already exists (a live group or a
  * tombstone) makes no group. A member another pass took first is skipped, and
- * a group that ends up with fewer than two members is emptied and invalidated
- * before any signal is written, members before the group (the composite key).
+ * a group missing any planned member is emptied and invalidated before any
+ * signal is written, members before the group (the composite key), keeping
+ * the planned ids its key was made from as the tombstone list.
  */
 const writeNewGroups = async (
   tx: Tx,
@@ -438,12 +439,19 @@ const writeNewGroups = async (
     RETURNING "groupId"`;
   const counts = new Map<string, number>();
   for (const row of members) counts.set(row.groupId, (counts.get(row.groupId) ?? 0) + 1);
-  const lost = kept.filter((g) => (counts.get(g.id) ?? 0) < 2).map((g) => g.id);
+  // Any planned member missing means the key and input digest name a set the
+  // group does not have: the whole group goes, and it keeps every planned id
+  // so an account deletion can still find its tombstone.
+  const lostGroups = kept.filter((g) => (counts.get(g.id) ?? 0) !== g.memberIds.length);
+  const lost = lostGroups.map((g) => g.id);
   if (lost.length > 0) {
     await tx.$executeRaw`DELETE FROM "SupportTriageGroupMember" WHERE "groupId" = ANY(${lost}::text[])`;
     await tx.$executeRaw`
-      UPDATE "SupportTriageGroup" SET "state" = 'invalidated', "primarySnapshotDigest" = NULL
-       WHERE "id" = ANY(${lost}::text[]) AND "state" = 'candidate'`;
+      UPDATE "SupportTriageGroup" g
+         SET "state" = 'invalidated', "primarySnapshotDigest" = NULL,
+             "retiredMemberIds" = pg_catalog.string_to_array(c."memberIds", ',')
+        FROM unnest(${lost}::text[], ${lostGroups.map((group) => group.memberIds.join(","))}::text[]) AS c("id", "memberIds")
+       WHERE g."id" = c."id" AND g."state" = 'candidate'`;
   }
   const live = kept.filter((g) => !lost.includes(g.id));
   const signalRows = live.flatMap((g) => g.signals.map((s) => [g.id, s.kind, s.snapshotDigest, s.expiresAt] as const));

@@ -191,15 +191,17 @@ test("a tombstoned key makes no second group for the same members", async () => 
   );
 });
 
-test("a group that loses a member to a concurrent pass is emptied and invalidated, and the batch still commits", async () => {
+test("a group missing one planned member is emptied and invalidated, keeping every planned id; the batch still commits", async () => {
+  // Three planned, one lost: two would remain, but the key names all three.
   await report("a", { userId: "user-gf-1" });
   await report("b", { userId: "user-gf-1" });
+  await report("c", { userId: "user-gf-1" });
   await report("x");
   const run = await startSupportTriageRun("worker");
-  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`]);
-  assert.equal(batch.claimed.length, 2);
+  const batch = await claimSupportTriageBatch(run, [`${PREFIX}a`, `${PREFIX}b`, `${PREFIX}c`]);
+  assert.equal(batch.claimed.length, 3);
 
-  // Another transaction puts b in a group of its own and holds it uncommitted.
+  // Another transaction puts c in a group of its own and holds it uncommitted.
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   let inserted!: () => void;
@@ -209,7 +211,7 @@ test("a group that loses a member to a concurrent pass is emptied and invalidate
       await tx.supportTriageGroup.create({
         data: { id: "gf-other", primaryKind: "autofix_fingerprint", primarySnapshotDigest: "f".repeat(64), groupCandidateKey: "e".repeat(64) },
       });
-      for (const feedbackId of [`${PREFIX}b`, `${PREFIX}x`]) {
+      for (const feedbackId of [`${PREFIX}c`, `${PREFIX}x`]) {
         await tx.supportTriageGroupMember.create({
           data: { groupId: "gf-other", feedbackId, primarySnapshotDigest: "f".repeat(64) },
         });
@@ -220,23 +222,33 @@ test("a group that loses a member to a concurrent pass is emptied and invalidate
     { timeout: 30_000 }
   );
   await ready;
-  // The result transaction plans {a, b}; inserting b waits on the other transaction.
+  // The result transaction plans {a, b, c}; inserting c waits on the other transaction.
   const writing = writeSupportTriageResults(run, batch.token as string, batch.claimed, { peerIds: [] });
   await new Promise((resolve) => setTimeout(resolve, 500));
   release();
   await other;
   const result = await writing;
-  assert.equal(result.ready, 2);
+  assert.equal(result.ready, 3);
   assert.equal(result.groups.groupsCreated, 0);
   assert.equal(result.groups.groupsLost, 1);
+  assert.equal(result.groups.groupMembers, 0);
+  assert.equal(result.groups.groupSignals, 0);
   const made = await groups();
   assert.deepEqual(
     made.map((g) => [g.kind, g.state, g.digest === null, g.members]).sort(),
     [
-      ["autofix_fingerprint", "candidate", false, ["b", "x"]],
+      ["autofix_fingerprint", "candidate", false, ["c", "x"]],
       ["same_account", "invalidated", true, []],
     ]
   );
+  // The tombstone lists every id the key was made from, so an account
+  // deletion of any of them still finds and removes it.
+  const lost = await prisma.supportTriageGroup.findFirstOrThrow({
+    where: { state: "invalidated" },
+    select: { retiredMemberIds: true, groupCandidateKey: true },
+  });
+  assert.deepEqual([...lost.retiredMemberIds].sort(), ["a", "b", "c"].map((id) => `${PREFIX}${id}`));
+  assert.match(lost.groupCandidateKey ?? "", /^[0-9a-f]{64}$/);
 });
 
 test("the pass's membership budget leaves later groups for later", async () => {
