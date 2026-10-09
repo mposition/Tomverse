@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
-import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { getAdminRole, hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication, isAdminReauthenticationError } from "@/lib/adminReauthentication";
 import {
   apiSecurityResponse,
@@ -24,6 +24,7 @@ import {
   resolveAmuxReview,
 } from "@/lib/amux/reviewApproval";
 import { isAmuxAgentApprovalEnabled } from "@/lib/amux/reviewApprovalCore";
+import { prisma } from "@/lib/prisma";
 
 const cuid = z.string().cuid();
 const commandSchema = z.discriminatedUnion("action", [
@@ -70,6 +71,21 @@ export async function POST(request: Request) {
       day: 300,
     });
     action = await readLimitedJson(request, 8 * 1_024, commandSchema);
+    const reviewSource = action.action === "decision_status" ?
+      await prisma.amuxReviewProposal.findUnique({
+        where: { decisionId: action.decision_id },
+        select: { task: { select: { sourceSystem: true } } },
+      }) : await prisma.amuxHumanEscalation.findUnique({
+        where: { id: action.escalation_id },
+        select: { task: { select: { sourceSystem: true } } },
+      });
+    if (getAdminRole(session) !== "owner" &&
+        (!reviewSource || reviewSource.task.sourceSystem === "admin-idea-v4")) {
+      return NextResponse.json({ error: "Not found." },
+        { status: 404, headers: noStore });
+    }
+    if (reviewSource?.task.sourceSystem === "admin-idea-v4" &&
+        action.action === "acknowledge") await assertRecentAdminAuthentication(session);
     if (action.action !== "acknowledge") {
       if (action.action !== "decision_status" &&
           !isAmuxAgentApprovalEnabled(process.env.TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED)) {

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { decideRouterModel } from "../lib/routerDecision.ts";
 import {
@@ -14,6 +18,8 @@ import { NEUTRAL_QUALITY_BAND, ROUTER_TIE_BREAK_ORDER } from "../lib/routerScore
 import { resolveModelPricing } from "../lib/modelPricing.ts";
 import { toReservedInputTokens } from "../lib/chatTokenEstimate.ts";
 import { NO_WEB_SEARCH_BACKENDS } from "../lib/webSearchBackends.ts";
+import { AVAILABLE_MODELS } from "../lib/models.ts";
+import { TASK_KINDS } from "../lib/taskProfileCore.ts";
 
 /**
  * The diagnostic is an explanation of the product's decision, not a second
@@ -161,6 +167,63 @@ test("an unmeasured model is reported at the neutral band with no evidence, neve
   assert.ok(report.improvementCandidates.some((c) => c.kind === "no_quality_evidence_for_kind"));
   // Nothing here writes a band: the policy module is read, not edited.
   assert.ok(!report.improvementCandidates.some((c) => c.detail.includes("promote")));
+});
+
+test("catalogue coverage separates declared input/search support from approved quality evidence for every model and task", () => {
+  const report = diagnoseFullCatalog(base({ items: [], models: AVAILABLE_MODELS, requestedModelId: "gpt-5-6-luna" }));
+  assert.deepEqual(report.catalogueCoverage.map((row) => row.modelId), AVAILABLE_MODELS.map((entry) => entry.id));
+  const byId = Object.fromEntries(report.catalogueCoverage.map((row) => [row.modelId, row]));
+  assert.deepEqual(byId["gpt-5-6-luna"].declaredInput, { image: "supported", nativePdf: "supported" });
+  assert.equal(byId["gpt-5-6-luna"].declaredWebSearch, "native");
+  assert.equal(byId["gpt-5-4-mini"].declaredWebSearch, "app-managed");
+  assert.equal(byId["gpt-5-4-mini"].enabledInSuppliedCatalogue, true);
+  for (const row of report.catalogueCoverage) {
+    assert.deepEqual(Object.keys(row.qualityEvidenceByKind), [...TASK_KINDS]);
+    for (const kind of TASK_KINDS) {
+      assert.deepEqual(row.qualityEvidenceByKind[kind], { status: "no_evidence", evidenceRef: null });
+    }
+  }
+  assert.equal(report.summary.evidenceCells.total, 0, "old item-scoped summary still only counts observed kinds");
+});
+
+test("coverage reads code declarations, not a caller's runtime search override or a task-quality guess", () => {
+  const report = diagnoseFullCatalog(base({
+    items: [],
+    models: [model("synthetic", { inputCapabilities: { image: true, nativePdf: false }, webSearchOverride: "off" })],
+    requestedModelId: "synthetic",
+  }));
+  assert.deepEqual(report.catalogueCoverage, [{
+    modelId: "synthetic",
+    enabledInSuppliedCatalogue: true,
+    publiclyListedInSuppliedCatalogue: true,
+    declaredInput: { image: "supported", nativePdf: "unsupported" },
+    declaredWebSearch: "app-managed",
+    qualityEvidenceByKind: Object.fromEntries(TASK_KINDS.map((kind) => [kind, { status: "no_evidence", evidenceRef: null }])),
+  }]);
+  const unspecified = diagnoseFullCatalog(base({ items: [] })).catalogueCoverage[0];
+  assert.deepEqual(unspecified.declaredInput, { image: "not_declared", nativePdf: "not_declared" });
+});
+
+test("Markdown prints per-model coverage and a real subset-context count without claiming runtime approval", () => {
+  const directory = mkdtempSync(join(tmpdir(), "router-d03-"));
+  try {
+    const setPath = join(directory, "synthetic-set.json");
+    writeFileSync(setPath, JSON.stringify({ version: "synthetic", items: [{ id: "synthetic-1", prompt: "Hello" }] }));
+    const result = spawnSync(process.execPath, [
+      "--import", "tsx", "scripts/report-router-full-catalog.mjs",
+      `--set=${setPath}`, "--items=all", "--requested-model=gpt-5-6-luna",
+    ], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Per-model declared capability and quality-evidence coverage/);
+    assert.match(result.stdout, /static catalogue and the Router score snapshot, not the runtime model registry/);
+    assert.match(result.stdout, /enabled model, observed item kind\) cells with approved quality evidence/);
+    assert.ok(result.stdout.includes(`| model | enabled | image input | native PDF input | declared web search | ${TASK_KINDS.join(" | ")} |`));
+    assert.match(result.stdout, /\| gpt-5-6-luna \| yes \| supported \| supported \| native \| no_evidence/);
+    assert.match(result.stdout, /items with subset-context reversals against the primary \| \d+ \|/);
+    assert.doesNotMatch(result.stdout, /undefined/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("the Router's output cap and dispatch's are both reported, and a difference is named rather than hidden", () => {

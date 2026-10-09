@@ -9,6 +9,7 @@ import {
 } from "@/lib/emailAddressMaskingCore";
 import { AUDIENCE_COHORTS } from "@/lib/modelRetirementAudienceCore";
 import { WAVE_ORDER } from "@/lib/emailCampaignScheduleCore";
+import { readExpansionSpec } from "@/lib/emailAudienceExpansionCore";
 
 const CAMPAIGN_AUDIENCE_REASONS = [
   ...AUDIENCE_COHORTS,
@@ -318,6 +319,15 @@ export type WaveAudienceBreakdown = {
   malformed: number;
   excluded: Record<string, number>;
   cohorts: Record<string, number>;
+  /**
+   * False when this campaign's audience writes no ledger rows: an explicit
+   * list, or the amendment notice cohort, whose record is the delivery row
+   * itself (lib/emailAudienceExpansion.ts). A zero `total` then says nothing
+   * about whether the wave expanded, and `deliveries` is the count to read.
+   */
+  keepsLedger: boolean;
+  /** Delivery rows the wave's event holds, however they ended. */
+  deliveries: number;
 };
 
 /**
@@ -343,9 +353,28 @@ export const waveAudienceBreakdown = async (
 ): Promise<WaveAudienceBreakdown[]> => {
   const waves = await prisma.emailCampaignWave.findMany({
     where: { campaignId },
-    select: { id: true, kind: true, sequence: true, dryRun: true },
+    select: { id: true, kind: true, sequence: true, dryRun: true, eventId: true },
   });
   if (waves.length === 0) return [];
+  const campaign = await prisma.emailCampaign.findUnique({
+    where: { id: campaignId },
+    select: { audienceSpec: true },
+  });
+  const cohort = readExpansionSpec(campaign?.audienceSpec).cohort;
+  const keepsLedger = Boolean(cohort) && cohort?.kind !== "policy_change_notice";
+  const eventIds = waves
+    .map((wave) => wave.eventId)
+    .filter((id): id is string => typeof id === "string");
+  const deliveriesByEvent = new Map(
+    (eventIds.length === 0
+      ? []
+      : await prisma.emailDelivery.groupBy({
+          by: ["eventId"],
+          where: { eventId: { in: eventIds } },
+          _count: { _all: true },
+        })
+    ).map((row) => [row.eventId, row._count._all])
+  );
 
   // Three grouped reads rather than one pass over the rows: the ledger is one
   // row per person per wave, and a campaign that reached its audience has as
@@ -420,6 +449,8 @@ export const waveAudienceBreakdown = async (
         malformed: malformedByWave.get(wave.id) ?? 0,
         excluded,
         cohorts,
+        keepsLedger,
+        deliveries: wave.eventId ? (deliveriesByEvent.get(wave.eventId) ?? 0) : 0,
       };
     });
 };

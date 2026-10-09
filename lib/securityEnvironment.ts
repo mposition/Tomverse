@@ -24,7 +24,12 @@ const databaseTransportStatus = (value: string | undefined) => {
   if (!configured(value)) return false;
   try {
     const url = new URL(value!);
-    if (isPrivateDatabaseHost(url.hostname.toLowerCase())) return true;
+    // WHATWG `hostname` keeps the brackets for an IPv6 host, so the `::1` in
+    // the list above never matched a `[::1]` database host, and the check then
+    // demanded verify-full of a loopback connection that has no network to
+    // protect -- the grant it already makes unconditionally for `127.0.0.1`.
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    if (isPrivateDatabaseHost(hostname)) return true;
     return ["verify-full", "verify-ca"].includes(
       (url.searchParams.get("sslmode") || "").toLowerCase()
     );
@@ -110,11 +115,13 @@ export const getSecurityEnvironmentStatus = () => {
     // operational incident nobody could act on.
     //
     // Each deployment now asserts the mode it is supposed to have. An unknown
-    // key shape (null) satisfies neither, so it fails both ways.
+    // key shape (null) satisfies neither, so it fails both ways. `dev` is held
+    // to staging's rule: it deploys every develop merge, so a live key there
+    // would bill real cards from code nobody has verified yet.
     stripeLiveMode:
       deployment === "production"
         ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === true
-        : deployment === "staging"
+        : deployment === "staging" || deployment === "dev"
           ? stripeKeyLiveMode(process.env.STRIPE_SECRET_KEY) === false
           : true,
     providerUsageSyncSecret:

@@ -109,6 +109,7 @@ export const amuxOwnedQueueResponseSchema = z
         owner: amuxMachineIdSchema,
         revision: prismaInt,
         created_at: timestamp,
+        assignment_id: z.string().uuid().optional(),
       })
       .strict(),
   )

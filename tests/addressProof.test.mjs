@@ -36,9 +36,22 @@ test("Google proves only with email_verified true and the same address", () => {
   assert.equal(proof({ profile: { email: "other@example.test", email_verified: true } }), null);
 });
 
-test("Microsoft and anything else prove nothing", () => {
-  assert.equal(proof({ provider: "azure-ad", profile: { email: "a@example.test", email_verified: true } }), null);
+test("Microsoft proves the account's own address (owner decision, section 14.7)", () => {
+  assert.deepEqual(proof({ provider: "azure-ad", profile: { email: "A@example.test" } }), {
+    method: "microsoft_signin",
+    address: "a@example.test",
+    provenAt: NOW.toISOString(),
+  });
+  // A Microsoft account linked to another address's session proves nothing,
+  // and a profile without an address proves nothing.
+  assert.equal(proof({ provider: "azure-ad", profile: { email: "other@example.test" } }), null);
+  assert.equal(proof({ provider: "azure-ad", profile: {} }), null);
+  assert.equal(proof({ provider: "azure-ad", profile: null }), null);
+});
+
+test("anything else proves nothing", () => {
   assert.equal(proof({ provider: undefined }), null);
+  assert.equal(proof({ provider: "github", profile: { email: "a@example.test", email_verified: true } }), null);
   assert.equal(proof({ provider: "email-code", userEmail: null }), null);
 });
 

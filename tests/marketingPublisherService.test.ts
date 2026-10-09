@@ -43,10 +43,12 @@ import {
 
 test("the shipped limits are each strictly inside the one before", () => {
   assert.deepEqual(marketingPublisherTimingProblems(MARKETING_PUBLISHER_TIMING), []);
-  // The figure the plan derives, by the plan's own arithmetic: twelve
-  // statements at five seconds and the eleven gaps between them at five.
-  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 12 * 5_000 + 11 * 5_000);
-  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 115_000);
+  // The figure the plan derives, by the plan's own arithmetic: eighteen
+  // statements at five seconds and the seventeen gaps between them at five. It
+  // was 115s at a budget of twelve; measuring the publisher's real operations
+  // with an integrity key configured moved it; see MARKETING_PUBLISHER_MAX_STATEMENTS.
+  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 18 * 5_000 + 17 * 5_000);
+  assert.equal(MARKETING_PUBLISHER_DERIVED_TRANSACTION_MAX_MS, 175_000);
 });
 
 test("each broken ordering is named, not reported as 'wrong timing'", () => {
@@ -169,6 +171,9 @@ test("the service is declared once, every five minutes, with exactly two variabl
       environment,
     );
   }
+  // dev runs every develop merge before anyone has verified it, so it never
+  // holds the job that publishes to outside accounts.
+  assert.equal(service.variables.dev, undefined);
 
   const trigger = parseCronSchedule(service.cronSchedule);
   assert.ok(trigger);

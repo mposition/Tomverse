@@ -35,9 +35,42 @@
 /** The directory a failed restore makes unusable, relative to the repo root. */
 export const TURBOPACK_CACHE_DIR = ".next/cache/turbopack";
 
+/**
+ * The build's child workers must inherit the CI type-check heap limit.
+ *
+ * `largeHeap` asks for that same limit off CI, which is what `npm run
+ * build:local` does. A local build has died in Mark-Compact at the default heap
+ * (2026-10-07), and the remedy was an environment variable the developer had to
+ * know about; it does not reproduce on an otherwise idle machine at this tree,
+ * so treat this as the one-command way to borrow CI's ceiling rather than as a
+ * fix for a deterministic failure.
+ *
+ * It is a caller's request rather than "anything that is not CI" because
+ * Railway declares no build command and runs this very script, and raising the
+ * ceiling there would change how a deploy build fails -- a container limit
+ * reached instead of V8 refusing -- which is not a local convenience's call.
+ */
+export const nodeOptionsForBuild = (env, { largeHeap = false } = {}) => {
+  const configured = env.NODE_OPTIONS ?? "";
+  if ((env.GITHUB_ACTIONS !== "true" && !largeHeap) ||
+      /--max[-_]old[-_]space[-_]size(?:=|\s)/.test(configured)) return configured;
+  return `${configured ? `${configured} ` : ""}--max-old-space-size=6144`;
+};
+
+/**
+ * Taken out of the arguments before the rest are forwarded: everything else
+ * goes to `next build`, which would reject a flag of ours.
+ */
+export const LARGE_HEAP_FLAG = "--large-heap";
+
 const INTERNAL_ERROR_MARKERS = [
   "TurbopackInternalError",
   "An unexpected Turbopack error occurred",
+  // 2026-10-07 (staging, develop 1c02353): the same corrupt cache surfaced as a
+  // panic in Turbopack's task backend, reported only as "Panic in async
+  // function", with neither marker above. The panic site is the persisted task
+  // store, which is what a cold cache replaces.
+  "panicked at turbopack/crates/turbo-tasks-backend/",
 ];
 
 const CACHE_RESTORE_MARKERS = [
@@ -45,6 +78,7 @@ const CACHE_RESTORE_MARKERS = [
   "Failed to restore Data for TaskId",
   "Looking up task storage for TaskId",
   "Unable to open static sorted file referenced from",
+  "Unable to read next free task id from database",
 ];
 
 /**

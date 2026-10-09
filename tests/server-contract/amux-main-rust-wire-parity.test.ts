@@ -39,6 +39,8 @@ const routingWire = readJson("tests/fixtures/amux-routing-snapshot-v1.json");
 const LEASE = new Date("2026-09-29T00:01:30.000Z");
 const ATTEMPT = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e6f";
 const RECEIPT = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+let v22DeliveryProfile: { modelId: string; role: string;
+  budgetMicrousd: number } | null = null;
 const calls: { writer: string; input: unknown }[] = [];
 const record = (writer: string, input: unknown) => {
   calls.push({ writer, input });
@@ -99,6 +101,9 @@ mock.module(mod("lib/amux/delivery.ts"), {
           worker: "claude-impl",
           taskRevision: 3,
           prompt: `Execution attempt: ${ATTEMPT}`,
+          v22Execution: v22DeliveryProfile,
+          ...(v22DeliveryProfile ? { assignmentId:
+            "0a7e13db-0373-4b92-9e74-0b2a79e0e8c7" } : {}),
           receiptId: RECEIPT,
           leaseExpiresAt: LEASE,
         },
@@ -168,6 +173,24 @@ test("every lifecycle body main's Rust sends is accepted and answered in the sha
     assert.equal(response.status, exchange.status, exchange.name);
     assert.deepEqual(await response.json(), exchange.response, exchange.name);
   }
+});
+
+test("v22 delivery carries its approved one-shot model, role and ceiling", async () => {
+  v22DeliveryProfile = { modelId: "claude-opus-5-5", role: "design",
+    budgetMicrousd: 1_250_000 };
+  try {
+    const exchange = wire.exchanges.find((entry) => entry.name === "delivery_pull");
+    assert.ok(exchange);
+    const response = await post(exchange.path, exchange.request);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.delivery.v22_execution, {
+      model_id: "claude-opus-5-5", role: "design",
+      budget_microusd: 1_250_000,
+    });
+    assert.equal(body.delivery.assignment_id,
+      "0a7e13db-0373-4b92-9e74-0b2a79e0e8c7");
+  } finally { v22DeliveryProfile = null; }
 });
 
 test("settle keeps the review PR distinction main's Rust sends: a number, null, or absent", async () => {

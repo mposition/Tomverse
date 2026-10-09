@@ -275,6 +275,11 @@ export function MarketingActionRail({
           className="mt-3 grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3"
           onSubmit={(event) => {
             event.preventDefault();
+            // Asked here as well as on a plain button. An action with fields
+            // opens this form instead of sending, and the question used to be
+            // skipped on that path -- so an action whose warning was the whole
+            // point (arming a deliberate 503) sent without it.
+            if (opened.confirm && !window.confirm(opened.confirm)) return;
             void send(opened, opened.body(values));
           }}
         >

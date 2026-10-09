@@ -40,6 +40,18 @@ test("domains are unique", () => {
   }
 });
 
+test("AMUX v4 retention metadata stays classified but unverified for account export", () => {
+  for (const prismaModel of [
+    "AmuxIdeaContentKeyRetirement",
+    "AmuxIdeaRetentionHold",
+  ]) {
+    const declaration = EXPORT_DOMAIN_DECLARATIONS.find(
+      (item) => item.prismaModel === prismaModel
+    );
+    assert.equal(declaration?.state, "unverified", prismaModel);
+  }
+});
+
 // The name in the file is the part a user's own tooling depends on. Prisma
 // model names move with refactors; an export somebody downloaded two years ago
 // should still parse.

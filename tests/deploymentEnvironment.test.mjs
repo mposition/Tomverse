@@ -36,6 +36,28 @@ test("APP_ENV outranks the platform's own environment name", () => {
   );
 });
 
+test("the dev Railway environment is dev, not production and not local", () => {
+  // dev is a production build that deploys every develop merge. Before it was
+  // listed, Railway's name "dev" fell through to NODE_ENV and the deployment
+  // resolved to production: a live Stripe key demanded, Sentry events filed
+  // under production.
+  assert.equal(
+    resolveDeploymentEnvironment({ RAILWAY_ENVIRONMENT_NAME: "dev", NODE_ENV: "production" }),
+    "dev"
+  );
+  assert.equal(
+    resolveDeploymentEnvironment({ APP_ENV: "dev", NODE_ENV: "production" }),
+    "dev"
+  );
+  // `development` stays the local answer; the two names are not aliases.
+  assert.notEqual(validateEnvironment("dev"), validateEnvironment("development"));
+  // A Railway environment that has not been listed still fails closed.
+  assert.equal(
+    resolveDeploymentEnvironment({ RAILWAY_ENVIRONMENT_NAME: "develop", NODE_ENV: "production" }),
+    "production"
+  );
+});
+
 test("an unrecognised label falls through rather than being believed", () => {
   // "prod" and "stg" are not in the list, and guessing what they meant is how
   // a typo turns into a relaxed security rule.

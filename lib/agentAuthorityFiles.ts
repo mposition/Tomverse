@@ -39,6 +39,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   ".tmp",
   "app",
   "apps",
+  "bin",
   "components",
   "config",
   "crates",
@@ -51,7 +52,9 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   "public",
   "scripts",
   "tests",
+  "tools",
   "types",
+  "vendor",
 ] as const;
 
 /**
@@ -96,8 +99,16 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // §4-2: the execution environment. Root files and root dot-directories are
   // handled structurally in `classifyPath`.
   ".github/**",
+  "bin/**",
   "scripts/**",
   "config/**",
+  // Operator tooling that runs reviewer CLIs (the independent review
+  // orchestrator): it decides who reviews whom, so no agent may change it.
+  "tools/**",
+  // The app side of its status report: the secret check and the one row it may write.
+  "lib/reviewOrchestrator*",
+  "tests/reviewOrchestrator*",
+  "tests/fixtures/review-orchestrator/**",
   // §4-4: policy and contract documents.
   "docs/policy/**",
   "docs/ui-contracts/**",
@@ -110,9 +121,24 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // The services' image and their operating runbook (§8, §12).
   "docker/**",
   "docs/ops/engineering-agent*",
+  // The product-research agent's own gates, state and runbook
+  // (docs/policy/product-research-agent.md). Its judgement modules decide what
+  // may be stored and how a phase window is counted, so no agent may change
+  // them -- the same reason the engineering agent cannot change its own.
+  "lib/productResearch*",
+  "lib/adminMessages/productResearch*",
+  "docs/ops/product-research-agent*",
+  "tests/productResearch*",
+  // The two backlog tests this agent owns, named one by one:
+  // tests/issueBacklog.test.mjs is the existing report's own product test, and
+  // a glob would take it too.
+  "tests/issueBacklogShaMode.test.mjs",
+  "tests/issueBacklogPartialClone.test.mjs",
   "tests/agent*",
   "tests/engineeringAgent*",
+  "tests/support/engineeringAgentV22PublicationCheckHarness.mjs",
   "tests/**/engineering-agent*",
+  "tests/**/agent-digest*",
   "tests/security*",
   // §4-4: administration and authentication.
   "app/api/admin/**",
@@ -125,15 +151,21 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   "lib/adminAmux*",
   "tests/adminAmux*",
   "lib/adminMessages/engineeringAgent*",
+  "lib/adminMessages/agentDigests*",
+  // The Agent office's copy, which names the agent teams and what each may do.
+  "lib/adminMessages/agentOffice*",
   // §4-4: the whole AMUX execution control plane, and its tests.
   "lib/amux/**",
   "crates/**",
   "apps/**",
   "app/api/internal/**",
   "docs/ops/amux/**",
+  // The independent Ubuntu AMUX server is still agent execution code, never tier one.
+  "vendor/amux/**",
   "tests/amux*",
   "tests/**/amux*",
   "tests/**/*-amux-*",
+  "tests/verifyAmuxWslGitTransfer.test.mjs",
   "tests/orchestrator*",
 ];
 

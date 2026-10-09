@@ -54,6 +54,10 @@ test("the closed lists are the ones section 2 and section 4 name", () => {
     "execution_attempt",
     "auto_promotion_grant",
     "auto_promotion_consumption",
+    "v22_promotion_receipt",
+    "v22_promotion_unknown",
+    "v22_promotion_halt",
+    "v22_worker_assignment",
     "quota_observation_batch",
   ]);
   assert.deepEqual(AMUX_ORCHESTRATOR_RESOLUTIONS, ["no_commit", "human_confirmed"]);

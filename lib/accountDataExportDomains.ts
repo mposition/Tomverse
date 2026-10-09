@@ -552,6 +552,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
   },
   {
+    domain: "promptRefinerVnextOneShotStage",
+    publicName: "prompt_refiner_vnext_one_shot_stage_approvals",
+    prismaModel: "PromptRefinerVnextOneShotStage",
+    state: "excluded",
+    exclusionReason:
+      "Content-free one-shot stage evidence with immutable approval identities. It records exact source, deployment, manifest and bounded cost identities with the approving operator id, but no customer id, prompt, answer or provider prose. Operator access requests use the manual PrivacyRequest path because the linked audit entry is tamper-evident and retained.",
+  },
+  {
     domain: "promptRefinerShadowRun",
     publicName: "prompt_refiner_shadow_run_approvals",
     prismaModel: "PromptRefinerShadowRun",
@@ -624,9 +632,61 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one orchestrator halt, not customer data. The cleared-by id is the administrator who cleared the halt and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed reason code and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxDecisionMakerSwitchEvent",
+    publicName: "amux_decision_maker_switch_events",
+    prismaModel: "AmuxDecisionMakerSwitchEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker switch change or latch, not customer data. The actor id is the administrator who set the switch and is intentionally not a User foreign key, so account deletion cannot rewrite it; a latch carries no person. The row stores a closed scope, value and reason code and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerBody",
+    publicName: "amux_decision_maker_bodies",
+    prismaModel: "AmuxDecisionMakerBody",
+    state: "excluded",
+    exclusionReason:
+      "An operational record of the AMUX Decision Maker (docs/policy/amux-decision-maker.md section 10): worker-written question cards, DM answers and the operator's edits. The table has no account key, so no row can be attributed to an account for a per-account export; a person's request to see or erase their data is handled by an operator searching the bodies, and section 10's privacy erase removes them under a person's audit. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerRetentionEvent",
+    publicName: "amux_decision_maker_retention_events",
+    prismaModel: "AmuxDecisionMakerRetentionEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker legal hold or its release, or the system's retention start when a request closes, not customer data. The actor id is the administrator who set or released the hold and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind, a key period and identifiers, not a body. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerJudgment",
+    publicName: "amux_decision_maker_judgments",
+    prismaModel: "AmuxDecisionMakerJudgment",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX Decision Maker judgment -- a person's confirmation, edited confirmation or rejection of a proposal and the declaration accuracy they recorded -- not customer data. The actor id is the administrator who judged and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores closed codes, keyed digests and identifiers, never the answer. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxDecisionMakerDeliveryEvent",
+    publicName: "amux_decision_maker_delivery_events",
+    prismaModel: "AmuxDecisionMakerDeliveryEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for the delivery of one confirmed AMUX Decision Maker answer, not customer data. The actor id, on a resolution only, is the administrator who checked an unknown delivery and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a closed kind and outcome and identifiers, not the answer. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxIdeaFrontierModelApproval",
     publicName: "amux_idea_frontier_model_approvals",
     prismaModel: "AmuxIdeaFrontierModelApproval",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaAnalysisPriceVersion",
+    publicName: "amux_idea_analysis_price_versions",
+    prismaModel: "AmuxIdeaAnalysisPriceVersion",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskCostCatalogApproval",
+    publicName: "amux_v4_task_cost_catalog_approvals",
+    prismaModel: "AmuxV4TaskCostCatalogApproval",
     state: "unverified",
   },
   {
@@ -654,6 +714,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaDerivationGroup",
+    publicName: "amux_idea_derivation_groups",
+    prismaModel: "AmuxIdeaDerivationGroup",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaUnitDecision",
     publicName: "amux_idea_unit_decisions",
     prismaModel: "AmuxIdeaUnitDecision",
@@ -669,6 +735,54 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     domain: "amuxIdeaTransferPreview",
     publicName: "amux_idea_transfer_previews",
     prismaModel: "AmuxIdeaTransferPreview",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaContentKeyRetirement",
+    publicName: "amux_idea_content_key_retirements",
+    prismaModel: "AmuxIdeaContentKeyRetirement",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskResult",
+    publicName: "amux_v22_task_results",
+    prismaModel: "AmuxV22TaskResult",
+    state: "unverified",
+  },
+  {
+    domain: "amuxTaskPatch",
+    publicName: "amux_v22_task_patches",
+    prismaModel: "AmuxV22TaskPatch",
+    state: "unverified",
+  },
+  {
+    domain: "amuxIdeaRetentionHold",
+    publicName: "amux_idea_retention_holds",
+    prismaModel: "AmuxIdeaRetentionHold",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioAssessment",
+    publicName: "amux_portfolio_assessments",
+    prismaModel: "AmuxPortfolioAssessment",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPortfolioScoreSnapshot",
+    publicName: "amux_portfolio_score_snapshots",
+    prismaModel: "AmuxPortfolioScoreSnapshot",
+    state: "unverified",
+  },
+  {
+    domain: "amuxPromotionControl",
+    publicName: "amux_v22_promotion_controls",
+    prismaModel: "AmuxV22PromotionControl",
+    state: "unverified",
+  },
+  {
+    domain: "amuxWorkerLaneDecision",
+    publicName: "amux_v22_lane_decisions",
+    prismaModel: "AmuxV22LaneDecision",
     state: "unverified",
   },
   {

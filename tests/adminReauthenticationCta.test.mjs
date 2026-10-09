@@ -110,6 +110,14 @@ const OFFERS_THE_WAY_BACK = [
 const panelsReaching = (prefix) =>
   panels.filter((panel) => panel.source.includes(prefix));
 
+test("the AMUX portfolio panel links a 428 refusal to recent authentication", () => {
+  const panel = panels.find((item) => item.name === "AmuxPortfolioPanel.tsx");
+  assert.ok(panel);
+  assert.match(panel.source, /response\.status === 428 \? m\.reauth/);
+  assert.match(panel.source,
+    /error === m\.reauth \? <Link href=\{adminRecentAuthenticationHref\(\s*"\/admin\/amux-backlog\?tab=ideas"\)\}/);
+});
+
 test("the sweep sees both ends, so a silent pass is impossible", () => {
   assert.ok(
     refusingPrefixes.length >= 8,

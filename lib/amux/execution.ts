@@ -1,11 +1,12 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { AMUX_SYSTEM_AUDIT_ACTOR } from "@/lib/amux/auditContract";
 import { AMUX_MAX_EXPECTED_REVISION } from "@/lib/amux/claimContract";
 import { lockAmuxAdmissionAndReadIncident } from "@/lib/amux/incident";
+import { findOpenAmuxOrchestratorHalt } from "@/lib/amux/orchestratorHaltStore";
 import { cancelPendingAmuxWorkDelivery } from "@/lib/amux/delivery";
 import {
   AMUX_DB_BOUNDARIES,
@@ -35,6 +36,40 @@ import {
   buildAmuxDeliveryPrompt,
   classifyApprovedExecutionBrief,
 } from "@/lib/amux/deliveryPrompt";
+import { calculateCurrentApprovedAmuxV4TaskCost } from
+  "@/lib/amux/v4TaskCostCatalogApprovalService";
+import { checkV4TaskApprovedCeiling } from "@/lib/amux/v4TaskCostCeilingCore";
+import { ENGINEERING_AGENT_POLICY_VERSION,
+  v22RunOutcomeForProduct } from "@/lib/engineeringAgentCore";
+import {
+  EngineeringAgentStoreRefusedError,
+  endEngineeringAgentRun,
+  engineeringAgentTransactionInAmux,
+  heartbeatEngineeringAgentRun,
+  lockEngineeringAgentV22Run,
+  readEngineeringAgentSwitches,
+  recordEngineeringAgentRunStart,
+  requireEngineeringAgentRunAdmission,
+} from "@/lib/engineeringAgentStore";
+import { AMUX_V22_SEALED_DELIVERY_MARKER,
+  AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  AMUX_V22_TASK_EXECUTION_ENV, amuxV22EngineeringPublicationEnabled,
+  amuxV22TaskExecutionEnabled,
+  v22ExecutionCostWithinAssignment,
+  v22ExecutionReceiptVerified,
+  v22SettlementPatchMatches } from "@/lib/amux/v22TaskExecutionCore";
+import { loadEngineeringAgentV22SettlementPatch } from
+  "@/lib/engineeringAgentV22SettlementPatch";
+import { loadEngineeringAgentV22StoredCandidate } from
+  "@/lib/engineeringAgentV22StoredCandidate";
+import { v22PublishCandidateMatches, v22PublishPreflightEligible } from
+  "@/lib/engineeringAgentV22PublicationDecision";
+import { openEngineeringAgentV22Product } from
+  "@/lib/engineeringAgentV22ProductStore";
+import { currentEngineeringAgentV22ImageProofDigest } from
+  "@/lib/engineeringAgentV22ImageEvidence";
+import { readAmuxV22PublicPrConsent } from
+  "@/lib/amux/v22PublicPrConsent";
 
 export const AMUX_EXECUTION_LEASE_MS = 90_000;
 
@@ -105,12 +140,15 @@ type AttemptLockRow = {
   taskRevision: number;
   attemptNumber: number | null;
   reservedCostMicrousd: bigint;
+  v22AssignmentId: string | null;
   leaseExpiresAt: Date | null;
   endedAt: Date | null;
 };
 
 type TaskLockRow = {
   id: string;
+  sourceSystem: string | null;
+  v22AssignmentId: string | null;
   owner: string | null;
   status: string;
   revision: number;
@@ -162,6 +200,7 @@ const lockAttempt = async (
       "taskRevision",
       "attemptNumber",
       "reservedCostMicrousd",
+      "v22AssignmentId",
       "leaseExpiresAt",
       "endedAt"
     FROM "AmuxExecutionAttempt"
@@ -179,6 +218,8 @@ const lockTask = async (
   const rows = await tx.$queryRaw<TaskLockRow[]>`
     SELECT
       "id",
+      "sourceSystem",
+      "v22AssignmentId",
       "owner",
       "status",
       "revision",
@@ -221,6 +262,230 @@ const validSettlement = (
   (outcome === "succeeded" && (toStatus === "review" || toStatus === "done")) ||
   (outcome === "failed" && toStatus === "todo") ||
   (outcome === "blocked" && toStatus === "blocked");
+
+/** Consume exactly the A13 assignment, without reusing legacy ownership as
+ * execution authority. No CLI call occurs here; the A14 usage receipt must
+ * follow the delivery before settlement can be accepted. */
+export async function startAmuxV22TaskExecution(input: {
+  taskId: string;
+  assignmentId: string;
+  worker: string;
+  instanceId: string;
+  generation: number;
+  expectedRevision: number;
+  /** App-read develop head, supplied only after exact owner disclosure check. */
+  publicationBaseSha?: string | null;
+}) {
+  if (!amuxV22TaskExecutionEnabled(process.env[AMUX_V22_TASK_EXECUTION_ENV]))
+    return { started: false as const, reason: "v22_execution_disabled" as const };
+  const publicationBaseSha = amuxV22EngineeringPublicationEnabled(
+    process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+    input.publicationBaseSha &&
+    /^[0-9a-f]{40}$/.test(input.publicationBaseSha)
+    ? input.publicationBaseSha : null;
+  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionStart,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionStart.prismaCallCeiling +
+      (publicationBaseSha ? 24 : 0) },
+    async (tx, context) => {
+      const now = context.dbNow;
+      const incident = await lockAmuxAdmissionAndReadIncident(tx, now);
+      if (incident.blocks_admission) return { started: false as const,
+        reason: "incident_frozen" as const };
+      const halt = await findOpenAmuxOrchestratorHalt(tx);
+      if (halt) return { started: false as const,
+        reason: "orchestrator_halted" as const };
+      const runtime = await lockRuntime(tx, input.worker);
+      if (!runtimeGenerationMatches(runtime, input, now) ||
+          runtime?.status !== "idle" || !runtime.dispatchReady) {
+        return { started: false as const, reason: "runtime_not_ready" as const };
+      }
+      const task = await lockTask(tx, input.taskId);
+      const card = task && await tx.amuxWorkItem.findUnique({
+        where: { id: input.taskId },
+        select: { kind: true, cardType: true, taskRole: true, executionGrade: true,
+          v22AssignmentId: true, v4SourceApprovalId: true,
+          v4BriefDigest: true, v22ReceiptId: true,
+          reviewPrNumber: true },
+      });
+      if (!task || !card || task.sourceSystem !== "admin-idea-v4" ||
+          card.cardType !== "task" || task.status !== "todo" ||
+          task.owner !== input.worker || task.archivedAt !== null ||
+          task.revision !== input.expectedRevision ||
+          card.v22AssignmentId !== input.assignmentId ||
+          !card.v22ReceiptId || !card.v4SourceApprovalId ||
+          !card.taskRole || !card.executionGrade || !card.v4BriefDigest ||
+          card.reviewPrNumber !== null ||
+          !task.claimedAt) {
+        return { started: false as const, reason: "assignment_mismatch" as const };
+      }
+      const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+        where: { id: input.assignmentId },
+      });
+      const promotion = await tx.amuxV22PromotionReceipt.findUnique({
+        where: { id: card.v22ReceiptId },
+        select: { workItemId: true, sourceApprovalId: true,
+          briefDigest: true },
+      });
+      if (!assignment || assignment.workItemId !== input.taskId ||
+          assignment.taskRevision + 1 !== task.revision ||
+          assignment.workerName !== input.worker ||
+          assignment.workerInstanceId !== input.instanceId ||
+          assignment.workerGeneration !== input.generation ||
+          assignment.role !== card.taskRole ||
+          assignment.grade !== card.executionGrade ||
+          promotion?.workItemId !== input.taskId ||
+          promotion.sourceApprovalId !== card.v4SourceApprovalId ||
+          promotion.briefDigest !== card.v4BriefDigest) {
+        return { started: false as const, reason: "assignment_mismatch" as const };
+      }
+      const source = await tx.amuxIdeaUnitDecision.findUnique({
+        where: { id: card.v4SourceApprovalId },
+        select: { confirmationSnapshot: true },
+      });
+      const snapshot = source?.confirmationSnapshot;
+      const approved = snapshot && typeof snapshot === "object" &&
+        !Array.isArray(snapshot) && "card" in snapshot && snapshot.card &&
+        typeof snapshot.card === "object" && !Array.isArray(snapshot.card) &&
+        "task" in snapshot.card && snapshot.card.task &&
+        typeof snapshot.card.task === "object" &&
+        !Array.isArray(snapshot.card.task) &&
+        "costReceipt" in snapshot.card.task ? snapshot.card.task.costReceipt : null;
+      let cost;
+      try { cost = await calculateCurrentApprovedAmuxV4TaskCost(tx,
+        card.taskRole, card.executionGrade); }
+      catch { return { started: false as const,
+        reason: "cost_unverified" as const }; }
+      if (checkV4TaskApprovedCeiling(approved,
+        { ok: true, receipt: cost.receipt }).decision !== "allow") {
+        return { started: false as const,
+          reason: "cost_reconfirmation_required" as const };
+      }
+      const route = cost.receipt.routes.find((candidate) =>
+        candidate.routeId === assignment.routeId &&
+        candidate.workerName === assignment.workerName &&
+        candidate.provider === assignment.provider &&
+        candidate.modelId === assignment.modelId &&
+        candidate.routePolicyDigest === assignment.routePolicyDigest);
+      const prior = await tx.amuxExecutionAttempt.aggregate({
+        where: { taskId: input.taskId },
+        _count: { _all: true }, _max: { attemptNumber: true },
+        _sum: { reservedCostMicrousd: true },
+      });
+      const budget = decideAmuxAttemptBudget({
+        historical_rows: prior._count._all,
+        greatest_attempt_number: prior._max.attemptNumber,
+      });
+      if (!budget.allowed) return { started: false as const,
+        reason: "attempt_budget_exhausted" as const };
+      if (!route || !approved || typeof approved !== "object" ||
+          !("ceilingMicroUsd" in approved) ||
+          typeof approved.ceilingMicroUsd !== "string" ||
+          !v22ExecutionCostWithinAssignment({
+            assignedMicroUsd: assignment.perAttemptMicroUsd,
+            currentMicroUsd: BigInt(route.perAttemptMicroUsd),
+            approvedCeilingMicroUsd: BigInt(approved.ceilingMicroUsd),
+            priorReservedMicroUsd: prior._sum.reservedCostMicrousd ?? BigInt(0),
+          })) {
+        return { started: false as const, reason: "cost_unverified" as const };
+      }
+      let publicationRunId: string | null = null;
+      if (publicationBaseSha && card.taskRole === "implement" &&
+          (await readEngineeringAgentSwitches(tx)).publishAllowed) {
+        try {
+          // The engineering row is optional for Task execution. A full owner
+          // queue or halted Publisher leaves the Task's result private.
+          await requireEngineeringAgentRunAdmission(
+            engineeringAgentTransactionInAmux(context.attachedTransaction));
+          publicationRunId = String(randomInt(100_000_000_000,
+            1_000_000_000_000));
+        } catch (error) {
+          if (!(error instanceof EngineeringAgentStoreRefusedError)) throw error;
+        }
+      }
+      const changed = await tx.amuxWorkItem.updateMany({ where: {
+        id: input.taskId, status: "todo", owner: input.worker,
+        v22AssignmentId: input.assignmentId, revision: input.expectedRevision,
+      }, data: { status: "doing", revision: { increment: 1 } } });
+      if (changed.count !== 1) return { started: false as const,
+        reason: "assignment_mismatch" as const };
+      const busy = await tx.amuxWorkerRuntime.updateMany({ where: {
+        workerName: input.worker, instanceId: input.instanceId,
+        generation: input.generation, status: "idle", dispatchReady: true,
+        leaseExpiresAt: { gt: now },
+      }, data: { status: "busy", dispatchReady: false } });
+      if (busy.count !== 1) throw new Error("v22 runtime changed during start");
+      const attemptId = randomUUID();
+      const leaseExpiresAt = executionLeaseExpiry(now);
+      await tx.amuxExecutionAttempt.create({ data: {
+        id: attemptId, taskId: input.taskId, worker: input.worker,
+        workerInstanceId: input.instanceId,
+        workerGeneration: input.generation,
+        taskRevision: input.expectedRevision + 1,
+        attemptNumber: budget.next_attempt_number,
+        reservedCostMicrousd: assignment.perAttemptMicroUsd,
+        heartbeatAt: now, leaseExpiresAt, startedAt: now,
+        v22AssignmentId: input.assignmentId,
+      } });
+      if (publicationRunId && publicationBaseSha) {
+        await recordEngineeringAgentRunStart(
+          engineeringAgentTransactionInAmux(context.attachedTransaction), {
+            runId: publicationRunId, amuxAttemptId: attemptId,
+            cardId: task.id, cardKind: card.kind,
+            baseSha: publicationBaseSha,
+            leaseMs: leaseExpiresAt.getTime() - now.getTime(),
+          });
+      }
+      await tx.amuxWorkDelivery.create({ data: {
+        attemptId, taskId: input.taskId, worker: input.worker,
+        workerInstanceId: input.instanceId,
+        workerGeneration: input.generation,
+        taskRevision: input.expectedRevision + 1,
+        prompt: AMUX_V22_SEALED_DELIVERY_MARKER,
+      } });
+      await writeSystemAuditLog({ tx,
+        systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.v22.execution.started",
+        targetType: "AmuxExecutionAttempt", targetId: attemptId,
+        summary: "Started one assignment-bound AMUX v22 Task attempt.",
+        metadata: { taskId: input.taskId, assignmentId: input.assignmentId,
+          worker: input.worker, taskRevision: input.expectedRevision + 1,
+          reservedCostMicrousd: assignment.perAttemptMicroUsd.toString() },
+      });
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(leaseExpiresAt);
+      return { started: true as const, attemptId,
+        taskRevision: input.expectedRevision + 1, leaseExpiresAt };
+    });
+}
+
+/** A lost start response must be read back by assignment, never retried blind. */
+export async function readAmuxV22TaskExecution(input: {
+  assignmentId: string; worker: string; instanceId: string; generation: number;
+}) {
+  return withAmuxDbBoundary(AMUX_DB_BOUNDARIES.executionRecoveryRead,
+    async (tx) => {
+      const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+        where: { id: input.assignmentId },
+        select: { workerName: true, workerInstanceId: true,
+          workerGeneration: true, executionAttempt: { select: {
+            id: true, taskRevision: true, leaseExpiresAt: true,
+            endedAt: true, outcome: true, toStatus: true,
+          } } },
+      });
+      if (!assignment || assignment.workerName !== input.worker ||
+          assignment.workerInstanceId !== input.instanceId ||
+          assignment.workerGeneration !== input.generation)
+        return { found: false as const };
+      const attempt = assignment.executionAttempt;
+      if (!attempt) return { found: true as const,
+        state: "not_started" as const };
+      return { found: true as const,
+        state: attempt.endedAt ? "ended" as const : "started" as const,
+        attemptId: attempt.id, taskRevision: attempt.taskRevision,
+        leaseExpiresAt: attempt.leaseExpiresAt,
+        outcome: attempt.outcome, toStatus: attempt.toStatus };
+    });
+}
 
 /**
  * Starts execution only for the currently-owned Todo and the currently-live
@@ -299,13 +564,14 @@ export async function startAmuxExecution(
       const planning = await tx.amuxWorkItem.findUnique({
         where: { id: input.taskId },
         select: {
+          sourceSystem: true,
           projectKey: true,
           teamKey: true,
           effortPoints: true,
           estimatedCostMicrousd: true,
         },
       });
-      if (!planning) {
+      if (!planning || planning.sourceSystem === "admin-idea-v4") {
         return {
           started: false as const,
           reason: "task_not_startable" as const,
@@ -333,6 +599,7 @@ export async function startAmuxExecution(
       const lockedTask = await lockTask(tx, input.taskId);
       if (
         !lockedTask ||
+        lockedTask.sourceSystem === "admin-idea-v4" ||
         lockedTask.owner !== input.worker ||
         lockedTask.status !== "todo" ||
         lockedTask.archivedAt !== null ||
@@ -684,7 +951,7 @@ export async function startAmuxExecution(
  * 2. worker runtime instance/generation,
  * 3. task owner/status/revision.
  */
-export async function heartbeatAmuxExecution(
+async function heartbeatAmuxExecutionBound(
   input: {
     attemptId: string;
     worker: string;
@@ -694,6 +961,7 @@ export async function heartbeatAmuxExecution(
     now?: Date;
   },
   attachment?: AmuxAttachment<AmuxExecutionRenewedFact>,
+  allowV22 = false,
 ): Promise<boolean> {
   return withAmuxDbBoundary(
     amuxBoundaryWithAttachment(AMUX_DB_BOUNDARIES.executionHeartbeat, attachment),
@@ -727,6 +995,9 @@ export async function heartbeatAmuxExecution(
 
       if (
         !task ||
+        (task.sourceSystem === "admin-idea-v4") !== allowV22 ||
+        (allowV22 && (!attempt.v22AssignmentId ||
+          task.v22AssignmentId !== attempt.v22AssignmentId)) ||
         task.owner !== input.worker ||
         task.status !== "doing" ||
         task.revision !== input.taskRevision
@@ -784,6 +1055,346 @@ export async function heartbeatAmuxExecution(
       return true;
     },
   );
+}
+
+export const heartbeatAmuxExecution = (
+  input: Parameters<typeof heartbeatAmuxExecutionBound>[0],
+  attachment?: AmuxAttachment<AmuxExecutionRenewedFact>,
+) => heartbeatAmuxExecutionBound(input, attachment);
+
+export const heartbeatAmuxV22TaskExecution = (
+  input: Parameters<typeof heartbeatAmuxExecutionBound>[0],
+) => heartbeatAmuxExecutionBound(input, {
+  prismaCalls: 4,
+  work: async (lent, fact, context) => {
+    const run = await lent.engineeringAgentRun.findUnique({
+      where: { amuxAttemptId: fact.attemptId },
+      select: { id: true, status: true },
+    });
+    if (run?.status === "active") {
+      try {
+        await heartbeatEngineeringAgentRun(
+          engineeringAgentTransactionInAmux(lent), {
+            runId: run.id, amuxAttemptId: fact.attemptId,
+            leaseMs: fact.leaseExpiresAt.getTime() - context.dbNow.getTime(),
+          });
+      } catch (error) {
+        if (!(error instanceof EngineeringAgentStoreRefusedError &&
+            error.code === "run_lease_not_live")) throw error;
+        // Publication is optional. Its expired lease cannot fence the private
+        // Task heartbeat; the Publisher must still reject the stale run.
+      }
+    }
+  },
+}, true);
+
+/** A reported result is not a cost observation. Only exact, recorded A14
+ * invocation receipts allow success or automatic requeue after a failure. */
+export async function settleAmuxV22TaskExecution(input: {
+  attemptId: string; worker: string; instanceId: string;
+  generation: number; taskRevision: number;
+  outcome: "succeeded" | "failed" | "blocked";
+  invocationIds: string[];
+}) {
+  const patch = input.outcome === "succeeded" ?
+    await loadEngineeringAgentV22SettlementPatch(input.attemptId) : null;
+  // Tier work and GitHub reads happen outside the short settlement transaction.
+  // Any missing evidence keeps the result private; it never becomes a worker
+  // assertion that the patch is T1.
+  const publication = v22PublishPreflightEligible({
+    policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+    patchPresent: patch !== null,
+    publicationEnabled: amuxV22EngineeringPublicationEnabled(
+      process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]),
+  }) ?
+    await loadEngineeringAgentV22StoredCandidate(input.attemptId)
+      .catch(() => null) : null;
+  return withAmuxDbBoundary({ ...AMUX_DB_BOUNDARIES.executionSettle,
+    prismaCallCeiling: AMUX_DB_BOUNDARIES.executionSettle.prismaCallCeiling + 40 },
+    async (tx, context) => {
+      const now = context.dbNow;
+      const runtime = await lockRuntime(tx, input.worker);
+      if (!runtimeGenerationMatches(runtime, input, now) ||
+          runtime?.status !== "busy")
+        return { settled: false as const, reason: "fenced_out" as const };
+      const attempt = await lockAttempt(tx, input.attemptId);
+      if (!attempt || !attempt.v22AssignmentId || attempt.endedAt ||
+          attempt.worker !== input.worker ||
+          attempt.workerInstanceId !== input.instanceId ||
+          attempt.workerGeneration !== input.generation ||
+          attempt.taskRevision !== input.taskRevision ||
+          !attempt.leaseExpiresAt || attempt.leaseExpiresAt <= now)
+        return { settled: false as const, reason: "fenced_out" as const };
+      const task = await lockTask(tx, attempt.taskId);
+      if (!task || task.sourceSystem !== "admin-idea-v4" ||
+          task.v22AssignmentId !== attempt.v22AssignmentId ||
+          task.status !== "doing" || task.owner !== input.worker ||
+          task.revision !== input.taskRevision)
+        return { settled: false as const, reason: "fenced_out" as const };
+      const delivery = await tx.amuxWorkDelivery.findUnique({
+        where: { attemptId: input.attemptId }, select: { status: true },
+      });
+      if (delivery?.status !== "acknowledged")
+        return { settled: false as const, reason: "delivery_unverified" as const };
+      const events = await tx.amuxCliUsageEvent.findMany({
+        where: { attemptId: input.attemptId },
+        select: { invocationId: true, status: true, completeness: true,
+          projectedApiCostMicrousd: true, source: true, actualModelId: true,
+          selectedModelId: true },
+      });
+      const expectedIds = input.invocationIds;
+      const storedResult = input.outcome === "succeeded" ?
+        await tx.amuxV22TaskResult.findUnique({
+          where: { attemptId: input.attemptId },
+          select: { taskId: true, bodyPurgedAt: true },
+        }) : null;
+      const receiptsComplete = v22ExecutionReceiptVerified({
+        attemptId: attempt.id, invocationIds: expectedIds, events,
+        outcome: input.outcome,
+        reservedCostMicrousd: attempt.reservedCostMicrousd,
+        resultStored: storedResult?.taskId === task.id &&
+          storedResult.bodyPurgedAt === null,
+      });
+      if (input.outcome === "succeeded" &&
+          (!storedResult || storedResult.taskId !== task.id ||
+            storedResult.bodyPurgedAt !== null))
+        return { settled: false as const, reason: "result_unverified" as const };
+      if (input.outcome !== "blocked" && !receiptsComplete)
+        return { settled: false as const, reason: "usage_unverified" as const };
+      const storedPatch = await tx.amuxV22TaskPatch.findUnique({
+        where: { attemptId: attempt.id },
+        select: { taskId: true, patchSha256: true, baseSha: true,
+          bodyPurgedAt: true },
+      });
+      if (!v22SettlementPatchMatches({ taskId: task.id,
+        readPatch: patch, storedPatch }))
+        return { settled: false as const,
+          reason: "publication_state_changed" as const };
+      const run = await lockEngineeringAgentV22Run(
+        engineeringAgentTransactionInAmux(context.attachedTransaction),
+        attempt.id);
+      let product = run ? await tx.engineeringAgentWorkItem.findFirst({
+        where: { runId: run.id, kind: { in: ["publish", "t2_draft"] } },
+        select: { id: true, kind: true, patchDigest: true, baseSha: true },
+      }) : null;
+      if (patch) {
+        const assignment = await tx.amuxV22WorkerAssignment.findUnique({
+          where: { id: attempt.v22AssignmentId },
+          select: { role: true, workItemId: true },
+        });
+        if (!run || run.status !== "active" ||
+            !["shadow", "t1"].includes(run.modeAtStart) ||
+            run.cardId !== task.id || run.baseSha !== patch.baseSha ||
+            patch.taskId !== task.id ||
+            assignment?.role !== "implement" ||
+            assignment.workItemId !== task.id)
+          return { settled: false as const,
+            reason: "publication_state_changed" as const };
+        if (product && (product.patchDigest !== patch.sha256 ||
+            product.baseSha !== patch.baseSha))
+          return { settled: false as const,
+            reason: "publication_product_conflict" as const };
+        if (!product) {
+          const publish = v22PublishCandidateMatches({
+            policyVersion: ENGINEERING_AGENT_POLICY_VERSION,
+            modeAtStart: run.modeAtStart, runId: run.id,
+            taskId: task.id, baseSha: patch.baseSha,
+            patchDigest: patch.sha256, publication,
+            currentImageProofDigest:
+              currentEngineeringAgentV22ImageProofDigest(),
+          }) &&
+            amuxV22EngineeringPublicationEnabled(
+              process.env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) &&
+            (await readEngineeringAgentSwitches(tx)).publishAllowed &&
+            await readAmuxV22PublicPrConsent(task.id, tx);
+          const engineeringTx = engineeringAgentTransactionInAmux(
+            context.attachedTransaction);
+          product = await openEngineeringAgentV22Product(engineeringTx, {
+            runId: run.id, taskId: task.id, patch, publish,
+            candidate: publication?.ok ? publication.candidate : null,
+          });
+        }
+      }
+      const budget = settlementDestinationForBudget({
+        requested_status: input.outcome === "succeeded" ? "review" :
+          input.outcome === "failed" ? "todo" : "blocked",
+        attempt_number: attempt.attemptNumber,
+      });
+      const next = budget.to_status;
+      await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
+        status: next, owner: null, claimedAt: null, v22AssignmentId: null,
+        reviewPrNumber: null,
+        revision: { increment: 1 },
+      } });
+      await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
+        data: { endedAt: now, leaseExpiresAt: null, heartbeatAt: now,
+          outcome: input.outcome, toStatus: next, endedBy: input.worker,
+          reason: budget.exhausted_limit ??
+            (receiptsComplete ? "reported_result" : "usage_outcome_unknown") },
+      });
+      await tx.amuxWorkerRuntime.updateMany({ where: {
+        workerName: input.worker, instanceId: input.instanceId,
+        generation: input.generation, status: "busy",
+      }, data: { status: "idle", dispatchReady: false } });
+      if (next === "review" || next === "blocked")
+        await openAmuxHumanEscalation(tx, { taskId: task.id,
+          specialty: next === "review" ? AMUX_DEFAULT_REVIEW_SPECIALTY :
+            "execution-recovery",
+          reason: next === "review" ? "human_review_required" :
+            budget.exhausted_limit ?? (receiptsComplete ?
+              "execution_blocked" : "usage_outcome_unknown"),
+          openedBy: input.worker });
+      await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+      await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+        action: "amux.v22.execution.settled", targetType: "AmuxWorkItem",
+        targetId: task.id, summary: "Settled an assignment-bound AMUX v22 Task.",
+        metadata: { attemptId: attempt.id, outcome: input.outcome,
+          toStatus: next, invocationIds: expectedIds,
+          receiptsComplete, reservedCostMicrousd:
+            attempt.reservedCostMicrousd.toString(),
+          imageProofDigest: product?.kind === "publish" &&
+            publication?.ok ? publication.imageProofDigest : null },
+      });
+      if (run?.status === "active") {
+        await endEngineeringAgentRun(
+          engineeringAgentTransactionInAmux(context.attachedTransaction), {
+            runId: run.id, amuxAttemptId: attempt.id,
+            outcome: v22RunOutcomeForProduct({ taskOutcome: input.outcome,
+              productKind: product?.kind ?? null }),
+            halt: "none",
+          });
+      }
+      context.requireLeaseAt(runtime.leaseExpiresAt);
+      context.requireLeaseAt(attempt.leaseExpiresAt);
+      return { settled: true as const, taskRevision: task.revision + 1 };
+    });
+}
+
+/** Expiry is an unknown execution result, never permission to retry. */
+export async function quarantineExpiredAmuxV22TaskExecutions(limit = 50) {
+  const candidates = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.executionRecoveryRead, (tx, context) =>
+      tx.amuxExecutionAttempt.findMany({ where: {
+        v22AssignmentId: { not: null }, endedAt: null,
+        leaseExpiresAt: { lte: context.dbNow },
+      }, orderBy: [{ leaseExpiresAt: "asc" }, { id: "asc" }],
+      take: Math.min(Math.max(limit, 1), 200),
+      select: { id: true, worker: true },
+      }));
+  let quarantined = 0;
+  for (const candidate of candidates) {
+    const changed = await withAmuxDbBoundary(
+      { ...AMUX_DB_BOUNDARIES.executionRecoveryWrite,
+        prismaCallCeiling:
+          AMUX_DB_BOUNDARIES.executionRecoveryWrite.prismaCallCeiling + 10 },
+      async (tx, context) => {
+        const now = context.dbNow;
+        const runtime = await lockRuntime(tx, candidate.worker);
+        const attempt = await lockAttempt(tx, candidate.id);
+        if (!attempt || !attempt.v22AssignmentId || attempt.endedAt ||
+            !attempt.leaseExpiresAt || attempt.leaseExpiresAt > now)
+          return false;
+        const task = await lockTask(tx, attempt.taskId);
+        if (!task || task.sourceSystem !== "admin-idea-v4" ||
+            task.v22AssignmentId !== attempt.v22AssignmentId ||
+            task.status !== "doing" || task.owner !== attempt.worker ||
+            task.revision !== attempt.taskRevision)
+          return false;
+        await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
+          status: "blocked", owner: null, claimedAt: null,
+          v22AssignmentId: null, revision: { increment: 1 },
+        } });
+        await tx.amuxExecutionAttempt.update({ where: { id: attempt.id },
+          data: { endedAt: now, leaseExpiresAt: null,
+            outcome: "expired", toStatus: "blocked",
+            endedBy: "system:amux-v22-execution-reaper",
+            reason: "outcome_unknown" },
+        });
+        if (runtime?.instanceId === attempt.workerInstanceId &&
+            runtime.generation === attempt.workerGeneration &&
+            runtime.status === "busy")
+          await tx.amuxWorkerRuntime.updateMany({ where: {
+            workerName: attempt.worker, instanceId: attempt.workerInstanceId,
+            generation: attempt.workerGeneration, status: "busy",
+          }, data: { status: "error", dispatchReady: false } });
+        await openAmuxHumanEscalation(tx, { taskId: task.id,
+          specialty: "execution-recovery", reason: "execution_lease_expired",
+          openedBy: "system:amux-v22-execution-reaper" });
+        await cancelPendingAmuxWorkDelivery(tx, attempt.id, now);
+        await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: "amux.v22.execution.quarantined",
+          targetType: "AmuxWorkItem", targetId: task.id,
+          summary: "Quarantined an expired AMUX v22 Task attempt.",
+          metadata: { attemptId: attempt.id, assignmentId:
+            attempt.v22AssignmentId, taskRevision: task.revision + 1,
+            reservedCostMicrousd: attempt.reservedCostMicrousd.toString(),
+            outcome: "unknown" },
+        });
+        const run = await tx.engineeringAgentRun.findUnique({
+          where: { amuxAttemptId: attempt.id },
+          select: { id: true, status: true },
+        });
+        if (run?.status === "active") {
+          await endEngineeringAgentRun(
+            engineeringAgentTransactionInAmux(context.attachedTransaction), {
+              runId: run.id, amuxAttemptId: attempt.id,
+              outcome: "abandoned", halt: "none",
+            });
+        }
+        context.recordReceipt("work_item", task.id, 1);
+        context.recordReceipt("execution_attempt", attempt.id, 1);
+        return true;
+      });
+    if (changed) quarantined++;
+  }
+  return quarantined;
+}
+
+/** No attempt row after locking the card proves the reserved Todo never
+ * started. This is the only v22 recovery that may requeue automatically. */
+export async function releaseUnstartedAmuxV22Assignments(limit = 50) {
+  const candidates = await withAmuxDbBoundary(
+    AMUX_DB_BOUNDARIES.ownershipRecoveryRead, (tx, context) =>
+      tx.amuxWorkItem.findMany({ where: {
+        sourceSystem: "admin-idea-v4", status: "todo",
+        owner: { not: null }, v22AssignmentId: { not: null },
+        claimedAt: { lte: new Date(context.dbNow.getTime() -
+          AMUX_CLAIM_RESERVATION_MS) },
+      }, orderBy: [{ claimedAt: "asc" }, { id: "asc" }],
+      take: Math.min(Math.max(limit, 1), 200), select: { id: true },
+      }));
+  let released = 0;
+  for (const candidate of candidates) {
+    const changed = await withAmuxDbBoundary(
+      AMUX_DB_BOUNDARIES.ownershipRecoveryWrite,
+      async (tx, context) => {
+        const task = await lockTask(tx, candidate.id);
+        if (!task || task.sourceSystem !== "admin-idea-v4" ||
+            task.status !== "todo" || !task.owner ||
+            !task.claimedAt || !task.v22AssignmentId ||
+            task.claimedAt.getTime() + AMUX_CLAIM_RESERVATION_MS >
+              context.dbNow.getTime()) return false;
+        const attempted = await tx.amuxExecutionAttempt.count({ where: {
+          v22AssignmentId: task.v22AssignmentId,
+        } });
+        if (attempted !== 0) return false;
+        await tx.amuxWorkItem.update({ where: { id: task.id }, data: {
+          owner: null, claimedAt: null, v22AssignmentId: null,
+          revision: { increment: 1 },
+        } });
+        await writeSystemAuditLog({ tx, systemActor: AMUX_SYSTEM_AUDIT_ACTOR,
+          action: "amux.v22.assignment.unstarted_released",
+          targetType: "AmuxWorkItem", targetId: task.id,
+          summary: "Released an unstarted AMUX v22 assignment.",
+          metadata: { assignmentId: task.v22AssignmentId,
+            nextTaskRevision: task.revision + 1 },
+        });
+        context.recordReceipt("work_item", task.id, 1);
+        return true;
+      });
+    if (changed) released++;
+  }
+  return released;
 }
 
 /**
@@ -901,6 +1512,7 @@ export async function settleAmuxExecution(
 
       if (
         !task ||
+        task.sourceSystem === "admin-idea-v4" ||
         task.owner !== input.worker ||
         task.status !== "doing" ||
         task.revision !== input.taskRevision ||
@@ -1163,6 +1775,7 @@ export async function reclaimExpiredAmuxExecutions(
       return tx.amuxExecutionAttempt.findMany({
         where: {
           endedAt: null,
+          v22AssignmentId: null,
           leaseExpiresAt: { lte: now },
         },
         orderBy: [{ leaseExpiresAt: "asc" }, { id: "asc" }],
@@ -1212,6 +1825,7 @@ export async function reclaimExpiredAmuxExecutions(
            */
           if (
             !task ||
+            task.sourceSystem === "admin-idea-v4" ||
             task.owner !== attempt.worker ||
             task.status !== "doing" ||
             task.revision !== attempt.taskRevision ||
@@ -1402,6 +2016,8 @@ export async function reclaimExpiredAmuxClaims(
       return tx.amuxWorkItem.findMany({
         where: {
           status: "todo",
+          OR: [{ sourceSystem: null },
+            { sourceSystem: { not: "admin-idea-v4" } }],
           owner: { not: null },
           archivedAt: null,
           claimedAt: { lte: cutoff },
@@ -1441,6 +2057,7 @@ export async function reclaimExpiredAmuxClaims(
 
           if (
             !task ||
+            task.sourceSystem === "admin-idea-v4" ||
             task.status !== "todo" ||
             task.archivedAt !== null ||
             task.owner !== candidateOwner ||

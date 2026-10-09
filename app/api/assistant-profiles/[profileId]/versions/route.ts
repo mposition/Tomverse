@@ -22,7 +22,7 @@ import {
     AssistantProfilesDisabledError,
     isAssistantProfilesEnabled,
 } from "@/lib/appSettings";
-import { assistantProfileErrorResponse } from "@/app/api/assistant-profiles/route";
+import { assistantProfileErrorResponse } from "@/lib/assistantProfileErrorResponse";
 import {
     publishAssistantProfileVersion,
     readAssistantProfile,

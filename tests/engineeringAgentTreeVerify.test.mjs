@@ -10,6 +10,7 @@ import {
   checkListing,
   diffLines,
   gitObjectId,
+  resultListingFromModifiedBlobs,
   toPolicyChanges,
   verifyResultListing,
 } from "../lib/engineeringAgentTreeVerify.ts";
@@ -111,6 +112,43 @@ test("a listing that is inconsistent in itself is refused", () => {
       [{ path: "empty", mode: "040000", type: "tree", oid: gitObjectId("tree", new Uint8Array()) }],
     ];
     for (const entries of cases) assert.equal(checkListing(entries).ok, false);
+  });
+});
+
+test("v22 sparse modified blobs reproduce Git's tree without applying a patch", () => {
+  withRepo(({ put, snapshot }) => {
+    put("lib/a.ts", "old\n");
+    put("lib/nested/b.ts", "keep\n");
+    const base = snapshot();
+    const derived = resultListingFromModifiedBlobs({ base: base.listing,
+      baseRootTreeId: base.root, files: [{ path: "lib/a.ts",
+        mode: "100644", bytes: bytes("new\n") }] });
+    assert.equal(derived.ok, true);
+    put("lib/a.ts", "new\n");
+    const actual = snapshot();
+    assert.equal(derived.rootTreeId, actual.root);
+    assert.deepEqual(verifyResultListing({ base: base.listing,
+      baseTruncated: false, baseRootTreeId: base.root,
+      result: derived.result, claimedResultRootTreeId: derived.rootTreeId,
+      changedBlobs: derived.changedBlobs, baseGitattributes: null }).ok, true);
+    put("lib/nested/b.ts", "hidden change\n");
+    assert.notEqual(derived.rootTreeId, snapshot().root,
+      "a Publisher applying extra patch changes must reject before push");
+  });
+});
+
+test("v22 sparse transport rejects omission-shaped invalid paths and modes", () => {
+  withRepo(({ put, snapshot }) => {
+    put("lib/a.ts", "old\n");
+    const base = snapshot();
+    const input = { base: base.listing, baseRootTreeId: base.root };
+    for (const files of [[], [{ path: "lib/missing.ts", mode: "100644",
+      bytes: bytes("new\n") }], [{ path: "../lib/a.ts", mode: "100644",
+      bytes: bytes("new\n") }], [{ path: "lib/a.ts", mode: "100755",
+      bytes: bytes("new\n") }], [{ path: "lib/a.ts", mode: "100644",
+      bytes: bytes("old\n") }]]) {
+      assert.equal(resultListingFromModifiedBlobs({ ...input, files }).ok, false);
+    }
   });
 });
 

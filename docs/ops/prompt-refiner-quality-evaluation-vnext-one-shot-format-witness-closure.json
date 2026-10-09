@@ -1,0 +1,11 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-format-witness-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotFormatWitness.ts": "37963bd8ff1b69a0cc249b55b1e2c4b007fb9d60a8e13166b4200905d0b8bbcb",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitness.test.mjs": "03c14bf4ad0c2aad4c044b7da5bd4b0a60e1fdadce34ebc47b45a4d7b5164bd4",
+    "tests/promptRefinerQualityEvaluationVnextOneShotFormatWitnessClosure.test.mjs": "0bc15949b6ed60a18c6d2dbaf33c140b1cb4189e4bd1cba448c4499a4d00fb34"
+  }
+}

@@ -6,6 +6,7 @@ import corpusJson from "@/docs/ops/prompt-refiner-shadow/corpus-v1.json";
 import evidenceSpecJson from "@/docs/ops/prompt-refiner-shadow/evidence-spec-v1.json";
 
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import {
     consumePromptRefinerReservation,
     reservePromptRefinerExecution,
@@ -71,7 +72,7 @@ const fixtureRequest = new Request(
 );
 
 const reset = async () => {
-    await prisma.$executeRawUnsafe(`
+    await resetTestFixture(prisma, `
         TRUNCATE TABLE
           "PromptRefinerShadowAttempt",
           "PromptRefinerShadowRun",

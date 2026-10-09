@@ -1,0 +1,716 @@
+#!/bin/bash
+# Ensure cargo/rustup's PATH is present even when the invoking shell (a git
+# GUI, a fresh non-interactive commit, or apparently even an ordinary
+# interactive `git commit` in some environments) didn't export it — same
+# "setdefault, don't override" discipline CARGO_TARGET_DIR below already
+# uses. Found 2026-08-31: a Rust-touching commit hit "clippy not installed
+# - falling back to cargo check" immediately followed by "cargo: command
+# not found", i.e. BOTH the clippy branch and its own cargo-check fallback
+# were unresolvable in the hook's environment even though the same shell
+# resolved `cargo` fine when run directly — silently downgrading the Rust
+# gate from "lints enforced" all the way to "commit refused", never to
+# "actually ran". `[ -f ... ]` guard so a box without rustup's installer
+# (a from-scratch cargo install, a system package) is unaffected.
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+
+# amux-staged-guard  (see the block below for why this call is HERE now)
+g="$(dirname -- "$0")/amux-staged-guard"
+# SELF-HEAL RATHER THAN WARN (AMUX-2663). The guard BLOCKS a commit that touches
+# another lane's in-flight files — that is the whole protection — and it was one
+# file mode away from being inert: the tracked copy was 100644, so every path
+# that PRESERVES mode (git checkout of a fresh clone, cp -p, tar) landed a
+# non-executable guard, `[ -x ]` failed, and this branch printed one line to
+# stderr and let the commit through. A protection that announces it is off and
+# proceeds is the incident this card records, not a warning about it.
+#
+# Mode is fixed at the source too, but self-healing here covers the checkouts
+# that already have the bad copy and will never run install-hooks.sh again.
+if [ ! -x "$g" ]; then
+  _src="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/git-hooks/amux-staged-guard"
+  if [ -f "$_src" ]; then
+    install -m 0755 "$_src" "$g" 2>/dev/null       && echo "amux: staged-guard was not executable - reinstalled from $_src" >&2
+  fi
+fi
+if [ -x "$g" ]; then "$g" || exit 1; else echo "amux: staged-guard MISSING at $g - cross-session sweep protection is OFF (AMUX-1730)" >&2; fi
+# Pre-commit hook: security scan + Rust/client-JS syntax
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+# ── RECORD WHAT THIS COMMIT IS SUPPOSED TO CONTAIN (AF-565) ──────────────────
+#
+# For a pathspec commit (`git commit -- <paths>`) git builds a TEMPORARY index
+# and points GIT_INDEX_FILE at it, so `git diff --cached` here is exactly the set
+# that is about to be committed — the intent, captured before anything can race.
+#
+# post-commit compares the resulting tree against this. Measured 2026-09-07: a
+# `git commit -F - -- e2e/settings.spec.ts` printed "fatal: cannot lock ref
+# 'HEAD'", EXITED 0, and produced a commit carrying my message over a peer's five
+# files and 236 lines, with my own change left unstaged. Nothing warned. The
+# staged-guard's sibling check catches the case where the message ships and the
+# work does NOT; this is its inverse and strictly worse, because it misattributes
+# someone else's work rather than costing a re-run.
+#
+# HEAD is recorded too so post-commit can tell a fresh commit from an amend or a
+# rebase replay, where this manifest would be stale and comparing it would
+# manufacture a false alarm.
+#
+# Fail-open in every arm: a manifest that cannot be written must never wedge a
+# commit.
+_afm_dir="${AMUX_HOME:-$HOME/.amux}/commit-intent"
+if mkdir -p "$_afm_dir" 2>/dev/null; then
+  {
+    echo "head $(git rev-parse HEAD 2>/dev/null || echo none)"
+    git diff --cached --name-only 2>/dev/null
+  } > "$_afm_dir/$(echo "$ROOT" | tr '/' '_').txt" 2>/dev/null || true
+fi
+
+# ── MASS DELETION OF FILES THAT STILL EXIST ON ORIGIN (AMUX-3921) ────────────
+#
+# Handed over from MHC-531. `git ls-files -d` on the shared ~/Dev/mixpeek
+# returned 233 tracked files absent from disk, all 233 still on origin/main,
+# zero legitimate deletions — 200 under packages/, 7 server tests, 6 MVS files,
+# 2 security baselines. Nothing was staged, so nothing was armed. ONE
+# `git add -A` or `git commit -a` by any lane would have staged all 233 and
+# pushed them.
+#
+# WHY THIS LIVES HERE AND NOT IN git-shared-guard.py. That guard already refuses
+# `git add -A`, `git add .` and `git commit -a` UNCONDITIONALLY (AF-316), which
+# is stronger than the conditional leg the handoff asked for. But it is wired as
+# a Claude Code PreToolUse Bash hook in ~/.claude/settings.json, so it only sees
+# commands a harness session runs. Anything else — a script, a lane whose hook
+# config did not load, a session that wandered into this checkout — walks past
+# it. That is not hypothetical: on 2026-08-30 two `git commit -a` invocations
+# swept three lanes' in-flight work into unrelated commits and the guard did not
+# fire, and MHC-531's own postscript records a third that ran while the guard
+# logged NOT ENFORCED.
+#
+# A pre-commit hook runs for EVERY invoker. So the gate belongs on the OUTCOME
+# (deletions are staged) rather than on the SYNTAX (`-a` was typed), which is
+# also the more honest test: `-a` is one way to produce this and not the only
+# one.
+#
+# WHY origin-presence AND A THRESHOLD, rather than either alone. An intentional
+# `git rm` also deletes paths that exist on origin, so presence cannot separate
+# them; and a lane legitimately removing one dead module must not be gated. What
+# does separate them is SCALE — a deliberate removal names a handful of files, a
+# sweep takes everything the worktree happens to be missing. The threshold is
+# the override-free path for ordinary work.
+# THE THRESHOLD IS DERIVED FROM THIS REPO, not inherited (mixpeek-homepage-claude
+# made this point by measuring their own and I had not measured mine). Over the
+# last 400 commits on amux, FIVE deleted anything at all: 61, 17, 7, 6 and 4
+# files. So 15 gates two of four hundred — 792ce1f4 "the Python server was
+# deleted" and 88f797c5 "Remove Playwright entirely" — and both are exactly the
+# deliberate mass removal where an explicit confirmation is the right answer,
+# not a false positive. 0.5% is well short of the rate that would teach the
+# override by reflex.
+DEL_LIMIT="${AMUX_MAX_STAGED_DELETIONS:-15}"
+if [ -z "${AMUX_ALLOW_MASS_DELETE:-}" ]; then
+  # ORIGIN MUST BE RESOLVABLE, AND SAY SO WHEN IT IS NOT. Without this the
+  # `git cat-file -e origin/main:<path>` below returns non-zero for every path,
+  # ON_ORIGIN stays 0, and the gate passes — so a fetch-less or freshly-cloned
+  # checkout has NO gate and nothing says so. Silent-correct and silent-broken
+  # look identical, which is the class this whole file keeps running into.
+  if ! git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+    echo "amux: NOTE — origin/main is not resolvable here, so the mass-deletion gate" >&2
+    echo "      cannot compare against it and is NOT protecting this commit." >&2
+    echo "      (git fetch origin, or ignore if this checkout has no remote.)" >&2
+  fi
+  STAGED_DEL=$(git diff --cached --name-only --diff-filter=D 2>/dev/null || true)
+  N_DEL=$(printf '%s' "$STAGED_DEL" | grep -c . || true)
+  if [ "${N_DEL:-0}" -gt "$DEL_LIMIT" ]; then
+    # Only count deletions of paths ORIGIN STILL HAS. Removing files that were
+    # never pushed is a local cleanup and is nobody else's loss.
+    ON_ORIGIN=0
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if git cat-file -e "origin/main:$f" 2>/dev/null; then
+        ON_ORIGIN=$((ON_ORIGIN + 1))
+      fi
+    done <<EOF
+$STAGED_DEL
+EOF
+    if [ "$ON_ORIGIN" -gt "$DEL_LIMIT" ]; then
+      echo "amux: REFUSING — this commit deletes $ON_ORIGIN file(s) that still exist on origin/main" >&2
+      echo "      (limit $DEL_LIMIT, AMUX_MAX_STAGED_DELETIONS). On a shared checkout this is the" >&2
+      echo "      shape of a sweep, not a removal: tracked files go missing from disk and one" >&2
+      echo "      \`git add -A\` or \`git commit -a\` stages every one of them." >&2
+      echo "" >&2
+      echo "      What to check first:" >&2
+      echo "        git diff --cached --name-only --diff-filter=D | head" >&2
+      echo "        git ls-files -d | wc -l      # tracked files missing from disk RIGHT NOW" >&2
+      echo "      Restore rather than commit the loss:" >&2
+      echo "        git checkout origin/main -- <path>" >&2
+      echo "" >&2
+      echo "      If the removal is deliberate, say so: AMUX_ALLOW_MASS_DELETE=1 git commit ..." >&2
+      echo "      (logged like every other override; prefer naming the paths explicitly)" >&2
+      exit 1
+    fi
+  fi
+fi
+
+# THE staged-guard CALL IS AT THE TOP OF THIS FILE AGAIN (2026-08-09), and the
+# history below is why that is not a re-run of a mistake.
+#
+# It used to be injected by the server: `_install_amux_precommit_guard()` in
+# amux-server.py generated `.git/hooks/amux-staged-guard` per work_dir and
+# inserted a shim line into whatever pre-commit existed. On 2026-08-06 a
+# session added a tracked copy plus a call here, and that was correctly
+# reverted for two reasons — it made install-hooks.sh a SECOND producer of a
+# generated file (running it overwrote the server's live guard with a frozen
+# one, reverting AC-241), and the shim was already injected, so the guard ran
+# TWICE and printed every NOTE twice.
+#
+# Both reasons are now dead. amux-server.py is deleted (rust cutover) and
+# nothing in the rust server generates the hook or injects the shim, so:
+#   1. there is no first producer to collide with — the tracked copy in
+#      scripts/git-hooks/ is the only one; and
+#   2. nothing injects a second call, so this one cannot duplicate.
+#
+# The cost of the old arrangement was measured: with no generator, this hook
+# was whatever the retired python last wrote, and running install-hooks.sh —
+# which overwrites this file — would have DELETED the injected shim and turned
+# the guard off, while printing "ok ... matches". If a generator ever returns,
+# delete this call and the tracked guard in the same commit that adds it.
+
+# ── 1. Security scan (runs on every commit) ─────────────────────────────────
+
+BLOCKED_FILES=(
+  "terraform.tfvars"
+  ".env.local"
+  "*.pem"
+  "*.key"
+  "*.p12"
+  "*.pfx"
+  "id_rsa"
+  "id_ecdsa"
+  "id_ed25519"
+)
+
+# Patterns matched against added/modified lines in staged content
+SECRET_PATTERNS=(
+  "-----BEGIN .* PRIVATE KEY|-----BEGIN PRIVATE KEY"       # private keys
+  "sk-ant-api[0-9a-zA-Z-]{20,}"                           # Anthropic API keys
+  "tskey-auth-[A-Za-z0-9]+"                               # Tailscale auth keys
+  "AKIA[0-9A-Z]{16}"                                      # AWS access key IDs
+  "ghp_[A-Za-z0-9]{36}"                                   # GitHub personal tokens
+  "github_pat_[A-Za-z0-9_]+"                              # GitHub fine-grained PATs
+  "AIza[0-9A-Za-z_-]{35}"                                 # Google API keys
+  "sk-[a-zA-Z0-9]{48}"                                    # OpenAI-style keys
+  # AC-239: FOUR credentials sat committed in cloud/setup-cloud.sh since
+  # 2026-03-11 — Clerk sk_test_, R2 access+secret, CF account id — and this
+  # scanner matched NONE of them. The R2 pair is what litestream uses to
+  # replicate every per-user database, in a PUBLIC repo. Every pattern below
+  # was added by testing it against that exact block first; a secret scanner
+  # whose patterns were never run against a real leak is theatre.
+  "sk_(test|live)_[A-Za-z0-9]{20,}"                       # Clerk / Stripe secret keys
+  "(R2|AWS)_SECRET(_ACCESS)?_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9/+]{32,}"   # R2/S3 secrets
+  "CLERK_SECRET_KEY[[:space:]]*=[[:space:]]*[A-Za-z0-9_-]{20,}"
+  "xox[baprs]-[A-Za-z0-9-]{10,}"                          # Slack tokens
+  "glpat-[A-Za-z0-9_-]{20,}"                              # GitLab PATs
+)
+
+SECRETS_FOUND=0
+
+# Check blocked filenames
+for f in $STAGED; do
+  base="$(basename "$f")"
+  for pattern in "${BLOCKED_FILES[@]}"; do
+    # shellcheck disable=SC2053
+    if [[ "$base" == $pattern ]]; then
+      echo "✗ BLOCKED FILE: $f matches sensitive filename pattern '$pattern'"
+      SECRETS_FOUND=1
+    fi
+  done
+done
+
+# Check staged content for secret patterns (only added lines, skip binary files)
+ADDED_LINES=$(git diff --cached --diff-filter=ACM -U0 2>/dev/null \
+  | grep "^+" \
+  | grep -v "^+++" \
+  || true)
+
+if [ -n "$ADDED_LINES" ]; then
+  for pattern in "${SECRET_PATTERNS[@]}"; do
+    # -e is REQUIRED: the private-key pattern starts with "-----", which grep
+    # reads as options no matter how it is quoted. Without it that pattern died
+    # with "grep: unrecognized option", the error went to stderr, `|| true`
+    # swallowed the status, and the hook printed "Security scan passed" — so the
+    # one check guarding against committing a private key had never once run.
+    # Assign inside `if`: this script runs under `set -e`, and grep exits 1 on a
+    # clean file, so a bare assignment would abort the hook — silently, mid-scan,
+    # with a non-zero status git reports as a blocked commit and no reason why.
+    if matches=$(echo "$ADDED_LINES" | grep -E -e "$pattern" 2>&1); then
+      status=0
+    else
+      status=$?
+    fi
+    # grep: 0 = matched, 1 = no match, >1 = the pattern never ran. Treat that
+    # last case as a failure instead of a pass — a scan that cannot report a
+    # problem is worse than no scan, because the "passed" line gets trusted.
+    if [ "$status" -gt 1 ]; then
+      echo "✗ SECRET SCAN BROKEN: pattern '$pattern' did not run (grep exit $status)"
+      echo "$matches" | head -2 | sed 's/^/    /'
+      SECRETS_FOUND=1
+    elif [ "$status" -eq 0 ]; then
+      echo "✗ SECRET DETECTED matching pattern: $pattern"
+      echo "$matches" | head -5 | sed 's/^/    /'
+      SECRETS_FOUND=1
+    fi
+  done
+fi
+
+if [ "$SECRETS_FOUND" -eq 1 ]; then
+  echo ""
+  echo "Commit blocked. Remove the sensitive content and try again."
+  echo "To skip this check (dangerous): git commit --no-verify"
+  exit 1
+fi
+
+echo "Security scan passed."
+
+# ── 2. Rust + client JS syntax (only when the workspace / dashboard is staged) ─
+# The Python predecessor's ast.parse + inline-<script> extraction lived here
+# until 2026-08-09; the client is real static files now and the server is Rust.
+
+STAGED_RS=$(echo "$STAGED" | grep -E '^crates/.*\.rs$' || true)
+
+# ── 2a. A staged `mod X;` whose X is UNTRACKED (AMUX-2777) ────────────────────
+#
+# THIS IS THE ONE `cargo check` STRUCTURALLY CANNOT CATCH. The module file is
+# present in MY working tree, so my build is green and stays green; the breakage
+# appears only in a checkout that does not have the untracked file — i.e. in
+# everyone else's, after I push. Five times in one night, per the card.
+#
+# The check is deliberately about TRACKEDNESS, not existence: `test -f` passes
+# for exactly the file that is about to be missing for everybody else.
+if [ -n "$STAGED_RS" ]; then
+  MISSING_MODS=""
+  for f in $STAGED_RS; do
+    dir=$(dirname "$f")
+    base=$(basename "$f" .rs)
+    # `mod x;` in foo.rs resolves against foo/, except for the crate roots and
+    # mod.rs, which resolve against their own directory.
+    case "$base" in
+      lib|main|mod) moddir="$dir" ;;
+      *)            moddir="$dir/$base" ;;
+    esac
+    # Declarations only: `mod x;` / `pub mod x;` / `pub(crate) mod x;` ending in
+    # a semicolon. `mod tests { ... }` is inline and has no file.
+    for m in $(grep -oE '^[[:space:]]*(pub([[:space:]]*\([^)]*\))?[[:space:]]+)?mod[[:space:]]+[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*;' "$f" 2>/dev/null \
+               | sed -E 's/.*mod[[:space:]]+([a-zA-Z_][a-zA-Z0-9_]*)[[:space:]]*;/\1/'); do
+      cand1="$moddir/$m.rs"
+      cand2="$moddir/$m/mod.rs"
+      target=""
+      [ -e "$cand1" ] && target="$cand1"
+      [ -z "$target" ] && [ -e "$cand2" ] && target="$cand2"
+      if [ -z "$target" ]; then
+        continue   # declared but absent here too — cargo check will say so
+      fi
+      # Tracked in HEAD, or staged in THIS commit: either way it ships.
+      if git ls-files --error-unmatch "$target" >/dev/null 2>&1; then continue; fi
+      if git diff --cached --name-only | grep -qxF "$target"; then continue; fi
+      MISSING_MODS="$MISSING_MODS\n  $f declares 'mod $m;' -> $target is UNTRACKED"
+    done
+  done
+  if [ -n "$MISSING_MODS" ]; then
+    printf 'BLOCKED: a staged file declares a module whose file is not tracked.%b\n' "$MISSING_MODS"
+    echo ""
+    echo "Your build is green because the file exists HERE. It will not exist in any"
+    echo "other checkout, so this commit breaks the workspace for every other lane the"
+    echo "moment it lands — and cargo check cannot see that from inside your tree."
+    echo ""
+    echo "Stage the module file too:   git add <the path(s) above>"
+    echo "Or drop the declaration if it was not meant to ship yet."
+    exit 1
+  fi
+fi
+
+# ONE IMPLEMENTATION FOR BOTH BUILD GATES (AMUX-3726).
+#
+# The clippy branch and the clippy-absent `cargo check` fallback had the same
+# defect and the fallback's own comment says it "matters MORE, not less" there —
+# the failure that reaches it is a COMPILE error rather than a lint. Fixing only
+# the branch I happened to be reading would leave the identical hazard beside it
+# for whoever hits the other one, which is the fix-only-the-survivor shape.
+#
+# $1 = raw build output (for blame), $2 = the build command to re-run on the index.
+# Returns 0 ONLY when a clean build of the INDEX proves the staged content sound.
+_amux_staged_recheck() {
+  local _out="$1" _cmd="$2" _blame_rc=0 _sw _staged_rc=0 _bpid _wpid _idx
+  CLIPPY_OUT="$_out" STAGED="$STAGED" \
+    python3 "$ROOT/scripts/git-hooks/lint-blame.py" >&2 || _blame_rc=$?
+  # ASK THE QUESTION THE TREE CANNOT (AF-182's structural half).
+  #
+  # Everything above builds the WORKING TREE, which on a shared checkout is not
+  # what anyone is committing. lint-blame can now say "none of the offenders are
+  # staged" (exit 10) — but knowing that still left the committer refused, and
+  # the only exit was AMUX_SKIP_RUST_GATE, an ASSERTION they make rather than an
+  # answer anyone verified.
+  #
+  # WHY THIS IS SAFE ON EVERY LANE'S COMMIT PATH, which is what kept it unwritten:
+  #   - UNREACHABLE unless the build already FAILED. The green path — very nearly
+  #     every commit — creates no worktree and is not touched at all.
+  #   - it can only turn a REFUSAL into a pass, never a pass into a refusal, so
+  #     the worst correctness outcome is a commit CI would have caught anyway.
+  #   - only exit 10 enables it; a crashed, missing or confused aid returns
+  #     something else and we refuse exactly as before.
+  #   - hard watchdog, so it can never hang a commit; on timeout we refuse.
+  #   - the worktree is removed in a trap and pruned. A leaked one is a
+  #     15GB-class hazard here (CLAUDE.md: 37 abandoned target dirs took the
+  #     volume to 741MB free).
+  #
+  # Cost, measured before writing it: ~22s warm, and it does NOT amortise —
+  # cargo re-fingerprints the workspace crates when the path differs. That 22s
+  # is spent only in the case that today costs the committer their commit.
+  [ "$_blame_rc" -eq 10 ] || return 1
+  [ "${AMUX_STAGED_RECHECK:-1}" = "1" ] || return 1
+  echo "" >&2
+  echo "amux: none of the offenders are staged — building the INDEX to check what you" >&2
+  echo "      are ACTUALLY committing (~22s; set AMUX_STAGED_RECHECK=0 to skip)..." >&2
+  _sw=$(mktemp -d "${TMPDIR:-/tmp}/amux-staged-XXXXXX" 2>/dev/null) || return 1
+  # NEVER LET THESE GIT CALLS TOUCH THE PENDING COMMIT'S INDEX (AMUX-3872).
+  #
+  # For `git commit -- <pathspec>` git builds a TEMPORARY index and points the
+  # hook at it: the hook really does see
+  # GIT_INDEX_FILE=.git/next-index-<pid>.lock, and that file is what git turns
+  # into the commit when the hook returns 0. `worktree add` and `checkout-index`
+  # inherit it and WRITE to it, so the pathspec's staged content was wiped and
+  # the commit landed with ZERO FILES while reporting success.
+  #
+  # That is not theoretical. It ate this card's own fix: `[main 1755406d]`,
+  # "2 files changed" nowhere in sight, the work still sitting unstaged
+  # afterwards. Same command with AMUX_STAGED_RECHECK=0 committed 2 files and
+  # 268 insertions, which is the control that isolates it.
+  #
+  # `env -u GIT_INDEX_FILE` alone would be WRONG here, and that is the trap: the
+  # recheck exists to build WHAT YOU ARE COMMITTING, and without the temp index
+  # `checkout-index` materialises the repo's main index instead — validating
+  # content that is not the commit. So the index is COPIED, the copy feeds
+  # checkout-index, and only the worktree bookkeeping runs index-free.
+  _idx=$(mktemp "${TMPDIR:-/tmp}/amux-idx-XXXXXX" 2>/dev/null) || return 1
+  cp "${GIT_INDEX_FILE:-$ROOT/.git/index}" "$_idx" 2>/dev/null || return 1
+  # shellcheck disable=SC2064
+  trap "env -u GIT_INDEX_FILE git -C '$ROOT' worktree remove --force '$_sw' >/dev/null 2>&1; rm -rf '$_sw' '$_idx'; env -u GIT_INDEX_FILE git -C '$ROOT' worktree prune >/dev/null 2>&1" EXIT
+  rm -rf "$_sw"
+  if ! env -u GIT_INDEX_FILE git -C "$ROOT" worktree add --detach -q "$_sw" HEAD >/dev/null 2>&1 \
+     || ! GIT_INDEX_FILE="$_idx" git -C "$ROOT" --work-tree="$_sw" checkout-index -a -f >/dev/null 2>&1; then
+    echo "amux: could not materialise the index (worktree/checkout-index failed) —" >&2
+    echo "      refusing, exactly as before. Nothing is skipped on your behalf." >&2
+    return 1
+  fi
+  # No `timeout` on macOS by default, so bound it with a watchdog: a wedged
+  # build must cost 5 minutes, not the session.
+  ( cd "$_sw" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.amux/rust-build-target}" \
+      eval "$_cmd" >/dev/null 2>&1 ) &
+  _bpid=$!
+  ( sleep 300; kill -9 "$_bpid" >/dev/null 2>&1 ) & _wpid=$!
+  # `disown` the watchdog: killing it below is the NORMAL path (the build
+  # finished first), and without this bash prints "Terminated: 15" to the
+  # committer's terminal every single time. A gate that cries wolf on its happy
+  # path is one people stop reading, which is the failure this whole card is
+  # about, one layer over.
+  disown "$_wpid" 2>/dev/null || true
+  wait "$_bpid" 2>/dev/null || _staged_rc=$?
+  kill "$_wpid" >/dev/null 2>&1
+  if [ "$_staged_rc" -eq 0 ]; then
+    echo "" >&2
+    echo "amux: YOUR STAGED CONTENT IS CLEAN — the red is entirely someone else's" >&2
+    echo "      uncommitted work. Allowing this commit; the workspace stays red for" >&2
+    echo "      them to fix, and CI gates the push." >&2
+    return 0
+  fi
+  echo "" >&2
+  echo "amux: the staged content is ALSO red (exit $_staged_rc) — this is not just" >&2
+  echo "      the peer's edit. Refusing." >&2
+  return 1
+}
+
+# AMUX_SKIP_RUST_GATE=1 — the NARROW escape, so nobody has to reach for the
+# wide one (AF-182, third instance 2026-08-26).
+#
+# The Rust gate compiles the WORKING TREE, which on this shared checkout is not
+# the question anyone is asking. It cannot distinguish "what you are committing
+# is broken" from "a peer is mid-edit two files away", and `lint-blame.py`
+# exists precisely because that partition is invisible from clippy's output.
+#
+# But attribution alone does not unblock you: the hook refuses either way, and
+# until now the ONLY way past it was `--no-verify` — which also drops the
+# security scan, the staged-guard, the append-only guard and the JS checks.
+# Three AF-182 instances ended that way, most recently a peer whose own files
+# were clean and whose commit was refused by MY half-finished edit. A gate whose
+# refusal is routinely answered by disabling every gate is worse than a gate
+# that refuses precisely (ethos rule 6: a constraint whose sanctioned escape is
+# unwalkable gets walked from an unaudited one).
+#
+# So this skips exactly ONE gate and keeps the rest. It is deliberately not
+# something the blame analysis can set for you: the aid still cannot change a
+# verdict, a human or agent decides, and the skip announces itself in the commit
+# output so it is visible in the transcript rather than silent.
+if [ "${AMUX_SKIP_RUST_GATE:-}" = "1" ] && echo "$STAGED" | grep -qE '^(crates/.*\.rs|Cargo\.(toml|lock))$'; then
+  echo "amux: RUST GATE SKIPPED (AMUX_SKIP_RUST_GATE=1) — cargo clippy/check did NOT run." >&2
+  echo "      Every other gate still ran. Use this only when lint-blame attributed the" >&2
+  echo "      failure to another session's in-flight work; if your own staged files are" >&2
+  echo "      in the offender list, this is a false green you are giving yourself." >&2
+elif echo "$STAGED" | grep -qE '^(crates/.*\.rs|Cargo\.(toml|lock))$'; then
+  # ONE SHARED TARGET DIR — and until now this hook was the single biggest
+  # violator of the rule CLAUDE.md states for everyone else.
+  #
+  # That rule exists because the opposite instruction filled the disk: a debug
+  # target tree is 10-15GB, ~37 of them accumulated under /private/tmp, and on
+  # 2026-08-10 the volume hit 741MB free with a 50-session fleet running and
+  # writes failing with ENOSPC. Every session is told to export
+  # CARGO_TARGET_DIR=~/.amux/rust-build-target so the fleet shares one warm
+  # cache instead of paying 15GB and a full rebuild each.
+  #
+  # This hook inherited whatever the committing shell happened to have, which
+  # for a git GUI, an editor, a cron job, or any session that did not export it
+  # is NOTHING — so it built into a repo-local ./target. Measured 2026-08-26 in
+  # a fresh worktree with no CARGO_TARGET_DIR exported: 631MB of ./target in the
+  # 2 minutes before the commit was killed, on its way to a second full tree,
+  # for a check that completes in seconds against the shared one. Nothing said
+  # so; the hook just looked slow, which is the shape people wait on rather than
+  # investigate.
+  #
+  # SETDEFAULT, NOT OVERRIDE (same discipline as server.env): a shell that has
+  # already chosen a target dir keeps it, and the flag CI passes is untouched.
+  # The builder's own spelling is copied rather than re-derived
+  # (scripts/rust-auto-build.sh:301) so the two cannot drift into two dirs.
+  : "${CARGO_TARGET_DIR:=$HOME/.amux/rust-build-target}"
+  export CARGO_TARGET_DIR
+  echo "Checking Rust (cargo check --workspace --all-targets)..."
+  # --all-targets IS THE POINT, not a flourish (AMUX-2807).
+  #
+  # Plain `cargo check --workspace` does not compile test targets, so a break
+  # that lives in `#[cfg(test)]` code sails through this gate and lands on
+  # whoever runs tests next — which on a shared checkout is every other lane.
+  # That happened TWICE on 2026-08-10 alone: a non-exhaustive match on
+  # `DetectorKind::CiFailure`, and `title_needs_self_description` called from
+  # orchestrator/runtime.rs before it existed in amux-core. Both passed this
+  # hook. Both left `cargo test` red for the whole fleet, one of them for ~30
+  # minutes, while `cargo check` reported green the entire time.
+  #
+  # Note what this does and does not buy: it compiles tests, it does not RUN
+  # them. That is deliberate — running the suite is ~40s and this is every
+  # commit on a machine hosting ~50 lanes. Compile errors are the class that
+  # blocks OTHER PEOPLE; a failing assertion blocks only its author.
+  #
+  # Measured on this machine, warm cache: 3.75s -> 13.75s. Ten seconds a commit
+  # against four fleet-wide blockages in one afternoon. If that trade ever stops
+  # being worth it, drop the flag — but drop it knowing what it was buying.
+  # CLIPPY, NOT CHECK — it SUBSUMES check (it compiles) and adds the lints, so
+  # this is a swap and not an extra gate. Measured warm on this machine:
+  # check --all-targets 0s, clippy --all-targets 1s. One second.
+  #
+  # Added 2026-08-11 after TWO peer test files reached main with clippy denials
+  # in one day (tests/opencode_battle.rs, tests/autofix_e2e.rs), each turning
+  # `clippy --workspace --all-targets -D warnings` red for every lane on this
+  # shared checkout and queued to fail CI on the next push of main — which on a
+  # shared checkout is whoever pushes next, not the author.
+  #
+  # The class reached main BY DESIGN: `cargo check` does not lint, and clippy
+  # without --all-targets does not compile tests, so a lint denial in a test
+  # file passed every gate an author would naturally run. It was caught only by
+  # whoever ran the full command next, hours later, on someone else's work.
+  #
+  # Falls back to check where clippy is absent: a missing component must not
+  # block commits, and check is what this gate did before.
+  if cargo clippy --version >/dev/null 2>&1; then
+    # WHOSE FAILURE IS IT? (AF-182)
+    #
+    # This lints the WORKSPACE, which is right — a denial in any file turns
+    # `clippy --workspace --all-targets` red for every lane on this shared
+    # checkout and queues a CI failure for whoever pushes next. But it lints the
+    # WORKING TREE, so another session's uncommitted work refuses YOUR commit,
+    # and clippy names their file and nothing names them.
+    #
+    # Hit twice in one hour on 2026-08-23: a transient checks.rs/monitor.rs
+    # window failed a peer's build, then 170 uncommitted lines in board_drive.rs
+    # refused a commit of two unrelated clean files. The diagnostic is TRUE about
+    # the repo and FALSE about the committer, and the output cannot say which was
+    # meant — a workspace-scoped fact in a session-scoped sentence (amux's
+    # phrasing). Both natural readings are wrong: "I broke this" and "this gate
+    # is noise".
+    #
+    # The dangerous one is not the wait. It is that the cheap wrong move is right
+    # there: fix the peer's file. That is how a session commits another session's
+    # half-finished work, which is the class the staged-guard above exists to
+    # prevent, reached from a direction the staged-guard cannot see.
+    #
+    # So: still refuse, always — a red workspace is a red workspace. But
+    # PARTITION the offenders, because the next action is completely different
+    # and the committer cannot work it out from clippy's output alone.
+    # AMUX-70: run through safe-cargo.sh (its own systemd scope), not bare
+    # cargo — a workspace-wide clippy run OOM-killed inside THIS hook's own
+    # process tree takes the whole interactive pane down with it, hook and
+    # all, exactly the incident this wrapper exists to prevent.
+    if ! _clippy_out=$(scripts/safe-cargo.sh clippy --workspace --all-targets --quiet -- -D warnings 2>&1); then
+      printf '%s\n' "$_clippy_out" >&2
+      # NEVER let the blame analysis change the verdict: it runs after the raw
+      # output, its failure is swallowed, and the exit is unconditional. A
+      # diagnostic aid that can suppress a refusal is a worse bug than the one
+      # it explains.
+      _amux_staged_recheck "$_clippy_out" "cargo clippy --workspace --all-targets --quiet -- -D warnings" \
+        && _rust_gate_ok=1
+      [ "${_rust_gate_ok:-0}" = "1" ] || exit 1
+    fi
+    echo "cargo clippy passed (test targets + lints)."
+  else
+    echo "clippy not installed - falling back to cargo check (lints NOT enforced)" >&2
+    # SAME BLAME ANALYSIS AS THE CLIPPY BRANCH ABOVE (AF-182 follow-up).
+    #
+    # This branch had the identical defect the branch above just fixed, sitting
+    # immediately beside it: a peer's uncommitted work refuses your commit and
+    # nothing says it is theirs. It matters MORE here, not less. The failure
+    # that reaches this branch is a COMPILE error rather than a lint, and the
+    # incident that motivated AF-182 was exactly that — a transient
+    # checks.rs/monitor.rs window where a struct gained a field in one file and
+    # its initializer had not been updated in the other yet, which is what a
+    # multi-file change looks like from a peer's build for the seconds between
+    # two writes. Attribution being available or not must not depend on whether
+    # a toolchain component happens to be installed.
+    #
+    # lint-blame parses `--> file:line` spans, which rustc emits in the same
+    # form clippy does, so an E0063 partitions exactly like a lint denial.
+    # AMUX-70: same reasoning as the clippy branch above — safe-cargo.sh, not bare cargo.
+    if ! _check_out=$(scripts/safe-cargo.sh check --workspace --all-targets --quiet 2>&1); then
+      printf '%s\n' "$_check_out" >&2
+      # SAME PATH AS THE CLIPPY BRANCH, via the shared helper. This branch's own
+      # comment says it matters MORE there, since the failure reaching it is a
+      # COMPILE error; fixing only the other one would leave the hazard beside it.
+      _rust_gate_ok=0
+      _amux_staged_recheck "$_check_out" "cargo check --workspace --all-targets --quiet" \
+        && _rust_gate_ok=1
+      [ "${_rust_gate_ok:-0}" = "1" ] || exit 1
+    fi
+    echo "cargo check passed (including test targets)."
+  fi
+fi
+
+JS_STAGED=$(echo "$STAGED" | grep -E '^crates/amux-dashboard/static/.*\.(js|mjs)$' || true)
+if [ -n "$JS_STAGED" ]; then
+  echo "Checking client JS syntax..."
+  for f in $JS_STAGED; do
+    node --check "$ROOT/$f"
+  done
+  echo "JS syntax checks passed."
+fi
+
+# ── 4. frustrations.md structural audit (AF-120) ─────────────────────────────
+#
+# The audit existed, detected exactly this failure (an entry appended with no
+# `## ` heading folds into the previous entry and vanishes from every census),
+# named the delta, and NOTHING RAN IT — so a check built after this exact
+# incident sat unread while the incident recurred six times, all via bash
+# heredoc appends that no Edit-tool hook ever sees. Commit time is the one
+# gate every append passes through; this is the audit's consumer. Structure
+# drift blocks; the informational card-title CHECK lines do not (the audit's
+# own exit code makes that distinction).
+if echo "$STAGED" | grep -qx 'frustrations.md' && [ -f "$ROOT/scripts/frustrations_audit.py" ]; then
+  echo "Checking frustrations.md structure..."
+  # Exit contract (the script's docstring): 0 clean, 1 structural problems,
+  # 2 board unreachable with structure CLEAN. Structural problems are
+  # decidable without a board, so only 1 blocks; 2 happens whenever the amux
+  # server is mid-restart (which on this checkout is every builder adoption)
+  # and blocking a structurally-clean commit on it would train bypassing.
+  AUDIT_RC=0
+  python3 "$ROOT/scripts/frustrations_audit.py" >/dev/null 2>&1 || AUDIT_RC=$?
+  if [ "$AUDIT_RC" != "0" ] && [ "$AUDIT_RC" != "2" ]; then
+    python3 "$ROOT/scripts/frustrations_audit.py" 2>&1 | head -12
+    echo ""
+    echo "BLOCKED: frustrations.md fails its own structural audit (usually an entry"
+    echo "appended without a '## <title>' heading — the parser folds it into the"
+    echo "previous entry and every census undercounts it, AF-120). The format lives"
+    echo "in the file's own header. Fix the entry, restage, retry."
+    exit 1
+  fi
+  if [ "$AUDIT_RC" = "2" ]; then
+    echo "frustrations.md structure ok (board unreachable — card pointers unchecked)."
+  else
+    echo "frustrations.md structure ok."
+  fi
+fi
+
+# ── DOES YOUR GREEN RESULT DESCRIBE THIS COMMIT? (AF-195) ────────────────────
+#
+# A test run describes the bytes cargo compiled. A commit ships the bytes in the
+# INDEX. On a shared checkout those come apart in the window between the two:
+# a peer stages a change to a file you tested, and the commit carries a version
+# no test ever saw. Specimen, 2026-08-24: `cargo test -p amux-server --test
+# board_api` gave 37 passed / 0 failed, the commit that cited it (c971756b)
+# shipped RED, and a rerun minutes later failed at board_api.rs:2280. Both
+# results were TRUE when taken. The floor arrived through the index in between.
+#
+# THIS DOES NOT RUN TESTS AND DOES NOT BLOCK. The Rust gate above records, with
+# measurements, why it compiles tests and does not run them: ~40s on every
+# commit across ~50 lanes, and a failing assertion blocks only its author. That
+# trade stands. This costs one `ls-files -s` and a file read, and it answers a
+# question nothing else here can: whether the run you are about to cite covers
+# the bytes you are about to commit.
+#
+# WHY IT REPORTS WHEN THERE IS NO RECEIPT. "Silent" and "everything matches"
+# must not look the same (ethos rule 4). A commit with no receipt has no claim
+# behind it, which is fine and common; what is not fine is a reader inferring
+# coverage from silence.
+if [ -n "$STAGED" ] && echo "$STAGED" | grep -q '^crates/'; then
+  _rcpt="${AMUX_HOME:-$HOME/.amux}/test-receipts/${AMUX_SESSION:-unknown}.tsv"
+  _staged_crates=$(echo "$STAGED" | grep '^crates/' || true)
+  _n_staged=$(printf '%s\n' "$_staged_crates" | grep -c . || true)
+  if [ ! -f "$_rcpt" ]; then
+    echo "test receipt: none for session '${AMUX_SESSION:-unknown}' — $_n_staged staged crate"
+    echo "test receipt: file(s) carry no claim that any run compiled these bytes. Not a"
+    echo "test receipt: problem; said out loud so silence is not read as coverage."
+    # NAME THE COMMANDS THAT WRITE ONE (AF-478). This branch used to report the
+    # absence and stop, which is honest and unactionable: a reader who HAD run
+    # tests could not tell "you did not test" from "the command you used does
+    # not record it". That was a live conflict for a day — `safe-cargo.sh`
+    # wrote nothing, so following CLAUDE.md's isolation instruction produced
+    # this message after three green runs.
+    echo "test receipt: written by \`scripts/test-contended.sh <cargo test args>\` or"
+    echo "test receipt: \`scripts/safe-cargo.sh test <args>\`. A run through anything"
+    echo "test receipt: else (bare cargo, a remote build) leaves no receipt to read."
+  elif [ "$(grep -m1 '^# repo	' "$_rcpt" | cut -f2)" != "$ROOT" ]; then
+    echo "test receipt: the receipt on file is from a DIFFERENT checkout"
+    echo "test receipt: ($(grep -m1 '^# repo	' "$_rcpt" | cut -f2)) — it says nothing about this one."
+  else
+    _rc=$(grep -m1 '^# rc	' "$_rcpt" | cut -f2)
+    _age=$(( $(date -u +%s) - $(grep -m1 '^# at	' "$_rcpt" | cut -f2) ))
+    _args=$(grep -m1 '^# args	' "$_rcpt" | cut -f2-)
+    # The index blob sha per staged path, which git already has — no hashing.
+    _changed=""
+    while IFS= read -r _p; do
+      [ -n "$_p" ] || continue
+      _idx=$(git ls-files -s -- "$_p" 2>/dev/null | awk '{print $2}')
+      # LAST match, not first. The writer emits HEAD's blob for every tracked
+      # file and then OVERRIDES the dirty ones, so a dirty path appears twice
+      # and the worktree row is the second. Reading the first took HEAD's blob
+      # and reported every file you had edited-and-tested as "DIFFERS" — which
+      # is exactly what this said on its first real commit, about a run that had
+      # finished 27 seconds earlier with no edit in between.
+      _was=$(awk -F'\t' -v p="$_p" '$2==p {v=$1} END{if (v!="") print v}' "$_rcpt")
+      if [ -z "$_was" ]; then
+        _changed="$_changed
+    $_p (not in the tested set at all)"
+      elif [ "$_idx" != "$_was" ]; then
+        _changed="$_changed
+    $_p"
+      fi
+    done <<< "$_staged_crates"
+    if [ "$_rc" != "0" ]; then
+      echo "test receipt: your last run EXITED $_rc (\`$_args\`, ${_age}s ago). A red run"
+      echo "test receipt: vouches for nothing — do not cite it as evidence for this commit."
+    fi
+    if [ -n "$_changed" ]; then
+      _nc=$(printf '%s' "$_changed" | grep -c . || true)
+      echo "test receipt: $_nc of $_n_staged staged crate file(s) DIFFER from the bytes your"
+      echo "test receipt: last run compiled (\`$_args\`, ${_age}s ago):$_changed"
+      echo "test receipt: That green result does not describe this commit. It may still be"
+      echo "test receipt: fine — you may have edited after testing — but the run is not"
+      echo "test receipt: evidence for these bytes until you re-run it."
+    elif [ "$_rc" = "0" ]; then
+      echo "test receipt: all $_n_staged staged crate file(s) match the bytes your last run"
+      echo "test receipt: compiled (\`$_args\`, ${_age}s ago, exit 0)."
+    fi
+  fi
+fi

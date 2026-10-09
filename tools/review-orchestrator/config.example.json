@@ -1,0 +1,109 @@
+{
+  "stateDir": "/var/lib/review-orchestrator",
+  "timeoutSeconds": 2400,
+  "waitMaxSeconds": 540,
+  "repos": {
+    "tomverse": {
+      "url": "https://github.com/mposition/Tomverse.git",
+      "mirror": "/var/lib/review-orchestrator/mirrors/tomverse.git"
+    }
+  },
+  "contractPaths": [
+    "prisma/**",
+    "lib/modelPricing.ts",
+    "lib/credit*",
+    "lib/chatCostGuardrails.ts",
+    "lib/models.ts",
+    "lib/billingPriceCatalog.ts",
+    "lib/conversationProduct.ts",
+    "docs/policy/**",
+    "docs/ui-contracts/**"
+  ],
+  "providers": [
+    {
+      "id": "claude",
+      "vendor": "anthropic",
+      "quotaProbe": "claude",
+      "enabled": true,
+      "maxConcurrent": 2,
+      "command": "claude",
+      "args": [
+        "-p",
+        "--strict-mcp-config",
+        "--output-format", "text",
+        "--allowedTools", "Read,Grep,Glob",
+        "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Agent,Task"
+      ]
+    },
+    {
+      "id": "codex",
+      "vendor": "openai",
+      "quotaProbe": "codex",
+      "enabled": true,
+      "maxConcurrent": 2,
+      "command": "codex",
+      "args": ["exec", "--sandbox", "read-only", "-C", "{workdir}", "-"],
+      "passEnv": ["CODEX_HOME"]
+    },
+    {
+      "id": "cursor",
+      "vendor": "xai",
+      "quotaProbe": "cursor",
+      "enabled": true,
+      "maxConcurrent": 2,
+      "model": "grok-4.7-xhigh",
+      "command": "cursor-agent",
+      "args": ["--print", "--mode", "ask", "--trust", "--model", "{model}"]
+    },
+    {
+      "id": "devin",
+      "vendor": "cognition",
+      "enabled": false,
+      "maxConcurrent": 2,
+      "model": "swe-2-high",
+      "promptNote": "Tool rule for this run: read files with your file tools; for search use only grep, rg, find, ls, cat, head, tail, wc, git log, git show, git blame, git status or git ls-files. Any other command, any file write and any network access is rejected and ends the review before the verdict. If you cannot check something, say so in a finding.",
+      "command": "devin",
+      "args": [
+        "-p",
+        "--prompt-file", "{promptFile}",
+        "--respect-workspace-trust", "false",
+        "--sandbox",
+        "--permission-mode", "auto",
+        "--model", "{model}"
+      ]
+    },
+    {
+      "id": "copilot",
+      "vendor": "moonshot",
+      "quotaProbe": "copilot",
+      "quotaKey": "premium_interactions",
+      "enabled": true,
+      "priority": 1,
+      "maxConcurrent": 2,
+      "model": "kimi-k3",
+      "command": "copilot",
+      "args": [
+        "-p", "Read the file {promptFile} completely. It is your whole task: follow it exactly and end with the json block it asks for.",
+        "--add-dir", "{promptDir}",
+        "--disable-builtin-mcps",
+        "--no-custom-instructions",
+        "--no-ask-user",
+        "--no-auto-update",
+        "--no-remote",
+        "--no-remote-export",
+        "--disallow-temp-dir",
+        "--secret-env-vars", "COPILOT_GITHUB_TOKEN",
+        "--deny-tool", "write",
+        "--deny-tool", "url",
+        "--allow-tool", "shell(grep)",
+        "--allow-tool", "shell(rg)",
+        "--allow-tool", "shell(git log:*)",
+        "--allow-tool", "shell(git show:*)",
+        "--max-ai-credits", "50",
+        "-s",
+        "--model", "{model}"
+      ],
+      "passEnv": ["COPILOT_GITHUB_TOKEN"]
+    }
+  ]
+}

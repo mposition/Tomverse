@@ -1,0 +1,1441 @@
+//! `/health` (RR-0021): build hash, uptime, store status, global revision.
+//!
+//! The Python workflow's hard-won rule — "bracket any measurement with
+//! /health's build" — carries over verbatim: `build` is a content hash of
+//! the running binary, so a restart with the same code and a restart with
+//! different code are distinguishable (ethos rule 4).
+
+use super::AppState;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::Json;
+use serde::Serialize;
+
+/// AF-332 + AF-320. `ok: false` and "the probe never ran" are different facts
+/// and must not render identically, so `measured` travels beside the verdict
+/// and `rows_mapped` beside the count. An empty board and an unreadable board
+/// both yield zero rows; only `measured` separates them.
+#[derive(Serialize)]
+pub struct BoardProbe {
+    /// Did the probe run to completion? False means `ok` is meaningless.
+    pub measured: bool,
+    /// Did the real row mapper accept a row?
+    pub ok: bool,
+    /// Rows actually deserialized (0 or 1 — the probe is LIMIT 1). Zero with
+    /// measured:true and ok:true means the board is genuinely empty.
+    pub rows_mapped: usize,
+    /// Present only on failure, and it is the sentence a sweep will grep for.
+    pub error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct Health {
+    pub status: &'static str,
+    /// AF-332: the result of an ACTUAL bounded board read, not a liveness ping.
+    ///
+    /// On 2026-08-30 `GET /api/board` returned 500 to every session in the
+    /// fleet for ~20 minutes and NOTHING alarmed. /health was 200 with
+    /// store:"ok" throughout, no invariant covered a board read, autofix filed
+    /// nothing, and the dashboard rendered an empty board that is
+    /// indistinguishable from a quiet one. A human found it by noticing a
+    /// number looked wrong while verifying something unrelated.
+    ///
+    /// `store` could not have caught it and still cannot: it reports whether
+    /// the connection answers `current_rev()`, and the failure was in ROW
+    /// MAPPING. This field goes through the real `issue_from_row`, so the class
+    /// fails here the way it fails in `list_issues`.
+    pub board: BoardProbe,
+    pub build: String,
+    /// The commit the binary was built from (AMUX-3454), stamped by build.rs.
+    /// `build` discriminates BINARIES but cannot answer "does this build
+    /// contain commit X", and the AF-82 time-comparison fails when two
+    /// commits land seconds apart — which produced two wasted verification
+    /// rounds in one afternoon (a build adopted mid-window was read as
+    /// containing the later commit). `-dirty` suffix when the tree had
+    /// uncommitted changes under crates/ at build time (the local builder
+    /// compiles the working tree, so a bare sha would overclaim);
+    /// "unknown" outside a git checkout (the cloud image).
+    pub commit: &'static str,
+    pub commit_full: &'static str,
+    pub uptime_s: u64,
+    pub rev: Option<u64>,
+    pub store: &'static str,
+    /// Progress of the actual probe, including work that completed after the
+    /// HTTP budget. Historical success is not current readiness.
+    pub store_probe: StoreProbeProgress,
+    pub pid: u32,
+    pub server: &'static str,
+    /// Open descriptors / the process's own RLIMIT_NOFILE soft limit.
+    ///
+    /// AMUX-2812: on 2026-08-10 this process hit macOS's launchd default of 256
+    /// and every open and spawn began failing with EMFILE. `/health` then went
+    /// SILENT — which from the outside is indistinguishable from a dead
+    /// machine, so the dashboard simply read "offline" and the first stretch of
+    /// the investigation went looking for a crash that had not happened.
+    ///
+    /// Answering "out of descriptors" while out of descriptors is not reliably
+    /// possible: the reply needs a socket. So the useful move is the one BEFORE
+    /// that — publish the number continuously, so the approach is visible in
+    /// the instrument everyone already polls, and `degraded` arrives while the
+    /// server can still say it. `None` when unmeasurable, which is honestly
+    /// different from zero.
+    pub fds: Option<FdHealth>,
+    /// Invariant-monitor confidence (AMUX-2625): healthy | degraded | unknown |
+    /// unhealthy, from the last monitor roll-up. `unknown` when the monitor has
+    /// not run yet OR its evidence is stale — the four states this card is
+    /// about, on the endpoint every consumer already polls. Separate from
+    /// `status` on purpose: `status` gates request health (store/fds), this
+    /// carries the fleet-invariant verdict, and one must not mask the other.
+    pub confidence: &'static str,
+    /// Age of the evidence behind `confidence`, seconds. `None` if the monitor
+    /// has never recorded a verdict. A growing age with `confidence:unknown` is
+    /// a wedged monitor — visible instead of a frozen `healthy`.
+    pub confidence_age_s: Option<f64>,
+    /// Seconds amux was NOT RUNNING immediately before this boot (AEAB-29).
+    ///
+    /// `uptime_s` alone cannot distinguish "restarted 60s ago to adopt a build"
+    /// from "restarted 60s ago after four hours down", and on 2026-08-18 that
+    /// was exactly the question — the user's prompts had been going nowhere and
+    /// the only evidence was a GAP between two log lines, which nothing counted.
+    /// This publishes the gap on the endpoint every consumer already polls.
+    ///
+    /// `None` is honestly different from `0.0`: it means no outage was recorded
+    /// for this boot — either there was none, or the heartbeat could not be
+    /// stamped (which logs a WARN of its own rather than reporting health).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downtime_before_boot_s: Option<f64>,
+    /// WHY that downtime happened: `machine` (the host restarted inside the
+    /// window) or `process-only` (the host stayed up and only amux went away —
+    /// the gui/501 signature). Absent when there was no downtime OR when the
+    /// kernel boot instant could not be read; those are different, and the WARN
+    /// in `heartbeat::record_boot` distinguishes them in prose. Published here
+    /// because /health is where consumers already look (DESKT-22).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downtime_before_boot_cause: Option<&'static str>,
+    /// Host memory state (AMUX-3397). The 2026-08-19 kernel panic
+    /// (memory/swap exhaustion, AMUX-3396) killed the whole fleet and was
+    /// invisible to every amux instrument before, during, and after. Same
+    /// reasoning as `fds`: a host that is dying of memory exhaustion will
+    /// soon be unable to say so, so the useful move is publishing the
+    /// approach continuously on the endpoint everyone already polls.
+    pub mem: MemHealth,
+    /// Whether the host has room to admit another worker (AMUX-3396 follow-through).
+    pub admission: Admission,
+    /// Free space where amux keeps its DB and logs. Same rationale as `mem`
+    /// (DESKT-21): the ENOSPC that took this machine to 741 MB free on
+    /// 2026-08-10 was invisible to every amux instrument at the time.
+    pub disk: DiskHealth,
+    /// Tailnet reachability and node-key expiry (DESKT-24). Absent until the
+    /// first `tailnet-watch` tick completes — deliberately distinct from a
+    /// present reading whose `state` is `unknown`, which means a tick RAN and
+    /// could not determine the answer. Read from a cache, never sampled here:
+    /// forking the tailscale CLI per /health request would be a probe whose
+    /// cost lands on the endpoint the whole fleet polls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tailnet: Option<crate::runtime_jobs::tailnet_watch::TailnetHealth>,
+    /// AMUX-3969b: `false` while startup reconciliation is still running.
+    /// The listener binds immediately so the fleet gets a real HTTP response
+    /// instead of connection-refused, but session state may be stale until
+    /// this flips to `true`. Consumers that need consistent session state
+    /// can poll this field; everything else (board, health, config) is
+    /// already correct.
+    pub reconciled: bool,
+}
+
+#[derive(Serialize)]
+pub struct FdHealth {
+    pub open: usize,
+    pub limit: u64,
+    pub ratio: f64,
+}
+
+#[derive(Serialize, Debug)]
+pub struct MemHealth {
+    /// The KERNEL's own verdict, not a tuned amux threshold (ethos rule 7:
+    /// prefer the structurally-present signal): macOS
+    /// `kern.memorystatus_vm_pressure_level` — 1 normal, 2 warn, 4 critical
+    /// (jetsam imminent). `None` when unmeasurable (non-macOS).
+    pub pressure_level: Option<u32>,
+    /// The level spelled out, so a reader does not need the mapping.
+    pub pressure: &'static str,
+    pub swap_used_mb: Option<f64>,
+    pub swap_total_mb: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub struct DiskHealth {
+    pub free_gb: Option<f64>,
+    pub total_gb: Option<f64>,
+    /// "ok" | "warn" | "critical" | "unknown"
+    pub state: &'static str,
+    /// WHICH filesystem this reading is about (AMUX-4746).
+    ///
+    /// `state: "ok"` reads as "the host has disk". It means "the one filesystem
+    /// containing this path has disk", and until now the payload never said
+    /// which path that was or that only one was measured.
+    ///
+    /// THE INCIDENT THAT NAMES THIS: a lane's watch script logged 16,280
+    /// consecutive "No space left on device" write failures, and nothing
+    /// reported it. This probe was not wrong. Measured afterwards from the
+    /// `host_metrics` series covering the failures, free space on the volume
+    /// holding both `~/.amux` and that lane's scratchpad never fell below
+    /// 251 GB, against a 1.8 TB total. `ok` was the correct answer to the
+    /// question this probe asks, and the question was narrower than the reader.
+    ///
+    /// It is also not always the path handed in: `statvfs` fails with ENOENT on
+    /// a path that does not exist, so the reader walks UP to the nearest
+    /// existing ancestor. On a fresh install that ancestor can sit on a
+    /// different volume than `~/.amux` eventually will. The number was always
+    /// for whatever this field now names.
+    pub measured_path: Option<String>,
+}
+
+/// Free space on the volume holding `~/.amux`, published for the same reason as
+/// [`mem_health`]: a host about to fail writes will soon be unable to say so,
+/// so the useful move is putting the approach on the endpoint everyone polls.
+///
+/// # Why the threshold is ABSOLUTE GB and not a percentage
+///
+/// A percentage is the wrong unit here and would be a detector that fires on the
+/// healthy baseline (ethos rule 7). This volume is 1.8 TB and sits at 91% used
+/// while perfectly fine — a "90% used" alarm would be reporting that the disk
+/// exists. What actually breaks is absolute headroom against a fixed-size
+/// consumer: one debug cargo target tree is 10-15 GB, and on 2026-08-10 this
+/// machine reached 741 MB free with a 50-session fleet and writes failing with
+/// ENOSPC (the incident CLAUDE.md's shared-target-dir rule exists for).
+///
+/// Thresholds, RE-SET 2026-08-24 after they proved too low in a real incident:
+/// the volume fell from 144 GB to 13 GB overnight and spent the morning at
+/// 100% capacity, and 13 GB free read as merely `warn`. On a box running ~50
+/// lanes that is an emergency, not a caution.
+///
+/// critical below 25 GB, warn below 75 GB. Both sit well under the measured
+/// healthy baseline — `reclaim_scans` recorded 186-220 GB free across
+/// 2026-08-16..21, and 420 GB after the 08-24 cleanup — so this stays quiet
+/// normally rather than reporting that the disk exists (ethos rule 7), and
+/// still fires with runway rather than at the cliff.
+pub fn disk_health() -> DiskHealth {
+    // statvfs is POSIX and present on both macOS and Linux, so unlike mem_health
+    // this needs no cfg split at all.
+    let free_total = statvfs_free_total(&crate::config::amux_home());
+    let (critical_gb, warn_gb) = disk_thresholds();
+    match free_total {
+        Some((free_gb, total_gb, measured_path)) => DiskHealth {
+            free_gb: Some(free_gb),
+            total_gb: Some(total_gb),
+            state: disk_state_with_thresholds(Some(free_gb), critical_gb, warn_gb),
+            measured_path: Some(measured_path),
+        },
+        // "unknown" and "ok" must never collapse: an unreadable disk is not a
+        // healthy one, and reporting it as ok is how a silent probe gets trusted.
+        // No path answered, so there is nothing to name. `None` here is
+        // honestly different from a path with no reading.
+        None => DiskHealth { free_gb: None, total_gb: None, state: disk_state_with_thresholds(None, critical_gb, warn_gb), measured_path: None },
+    }
+}
+
+const DISK_CRITICAL_GB_DEFAULT: f64 = 25.0;
+const DISK_WARN_GB_DEFAULT: f64 = 75.0;
+
+/// Per-host override for the absolute-GB thresholds below (`server.env`:
+/// `AMUX_DISK_CRITICAL_GB` / `AMUX_DISK_WARN_GB`), found 2026-08-30. The
+/// 25/75 GB defaults were calibrated against a real incident on a large
+/// (multi-hundred-GB) fleet host — see `disk_health`'s doc — and stay the
+/// default for every host unset. They ALSO make the "ok" band structurally
+/// unreachable on a deliberately small host (a 35 GB dev container: 100%
+/// free is still under 75 GB), which reads as permanently critical
+/// regardless of actual disk pressure. Overriding here does not undo the
+/// reasoning against a PERCENTAGE threshold (still wrong — see
+/// `disk_health`'s doc, a 1.8TB-at-91%-used host would still false-positive
+/// forever on percent); it recalibrates the SAME absolute-GB mechanism for a
+/// host whose real risk (one abandoned cargo target tree costs 10-15GB —
+/// confirmed live on this exact box the same day this was found) is smaller
+/// in scale, not different in kind.
+fn disk_thresholds() -> (f64, f64) {
+    let get = |key: &str, default: f64| {
+        std::env::var(key).ok().and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(default)
+    };
+    (get("AMUX_DISK_CRITICAL_GB", DISK_CRITICAL_GB_DEFAULT), get("AMUX_DISK_WARN_GB", DISK_WARN_GB_DEFAULT))
+}
+
+/// The threshold decision at amux's fleet-wide DEFAULTS, split out so it is
+/// testable without a disk — the shipped path with no override calls exactly
+/// this. Every incident-regression test below pins these exact numbers;
+/// `disk_state_with_thresholds` is the same logic parameterized for
+/// `disk_thresholds`'s override, so a host-specific `server.env` value never
+/// has to touch this function or its tests.
+pub(crate) fn disk_state(free_gb: Option<f64>) -> &'static str {
+    disk_state_with_thresholds(free_gb, DISK_CRITICAL_GB_DEFAULT, DISK_WARN_GB_DEFAULT)
+}
+
+pub(crate) fn disk_state_with_thresholds(free_gb: Option<f64>, critical_gb: f64, warn_gb: f64) -> &'static str {
+    match free_gb {
+        Some(g) if g < critical_gb => "critical",
+        Some(g) if g < warn_gb => "warn",
+        Some(_) => "ok",
+        None => "unknown",
+    }
+}
+
+/// `(free_gb, total_gb)` for the filesystem containing `path`, walking UP to the
+/// nearest existing ancestor.
+///
+/// The walk is not defensive padding: `statvfs` fails with ENOENT on a path that
+/// does not exist, and `~/.amux` does not exist until the server creates it — so
+/// without this, a fresh install reports `unknown` for the whole first run, and
+/// CI (which has no `~/.amux` at all) reported it always. The volume is the same
+/// one either way; the leaf's existence is irrelevant to the question being asked.
+///
+/// Found by CI going red on the test that was supposed to prove this reader
+/// works (DESKT-21). The test asserted "readable on THIS host" and encoded my
+/// host's layout as the premise — the failure was real and the assertion was
+/// right to fire.
+fn statvfs_free_total(path: &std::path::Path) -> Option<(f64, f64, String)> {
+    let mut cur = Some(path);
+    while let Some(p) = cur {
+        if let Some((free, total)) = statvfs_exact(p) {
+            // The ancestor that ANSWERED, not the one asked about. Those differ
+            // exactly when the walk above did something, which is the case a
+            // reader cannot otherwise see (AMUX-4746).
+            return Some((free, total, p.display().to_string()));
+        }
+        cur = p.parent();
+    }
+    None
+}
+
+/// `statvfs` on exactly this path, no fallback.
+fn statvfs_exact(path: &std::path::Path) -> Option<(f64, f64)> {
+    let cpath = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).ok()?;
+    let mut st = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: cpath is a NUL-terminated path and st is a properly sized statvfs
+    // the kernel fills on success.
+    let rc = unsafe { libc::statvfs(cpath.as_ptr(), st.as_mut_ptr()) };
+    if rc != 0 {
+        return None;
+    }
+    let st = unsafe { st.assume_init() };
+    // f_frsize is the fragment size the f_* block counts are expressed in;
+    // f_bsize is the preferred IO size and is NOT always the same number.
+    // Using the wrong one silently scales every reading.
+    let unit = if st.f_frsize > 0 { st.f_frsize as f64 } else { st.f_bsize as f64 };
+    const GB: f64 = 1_073_741_824.0;
+    // f_bavail, not f_bfree: bfree counts root-reserved blocks that amux (which
+    // does not run as root) can never actually use.
+    Some((st.f_bavail as f64 * unit / GB, st.f_blocks as f64 * unit / GB))
+}
+
+/// Whether the host has room to admit ANOTHER worker right now.
+///
+/// # Why this exists
+///
+/// `mem_health` has been published on /health since the 2026-08-19 kernel panic
+/// (memory/swap exhaustion, AMUX-3396) — and nothing ever ACTED on it. amux kept
+/// admitting lanes while macOS was already shedding processes. The JetsamEvent of
+/// 2026-08-24 21:01 names the top memory holders at kill time and they are
+/// Claude Code binaries (`2.1.237`) at 0.7-1.2 GB each: amux's own lanes.
+///
+/// Three WindowServer watchdog kills followed in a week (08-22, 08-24, 08-28),
+/// all three with the identical signature — `blocked by turnstile waiting for
+/// tccd after 2 hops`. The deadlock itself is Apple's and amux cannot fix it: a
+/// synchronous TCC preflight on WindowServer's main thread. What amux CAN do is
+/// stop being the reason the machine is too starved to service that XPC round
+/// trip inside the 40-second watchdog budget.
+///
+/// # Why this does NOT gate on free RAM, which is the obvious design
+///
+/// A "keep 20 GB free" reserve would deny EVERY admission on this machine,
+/// permanently. macOS drives free pages to near zero by design: measured
+/// 2026-08-28 on a healthy box, raw free was **0.27 GB** while effective
+/// available (free + inactive + speculative) was 28.96 GB. A reserve rule fed
+/// the wrong number is a detector that fires on the healthy baseline, which is
+/// ethos rule 7's exact failure.
+///
+/// Computing true "available" needs `host_statistics64`, and the kernel already
+/// publishes its own summary of that computation as
+/// `kern.memorystatus_vm_pressure_level`. Preferring the structurally-present
+/// signal over a re-derived threshold is what this file's `MemHealth` comment
+/// already says it does, so this follows it rather than inventing a second
+/// opinion that can disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Admission {
+    /// Room to start another lane.
+    Allow,
+    /// Startable, but the kernel is already reporting pressure. Logged, not blocked.
+    Strained,
+    /// Do not start another lane.
+    Deny,
+}
+
+/// The admission decision, as a pure function of the two signals, so it is
+/// testable without a machine in any particular state.
+///
+/// `pressure_level` is the kernel's own verdict (1 normal, 2 warn, 4 critical).
+/// `swap_used_mb` is absolute rather than a fraction on purpose: macOS GROWS the
+/// swap file on demand, so "percent of swap used" stays flat as the problem gets
+/// worse and is close to useless as a signal.
+pub(crate) fn admission_for(
+    pressure_level: Option<u32>,
+    swap_used_mb: Option<f64>,
+    swap_deny_mb: f64,
+) -> Admission {
+    // Unknown must not deny: a host where these are unreadable (non-macOS, a
+    // sandbox) would otherwise be unable to start any worker at all.
+    if pressure_level == Some(4) {
+        return Admission::Deny;
+    }
+    if swap_used_mb.is_some_and(|mb| mb >= swap_deny_mb) {
+        return Admission::Deny;
+    }
+    if pressure_level == Some(2) {
+        return Admission::Strained;
+    }
+    Admission::Allow
+}
+
+/// Swap in use, in MB, at or above which amux stops admitting workers.
+/// Default 8192 (8 GB). Sustained swapping of that size on a 96 GB box means the
+/// working set no longer fits, which is the state that precedes jetsam.
+pub fn swap_deny_mb() -> f64 {
+    std::env::var("AMUX_MEM_SWAP_DENY_MB")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(8192.0)
+}
+
+/// Live admission check against this host.
+pub fn admission() -> Admission {
+    let m = mem_health();
+    admission_for(m.pressure_level, m.swap_used_mb, swap_deny_mb())
+}
+
+/// A fixed admission verdict for one router, used in place of the live host
+/// reading: `router(state).layer(Extension(AdmissionOverride(Admission::Allow)))`.
+///
+/// This exists for test harnesses, and the server never installs it.
+/// `admission()` reads the memory state of whatever machine runs the suite, so
+/// every in-process test that started a worker passed or failed with the host.
+/// On 2026-09-14, at 64 GB of swap, five lib tests and `replay_roundtrip` went
+/// red with a 503 where they expected a 202. Lanes had been re-diagnosing those
+/// same five as "host pressure" and moving on since at least 25d3d2e8, which
+/// also meant the refusal branch was only covered on a starved machine and the
+/// start branch only on a healthy one.
+///
+/// It is per router because the refusal tests and the start tests run in
+/// parallel in one process and need opposite verdicts, which an env var or a
+/// global would force them to share.
+/// A refusal names which one decided it (`admission_source`), so a harness that
+/// forgot to pin reads as `host` in the failure body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdmissionOverride(pub Admission);
+
+/// One syscall per field on macOS (`sysctlbyname`), `/proc/meminfo` on Linux
+/// — no subprocess, for the fd_health reason: spawning costs the resources
+/// being measured, and fails exactly when the condition it reports is present.
+pub fn mem_health() -> MemHealth {
+    let level = pressure_level();
+    let swap = swap_usage();
+    MemHealth {
+        pressure_level: level,
+        pressure: match level {
+            Some(1) => "normal",
+            Some(2) => "warn",
+            Some(4) => "critical",
+            Some(_) | None => "unknown",
+        },
+        swap_used_mb: swap.map(|(u, _)| u),
+        swap_total_mb: swap.map(|(_, t)| t),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sysctl_by_name<T>(name: &str) -> Option<T> {
+    let cname = std::ffi::CString::new(name).ok()?;
+    let mut val = std::mem::MaybeUninit::<T>::uninit();
+    let mut len = std::mem::size_of::<T>();
+    // SAFETY: the kernel writes at most `len` bytes into a T-sized buffer;
+    // we only assume_init when it reports success AND filled the whole T.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            cname.as_ptr(),
+            val.as_mut_ptr() as *mut libc::c_void,
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (rc == 0 && len == std::mem::size_of::<T>()).then(|| unsafe { val.assume_init() })
+}
+
+#[cfg(target_os = "macos")]
+fn pressure_level() -> Option<u32> {
+    sysctl_by_name::<libc::c_int>("kern.memorystatus_vm_pressure_level").map(|v| v as u32)
+}
+
+#[cfg(target_os = "macos")]
+fn swap_usage() -> Option<(f64, f64)> {
+    sysctl_by_name::<libc::xsw_usage>("vm.swapusage")
+        .map(|x| (x.xsu_used as f64 / 1048576.0, x.xsu_total as f64 / 1048576.0))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pressure_level() -> Option<u32> {
+    // Linux exposes PSI, not a discrete level; mapping PSI to warn/critical
+    // would be a tuned parameter invented here, so it is honestly absent.
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn swap_usage() -> Option<(f64, f64)> {
+    let s = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let get = |k: &str| {
+        s.lines()
+            .find(|l| l.starts_with(k))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<f64>().ok())
+    };
+    let total_kb = get("SwapTotal:")?;
+    let free_kb = get("SwapFree:")?;
+    Some(((total_kb - free_kb) / 1024.0, total_kb / 1024.0))
+}
+
+/// The same `AMUX_FD_MAX_RATIO` the autofix detector triggers on, read from the
+/// same env var — so `/health` saying `degraded` and a card being filed are the
+/// SAME condition, not two thresholds that drift apart. A view must share the
+/// predicate of the mechanism it describes (ethos rule 1).
+fn fd_ceiling() -> f64 {
+    std::env::var("AMUX_FD_MAX_RATIO")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.7)
+        .clamp(0.1, 0.99)
+}
+
+/// Costs one descriptor and NO subprocess — `lsof` would fail exactly when the
+/// condition it reports is present, and each attempt would consume the resource
+/// being measured (ethos rule 7: what does the detector cost, and is it paid in
+/// the same resource as the fault?).
+fn fd_health() -> Option<FdHealth> {
+    let open = std::fs::read_dir("/dev/fd").ok()?.count();
+    let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit writes into a fully-initialised local; no aliasing.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) } != 0 || rl.rlim_cur == 0 {
+        return None;
+    }
+    let limit = rl.rlim_cur;
+    Some(FdHealth { open, limit, ratio: open as f64 / limit as f64 })
+}
+
+#[derive(Serialize)]
+pub struct StoreProbeProgress {
+    pub last_success_age_ms: Option<u64>,
+    pub in_flight_age_ms: Option<u64>,
+    /// Writes queued behind the single writer thread right now (AMUX-4744).
+    ///
+    /// Reads and writes take different paths and only writes queue here, which
+    /// is why a stalled POST sits beside a GET answering in 8ms and the server
+    /// looks healthy by every other field in this payload.
+    pub write_inflight: usize,
+    /// Longest write wait seen since process start, milliseconds. Rises only,
+    /// so a stall that has already cleared is still reportable afterwards; a
+    /// gauge that decayed would read zero exactly when someone came to look.
+    pub write_wait_max_ms: u64,
+    /// Longest wait for a `spawn_blocking` thread, milliseconds, rising only.
+    ///
+    /// READ THIS BESIDE `write_wait_max_ms`, because together they say WHICH
+    /// queue is the problem and either alone is misleading. Both `writer_slow`
+    /// and `write_wait_max_ms` are measured from a thread the task already
+    /// holds, so neither can see time spent waiting to GET that thread. A large
+    /// value here with a small `write_wait_max_ms` means the writer was never
+    /// the bottleneck and the blocking pool was.
+    pub blocking_dispatch_max_ms: u64,
+    /// How long the probe is given before `store` is reported as "hung".
+    ///
+    /// PUBLISHED BECAUSE "hung" IS A VERDICT ABOUT A BUDGET, NOT ABOUT THE
+    /// STORE (AMUX-4739). The probe is cancelled at this deadline and the
+    /// payload then says `store: "hung"` with a 503, which reads as a dead
+    /// database. On 2026-09-16 that reading sent an investigation after
+    /// synchronous `Store::read` and a ~440-call-site refactor; the store was
+    /// answering /api/board in 1.6s at the same moment.
+    pub probe_budget_ms: u64,
+    /// How long the most recent probe that FINISHED actually took, in
+    /// milliseconds, or None if none has finished since start.
+    ///
+    /// This is the number that makes "hung" legible. A cancelled probe keeps
+    /// running, so the server learns its real duration a moment later and
+    /// nothing used to publish it. Read beside `probe_budget_ms`:
+    /// 250 budget with a 1044ms last completion is a slow probe on a loaded
+    /// box; 250 budget with a 68000ms last completion is the store in trouble.
+    /// Both render as `store: "hung"`, and before this they were
+    /// indistinguishable to every reader.
+    pub last_completion_ms: Option<u64>,
+}
+
+/// The probe's budget, named once. It was written as a bare `250` in two
+/// places: the cancellation timeout and the `slow_probe_completed` threshold.
+/// Those two must agree by construction, since the second exists to report
+/// overruns of the first.
+const PROBE_BUDGET_MS: u64 = 250;
+
+/// Duration of the most recent probe that ran to completion, OFFSET BY ONE so
+/// that zero can mean "none has finished yet".
+///
+/// A plain millisecond count cannot express that: a probe that never completed
+/// and one that completed in under a millisecond both read 0, and those are
+/// opposite facts. Flooring the value at 1 was the first attempt and it is
+/// worse than it looks — it is unreachable on any real probe (opening and
+/// querying the store always costs at least a millisecond), so it could not be
+/// tested, and a guard no test can reach is a guard nobody can trust.
+static LAST_PROBE_COMPLETION_RAW: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Store side of the offset. Called by the probe; paired with `decode_completion`.
+fn encode_completion(ms: u64) -> u64 {
+    ms.saturating_add(1)
+}
+
+/// Read side of the offset. `None` means no probe has completed since start,
+/// which is distinct from `Some(0)`, a probe that completed immediately.
+fn decode_completion(raw: u64) -> Option<u64> {
+    raw.checked_sub(1)
+}
+
+// Monotonic, process-local timestamps: zero is reserved for "not measured".
+fn probe_clock_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+struct ProbeFlight(std::sync::Arc<std::sync::atomic::AtomicU64>);
+impl Drop for ProbeFlight {
+    fn drop(&mut self) { self.0.store(0, std::sync::atomic::Ordering::Relaxed); }
+}
+
+pub async fn health(State(state): State<AppState>) -> (StatusCode, Json<Health>) {
+    // AMUX-4225: a pooled read can wait 30s and SQLite itself can wait 5s.
+    // Neither may occupy a Tokio worker, including the worker accepting TLS.
+    // One in-flight probe per store prevents timed-out requests from filling
+    // the blocking pool. The permit stays WITH the work after HTTP times out.
+    let started = std::time::Instant::now();
+    let phase = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let result = match state.store.health_probe.clone().try_acquire_owned() {
+        Ok(permit) => {
+            state.store.health_probe_started.store(probe_clock_ms(), std::sync::atomic::Ordering::Relaxed);
+            let store = state.store.clone();
+            let phase = phase.clone();
+            let task = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let _flight = ProbeFlight(store.health_probe_started.clone());
+                let probe_started = std::time::Instant::now();
+                phase.store(1, std::sync::atomic::Ordering::Relaxed);
+                // Readability alone concealed a dead writer for hours while
+                // every queued mutation failed. Exercise the serialized write
+                // path without changing the revision or creating an event.
+                store.write(|_| Ok(crate::db::WriteOutcome { applied: false, events: vec![] }))
+                    .map_err(|_| "writer_probe_failed")?;
+                let conn = store.try_read().ok_or("read_pool_exhausted")?;
+                phase.store(2, std::sync::atomic::Ordering::Relaxed);
+                let rev: u64 = conn.query_row("SELECT rev FROM _amux_rev WHERE id = 1", [], |r| r.get(0))
+                    .map_err(|_| "revision_read_failed")?;
+                phase.store(3, std::sync::atomic::Ordering::Relaxed);
+                let board = match crate::db::board_store::probe_board_read(&conn) {
+                    Ok(n) => BoardProbe { measured: true, ok: true, rows_mapped: n, error: None },
+                    Err(e) => {
+                        tracing::warn!(target: "health", error = %e, verdict = "board_mapper_failed",
+                            "health board row mapper failed (AF-332)");
+                        BoardProbe { measured: true, ok: false, rows_mapped: 0, error: Some(e.to_string()) }
+                    }
+                };
+                // A timed-out JoinHandle keeps running, but used to discard
+                // every eventual success. The watchdog then inferred a dead
+                // database from three slow samples and killed a serving app.
+                // RECORDED WHETHER OR NOT THE HTTP CALLER IS STILL LISTENING.
+                // A cancelled probe keeps running, so this is the only place
+                // the real duration of a slow probe is ever known.
+                let took_ms = probe_started.elapsed().as_millis() as u64;
+                LAST_PROBE_COMPLETION_RAW
+                    .store(encode_completion(took_ms), std::sync::atomic::Ordering::Relaxed);
+                if board.ok {
+                    store.health_probe_last_success.store(probe_clock_ms(), std::sync::atomic::Ordering::Relaxed);
+                    if took_ms >= PROBE_BUDGET_MS {
+                        tracing::info!(target:"health", verdict="slow_probe_completed",
+                            measured=true, elapsed_ms=took_ms, budget_ms=PROBE_BUDGET_MS,
+                            "store probe completed after the HTTP deadline; readiness history retained");
+                    }
+                }
+                Ok((rev, board))
+            });
+            match tokio::time::timeout(std::time::Duration::from_millis(PROBE_BUDGET_MS), task).await {
+                Ok(Ok(result)) => result,
+                Ok(Err(_)) => Err("probe_task_failed"),
+                Err(_) => Err("probe_deadline_exceeded"),
+            }
+        }
+        Err(_) => Err("probe_already_in_flight"),
+    };
+    let (rev, store, code, board) = match result {
+        Ok((rev, board)) => (Some(rev), "ok", StatusCode::OK, board),
+        Err(reason) => {
+            tracing::warn!(target: "health", verdict = reason, measured = false,
+                phase = phase.load(std::sync::atomic::Ordering::Relaxed),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                commit = env!("AMUX_BUILD_COMMIT"), build = %state.build_hash,
+                pid = std::process::id(), "health store probe unavailable; returning identity without blocking the runtime");
+            (None, "hung", StatusCode::SERVICE_UNAVAILABLE,
+                BoardProbe { measured: false, ok: false, rows_mapped: 0, error: Some(reason.into()) })
+        }
+    };
+    let now = probe_clock_ms();
+    let age = |value: u64| (value != 0).then(|| now.saturating_sub(value));
+    let store_probe = StoreProbeProgress {
+        last_success_age_ms: age(state.store.health_probe_last_success.load(std::sync::atomic::Ordering::Relaxed)),
+        in_flight_age_ms: age(state.store.health_probe_started.load(std::sync::atomic::Ordering::Relaxed)),
+        probe_budget_ms: PROBE_BUDGET_MS,
+        last_completion_ms: decode_completion(
+            LAST_PROBE_COMPLETION_RAW.load(std::sync::atomic::Ordering::Relaxed),
+        ),
+        write_inflight: state.store.write_inflight.load(std::sync::atomic::Ordering::Relaxed),
+        write_wait_max_ms: state.store.write_wait_max_ms.load(std::sync::atomic::Ordering::Relaxed),
+        blocking_dispatch_max_ms: state
+            .store
+            .blocking_dispatch_max_ms
+            .load(std::sync::atomic::Ordering::Relaxed),
+    };
+    let board_bad = board.measured && !board.ok;
+    let fds = fd_health();
+    // Descriptor pressure degrades `status` but does NOT fail the request: the
+    // server is still serving, and returning 503 here would take the fleet down
+    // on a warning. `status` is the field that carries the warning; `store` is
+    // the one that gates the code.
+    let fd_tight = fds.as_ref().is_some_and(|f| f.ratio >= fd_ceiling());
+    // Cheap read of the monitor's last cached verdict — no DB, no re-run, and
+    // correct (unknown) even if the monitor is dead (AMUX-2625).
+    let (conf, conf_age) =
+        crate::invariants::health_confidence(chrono::Utc::now().timestamp() as f64);
+    (
+        code,
+        Json(Health {
+            // `degraded-board` ranks ABOVE fd pressure and below a hung
+            // store: an unreadable board means the surface the whole fleet
+            // coordinates through is down, which is worse than descriptor
+            // pressure and is the thing that went unreported for 20 minutes.
+            //
+            // It does NOT fail the request, same reasoning the fd branch
+            // records: a 503 here invites a watchdog restart, and a restart
+            // does not fix a schema drift or a serializer panic. `status` is
+            // the field that carries the alarm; `store` is the one that gates
+            // the code.
+            status: if store != "ok" {
+                "degraded"
+            } else if board_bad {
+                "degraded-board"
+            } else if fd_tight {
+                "degraded-fds"
+            } else {
+                "ok"
+            },
+            board,
+            build: state.build_hash.clone(),
+            commit: env!("AMUX_BUILD_COMMIT"),
+            commit_full: env!("AMUX_BUILD_COMMIT_FULL"),
+            uptime_s: state.started.elapsed().as_secs(),
+            rev,
+            store,
+            store_probe,
+            pid: std::process::id(),
+            server: "amux-rust",
+            fds,
+            confidence: conf.as_str(),
+            confidence_age_s: conf_age,
+            downtime_before_boot_s: crate::runtime_jobs::heartbeat::boot_gap()
+                .map(|g| g.seconds),
+            downtime_before_boot_cause: crate::runtime_jobs::heartbeat::boot_gap()
+                .and_then(|g| g.cause)
+                .map(|c| c.as_str()),
+            mem: mem_health(),
+            admission: admission(),
+            disk: disk_health(),
+            tailnet: crate::runtime_jobs::tailnet_watch::cached(),
+            reconciled: state
+                .reconciled
+                .load(std::sync::atomic::Ordering::Acquire),
+        }),
+    )
+}
+
+/// GET /api/debug/tmux — runs the exact fleet-discovery command from INSIDE
+/// this process and reports argv, exit status, output sizes, and the env
+/// that determines the socket. Exists because the live launchd instance
+/// served running=0 for the whole fleet while the same binary in a login
+/// shell served 49, and no log line could say why (ethos rule 4: the
+/// instrument must express the discriminator, from the consumer's vantage).
+pub async fn debug_tmux() -> axum::Json<serde_json::Value> {
+    let socket_ownership = crate::backend::tmux_health::observe().await;
+    let _ = socket_ownership.invariant();
+    let mut command = tokio::process::Command::new("tmux");
+    command.kill_on_drop(true).args([
+        "-N",
+        "list-sessions",
+        "-F",
+        "#{session_name}\t#{session_activity}\t#{session_created}",
+    ]);
+    let list_result = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        command.output(),
+    )
+    .await;
+    let out = match list_result {
+        Ok(out) => out.map_err(|e| e.to_string()),
+        Err(_) => {
+            tracing::warn!(target: "amux::tmux", verdict = "diagnostic_probe_timeout",
+                "tmux diagnostic list timed out after 3s; socket ownership evidence is retained");
+            Err("tmux list-sessions timed out after 3s".to_string())
+        }
+    };
+    let which = std::process::Command::new("which").arg("tmux").output();
+    // AMUX-3700: how often a pane capture had to be KILLED on its deadline.
+    // A bounded capture is invisible by construction — the request succeeds and
+    // the lane's preview is merely absent — so a tmux that has started hanging
+    // reads exactly like a quiet fleet. Before the bound existed, the same
+    // condition showed up as GET /api/sessions at 12.1s and 93.3s, diagnosed
+    // from raw latency rows because nothing could name the cause.
+    let pane_timeouts = crate::api::sessions_legacy::PANE_CAPTURE_TIMEOUTS
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let pane_last = crate::api::sessions_legacy::PANE_CAPTURE_LAST_TIMEOUT
+        .lock()
+        .ok()
+        .and_then(|l| l.clone())
+        .map(|(lane, ts)| serde_json::json!({"lane": lane, "ts": ts}));
+    // AF-320: `stdout_lines: 0` is the exact reading this endpoint was built to
+    // explain, and on its own it cannot say whether tmux answered with nothing
+    // or was never reached. The contract puts that clause in the same payload.
+    axum::Json(match out {
+        Ok(o) => crate::api::measured::measured(
+            serde_json::json!({
+            "spawn": "ok",
+            "socket_ownership": socket_ownership,
+            "pane_capture_timeouts": pane_timeouts,
+            "pane_capture_last_timeout": pane_last,
+            "pane_capture_last_timeout_detail": crate::api::sessions_legacy::PANE_CAPTURE_LAST_TIMEOUT_DETAIL.lock().ok().and_then(|last| last.clone()),
+            "pane_capture_note": "captures killed on AMUX_PANE_CAPTURE_TIMEOUT_S (default 3s). \
+                                  In-memory, so a restart resets it; a non-zero count means \
+                                  a probe missed its deadline and some lane previews may be missing. \
+                                  last_timeout_detail distinguishes child exit from pipe EOF and counts drained bytes.",
+            "exit": o.status.to_string(),
+            "stdout_bytes": o.stdout.len(),
+            "stdout_lines": String::from_utf8_lossy(&o.stdout).lines().count(),
+            "stdout_head": String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or(""),
+            "stderr": String::from_utf8_lossy(&o.stderr).trim(),
+            "which_tmux": which.ok().map(|w| String::from_utf8_lossy(&w.stdout).trim().to_string()),
+            "env_path": std::env::var("PATH").unwrap_or_default(),
+            "env_tmux_tmpdir": std::env::var("TMUX_TMPDIR").ok(),
+            "env_tmpdir": std::env::var("TMPDIR").ok(),
+            "env_tmux": std::env::var("TMUX").ok(),
+            "cwd": std::env::current_dir().ok().map(|p| p.display().to_string()),
+            }),
+            String::from_utf8_lossy(&o.stdout).lines().count(),
+        ),
+        Err(e) => crate::api::measured::unmeasured(
+            serde_json::json!({
+                "spawn": "failed",
+                "error": e,
+                "socket_ownership": socket_ownership,
+                "pane_capture_timeouts": pane_timeouts,
+                "pane_capture_last_timeout": pane_last,
+                "pane_capture_last_timeout_detail": crate::api::sessions_legacy::PANE_CAPTURE_LAST_TIMEOUT_DETAIL.lock().ok().and_then(|last| last.clone())
+            }),
+            "tmux could not be spawned or did not answer within 3s; the fleet was never listed",
+        ),
+    })
+}
+
+/// GET /api/debug/scan returns the terminal scan loop's last pass, so a
+/// demotion that leaves no trace is not mistaken for a scan that found nothing
+/// (ethos rule 4, the D1 "scan" deviation). Advertised in ethos.md and the
+/// system-jobs registry (`detail: Some("/api/debug/scan")`) but unrouted until
+/// AF-80: a claimed-but-not-implemented instrument (ethos rule 6). Reports which lanes
+/// were demoted off pane-scraping and on what basis (their own protocol voice
+/// vs the backend's native agent-status report), which were actually captured,
+/// which captures or native reads failed, and the per-worker dedupe hash that
+/// gates re-firing a still-on-screen banner. A `null` last_pass_at means the
+/// loop has not completed a pass yet; if that persists past AMUX_RS_SCAN_SECS,
+/// `/api/system-jobs` names the `terminal-scan` job as stalled.
+pub async fn debug_scan() -> axum::Json<serde_json::Value> {
+    let now = crate::runtime_jobs::registry::unix_now();
+    match crate::orchestrator::scan::last_scan_state() {
+        // AF-320. Every list below can be legitimately empty, and "the loop found
+        // nothing to demote" and "the loop has never run" produce the same empty
+        // lists. n_considered is the number of lanes the pass actually looked at.
+        Some(s) => axum::Json(crate::api::measured::measured(
+            serde_json::json!({
+            "note": "the terminal scan loop's last pass, the FALLBACK voice for hookless \
+                     workers. A lane in demoted_structured spoke for itself (live protocol \
+                     session); one in demoted_native was reported by its backend (herdr \
+                     agent_status); one in scanned had its pane captured because neither \
+                     voice was available. A skip here leaves a trace on purpose (ethos rule 4).",
+            "now": now,
+            "last_pass_at": s.last_pass_at,
+            "last_pass_age_s": s.last_pass_at.map(|t| now - t),
+            "scan_secs": std::env::var("AMUX_RS_SCAN_SECS").ok(),
+            "scanned": s.report.scanned,
+            "demoted_structured": s.report.demoted_structured,
+            "demoted_native": s.report.demoted_native,
+            "native_status_failures": s.report.native_status_failures,
+            "process_exits": s.report.process_exits,
+            "process_exit_failures": s.report.process_exit_failures,
+            "stale_process_exits": s.report.stale_process_exits,
+            "stale_observations": s.report.stale_observations,
+            "capture_failures": s.report.capture_failures,
+            "events_applied": s.report.events_applied,
+            "deduped": s.deduped,
+            }),
+            s.report.scanned.len()
+                + s.report.demoted_structured.len()
+                + s.report.demoted_native.len()
+                + s.report.process_exits.len()
+                + s.report.stale_process_exits.len(),
+        )),
+        None => axum::Json(crate::api::measured::unmeasured(
+            serde_json::json!({
+            "note": "the terminal scan loop has not completed a pass yet, so no demotion \
+                     decisions to report. If this persists past AMUX_RS_SCAN_SECS, check \
+                     /api/system-jobs for the 'terminal-scan' job.",
+            "now": now,
+            "last_pass_at": serde_json::Value::Null,
+            "scanned": Vec::<String>::new(),
+            "demoted_structured": Vec::<String>::new(),
+            "demoted_native": Vec::<String>::new(),
+            "native_status_failures": Vec::<String>::new(),
+            "process_exits": serde_json::Map::new(),
+            "process_exit_failures": Vec::<String>::new(),
+            "stale_process_exits": serde_json::Map::new(),
+            "stale_observations": Vec::<String>::new(),
+            "capture_failures": Vec::<String>::new(),
+            "events_applied": 0,
+            "deduped": serde_json::Map::new(),
+            }),
+            "the terminal scan loop has not completed a pass yet — these empty lists are \
+             the absence of a measurement, not the absence of demotions",
+        )),
+    }
+}
+
+/// GET /api/debug/downtime — the recorded outages, most recent first (AEAB-29).
+///
+/// The CATALOG row for the `heartbeat` job advertises this path, and an
+/// advertised-but-unrouted instrument is ethos rule 6 (an audit trail that is
+/// claimed and not implemented). It answers the question that had no answer on
+/// 2026-08-18: was amux down, when, and for how long?
+pub async fn debug_downtime(State(state): State<AppState>) -> axum::Json<serde_json::Value> {
+    let conn = match state.store.read() {
+        Ok(c) => c,
+        Err(e) => {
+            return axum::Json(crate::api::measured::unmeasured(
+                serde_json::json!({ "error": e.to_string(), "outages": [] }),
+                "the store could not be opened, so no outage row was read",
+            ));
+        }
+    };
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    // A query that FAILS must not render as "there were never any outages".
+    // Caught live on AF-99: with migrations 0022/0023 written but not registered,
+    // `requests_during` did not exist, prepare() failed, and this endpoint served
+    // `"outages": []` — which is exactly what a healthy server with no history
+    // looks like. I read that as the false row having been corrected. An empty
+    // list and a broken query must be distinguishable (ethos rule 4).
+    let mut query_error: Option<String> = None;
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT down_from, up_at, seconds, port, requests_during FROM server_downtime \
+         ORDER BY up_at DESC LIMIT 100",
+    ) {
+        if let Ok(it) = stmt.query_map([], |r| {
+            let served: Option<i64> = r.get(4)?;
+            // The row's own verdict, so a reader never has to re-derive the rule
+            // (AF-99). It is the same predicate downtime_within() subtracts on.
+            let (kind, subtractable) = match served {
+                Some(0) => ("downtime", true),
+                Some(_) => ("heartbeat-gap", false),
+                None => ("unverified", false),
+            };
+            Ok(serde_json::json!({
+                "down_from": crate::api::request_log::local_when(r.get::<_, f64>(0)?),
+                "up_at": crate::api::request_log::local_when(r.get::<_, f64>(1)?),
+                "down_from_ts": r.get::<_, f64>(0)?,
+                "up_at_ts": r.get::<_, f64>(1)?,
+                "seconds": r.get::<_, f64>(2)?,
+                "minutes": (r.get::<_, f64>(2)? / 60.0 * 10.0).round() / 10.0,
+                "noticed_by_port": r.get::<_, Option<i64>>(3)?,
+                "requests_during": served,
+                "kind": kind,
+                "counts_as_downtime": subtractable,
+            }))
+        }) {
+            rows.extend(it.filter_map(|r| r.ok()));
+        } else {
+            query_error = Some("server_downtime rows could not be read".into());
+        }
+    } else {
+        query_error = Some(
+            "server_downtime could not be queried — the schema is older than this \
+             binary expects (is a migration unregistered or unapplied?)"
+                .into(),
+        );
+    }
+    let last_beat: Option<f64> = conn
+        .query_row("SELECT beat_at FROM server_heartbeat WHERE id = 1", [], |r| r.get(0))
+        .ok();
+    let query_error_reason = query_error.clone();
+    let body = serde_json::json!({
+        "note": "Gaps in the liveness heartbeat. `down_from` is the LAST CONFIRMED \
+                 BEAT, so the true stop is within one beat interval after it — the \
+                 number is deliberately the one that can be proved rather than a guess. \
+                 READ `kind` BEFORE USING A ROW: only `downtime` (requests_during = 0) \
+                 means no server was running, and only those are subtracted by \
+                 downtime_within(). `heartbeat-gap` means the server SERVED requests \
+                 throughout — the beat loop stopped, amux did not — and `unverified` \
+                 means the request log could not be counted. Filing all three was AF-99: \
+                 a row claiming 759 minutes of downtime covered 33,455 served requests, \
+                 and this table is built to be SUBTRACTED from steer-queue age, rot \
+                 timers and missed schedules.",
+        "beat_interval_s": crate::runtime_jobs::heartbeat::beat_interval().as_secs(),
+        "min_gap_s": crate::runtime_jobs::heartbeat::min_gap_s(),
+        "last_beat_at": last_beat.map(crate::api::request_log::local_when),
+        "this_boot_followed_downtime_s": crate::runtime_jobs::heartbeat::boot_gap().map(|g| g.seconds),
+        "outages": rows,
+        // Present ONLY when the read failed, so a consumer can tell an empty
+        // history from an unreadable one.
+        "error": query_error,
+    });
+    // AF-320 makes that same distinction MACHINE-READABLE. `error` above is the
+    // prose half and predates the contract; a consumer had to know to look for
+    // it, which is what AF-99 shows nobody does.
+    axum::Json(match query_error_reason {
+        Some(w) => crate::api::measured::unmeasured(body, &w),
+        None => crate::api::measured::measured(body, rows.len()),
+    })
+}
+
+#[cfg(test)]
+mod disk_tests {
+    use super::*;
+
+    /// AMUX-4746: the disk reading must name the filesystem it is about.
+    ///
+    /// A lane's watch script logged 16,280 consecutive "No space left on
+    /// device" write failures and nothing reported it. This probe was NOT
+    /// wrong: from the host_metrics series covering those failures, free space
+    /// on the volume holding both ~/.amux and that lane's scratchpad never fell
+    /// below 251 GB of 1.8 TB. `state: "ok"` was the right answer to the
+    /// question this probe asks, and the question is narrower than "does the
+    /// host have disk" — which is how a reader takes it.
+    ///
+    /// Naming the path is what separates those two readings.
+    #[test]
+    fn the_disk_reading_says_which_filesystem_it_measured() {
+        let h = disk_health();
+        assert!(
+            h.free_gb.is_some(),
+            "this host must be readable or the rest of the cell proves nothing"
+        );
+        let path = h
+            .measured_path
+            .as_deref()
+            .expect("a reading that succeeded must name the path it came from");
+        assert!(
+            std::path::Path::new(path).exists(),
+            "the named path must be one that actually answered statvfs: {path}"
+        );
+    }
+
+    /// THE FAULT TEST, run WITHOUT filling a real disk (the card asks for
+    /// exactly that): point the reader at a path that does not exist and prove
+    /// the walk-up is disclosed rather than silent.
+    ///
+    /// `statvfs` fails with ENOENT on a missing path, so the reader climbs to
+    /// the nearest existing ancestor. That ancestor can be a DIFFERENT volume
+    /// from the one the leaf will eventually live on, and before this the
+    /// payload reported its numbers with nothing to say so.
+    #[test]
+    fn a_reading_taken_from_an_ancestor_names_the_ancestor_not_the_leaf() {
+        let base = std::env::temp_dir();
+        let missing = base.join("amux-4746-does-not-exist").join("nor-this").join("nor-this-either");
+        assert!(!missing.exists(), "the fixture path must genuinely not exist");
+
+        let (free, total, named) =
+            statvfs_free_total(&missing).expect("the walk must reach an existing ancestor");
+        assert!(free >= 0.0 && total > 0.0, "the ancestor gave a real reading");
+        assert_ne!(
+            named,
+            missing.display().to_string(),
+            "the leaf does not exist, so the reading cannot be from it"
+        );
+        assert!(
+            std::path::Path::new(&named).exists(),
+            "the named path must exist: {named}"
+        );
+        assert!(
+            missing.starts_with(&named),
+            "the reading must come from an ANCESTOR of the requested path, not an \
+             unrelated one: asked {} got {named}",
+            missing.display()
+        );
+    }
+
+    /// The thresholds still decide the verdict, and a named path must not make
+    /// a full disk read as healthy. Synthetic values, so this needs no real
+    /// disk pressure to exercise the failing arm.
+    #[test]
+    fn naming_the_path_did_not_soften_the_verdict() {
+        let (crit, warn) = (5.0, 20.0);
+        assert_eq!(disk_state_with_thresholds(Some(1.0), crit, warn), "critical");
+        assert_eq!(disk_state_with_thresholds(Some(10.0), crit, warn), "warn");
+        assert_eq!(disk_state_with_thresholds(Some(500.0), crit, warn), "ok");
+        assert_eq!(disk_state_with_thresholds(None, crit, warn), "unknown");
+    }
+
+    /// The NEGATIVE half: "could not read" must never render as healthy. An
+    /// unreadable disk reported as `ok` is the silent probe that gets trusted.
+    #[test]
+    fn unknown_is_not_ok() {
+        assert_eq!(disk_state(None), "unknown");
+        assert_ne!(disk_state(None), disk_state(Some(500.0)));
+    }
+
+    /// Rebuilt from the incident this exists for: 2026-08-10, ~37 abandoned
+    /// cargo target trees took this volume to 741 MB free and writes started
+    /// failing with ENOSPC while a 50-session fleet ran.
+    #[test]
+    fn the_2026_08_10_enospc_would_have_read_critical() {
+        assert_eq!(disk_state(Some(0.741)), "critical");
+    }
+
+    /// And the half that keeps it from being an alarm that is always on: this
+    /// volume is 1.8 TB at 91% used and perfectly fine. A percentage threshold
+    /// would fire here permanently, which is a detector reporting that the disk
+    /// exists (ethos rule 7).
+    #[test]
+    fn todays_170gb_free_at_91_percent_used_reads_ok() {
+        assert_eq!(disk_state(Some(170.0)), "ok");
+    }
+
+    /// Rebuilt from the 2026-08-24 incident, which is why the thresholds moved:
+    /// the volume fell 144 GB -> 13 GB overnight and sat at 100% capacity. The
+    /// OLD thresholds called 13 GB `warn`. On a box running ~50 lanes that is
+    /// an emergency, and the old numbers would have under-called it again.
+    #[test]
+    fn the_2026_08_24_overnight_fall_is_called_at_its_real_severity() {
+        assert_eq!(disk_state(Some(144.0)), "ok", "where the night started — genuinely fine");
+        assert_eq!(disk_state(Some(60.0)), "warn", "falling, with runway to act");
+        assert_eq!(disk_state(Some(13.0)), "critical", "where it actually ended up");
+    }
+
+    /// Boundaries pinned so a later refactor cannot slide them silently.
+    #[test]
+    fn the_thresholds_discriminate_at_their_own_boundaries() {
+        assert_eq!(disk_state(Some(24.99)), "critical");
+        assert_eq!(disk_state(Some(25.0)), "warn");
+        assert_eq!(disk_state(Some(74.99)), "warn");
+        assert_eq!(disk_state(Some(75.0)), "ok");
+    }
+
+    /// Found 2026-08-30: a 35 GB host can never reach "ok" against the
+    /// fleet-wide defaults (25/75 GB) since 100% free is still under 75 GB.
+    /// `disk_state` itself must stay pinned to the defaults — this is what
+    /// the parameterized form under `disk_thresholds`'s override exists for.
+    #[test]
+    fn a_small_host_can_reach_ok_with_scaled_down_thresholds() {
+        // Same 19 GB free that read "critical" against the fleet defaults on
+        // a 35 GB disk (this exact box, this exact day) reads "ok" once the
+        // thresholds are recalibrated for its real size.
+        assert_eq!(disk_state(Some(19.0)), "critical", "unscaled default still fires, correctly");
+        assert_eq!(disk_state_with_thresholds(Some(19.0), 5.0, 10.0), "ok");
+        assert_eq!(disk_state_with_thresholds(Some(7.0), 5.0, 10.0), "warn");
+        assert_eq!(disk_state_with_thresholds(Some(3.0), 5.0, 10.0), "critical");
+    }
+
+    /// `disk_state_with_thresholds` at the DEFAULT thresholds must behave
+    /// identically to `disk_state` — same function, not a fork that could
+    /// drift from the incident-pinned regression tests above.
+    #[test]
+    fn parameterized_form_matches_disk_state_at_defaults() {
+        for g in [0.741, 13.0, 24.99, 25.0, 60.0, 74.99, 75.0, 144.0, 170.0] {
+            assert_eq!(
+                disk_state_with_thresholds(Some(g), DISK_CRITICAL_GB_DEFAULT, DISK_WARN_GB_DEFAULT),
+                disk_state(Some(g)),
+                "diverged at {g} GB"
+            );
+        }
+    }
+
+    /// The statvfs read must actually work. A reader that compiles everywhere
+    /// and returns None on the host you ship to is theatre, and would render as
+    /// `unknown` forever with nobody noticing.
+    ///
+    /// The first version of this asserted against `~/.amux` and turned CI red:
+    /// that directory does not exist on a fresh runner, `statvfs` returns
+    /// ENOENT, and the reading was `None`. The assertion was CORRECT to fire —
+    /// the defect was in the reader, which now walks up to an existing
+    /// ancestor. This version anchors on a path that exists everywhere so it
+    /// tests the READER rather than my home directory's layout.
+    #[test]
+    fn a_real_volume_is_readable() {
+        let (free, total, _named) = statvfs_free_total(std::path::Path::new("/"))
+            .expect("statvfs on / must be readable on any host that can run this test");
+        assert!(free > 0.0 && total > 0.0, "free {free} total {total}");
+        assert!(free <= total, "free {free} cannot exceed total {total}");
+        // Catches an f_frsize/f_bsize units mix-up, the failure that would
+        // silently scale every reading by 8x or 512x.
+        assert!(total < 1_000_000.0, "implausible volume size {total} GB — units wrong?");
+    }
+
+    /// The ancestor walk is the fix for the CI break, so it gets its own test
+    /// with a path that CANNOT exist — otherwise the fix is only exercised on
+    /// hosts that happen to be missing `~/.amux`, which is the opposite of
+    /// where it will be read.
+    #[test]
+    fn a_path_that_does_not_exist_yet_still_reports_its_volume() {
+        let missing = std::path::Path::new("/this-does-not-exist-9f3a/nor/does/this");
+        assert!(!missing.exists(), "fixture must actually be absent to test anything");
+        assert!(
+            statvfs_exact(missing).is_none(),
+            "the non-walking reader must fail here, or the walk below proves nothing"
+        );
+        let (free, total, _named) = statvfs_free_total(missing)
+            .expect("the walk must reach / and report the volume anyway");
+        assert!(free > 0.0 && total > 0.0);
+        assert_ne!(disk_state(Some(free)), "unknown");
+    }
+
+    /// And the shipped entry point must be healthy here, whatever `~/.amux`'s
+    /// state is — this is the assertion that would have caught the original
+    /// bug from the consumer's side.
+    #[test]
+    fn disk_health_never_reports_unknown_on_a_working_host() {
+        let h = disk_health();
+        let free = h.free_gb.expect("disk_health must report free space on any host");
+        let total = h.total_gb.expect("disk_health must report total space");
+        assert!(free > 0.0 && total > 0.0, "free {free} total {total}");
+        assert!(free <= total, "free {free} cannot exceed total {total}");
+        assert_ne!(h.state, "unknown", "a readable volume must not report unknown");
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    /// TODAY's real reading on a healthy box: kernel says normal, 2.2 GB swapped.
+    /// It must ALLOW. A gate that denies at the healthy baseline stops the fleet
+    /// dead and gets switched off within the hour (ethos rule 7).
+    #[test]
+    fn the_healthy_2026_08_28_baseline_allows() {
+        assert_eq!(admission_for(Some(1), Some(2207.4), 8192.0), Admission::Allow);
+    }
+
+    /// The kernel's own critical verdict denies. This is the signal preferred over
+    /// any threshold amux could pick, because the kernel computed it from the real
+    /// page accounting.
+    #[test]
+    fn a_kernel_critical_verdict_denies() {
+        assert_eq!(admission_for(Some(4), Some(0.0), 8192.0), Admission::Deny);
+    }
+
+    /// Kernel `warn` is reported, not blocked. Refusing on warn would deny during
+    /// ordinary heavy builds, and a gate that cries wolf is a gate people disable.
+    #[test]
+    fn kernel_warn_is_strained_not_denied() {
+        assert_eq!(admission_for(Some(2), Some(100.0), 8192.0), Admission::Strained);
+    }
+
+    /// Heavy sustained swap denies on its own, because the kernel's pressure level
+    /// can still read `normal` while the working set has stopped fitting.
+    #[test]
+    fn heavy_swap_denies_even_when_the_kernel_says_normal() {
+        assert_eq!(admission_for(Some(1), Some(9000.0), 8192.0), Admission::Deny);
+        assert_eq!(admission_for(Some(1), Some(8192.0), 8192.0), Admission::Deny, "boundary is inclusive");
+        assert_eq!(admission_for(Some(1), Some(8191.9), 8192.0), Admission::Allow);
+    }
+
+    /// UNKNOWN must never deny. On a host where these are unreadable — Linux, the
+    /// cloud container, a sandbox — denying would make amux unable to start any
+    /// worker at all, which is a far worse failure than not having the gate.
+    #[test]
+    fn unreadable_signals_allow_rather_than_brick_the_fleet() {
+        assert_eq!(admission_for(None, None, 8192.0), Admission::Allow);
+        assert_eq!(admission_for(None, Some(100.0), 8192.0), Admission::Allow);
+        assert_eq!(admission_for(Some(1), None, 8192.0), Admission::Allow);
+    }
+
+    /// And the live check must not be denying right now, or every lane start on
+    /// this machine is already broken.
+    #[test]
+    fn the_live_host_is_not_currently_denying() {
+        let a = admission();
+        assert_ne!(
+            a,
+            Admission::Deny,
+            "the gate is DENYING on this host right now — mem: {:?}",
+            mem_health()
+        );
+    }
+}
+
+#[cfg(test)]
+mod amux4739_probe_budget_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// AMUX-4739: `store: "hung"` is a verdict about a BUDGET, and the payload
+    /// has to say what the budget was.
+    ///
+    /// The probe is cancelled at `PROBE_BUDGET_MS` and the payload then reports
+    /// `store: "hung"` with a 503. That reads as a dead database. Measured on
+    /// 2026-09-17, the probe's own `slow_probe_completed` log says what really
+    /// happened: before the writer fix the median slow probe finished in
+    /// 68,481ms; after it, 1,044ms with nothing over 5s. Same "hung" label for
+    /// both, and a reader could not tell them apart from the payload.
+    ///
+    /// COST, concrete: that label sent an investigation after synchronous
+    /// `Store::read` and a ~440-call-site refactor, while /api/board was
+    /// answering in 1.6s at the same moment.
+    #[test]
+    fn the_probe_budget_is_published_so_hung_can_be_read_against_something() {
+        // The two uses of the budget must be the same number BY CONSTRUCTION.
+        // They were two bare `250` literals: the cancellation timeout, and the
+        // threshold for reporting an overrun of that timeout. A drift between
+        // them would make `slow_probe_completed` fire on probes that were never
+        // cancelled, or stay silent on ones that were.
+        let src = include_str!("health.rs");
+        let body = src
+            .split_once("\npub async fn health(")
+            .expect("the health handler exists")
+            .1;
+        let body = body.split_once("\n}\n").expect("its closing brace").0;
+        let body: String = body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            body.contains("timeout") && body.contains("try_acquire_owned"),
+            "the scan is not reading the health handler; {} chars of something else",
+            body.len()
+        );
+        assert!(
+            !body.contains("from_millis(250)"),
+            "the probe budget is a bare literal again; it must be PROBE_BUDGET_MS so the \
+             cancellation and the overrun report cannot drift apart"
+        );
+        assert!(
+            body.contains("PROBE_BUDGET_MS"),
+            "the handler must use the named budget"
+        );
+    }
+
+    /// The gauge has to distinguish "no probe has finished" from "a probe
+    /// finished instantly". Both are zero in the atomic, which is why the
+    /// published field is an Option and completions are floored at 1ms.
+    ///
+    /// DRIVEN THROUGH THE REAL HANDLER, after a first version of this cell
+    /// reimplemented the `0 => None` match locally and asserted on its own copy.
+    /// It passed under a mutation that deleted the flooring from the shipped
+    /// path, because the shipped path was never executed. A cell that restates
+    /// the logic it is checking cannot fail when that logic changes.
+    #[tokio::test]
+    async fn an_instant_probe_publishes_a_duration_rather_than_an_absence() {
+        LAST_PROBE_COMPLETION_RAW.store(0, Ordering::Relaxed);
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState {
+            store: std::sync::Arc::new(
+                crate::db::Store::open(&dir.path().join("h.db")).unwrap(),
+            ),
+            started: std::time::Instant::now(),
+            build_hash: "test".into(),
+            auth_token: None,
+            reconciled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        };
+
+        let (_code, Json(first)) = health(State(state.clone())).await;
+        // A fresh store probes in well under a millisecond, which is exactly
+        // the case that collapses into "nothing has ever completed" without the
+        // flooring. So this is the discriminating input, not a convenient one.
+        assert_eq!(
+            first.store, "ok",
+            "the probe must have completed for this cell to say anything"
+        );
+        assert!(
+            first.store_probe.last_completion_ms.is_some(),
+            "a probe completed, so its duration must be published; None claims none ever ran"
+        );
+        assert_eq!(
+            first.store_probe.probe_budget_ms, PROBE_BUDGET_MS,
+            "the budget the verdict is measured against must be in the payload"
+        );
+    }
+
+    /// The offset that keeps "no probe has completed" apart from "a probe
+    /// completed in under a millisecond".
+    ///
+    /// These are the FUNCTIONS THE HANDLER CALLS, not a restatement of them.
+    /// The previous version of this cell inlined its own `0 => None` match and
+    /// stayed green while a mutation deleted the real one.
+    #[test]
+    fn a_zero_millisecond_probe_is_not_reported_as_no_probe() {
+        assert_eq!(
+            decode_completion(0),
+            None,
+            "nothing has completed since start"
+        );
+        // The discriminating case, and the one a floor gets wrong: a probe that
+        // finished in under a millisecond DID happen and must publish 0, not
+        // absence.
+        assert_eq!(
+            decode_completion(encode_completion(0)),
+            Some(0),
+            "a sub-millisecond probe completed; None would claim none ever did"
+        );
+        // And the offset must not distort a real duration, which a floor also
+        // did: max(1) silently rewrites 0 to 1.
+        for ms in [1u64, 250, 1_044, 68_481] {
+            assert_eq!(
+                decode_completion(encode_completion(ms)),
+                Some(ms),
+                "the published duration must be the measured one, exactly"
+            );
+        }
+    }
+
+    /// The budget must be a real cap, not a value that happens to exceed every
+    /// observed probe. A budget above the slow-probe durations would never
+    /// cancel anything and the "hung" path would be dead code.
+    #[test]
+    fn the_budget_is_small_enough_to_actually_cancel_a_slow_probe() {
+        // MEASURED DURATIONS, not invented ones, run through the same decode
+        // the payload uses. Asserting a range on the constant alone is a
+        // tautology clippy rejects and it would be right to: that assertion
+        // cannot fail whatever the budget is set to.
+        //
+        // /api/health p50 on 2026-09-17 was 0.74ms. Slow probes: median 1044ms
+        // after the writer fix (2b4c247f), 68481ms before it.
+        let healthy_ms = [0u64, 1];
+        let slow_ms = [1_044u64, 68_481];
+        for ms in healthy_ms {
+            let published = decode_completion(encode_completion(ms)).expect("completed");
+            assert!(
+                published < PROBE_BUDGET_MS,
+                "a healthy {ms}ms probe must fit inside the {PROBE_BUDGET_MS}ms budget, \
+                 or the server reports itself hung while answering normally"
+            );
+        }
+        for ms in slow_ms {
+            let published = decode_completion(encode_completion(ms)).expect("completed");
+            assert!(
+                published > PROBE_BUDGET_MS,
+                "a measured slow probe of {ms}ms must exceed the {PROBE_BUDGET_MS}ms budget, \
+                 or the cancellation path this card is about is unreachable"
+            );
+        }
+    }
+}

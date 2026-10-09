@@ -417,3 +417,53 @@ d3569b097b1d264031ea7b98e2f24684e14d03a2:tests/engineeringAgentPublisher.test.mj
 # Scope: exactly these two findings in those two commits — nothing wider.
 2bdbdffdf26dd95f9b8be51665a428f74a110317:components/auth/signupConsentClient.ts:generic-api-key:16
 66dffd7bc78bac851890835b007df8b8f9299cb3:components/auth/signupConsentClient.ts:generic-api-key:21
+
+# Synthetic agent-digest secret-scan fixtures, not credentials.
+#
+# Commit 110c694 introduced tests/agentDigestStoreCore.test.mjs with two
+# assignment-shaped values (an upper-case token key and a nested client
+# secret key) that exercise the agent-digest store's own refusal of
+# key=value secrets. Both values were invented for the test, are
+# alternating letter-digit runs, and never belonged to any system. Both sit
+# on one line, so gitleaks reports one fingerprint twice. The values are
+# deliberately not quoted.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+110c69474974e48200bcb7fbd556a7e41a7234b6:tests/agentDigestStoreCore.test.mjs:generic-api-key:92
+
+# The same fixture, carried to main by the QA-release merge lane selective release
+# (release/2026-10-07-qa-release-merge-lane) in cherry-pick a07bebe24. Same file,
+# same synthetic values, now on line 100.
+#
+# Scope: exactly this one finding in that one commit -- nothing wider.
+a07bebe2432c3f003ffeb38573a694ce8ecab80a:tests/agentDigestStoreCore.test.mjs:generic-api-key:100
+
+# AMUX release test fixtures, not credentials.
+#
+# The two retention-route tests use invented bearer values for authorization
+# assertions. The commit-deadline test lists a migration identifier whose
+# long underscore-separated name resembles a generic key to the scanner.
+# None of these values grants access. The scanner pins the introducing
+# cherry-pick, so only these exact three history findings are excluded.
+# Values are intentionally not repeated here.
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4LocalRetentionTrigger.test.mjs:generic-api-key:9
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxCommitDeadline.test.mjs:generic-api-key:84
+a4a0e8b76524ae9641828d9beebf5e448c31fee5:tests/amuxV4ContentRetentionRoute.test.mjs:generic-api-key:10
+
+# AMUX Decision Maker S1d labels and a synthetic test token, not credentials.
+#
+# Commit c627ce4 introduced lib/amux/decisionMakerBodyCore.ts, whose result
+# digest is an HMAC under a per-request key with a fixed domain-separation
+# label; the scanner's generic-api-key rule reads that label, passed as the
+# second argument to hmac(), as a key. Two assertions in
+# tests/amuxDecisionMakerBody.test.mjs repeat the same label. The same test
+# file also feeds the body store's secret check an invented GitHub-token
+# shape to prove it is refused. None of these values grants access to any
+# system. Values are intentionally not repeated here.
+#
+# Scope: exactly these five findings in that one commit — nothing wider.
+c627ce4ede7ab0618b16205d8109741facab5fd8:lib/amux/decisionMakerBodyCore.ts:generic-api-key:188
+c627ce4ede7ab0618b16205d8109741facab5fd8:lib/amux/decisionMakerBodyCore.ts:generic-api-key:189
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:292
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:generic-api-key:293
+c627ce4ede7ab0618b16205d8109741facab5fd8:tests/amuxDecisionMakerBody.test.mjs:github-pat:389

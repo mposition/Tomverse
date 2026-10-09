@@ -4,6 +4,8 @@
 - 기한: **2026-12-01** — Railway가 `railway.json`·`railway.toml`(Config as Code)을 읽지 않기 시작하는 날
   ([docs.railway.com/config-as-code](https://docs.railway.com/config-as-code))
 - 대상: cron 서비스 5개 × 환경 2개(staging, production). 웹 서비스 `Tomverse`는 **대상이 아닙니다.**
+- 2026-10-07 이후: 환경 `dev`가 더해졌고(cron 3개, `develop` 배포), staging은 `test` 브랜치를 배포합니다
+  (`.railway/scheduled-jobs.ts`의 `RAILWAY_ENVIRONMENT_BRANCHES`, `.github/RELEASE_CHECKLIST.md` 7.9).
 
 ## 1. 왜 해야 하는가
 
@@ -56,6 +58,8 @@ partial 이름(`scheduled-jobs`)은 첫 apply 뒤에 **바꾸지 않습니다.**
 ## 4. 적용 절차 (환경마다 한 번, staging 먼저)
 
 **실행 위치:** 로컬 PC의 PowerShell, Tomverse clone 폴더 안(이 PR이 병합된 `develop`, production은 `main`).
+dev는 `develop`, staging은 `test` checkout에서 적용합니다 — staging cron이 돌리는 코드와 표가 어긋나지 않게.
+단 `test`가 2026-10-07의 lane 전환을 담기 전에는 staging에 apply하지 않습니다(`docs/ops/dev-test-lanes.md` 4절).
 **필요한 것:**
 - Node 22
 - Railway CLI **5.42.1 이상**(`railway --version`으로 확인, 낮으면 `railway upgrade`)

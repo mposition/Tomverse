@@ -543,6 +543,16 @@ test("approve proposals bind a complete GitHub PR head and diff digest to the ta
   assert.equal(await prisma.amuxReviewProposal.count({ where: { escalationId: fixture.escalation.id } }), 1);
 });
 
+test("PR-less approval remains forbidden for a legacy review task", async () => {
+  const fixture = await reviewFixture();
+  await prisma.amuxWorkItem.update({ where: { id: fixture.task.id },
+    data: { reviewPrNumber: null } });
+  await assert.rejects(issueApproveProposal(fixture, {
+    reviewPrNumber: null, reviewBaseSha: null,
+    reviewHeadSha: null, reviewDiffDigest: null,
+  }), /PR-less approval requires a v4 non-code Task/);
+});
+
 test("review PR attached after settlement remains approvable across a metadata-only revision", async () => {
   const fixture = await reviewFixture();
   await prisma.amuxWorkItem.update({

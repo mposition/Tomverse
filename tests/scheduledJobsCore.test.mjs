@@ -100,6 +100,8 @@ test("the IaC cron table names a real script and a variable list for each enviro
     assert.ok(scripts[script], `${job.service}: package.json has no "${script}" script`);
     for (const environment of Object.keys(RAILWAY_ENVIRONMENT_BRANCHES)) {
       const variables = job.variables[environment];
+      // dev is opt-in per job; absent there means not declared there.
+      if (environment === "dev" && variables === undefined) continue;
       // An empty list is not "no variables": applying it deletes every variable
       // the service has in that environment.
       assert.ok(
@@ -123,12 +125,13 @@ test("the IaC resource list is exactly the table, per environment, and refuses t
   };
   for (const [environment, branch] of Object.entries(RAILWAY_ENVIRONMENT_BRANCHES)) {
     const resources = buildScheduledJobResources(environment, dsl);
+    const declaredJobs = RAILWAY_CRON_SERVICES.filter((job) => job.variables[environment] !== undefined);
     assert.deepEqual(
       resources.map((resource) => resource.name),
-      RAILWAY_CRON_SERVICES.map((job) => job.service),
+      declaredJobs.map((job) => job.service),
       `${environment}: the resource list drops or adds a service`
     );
-    for (const job of RAILWAY_CRON_SERVICES) {
+    for (const job of declaredJobs) {
       const resource = resources.find((entry) => entry.name === job.service);
       assert.deepEqual(resource.source, { repo: "mposition/Tomverse", branch });
       assert.equal(resource.start, job.startCommand);
@@ -151,6 +154,39 @@ test("the IaC resource list is exactly the table, per environment, and refuses t
     RAILWAY_CRON_SERVICES.length,
     "two cron services run the same command"
   );
+});
+
+test("production and staging declare every job; dev declares the operator's set, from develop", () => {
+  // A job missing from production or staging is a service the partial deletes
+  // there, so only dev may leave one out. The dev set is the operator's
+  // 2026-10-07 decision: no Provider Probe, Provider Usage Sync or Marketing
+  // Publisher (the one job that acts on outside accounts).
+  for (const environment of ["production", "staging"]) {
+    for (const job of RAILWAY_CRON_SERVICES) {
+      assert.ok(job.variables[environment], `${job.service} is missing from ${environment}`);
+    }
+  }
+  assert.deepEqual(
+    RAILWAY_CRON_SERVICES.filter((job) => job.variables.dev !== undefined).map((job) => job.key),
+    ["creditReconciliation", "maintenance", "providerModelCatalog"]
+  );
+  for (const job of RAILWAY_CRON_SERVICES) {
+    if (job.variables.dev === undefined) continue;
+    // Same endpoint and secret names as staging; the values differ per environment.
+    assert.deepEqual([...job.variables.dev].sort(), [...job.variables.staging].sort(), job.service);
+  }
+  assert.equal(RAILWAY_ENVIRONMENT_BRANCHES.dev, "develop");
+});
+
+test("develop lands on dev; staging holds the test branch's release candidate", () => {
+  // The lane switch (2026-10-07). staging following develop again would put
+  // every develop merge back on the environment a pinned verification is
+  // using, which is the wait this split removed.
+  assert.deepEqual(RAILWAY_ENVIRONMENT_BRANCHES, {
+    production: "main",
+    staging: "test",
+    dev: "develop",
+  });
 });
 
 test("the IaC entry point stays a pass-through owning only the scheduled-jobs partial", () => {

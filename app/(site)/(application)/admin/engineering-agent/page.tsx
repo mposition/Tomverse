@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { getServerSession } from "next-auth/next";
 import { AdminEngineeringAgentPanel } from "@/components/admin/AdminEngineeringAgentPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AdminProductResearchPanel } from "@/components/admin/AdminProductResearchPanel";
 import { hasAdminPermission } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
@@ -10,6 +11,7 @@ import {
   readEngineeringAgentConsole,
   type EngineeringAgentConsoleSection,
 } from "@/lib/engineeringAgentConsoleRead";
+import { readProductResearchConsole } from "@/lib/productResearchConsoleRead";
 
 const TABS = adminNavItemTabs("engineering-agent");
 
@@ -31,10 +33,19 @@ export default async function AdminEngineeringAgentPage({
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
-  const initial = await readEngineeringAgentConsole(
-    tab.id as EngineeringAgentConsoleSection,
-    hasAdminPermission(session, "engineering-agent:write"),
-  );
+
+  // The product-research section is on this screen rather than its own
+  // (docs/policy/product-research-agent.md §4: one shared agent area). It
+  // shares nothing else: its own read, its own panel, and no control at all,
+  // because that agent proposes nothing to decide.
+  const productResearch = tab.id === "product-research";
+  const initial = productResearch
+    ? null
+    : await readEngineeringAgentConsole(
+        tab.id as EngineeringAgentConsoleSection,
+        hasAdminPermission(session, "engineering-agent:write"),
+      );
+  const observations = productResearch ? await readProductResearchConsole() : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -46,7 +57,11 @@ export default async function AdminEngineeringAgentPage({
         query={query}
       />
       {/* Keyed by section: a tab change remounts the panel with its own rows. */}
-      <AdminEngineeringAgentPanel key={tab.id} initial={initial} />
+      {observations === null ? (
+        <AdminEngineeringAgentPanel key={tab.id} initial={initial!} />
+      ) : (
+        <AdminProductResearchPanel key={tab.id} initial={observations} />
+      )}
     </div>
   );
 }

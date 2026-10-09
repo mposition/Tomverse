@@ -99,10 +99,13 @@ function SignInButtons({
     turnstileSiteKey,
     signupConsentEnabled = false,
     mode,
+    onHeldSignupChange,
 }: {
     turnstileSiteKey?: string;
     signupConsentEnabled?: boolean;
     mode: AuthScreenMode;
+    /** Tells the card when this tab has turned into the sign-up step. */
+    onHeldSignupChange?: (held: boolean) => void;
 }) {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -179,6 +182,9 @@ function SignInButtons({
     // The sign-in screen proved this address and found no account: the code is
     // now a one-time sign-up hold, and this tab turns into the sign-up step.
     const [heldSignup, setHeldSignup] = useState(false);
+    useEffect(() => {
+        onHeldSignupChange?.(heldSignup);
+    }, [heldSignup, onHeldSignupChange]);
     // Only a screen that shows the devices stores a choice -- the server writes
     // `noticeShown: true` on every attempt it is given.
     const devicesShown = signupConsentEnabled && (isSignup || heldSignup);
@@ -750,6 +756,9 @@ export function SignInPageContent({
     // it -- on short viewports the page just grows taller and scrolls
     // (UI-P1-02).
     const registerAuthConsentSlot = useAuthConsentSlotRef();
+    // The sign-in screen's held step is a sign-up: its subtitle says so, not
+    // "sign in".
+    const [heldSignup, setHeldSignup] = useState(false);
     const [consentSlot, setConsentSlot] = useState<HTMLDivElement | null>(null);
     useEffect(() => {
         registerAuthConsentSlot(consentSlot);
@@ -772,7 +781,7 @@ export function SignInPageContent({
                             Tomverse
                         </h1>
                         <p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
-                            {t(mode === "signup" ? "auth.signupDescription" : "auth.description")}
+                            {t(mode === "signup" || heldSignup ? "auth.signupDescription" : "auth.description")}
                         </p>
                     </div>
                 </div>
@@ -783,6 +792,7 @@ export function SignInPageContent({
                             turnstileSiteKey={turnstileSiteKey}
                             signupConsentEnabled={signupConsentEnabled}
                             mode={mode}
+                            onHeldSignupChange={setHeldSignup}
                         />
                     </Suspense>
                 </div>

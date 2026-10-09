@@ -49,7 +49,7 @@ export type MarketingAutomationAccessReason =
   | "webhook_signature_invalid"
   | "webhook_pipeline_fingerprint_stale"
   | "webhook_config_snapshot_invalid"
-  | "webhook_config_snapshot_stale"
+  | "webhook_production_config_unsigned"
   | "webhook_record_digest_mismatch"
   | "webhook_audit_invalid"
   | "webhook_record_mismatch"
@@ -66,6 +66,8 @@ export const MARKETING_AUTOMATION_KILL_SWITCH_ENV =
 export const TOMVERSE_DEPLOY_ENV = "TOMVERSE_DEPLOY_ENV";
 export const APP_ENV = "APP_ENV";
 export const RAILWAY_ENVIRONMENT_NAME = "RAILWAY_ENVIRONMENT_NAME";
+export const ZERNIO_WEBHOOK_SECRET_ENV = "ZERNIO_WEBHOOK_SECRET";
+export const ZERNIO_API_KEY_ENV = "ZERNIO_API_KEY";
 
 export const MARKETING_DRAFTS_KEY = "marketingAutomation.draftsEnabled";
 export const MARKETING_PUBLISH_KEY = "marketingAutomation.publishEnabled";
@@ -86,24 +88,83 @@ export const marketingAutomationEnabledFromValue = (
 export const MARKETING_PRICE_FALLBACK_ALERT_READY = false;
 
 /**
- * S1 has no receiver, dedupe, storage, mapping or status-query comparison.
- * S2 may flip this only after all of those files exist and are included in the
- * static fingerprint below.
+ * The S2e receiver, dedupe, storage, mapping and status-query comparison now
+ * exist and are in the fingerprint below. This stays false until S2f adds the
+ * separately signed production configuration generation (S1 r7 amendment 1):
+ * a staging record alone never applies an event in production.
  */
 export const MARKETING_WEBHOOK_PIPELINE_COMPLETE = false;
 
 export const MARKETING_WEBHOOK_SCHEMA_VERSION = "marketing-webhook-shadow-v1";
-export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [] as const;
+/** Written out, not imported: the receiver's core imports this module. */
+export const MARKETING_WEBHOOK_ACCEPTED_EVENT_TYPES = [
+  "post.published",
+  "post.failed",
+  "post.partial",
+  "post.cancelled",
+  "post.platform.published",
+  "post.platform.failed",
+  "post.platform.deleted",
+] as const;
 
-/** Only pipeline files that exist in S1. S2 must extend this closed list. */
+/**
+ * Every file whose bytes can decide what a received event becomes: the whole
+ * local import closure of the receiver route (receiver, signature, dedupe,
+ * storage and audit transaction, mapping, status query), plus the schema's receiver
+ * models (MARKETING_WEBHOOK_SCHEMA_MODELS, not the whole file) and
+ * the dedupe index it cannot see. Not a hand-picked subset -- the test derives
+ * the closure and refuses any difference. This module itself is left out: it
+ * holds the fingerprint, and its webhook inputs are in the descriptor below.
+ * A change to any listed file makes a signed staging record stale.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_FILES = [
+  "app/api/_marketing/zernioAdapter.ts",
+  "app/api/webhooks/zernio/route.ts",
+  "lib/adminAudit.ts",
+  "lib/adminAuditIntegrityCore.ts",
+  "lib/adminAuditSystemActors.ts",
+  "lib/clientIp.ts",
+  "lib/deploymentEnvironment.ts",
+  "lib/marketingAuditEvidence.ts",
   "lib/marketingAutomationSchema.ts",
+  "lib/marketingBannedClaims.ts",
+  "lib/marketingClaimVerbs.ts",
+  "lib/marketingFacts.ts",
+  "lib/marketingGuardCore.ts",
+  "lib/marketingGuardNormalise.ts",
+  "lib/marketingGuardRules.ts",
+  "lib/marketingKoreanClaims.ts",
+  "lib/marketingMemoryClaims.ts",
+  "lib/marketingMinorsClaims.ts",
+  "lib/marketingNegation.ts",
+  "lib/marketingPublishAdapter.ts",
+  "lib/marketingStore.ts",
+  "lib/marketingWebhookCore.ts",
+  "lib/marketingWebhookReceiver.ts",
+  "lib/marketingWebhookSettings.ts",
+  "lib/postgresConnectionConfigCore.mjs",
+  "lib/prisma.ts",
+  "lib/zernioPublishAdapter.ts",
+  "prisma/migrations/20261002120000_marketing_webhook_shadow_event_unique/migration.sql",
   "prisma/schema.prisma",
 ] as const;
 
+/** The route whose import closure the list above must equal. */
+export const MARKETING_WEBHOOK_PIPELINE_ROOT = "app/api/webhooks/zernio/route.ts";
+
+/**
+ * Names only. The staging snapshot hashes these environment values; the
+ * fingerprint carries the names, never a value.
+ */
 export const MARKETING_WEBHOOK_PIPELINE_DESCRIPTOR = {
   appSettingKeys: [MARKETING_WEBHOOK_SHADOW_KEY],
-  envNames: [APP_ENV, RAILWAY_ENVIRONMENT_NAME, TOMVERSE_DEPLOY_ENV],
+  envNames: [
+    APP_ENV,
+    RAILWAY_ENVIRONMENT_NAME,
+    TOMVERSE_DEPLOY_ENV,
+    ZERNIO_API_KEY_ENV,
+    ZERNIO_WEBHOOK_SECRET_ENV,
+  ],
   schemaVersion: MARKETING_WEBHOOK_SCHEMA_VERSION,
 } as const;
 
@@ -143,15 +204,73 @@ const canonicalPipelinePath = (value: string): string => {
   return path;
 };
 
+/**
+ * The schema models the receiver path reads or writes. These blocks, their
+ * enums, datasource and generator enter the fingerprint (operator decision
+ * 2026-10-03): an unrelated model added elsewhere in the schema no longer
+ * stales a signed record, and a change to any of these still does.
+ */
+export const MARKETING_WEBHOOK_SCHEMA_MODELS = [
+  "AdminAuditLog",
+  "AppSetting",
+  "MarketingChannel",
+  "MarketingReport",
+] as const;
+
+const MARKETING_WEBHOOK_SCHEMA_PATH = "prisma/schema.prisma";
+
+/**
+ * The declared models' blocks, the enums their fields use, and the datasource
+ * and generator blocks (a provider or relationMode change alters what the
+ * receiver can store), in schema order. Blocks end at a `}` in column 0, which
+ * `prisma format` guarantees; a watched model that cannot be found throws.
+ */
+export const marketingWebhookSchemaSlice = (schemaText: string): string => {
+  const blocks = new Map<string, string>();
+  const order: string[] = [];
+  for (const match of canonicalMarketingWebhookFileText(schemaText).matchAll(
+    /^(model|enum|datasource|generator)\s+(\w+)\s*\{[\s\S]*?^\}/gm,
+  )) {
+    const key = `${match[1]} ${match[2]}`;
+    blocks.set(key, match[0]);
+    order.push(key);
+  }
+  const wanted = new Set<string>(
+    order.filter((key) => key.startsWith("datasource ") || key.startsWith("generator ")),
+  );
+  for (const model of MARKETING_WEBHOOK_SCHEMA_MODELS) {
+    const block = blocks.get(`model ${model}`);
+    if (block === undefined) {
+      throw new Error(`Marketing webhook schema model is missing: ${model}`);
+    }
+    wanted.add(`model ${model}`);
+    for (const line of block.split("\n").slice(1)) {
+      const field = /^\s*\w+\s+(\w+)/.exec(line);
+      if (field && blocks.has(`enum ${field[1]}`)) wanted.add(`enum ${field[1]}`);
+    }
+  }
+  return `${order
+    .filter((key) => wanted.has(key))
+    .map((key) => blocks.get(key))
+    .join("\n\n")}\n`;
+};
+
 export const computeMarketingWebhookPipelineFingerprint = (
   files: ReadonlyArray<{ path: string; content: string }>,
   descriptor: unknown,
 ): string => {
   const canonicalFiles = files
-    .map((file) => ({
-      path: canonicalPipelinePath(file.path),
-      content: canonicalMarketingWebhookFileText(file.content),
-    }))
+    .map((file) => {
+      const path = canonicalPipelinePath(file.path);
+      const content = canonicalMarketingWebhookFileText(file.content);
+      return {
+        path,
+        content:
+          path === MARKETING_WEBHOOK_SCHEMA_PATH
+            ? marketingWebhookSchemaSlice(content)
+            : content,
+      };
+    })
     .sort((left, right) => codePointCompare(left.path, right.path));
 
   if (
@@ -385,13 +504,77 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * override; both notes above stand, and the value below is computed over the
  * merged schema.
  *
- * 2026-10-02: the AMUX v4 integration adds only nullable AMUX card fields,
- * AMUX analysis tables and their relations to the watched Prisma schema.
- * No marketing model, webhook input, descriptor or admission decision changes.
- * The closed digest is repinned over this merged schema, not either parent.
+ * 2026-10-02: the product-research agent's observation table is added
+ * (docs/policy/product-research-agent.md §4) -- one new model with its own
+ * triggers. Not a marketing model and not a webhook input; the digest moves
+ * because the whole Prisma schema is deliberately watched. Descriptor and
+ * admission decisions are unchanged. The value below is computed with that
+ * model's columns aligned the way `prisma format` aligns them, which is the
+ * state the file is committed in.
+ *
+ * 2026-10-03: product-research and CHAT-01 changed the schema after develop
+ * was repinned. The value below covers the merged schema including the
+ * CHAT-01 one-shot dark tables; older fingerprints are intentionally stale.
+ * SupportTriageRun and its two audit actors remain included in the merged schema. billing-finance-ops adds its digest intake actor (docs/policy/billing-finance-ops.md §7 W1a); descriptor and admission decisions unchanged. SupportTriageSuggestion and the account-deletion actor move it again.
+ *
+ * 2026-10-04: the sre-ops agent's audit actor ("ops-observer") is added to
+ * `lib/adminAuditSystemActors.ts`, and `lib/adminAudit.ts` gains
+ * `writeSystemAuditLogEntry()`, which returns the entry's hash with its id
+ * (docs/policy/sre-ops.md §3-10). Both files are in the receiver's import
+ * closure. The receiver's calls and the rows it writes are unchanged; the
+ * fingerprint moves because the closure's bytes did. Computed over the merged
+ * tree, which includes the support-triage and agent-digest actors above.
+ *
+ * 2026-10-05: AMUX v4 adds a separately scoped system-audit action for its
+ * analysis budget hold. The webhook receiver's imports and decisions do not
+ * change; its existing audit-helper closure now has different source bytes.
+ * The AMUX expiry, settlement, unknown-outcome and auto-cancel audit scopes
+ * move those same helper bytes again. Existing signed staging evidence becomes
+ * stale; the receiver's own admission and write path remain unchanged.
+ * 2026-10-07: v22 worker claim adds a closed system-audit actor in the same
+ * imported helper closure. Re-pin after the AMUX source changes are verified.
+ * 2026-10-07: A06 adds analysis claim, result, retention and key-retirement
+ * audit scopes. The receiver still uses the same audit entry path; its shared
+ * actor helper and watched schema bytes changed, so prior evidence is stale.
+ * 2026-10-07: `lib/deploymentEnvironment.ts` lists `dev`, the Railway
+ * environment that takes develop once staging holds release candidates. The
+ * receiver's staging test still needs both signals to say staging, and dev
+ * resolves to dev, so dev never reaches the shadow writer; descriptor and
+ * admission decisions are unchanged. Prior evidence is stale.
+ * 2026-10-07: A09 adds closed AMUX audit actors in the same imported helper closure.
+ * The receiver's admission and write path are unchanged.
+ * 2026-10-07: A12 portfolio and promotion work extends the watched schema
+ * and shared audit helper. The receiver's own admission stays unchanged.
+ * 2026-10-07: the AMUX Decision Maker switch store, per
+ * docs/policy/amux-decision-maker.md §10, adds three system actors to
+ * `lib/adminAuditSystemActors.ts` and its switch events' back relation to
+ * `AdminAuditLog` in the watched schema. The receiver's calls, descriptor and
+ * admission decisions are unchanged; the bytes moved, so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker request ledger (S1c, per
+ * docs/policy/amux-decision-maker.md §10) adds its request and request event
+ * back relations to `AdminAuditLog` in the watched schema. No actor,
+ * descriptor, webhook writer or admission decision changes; the bytes moved,
+ * so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker body store (S1d, per
+ * docs/policy/amux-decision-maker.md §10) adds its body, retention event and
+ * digest-key event back relations to `AdminAuditLog` in the watched schema.
+ * No actor, descriptor, webhook writer or admission decision changes; the
+ * bytes moved, so evidence is stale.
+ * 2026-10-08, the S1d review: the body store adds the result detail's back
+ * relation to `AdminAuditLog` in the watched schema. Nothing else changes; the
+ * bytes moved, so evidence is stale.
+ * 2026-10-08: the AMUX Decision Maker judgment and delivery records (S1e, per
+ * docs/policy/amux-decision-maker.md §10) add the judgment and delivery event
+ * models and their back relations to `AdminAuditLog`, the request and the
+ * request event in the watched schema. No actor, descriptor, webhook writer or
+ * admission decision changes; the bytes moved, so evidence is stale.
+ * 2026-10-09: the separate Prompt Refiner product-Auto budget hold adds a
+ * narrowly scoped audit actor to the shared helper and two back relations to
+ * `AdminAuditLog`. The marketing receiver's decisions are unchanged, but its
+ * watched source and schema bytes moved, so prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "3911aa6e0c8b1d7df3b89081b421979d3027f161a46dafb11aa7856a7a9eb6a7";
+  "b75a4effd8f593f3b7460f2b3fc1c96dabdae9d7f3b15e4135c918754284fd6d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -553,7 +736,7 @@ export const marketingWebhookVerificationRecordSchema = z
       .min(1)
       .max(100),
     pipelineFingerprint: sha256Hex,
-    configSnapshotDigest: sha256Hex,
+    stagingConfigSnapshotDigest: sha256Hex,
   })
   .strict();
 
@@ -765,14 +948,12 @@ const webhookApplyDecision = (
     !isDeclaredMarketingWebhookConfigSnapshot(input.webhookConfigSnapshot.value)
   ) {
     add(reasons, "webhook_config_snapshot_invalid");
-  } else if (record) {
-    const currentConfigDigest = computeMarketingWebhookConfigSnapshotDigest(
-      input.webhookConfigSnapshot.value,
-    );
-    if (record.configSnapshotDigest !== currentConfigDigest) {
-      add(reasons, "webhook_config_snapshot_stale");
-    }
   }
+  // S1 r7 amendment 1: the record's staging snapshot is staging evidence and is
+  // never compared with the live one -- environment identity, shadow state and
+  // secrets are meant to differ. Production is bound by its own separately
+  // signed configuration generation, which S2f adds; until then nothing is.
+  add(reasons, "webhook_production_config_unsigned");
 
   if (record && signature) {
     const recordText = input.webhookVerificationRecordText;

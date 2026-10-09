@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { openAmuxContent, verifyAmuxContentDigest, type AmuxContentKeys } from "./ideaCrypto.ts";
 import { inspectAmuxIdeaInput } from "./ideaInputCore.ts";
 import { loadCurrentAmuxContentKeys } from "./ideaKeyConfig.ts";
+import { amuxContentKeyRing, loadAmuxContentUnitKeys } from "./ideaKeyStore.ts";
 import { inspectAmuxIdeaSourceScope } from "./ideaSourceScopeCore.ts";
 import {
   AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV,
@@ -114,7 +115,20 @@ export async function previewAmuxSourceScope(
   if (!sourceScopePreviewPermitted(process.env[AMUX_V4_SOURCE_SCOPE_PREVIEW_ENV])) {
     throw new AmuxSourceScopePreviewError("preview_disabled", 503);
   }
-  const keys = loadCurrentAmuxContentKeys(process.env);
+  const owned = await prisma.amuxIdeaSubmission.findFirst({
+    where: { id: request.ideaId, actorUserId }, select: { id: true },
+  });
+  if (!owned) throw new AmuxSourceScopePreviewError("not_found", 404);
+  let keys: AmuxContentKeys;
+  try {
+    const global = loadCurrentAmuxContentKeys(process.env);
+    const identity = { ideaId: request.ideaId, purpose: "idea_raw" as const,
+      subjectId: request.ideaId };
+    const unit = await loadAmuxContentUnitKeys(identity);
+    keys = amuxContentKeyRing(global, [{ identity, keys: unit }]);
+  } catch {
+    throw new AmuxSourceScopePreviewError("idea_unavailable", 409);
+  }
   try {
     return await prisma.$transaction(async (tx) => {
       await configureAmuxSourceScopeReadOnlyTransaction(tx);

@@ -156,6 +156,53 @@ export function assessAmuxIdeaAnalysisBudget(
   };
 }
 
+export type AmuxIdeaAnalysisSettlementDecision =
+  | { decision: "settlement_candidate"; status: "succeeded" | "failed";
+      settledMicroUsd: string; releasedMicroUsd: string }
+  | { decision: "hold"; reason: "basis_invalid" | "usage_unknown" |
+      "usage_exceeds_cap" | "reservation_mismatch" };
+
+/** A known provider result moves only the measured upper-bound estimate from
+ * reserved to spent. This does not write either ledger. Unknown usage keeps
+ * the full reservation occupied; release and owner resolution are separate
+ * audited transactions, not inferred from a failed transport. */
+export function assessAmuxIdeaAnalysisSettlement(raw: unknown):
+  AmuxIdeaAnalysisSettlementDecision {
+  const hold = (reason: Extract<AmuxIdeaAnalysisSettlementDecision,
+    { decision: "hold" }>["reason"]): AmuxIdeaAnalysisSettlementDecision =>
+    ({ decision: "hold", reason });
+  const value = snapshotExact(raw, ["outcome", "reservedMicroUsd", "inputTokensCap",
+    "outputTokensCap", "inputMicroUsdPerMillion", "outputMicroUsdPerMillion",
+    "inputTokens", "outputTokens"]);
+  if (!value || !amount(value.reservedMicroUsd) ||
+      BigInt(value.reservedMicroUsd) === BigInt(0) ||
+      !positiveSafeInteger(value.inputTokensCap) ||
+      !positiveSafeInteger(value.outputTokensCap) ||
+      !positiveSafeInteger(value.inputMicroUsdPerMillion) ||
+      !positiveSafeInteger(value.outputMicroUsdPerMillion) ||
+      (value.outcome !== "verified_success" &&
+       value.outcome !== "invocation_failed" &&
+       value.outcome !== "outcome_unknown")) return hold("basis_invalid");
+  if (value.outcome === "outcome_unknown") {
+    return value.inputTokens === null && value.outputTokens === null
+      ? hold("usage_unknown") : hold("basis_invalid");
+  }
+  if (!nonnegativeSafeInteger(value.inputTokens) ||
+      !nonnegativeSafeInteger(value.outputTokens) ||
+      (value.inputTokens === 0 && value.outputTokens === 0)) return hold("basis_invalid");
+  if (value.inputTokens > value.inputTokensCap ||
+      value.outputTokens > value.outputTokensCap) return hold("usage_exceeds_cap");
+  const settled =
+    ceilDivide(BigInt(value.inputTokens) * BigInt(value.inputMicroUsdPerMillion), TOKENS_PER_MILLION) +
+    ceilDivide(BigInt(value.outputTokens) * BigInt(value.outputMicroUsdPerMillion), TOKENS_PER_MILLION);
+  const reserved = BigInt(value.reservedMicroUsd);
+  if (settled > reserved) return hold("reservation_mismatch");
+  return { decision: "settlement_candidate",
+    status: value.outcome === "verified_success" ? "succeeded" : "failed",
+    settledMicroUsd: settled.toString(),
+    releasedMicroUsd: (reserved - settled).toString() };
+}
+
 export type AmuxIdeaAnalysisFailureState = {
   consecutiveFailures: number;
   haltReason: null | "three_failures" | "outcome_unknown";

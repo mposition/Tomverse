@@ -50,6 +50,7 @@ import {
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
+import { promptRefinerAutoMessageView } from "@/lib/promptRefinerChatHandoff";
 import { decideAutoCohort } from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
@@ -1393,6 +1394,12 @@ async function handleChatPost(
                       },
                   })
                 : null;
+        // Product Refiner has no server-held, one-time-consumed suggestion yet.
+        // Keep Auto on authored bytes until that authority can supply a
+        // validated projection; browser resolution is never a routing input.
+        const autoRoutingMessages = promptRefinerAutoMessageView({
+            authoredMessages: messages,
+        });
         // Measured, not declared. A size the client stated is a claim, and an
         // understated one would steer the Router to a model whose window the
         // real content does not fit -- leaving the user with a context-window
@@ -1400,7 +1407,7 @@ async function handleChatPost(
         // cohort would refuse anyway, so a turn nobody routes pays for no HEAD
         // requests.
         const measuredAttachments =
-            autoCohort.eligible && turnCarriesAttachments(messages)
+            autoCohort.eligible && turnCarriesAttachments(autoRoutingMessages)
                 ? measureTurnAttachments(
                       Array.from(resolvedAttachments.values()),
                       ownAttachmentPrefix
@@ -1475,7 +1482,7 @@ async function handleChatPost(
             attachmentTokensFor: measuredAttachments.measurable
                 ? attachmentTokensForModel(measuredAttachments.descriptors)
                 : undefined,
-            text: profileTextFor(messages),
+            text: profileTextFor(autoRoutingMessages),
             // The profiler reads these to set hasImageInput / hasDocumentInput,
             // which is what stops an image turn being routed to a model that
             // cannot see one. Media types only -- no name, no bytes.
@@ -1490,7 +1497,7 @@ async function handleChatPost(
             // consults the cohort again, and without this the drill's turn was
             // refused on the very gate the override exists to pass.
             drillOverride: drillOverride.allowed,
-            reservedInputTokens: preflightInputEstimate(messages).estimatedInputTokens,
+            reservedInputTokens: preflightInputEstimate(autoRoutingMessages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
             // window would bias every other candidate against it.
@@ -3451,7 +3458,12 @@ async function handleChatPost(
                 // shadow decision consider a model the person cannot use.
                 plan: access.kind === "guest" ? "Guest" : (access.plan ?? "Free"),
                 profile: buildTaskProfile({
-                    text: profileText,
+                    // Keep the existing formatted shadow text for ordinary
+                    // turns. A future accepted server projection must give
+                    // live Auto and shadow the same execution view.
+                    text: autoRoutingMessages === messages
+                        ? profileText
+                        : profileTextFor(autoRoutingMessages),
                     attachments: parts
                         .filter((part) => part.type === "file")
                         .map((part) => ({

@@ -249,11 +249,26 @@ const holdsActorIdentity = (body) => {
   return false;
 };
 const USER_COLUMN = /^\s{2}(?:\w*[Uu]serId|approvedBy)\s+String\b/m;
+// A row can carry operator-derived content through a direct relation to an
+// idea without repeating actorUserId (notably v22 results, patches and
+// key-retire receipts). The relation name/field order may change; indirect
+// paths through other models still require explicit privacy review.
+const AMUX_IDEA_PARENT_LINK = /\bAmuxIdeaSubmission\??\s+@relation\(/;
+// The AMUX Decision Maker body table holds worker-written free text with no
+// account key, and docs/policy/amux-decision-maker.md section 10 registers it
+// here as an operational record ("본문 표 ... 공개 data-domain registry에 운영
+// 기록으로 등록한다"). Its shape -- a `text` column on a row hanging off the
+// Decision Maker request ledger -- is what makes it one; the ledger's own
+// tables carry identifiers and digests, not text, and stay unregistered.
+const AMUX_DECISION_MAKER_BODY_TEXT = (body) =>
+  /\bAmuxDecisionMakerRequest\??\s+@relation\(/.test(body) && /^\s{2}text\s+String\b/m.test(body);
 const holdsUserData = new Set(
   models
     .filter(
       ({ body }) =>
-        USER_LINK.test(body) || USER_COLUMN.test(body) || holdsActorIdentity(body)
+        USER_LINK.test(body) || USER_COLUMN.test(body) ||
+        holdsActorIdentity(body) || AMUX_IDEA_PARENT_LINK.test(body) ||
+        AMUX_DECISION_MAKER_BODY_TEXT(body)
     )
     .map(({ name }) => name)
 );

@@ -11,6 +11,8 @@
 import "server-only";
 
 import { REGISTRATION_SOURCES } from "@/lib/engineeringAgentRegistrationGuard";
+import { checkListing, gitObjectId, type TreeEntry } from
+  "@/lib/engineeringAgentTreeVerify";
 
 /** One fixed repository. A caller supplies a commit id or a PR number, never a URL. */
 const REPOSITORY = "mposition/Tomverse";
@@ -18,6 +20,7 @@ const API_ORIGIN = "https://api.github.com";
 const API_VERSION = "2022-11-28";
 const TIMEOUT_MS = 8_000;
 const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_TREE_JSON_BYTES = 5 * 1024 * 1024;
 const MAX_BACKLOG_BYTES = 1024 * 1024;
 const MAX_CHECK_RUNS = 100;
 /** One page of open pull requests; more than this and the list is refused, not cut. */
@@ -86,8 +89,9 @@ async function readBounded(response: Response, limit: number): Promise<Uint8Arra
 async function githubJson(
   path: string,
   deps: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+  limit = MAX_JSON_BYTES,
 ): Promise<unknown> {
-  return (await githubPage(path, deps)).body;
+  return (await githubPage(path, deps, limit)).body;
 }
 
 /** A `Link` header that names a next page: the answer is one page of more. */
@@ -101,6 +105,7 @@ const hasNextPage = (link: string | null) => link !== null && /<[^>]*>\s*;\s*rel
 async function githubPage(
   path: string,
   deps: { env: Readonly<Record<string, string | undefined>>; fetchImpl: FetchLike },
+  limit = MAX_JSON_BYTES,
 ): Promise<{ body: unknown; hasNext: boolean }> {
   const token = tokenFrom(deps.env);
   let response: Response;
@@ -124,7 +129,7 @@ async function githubPage(
     throw new EngineeringAgentGitHubReadError("http_error");
   }
   const hasNext = hasNextPage(response.headers.get("link"));
-  const bytes = await readBounded(response, MAX_JSON_BYTES);
+  const bytes = await readBounded(response, limit);
   try {
     return { body: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), hasNext };
   } catch {
@@ -228,6 +233,104 @@ export async function readEngineeringAgentDevelopChecks(
   const headSha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
   if (headSha === null || !SHA.test(headSha)) throw new EngineeringAgentGitHubReadError("invalid_response");
   return { headSha, checkRuns: await checkRunsAt(headSha, resolved) };
+}
+
+/** Exact develop head for a v22 attempt's optional publication run. A later
+ * patch whose local baseline differs from this commit cannot be published. */
+export async function readEngineeringAgentDevelopHead(deps: Deps = {}): Promise<string> {
+  const head = record(await githubJson("/commits/develop", withDefaults(deps)));
+  const sha = typeof head?.sha === "string" ? head.sha.toLowerCase() : null;
+  if (sha === null || !SHA.test(sha))
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  return sha;
+}
+
+/** One content-addressed Git blob, never an arbitrary URL or branch path. */
+export async function readEngineeringAgentGitBlob(oid: string,
+  deps: Deps = {}, maxBytes = 200 * 1024): Promise<Uint8Array> {
+  if (!SHA.test(oid) || !Number.isSafeInteger(maxBytes) ||
+      maxBytes < 1 || maxBytes > 2 * 1024 * 1024)
+    throw new EngineeringAgentGitHubReadError("invalid_input");
+  const blob = record(await githubJson(`/git/blobs/${oid}`,
+    withDefaults(deps), Math.min(MAX_TREE_JSON_BYTES,
+      4 * Math.ceil(maxBytes / 3) + 4_096)));
+  if (!blob || blob.sha !== oid || blob.encoding !== "base64" ||
+      typeof blob.content !== "string" ||
+      typeof blob.size !== "number" || blob.size > maxBytes ||
+      blob.size < 0)
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  const compact = blob.content.replace(/\n/g, "");
+  const bytes = Buffer.from(compact, "base64");
+  if (bytes.length !== blob.size || bytes.toString("base64") !== compact ||
+      gitObjectId("blob", bytes) !== oid) {
+    bytes.fill(0);
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  }
+  return bytes;
+}
+
+/** Read the complete pinned base from GitHub. The worker supplies only the
+ * commit SHA; neither its tree listing nor a caller-provided URL is trusted. */
+export async function readEngineeringAgentPinnedBaseTree(baseSha: string,
+  deps: Deps = {}): Promise<{ base: TreeEntry[]; rootTreeId: string;
+    baseGitattributes: string | null; baseCommitterDate: string | null }> {
+  if (!SHA.test(baseSha)) throw new EngineeringAgentGitHubReadError("invalid_input");
+  const resolved = withDefaults(deps);
+  if (await readEngineeringAgentDevelopHead(deps) !== baseSha)
+    throw new EngineeringAgentGitHubReadError("invalid_input");
+  const commit = record(await githubJson(`/git/commits/${baseSha}`, resolved));
+  const treeRef = record(commit?.tree);
+  const rootTreeId = treeRef?.sha;
+  if (commit?.sha !== baseSha || typeof rootTreeId !== "string" ||
+      !SHA.test(rootTreeId))
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  // GitHub normalizes the JSON committer date to UTC. A verified commit's
+  // signed payload retains the exact Git timestamp and zone needed for the
+  // Publisher's deterministic commit object. Without it, publication stays
+  // private rather than inventing a timezone.
+  const verification = record(commit?.verification);
+  const payload = verification?.verified === true &&
+    typeof verification.payload === "string" ? verification.payload : null;
+  const headerEnd = payload?.indexOf("\n\n") ?? -1;
+  const header = payload?.startsWith(`tree ${rootTreeId}\n`) &&
+    headerEnd > 0 ? payload.slice(0, headerEnd) : null;
+  const committerLines = header?.split("\n").filter((line) =>
+    line.startsWith("committer ")) ?? [];
+  const baseCommitterDate = committerLines.length === 1 ?
+    /^committer [^\r\n]+ <[^<>\r\n]+> (\d{1,12} [+-]\d{4})$/.exec(
+      committerLines[0])?.[1] ?? null : null;
+  const tree = record(await githubJson(`/git/trees/${rootTreeId}?recursive=1`,
+    resolved, MAX_TREE_JSON_BYTES));
+  if (!tree || tree.sha !== rootTreeId || tree.truncated !== false ||
+      !Array.isArray(tree.tree) || tree.tree.length > 20_000)
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  const base: TreeEntry[] = tree.tree.map((item: unknown) => {
+    const entry = record(item);
+    if (typeof entry?.path !== "string" ||
+        typeof entry.mode !== "string" ||
+        typeof entry.sha !== "string" ||
+        (entry.type !== "blob" && entry.type !== "tree" &&
+          entry.type !== "commit"))
+      throw new EngineeringAgentGitHubReadError("invalid_response");
+    return { path: entry.path, mode: entry.mode,
+      type: entry.type, oid: entry.sha };
+  });
+  const checked = checkListing(base);
+  if (!checked.ok || checked.rootTreeId !== rootTreeId)
+    throw new EngineeringAgentGitHubReadError("invalid_response");
+  const attributes = base.find((item) => item.path === ".gitattributes");
+  let baseGitattributes: string | null = null;
+  if (attributes) {
+    if (attributes.type !== "blob" || attributes.mode !== "100644")
+      throw new EngineeringAgentGitHubReadError("invalid_response");
+    const bytes = await readEngineeringAgentGitBlob(
+      attributes.oid, deps, 65_536);
+    try {
+      baseGitattributes = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } finally { bytes.fill(0); }
+  }
+  return { base, rootTreeId, baseGitattributes,
+    baseCommitterDate };
 }
 
 /**

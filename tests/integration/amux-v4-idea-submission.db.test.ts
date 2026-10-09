@@ -4,7 +4,12 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
-import { openAmuxContent } from "@/lib/amux/ideaCrypto";
+import { auditRowActorKind,
+  AMUX_V4_IDEA_AUTO_CANCEL_SCOPE } from "@/lib/adminAuditSystemActors";
+import { openAmuxContent, sealAmuxContent } from "@/lib/amux/ideaCrypto";
+import { AmuxIdeaAutoCancellationError,
+  commitAmuxOverdueIdeaAnalysisCancellation } from
+  "@/lib/amux/ideaAnalysisAutoCancellationService";
 import { inspectAmuxIdeaSubmission, submissionFailureKind } from "@/lib/amux/ideaSubmissionCore";
 import {
   commitIdeaSubmission,
@@ -77,7 +82,8 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
     keyVersion: stored.rawKeyVersion ?? 0,
   }, "idea_raw", ideaId, keys);
   assert.equal(JSON.parse(opened.toString("utf8")).idea, ideaText);
-  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId), { requestId, status: "committed", ideaId });
+  assert.deepEqual(await readIdeaSubmissionRequest(session, requestId),
+    { requestId, status: "committed", ideaId, hasExternalSources: false });
   const audit = await prisma.adminAuditLog.findUniqueOrThrow({ where: { id: result.auditId } });
   assert.equal(audit.actorUserId, actorUserId);
   assert.equal(audit.action, "AMUX_V4_IDEA_SUBMITTED");
@@ -107,6 +113,23 @@ test("synthetic idea submission is encrypted, audited, request-idempotent, and c
   assert.notEqual(submissionFailureKind(false, databaseUniqueError), "definitive_failure");
 });
 
+test("read-back preserves whether the saved idea declared external sources", async () => {
+  const sourceRequestId = randomUUID();
+  const sourceIdeaId = randomUUID();
+  const sourceInspection = inspectAmuxIdeaSubmission(JSON.stringify({
+    version: 1, requestId: sourceRequestId,
+    input: { version: 1, idea: "SYNTHETIC_SOURCE_REFERENCE", repositories: ["mposition/Tomverse"],
+      pullRequests: [] },
+  }));
+  if (!sourceInspection.ok) throw new Error(sourceInspection.code);
+  await prisma.$transaction((tx) => commitIdeaSubmission(tx, {
+    session, request, inspected: sourceInspection, ideaId: sourceIdeaId, keys,
+  }));
+  assert.deepEqual(await readIdeaSubmissionRequest(session, sourceRequestId),
+    { requestId: sourceRequestId, status: "committed", ideaId: sourceIdeaId,
+      hasExternalSources: true });
+});
+
 test("submission row and canonical audit roll back together", async () => {
   const rollbackRequestId = randomUUID();
   const rollbackIdeaId = randomUUID();
@@ -126,4 +149,94 @@ test("submission row and canonical audit roll back together", async () => {
   assert.equal(await prisma.adminAuditLog.count({
     where: { action: "AMUX_V4_IDEA_SUBMITTED", targetId: rollbackIdeaId },
   }), 0);
+});
+
+test("seven-day auto-cancel stops only unfinished analysis and keeps its raw purge deadline", async () => {
+  const overdueIdeaId = randomUUID();
+  const submittedAt = new Date(Date.now() - 7 * 86_400_000 - 60_000);
+  const deadline = new Date(submittedAt.getTime() + 7 * 86_400_000);
+  const sealed = sealAmuxContent(Buffer.from("SYNTHETIC_OVERDUE_IDEA"),
+    "idea_raw", overdueIdeaId, keys);
+  await prisma.amuxIdeaSubmission.create({ data: {
+    id: overdueIdeaId, requestId: randomUUID(), actorUserId, state: "analyzing",
+    submittedAt, analysisDeadlineAt: deadline, rawPurgeAfter: deadline,
+    rawCiphertext: new Uint8Array(sealed.ciphertext), rawKeyId: sealed.keyId,
+    rawKeyVersion: sealed.keyVersion, rawDigest: sealed.digest,
+    rawDigestKeyId: sealed.digestKeyId,
+  } });
+  const attempts = await Promise.allSettled([
+    prisma.$transaction((tx) => commitAmuxOverdueIdeaAnalysisCancellation(tx, overdueIdeaId)),
+    prisma.$transaction((tx) => commitAmuxOverdueIdeaAnalysisCancellation(tx, overdueIdeaId)),
+  ]);
+  const winner = attempts.find((result) => result.status === "fulfilled");
+  assert.ok(winner?.status === "fulfilled");
+  const loser = attempts.find((result) => result.status === "rejected");
+  assert.ok(loser?.status === "rejected" &&
+    loser.reason instanceof AmuxIdeaAutoCancellationError && loser.reason.code === "not_due");
+  const [idea, audit] = await Promise.all([
+    prisma.amuxIdeaSubmission.findUniqueOrThrow({ where: { id: overdueIdeaId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: winner.value.auditId } }),
+  ]);
+  assert.equal(idea.state, "cancelled");
+  assert.equal(idea.cancelledAt?.toISOString(), winner.value.cancelledAt);
+  assert.equal(idea.rawPurgeAfter?.getTime(), deadline.getTime());
+  assert.deepEqual(Buffer.from(idea.rawCiphertext ?? []), Buffer.from(sealed.ciphertext));
+  assert.equal(auditRowActorKind(audit), "system");
+  assert.equal((audit.metadata as Record<string, unknown>).actorScope,
+    AMUX_V4_IDEA_AUTO_CANCEL_SCOPE);
+  assert.equal(await prisma.adminAuditLog.count({ where: {
+    action: "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED", targetId: overdueIdeaId,
+  } }), 1);
+
+  const futureIdeaId = randomUUID();
+  const recentAt = new Date();
+  const futureDeadline = new Date(recentAt.getTime() + 7 * 86_400_000);
+  await prisma.amuxIdeaSubmission.create({ data: {
+    id: futureIdeaId, requestId: randomUUID(), actorUserId, state: "submitted",
+    submittedAt: recentAt, analysisDeadlineAt: futureDeadline,
+    rawPurgeAfter: futureDeadline,
+  } });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxOverdueIdeaAnalysisCancellation(tx, futureIdeaId)),
+  (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+    error.code === "not_due");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: futureIdeaId },
+  })).state, "submitted");
+
+  const completedIdeaId = randomUUID();
+  const completedAt = new Date(deadline.getTime() - 60_000);
+  await prisma.amuxIdeaSubmission.create({ data: {
+    id: completedIdeaId, requestId: randomUUID(), actorUserId,
+    state: "awaiting_owner", submittedAt, analysisDeadlineAt: deadline,
+    analysisCompletedAt: completedAt, rawPurgeAfter: completedAt,
+  } });
+  await assert.rejects(prisma.$transaction((tx) =>
+    commitAmuxOverdueIdeaAnalysisCancellation(tx, completedIdeaId)),
+  (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+    error.code === "not_due");
+  assert.equal((await prisma.amuxIdeaSubmission.findUniqueOrThrow({
+    where: { id: completedIdeaId },
+  })).state, "awaiting_owner");
+  for (const absentId of ["not an idea id", randomUUID()]) {
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxOverdueIdeaAnalysisCancellation(tx, absentId)),
+    (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+      error.code === "not_found");
+  }
+  for (const rawPurgeAfter of [null, new Date(deadline.getTime() + 60_000)]) {
+    const invalidIdeaId = randomUUID();
+    await prisma.amuxIdeaSubmission.create({ data: {
+      id: invalidIdeaId, requestId: randomUUID(), actorUserId,
+      state: "submitted", submittedAt, analysisDeadlineAt: deadline,
+      rawPurgeAfter,
+    } });
+    await assert.rejects(prisma.$transaction((tx) =>
+      commitAmuxOverdueIdeaAnalysisCancellation(tx, invalidIdeaId)),
+    (error: unknown) => error instanceof AmuxIdeaAutoCancellationError &&
+      error.code === "integrity_unavailable");
+    assert.equal(await prisma.adminAuditLog.count({ where: {
+      action: "AMUX_V4_IDEA_ANALYSIS_AUTO_CANCELLED", targetId: invalidIdeaId,
+    } }), 0);
+  }
 });

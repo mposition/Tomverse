@@ -34,13 +34,17 @@ test("general escalation list cannot disclose raw persisted reasons or resolutio
   assert.match(general, /safeTitle\(escalation\.task\.title\)/);
 });
 
-test("retry is bounded, planning correction is revision-proven, and approve needs a fetched PR artifact", () => {
+test("retry is bounded, planning correction is revision-proven, and approval needs verified evidence", () => {
   assert.match(service, /escalation\.openedTaskRevision !== null/);
   assert.match(service, /task\.revision > escalation\.openedTaskRevision/);
   assert.match(service, /task\.dueParseState === "valid"/);
-  assert.match(service, /!displayTruncated && budget\.allowed && dueCorrected &&\s*\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
-  assert.match(service, /if \(artifact && !displayTruncated\) outcomes\.push\("approve"\)/);
-  assert.match(service, /amuxReviewTextExceedsDisplay\(description\)/);
+  assert.match(service, /!displayTruncated && displayExact && budget\.allowed && dueCorrected &&\s*amuxV22ReviewRetryHasVerifiedOutcome\(/);
+  assert.match(service, /\(lastAttempt !== null \|\| escalation\.specialty === "planning-review"\)/);
+  assert.match(service, /amuxReviewApprovalHasEvidence\(\{ sourceSystem: task\.sourceSystem/);
+  assert.match(service, /display_mismatch: !displayExact/);
+  assert.match(service, /result_attempt_id: task\.reviewPrNumber === null && v4Valid/);
+  assert.match(service, /v4EvidenceVerified: v4Valid, displayTruncated/);
+  assert.match(service, /amuxReviewTextExceedsDisplay\(reviewTitle\) \|\|\s*amuxReviewTextExceedsDisplay\(description\)/);
   assert.match(service, /readAmuxReviewPullRequest\(escalation\.task\.reviewPrNumber\)/);
   assert.match(service, /lastAttempt\.taskRevision < task\.revision/);
   assert.match(service, /review_pr_number: artifact\?\.prNumber \?\? null/);
@@ -48,9 +52,9 @@ test("retry is bounded, planning correction is revision-proven, and approve need
   assert.match(service, /review_head_sha: artifact\?\.headSha \?\? null/);
   assert.match(service, /review_diff_digest: artifact\?\.diffDigest \?\? null/);
   assert.match(service, /input\.outcome === "approve" \? state\.artifact\?\.diffDigest \?\? null : null/);
-  assert.match(service, /proposal\.reviewHeadSha !== state\.artifact\?\.headSha/);
-  assert.match(service, /proposal\.reviewBaseSha !== state\.artifact\?\.baseSha/);
-  assert.match(service, /proposal\.reviewDiffDigest !== state\.artifact\?\.diffDigest/);
+  assert.match(service, /proposal\.reviewHeadSha !== \(state\.artifact\?\.headSha \?\? null\)/);
+  assert.match(service, /proposal\.reviewBaseSha !== \(state\.artifact\?\.baseSha \?\? null\)/);
+  assert.match(service, /proposal\.reviewDiffDigest !== \(state\.artifact\?\.diffDigest \?\? null\)/);
 });
 
 test("proposal preallocates decision identity and status lookup never reports an uncommitted failure", () => {

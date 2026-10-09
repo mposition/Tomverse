@@ -288,6 +288,11 @@
   --color-status-success-700: var(--color-emerald-700);
   --color-status-success-900: var(--color-emerald-900);
   --color-status-success-950: var(--color-emerald-950);
+
+  /* status-switch-on: a switch that is on (email preferences). Separate from
+     status-success on purpose: same value today, a control's state is not a
+     verification. */
+  --color-status-switch-on-500: var(--color-emerald-500);
 }
 
 body {

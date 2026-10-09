@@ -3,6 +3,7 @@ import { after, beforeEach, test } from "node:test";
 
 import { loadAuditRowById, loadAuditRows } from "@/lib/adminConsoleData";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 // Opening one audit row by id, including one the recent window does not hold.
 //
@@ -16,7 +17,7 @@ import { prisma } from "@/lib/prisma";
 // rows.
 
 const reset = () =>
-  prisma.$executeRawUnsafe(
+  resetTestFixture(prisma,
     `TRUNCATE TABLE "AdminAuditLog", "User" RESTART IDENTITY CASCADE`
   );
 

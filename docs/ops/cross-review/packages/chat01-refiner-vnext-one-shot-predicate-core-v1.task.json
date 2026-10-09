@@ -1,0 +1,22 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-predicate-core-v1",
+  "requirement": "Within mposition's exact 2026-10-01 approval of one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e and file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, implement only a bounded, pure, development-only predicate atom evaluator for public synthetic fixtures. This is one prerequisite for a future owner-only manifest witness validator. It must never be regarded as full predicate/rubric truth, sealing, stage/run approval or dispatch admission. Codex authors; Claude Code Max first-party subscription CLI independently reviews read-only using user-approved skip-preflight. Do not use Anthropic API or handle real holdout content.",
+  "completionCriteria": [
+    "Read the exact scoped diff and bind verdict to package digest.",
+    "Confirm closed atom kinds, exact input fields, size and key bounds, and no arbitrary regex/script/provider execution.",
+    "Confirm synthetic positive/negative fixture tests for literal inclusion, one-line, exact JSON object keys, invalid shapes, and limits.",
+    "Confirm result is a boolean fixture signal only; no full manifest, semantic truth, sealing, spend, or dispatch authority is claimed.",
+    "Confirm new source and tests are byte-pinned in a separate development-only closure that includes its own closure test.",
+    "Require focused tests, typecheck, lint and whitespace guards; distinguish controller checks from commands actually run by the reviewer.",
+    "Return exactly one raw JSON verdict without Markdown fences and only reproducible actionable findings."
+  ],
+  "baseCommit": "5052d34803d32d168ecfedfaa717b5c0c5042aae",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-predicate-core-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-predicate-core-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotPredicateCore.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPredicateCore.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPredicateCoreClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

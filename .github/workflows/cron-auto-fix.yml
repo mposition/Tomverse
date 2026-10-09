@@ -34,12 +34,22 @@
 #      the response -- parsing, the matrix, a cancelled job -- consumes those
 #      incidents permanently, because the next poll no longer sees them. A
 #      lease with reclaim, or an explicit release on failure, is needed first.
-#   4. The merge target. `attempt-fix` opens its PR against `main` and enables
-#      auto-merge, so a machine-authored change can reach production with no
-#      human in the path. That is a separate approval from switching the
-#      pipeline on.
+#   4. The merge target. `attempt-fix` opens its PR against `main`. It no
+#      longer enables auto-merge (2026-10-02): GitHub merged an armed PR the
+#      moment its checks passed, so a machine-authored change could reach
+#      production with no human in the path and past the merge train's hold on
+#      in-flight Railway deployments. A person merges it. Whether such a PR
+#      should target `main` at all is still a separate approval from switching
+#      the pipeline on.
 
 name: Cron Auto-Fix
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 
 on:
   schedule:
@@ -207,7 +217,17 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          cache: npm
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment package.json
+          # names a package manager. This job holds a credential, and nothing can write
+          # a cache in a scope this job runs in any more, so the entry it used to look
+          # for was already a certain miss: daily-security-audit run 37162314395, in the
+          # same scope and while it still asked for the cache, logged "npm cache is not
+          # found" and then "cache write denied: token has no writable scopes".
+          # Declaring it costs nothing here and takes the job out of the analyser's
+          # cache-restoring set.
+          # .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and P3.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -367,10 +387,9 @@ jobs:
             --head "$branch" \
             --base main \
             --title "Auto-fix: ${JOB_KEY} failure (run ${RUN_ID})" \
-            --body "Auto-created by the Cron Auto-Fix workflow after \`${JOB_KEY}\` (run \`${RUN_ID}\`) failed. Security, unit, encoding, build, and E2E gates already passed in the automation run before this PR was opened. Will auto-merge once required checks pass."
-          gh pr merge "$branch" --squash --auto
+            --body "Auto-created by the Cron Auto-Fix workflow after \`${JOB_KEY}\` (run \`${RUN_ID}\`) failed. Security, unit, encoding, build, and E2E gates already passed in the automation run before this PR was opened. Auto-merge is not enabled; a person merges it."
           curl -sS -f -X POST \
             -H "Authorization: Bearer ${AUTO_FIX_SYNC_SECRET}" \
             -H "Content-Type: application/json" \
-            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"fixed_and_merged\",\"detail\":\"Branch ${branch} opened as a PR to main and auto-merge enabled.\"}" \
+            -d "{\"runId\":\"${RUN_ID}\",\"jobKey\":\"${JOB_KEY}\",\"outcome\":\"fixed_and_merged\",\"detail\":\"Branch ${branch} opened as a PR to main; a person merges it.\"}" \
             "${TOMVERSE_APP_URL}/api/internal/scheduled-jobs/auto-fix/result"

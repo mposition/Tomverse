@@ -1119,6 +1119,39 @@ test("a task continues only a concluded exchange, inherits what it left open, an
   assert.equal(MAX_SUPERSESSIONS, 2);
   assert.deepEqual(supersessionProblems(continuing, { ...prior, lineage: ["T-a"] }), []);
   assert.match(supersessionProblems(continuing, { ...prior, lineage: ["T-a", "T-b"] })[0], /the cap is 2/);
+
+  const durableV4 = {
+    ...continuing,
+    taskId: "chat01-refiner-vnext-one-shot-durable-slots-v4",
+    supersedes: {
+      taskId: "chat01-refiner-vnext-one-shot-durable-slots-v3",
+      exchange: "artifacts/cross-review/chat01-refiner-vnext-one-shot-durable-slots-v3/exchange.json",
+    },
+  };
+  const durableV3 = {
+    ...prior,
+    taskId: "chat01-refiner-vnext-one-shot-durable-slots-v3",
+    lineage: [
+      "chat01-refiner-vnext-one-shot-durable-slots-v1",
+      "chat01-refiner-vnext-one-shot-durable-slots-v2",
+    ],
+  };
+  assert.deepEqual(supersessionProblems(durableV4, durableV3), []);
+  assert.match(supersessionProblems({ ...durableV4, taskId: "another-task" }, durableV3)[0], /the cap is 2/);
+  assert.match(supersessionProblems(durableV4, { ...durableV3, status: "failed" })[0], /the cap is 2/);
+  assert.match(
+    supersessionProblems(
+      { ...durableV4, supersedes: { ...durableV4.supersedes, taskId: "another-v3" } },
+      { ...durableV3, taskId: "another-v3" }
+    )[0],
+    /the cap is 2/
+  );
+  assert.match(
+    supersessionProblems({ ...durableV4, supersedes: { ...durableV4.supersedes, exchange: "another/exchange.json" } }, durableV3)[0],
+    /the cap is 2/
+  );
+  assert.match(supersessionProblems(durableV4, { ...durableV3, lineage: ["T-a", "T-b"] })[0], /the cap is 2/);
+  assert.match(supersessionProblems(durableV4, { ...durableV3, lineage: [...durableV3.lineage, "T-c"] })[0], /the cap is 2/);
 });
 
 test("the preflight asks for a read and a write, and passes only on the read the control program expects and a write that did not land", () => {

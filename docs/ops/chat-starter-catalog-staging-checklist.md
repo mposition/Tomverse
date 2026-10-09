@@ -103,8 +103,8 @@ npm run report:starter-catalog-expectations -- --image=<on|off> --voice=<on|off>
 하나라도 어긋나면 검증이 아니라 **다른 것을 측정**하게 됩니다.
 
 - [ ] staging이 서빙 중인 **전체 40자리 SHA**를 `GET /api/build-info`에서 읽음
-      (로그인 불필요). merge SHA를 옮겨 적지 않습니다 — staging은 develop에
-      무엇이 병합되든 재배포됩니다.
+      (로그인 불필요). merge SHA를 옮겨 적지 않습니다 — staging은 `test`가
+      가리키는 release candidate를 배포합니다(`npm run promote:test`).
 - [ ] 그 SHA가 `4f300e21`(PR #1433 merge) 이후임
 - [ ] Admin → 플랫폼 설정에서 **이미지 생성**과 **음성 입력** flag의 현재
       값을 읽어 적음. 이 둘이 정답지의 입력입니다.

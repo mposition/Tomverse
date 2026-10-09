@@ -1,4 +1,11 @@
 name: Nightly Visual Regression
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # tests/e2e/chat-state-visual-regression.spec.ts is the chat shell's
 # screenshot-golden suite. It is deliberately not part of PR Fast Gate's
@@ -8,14 +15,14 @@ name: Nightly Visual Regression
 # in signal.
 #
 # Excluding it from the PR gate does not reduce coverage: it still runs on
-# every main push (Main Chromium Regression) and inside the full nightly
+# every pull request into main (Main Chromium Regression) and inside the full nightly
 # suite (Daily Security Audit). This workflow adds a third, isolated run
 # whose only job is that suite, so a golden that starts drifting produces a
 # standalone red check with the actual/expected/diff PNGs attached, instead
 # of one line inside a twelve-check audit report.
 #
 # It does mean a broken golden no longer blocks a merge and can be found up
-# to a day later, on this schedule or on the next main push -- an accepted
+# to a day later, on this schedule or on the next release PR -- an accepted
 # trade for taking ~82s (30%) off every PR. The zero-retry bar that made the
 # PR-tier run meaningful moved here with it; see the test step below.
 #
@@ -66,13 +73,25 @@ jobs:
 
       - name: Restore Next.js build cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore but never save. This workflow runs on the default branch, and
+        # an entry written there is restorable by every run in the repository --
+        # including the required pull-request gate. The job runs third-party npm
+        # install scripts, so writing that entry is the one step that turns a
+        # compromised dependency into something every later run executes.
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: .next/cache
-          key: ${{ runner.os }}-next-visual-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          key: ${{ runner.os }}-next-v2-visual-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Namespaced and versioned: next-v2-visual-<lockfile>-<sources>. A restore-key
+          # no narrower than Linux-next- matches every other workflow entry, and an
+          # entry written in a scope every run can see then becomes one shared pool.
+          # That also broke builds: a 16.3.4 cache from another workflow fails a
+          # 16.3.5 Turbopack font build. v2 abandons the entries written while the
+          # fallback was open. Enforced by npm run check:ci-cache-keys
+          # (scripts/ci-cache-key-policy.mjs, .github/audits/actions-cache-poisoning-audit-2026-10-03.md F2).
           restore-keys: |
-            ${{ runner.os }}-next-visual-${{ hashFiles('package-lock.json') }}-
-            ${{ runner.os }}-next-
+            ${{ runner.os }}-next-v2-visual-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         run: npm ci
@@ -82,12 +101,24 @@ jobs:
 
       - name: Restore Playwright Chromium cache
         continue-on-error: true
-        uses: actions/cache@v5
+        # Restore but never save. This workflow runs on the default branch, and
+        # an entry written there is restorable by every run in the repository --
+        # including the required pull-request gate. The job runs third-party npm
+        # install scripts, so writing that entry is the one step that turns a
+        # compromised dependency into something every later run executes.
+        # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          key: ${{ runner.os }}-playwright-v2-visual-${{ hashFiles('package-lock.json') }}-chromium
+          # Namespaced per workflow: five workflows shared one exact
+          # Linux-playwright-<lockfile>-chromium entry, so whichever wrote it first in a
+          # scope every run can see owned the browser binaries the others execute -- and
+          # a cache hit skips the download and verifies nothing. v2 abandons the shared
+          # entries. Enforced by npm run check:ci-cache-keys
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F1).
           restore-keys: |
-            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-playwright-v2-visual-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
         run: scripts/ci/install-playwright.sh chromium

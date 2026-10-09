@@ -1,4 +1,11 @@
 name: fal Price Drift
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # fal publishes "Pricing is subject to change" beside the number this
 # repository turned into a fixed 120-credit product. `check:fal-image-pricing`
@@ -19,7 +26,7 @@ name: fal Price Drift
 # providers down with it.
 #
 # Both branches, because they answer different questions. `main` is what bills
-# real users and is the one that matters. `develop` is what staging runs and
+# real users and is the one that matters. `develop` is what dev runs and
 # what becomes main next, so checking it is how a drift is caught before a
 # deploy rather than after one -- which is the entire point of a drift check.
 # A branch where the model is still held reports `skipped` and passes, so the
@@ -62,7 +69,17 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment package.json
+          # names a package manager. This job holds a credential, and nothing can write
+          # a cache in a scope this job runs in any more, so the entry it used to look
+          # for was already a certain miss: daily-security-audit run 37162314395, in the
+          # same scope and while it still asked for the cache, logged "npm cache is not
+          # found" and then "cache write denied: token has no writable scopes".
+          # Declaring it costs nothing here and takes the job out of the analyser's
+          # cache-restoring set.
+          # .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and P3.
+          package-manager-cache: false
 
       - name: Install dependencies
         timeout-minutes: 5

@@ -1,4 +1,11 @@
 name: Back-merge main into develop
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # Releases reach `main` as squash commits, which leaves `main` outside
 # `develop`'s ancestry: the trees agree, but git holds no commit connecting
@@ -158,6 +165,94 @@ jobs:
             echo "conflicted=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Working out what diverged used to mean reading the job log, then
+      # reproducing the merge in a throwaway worktree -- which is what a person
+      # did on 2026-10-03 for the fourth of four conflicted back-merges (#2023).
+      # This prints the answer instead: which paths conflict, what each side did
+      # to them, and whether resolving to develop would change any file.
+      #
+      # It does not resolve anything and it pushes nothing. Automating the
+      # resolution was authorised, attempted twice, and withdrawn on the
+      # evidence: two independent review rounds each produced a counterexample
+      # where every check passed and main's change was still lost. The second is
+      # unanswerable by any line comparison -- develop can hold every line main
+      # added and comment them out. See scripts/back-merge-ancestry-core.mjs.
+      - name: Report what diverged
+        if: steps.merge.outputs.conflicted == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          # Twice, on purpose: once into the step log where it has always gone,
+          # and once into the run summary, which is the run's front page.
+          #
+          # The log alone was not enough. This has conflicted on every selective
+          # release since 2026-10-03 -- six by 2026-10-07 -- and each repair
+          # began with a person opening the job, finding this step, and then
+          # working out the base, the branch and the commands for themselves.
+          # The diagnosis was already computed by then; only its placement made
+          # it cost anything.
+          node scripts/report-back-merge-divergence.mjs \
+            --ours origin/develop --theirs origin/main | tee /tmp/divergence.txt
+
+          MAIN_SHORT="$(git rev-parse --short origin/main)"
+          {
+            echo "## The back-merge conflicts, and needs a person"
+            echo
+            echo "No branch was pushed and no pull request was opened. That is deliberate:"
+            echo "a pull request whose resolution a machine guessed is worse than the absence"
+            echo "of one, and the two counterexamples in"
+            echo '`tests/backMergeAncestryCore.test.mjs` say why no line comparison can'
+            echo "decide it."
+            echo
+            echo "### Repair it"
+            echo
+            echo "**Where:** your own PC, PowerShell 7+ (\`pwsh\`), inside a Tomverse clone."
+            echo "Git is all you need -- **no credential beyond the GitHub access you already"
+            echo "push with**, and no production access. \`npm run\` needs Node 22 and"
+            echo "\`npm ci\`; skip that line if you have not installed."
+            echo
+            echo "**Run them one at a time and stop at the first failure.** Pasting the"
+            echo "block runs every line regardless: in PowerShell a failed external command"
+            echo "does not stop the next one, so a failed \`git commit\` would be followed by"
+            echo "a \`git push\` of the wrong thing."
+            echo
+            echo "**It writes.** It creates a local branch and pushes it to the remote."
+            echo "Nothing touches \`develop\` or \`main\` until you merge the pull request."
+            echo "To undo, in this order -- the branch is checked out when you finish, and"
+            echo "\`git branch -D\` refuses to delete the branch you are on:"
+            echo
+            echo '```'
+            echo "git switch develop"
+            echo "git branch -D claude/back-merge-main-${MAIN_SHORT}"
+            echo "git push origin --delete claude/back-merge-main-${MAIN_SHORT}"
+            echo '```'
+            echo
+            echo '```'
+            echo "git fetch origin main develop"
+            echo "git checkout -B claude/back-merge-main-${MAIN_SHORT} origin/develop"
+            echo "git merge --no-ff origin/main"
+            echo "#  ^ stops on the conflicts listed below. Edit each file, then:"
+            echo "npm run report:back-merge-divergence   # the same reading, locally"
+            echo "git add -A"
+            echo "#  ^ required: git commit refuses while the index has unmerged entries"
+            echo "git commit --no-edit"
+            echo "git push -u origin claude/back-merge-main-${MAIN_SHORT}"
+            echo '```'
+            echo
+            echo "One command per line because \`&&\` is not a statement separator in Windows"
+            echo "PowerShell 5.1 -- not because the lines stop each other. They do not; that"
+            echo "is why the instruction above is to run them one at a time."
+            echo
+            echo "Open the pull request against \`develop\` and **merge it with a merge"
+            echo "commit** -- a squash records no ancestry and leaves this invariant red."
+            echo
+            echo "### What diverged"
+            echo
+            echo '```'
+            cat /tmp/divergence.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Reported for the log, and worth reading: a back-merge after a squashed
       # release normally changes nothing, because the content is already on
       # develop. A non-empty diff means main carries work develop never had --
@@ -281,6 +376,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment
+          # package.json declares a package manager, without this file changing.
+          # This job holds a credential, so that would quietly put a cache next
+          # to it (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
 
       - name: Report the red lane
         if: always() && steps.invariant.outcome == 'failure'

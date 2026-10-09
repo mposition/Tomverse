@@ -209,8 +209,21 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   },
   "engineering-agent": {
     label: "엔지니어링 에이전트",
-    description: "결정을 기다리는 T2 초안, run, 에이전트가 연 pull request, 모드",
-    aliases: ["엔지니어링", "에이전트", "T2 초안", "패치", "풀 리퀘스트", "게시 서비스", "러너", "동결"],
+    description: "에이전트의 기록 — 엔지니어링 T2 초안과 run, 제품·리서치 관측 회차",
+    aliases: [
+      "엔지니어링",
+      "에이전트",
+      "T2 초안",
+      "패치",
+      "풀 리퀘스트",
+      "게시 서비스",
+      "러너",
+      "동결",
+      "제품 리서치",
+      "관측",
+      "이슈 백로그",
+      "회차",
+    ],
     tabs: {
       queue: { label: "소유자 대기열", description: "사람을 기다리는 T2 초안, 결정, 상태 불일치" },
       runs: { label: "Run", description: "각 run과 시작 모드, 종료 결과, 정지 여부" },
@@ -219,6 +232,33 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
         description: "에이전트가 결속한 것 — pull request, snapshot, 승인·병합 관측",
       },
       settings: { label: "모드", description: "모드, 동결, kill switch, 상한 대비 소유자 대기열" },
+      "product-research": {
+        label: "제품·리서치",
+        description: "관측 회차, 가장 최근 회차의 행, staging·production 창 계산값",
+      },
+    },
+  },
+  "sre-ops": {
+    label: "SRE 에이전트",
+    description: "ops observer의 상태 체인, 신뢰 판정, 소유자의 genesis",
+    aliases: ["SRE", "ops observer", "genesis", "신뢰", "상태 체인", "호출"],
+  },
+  "agent-digests": {
+    label: "Agent digest",
+    description: "각 Agent가 날마다 보고한 내용과 그 Agent가 따르는 운영자 제어",
+    aliases: ["digest", "QA", "릴리스", "릴리스 준비", "병합 레인", "제어 revision"],
+    tabs: {
+      "qa-release": { label: "QA·릴리스", description: "일일 릴리스 준비 digest와 운영자 제어 revision" },
+      "billing-finance-ops": { label: "과금·재무", description: "가격 검증 기한 일일 digest, Agent 스위치와 monitor 확인" },
+    },
+  },
+  office: {
+    label: "에이전트 오피스",
+    description: "8개 에이전트 팀의 픽셀 오피스 껍데기와 팀별 기록 화면 링크",
+    aliases: ["오피스", "에이전트 팀", "픽셀 오피스", "라이브 오피스", "팀 현황"],
+    tabs: {
+      live: { label: "라이브 오피스", description: "오피스 바닥, 운영자 지시창, 데모 결재와 피드" },
+      dashboard: { label: "대시보드", description: "팀 현황판, 데모 결재, digest 브리핑과 팀별 기록 링크" },
     },
   },
   "email-campaigns": {
@@ -317,6 +357,10 @@ export const ADMIN_DETAIL_ROUTES_KO: Readonly<
   "user-detail": {
     label: "고객 상세",
     description: "계정 타임라인, 결제, 크레딧, 보안 제어",
+  },
+  "sre-ops-item": {
+    label: "운영 감시 메시지",
+    description: "page 메시지 하나가 무엇에 관한 것이었는지: 신호, 메시지 종류, 시각",
   },
   "campaign-detail": {
     label: "캠페인 상세",

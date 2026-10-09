@@ -32,8 +32,8 @@ digest:
 | 로그인 계정의 플랜 | Free / Pro / Max |
 | 실기기 (E 구획을 한 경우) | 기기·OS·브라우저 버전 |
 
-**merge SHA를 옮겨 적지 않습니다.** staging은 develop에 무엇이 병합되든
-재배포되므로, 실행 시점에 서빙 중인 SHA와 다를 수 있습니다.
+**merge SHA를 옮겨 적지 않습니다.** staging은 `test`가 가리키는 release
+candidate를 배포하므로, 실행 시점에 서빙 중인 SHA와 다를 수 있습니다.
 
 ## 이 회차가 가정한 배포 상태
 

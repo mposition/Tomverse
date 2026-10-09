@@ -1,0 +1,26 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-manifest-rubrics-v1",
+  "requirement": "Under mposition's approved one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, add only owner-runner development-stage structural rubric checks using public synthetic fixtures. Codex authors; Claude Code Max first-party subscription CLI independently reviews read-only with user-approved --skip-preflight. The owner's actual holdout is neither authored nor viewed. No seal, provider/API call, stage/run, product traffic, or dispatch authority is implemented by this change. Anthropic API is forbidden.",
+  "completionCriteria": [
+    "Inspect the exact diff and package digest, including inherited root/allocation/witness and direction/predicate validators.",
+    "The closed per-case rubric binds expected direction, bounded pre-registered reason, distinct counterexample, deterministic predicate, and separating synthetic passing/failing fixtures; both rewrite and safety-abstention structures are covered.",
+    "The owner-runner pass rehashes and rechecks all 80 manifest cases and 32 challenge witnesses before checking an explicitly present rubric on every case; no case content, ID, root or digest is returned or logged.",
+    "Malformed, missing, direction-mismatched, or non-separating rubrics and changed-root bytes fail closed in synthetic tests.",
+    "Returned flags explicitly keep semantic truth, independent authorship, privacy exclusion, full-manifest validation, and dispatch authority false.",
+    "New source and synthetic tests are byte-pinned by a development-only closure with LF attributes and a closure self-test.",
+    "Focused tests, typecheck, lint and whitespace guards must pass; distinguish controller-recorded checks from reviewer-run commands.",
+    "Return one raw JSON verdict without Markdown fences; approve with any reproducible finding is not a controller pass."
+  ],
+  "baseCommit": "56852ff10aeb3e22e1b996263f22b1497258e644",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-rubrics-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotRubric.ts",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotRubric.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubricsClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

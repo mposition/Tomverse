@@ -2,6 +2,11 @@ import "server-only";
 
 import type { LoginMethodProvider } from "@/lib/loginMethodsCore";
 
+import {
+  renderEmailButton,
+  renderEmailParagraph,
+  renderTransactionalEmailLayout,
+} from "@/lib/accountEmails";
 import { EMAIL_FONT_STACK, EMAIL_MONO_FONT_STACK } from "@/lib/emailTypography";
 
 type EmailLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
@@ -121,15 +126,19 @@ export function buildEmailLoginCodeEmail(input: {
       copy.expiry,
       copy.ignore,
     ].join("\n"),
-    html: `
-      <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
-        <p>${escapeHtml(copy.intro)}</p>
-        <p style="font-family:${EMAIL_MONO_FONT_STACK};font-size:32px;font-weight:700;letter-spacing:4px;margin:24px 0">${escapeHtml(input.code)}</p>
-        <p><a href="${input.verifyUrl}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">${escapeHtml(copy.linkLabel)}</a></p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.expiry)}</p>
-        <p style="color:#6b7280;font-size:13px">${escapeHtml(copy.ignore)}</p>
-      </div>
-    `,
+    // The welcome mail's frame (logo, title band, card, footer). The preview
+    // line is the instruction, never the code: inbox lists show it.
+    html: renderTransactionalEmailLayout({
+      preview: copy.intro,
+      title: copy.subject,
+      bodyHtml: [
+        renderEmailParagraph(escapeHtml(copy.intro)),
+        `<p style="margin:0 0 22px;padding:18px 20px;background:#f1f5f9;border:1px solid #dbe3ef;border-radius:16px;text-align:center;font-family:${EMAIL_MONO_FONT_STACK};font-size:32px;font-weight:700;letter-spacing:6px;color:#0f172a;">${escapeHtml(input.code)}</p>`,
+        renderEmailButton(input.verifyUrl, escapeHtml(copy.linkLabel)),
+        renderEmailParagraph(escapeHtml(copy.expiry), "muted"),
+        renderEmailParagraph(escapeHtml(copy.ignore), "muted"),
+      ].join(""),
+    }),
   };
 }
 

@@ -133,11 +133,6 @@ const READ_ONLY_KEYS = {
       "S2 adds the audited experiment activation route after cache and CSP " +
       "evidence exists; S1 only consumes this default-off value.",
   },
-  MARKETING_WEBHOOK_SHADOW_KEY: {
-    reason:
-      "The staging-only webhook receiver and signed verification workflow are " +
-      "S2 work. S1 reads the switch but intentionally provides no writer.",
-  },
   MARKETING_WEBHOOK_APPLY_SCOPE_KEY: {
     reason:
       "S2 writes the verified event-type and channel subset with marketing:write, " +

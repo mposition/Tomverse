@@ -1,6 +1,9 @@
 "use client";
 
+import { useRef, useState } from "react";
+
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 import type { AmuxAdminCardRow } from "@/lib/amux/adminCardList";
 import { adminAmuxCardsMessages } from "@/lib/adminMessages/amuxCards";
 
@@ -16,6 +19,35 @@ export function AmuxCardListPanel({
   limit: number;
 }) {
   const messages = useAdminMessages(adminAmuxCardsMessages);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [resultText, setResultText] = useState<string | null>(null);
+  const [resultState, setResultState] = useState<"loading" | "missing" |
+    "purged" | "unavailable" | "available" | null>(null);
+  const resultRequestId = useRef(0);
+  async function showResult(taskId: string) {
+    const requestId = ++resultRequestId.current;
+    setSelectedTaskId(taskId);
+    setResultText(null);
+    setResultState("loading");
+    try {
+      const response = await adminFetch(`/api/admin/amux/v22-task-result?taskId=${encodeURIComponent(taskId)}`,
+        { cache: "no-store" });
+      if (requestId !== resultRequestId.current) return;
+      if (response.status === 404) { setResultState("missing"); return; }
+      if (!response.ok) { setResultState("unavailable"); return; }
+      const body = await response.json();
+      if (requestId !== resultRequestId.current) return;
+      if (body?.result?.state === "purged") { setResultState("purged"); return; }
+      if (body?.result?.state !== "available" ||
+          typeof body.result.text !== "string") {
+        setResultState("unavailable"); return;
+      }
+      setResultText(body.result.text);
+      setResultState("available");
+    } catch {
+      if (requestId === resultRequestId.current) setResultState("unavailable");
+    }
+  }
   return (
     <section className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4" data-testid="amux-card-list-panel">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{messages.title}</h2>
@@ -62,6 +94,12 @@ export function AmuxCardListPanel({
                     {row.lastAttemptOutcome && row.lastAttemptToStatus
                       ? ` · ${messages.lastAttempt(row.lastAttemptOutcome, row.lastAttemptToStatus)}`
                       : ""}
+                    {row.attemptCount > 0 && (
+                      <button type="button" className="block underline"
+                        onClick={() => void showResult(row.id)}>
+                        {messages.resultButton}
+                      </button>
+                    )}
                   </td>
                   <td className={`${cellClass} font-mono text-xs`}>{row.updatedAt}</td>
                 </tr>
@@ -69,6 +107,17 @@ export function AmuxCardListPanel({
             </tbody>
           </table>
         </div>
+      )}
+      {selectedTaskId && resultState && (
+        <section aria-live="polite" className="rounded border border-zinc-300 p-3 dark:border-zinc-700">
+          <p className="font-mono text-xs">{selectedTaskId}</p>
+          {resultState === "available" ?
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm">{resultText}</pre> :
+            <p className="mt-2 text-sm">{resultState === "loading" ? messages.resultLoading :
+              resultState === "missing" ? messages.resultMissing :
+              resultState === "purged" ? messages.resultPurged :
+              messages.resultUnavailable}</p>}
+        </section>
       )}
     </section>
   );

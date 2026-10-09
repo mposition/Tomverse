@@ -1973,8 +1973,11 @@ model Feedback {
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 
-  lifecycleEvents FeedbackLifecycleEvent[]
-  autoFixCase     FeedbackAutoFixCase?
+  lifecycleEvents          FeedbackLifecycleEvent[]
+  autoFixCase              FeedbackAutoFixCase?
+  supportTriageSuggestions SupportTriageSuggestion[]
+  supportTriageMemberships SupportTriageGroupMember[]
+  supportTriageDecisionLinks SupportTriageDecisionRecordLink[]
 
   @@index([status, createdAt])
   @@index([type, createdAt])
@@ -2267,6 +2270,32 @@ model AdminAuditLog {
   amuxV4FrontierApprovals AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierApprovalAudit")
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
+  amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
+  amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
+  amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
+  amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
+  amuxV4RetentionHoldApprovals AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldApprovalAudit")
+  amuxV4RetentionHoldReleases AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldReleaseAudit")
+  amuxV4RetentionHoldNotices AmuxIdeaRetentionHold[] @relation("AmuxV4RetentionHoldNoticeAudit")
+  amuxV4DerivationGroups AmuxIdeaDerivationGroup[] @relation("AmuxV4DerivationApprovalAudit")
+  amuxPortfolioAssessments AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentAudit")
+  amuxPortfolioScoreSnapshots AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreSnapshotAudit")
+  amuxV22PromotionControls AmuxV22PromotionControl[] @relation("AmuxV22PromotionControlAudit")
+  amuxV22PromotionReceipts AmuxV22PromotionReceipt[] @relation("AmuxV22PromotionReceiptAudit")
+  amuxV22PromotionUnknowns AmuxV22PromotionUnknown[] @relation("AmuxV22PromotionUnknownAudit")
+  amuxV22WorkerAssignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentAudit")
+  amuxV22LaneDecisions AmuxV22LaneDecision[] @relation("AmuxV22LaneAudit")
+  amuxDecisionMakerSwitchEvent AmuxDecisionMakerSwitchEvent?
+  amuxDecisionMakerRequest AmuxDecisionMakerRequest?
+  amuxDecisionMakerRequestEvent AmuxDecisionMakerRequestEvent?
+  amuxDecisionMakerBodies AmuxDecisionMakerBody[]
+  amuxDecisionMakerRetentionEvent AmuxDecisionMakerRetentionEvent?
+  amuxDecisionMakerDigestKeyEvent AmuxDecisionMakerDigestKeyEvent?
+  amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
+  amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
+  amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
+  promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
+  promptRefinerAutoBudgetSettlements PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetSettlementAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -5914,6 +5943,85 @@ model PromptRefinerReservation {
   @@index([stageId, status, expiresAt])
 }
 
+// Separate from the v1 shadow reservation tables, whose database constraints
+// pin a different 100-slot contract and price. These rows are dark until the
+// exact one-shot admission and audit path is implemented and reviewed.
+model PromptRefinerVnextOneShotStage {
+  id                         String   @id
+  status                     String   @default("staged")
+  sourceCommitSha            String
+  sourceManifestDigest       String
+  runnerDigest               String
+  manifestRoot               String
+  runtimeDeploymentId        String
+  runtimeCommitSha           String
+  pricePinDigest             String
+  perRequestCostMicroUsd     BigInt
+  slotCount                  Int
+  costCeilingMicroUsd        BigInt
+  approvedBy                 String
+  approvedAt                 DateTime
+  stageApprovalAuditLogId    String   @unique
+  runApprovalAuditLogId      String?  @unique
+  supersededAuditLogId       String?  @unique
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  slots PromptRefinerVnextOneShotSlot[]
+}
+
+model PromptRefinerVnextOneShotSlot {
+  id                   String    @id
+  stageId              String
+  slotIndex            Int
+  status               String    @default("reserved")
+  reservedCostMicroUsd BigInt
+  requestId            String?   @unique
+  consumedAt           DateTime?
+  createdAt            DateTime  @default(now())
+
+  stage PromptRefinerVnextOneShotStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([stageId, slotIndex])
+  @@index([stageId, status])
+}
+
+/// Dark product-Auto spend hold. This is separate from user credits, Chat
+/// provider budgets, and the 80-slot evaluation ledger. A held/unknown request
+/// keeps its worst-case micro-USD booked until a separately audited settlement.
+model PromptRefinerAutoBudgetWindow {
+  period            String
+  periodStart       DateTime @db.Timestamptz(3)
+  committedMicroUsd BigInt   @default(0)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  @@id([period, periodStart])
+}
+
+model PromptRefinerAutoBudgetHold {
+  id                    String    @id
+  requestKey            String    @unique
+  dayStart              DateTime  @db.Timestamptz(3)
+  monthStart            DateTime  @db.Timestamptz(3)
+  reservedMicroUsd      BigInt
+  settledMicroUsd       BigInt?
+  status                String
+  candidateDigest       String
+  pricePinDigest        String
+  runtimeDeploymentId   String
+  reservationAuditLogId String    @unique
+  settlementAuditLogId  String?   @unique
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  closedAt              DateTime? @db.Timestamptz(3)
+
+  reservationAudit AdminAuditLog @relation("PromptRefinerAutoBudgetReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  settlementAudit  AdminAuditLog? @relation("PromptRefinerAutoBudgetSettlementAudit", fields: [settlementAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, createdAt])
+  @@index([dayStart])
+  @@index([monthStart])
+}
+
 /// Where a provider actually serves a request from.
 ///
 /// Dark. Nothing writes this, nothing routes from it, and no request consults
@@ -7055,6 +7163,8 @@ model AmuxWorkItem {
   executionBriefDigest  String?
   /// Only new admin-idea-v4 cards use these fields. Existing rows remain NULL.
   cardType              String?
+  /// For v4 Stories only: Bug is a Story subtype, not an executable card.
+  storyKind             String?
   parentFeatureNodeId   String?
   parentStoryCardId     String?
   v4TitleCiphertext     Bytes?
@@ -7062,6 +7172,12 @@ model AmuxWorkItem {
   v4TitleKeyVersion     Int?
   v4TitleDigest         String?
   v4TitleDigestKeyId    String?
+  v4BodyCiphertext      Bytes?
+  v4BodyKeyId           String?
+  v4BodyKeyVersion      Int?
+  v4BodyDigest          String?
+  v4BodyDigestKeyId     String?
+  v4BodyPurgedAt        DateTime?
   v4BriefCiphertext     Bytes?
   v4BriefKeyId          String?
   v4BriefKeyVersion     Int?
@@ -7070,7 +7186,8 @@ model AmuxWorkItem {
   v4BriefPurgedAt       DateTime?
   v4TerminalAt          DateTime?
   v4SourceApprovalId    String?
-  v22ReceiptId          String?   @unique
+  v22ReceiptId          String?   @unique @db.Uuid
+  v22AssignmentId       String?   @unique @db.Uuid
   taskRole              String?
   executionGrade        String?
   createdAt             DateTime  @default(now())
@@ -7083,6 +7200,8 @@ model AmuxWorkItem {
   amuxV4RegisteredDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionRegisteredCard")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedCard")
   executionAttempts AmuxExecutionAttempt[]
+  v22TaskResults    AmuxV22TaskResult[]
+  v22TaskPatches    AmuxV22TaskPatch[]
   humanEscalations  AmuxHumanEscalation[]
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
@@ -7103,6 +7222,13 @@ model AmuxWorkItem {
   parentFeatureNode AmuxPortfolioNode? @relation(fields: [parentFeatureNodeId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   parentStoryCard   AmuxWorkItem?       @relation("AmuxStoryTasks", fields: [parentStoryCardId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   storyChildTasks   AmuxWorkItem[]      @relation("AmuxStoryTasks")
+  portfolioAssessments AmuxPortfolioAssessment[]
+  portfolioScoreSnapshots AmuxPortfolioScoreSnapshot[]
+  v22PromotionReceipt AmuxV22PromotionReceipt? @relation("AmuxV22PromotionCard")
+  v22AcceptedReceipt AmuxV22PromotionReceipt? @relation("AmuxV22AcceptedReceipt", fields: [v22ReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22Assignments AmuxV22WorkerAssignment[] @relation("AmuxV22AssignmentCard")
+  v22AcceptedAssignment AmuxV22WorkerAssignment? @relation("AmuxV22AcceptedAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22LaneDecisions AmuxV22LaneDecision[]
 
   @@unique([sourceSystem, sourceKey])
   @@index([status, owner, archivedAt, createdAt])
@@ -7165,6 +7291,11 @@ model AmuxExecutionAttempt {
   delivery          AmuxWorkDelivery?
   costLedgerEntries AmuxCostLedgerEntry[]
   reviewProposals   AmuxReviewProposal[]
+  cliUsageEvents    AmuxCliUsageEvent[]
+  v22TaskResult     AmuxV22TaskResult?
+  v22TaskPatch      AmuxV22TaskPatch?
+  v22AssignmentId   String? @unique @db.Uuid
+  v22Assignment     AmuxV22WorkerAssignment? @relation("AmuxV22ExecutionAssignment", fields: [v22AssignmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, taskId])
   @@unique([taskId, attemptNumber])
@@ -7172,6 +7303,60 @@ model AmuxExecutionAttempt {
   @@index([worker, endedAt, leaseExpiresAt])
   @@index([workerInstanceId, workerGeneration])
   engineeringAgentRun EngineeringAgentRun?
+}
+
+/// One encrypted, reviewable text result per v22 attempt. The sidecar keeps
+/// plaintext only in memory for a bounded transfer window; the journal keeps
+/// only a digest and cannot recreate the body after a sidecar restart.
+model AmuxV22TaskResult {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  sourceSha256    String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+  patch           AmuxV22TaskPatch?
+
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
+}
+
+/// A bounded patch candidate, not a publication grant. The Publisher may
+/// consume it only after independent app-side T1 verification.
+model AmuxV22TaskPatch {
+  attemptId       String   @id
+  taskId          String
+  ideaId          String
+  ciphertext      Bytes?
+  keyId           String?
+  keyVersion      Int?
+  digest          String
+  digestKeyId     String
+  patchSha256     String
+  baseSha         String
+  byteLength      Int
+  createdAt       DateTime @default(now())
+  bodyPurgedAt    DateTime?
+
+  result  AmuxV22TaskResult @relation(fields: [attemptId, taskId], references: [attemptId, taskId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxV22TaskPatch_result_fkey")
+  attempt AmuxExecutionAttempt @relation(fields: [attemptId, taskId], references: [id, taskId], onDelete: Restrict, onUpdate: Restrict)
+  task    AmuxWorkItem         @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  idea    AmuxIdeaSubmission   @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([attemptId, taskId])
+  @@index([taskId, createdAt])
+  @@index([ideaId, bodyPurgedAt])
 }
 
 model AmuxCostLedgerEntry {
@@ -7192,6 +7377,90 @@ model AmuxCostLedgerEntry {
   @@unique([attemptId, scope, resourceKey, kind])
   @@index([scope, resourceKey, budgetWindowStartsAt, budgetWindowEndsAt])
   @@index([taskId, createdAt])
+}
+
+/// Content-free per-invocation CLI usage, not a bill or a user-credit entry.
+/// Missing observations remain NULL; no caller may turn them into zero.
+model AmuxCliUsageEvent {
+  id                         String   @id @default(cuid())
+  invocationId               String   @unique
+  receiptDigest              String
+  bindingKind                String
+  attemptId                  String?
+  analysisHoldId             String?
+  taskId                     String?
+  worker                     String
+  cli                        String
+  provider                   String
+  selectedModelId            String
+  actualModelId              String?
+  cliVersion                 String?
+  authentication             String
+  startedAt                  DateTime
+  endedAt                    DateTime
+  status                     String
+  completeness               String
+  source                     String
+  inputTokens                BigInt?
+  outputTokens               BigInt?
+  cacheReadInputTokens       BigInt?
+  cacheCreationInputTokens   BigInt?
+  reasoningOutputTokens      BigInt?
+  inputTokensIncludeCacheRead  Boolean
+  inputTokensIncludeCacheWrite Boolean?
+  reasoningOutputIncludedInOutput Boolean?
+  completedTurns             Int
+  pricingVersion             String?
+  projectedApiCostMicrousd   BigInt?
+  actualApiCostMicrousd      BigInt?
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  attempt      AmuxExecutionAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  analysisHold AmuxIdeaAnalysisBudgetHold? @relation(fields: [analysisHoldId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([worker, createdAt])
+  @@index([actualModelId, createdAt])
+  @@index([retentionUntil])
+}
+
+/// One immutable finalization witness for a closed UTC calendar year.
+/// It can contain zero published cells when all provider cohorts have <5 calls.
+model AmuxCliUsageAggregateCohort {
+  cohortYear     Int      @id
+  publishedCells Int
+  createdAt      DateTime @default(now())
+  retentionUntil DateTime
+  cells          AmuxCliUsageAggregate[]
+
+  @@index([retentionUntil])
+}
+
+/// A non-overlapping, k>=5 long-term cell. No card, task, run, attempt,
+/// worker identity, invocation ID, prompt, or secret is retained here.
+model AmuxCliUsageAggregate {
+  id                         String   @id
+  cohortYear                 Int
+  provider                   String
+  grain                      String
+  periodStart                DateTime @db.Date
+  model                      String?
+  role                       String?
+  calls                      Int
+  reportedCalls              Int
+  inputTokens                BigInt
+  outputTokens               BigInt
+  cacheReadInputTokens       BigInt
+  cacheCreationInputTokens   BigInt
+  projectedApiCostMicrousd   BigInt
+  projectedCalls             Int
+  createdAt                  DateTime @default(now())
+  retentionUntil             DateTime
+
+  cohort AmuxCliUsageAggregateCohort @relation(fields: [cohortYear], references: [cohortYear], onDelete: Restrict, onUpdate: Restrict, map: "AmuxCliUsageAggregate_cohort_fkey")
+
+  @@index([retentionUntil])
 }
 
 model AmuxHumanEscalation {
@@ -8151,6 +8420,431 @@ model AmuxOrchestratorHalt {
   @@index([requestId])
 }
 
+/// AMUX Decision Maker switch events (docs/policy/amux-decision-maker.md §8,
+/// §10): append-only, and a scope's state is its newest event. Single writer:
+/// lib/amux/decisionMakerSwitchStore.ts. Migration
+/// 20261008030000_amux_decision_maker_switch holds the CHECKs (kill switch
+/// `on`/`off`, an instance `off`/`proposal`, a person only as `operator`, the
+/// system only latching an instance `off`) and the trigger that binds each
+/// event to an audit row of its own transaction, keeps a scope's sequence
+/// increasing, sets `createdAt` from the database clock and refuses every
+/// update and delete. `actorUserId` is the operator's id on a person's event
+/// and intentionally has no User foreign key, like the other AMUX operator
+/// evidence.
+model AmuxDecisionMakerSwitchEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  scope       String
+  value       String
+  reasonCode  String
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([scope, sequence])
+}
+
+/// AMUX Decision Maker requests (docs/policy/amux-decision-maker.md §2, §9,
+/// §10): one per (card id, question revision), with the binding values known
+/// when the question was routed and `routeDmQuestion()`'s decision. Immutable;
+/// the lifecycle is in `AmuxDecisionMakerRequestEvent`. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (the
+/// route, the provider's instance, the router's refusal codes and how they
+/// agree with the route) and the trigger that binds each row to the router's
+/// `amux.decision.route` audit row of its own transaction, sets `createdAt`
+/// from the database clock and `assignmentDeadlineAt` 2 minutes after it, and
+/// refuses every update and delete. No body is stored: identifiers, closed
+/// codes and opaque digests only, and no person's id.
+model AmuxDecisionMakerRequest {
+  id                    String   @id
+  cardId                String
+  questionRevision      Int
+  askingWorkerId        String
+  amuxSessionId         String
+  amuxSessionAttempt    Int
+  askingProvider        String
+  optionSetDigest       String
+  policyVersion         Int
+  termListVersion       String
+  classificationVersion String
+  scannerVersion        String
+  route                 String
+  instance              String?
+  refusalCodes          String[]
+  auditLogId            String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  /// Set by the insert trigger: `createdAt` plus 2 minutes.
+  assignmentDeadlineAt  DateTime @db.Timestamptz(3)
+
+  auditLog        AdminAuditLog                     @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events          AmuxDecisionMakerRequestEvent[]
+  bodies          AmuxDecisionMakerBody[]
+  retentionEvents AmuxDecisionMakerRetentionEvent[]
+  resultDetail    AmuxDecisionMakerResultDetail?
+  judgment        AmuxDecisionMakerJudgment?
+  deliveryEvents  AmuxDecisionMakerDeliveryEvent[]
+
+  @@unique([cardId, questionRevision])
+  @@index([instance, createdAt])
+}
+
+/// The append-only lifecycle of an `AmuxDecisionMakerRequest`
+/// (docs/policy/amux-decision-maker.md §2, §5, §6, §9, §10), ordered by
+/// `sequence`. `kind` is named after its §10 audit action. Single writer:
+/// lib/amux/decisionMakerRequestStore.ts. Migration
+/// 20261008090100_amux_decision_maker_request_ledger holds the CHECKs (what
+/// each kind carries), the partial unique indexes (one assignment,
+/// transmission intent, transmission outcome, terminal result, unknown result
+/// and closing per request -- not expressible here), the guard trigger (the
+/// transition graph, the deadlines by the database clock, the audit row of
+/// its own transaction by the router or the request's instance, an increasing
+/// sequence, READ COMMITTED only, no update or delete) and the deferred
+/// constraint trigger that refuses a late assignment or DM output at COMMIT
+/// with SQLSTATE AX001. Since stage S1e (migration
+/// 20261008130100_amux_decision_maker_judgment_delivery) a person's judgment
+/// closes a request with an event of its kind (confirm, edit_confirm or
+/// reject), which the judgment table's trigger writes and the guard accepts
+/// only beside that judgment; since migration
+/// 20261008130000_amux_decision_maker_stale_close_hours the stale close is 720
+/// hours after the creation, a fixed length.
+model AmuxDecisionMakerRequestEvent {
+  id                     String    @id
+  sequence               BigInt    @unique @default(autoincrement())
+  requestId              String
+  kind                   String
+  instance               String?
+  vendor                 String?
+  inputPayloadDigest     String?
+  snapshotState          String?
+  snapshotTargetSha      String?
+  snapshotManifestDigest String?
+  resultKind             String?
+  resultDigest           String?
+  rejectionReason        String?
+  /// Set by the insert trigger on an assignment: its `createdAt` plus 30 minutes.
+  resultDeadlineAt       DateTime? @db.Timestamptz(3)
+  auditLogId             String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt              DateTime  @default(now()) @db.Timestamptz(3)
+
+  request      AmuxDecisionMakerRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog     AdminAuditLog                  @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultDetail AmuxDecisionMakerResultDetail?
+  judgment     AmuxDecisionMakerJudgment?
+
+  @@index([requestId, sequence])
+}
+
+/// AMUX Decision Maker bodies (docs/policy/amux-decision-maker.md §10): the
+/// five text fields Admin needs to judge a proposal, and nothing else -- the
+/// question card text (16 KiB), the DM's answer (8 KiB), rationale (4 KiB) and
+/// escalation reason (1 KiB, Admin only), and the operator's edited answer
+/// (8 KiB) -- one row per field per request, kept apart from the ledger.
+/// Worker-written free text may carry personal data. Each row names its key
+/// period and is identified by a keyed digest (HMAC-SHA256 under the
+/// request's key), never a plain hash. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs (field
+/// list, byte caps, formats) and the guard: an insert only for an open request
+/// routed to a DM, in its key period under the registered key and not after
+/// that key's destruction, at most 40 KiB per request, bound to the audit row
+/// of its own transaction that wrote what it belongs to; no update; a delete
+/// only with no hold open and either the router's expiry purge after the
+/// request's retention or a person's privacy erase, each audited in the same
+/// transaction.
+model AmuxDecisionMakerBody {
+  id         String   @id
+  requestId  String
+  field      String
+  text       String
+  keyPeriod  Int
+  keyCheck   String
+  digest     String
+  auditLogId String
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([requestId, field])
+  @@index([keyPeriod])
+  @@index([auditLogId])
+}
+
+/// The append-only retention history of a request's bodies
+/// (docs/policy/amux-decision-maker.md §10): `retention_set` once, written by
+/// the database when the request closes (retentionUntil = the close + 90 days
+/// by the database clock), and a person's `hold_set` / `hold_release`. An
+/// open hold is more hold_set than hold_release. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts, and the closing trigger of migration
+/// 20261008120000_amux_decision_maker_body_store, which also holds the CHECKs,
+/// the partial unique index (one retention per request -- not expressible
+/// here) and the guard: the hold transitions, each event bound to its own
+/// transaction's audit row (the person's `amux.decision.legal_hold`, or the
+/// closing event's router audit), the request's key period, an increasing
+/// sequence, READ COMMITTED only, no update or delete. `actorUserId` is the
+/// operator id and intentionally has no User foreign key.
+model AmuxDecisionMakerRetentionEvent {
+  id             String    @id
+  sequence       BigInt    @unique @default(autoincrement())
+  requestId      String
+  keyPeriod      Int
+  kind           String
+  /// Set by the insert trigger on `retention_set`: the close plus 90 days.
+  retentionUntil DateTime? @db.Timestamptz(3)
+  actorKind      String
+  actorUserId    String?
+  auditLogId     String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
+  @@index([keyPeriod, kind])
+}
+
+/// The AMUX Decision Maker digest-key registry (docs/policy/amux-decision-maker.md
+/// §10): for each 30-day key period, its rotation into use (with the key check
+/// value HMAC(K_P, constant) -- never the key, which lives only in the server's
+/// secret store) and its destruction. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs, the partial
+/// unique indexes (one rotation and one destruction per period) and the
+/// guard: a destruction only after the period ended and once no body of the
+/// period, no open hold on one of its requests and no open request routed to
+/// a DM remains; each event bound to the router's audit row of its own
+/// transaction; no update or delete.
+model AmuxDecisionMakerDigestKeyEvent {
+  id         String   @id
+  sequence   BigInt   @unique @default(autoincrement())
+  keyPeriod  Int
+  kind       String
+  keyCheck   String?
+  auditLogId String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  auditLog AdminAuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// The structured detail of an AMUX Decision Maker request's terminal result
+/// (docs/policy/amux-decision-maker.md §6, §9, §10): part of the decision
+/// ledger, one immutable row per terminal result, written in the result's own
+/// transaction. It keeps what the ledger's result digest cannot and section 6
+/// needs on the stored proposal -- the output's kind, the option a select
+/// chose and the `irreversible` flag Admin shows before the operator judges --
+/// and the key period and key check value the result was digested under. No
+/// free text: the option id has the S1a grammar. Single writer:
+/// lib/amux/decisionMakerBodyStore.ts. Migration
+/// 20261008120000_amux_decision_maker_body_store holds the CHECKs (the shape
+/// per result kind, the option id grammar) and the guard: the request's own
+/// result event of the same transaction, kind and audit row; its key period
+/// under a registered, undestroyed key; no update or delete.
+model AmuxDecisionMakerResultDetail {
+  id            String   @id
+  requestId     String   @unique
+  resultEventId String   @unique
+  resultKind    String
+  outputKind    String?
+  optionId      String?
+  irreversible  Boolean?
+  keyPeriod     Int
+  keyCheck      String
+  auditLogId    String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A person's judgment of an AMUX Decision Maker proposal
+/// (docs/policy/amux-decision-maker.md §2-6, §4, §6, §10): one immutable row
+/// per request -- confirm, edit_confirm or reject -- with the values Admin
+/// showed beside the proposal (the keyed digests of its bodies, the select's
+/// option, the `irreversible` flag and the snapshot), the keyed digest of an
+/// edited answer (the answer itself is a body row), and §4's declaration
+/// accuracy (`matched`, `mismatched` with its wrong items, or the default
+/// `not_judged`). A judgment closes its request: its trigger writes the
+/// request's closing event of the same kind. Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs (the
+/// kind, accuracy and shape per kind), and the guard: an open request routed
+/// to a DM whose terminal result is the proposal it names, with that result's
+/// detail; no confirmation under the kill switch; every shown value equal to
+/// the stored one; the person's audit of the same transaction targeting the
+/// request; no update or delete. `actorUserId` is the operator's id and
+/// intentionally has no User foreign key.
+model AmuxDecisionMakerJudgment {
+  id                          String   @id
+  requestId                   String   @unique
+  resultEventId               String   @unique
+  instance                    String
+  kind                        String
+  actorUserId                 String
+  shownAnswerDigest           String?
+  shownRationaleDigest        String?
+  shownOptionId               String?
+  shownIrreversible           Boolean?
+  shownSnapshotState          String?
+  shownSnapshotTargetSha      String?
+  shownSnapshotManifestDigest String?
+  operatorAnswerDigest        String?
+  declarationAccuracy         String
+  /// Never NULL (a CHECK); empty unless `declarationAccuracy` is `mismatched`.
+  mismatchedItems             String[]
+  auditLogId                  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                   DateTime @default(now()) @db.Timestamptz(3)
+
+  request     AmuxDecisionMakerRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  resultEvent AmuxDecisionMakerRequestEvent @relation(fields: [resultEventId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog    AdminAuditLog                 @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([instance, createdAt])
+}
+
+/// The append-only delivery history of a confirmed AMUX Decision Maker
+/// answer (docs/policy/amux-decision-maker.md §2-7, §9, §10): one delivery
+/// decision after a confirm or edit_confirm (refused under the kill switch),
+/// then one receipt or one unknown outcome, and for an unknown outcome one
+/// person's resolution (`delivered` or `not_delivered`). Single writer:
+/// lib/amux/decisionMakerJudgmentStore.ts. Migration
+/// 20261008130100_amux_decision_maker_judgment_delivery holds the CHECKs, the
+/// partial unique indexes (one decision, one outcome and one resolution per
+/// request -- not expressible here) and the guard: the order above, the
+/// kill switch for the decision, the router's or the person's audit of the
+/// same transaction naming the event, an increasing sequence, READ COMMITTED
+/// only, no update or delete. `actorUserId` is the operator's id on a
+/// resolution and intentionally has no User foreign key.
+model AmuxDecisionMakerDeliveryEvent {
+  id          String   @id
+  sequence    BigInt   @unique @default(autoincrement())
+  requestId   String
+  kind        String
+  outcome     String?
+  actorKind   String
+  actorUserId String?
+  auditLogId  String   @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  request  AmuxDecisionMakerRequest @relation(fields: [requestId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLog AdminAuditLog            @relation(fields: [auditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([requestId, sequence])
+}
+
+/// The shared agent digest table: one row per stored digest item of any agent
+/// team, told apart by `agentKey`. Single writer: lib/agentDigestStore.ts.
+/// Triggers (migration 20261003000000_agent_digest_item) set `createdAt` and
+/// `retentionUntil` from the database clock, allow only the body expiry as an
+/// update and only the 365-day meta purge as a delete.
+model AgentDigestItem {
+  id             String    @id @db.Uuid
+  agentKey       String
+  kind           String
+  schemaVersion  Int
+  idempotencyKey String
+  payload        Json?
+  payloadSha256  String
+  sizeBytes      Int
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt      DateTime  @default(now()) @db.Timestamptz(3)
+  /// Overwritten by the insert trigger: createdAt plus the agent's body retention.
+  retentionUntil DateTime  @default(now()) @db.Timestamptz(3)
+  bodyDeletedAt  DateTime? @db.Timestamptz(3)
+
+  @@unique([agentKey, idempotencyKey])
+  @@index([agentKey, createdAt])
+  @@index([retentionUntil])
+}
+
+/// The QA-release agent's operator control record (docs/policy/qa-release-agent.md
+/// section 6): numbered, append-only revisions of what the operator decided,
+/// with rotation times and never secret values. Single writer:
+/// lib/qaReleaseOperatorControlStore.ts. Triggers (migration
+/// 20261003010000_qa_release_operator_control) require consecutive revisions
+/// and a same-transaction audit row by a person, set `createdAt` from the
+/// database clock, and refuse every update, delete and truncate.
+model QaReleaseOperatorControl {
+  revision                 Int       @id
+  digestEnabled            Boolean
+  mergeLaneEnabled         Boolean
+  developLaneOn            Boolean
+  iacCommit                String?
+  digestSecretRotatedAt    DateTime? @db.Timestamptz(3)
+  monitorSecretRotatedAt   DateTime? @db.Timestamptz(3)
+  mergeLaneSecretRotatedAt DateTime? @db.Timestamptz(3)
+  githubAppKeyRotatedAt    DateTime? @db.Timestamptz(3)
+  railwayTokenRotatedAt    DateTime? @db.Timestamptz(3)
+  githubReadTokenRotatedAt DateTime? @db.Timestamptz(3)
+  auditLogId               String    @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+
+  mergeAttempts QaReleaseMergeAttempt[]
+}
+
+/// The QA-release merge lane's attempts (docs/policy/qa-release-agent.md
+/// version 4, section 8 item 5). The lifecycle is lib/qaReleaseMergeAttemptCore.ts;
+/// migration 20261004010000_qa_release_merge_attempt enforces it, keeps one
+/// open attempt per lane with a partial unique index Prisma does not model,
+/// binds every write to an audit row of the same transaction and refuses
+/// removal.
+model QaReleaseMergeAttempt {
+  id                String                   @id
+  pullRequestNumber Int
+  headSha           String
+  base              String
+  controlRevision   Int
+  control           QaReleaseOperatorControl @relation(fields: [controlRevision], references: [revision], onDelete: Restrict, onUpdate: Restrict)
+  state             String
+  outcome           String?
+  mergeCommitSha    String?
+  lastAuditLogId    String
+  /// The next five are set by the triggers from the database clock.
+  issuedAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  expiresAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  consumedAt        DateTime?                @db.Timestamptz(3)
+  closedAt          DateTime?                @db.Timestamptz(3)
+  updatedAt         DateTime                 @default(now()) @db.Timestamptz(3)
+  /// The staging deployments the lane last observed for this merge, and when.
+  deployObservation Json?
+  deployObservedAt  DateTime?                @db.Timestamptz(3)
+
+  latchEvents QaReleaseMergeLaneLatch[]
+
+  @@index([issuedAt])
+}
+
+/// The QA-release merge lane's latch (docs/policy/qa-release-agent.md version
+/// 4, section 8 item 5): append-only events, latched when the newest sets it.
+/// Reasons are lib/qaReleaseMergeLaneLatchCore.ts; migration
+/// 20261004020000_qa_release_merge_lane_latch keeps the numbering consecutive,
+/// binds each event to an audit row of its own transaction (set by the merge
+/// lane, released by a person) and refuses any change.
+model QaReleaseMergeLaneLatch {
+  sequence   Int                    @id
+  latched    Boolean
+  reason     String?
+  attemptId  String?
+  attempt    QaReleaseMergeAttempt? @relation(fields: [attemptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  auditLogId String                 @unique
+  /// Overwritten by the insert trigger from the database clock.
+  createdAt  DateTime               @default(now()) @db.Timestamptz(3)
+}
+
 /// Engineering agent state (docs/policy/engineering-agent.md §11). One writer,
 /// lib/engineeringAgentStore.ts; every status column is guarded by a trigger in
 /// migration 20260928120000_engineering_agent_state, which also holds the
@@ -8355,6 +9049,297 @@ model SignupConsentAttempt {
   @@index([expiresAt])
 }
 
+/// One scheduled observation slot of the product-research agent, written once
+/// and never changed (docs/policy/product-research-agent.md §4).
+///
+/// The database owns three things here: one row per slot (a unique constraint,
+/// so two runs of the same slot cannot both find it empty), the refusal of a
+/// submission outside the slot's one-hour window, and the refusal of an update
+/// or of a delete before the retention period. A failed slot carries no
+/// payload, which is what keeps a failure from showing an earlier success's
+/// content.
+model ProductResearchObservation {
+  id            String   @id
+  /// The scheduled UTC instant this row answers for, on a whole minute.
+  slot          DateTime @unique
+  /// ok | failed
+  outcome       String
+  /// One of OBSERVATION_FAILURE_STAGES; set exactly when the outcome is failed.
+  failureStage  String?
+  schemaVersion Int
+  /// The commits the report was computed from. Present on a successful slot.
+  developSha    String?
+  mainSha       String?
+  issueCount    Int?
+  /// The observation rows and the counts recomputed from them.
+  payload       Json?
+  /// sha256 of the canonical payload, computed by the route from what it
+  /// stored -- never the digest the submitter sent.
+  payloadDigest String?
+  /// The database's own clock, set by the insert trigger.
+  submittedAt   DateTime @default(now())
+
+  @@index([outcome, slot])
+  @@index([submittedAt])
+}
+
+/// One state chain of the sre-ops agent (docs/policy/sre-ops.md §8). Written
+/// only by the Admin genesis action; never updated or deleted. The migration's
+/// trigger enforces the chain: one first genesis (shadow), every later one
+/// replacing the current head -- recovery in the same mode, activation shadow
+/// to live once.
+model OpsObserverGenesis {
+  id                  String            @id @db.Uuid
+  /// The database clock, set by the trigger.
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  /// One of GENESIS_REASONS.
+  reason              String
+  /// One of GENESIS_MODES.
+  mode                String
+  /// The head this genesis replaced; null only on the first genesis.
+  supersedesGenesisId String?           @unique @db.Uuid
+  /// 1 on the first genesis and null otherwise, so there is only one first genesis.
+  rootMarker          Int?              @unique
+  /// sha256 of the canonical genesis request the owner approved.
+  requestDigest       String
+  invariantVersion    Int
+  /// The deadline the approving request claimed; checked again at COMMIT.
+  runDeadlineAt       DateTime              @db.Timestamptz(3)
+  state               OpsObserverState?
+  deliveries          OpsObserverDelivery[]
+  transitions         OpsObserverTransition[]
+}
+
+/// The key state of one genesis. Every update is exactly the next generation
+/// (the compare-and-set); the trigger writes the stamps and refuses a state
+/// write whose genesis has been superseded or whose run deadline has passed by
+/// COMMIT.
+model OpsObserverState {
+  genesisId                 String             @id @db.Uuid
+  genesis                   OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation                Int
+  keys                      Json
+  updatedAt                 DateTime           @default(now()) @db.Timestamptz(3)
+  invariantVersion          Int
+  stampGeneration           Int
+  stampKeysSha256           String
+  verifiedThroughGeneration Int                @default(0)
+  verifiedThroughAuditId    String?
+  verifiedThroughAuditHash  String?
+  stampCheckpointSha256     String
+  /// The deadline the writing run claimed; checked again at COMMIT.
+  runDeadlineAt             DateTime           @db.Timestamptz(3)
+}
+
+/// One reservation of the sre-ops agent: what a run may send, at most once
+/// (docs/policy/sre-ops.md §3 rules 3 and 9, §5). Created reserved and closed
+/// once -- confirmed (live), shadowed (shadow) or abandoned; at most one is
+/// open at a time. The migration's triggers enforce all of it.
+model OpsObserverDelivery {
+  id               String                    @id @db.Uuid
+  genesisId        String                    @db.Uuid
+  genesis          OpsObserverGenesis        @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  /// Copied from the genesis by the trigger.
+  mode             String
+  /// The run that reserved it; one reservation per run.
+  runId            String                    @unique
+  /// One of DELIVERY_STATUSES.
+  status           String
+  /// 1 while reserved, null once closed; unique, so one reservation is open.
+  reservedMarker   Int?                      @unique
+  reservedAt       DateTime                  @default(now()) @db.Timestamptz(3)
+  confirmedAt      DateTime?                 @db.Timestamptz(3)
+  shadowedAt       DateTime?                 @db.Timestamptz(3)
+  abandonedAt      DateTime?                 @db.Timestamptz(3)
+  /// The owner's calendar date the daily budget counts against.
+  ownerDate        DateTime                  @db.Date
+  /// Set on the reservation that carries the weekly channel check; one per date.
+  channelCheckDate DateTime?                 @unique @db.Date
+  /// The AgentDigestItem the page links to; null for a check-only message.
+  digestItemId     String?                   @db.Uuid
+  invariantVersion Int
+  stampStatus      String
+  /// The deadline of the run that last wrote it; checked again at COMMIT.
+  runDeadlineAt    DateTime                  @db.Timestamptz(3)
+  items            OpsObserverDeliveryItem[]
+
+  @@index([genesisId, ownerDate])
+}
+
+/// One message kind for one incident inside a reservation. Written in the
+/// reservation's own transaction and never changed; (mode, signal, scope,
+/// kind, openedAt) is unique, so each kind is reserved once per incident.
+model OpsObserverDeliveryItem {
+  id         String              @id @db.Uuid
+  deliveryId String              @db.Uuid
+  delivery   OpsObserverDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  /// Copied from the reservation by the trigger.
+  mode       String
+  signal     String
+  scope      String
+  /// One of MESSAGE_KINDS.
+  kind       String
+  /// One of ITEM_ORIGINS.
+  origin     String
+  openedAt   DateTime            @db.Timestamptz(3)
+  /// Whether this item counted against the shared daily cap.
+  capped     Boolean
+
+  @@unique([mode, signal, scope, kind, openedAt], map: "OpsObserverDeliveryItem_incident_kind_key")
+  @@index([deliveryId])
+}
+
+/// Support-triage run record (docs/policy/support-triage.md §4, §8). One row per
+/// worker or retention run, content-free. Triggers in migration
+/// 20261003120000_support_triage_run own createdAt and deadlineAt, cap runs at
+/// 52 per kind per UTC day, downgrade a late success to deadline_exceeded, make
+/// a finished row final and refuse deleting a row younger than 30 days.
+model SupportTriageRun {
+  id                      String    @id
+  sequence                BigInt    @unique @default(autoincrement())
+  kind                    String
+  outcome                 String    @default("running")
+  createdAt               DateTime  @default(now())
+  deadlineAt              DateTime
+  finishedAt              DateTime?
+  batchesCompleted        Int?
+  overdueRemaining        Int?
+  oldestOverdueAgeSeconds Int?
+  blocked                 Int?
+
+  @@index([kind, createdAt])
+}
+
+/// The sre-ops run guard: one row per daily digest, its transaction's last
+/// write, whose deferred trigger refuses a late COMMIT of the shared rows
+/// written before it (docs/policy/sre-ops.md §6 item 5). Triggers in
+/// migrations/20261008020000_ops_observer_run_guard.
+model OpsObserverRunGuard {
+  /// sre-ops:daily:<owner date>.
+  runId            String   @id
+  /// One of RUN_GUARD_KINDS.
+  kind             String
+  /// The database clock, set by the trigger.
+  startedAt        DateTime @default(now()) @db.Timestamptz(3)
+  /// The deadline the run claimed; checked again at COMMIT.
+  runDeadlineAt    DateTime @db.Timestamptz(3)
+  invariantVersion Int
+}
+
+/// One row per state advance of the sre-ops agent, naming the system audit
+/// entry written in the same transaction (docs/policy/sre-ops.md §3-10, §10).
+/// Append-only; triggers in migrations/20261004030000_ops_observer_transition.
+model OpsObserverTransition {
+  genesisId      String             @db.Uuid
+  genesis        OpsObserverGenesis @relation(fields: [genesisId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  generation     Int
+  /// The AdminAuditLog entry of this advance. Not a relation: the audit table
+  /// is append-only already, and the insert trigger checks the entry exists.
+  auditLogId     String             @unique
+  auditEntryHash String
+  keysSha256     String
+  /// The deadline the advancing run claimed; checked again at COMMIT.
+  runDeadlineAt  DateTime           @db.Timestamptz(3)
+  /// The database clock, set by the trigger.
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+
+  @@id([genesisId, generation])
+}
+
+/// Support-triage suggestion (docs/policy/support-triage.md §1, §2, §6). At most one
+/// open row per (report, input digest); terminal rows may repeat it: a proposed lane and keyword-flag codes,
+/// never the text of the report. Migration
+/// 20261004010000_support_triage_suggestion holds the state machine, the
+/// lease and the display stamp.
+model SupportTriageSuggestion {
+  id              String    @id
+  feedbackId      String
+  inputDigest     String
+  state           String    @default("pending")
+  failureCode     String?
+  claimToken      String?
+  leaseExpiresAt  DateTime?
+  attemptCount    Int       @default(0)
+  lane            String?
+  keywordFlags    String[]  @default([])
+  ownerQueueState String    @default("not_queued")
+  displayedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  // One open row per (report, input): a partial unique index in migration
+  // 20261008100000_support_triage_suggestion_open_input_unique.
+  @@index([feedbackId, inputDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([leaseExpiresAt])
+}
+
+/// Support-triage group (docs/policy/support-triage.md §5, §6): one
+/// equivalence class of one kind over server facts, for display only. Its
+/// members carry its primary digest through a composite key, so a terminal
+/// group (digest NULL) can hold none. Migration
+/// 20261004020000_support_triage_group holds the state machine and the
+/// tombstone rules.
+model SupportTriageGroup {
+  id                            String    @id
+  state                         String    @default("candidate")
+  primaryKind                   String
+  primarySnapshotDigest         String?
+  groupCandidateKey             String?   @unique
+  groupInputDigest              String?
+  keyRetiredAt                  DateTime?
+  retiredMemberIds              String[]  @default([])
+  decision                      String?
+  decidedAt                     DateTime?
+  ownerQueueState               String    @default("not_queued")
+  displayedAt                   DateTime?
+  keyRecheckDeferredCount       Int       @default(0)
+  keyRecheckDeferredRunId       String?
+  keyRecheckLastEvaluatedRunSeq BigInt?
+  keyRecheckDeferredRunSeq      BigInt?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @default(now())
+
+  members SupportTriageGroupMember[]
+  signals SupportTriageGroupSignal[]
+
+  @@unique([id, primarySnapshotDigest])
+  @@index([state, ownerQueueState, createdAt])
+  @@index([keyRetiredAt])
+  @@index([retiredMemberIds], type: Gin)
+}
+
+/// A report in an open support-triage group. Inserted and deleted, never updated.
+model SupportTriageGroupMember {
+  groupId               String
+  feedbackId            String   @unique
+  primarySnapshotDigest String
+  createdAt             DateTime @default(now())
+
+  group    SupportTriageGroup @relation(fields: [groupId, primarySnapshotDigest], references: [id, primarySnapshotDigest], onDelete: Cascade, onUpdate: Restrict, map: "SupportTriageGroupMember_group_digest_fkey")
+  feedback Feedback           @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, feedbackId])
+}
+
+/// One signal per (group, kind): the SHA-256 of a server value its members
+/// share, never the value. Inserted and deleted, never updated.
+model SupportTriageGroupSignal {
+  groupId           String
+  kind              String
+  snapshotDigest    String
+  provenanceClass   String
+  snapshotExpiresAt DateTime
+  observedAt        DateTime @default(now())
+
+  group SupportTriageGroup @relation(fields: [groupId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([groupId, kind])
+  @@index([snapshotExpiresAt])
+}
+
 /// Operator-approved Frontier eligibility for one exact CLI provider/model.
 /// Names are data, never a permanent code allowlist. A revocation is a
 /// one-way update of the current row; a later reapproval is a new version.
@@ -8405,14 +9390,19 @@ model AmuxIdeaSubmission {
   currentSourcePlanRevisionId String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+  v22TaskResults      AmuxV22TaskResult[]
+  v22TaskPatches      AmuxV22TaskPatch[]
 
   scopeApprovals    AmuxIdeaSourceScopeApproval[] @relation("AmuxIdeaScopeOwner")
   previews          AmuxIdeaTransferPreview[]     @relation("AmuxIdeaPreviews")
   confirmedPreviews AmuxIdeaTransferPreview[]     @relation("AmuxPreviewConfirmedOwner")
   chunks            AmuxIdeaAnalysisChunk[]
   draftUnits        AmuxIdeaDraftUnit[]
+  derivationGroups  AmuxIdeaDerivationGroup[]
   unitDecisions     AmuxIdeaUnitDecision[]
   sourcePlanRevisions AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlans")
+  contentKeyRetirements AmuxIdeaContentKeyRetirement[]
+  retentionHolds AmuxIdeaRetentionHold[]
   currentSourcePlan AmuxIdeaSourcePlanRevision? @relation("AmuxCurrentIdeaPlan", fields: [currentSourcePlanRevisionId, id], references: [id, ideaId], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([id, actorUserId])
@@ -8420,6 +9410,52 @@ model AmuxIdeaSubmission {
   @@index([state, analysisDeadlineAt])
   @@index([rawPurgeAfter, rawPurgedAt])
   @@index([actorUserId, submittedAt])
+}
+
+/// A DB body purge and its external per-unit key deletion are separate
+/// irreversible steps. The retirement row is inserted with the purge audit;
+/// a verified key deletion completes it later without losing retry identity.
+model AmuxIdeaContentKeyRetirement {
+  ideaId              String
+  purpose             String
+  subjectId           String
+  bodyPurgedAt        DateTime
+  keyDeletedAt        DateTime?
+  purgeAuditLogId     String    @unique
+  keyDeleteAuditLogId String?   @unique
+  createdAt           DateTime  @default(now())
+
+  idea           AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  purgeAudit     AdminAuditLog @relation("AmuxV4ContentPurgeAudit", fields: [purgeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  keyDeleteAudit AdminAuditLog? @relation("AmuxV4KeyDeleteAudit", fields: [keyDeleteAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([ideaId, purpose, subjectId])
+  @@index([keyDeletedAt, bodyPurgedAt])
+}
+
+/// One owner-approved idea-wide hold pauses all four analysis content clocks.
+/// It never moves those clocks; expiry or release makes overdue rows due again.
+model AmuxIdeaRetentionHold {
+  id                String    @id @db.Uuid
+  ideaId            String
+  actorUserId       String
+  reasonCode        String
+  createdAt         DateTime  @default(now())
+  expiresAt         DateTime
+  releasedAt        DateTime?
+  noticeAt          DateTime
+  noticeSentAt      DateTime?
+  noticeAuditLogId  String?   @unique
+  approvalAuditLogId String   @unique
+  releaseAuditLogId  String?  @unique
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit AdminAuditLog @relation("AmuxV4RetentionHoldApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  releaseAudit AdminAuditLog? @relation("AmuxV4RetentionHoldReleaseAudit", fields: [releaseAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  noticeAudit AdminAuditLog? @relation("AmuxV4RetentionHoldNoticeAudit", fields: [noticeAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([ideaId, releasedAt, expiresAt])
+  @@index([noticeAt, noticeSentAt])
 }
 
 /// Immutable ordered source-unit manifest for one analysis revision. Only
@@ -8534,6 +9570,7 @@ model AmuxIdeaTransferPreview {
   currentForChunk     AmuxIdeaAnalysisChunk?         @relation("AmuxCurrentChunkPreview")
   planBoundCurrentForChunk AmuxIdeaAnalysisChunk? @relation("AmuxPlanBoundCurrentPreview")
   unitDecisions       AmuxIdeaUnitDecision[]
+  analysisBudgetHold  AmuxIdeaAnalysisBudgetHold?
 
   @@unique([ideaId, chunkIndex, attempt])
   @@unique([id, ideaId, chunkIndex])
@@ -8542,6 +9579,92 @@ model AmuxIdeaTransferPreview {
   @@index([sourcePlanRevisionId])
   @@index([state, expiresAt])
   @@index([payloadPurgeAfter, payloadPurgedAt])
+}
+
+/// Agent-only monthly ceiling for AMUX v4 idea analysis. A missing row is a
+/// refusal, never an implicit allowance. This dark table touches no user
+/// credit, plan, Chat provider-budget or worker-execution cost account.
+model AmuxIdeaAnalysisBudgetWindow {
+  namespace        String
+  monthStart       DateTime
+  limitMicroUsd    BigInt
+  spentMicroUsd    BigInt   @default(0)
+  reservedMicroUsd BigInt   @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  holds AmuxIdeaAnalysisBudgetHold[]
+
+  @@id([namespace, monthStart])
+}
+
+/// Owner-approved, versioned API-equivalent ceiling for one exact analysis
+/// CLI provider/model. A row is only price evidence, never call permission.
+/// No active version or expired evidence means reservation must stop.
+model AmuxIdeaAnalysisPriceVersion {
+  id                       String    @id
+  provider                 String
+  modelId                  String
+  mode                     String
+  version                  Int
+  status                   String
+  inputTokensCap           Int
+  outputTokensCap          Int
+  inputMicroUsdPerMillion  Int
+  outputMicroUsdPerMillion Int
+  evidenceDigest           String
+  verifiedAt               DateTime  @db.Timestamptz(3)
+  expiresAt                DateTime  @db.Timestamptz(3)
+  approvedAt               DateTime  @db.Timestamptz(3)
+  approvedByUserId         String
+  approvalAuditLogId       String    @unique
+  revokedAt                DateTime? @db.Timestamptz(3)
+  revocationAuditLogId     String?   @unique
+  createdAt                DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime  @updatedAt @db.Timestamptz(3)
+
+  approvalAudit   AdminAuditLog  @relation("AmuxV4AnalysisPriceApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisPriceVersion_approvalAudit_fkey")
+  revocationAudit AdminAuditLog? @relation("AmuxV4AnalysisPriceRevocationAudit", fields: [revocationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisPriceVersion_revocationAudit_fkey")
+  budgetHolds     AmuxIdeaAnalysisBudgetHold[]
+
+  @@unique([provider, modelId, mode, version], map: "AmuxIdeaAnalysisPriceVersion_provider_model_mode_version_key")
+  @@index([provider, modelId, mode, status], map: "AmuxIdeaAnalysisPriceVersion_lookup_idx")
+}
+
+/// One worst-case reservation for one exact, owner-confirmed preview. Unknown
+/// usage keeps the hold occupied until the owner resolves the exact claim.
+/// A zero settlement is only valid after positive evidence that the CLI did
+/// not start; it is distinct from an unused, never-dispatched reservation.
+model AmuxIdeaAnalysisBudgetHold {
+  id                       String    @id
+  previewId                String    @unique
+  namespace                String
+  monthStart               DateTime
+  mode                     String
+  provider                 String
+  modelId                  String
+  pricingVersion           String
+  priceVersionId           String?
+  inputTokensCap           Int
+  outputTokensCap          Int
+  inputMicroUsdPerMillion  Int
+  outputMicroUsdPerMillion Int
+  reservedMicroUsd         BigInt
+  settledMicroUsd          BigInt?
+  inputTokens              Int?
+  outputTokens             Int?
+  status                   String
+  createdAt                DateTime  @default(now())
+  dispatchedAt             DateTime?
+  closedAt                 DateTime?
+
+  window  AmuxIdeaAnalysisBudgetWindow @relation(fields: [namespace, monthStart], references: [namespace, monthStart], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_window_fkey")
+  preview AmuxIdeaTransferPreview      @relation(fields: [previewId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_preview_fkey")
+  priceVersion AmuxIdeaAnalysisPriceVersion? @relation(fields: [priceVersionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetHold_priceVersion_fkey")
+  cliUsageEvents AmuxCliUsageEvent[]
+
+  @@index([namespace, monthStart, status], map: "AmuxIdeaAnalysisBudgetHold_window_status_idx")
+  @@index([priceVersionId])
 }
 
 /// One bounded normalized analysis chunk. Raw provider output and normalized
@@ -8619,6 +9742,8 @@ model AmuxIdeaDraftUnit {
   localRef          String?
   unitKind          String
   state             String
+  /// Owner-authored split/merge output; null for model-authored units.
+  derivationGroupId String?
   expiresAt         DateTime
   bodyCiphertext    Bytes?
   bodyKeyId         String?
@@ -8634,6 +9759,9 @@ model AmuxIdeaDraftUnit {
   idea  AmuxIdeaSubmission    @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict)
   chunk AmuxIdeaAnalysisChunk @relation(fields: [ideaId, chunkIndex], references: [ideaId, chunkIndex], onDelete: Restrict, onUpdate: Restrict)
   decisions AmuxIdeaUnitDecision[]
+  derivationGroup AmuxIdeaDerivationGroup? @relation("AmuxV4DerivedDrafts", fields: [derivationGroupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDraftUnit_derivation_group_fkey")
+  derivationSources AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationSource")
+  derivationTargets AmuxIdeaDerivationEdge[] @relation("AmuxV4DerivationTarget")
 
   @@unique([ideaId, chunkIndex, unitIndex])
   @@unique([id, ideaId, actorUserId, chunkIndex])
@@ -8641,6 +9769,46 @@ model AmuxIdeaDraftUnit {
   @@index([actorUserId, ideaId])
   /// The due/expiry partial indexes live only in the SQL migration; Prisma
   /// schema cannot express their WHERE predicates.
+}
+
+/// Owner-approved split/merge provenance. Contains keyed commitments, never
+/// source or derived proposal text. One group may contain several edges.
+model AmuxIdeaDerivationGroup {
+  id                    String   @id
+  ideaId                String
+  actorUserId           String
+  requestId             String   @unique @db.Uuid
+  operation             String
+  sourceCount           Int
+  targetCount           Int
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  reasonDigest          String
+  reasonDigestKeyId     String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  idea AmuxIdeaSubmission @relation(fields: [ideaId, actorUserId], references: [id, actorUserId], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_idea_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxV4DerivationApprovalAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationGroup_audit_fkey")
+  derivedDrafts AmuxIdeaDraftUnit[] @relation("AmuxV4DerivedDrafts")
+  edges AmuxIdeaDerivationEdge[]
+
+  @@index([ideaId, actorUserId], map: "AmuxIdeaDerivationGroup_idea_actor_idx")
+}
+
+/// Immutable source-to-derived-unit edge; original proposal rows stay intact.
+model AmuxIdeaDerivationEdge {
+  id           String @id
+  groupId      String
+  sourceUnitId String
+  targetUnitId String
+
+  group AmuxIdeaDerivationGroup @relation(fields: [groupId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_group_fkey")
+  source AmuxIdeaDraftUnit @relation("AmuxV4DerivationSource", fields: [sourceUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_source_fkey")
+  target AmuxIdeaDraftUnit @relation("AmuxV4DerivationTarget", fields: [targetUnitId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaDerivationEdge_target_fkey")
+
+  @@unique([groupId, sourceUnitId, targetUnitId], map: "AmuxIdeaDerivationEdge_tuple_key")
+  @@index([targetUnitId], map: "AmuxIdeaDerivationEdge_target_idx")
 }
 
 /// One owner-confirmed decision on one v4 proposal unit. This additive table
@@ -8663,6 +9831,9 @@ model AmuxIdeaUnitDecision {
   unitDigestKeyId            String
   confirmationDigest         String
   confirmationDigestKeyId    String
+  /// Non-body owner-reviewed selection and cost receipt. Immutable after prepare;
+  /// the plaintext proposal and idea source are never copied here.
+  confirmationSnapshot       Json?
   sourcePreviewId            String
   sourcePreviewDigest        String
   sourcePreviewDigestKeyId   String
@@ -8744,6 +9915,7 @@ model AmuxPortfolioNode {
   amuxV4BaseDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionBaseNode")
   amuxV4ResolvedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionResolvedNode")
   amuxV4LinkedDecisions AmuxIdeaUnitDecision[] @relation("AmuxV4DecisionLinkedNode")
+  portfolioAssessments AmuxPortfolioAssessment[]
 
   @@index([parentId, level, state])
   @@index([level, state, createdAt])
@@ -8769,4 +9941,249 @@ model AmuxPortfolioNodeRevision {
 
   @@unique([nodeId, revision])
   @@index([decisionId])
+}
+
+/// Owner-confirmed evidence for one v4 hierarchy node or Story/Task. Model
+/// suggestions are not an authority: only an owner approval becomes a row.
+/// Evidence refs are opaque IDs; no source excerpt or explanation text lives here.
+model AmuxPortfolioAssessment {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  nodeId                String?
+  cardId                String?
+  subjectKind           String
+  subjectRevision       Int
+  subjectDigest         String
+  subjectDigestKeyId    String
+  assessmentVersion     Int
+  metrics               Json
+  uncertainty           String
+  evidenceRefs          Json
+  evidenceAsOf          DateTime
+  reasonCode            String
+  modelProposalDigest   String?
+  confirmationDigest    String
+  confirmationDigestKeyId String
+  priorAssessmentId     String?  @db.Uuid
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  approvedAt            DateTime
+
+  node AmuxPortfolioNode? @relation(fields: [nodeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_node_fkey")
+  card AmuxWorkItem? @relation(fields: [cardId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxPortfolioAssessment_card_fkey")
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioAssessmentAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  prior AmuxPortfolioAssessment? @relation("AmuxPortfolioAssessmentPrior", fields: [priorAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  successors AmuxPortfolioAssessment[] @relation("AmuxPortfolioAssessmentPrior")
+  initiativeScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreInitiative")
+  epicScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreEpic")
+  featureScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreFeature")
+  storyScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreStory")
+  taskScores AmuxPortfolioScoreSnapshot[] @relation("AmuxPortfolioScoreTask")
+
+  @@unique([nodeId, assessmentVersion], map: "AmuxPortfolioAssessment_node_version_key")
+  @@unique([cardId, assessmentVersion], map: "AmuxPortfolioAssessment_card_version_key")
+  @@index([nodeId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_node_approved_idx")
+  @@index([cardId, approvedAt(sort: Desc)], map: "AmuxPortfolioAssessment_card_approved_idx")
+  @@index([evidenceAsOf], map: "AmuxPortfolioAssessment_evidence_idx")
+}
+
+/// One owner-confirmed, append-only calculation from exact assessment rows.
+/// It has no status, SEV1, Todo, claim or execution authority.
+model AmuxPortfolioScoreSnapshot {
+  id                    String   @id @db.Uuid
+  requestId             String   @unique @db.Uuid
+  taskId                String
+  taskRevision          Int
+  sourceApprovalId      String
+  initiativeAssessmentId String  @db.Uuid
+  epicAssessmentId      String   @db.Uuid
+  featureAssessmentId   String   @db.Uuid
+  storyAssessmentId     String?  @db.Uuid
+  taskAssessmentId      String   @db.Uuid
+  scoreVersion          String
+  scoreTotal            Int
+  components            Json
+  inputDigest           String
+  inputDigestKeyId      String
+  evidenceAsOf          DateTime
+  activeStaleAt         DateTime
+  baselineStaleAt       DateTime
+  approvedByUserId      String
+  approvalAuditLogId    String   @unique
+  computedAt            DateTime
+
+  task AmuxWorkItem @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  approvalAudit AdminAuditLog @relation("AmuxPortfolioScoreSnapshotAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  v22PromotionReceipts AmuxV22PromotionReceipt[]
+  initiativeAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreInitiative", fields: [initiativeAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  epicAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreEpic", fields: [epicAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  featureAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreFeature", fields: [featureAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  storyAssessment AmuxPortfolioAssessment? @relation("AmuxPortfolioScoreStory", fields: [storyAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  taskAssessment AmuxPortfolioAssessment @relation("AmuxPortfolioScoreTask", fields: [taskAssessmentId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([taskId, computedAt(sort: Desc)], map: "AmuxPortfolioScoreSnapshot_task_computed_idx")
+  @@index([activeStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_active_idx")
+  @@index([baselineStaleAt, taskId], map: "AmuxPortfolioScoreSnapshot_baseline_idx")
+}
+
+/// Owner activation is separate from the v8 grant switch. No row is seeded.
+model AmuxV22PromotionControl {
+  id                      String   @id
+  active                  Boolean
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  activatedAt             DateTime
+  updatedAt               DateTime @updatedAt
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionControlAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Append-only evidence for one v4 Task's backlog-to-unassigned-todo move.
+/// It is not a worker claim, v8 grant, or authorization to run a CLI.
+model AmuxV22PromotionReceipt {
+  id                      String   @id @db.Uuid
+  workItemId              String   @unique
+  sourceApprovalId        String
+  sourceApprovalDigest    String
+  briefDigest             String
+  parentFeatureNodeId     String
+  parentStoryCardId       String?
+  taskRevision            Int
+  scoreSnapshotId         String   @db.Uuid
+  scoreVersion            String
+  scoreTotal              Int
+  capacityWipLimit        Int
+  capacityOccupied        Int
+  verifiedWorkerCount     Int
+  queueLimit              Int
+  normalLimit             Int
+  parallelReserved        Int
+  sev1Reserved            Int
+  costCents               Int
+  policyVersion           Int
+  authorizationAuditLogId String   @unique
+  promotedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22PromotionCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedReceipt")
+  scoreSnapshot AmuxPortfolioScoreSnapshot @relation(fields: [scoreSnapshotId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionReceiptAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
+}
+
+/// A lost result is never blindly retried. The shared v8 halt still applies.
+model AmuxV22PromotionUnknown {
+  id                      String   @id @db.Uuid
+  workItemId              String?
+  receiptFound            Boolean
+  authorizationAuditLogId String   @unique
+  recordedAt              DateTime
+
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22PromotionUnknownAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([recordedAt])
+}
+
+/// Owner decisions are append-only. The latest sequence is the effective lane;
+/// normal clears a prior SEV1 or parallel declaration without rewriting it.
+model AmuxV22LaneDecision {
+  sequence                BigInt   @id @default(autoincrement())
+  workItemId              String
+  lane                    String
+  approvedByUserId        String
+  authorizationAuditLogId String   @unique
+  decidedAt               DateTime
+
+  workItem AmuxWorkItem @relation(fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22LaneAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  workerAssignments AmuxV22WorkerAssignment[]
+
+  @@index([workItemId, sequence])
+}
+
+/// A Todo assignment, not execution authority. A15 must establish its own
+/// attempt and execution-cost fence before any v4 Task can enter doing.
+model AmuxV22WorkerAssignment {
+  id                      String   @id @db.Uuid
+  workItemId              String
+  promotionReceiptId      String   @db.Uuid
+  laneDecisionSequence    BigInt?
+  lane                    String
+  taskRevision            Int
+  workerName              String
+  workerInstanceId        String
+  workerGeneration        Int
+  provider                String
+  modelId                 String
+  role                    String
+  grade                   String
+  routeId                 String
+  routePolicyDigest       String
+  catalogApprovalId       String
+  catalogVersion          String
+  costReceiptDigest       String
+  perAttemptMicroUsd      BigInt
+  authorizationAuditLogId String   @unique
+  assignedAt              DateTime
+
+  workItem AmuxWorkItem @relation("AmuxV22AssignmentCard", fields: [workItemId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  acceptedByCard AmuxWorkItem? @relation("AmuxV22AcceptedAssignment")
+  promotionReceipt AmuxV22PromotionReceipt @relation(fields: [promotionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  laneDecision AmuxV22LaneDecision? @relation(fields: [laneDecisionSequence], references: [sequence], onDelete: Restrict, onUpdate: Restrict)
+  authorizationAuditLog AdminAuditLog @relation("AmuxV22AssignmentAudit", fields: [authorizationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  executionAttempt AmuxExecutionAttempt? @relation("AmuxV22ExecutionAssignment")
+
+  @@index([workItemId, assignedAt])
+}
+
+/// Owner-approved, versioned Agent worker/model ceiling inputs. These are
+/// separate from Chat pricing and user credit entitlement.
+model AmuxV4TaskCostCatalogApproval {
+  id                   String    @id
+  version              Int       @unique
+  status               String
+  catalogVersion       String    @unique
+  pricingVersion       String
+  catalog              Json
+  catalogDigest        String
+  evidenceDigest       String
+  approvedByUserId     String
+  approvalAuditLogId   String    @unique
+  approvedAt           DateTime
+  revokedAt            DateTime?
+  revocationAuditLogId String?   @unique
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}
+
+/// A person's support-triage decision (docs/policy/support-triage.md §5, §6):
+/// its kind, when, and a keyed digest of what it was bound to. Kept twelve
+/// months, and deleted whole the moment any linked report's account is.
+/// Migration 20261005010000_support_triage_decision_record holds the rules.
+model SupportTriageDecisionRecord {
+  id                     String   @id
+  decisionKind           String
+  decidedAt              DateTime @default(now())
+  decisionEnvelopeDigest String
+  digestVersion          Int
+  retentionUntil         DateTime @default(now())
+
+  links SupportTriageDecisionRecordLink[]
+
+  @@index([retentionUntil])
+  @@index([digestVersion])
+}
+
+/// One report a decision was bound to. Inserted and deleted, never updated;
+/// deleting any link deletes its record and every other link.
+model SupportTriageDecisionRecordLink {
+  id         String @id
+  recordId   String
+  feedbackId String
+
+  record   SupportTriageDecisionRecord @relation(fields: [recordId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  feedback Feedback                    @relation(fields: [feedbackId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([recordId, feedbackId])
+  @@index([feedbackId])
 }

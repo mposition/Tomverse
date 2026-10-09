@@ -6,7 +6,7 @@ name: PR Fast Gate
 # # `fast-gate` below MUST keep the name                                     #
 # #     Security, unit, build, and Chromium smoke tests                      #
 # # Branch protection on develop and main references check runs by NAME, and #
-# # that string is the required check. The three jobs it aggregates are      #
+# # that string is the required check. The jobs it aggregates are            #
 # # deliberately NOT registered as required checks -- adding them would mean #
 # # reconfiguring branch protection, and renaming this one would leave every #
 # # open PR waiting forever on a check that no longer exists.                #
@@ -18,15 +18,57 @@ name: PR Fast Gate
 # Neither tier is the full suite -- see .github/audits/ui-test-tiers.md for
 # what runs where.
 #
-# secret-scan, static-and-unit, build-and-e2e and ui-risk run concurrently;
-# fast-gate waits for all four and fails unless every one of them succeeded.
+# static-and-unit (which also runs the PR-commit secret scan), unit-tests,
+# build-and-e2e and ui-risk run concurrently; fast-gate waits for all four and
+# fails unless every one of them succeeded.
 # A matrix job's result is the roll-up of its shards, so all four of ui-risk's
 # must pass for it to count as one success. Nothing merges on a green
 # fast-gate that did not pass all four, and no upstream job can go green by
 # being skipped -- see the aggregation step.
+#
+# A draft pull request runs nothing (since 2026-10-03; before that only two
+# kinds did -- a draft release, develop -> main, and a draft stacked on a
+# branch other than develop or main).
+#
+# A release PR's head is develop's head, so every merge into develop also synchronizes
+# it, and its whole pull-request tier ran a second time on each develop
+# commit -- beside the push runs of Credit Finance, Admin Console E2E and
+# Rust on the same SHA. Railway's Wait for CI holds develop's deployment (on
+# staging then, on dev since 2026-10-07) for every suite on the commit, and the doubled demand queued jobs for up to 22
+# minutes: #1902's merge took ~40 minutes to reach staging on 2026-10-02.
+# develop carries main through the back-merge, so the release PR's merge ref
+# is develop's tree, which the push runs already verify.
+#
+# Stacked drafts were the other half of the queue. On 2026-10-02 ~45 draft
+# PRs were stacked one on another (each based on the previous branch, only
+# the bottom one on main), a new one roughly every half hour, and every push
+# ran the full tier of ~20 jobs. With the account's concurrent-job ceiling
+# that put develop's own merge-commit checks -- the ones Railway waits on --
+# behind them for 12+ minutes even after the release-PR duplicate was gone.
+# A stacked draft gets CI when it is marked ready or once it is a draft on
+# develop or main (GitHub retargets a stack when its base merges; that fires
+# no event, so the next push or `ready_for_review` starts the run).
+#
+# Then every draft. With the concurrent-job limit raised to 40, a snapshot on
+# 2026-10-03 still showed 40 jobs running and 68 queued: several agent
+# sessions each kept a series of open, non-draft pull requests into develop and
+# every push ran the full ~20-job tier, while develop's and main's own push
+# checks -- the ones Railway's deployments wait on -- queued behind them. A
+# branch is now opened as a draft (Auto PR to Develop passes --draft) and
+# marked ready when its work is complete; marking it ready runs the tier once.
+#
+# Every job here, and in the other pull-request workflows, carries the same
+# condition; tests/draftPrCiSkip.test.mjs keeps them in step. A draft cannot
+# merge, and `ready_for_review` starts the full run the merge then needs --
+# without it, the skipped check from the last draft push would be the
+# required check's verdict. `edited` is deliberately not a trigger: it fires
+# on a title change, and a skipped run there would replace a failed verdict.
+# Drafts into develop, and every non-draft PR, run as before, apart from one
+# extra run when a draft is marked ready.
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   actions: read
@@ -38,49 +80,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # This duplicates the scan Secret History Scan performs on the same PR
-  # (gitleaks-action scans base..head on pull_request in both), but it is
-  # deliberately kept: fast-gate is the only required status check on develop
-  # and main, so removing this would take secret scanning off the
-  # merge-blocking path entirely. Remove it only after
-  # "Scan repository history for secrets" is itself made a required check.
-  # `fetch-depth: 0` here is for gitleaks, which scans base..head and needs
-  # both ends. Every job in this workflow now checks out full history, each
-  # for its own reason stated at its own checkout, so no comment here claims
-  # anything about the others: the line this replaces said the depth existed
-  # "for this job, and only for this job", and three other jobs had it.
-  secret-scan:
-    name: Secret scan (PR commits)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Scan pull-request commits for secrets
-        timeout-minutes: 5
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_COMMENTS: "false"
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
-
   # Everything that needs node_modules but neither a build nor a browser.
   # Runs unconditionally, including on documentation-only PRs: the encoding
   # check is exactly the check a Markdown-only change needs, and the rest is
   # cheap enough that scoping it would buy less than it risks.
+  #
+  # The unit suite used to run here too, as one step of this job. By 2026-10 it
+  # took ~14 of this job's ~19.5 minutes and this job was the slowest in the
+  # gate, so it moved to `unit-tests` below and the two now run side by side.
   static-and-unit:
-    name: Security, lint, encoding, and unit tests
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Security, lint, and encoding checks
     runs-on: ubuntu-latest
-    # Recent to-develop runs measured 559-576s in the unit step and 782-822s
-    # for this job. The continuation contract suite added ~31s, and run
-    # 34695229219 then hit the old 10-minute step ceiling while still passing
-    # tests. Keep the unit deadline below the job deadline so an actual hang
-    # identifies its stage; the remaining job budget covers the static checks
-    # below on a slow but passing run.
-    timeout-minutes: 25
+    # Without the unit suite the job measured ~5.5 minutes of checks plus
+    # install. 15 bounds a hang, not the runtime.
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -93,11 +107,47 @@ jobs:
           # commit is absent, which needs the history to be here.
           fetch-depth: 0
 
+      # The PR-commit secret scan, first, before anything is installed. It was
+      # its own job until 2026-10-03; a ~15-second scan held a whole runner
+      # and its checkout per pull request against the account's concurrent-job
+      # ceiling, and this job already checks out the full history gitleaks
+      # needs to scan base..head. It duplicates Secret History Scan's PR run on
+      # purpose: fast-gate is the only required check, so this keeps secret
+      # scanning on the merge-blocking path. The token is the job's own
+      # read-only GITHUB_TOKEN.
+      - name: Scan pull-request commits for secrets
+        timeout-minutes: 5
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
+      # main takes the three lanes of .github/RELEASE_CHECKLIST.md 7.9 --
+      # develop, release/**, hotfix/** -- and features go to develop. First,
+      # and before `npm ci`, so a misdirected pull request learns in a minute
+      # rather than after the whole tier. The head repository is checked here
+      # because the policy reads only a branch name, and a fork can call its
+      # branch `develop`.
+      - name: Pull requests into main come from a release or a hotfix
+        if: github.base_ref == 'main'
+        timeout-minutes: 2
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::A pull request into main must come from a branch of $GITHUB_REPOSITORY, not $HEAD_REPO."
+            exit 1
+          fi
+          node scripts/main-pr-source-policy.mjs "$HEAD_REF" "$PR_NUMBER"
 
       # `--no-audit` skips the registry advisory round-trip npm otherwise
       # makes on every install; it does not weaken the audit itself, which
@@ -113,9 +163,9 @@ jobs:
         timeout-minutes: 5
         run: npm run security:regression
 
-      - name: Unit and API policy tests
-        timeout-minutes: 15
-        run: npm run test:unit
+      - name: One-shot gate source closure
+        timeout-minutes: 2
+        run: npm run verify:prompt-refiner-vnext-one-shot-gate-source
 
       # Its own process, not part of test:unit, because it needs
       # --experimental-test-module-mocks and module mocks are process-global
@@ -229,6 +279,55 @@ jobs:
       - name: Accent token usage
         timeout-minutes: 5
         run: npm run check:accent-tokens
+
+      # An Actions cache key decides who can restore the entry, and an entry
+      # written while running on the default branch or on develop is restorable
+      # by every run that can see that scope. So two workflows sharing a key
+      # share one pool, and a restore-key that names only the family joins pools
+      # that were meant to be separate -- which is how five workflows came to
+      # execute browser binaries from one entry, and how a 16.3.4 build cache
+      # broke a 16.3.5 Turbopack font build.
+      #
+      # It reads YAML and nothing else, so it belongs with the static checks.
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md F1 and F2.
+      - name: Actions cache key namespaces
+        timeout-minutes: 5
+        run: npm run check:ci-cache-keys
+
+      # The other half of the same question. The keys above decide who can
+      # restore an entry; this decides what a job may restore while holding a
+      # credential. Today every credentialed job restores only a package
+      # manager's cache, which npm ci verifies against the lockfile -- nothing
+      # was keeping it that way, and the existing agent push rule cannot tell,
+      # because it already fires for all of them.
+      #
+      # Same judgement as the agent push policy on purpose
+      # (lib/agentCredentialReachability.ts), so there is one answer to which
+      # jobs hold a credential rather than two that drift.
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md F4 and P3.
+      - name: Credential and unverified cache separation
+        timeout-minutes: 5
+        run: npm run check:credential-cache-separation
+
+      # The narrower question the engineering agent's cache isolation record
+      # rests on, and a stronger answer. GitHub's cache scoping closes a pull
+      # request's entries to other refs, but re-runs of that pull request can
+      # restore them -- so the agent's own pull request is the direction
+      # isolation cannot answer for, and docs/policy/engineering-agent.md §5's
+      # record instead asserts that no credentialed cache-restoring job runs
+      # there. The check above does not keep that: it permits the package
+      # manager's cache, and the lockfile comparison which makes that kind
+      # verified is no defence when the agent can change the lockfile in the
+      # same pull request.
+      #
+      # It never reads a job's `if:` -- §5 forbids the analyser from narrowing
+      # a result that way, and reading a trigger without its condition is the
+      # mistake the audit's F5 made twice. The condition is held as a fact
+      # instead: no such job restores a cache today.
+      # .github/audits/actions-cache-poisoning-audit-2026-10-03.md P7.
+      - name: Agent PR cache isolation
+        timeout-minutes: 5
+        run: npm run check:agent-pr-cache-isolation
 
       # A copy-based locator that steers a branch, on copy that no longer
       # exists, neither passes nor fails -- it quietly takes the other path.
@@ -620,6 +719,17 @@ jobs:
         timeout-minutes: 5
         run: npm run check:encoding:strict
 
+      # JSON allows an object to declare the same key twice and every reader
+      # keeps one of them, so a duplicate is invisible: the file is valid, the
+      # entry simply does not exist for anything that reads the parsed object,
+      # and a tool that parses and re-serialises the file deletes it from the
+      # bytes as well. That is how a duplicated `report:provider-data-
+      # destinations` was found in package.json. Nothing else in this stage
+      # would report it -- the file parses.
+      - name: Duplicate package.json keys
+        timeout-minutes: 5
+        run: npm run check:package-json-duplicate-keys
+
       # `npm run check` still runs both locally and in the daily audit. They
       # are split here so the step timings in this log attribute time to the
       # right stage, and so a lint failure reports without paying for a build.
@@ -627,7 +737,48 @@ jobs:
         timeout-minutes: 10
         run: npx eslint . --max-warnings=0
 
+      - name: AMUX dashboard SPA lint
+        timeout-minutes: 10
+        run: |
+          npm ci --prefix vendor/amux --ignore-scripts --no-audit --no-fund
+          npm run lint:spa --prefix vendor/amux
+
+  # The unit and API policy suite, in its own job so it runs beside the static
+  # checks instead of after them. scripts/run-unit-tests.mjs runs one test file
+  # per core here (Windows stays serial) and runs the few files that write into
+  # the checkout alone afterwards -- see scripts/unit-test-serial-files.mjs.
+  unit-tests:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Unit and API policy tests
+    runs-on: ubuntu-latest
+    # Serial, the step took ~14 minutes; concurrent, a fraction of that. 20
+    # bounds a hang and still covers a run that falls back to serial
+    # (UNIT_TEST_CONCURRENCY=1) while an ordering problem is investigated.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Some unit tests read git history (memory-eval signing commits,
+          # pinned source snapshots); a depth-1 clone cannot answer them.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        timeout-minutes: 10
+        run: npm ci --no-audit --no-fund
+
+      - name: Unit and API policy tests
+        timeout-minutes: 18
+        run: npm run test:unit
+
   build-and-e2e:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: Production build and Chromium smoke tests
     runs-on: ubuntu-latest
     # Measured 143s of work with a warm cache (run #130 step timings, minus
@@ -650,17 +801,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Documentation-only PRs skip this job's expensive half. The rule is a
-      # deliberately narrow allowlist: top-level Markdown and audit reports
-      # only. A Markdown file anywhere else -- under app/, tests/, scripts/,
-      # public/ -- does NOT qualify, because those trees can hold fixtures
-      # and generated content. Shared code, configuration, the lockfile,
-      # workflows and tests all put the full gate back, as does detection
-      # failing for any reason at all: `code=true` is the fallback on every
-      # error path, so the failure mode is "ran too much", never "skipped a
-      # check". `--no-renames` lists both sides of a rename so a file moved
-      # out of documentation is still seen.
-      - name: Determine whether this PR touches anything but documentation
+      # A PR that cannot change what the app renders skips this job's
+      # expensive half; the same decision gates ui-risk below and Review
+      # Parity. scripts/pr-ui-scope.mjs makes it: only paths provably outside
+      # the built app pass (documentation, unit and integration tests, Rust,
+      # other workflows, scripts/ files nothing in the app or its build
+      # reaches) -- until 2026-10-03 it was top-level Markdown and audit
+      # reports only, which almost no agent PR is. Everything else, and
+      # detection failing for any reason, runs the full gate: `code=true` is
+      # the fallback on every error path, so the failure mode is "ran too
+      # much", never "skipped a check". `--no-renames` lists both sides of a
+      # rename so a file moved out of the app is still seen.
+      - name: Determine whether this PR can change what the app renders
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -678,24 +830,7 @@ jobs:
           fi
           echo "Changed paths:"
           echo "$changed"
-          code=false
-          while IFS= read -r path; do
-            case "$path" in
-              .github/audits/*) ;;
-              docs/*.md) ;;
-              */*) code=true ;;
-              *.md) ;;
-              *) code=true ;;
-            esac
-            if [ "$code" = "true" ]; then
-              echo "Non-documentation path found: $path"
-              break
-            fi
-          done <<< "$changed"
-          if [ "$code" = "false" ]; then
-            echo "Documentation-only PR: skipping build, Chromium and smoke tests."
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
 
       - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'
@@ -710,12 +845,16 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .next/cache
-          key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
-          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
-          # Linux-next-admin-e2e- from another workflow. That cache was built
-          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
+          key: ${{ runner.os }}-next-v2-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Namespaced and versioned: next-v2-pr-<lockfile>-<sources>. A restore-key
+          # no narrower than Linux-next- matches every other workflow entry, and an
+          # entry written in a scope every run can see then becomes one shared pool.
+          # That also broke builds: a 16.3.4 cache from another workflow fails a
+          # 16.3.5 Turbopack font build. v2 abandons the entries written while the
+          # fallback was open. Enforced by npm run check:ci-cache-keys
+          # (scripts/ci-cache-key-policy.mjs, .github/audits/actions-cache-poisoning-audit-2026-10-03.md F2).
           restore-keys: |
-            ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-v2-pr-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'
@@ -746,9 +885,15 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          key: ${{ runner.os }}-playwright-v2-pr-${{ hashFiles('package-lock.json') }}-chromium
+          # Namespaced per workflow: five workflows shared one exact
+          # Linux-playwright-<lockfile>-chromium entry, so whichever wrote it first in a
+          # scope every run can see owned the browser binaries the others execute -- and
+          # a cache hit skips the download and verifies nothing. v2 abandons the shared
+          # entries. Enforced by npm run check:ci-cache-keys
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F1).
           restore-keys: |
-            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-playwright-v2-pr-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
@@ -756,7 +901,7 @@ jobs:
         run: scripts/ci/install-playwright.sh chromium
 
       # The @smoke tier only. Every other desktop-chromium test still runs --
-      # on main push via Main Chromium Regression, and nightly via Daily
+      # on pull requests into main via Main Chromium Regression, and nightly via Daily
       # Security Audit and Nightly Visual Regression. See
       # scripts/verify-smoke-coverage.mjs for what this tier must cover.
       #
@@ -833,8 +978,9 @@ jobs:
   # shard would buy less than this one did and cost another runner.
   #
   # The full 63-golden visual matrix stays out of the PR tier -- it runs
-  # unfiltered on main push and nightly.
+  # unfiltered on pull requests into main and nightly.
   ui-risk:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     name: High-risk UI regression checks (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
     # Each job: install, build, then a quarter of the tier. 25 minutes is well
@@ -866,7 +1012,7 @@ jobs:
       # failure mode is "ran too much", never "skipped a check". Inlined rather
       # than shared because this repository has no composite action to share it
       # through; if a third job needs it, extract it then.
-      - name: Determine whether this PR touches anything but documentation
+      - name: Determine whether this PR can change what the app renders
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -882,24 +1028,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          code=false
-          while IFS= read -r path; do
-            case "$path" in
-              .github/audits/*) ;;
-              docs/*.md) ;;
-              */*) code=true ;;
-              *.md) ;;
-              *) code=true ;;
-            esac
-            if [ "$code" = "true" ]; then
-              echo "Non-documentation path found: $path"
-              break
-            fi
-          done <<< "$changed"
-          if [ "$code" = "false" ]; then
-            echo "Documentation-only PR: skipping the UI regression shards."
-          fi
-          echo "code=$code" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$changed" | node scripts/pr-ui-scope.mjs
 
       - name: Setup Node.js
         if: steps.scope.outputs.code == 'true'
@@ -914,12 +1043,16 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .next/cache
-          key: ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
-          # Stop at next-pr-<lockfile>. A bare Linux-next- prefix also matches
-          # Linux-next-admin-e2e- from another workflow. That cache was built
-          # with Next 16.3.4 and breaks a 16.3.5 Turbopack font build.
+          key: ${{ runner.os }}-next-v2-pr-${{ hashFiles('package-lock.json') }}-${{ hashFiles('app/**/*.ts', 'app/**/*.tsx', 'components/**/*.ts', 'components/**/*.tsx', 'lib/**/*.ts', 'lib/**/*.tsx', 'next.config.ts', 'tsconfig.json') }}
+          # Namespaced and versioned: next-v2-pr-<lockfile>-<sources>. A restore-key
+          # no narrower than Linux-next- matches every other workflow entry, and an
+          # entry written in a scope every run can see then becomes one shared pool.
+          # That also broke builds: a 16.3.4 cache from another workflow fails a
+          # 16.3.5 Turbopack font build. v2 abandons the entries written while the
+          # fallback was open. Enforced by npm run check:ci-cache-keys
+          # (scripts/ci-cache-key-policy.mjs, .github/audits/actions-cache-poisoning-audit-2026-10-03.md F2).
           restore-keys: |
-            ${{ runner.os }}-next-pr-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-next-v2-pr-${{ hashFiles('package-lock.json') }}-
 
       - name: Install dependencies
         if: steps.scope.outputs.code == 'true'
@@ -937,20 +1070,44 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-chromium
+          key: ${{ runner.os }}-playwright-v2-pr-${{ hashFiles('package-lock.json') }}-chromium
+          # Namespaced per workflow: five workflows shared one exact
+          # Linux-playwright-<lockfile>-chromium entry, so whichever wrote it first in a
+          # scope every run can see owned the browser binaries the others execute -- and
+          # a cache hit skips the download and verifies nothing. v2 abandons the shared
+          # entries. Enforced by npm run check:ci-cache-keys
+          # (.github/audits/actions-cache-poisoning-audit-2026-10-03.md F1).
           restore-keys: |
-            ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}-
+            ${{ runner.os }}-playwright-v2-pr-${{ hashFiles('package-lock.json') }}-
 
       - name: Install Chromium
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 20
         run: scripts/ci/install-playwright.sh chromium
 
+      # Shard weights, shard 1 then shard 2, for both projects.
+      #
+      # `--shard` balances by test count in file-sized groups, and the heavy
+      # specs sort into shard 1 (chat-unified-workspace, 116 tests / 4.1 min;
+      # guest-turnstile-verification, ~5 s a test; image-generation-workspace).
+      # From 2026-08-26 to 2026-10-05 desktop shard 1's test step grew 9.8 ->
+      # 17.0 minutes while shard 2 grew 7.6 -> 9.5, and shard 1 set PR Fast
+      # Gate's wall clock. Both projects split the same files 512 / 435.
+      #
+      # 40:55 moves the boundary to 405 / 542. Replaying the measured per-test
+      # times of a 2026-10-05 run (which reproduce its actual 16.6 / 9.5 split
+      # exactly) gives 13.9 / 12.2 minutes for desktop; file granularity makes
+      # 13.9 the lowest maximum on offer (36:59 gives 12.2 / 14.0). Every test
+      # still lands in exactly one shard, and tests/uiRiskShardWeights.test.mjs
+      # pins one weight per shard. PWTEST_SHARD_WEIGHTS is Playwright's own,
+      # undocumented knob; without it the split falls back to equal counts.
+      # Recalibrate the same way when one shard drifts well past the other.
       - name: Run the high-risk UI regression checks
         if: steps.scope.outputs.code == 'true'
         timeout-minutes: 20
         env:
           UI_RISK_PROJECT: ${{ matrix.project }}
+          PWTEST_SHARD_WEIGHTS: "40:55"
         run: npm run test:e2e:ui-risk:shard -- --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
       - name: Upload failed test evidence
@@ -970,11 +1127,11 @@ jobs:
     name: Security, unit, build, and Chromium smoke tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [secret-scan, static-and-unit, build-and-e2e, ui-risk]
+    needs: [static-and-unit, unit-tests, build-and-e2e, ui-risk]
     # `always()` so this reports a red check instead of going pending when an
     # upstream job fails, is cancelled, or is skipped. The step below decides
     # the verdict; reaching it is not itself a pass.
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     steps:
       # Every upstream job must have concluded `success`. `skipped` and
       # `cancelled` are failures here on purpose: a job that never ran has
@@ -984,8 +1141,8 @@ jobs:
       # still concludes `success` and this stays a simple all-must-pass.
       - name: Enforce upstream job results
         env:
-          SECRET_SCAN: ${{ needs.secret-scan.result }}
           STATIC_AND_UNIT: ${{ needs.static-and-unit.result }}
+          UNIT_TESTS: ${{ needs.unit-tests.result }}
           BUILD_AND_E2E: ${{ needs.build-and-e2e.result }}
           # A matrix job's result is the roll-up of every shard: `success` only
           # if all shards succeeded, so both viewport classes are gated.
@@ -994,8 +1151,8 @@ jobs:
           set -uo pipefail
           failed=0
           for entry in \
-            "secret-scan=$SECRET_SCAN" \
             "static-and-unit=$STATIC_AND_UNIT" \
+            "unit-tests=$UNIT_TESTS" \
             "build-and-e2e=$BUILD_AND_E2E" \
             "ui-risk=$UI_RISK"
           do

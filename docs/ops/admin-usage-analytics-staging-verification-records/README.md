@@ -10,9 +10,10 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
 ```
 
 **merge SHA를 옮겨 적지 말고 실행 시점에 `GET /api/build-info`를 읽으십시오.**
-staging은 develop에 병합된 것이 CI를 통과해야 재배포되므로, 병합 SHA와 서빙
-SHA가 다를 수 있습니다. 2026-09-17 회차가 그랬습니다 — #1541이 병합됐지만
-develop의 Admin E2E가 실패해 staging은 #1539에 머물렀습니다.
+staging은 `test`가 가리키는 release candidate를(2026-10-07 전에는 develop에
+병합된 것을) CI를 통과해야 재배포하므로, 병합 SHA와 서빙 SHA가 다를 수 있습니다.
+2026-09-17 회차가 그랬습니다 — #1541이 병합됐지만 develop의 Admin E2E가 실패해
+staging은 #1539에 머물렀습니다.
 
 ## 규칙
 

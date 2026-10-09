@@ -2,9 +2,10 @@
 
 이 디렉터리는 Tomverse AMUX 운영 기록의 canonical location이다.
 
-AMUX의 현재·미래 개발 source of truth는 이 저장소다. Frozen upstream
-reference는 provenance와 semantic comparison에만 사용하며, Tomverse source
-tree에 upstream Git history를 합치지 않는다.
+AMUX 제품 통합과 독립 실행 서버의 개발 source of truth는 이 저장소다.
+서버 소스는 `vendor/amux/`의 독립 Cargo workspace에 있다. Frozen upstream
+reference는 provenance와 semantic comparison에만 사용하며, upstream Git
+history를 합치지 않는다. 서버 소스 편입 결정은 `architecture.md`에 기록한다.
 
 포함 대상:
 
@@ -39,6 +40,7 @@ Production mutation 전에는 다음을 확인한다.
 - immutable run records: `staging-verification-records/`
 - verification index: `verification/README.md`
 - recovery와 rollback: `recovery.md`
+- AMUX 서버 바이너리 빌드·교체·되돌리기: `server-deploy.md`
 
 실제 run record는 staging이 실제로 서빙하는 전체 40자리 SHA를 확인한 뒤에만
 생성한다.

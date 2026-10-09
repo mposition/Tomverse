@@ -1,7 +1,11 @@
 # Development Agent Orchestration
 
 상태: **승인됨.** 운영자 `mposition`이 2026-09-22에 버전 2 본문을 승인했다. 같은 운영자가 2026-09-24에 버전 3의 수동 promotion pilot 절을 승인했다. 같은 운영자가 2026-09-24에 버전 4의 소스 reconciliation 적용 경로를 승인했다. 그 경로의 코드 래치는 꺼진 채로 출고했다. 같은 운영자가 2026-09-24에 버전 5로 그 코드 래치를 켰다. 그 승인은 운영 revision을 쓰지 않고, `amux_authority`로 넘어가지 않는다. 같은 운영자가 2026-09-24에 버전 6으로 promotion pilot의 코드 래치를 켰다. 그 승인은 카드를 승격하지 않고, 환경 변수를 켜지 않으며, worker 실행과 `amux_authority`를 열지 않는다. 같은 운영자가 2026-09-24에 버전 7로 추천 풀과 카드별 승인, 보류, 거절을 승인했다. 그 승인은 코드 래치를 끈 채로 두고, 자동 승격을 열지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 버전 7의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-25에 버전 8로 제한 자동 승격의 졸업 조건, 비용 상한, worker 격리, 승인 유효기간, kill switch를 승인했다. 그 승인은 자동 승격 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, 용량 행을 넣지 않고, worker 실행을 열지 않는다. 버전 8의 구현은 이 절에 대한 독립 검토 뒤에만 시작한다. 같은 운영자가 2026-09-27에 버전 9로 자동 승격 코드 래치를 켰다. 요청 스키마의 policyVersion은 8로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 추천 풀 코드 래치를 켜지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 10으로 추천 풀 코드 래치를 켰다. 요청 스키마의 policyVersion은 7로 남는다. 그 승인은 사람 결정 20건을 만들지 않고, 용량 행을 넣지 않으며, 환경 변수를 설정하지 않고, worker 실행을 열지 않는다. 자동 승격 코드 래치는 버전 9의 true로 남는다. 같은 운영자가 2026-09-28에 버전 11로 추천 용량 행 writer를 승인했다. 요청은 `policyVersion` 11이고, `active`와 1 이상 10000 이하의 정수 `wipLimit`만 담는다. 그 승인은 한도를 고르지 않고, 사람 결정 20건을 만들지 않으며, 카드 status를 바꾸지 않고, 환경 변수를 설정하지 않으며, worker 실행을 열지 않는다. 같은 운영자가 2026-09-28에 버전 12로 앱 내부 engineering adapter를 두 번째 앱 경계로 인정하는 Authority 절을 승인했다. 그 승인은 adapter의 코드 래치를 끈 채로 두고, worker 실행, 환경 변수, 용량 행, 자동 승격을 바꾸지 않는다. 같은 운영자가 2026-09-28에 버전 13으로 개발용 WSL runner 예외를 승인했다. 그 승인은 코드 래치를 끈 채로 두고, Railway 실행 원칙을 삭제하지 않으며, worker 실행과 환경 변수를 켜지 않는다. 같은 운영자가 2026-09-28에 버전 14로 그 코드 래치를 켰다. 환경 변수 `TOMVERSE_AMUX_WSL_BRIDGE`가 정확히 `1`일 때만 runner가 열린다. 그 승인은 환경 변수를 설정하지 않고, `TOMVERSE_AMUX_EXECUTE`를 켜지 않으며, worker 프로세스를 시작하지 않는다. 같은 운영자가 2026-09-29에 버전 15로 WSL 실행 루프의 연결을 승인했다. claim 전용 모드, 로컬 카드를 실행 영수증으로 쓰는 결과 정산, 승격 카드의 사람 Review 강제, backlog 카드 메타데이터 writer, 자동 승격의 항목 결속·시스템 소비·비용 장부·만료·halt와 사람 재개다. 그 승인은 새 환경 변수를 설정하지 않고, 병합·배포·활성화를 포함하지 않는다. 같은 운영자가 2026-09-29에 버전 16으로 역할 판정(결정적 기준값과 LLM의 상향 신호)과 `design → develop → test → review` 단계 사이클, 실제 실행 provider에 기반한 교차 검토를 승인했다. 그 승인은 단계 사이클 코드 래치를 끈 채로 두고, 환경 변수를 설정하지 않으며, worker catalog와 WSL 세션을 바꾸지 않는다. 같은 운영자가 2026-09-29에 버전 17로 버전 7의 추천 풀 Admin 화면 위치 문장을 개정했다. 화면은 owner에게만 AMUX 내비게이션에 나타나고, 다른 역할에게는 광고하지 않는다는 원래 취지는 유지한다. 같은 운영자가 2026-09-29에 버전 18로 실행 API 게이트를 코드 래치(true로 출고)와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`의 결합으로 정하고, Phase A 절의 비활성 문장을 개정했다. 그 승인은 환경 변수를 바꾸지 않고, late COMMIT 성공 기록 방지가 증명됐다고 주장하지 않으며, `develop`의 AMUX를 `main`으로 옮기는 병합에 그 증명 테스트를 조건으로 둔다. 같은 운영자가 2026-09-29에 버전 19로 버전 18의 활성화 증거 절을 갱신했다. late COMMIT을 DB가 COMMIT 시점에 거부하는 장치와 그 테스트가 `develop`에서 `routing` 레인을 통과했다는 사실을 run 링크와 head SHA로 기록하고, 남는 구간을 적는다. 그 승인은 `main` 이식 조건의 2와 3을 면제하지 않고, 환경 변수를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 20으로 orchestrator 정지와 재시작을 승인했다. 알려진 답만 지금처럼 처리하고, 결과 불명 쓰기와 그 밖의 응답에서는 프로세스를 끝내지 않고 앱 DB에 기록하는 정지로 들어가며, 쓰기 접수와 영수증으로 기록 전 종료도 잡는다. 해제는 owner와 최근 step-up의 사람 조작뿐이다. 그 승인은 환경 변수와 Railway 재시작 정책을 바꾸지 않고, 외부 알림을 만들지 않으며, WSL bridge와 실행 모드를 바꾸지 않는다. 같은 운영자가 2026-09-30에 버전 21로 버전 20 절 5의 데이터 도메인 레지스트리 문장을 개정했다. 레지스트리에는 사람의 id를 가진 `AmuxOrchestratorHalt`만 등록한다. 그 승인은 동작, 테이블, 보존 규칙을 바꾸지 않는다. 공개 저장소에 버전 2 본문이 기록되기 전에는 공개 v1이 저장소상의 승인 정책으로 남는다.
-상태(최신): **v22 설계 및 v23~v26 CLI 사용량 보존·집계 계약 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인하고 2026-10-02에 v23 호출별 보존, v24 집계 보존·최소 칸 크기, v25 집계 분류·병합 순서, v26 다중 실제 모델 분류를 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
+상태(v22 이력): **v22 설계 승인, 구현·운영 활성화 별도.** 2026-09-30 운영자 `mposition`이 아래 v22 절을 승인했다. 이전 상태 문단은 v1~v21의 이력이다.
+상태(v23 이력): **v23 전용 Ubuntu runner 실행 위치 승인, 운영 활성화 별도.** 2026-10-01 운영자 `mposition`이 아래 v23 절을 승인했다. Claude의 독립 검토에서 정책 문구 승인 차단 사항이 없음을 확인했다. 이전 v22 상태 줄은 이력이다.
+상태(v24 이력): **v24 Ubuntu AMUX invariant 관측 게이트 정정 승인.** 2026-10-02 운영자 `mposition`이 아래 v24 절을 승인했다(그 절의 승인 기록). v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장은 v24 절의 계약으로 대체됐다. 이전 v23 상태 줄은 이력이다.
+상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
+상태(최신): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -23,10 +27,9 @@ approvedBy: mposition · approvedAt: 2026-09-29 · 정책 버전: 19
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 20
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 21
 approvedBy: mposition · approvedAt: 2026-09-30 · 정책 버전: 22
-approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 23
+approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 23
 approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 24
-approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 25
-approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 26
+approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -54,10 +57,10 @@ approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 26
 | 20 | 2026-09-30 mposition | orchestrator 정지와 재시작. 알려진 답만 지금처럼 처리하고, 그 밖의 응답·무응답과 선택 읽기 61번째 연속 실패에서 프로세스를 끝내지 않고 앱 DB `AmuxOrchestratorHalt`에 기록하는 정지로 들어간다. 쓰기 호출은 처리 전에 접수를 커밋하고 쓰기와 같은 트랜잭션에 영수증을 남겨, 기한이 지난 뒤 영수증이 없으면 롤백 확정, 있으면 사람 확인으로 가른다. 해제는 owner와 최근 step-up의 Admin 조작과 사람 감사로만 하며 원래 작업을 다시 하지 않는다. 구현 배포 뒤 Railway 재시작 정책을 `On Failure`로 명시한다. 환경 변수, 외부 알림, WSL bridge, 실행 모드는 바꾸지 않는다. |
 | 21 | 2026-09-30 mposition | 버전 20 절 5의 데이터 도메인 레지스트리 문장 개정. 사람의 id를 가진 `AmuxOrchestratorHalt`만 레지스트리에 운영 기록으로 등록하고, 사용자 데이터가 없는 `AmuxOrchestratorWrite`와 `AmuxOrchestratorWriteReceipt`는 레지스트리 대상이 아니다. 세 테이블 모두 고객 export에 넣지 않는다. 동작, 테이블, 보존 규칙, 해제 조건은 바꾸지 않는다. |
 | 22 | 2026-09-30 mposition | 전략적 계층·점수와 자동 실행 풀 편입, 별도 Task DAG·실행 등급, 병행/SEV1 예약, develop과 main의 PR·배포 권한 분리, 운영자 최종 완료, 실패 복구·결과 환류, 전 worker CLI 토큰 계측, Admin Kanban·계층 목록을 승인한다. 기존 v16 단계 순환은 새 카드에 적용하지 않는다. 이 승인 자체로 migration·flag·Publisher 권한·자동 병합/배포를 켜지 않는다. |
-| 23 | 2026-10-02 mposition | v22의 전 worker CLI 호출별 사용량 행은 13개월 보존 후 삭제하고, 이후에는 집계만 남긴다. 승인·사고 관련 canonical 감사의 기존 7년 규칙은 그대로다. 원장 구현·정리 검증은 아직 별도 gate이며 이 승인만으로 수집·정리 worker를 활성화하지 않는다. |
-| 24 | 2026-10-02 mposition | 호출별 행 삭제 뒤 남기는 비식별 토큰 집계는 36개월 보존한다. 한 집계 칸에 서로 다른 호출이 5건 미만이면 기간·분류를 합치고, 그래도 5건이 안 되면 장기 집계에 넣지 않는다. 원장·집계 구현과 운영 활성화는 별도 gate다. |
-| 25 | 2026-10-02 mposition | 장기 집계는 UTC 월·공급자·실제 모델·worker 역할에서 시작한다. 5건 미만 칸은 역할→모델→UTC 분기→UTC 연도 순서로 합치고, 그래도 5건 미만이면 제외한다. 세부·상위 칸을 동시에 공개하지 않는다. 구현 검증·운영 활성화는 별도다. |
-| 26 | 2026-10-02 mposition | CLI 한 호출에서 실제 모델이 둘 이상 확인되면 한 호출을 `multi_model` 칸에 한 번만 넣는다. 모델 미확인과 구분하고 선택 모델로 대체하지 않는다. 구현 검증·운영 활성화는 별도다. |
+| 23 | 2026-10-01 mposition | 운영자 워크스테이션 WSL runner를 전용 Ubuntu 서버로 이전하는 실행 위치 예외. 아래 v23 절의 격리·중복 실행 방지·활성화 검증을 충족한 경우에만 적용한다. 이 승인 자체로 제품 bridge·claim·실행 API를 켜지 않는다. |
+| 24 | 2026-10-02 mposition | v23의 AMUX invariant confidence 일괄 `healthy` 요구를 실패 0건·unknown 사유별 증거 계약으로 정정한다. 다른 활성화 게이트와 권한은 바꾸지 않는다. 이 승인 자체로 bridge·claim·제품 실행을 켜지 않는다. |
+| 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
+| 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1164,28 +1167,169 @@ PR 병합, `review` → `done`, 배포, worker catalog 변경, WSL 세션 추가
 
 순서는 공통 기반과 intake v4의 실행 위치·CLI 계약 정합성, hierarchy/Task DAG·점수·capacity·usage schema와 정책 테스트, 합성 데이터·동시성/결과 불명 검증, Admin preview, staging 비실행 관측, staging 제한 실행, 별도 production 승인이다. 기존 v16 단계 카드의 전환/종료 계획 없이는 v22 Task를 같은 카드에 중복 부착하지 않는다. source 유출, 무승인 카드·노드 write, 무승인 실행·PR push/병합·배포, provider 비용 폭주, 사용자 데이터·승인 이력 소실, 감사 누락은 차단한다. UI 문구·정렬은 복구 가능한 비차단 항목이다. 이 버전은 flag·환경 값·계정/Publisher 권한·Railway 설정을 변경하지 않는다.
 
-## v23 — 전 worker CLI 호출별 사용량 보존 [결정, 운영자 mposition 2026-10-02]
+## 버전 23 — 전용 Ubuntu 서버의 개발용 runner
+
+승인자 `mposition`, 승인일 2026-10-01. 작성자 Codex와 다른 provider인 Claude의 독립 검토를 거쳤다. v13~15의 WSL 예외에서 **실행 위치만** 전용 Ubuntu 서버로 옮긴다. 기존 `tomverse-wsl-bridge` 바이너리와 `TOMVERSE_AMUX_WSL_*` 이름은 호환 이름이며, 이름만으로 WSL 또는 Ubuntu 실행 권한을 판단하지 않는다. v13의 승인 brief 원문·digest 결속과 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 실제 provider 교차 검토, v12 engineering adapter의 꺼진 래치, v18 실행 API 게이트와 v22의 미구현 경계는 유지한다. v20 정지·영수증 계약은 Railway orchestrator의 것이며 bridge에 적용됐다고 주장하지 않는다. 이 절은 v22 §7과 intake v4의 실행 위치·CLI 계약 정합성 전체를 완료한 것으로 세지 않는다. 이 승인 자체는 bridge 환경 변수, 제품 실행 API, claim, 자동 승격, Publisher, 병합 또는 배포를 켜지 않는다.
+
+이번 이전에서 Linux worktree와 AMUX 세션의 복사·자동 시작, 기존 WSL 서비스 중지는 v23 승인 전에 이미 이뤄졌다. 제품 bridge는 새 호스트에서 활성화되지 않았고 제품 카드의 새 dispatch도 이 이전의 승인으로 열리지 않았다. 이후의 v23 승인은 그 사전 작업에 소급 권한을 부여하지 않는다. v22가 설계 범위에서 부른 “로컬 Ubuntu worker”는 v13의 현행 WSL bridge 실행 위치를 먼저 바꾼 승인이 아니었다.
+
+### 실행 위치와 단일 소유권
+
+- 대상은 운영자가 지정한 독립 Ubuntu 호스트 한 대다. worker 8개는 Linux 파일시스템의 독립 Git worktree에서 실행하며 실제 경로는 운영 기록에 둔다. Windows 드라이브 mount와 WSL 경로는 실행 작업 디렉터리가 될 수 없다. 재부팅 후 worker 자동 시작은 **세션 시작**만 허용하며 제품 카드의 새 배정은 별도 bridge 활성화 게이트를 통과해야 한다.
+- 기존 WSL bridge·AMUX 서버는 중지·비활성화하고 새 호스트와 동시에 실행하지 않는다. systemd뿐 아니라 Windows Task Scheduler·시작 프로그램·WSL boot 명령 등 옛 bridge를 시작할 수 있는 경로를 확인한다. 새 등록 전에 **이전 worker identity 각각의 열린 attempt 0건, 소유된 Todo 0건, 미해결 `AmuxOrchestratorWrite` 영수증 0건**을 제품 DB에서 read-back한다. 로컬 AMUX에서 종료되지 않았고 `Execution attempt:`가 있는 카드도 모두 열거해 원래 Tomverse attempt에 대응시킨다. 해소된 attempt에 대응하는 로컬 작업은 claim을 열기 전에 AMUX에서 멈춘다. 어느 항목이든 남으면 새 등록·claim·전송을 보류한다. 해소는 기존 app route의 lease expiry/recover 또는 사람 Review·escalation만 사용하며 직접 SQL로 상태를 고치지 않는다. 로컬 SQLite 복사는 제품 DB의 attempt와 승인 원장을 대체하지 않는다.
+- Tomverse 앱은 새 호스트로 인바운드 접속하지 않는다. bridge가 outbound HTTPS로 승인된 내부 route에 접속하고, 같은 호스트 AMUX에는 loopback 주소로만 접속한다. AMUX 수신도 loopback에만 묶거나 방화벽으로 운영자 SSH 외 접근을 차단한다. 기존 delivery digest, `msg_id` 멱등성, 로컬 카드 연결, heartbeat·lease fencing, `review`/`blocked` 정산, 사람 완료 판정을 유지한다. bridge의 결과 불명은 v15 연결 계약에 따라 halt(exit 3)하고 자동 재시작을 막은 뒤 사람이 read-back하여 재개한다. v20 orchestrator halt를 bridge의 보호 장치로 간주하지 않는다.
+
+### 자격증명과 실행 계정
+
+- bridge는 worker의 `tommy` 계정과 다른 권한 없는 OS 계정과 system 서비스로 실행한다. **root 소유이며 worker가 고칠 수 없는** 승인된 SHA의 바이너리·unit과, bridge 계정만 읽는 환경 파일을 사용한다. 여기서 격리할 인증값은 `TOMVERSE_AMUX_SYNC_SECRET`과 제품 DB 자격증명이다. worker 자신의 Codex/Claude/GitHub 로그인은 WSL에서 쓰던 범위 이하로 유지하고 목록과 권한을 운영 기록에 적는다. worker의 환경, 홈, AMUX 세션 파일, 프롬프트, 로그, 백업, 공용 Git worktree에는 bridge 인증값과 제품 DB 자격증명을 두지 않는다. worker 계정이 읽을 수 있는 파일에 mode `600`을 주는 것만으로는 격리가 아니다.
+- bridge 서비스 계정에는 제품 DB, GitHub 쓰기/Publisher, 배포, worker 홈 읽기 권한을 주지 않는다. AMUX loopback API 접근과 승인된 Tomverse 내부 route 호출에 필요한 권한만 준다. AMUX가 loopback API에 별도 토큰을 요구하면 bridge 전용 토큰을 격리 계정의 환경 파일에 두고 worker 홈에서 읽지 않는다. worker가 bridge 환경 파일·바이너리·unit을 고칠 수 있는지, bridge 프로세스 환경을 읽을 수 있는지, bridge가 worker 자격증명을 읽을 수 있는지를 실제 UID와 파일 권한으로 검사한다. 운영자 sudo는 worker 계정과 분리한다. worker 계정에서 `sudo`, `docker`, `lxd` 등 root와 동등한 권한의 그룹, `NOPASSWD`, 공유 sudo 인증 캐시를 제거한다. 현재 이전된 `tommy`가 이 세 그룹에 속해 있으므로 이를 바꾸기 전에는 격리 게이트가 통과하지 않는다. 그룹 제거 후에도 기존 프로세스의 보조 그룹은 남으므로 worker의 user systemd manager·tmux·AMUX 서버·8개 세션을 재시작하고, 각 프로세스의 `/proc/<pid>/status` `Groups`에 root 동등 그룹이 없는지 확인한다. worker가 root 동등 권한을 가졌던 기간의 sudoers·system unit/timer·root cron·setuid 파일·docker/lxd 컨테이너와 이미지를 점검한 **뒤에** 새 bridge 파일을 root 소유로 설치한다.
+- 이전 중 bridge secret의 사본이 worker 계정에 들어갔으므로 **기존 `TOMVERSE_AMUX_SYNC_SECRET`을 교체하고 옛 값이 거부됨을 확인**한 뒤에만 활성화한다. 이전 과정의 새 호스트 사본은 제거하고, AMUX DB·백업·shell 기록에도 값이 남았는지 비밀을 출력하지 않고 검사한다. WSL 원본 파일은 보존하되 fallback용 활성 자격증명으로 사용하지 않는다. 새 인증은 격리 계정에만 배치한다. 비밀값과 내부 URL은 정책·작업 로그·대화에 출력하지 않는다.
+
+### 활성화와 복구 게이트
+
+1. 승인된 이 정책 버전과 독립 리뷰, 개별 Agent 정책의 허용 범위, 제품 실행 API의 실제 게이트 상태를 확인한다. 미승인 자동 병합·배포·유료 분류 기능은 이 이전으로 켜지지 않는다.
+2. 새 호스트의 AMUX DB 무결성·원본 digest, 여덟 세션의 native 경로·프로세스·인증, Git origin과 worktree 기준 SHA, 시간 동기화, systemd 자동 시작을 관측한다. AMUX invariant confidence가 healthy이고 치명적 실패가 없는지도 확인한다. worker가 떠 있다는 사실과 제품 dispatch가 가능하다는 판정을 분리한다.
+3. WSL의 모든 재시작 경로가 꺼진 것과 새 호스트 bridge가 아직 꺼진 것을 확인한다. 위의 worker별 0건 조건과 로컬 카드 대응을 read-back한다. 이전 런타임의 늦은 결과가 거절되는 계약은 generation read-back과 코드·테스트 근거로 확인하며 옛 bridge를 실행해 시험하지 않는다.
+4. Railway claim 전용 루프를 끄거나 orchestrator를 명시적으로 halt하여 **새 claim이 불가능한 관측 창**을 만든다. 소유된 Todo가 0건인 상태에서 허용된 한 worker만 등록·heartbeat하여 실행이 일어나지 않음을 확인한다. bridge에는 register-only 모드가 없으므로 이를 독립적인 비실행 기능으로 부르지 않는다. 사람의 별도 활성화 결정 뒤 claim을 열고 제한 실행을 관측한다. 예상 밖 카드 전이·감사 누락·비밀 노출·중복 attempt·결과 불명은 차단하고 bridge를 중지한다. 각 작업의 유료 호출은 승인된 Agent 예산과 기존 전역 상한을 따른다.
+5. 되돌릴 때는 새 bridge부터 중지하고 제품 DB의 attempt·lease를 확인한다. WSL 원본은 보존하지만, 세대와 소유권을 재검증하기 전에는 WSL bridge를 다시 켜지 않는다. DB 스냅샷을 제품 정본 위에 덮어써서 rollback하지 않는다.
+
+운영 절차의 초안은 `docs/ops/amux/wsl-execution-bridge.md`의 Ubuntu 이전 절에 둔다. 이 절은 새 Agent나 새 제품 데이터 writer를 만들지 않으며, 기존 Agent의 카드·승인·감사·비용 namespace와 보존 규칙을 변경하지 않는다.
+
+## 버전 24 — Ubuntu AMUX invariant 관측 게이트 정정
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-02`. 작성자 Codex와 다른 provider인 Claude의 독립 검토에서 정책 문구 차단 사항이 없었다. v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장만 다음 계약으로 대체한다. `/health`의 `status=ok`, `store=ok`, board mapper `ok`, `reconciled=true`, disk `ok`, 완료된 write probe가 **기록한 유효** `probe_budget_ms` 안에 있는 것과 `/api/health/invariants`의 `fail=0`을 요구한다. `unknown`은 `pass`로 취급하지 않는다. 각 unknown의 invariant ID·측정 불가 이유·제품 dispatch, lease fencing, 감사, 비밀 격리, 비용 판정과의 관련성을 운영 기록에 남긴다. 관련/무관 분류는 작성자와 다른 provider의 독립 검토 또는 운영자 확인을 받는다. `schema.timestamp_units_declared`는 컬럼마다 분류하고 lease·heartbeat·attempt·감사·비용 컬럼은 관련으로 본다. **관련 unknown은 표본 부재만으로 허용하지 않는다.** 코드·테스트 근거와 별도의 직접 관측 **모두**로 같은 안전 조건을 claim 전에 증명한다. 운영 데이터에 표본이 없으면 격리된 로컬 fixture에서 해당 경로와 timestamp 단위를 실제 실행·관측할 수 있지만 제품 claim이나 제품 DB 쓰기로 표본을 만들지 않는다. 사전 증명이 불가능하면 claim을 열지 않는다. 관련이 없고 표본이 없거나 해당 플랫폼에서 측정할 수 없는 unknown만 이유와 근거를 남기고 허용한다. 이 분류와 검사는 v23의 계정·그룹 정리, AMUX 재시작 **이후**, claim을 막은 관측 창 직전에 다시 하고, 사람의 claim 해제 직전과 첫 제한 실행 중·후에도 다시 한다. 각 재검사에 새 unknown이 있으면 재분류·독립 확인 전까지 claim을 막는다. 관측 중 `fail>0`, 새 unknown, write probe 예산 초과, 유효 예산값 변경이 보이면 bridge를 중지하고 claim을 다시 막아 원인을 확인한다. 이 연속 관측을 수행할 수 없다면 claim을 열지 않는다.
+
+근거: 새 Ubuntu AMUX의 저장소·board probe는 `ok`였고 첫 관측에서 505개 invariant 중 462 pass·0 fail·43 unknown이었다. 후속 관측은 461 pass·0 fail·44 unknown으로 `hooks.reports_are_attributed`가 더해졌다. unknown 40개는 최신 500행에 값이 없는 컬럼의 `schema.timestamp_units_declared`로, 테이블 전체가 비었다는 뜻이 아니다. 나머지는 `host.memory_not_critical`, `schedules.cost_title_matches_kind`, `session.self_reports_landing` 및 후속 `hooks.reports_are_attributed`이다. worker 보고 hook의 두 unknown은 표본 부족이므로 한 worker 제한 실행 전에 **제품 카드가 아닌 로컬 합성 AMUX 작업**으로 실제 self-report와 attribution 도착을 관측한다. 호스트 메모리는 8개 worker 부하에서 `/proc/meminfo`로 별도 확인한다. 이 수치는 진단 스냅샷이지 앞으로 유지된다는 가정이 아니다.
+
+`AMUX_INVARIANT_RESULT_BUDGET` 변경은 실패를 숨기는 면제가 아니다. 기존 50만 행 기준에서 7일 보존되는 `unknown` 약 75만 건 때문에 `store.result_log_bounded`가 실패했고, **v24 승인 전에** 운영 설정을 100만 행으로 조정한 뒤 0 fail이 됐다. **2026-10-02 승인 시점 이후에 한해** 유효 예산 100만 행의 지속 사용을 허용한다. 승인 전 0 fail은 진단 기록으로만 쓰고, 승인 후 같은 설정을 다시 읽고 invariant를 재실행해야 게이트 증거가 된다. 과거 설정 변경을 소급 승인하지 않는다. 활성화 전후에 유효 result 예산과 write `probe_budget_ms`, 설정 파일의 소유자·권한·digest·변경 이력, 상태별 행 수·가장 오래된 시각·증가율·DB 크기·write probe 지연과 disk 여유를 대조한다. worker가 고칠 수 있는 user unit 파일의 값만으로 게이트를 통과시키지 않고 분리된 운영자 확인과 관측 기록을 요구한다. 두 예산값의 임의 변경은 기존 판정을 무효화하고 bridge 중지·claim 차단·재검토를 요구한다. 예산의 80%를 넘으면 증가율과 보존 종료 시점의 예상 행 수를 운영자에게 알린다. 실제 보존 한도 초과나 지연·디스크 압박이 있으면 예산값을 더 올려 통과시키지 않고 원인을 고친다. v23의 계정·비밀 교체·중복 실행 방지·사람 활성화 결정은 이 정정으로 완화되지 않는다. **v24 승인 자체는 bridge·claim·제품 실행을 켜지 않는다.**
+
+## 버전 25 — engineering adapter 코드 래치
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-07`. 작성자는 Claude이고, 작성자와 다른 provider인 Codex(OpenAI)와 Cursor(xAI)의 독립 검토가 문안을 accept했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다.
+
+이 버전은 버전 12가 false로 출고한 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`(`lib/engineeringAgentAmuxAdapter.ts`)를 true로 바꾼다. Authority 절의 adapter 규칙은 그대로다.
+
+- **열리는 조건.** Authority 절대로, adapter가 AMUX writer를 부르는 **모든** 호출 — worker 등록·heartbeat, claim, delivery pull·ack, execution start·heartbeat·settle, 비용 원장, review 대상 PR 번호 — 은 이 래치, 버전 18의 실행 API 게이트(코드 래치 `AMUX_EXECUTION_API_CODE_LATCH`와 환경 변수 `TOMVERSE_AMUX_EXECUTION_API_ENABLED`), 그리고 `off`가 아닌 engineering 운영 mode가 **모두** 참일 때만 열린다. mode는 실효 값이다. kill switch가 켜졌거나 설정을 읽지 못하면 `off`다. 이 판정은 각 호출이 AMUX에 닿기 전에 한다(`lib/engineeringAgentAmuxAdapter.ts`의 `adapterPermittedNow()`, 그것을 쓰는 `requireOpen()`). 닫혀 있으면 호출은 `adapter_closed`로 거절된다. 예외는 publisher가 보고한 pull request 결과 하나다. 그 PR은 이미 존재하므로 버리지 않는다. AMUX에는 닿지 않고, engineering 쪽에서 항목을 정산·결속하며 `docs/policy/engineering-agent.md` §11의 state mismatch(`adapter_closed`)를 사람에게 연다. AMUX가 번호를 거절할 때와 같은 경로다. 이 항목은 열려 있는 동안 halt이고, 처리는 `docs/policy/engineering-agent.md` §11의 절차를 따른다. 이 버전은 그 절차를 바꾸지 않으며, mode를 다시 여는 것만으로 이 항목은 닫히지 않는다.
+- **mode는 `off`로 남는다.** 그러므로 이 버전을 배포해도 어떤 adapter 호출도 AMUX에 닿지 않는다. `off`에서 `shadow`로 가는 것은 `docs/policy/engineering-agent.md` §12의 armed gate와 §14의 `shadow` 진입 조건을 지난 운영자의 Admin 조작뿐이다. 이 버전은 그 조건 어느 것도 대신하지 않는다.
+- **mode를 `off`로 내리면** 진행 중이던 실행의 heartbeat·settle도 닫힌다. runner는 실행 heartbeat가 한 번이라도 거절되면 그 실행의 lease를 잃은 것으로 고정하고 settle 없이 끝낸다(`scripts/engineering-agent-runner-core.mjs`). 그러므로 `off` 동안 heartbeat가 거절된 실행은 mode를 다시 열어도 이어지지 않고, runner가 deadline에 강제 종료된 경우와 같은 경로를 탄다.
+  - worker heartbeat도 닫히므로 runtime의 `dispatchReady`는 그 runtime lease가 끝날 때까지 마지막 값으로 남는다. 그 runtime이 idle이고 `dispatchReady`가 참이었다면 그 사이 AMUX가 이 worker에게 카드를 claim할 수 있다. 실행 start가 닫혀 있으므로 attempt는 생기지 않고, 그 claim은 AMUX의 recover route가 푼다.
+  - 그 attempt는 lease 만료 뒤 AMUX의 recover route가 회수하고, 카드는 AMUX 규칙대로 돌아간다. engineering run은 `active`로 남는다.
+  - attempt가 끝난 `active` run은 그 순간부터 halt 판정의 `orphanedRuns`로 센다(`readEngineeringAgentHaltState()`). halt가 있는 동안 새 실행은 AMUX start 트랜잭션 안의 admission(`requireEngineeringAgentRunAdmission()`)에서 거절되고 그 트랜잭션 전체가 되돌려진다. 그래서 돌아간 카드를 이 adapter가 다시 시작하지 못한다.
+  - mode가 `off`인 동안에는 engineering Agent 자신의 정비도 멈춘다(`docs/policy/engineering-agent.md` §12, `maintenanceAllowed`). mode가 다시 열린 뒤 첫 worker heartbeat가 §11 state mismatch 항목(`attempt_ended_run_active`)을 열어 사람에게 넘긴다. 이 정리는 자동 재시도가 아니라 사람의 판단이다.
+  - 그 실행의 비용은 adapter가 AMUX 비용 원장에 기록하지 않는다. LLM 지출의 상한은 여전히 그 Agent 전용 key의 공급자 측 한도다(`docs/policy/engineering-agent.md` §12).
+- **허용 동작은 버전 12의 목록 그대로다**: worker 등록과 heartbeat, claim, execution start·heartbeat·settle(결과는 `review`·`todo`·`blocked`뿐), delivery pull·ack, review 대상 PR 번호, settle 시점 비용 원장. recover, 승격, 승인, 카드 내용 수정, `done`은 열지 않는다. worker identity는 서버 상수 `engineering-runner`이고 요청 본문에서 받지 않는다.
+- **바꾸지 않는 것.** 환경 변수, worker catalog, 용량 행, 자동 승격, 추천 풀, Railway 서비스와 IaC, 게시 GitHub App, engineering mode를 이 버전이 설정하거나 켜지 않는다. AMUX 비용 원장의 금액을 admission에 쓰는 것은 여전히 별도 버전이다.
+- **구현.** mode까지 읽는 판정과 publisher 결과의 닫힌 경로는 승인된 Authority 절의 구현이다. 이 버전과 별개의 변경으로 먼저 병합하며, 이 버전의 승인은 그 병합이 `develop`에 들어간 뒤에만 기록한다. 그 뒤 남는 것은 래치 상수를 true로 바꾸고 `tests/engineeringAgentAmuxAdapter.test.mjs`의 출고 값 기대를 이 버전으로 옮기는 것뿐이다.
+- **사고 대응.** 이상이 보이면 먼저 `docs/policy/engineering-agent.md` §12의 정지·mode `off`를 쓴다. 래치를 다시 false로 내리는 것은 그다음 코드 변경이다.
+
+## 버전 27 — 전용 Ubuntu runner의 worker 목록과 Decision Maker 실행 주체
+
+상태: **승인됨.** `approvedBy: mposition`, `approvedAt: 2026-10-09`. 2026-10-09 작성, 작성자 Claude. 작성자와 다른 공급사인 Codex의 독립 검토가 accept였다(r-20261009-005341-7cc18f). 같은 요청의 Cursor 검토는 결과 불명(`reviewer_exit_1`)이었고 다시 보내지 않았다. 이 승인 자체로 아래 활성화 게이트 2~7은 충족되지 않는다. 번호: `develop`의 다음 빈 번호는 26이지만 `main`을 대상으로 한 draft PR #1888(2026-10-04 이후 갱신 없음)이 같은 문서에 다른 내용(CLI 사용량 보존·집계)의 v23~v26을 적고 있어 27을 쓰며, 두 번호 체계의 정리는 운영자가 한다.
+
+이 버전은 v23 실행 위치 절의 “worker 8개”를 아래 목록으로 대체하고, Decision Maker(이하 DM)의 실행 주체 둘을 더한다. v13의 자격증명·결과 경계, v15의 로컬 실행 영수증과 사람 Review, v16의 확인된 provider(`AMUX_VERIFIED_PROVIDERS`는 `claude`, `codex` 그대로)와 교차 검토, v18 실행 API 게이트, v22의 미구현 경계, v23의 격리·활성화 게이트, v24의 invariant 관측 계약은 그대로다. 이 승인 자체로 bridge 환경 변수, 제품 claim, 실행 API, worker catalog, 자동 승격, Publisher, 병합, 배포, DM 스위치를 켜거나 바꾸지 않는다.
+
+### 1. worker 목록과 역할
+
+| provider | 세션 | 수 |
+|---|---|---|
+| `claude` | v23의 기존 세션 | 4 |
+| `codex` | v23의 기존 세션 | 3 |
+| `cursor`(Cursor CLI) | `cursor-chore`, `cursor-impl`, `cursor-worker` | 3 |
+| `copilot`(GitHub Copilot CLI) | `copilot-chore`, `copilot-impl`, `copilot-worker` | 3 |
+
+- runner의 상주 worker 세션은 이 13개다. 목록 밖의 세션을 더하거나 제거한 세션을 다시 세우는 것은 이 문서의 새 버전이다.
+- 2026-10-09 운영자 지시로 `devin-worker`를 runner에서 제거했다. 제거 전에 그 worker에 묶인 열린 카드 0건을 read-back했고, Linux worktree는 보존했다. v23 범위를 좁히는 변경이므로 기록만 한다. 그 read-back이 v23의 identity별 제품 DB 조건(열린 attempt·소유 Todo·미해결 `AmuxOrchestratorWrite` 영수증 0건)까지 덮었는지는 활성화 게이트 2에서 따로 확인한다. 보존한 worktree는 실행 디렉터리가 아니다.
+- 새 여섯은 각자 Linux 파일시스템의 독립 Git worktree에서 v23의 규칙(Windows mount·WSL 경로 금지, 재부팅 자동 시작은 세션 시작만)으로 돈다.
+- `-chore`는 AGENTS.md “작업을 어느 모델에 보낼지” 표의 `chore`, `-impl`은 `impl`이다. v16 역할로는 각각 `chore`, `implementation`까지다.
+- `-worker`는 운영자가 역할을 정하지 않아 이 버전이 정한다. `impl`이 맡을 수 있는 범위 안의 일반 작업(구현, 조사, 재현, 문서 초안)이며 `impl`보다 넓지 않다. v16 역할로는 `implementation`까지다.
+- 여섯 모두 `contract`와 `review`를 맡지 않는다. AGENTS.md의 `contract` 대상이나 v16의 `AMUX_CONTRACT_PATHS` 경로를 바꾸는 작업도 맡지 않는다.
+
+### 2. 로그인과 자격증명 목록
+
+- 여섯은 worker 계정 `tommy`에 로그인 둘을 더한다. Cursor CLI 계정 로그인 하나와 GitHub Copilot CLI 로그인 하나(GitHub OAuth device flow)다. Copilot 로그인은 운영자가 2026-10-09, 이 버전 전에 이미 했다. v23이 사전 작업을 다룬 것처럼 이 승인은 그 로그인에 소급 권한을 주지 않는다.
+- 여섯 세션이 무엇이든 실행하기 전에(세션 시작과 로컬 카드 포함) 새 자격증명마다 발급 주체, 계정, 저장 위치와 파일 권한, scope, 실제로 닿는 범위를 운영 기록에 적는다. 비밀값은 적지 않는다. device flow가 준 것은 GitHub 토큰이므로 그 GitHub 권한도 적는다. worker 계정에 Devin CLI 로그인이 남아 있으면 쓰는 세션이 없는 자격증명이므로 남은 여부와 남긴 이유를 같은 목록에 적는다.
+- 다음 가운데 하나라도 닿으면 먼저 고치고(권한 축소, 재발급, 로그아웃) 다시 적는다. 제품 DB, 배포 권한, v23이 worker 계정에 이미 허용한 범위를 넘는 GitHub 쓰기, bridge 환경 파일·`TOMVERSE_AMUX_SYNC_SECRET`·bridge 프로세스 환경을 읽는 경로. v23의 실제 UID·파일 권한 검사는 새 자격증명에도 양쪽 방향(bridge가 그 자격증명을 읽지 못함 포함)으로 다시 한다.
+- 저장소의 `vendor/amux` 소스는 자동 승인 모드의 두 provider를 `--yolo`로 시작한다(`--yolo`는 Cursor에서 `--force`의 별칭이고, Copilot에서 도구·경로·URL을 모두 허용하는 `--allow-all`과 같다). 그러므로 CLI가 묻지 않고 할 수 있는 범위는 계정 경계와 이 목록이 정하며, CLI의 승인 화면을 격리로 세지 않는다.
+
+### 3. 실제 모델과 공급사
+
+- Cursor와 Copilot은 한 CLI로 여러 공급사의 모델을 돌리고, `vendor/amux` 소스는 두 provider의 기본 모델을 서비스가 고르는 `auto`로 둔다. provider 이름은 공급사를 정하지 않는다.
+- 여섯 세션의 CLI 호출마다 실제 모델 id, 그 공급사, 값의 출처(CLI 보고 또는 unknown)를 기록한다. 요청한 모델을 실제 모델로 적지 않는다.
+- 그 기록이 실행마다 실제 값을 남기는지 확인하고 이 문서와 DM 정책의 별도 버전이 승인되기 전에는 `cursor`·`copilot`을 `AMUX_VERIFIED_PROVIDERS`에 넣지 않는다. 여섯은 v16 교차 검토의 어느 쪽(develop 성공 행의 provider, review 담당)도 되지 않고 v22의 작성자·독립 리뷰 provider 쌍에도 들지 않는다. v16의 비교는 runtime 하나의 provider를 보지만 이 두 CLI는 실행마다 공급사가 달라질 수 있으므로, 편입은 비교 단위를 바꾸는 개정이다.
+- 여섯의 질문은 DM으로 가지 않고 운영자에게 간다(docs/policy/amux-decision-maker.md §3, §7).
+
+### 4. CLI 사용량
+
+- 두 provider의 모든 CLI 호출은 v22 절 5의 공통 사용량 사건을 같은 공통 실행 래퍼에서 남긴다. v22 절 5의 “Codex/Claude CLI 호출”은 이 runner에서 Cursor·Copilot CLI 호출을 포함한다.
+- CLI가 보고하지 않는 토큰·캐시 필드, 누락, 크래시는 0이 아니라 unknown이다. 실제 모델이 unknown이면 API 환산 예상액을 계산하지 않는다(v22 절 5의 가격 미확인 규칙).
+- unknown이 Task 비용 판정에 주는 효과는 v22 절 5 그대로다. 비용 상한을 사용량으로 판정하는 경우 read-back 전까지 그 범위의 새 attempt·claim을 보류하고, 운영자 해제는 최악 상한을 계속 점유한 채 재개하며, 강제 가능한 호출 전 상한이나 예약액이 없으면 운영자 해제로도 자동 실행하지 않는다.
+- 이 사건은 DM namespace(`amux-decision-maker`)가 아니다. 사용량의 보존·집계 규칙은 이 버전이 바꾸지 않는다.
+
+### 5. 제품 dispatch 전까지
+
+- 이 버전으로 여섯은 제품 claim·dispatch 대상이 되지 않는다. v16이 미확인 provider runtime에 남긴 비단계 카드 claim도 여섯에게는 열리지 않는다.
+- 그 전까지 허용되는 것은 절 2의 목록을 기록하고 고친 뒤 운영자가 직접 지시한 로컬 AMUX 카드뿐이다. 그 카드는 Tomverse 카드가 아니고 `Execution attempt:` 줄을 갖지 않으며 v15의 실행 영수증으로 연결되지 않는다. 결과는 v23의 worker 권한 안에 머문다.
+- 여섯을 worker catalog(`TOMVERSE_AMUX_WORKER_CATALOG_JSON`)에 넣지 않는다. 다른 worker를 위해 bridge를 켤 때는 `TOMVERSE_AMUX_WSL_SESSIONS`에 여섯을 뺀 허용 세션만 적는다. 이 변수를 설정하지 않으면 실행 중인 모든 세션이 runtime으로 등록되기 때문이다(apps/tomverse-orchestrator/src/wsl_bridge.rs).
+- 여섯의 제품 dispatch는 절 2·3·4가 확인되고 아래 게이트를 지나 운영자가 따로 활성화를 기록한 뒤에만 연다. 그 활성화는 절 3의 교차 검토·DM 편입을 포함하지 않는다.
+
+### 6. Decision Maker 실행 주체
+
+DM 정책(docs/policy/amux-decision-maker.md §5, §7, §12)의 두 인스턴스 `decision-maker-openai`(`codex`)와 `decision-maker-anthropic`(`claude`)을 이 runner의 실행 주체로 더한다. 조건은 그 정책 절 5 그대로이며 하나도 빼지 않는다.
+
+- 공급사마다 권한 없는 별도 OS 계정 하나와, 그 계정에 자기 공급사 CLI 인증 하나만 둔다. worker 계정 `tommy`의 로그인을 쓰거나 그 홈에서 읽지 않으며, Cursor·Copilot 로그인은 DM 계정에 두지 않는다.
+- broker는 worker, bridge, 두 공급사 계정과 다른 UID로 돌고 공급사 CLI 인증과 bridge 자격증명을 갖지 않는다. DM 계정과 broker에는 GitHub 로그인, git credential helper, SSH 키, 제품 DB·배포 자격증명, bridge 환경 파일이 없다.
+- 일반 worker launcher가 아니라 전용 launcher가 질문마다 비대화형 프로세스 하나를 고정 argv와 고정 환경(허용 목록)으로 시작하고, 시작 전에 설정 digest를 대조한다. 하나라도 기록과 다르면 시작하지 않는다.
+- 질문당 30분 hard timeout에 강제 종료한다.
+- 양방향 격리. worker는 요청 디렉터리, DM 프로세스, broker를 읽거나 ptrace하지 못한다. DM 계정과 broker는 worker 홈, 저장소 clone, 다른 공급사 계정, AMUX 상태 파일, bridge 환경 파일을 읽지 못한다.
+- 네트워크는 공급사 계정이 자기 공급사 API host만, broker가 GitHub 공개 host와 bridge 로컬 소켓만이다.
+- DM 정책의 S2 전에 S0의 양방향 계정 격리 실측 증거가 있어야 한다.
+
+두 주체는 상주 tmux worker 세션이 아니고, bridge가 runtime으로 등록하지 않으며, worker catalog에 없고, claim할 수 없다. 절 1의 13개, v22의 “검증된 worker 수”, 동시 실행 상한 어디에도 세지 않는다. 위 조건 가운데 하나라도 빠진 배치는 이 버전이 허락한 DM 주체가 아니다. worker 목록에 DM 이름을 더하거나, 일반 세션·launcher·`tommy`의 로그인으로 DM을 돌리는 것으로는 이 절을 충족하지 못한다. DM 인스턴스 스위치는 `off` 그대로다.
+
+### 활성화 게이트
+
+1. 이 버전의 승인 기록과, 작성자 Claude와 다른 공급사의 독립 검토.
+2. `devin-worker` identity의 v23 제품 DB 0건 조건을 read-back한다.
+3. 절 2의 자격증명 목록을 기록하고 넓은 범위를 고친다. 여섯 세션의 어떤 실행보다 먼저다.
+4. 절 3의 실제 모델 기록과 절 4의 사용량 사건을 여섯 세션 각각의 로컬 카드 실행으로 확인한다. 제품 dispatch보다 먼저다.
+5. v23 활성화 게이트 2·3과 v24 관측을 13개 세션으로 다시 한다. v24가 8개 부하로 적은 호스트 메모리는 13개 세션과 DM 프로세스를 함께 띄운 부하에서 다시 본다. `scripts/verify-amux-ubuntu-reboot.mjs`의 기대 목록은 아직 `devin-worker`를 포함한 8개이므로, 그 코드를 고치는 별도 변경 전에는 그 검사가 13개 목록의 증거가 되지 않는다.
+6. 여섯의 제품 dispatch는 운영자의 별도 활성화 기록 뒤, v23 활성화 게이트 4의 claim 차단 관측 창과 제한 실행 순서로만 연다.
+7. DM 주체는 S0 증거와 DM 정책 S2의 다른 선행 조건을 갖춘 뒤에만 설치·시작한다.
+
+### 이 버전이 하지 않는 것
+
+환경 변수, bridge·claim·실행 API, worker catalog, `AMUX_VERIFIED_PROVIDERS`, 동시 실행·대기열 상한, 용량 행, 자동 승격, Publisher, 병합, 배포, DM 스위치와 DM 정책, CLI 사용량의 보존·집계를 바꾸지 않는다. 위 검증 script를 포함해 어떤 코드도 바꾸지 않는다.
+
+## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
+
+approvedBy: mposition · approvedAt: 2026-10-02 · 부속 계약 식별자: `cli-usage-retention-2026-10-02`
+
+이 절은 v22 §5에 대해 운영자가 이미 승인한 네 결정을 복구한다. PR #1888의 기존 초안은 이 결정을 v23~v26으로 표시했지만, 현재 본문의 v23~v25와 v27은 Ubuntu runner·관측·adapter·worker에 대한 다른 승인 이력이다. 번호가 겹치는 기존 이력을 덮어쓰거나 새 오케스트레이션 버전 승인을 주장하지 않고, 이 절에서는 같은 CLI 결정에 CLI-A~CLI-D라는 참조 이름을 쓴다. 원래 초안과 승인일은 PR #1888의 커밋 이력에 보존한다. 아래의 “현재 Codex·Claude”는 2026-10-02 승인 당시의 명칭이며, worker 편입 권한은 각 현행 runner 정책을 따른다.
+
+승인 내용·수치·보류 조건은 원래 네 결정 그대로이며, 이 문서 복구는 구현·migration·수집·집계·조회·worker·CLI·게시·병합·배포·운영 스위치를 새로 승인하거나 활성화하지 않는다. 이미 진행된 구현과 운영 활성화의 증거·권한은 해당 별도 승인과 검증 기록을 확인한다.
+
+### CLI-A — 전 worker CLI 호출별 사용량 보존 [결정, 운영자 mposition 2026-10-02]
 
 운영자가 승인한 범위는 v22 §5의 **모든 worker CLI(현재 Codex·Claude) 호출별 사용량 행을 13개월 보존한 뒤 삭제하고, 이후에는 집계만 남기는 것**이다. 실패·취소·사용량 `unknown`인 호출도 같은 규칙을 적용한다. 원장에 프롬프트·응답 본문·비밀값을 넣지 않는 v22 계약은 그대로다. 승인·사고 관련 기존 canonical 감사는 **별도 7년** 보존하며, 호출별 행을 감사 본문에 복제해 13개월 삭제를 우회하지 않는다.
 
-**구현 요구(승인된 새 수치 아님):** 서버가 기록한 불변 `recordedAt`과 UTC 달력의 13개월을 삭제 시계 후보로 삼고, 경계 시각·재시도·동시성·집계 반영 후 삭제의 중복/누락 방지·백업 복원 시험으로 확정한다. 호출별 토큰의 사본이 다른 비용 장부·로그·백업·Admin export에 남아 13개월 삭제를 우회하지 않는지 inventory로 확인한다. 집계는 기간·공급자·실제 모델·worker 역할별 토큰 합계와 `unknown` 건수처럼 비용 예측에 필요한 지표만 남기고 호출·Task·run·attempt 식별자나 원문으로 역추적할 수 있는 필드를 넣지 않는 방향이다. 단일 호출만 든 집계 칸이 사실상 호출별 기록이 되지 않도록 최소 칸 크기·기간 granularity·합치기 규칙을 비합성 활성화 전에 확정한다. `unknown`을 0으로 합산하거나 미관측 호출을 누락하지 않는다. 집계 차원과 집계 자체의 최종 보존·삭제 기한도 v23이 새로 승인한 수치가 아니므로 같은 gate에서 확정한다. 실제 API 청구·사용자 credit·Agent 예산·canonical 감사는 v22의 분리 경계를 유지한다.
+**구현 요구(승인된 새 수치 아님):** 서버가 기록한 불변 `recordedAt`과 UTC 달력의 13개월을 삭제 시계 후보로 삼고, 경계 시각·재시도·동시성·집계 반영 후 삭제의 중복/누락 방지·백업 복원 시험으로 확정한다. 호출별 토큰의 사본이 다른 비용 장부·로그·백업·Admin export에 남아 13개월 삭제를 우회하지 않는지 inventory로 확인한다. 집계는 기간·공급자·실제 모델·worker 역할별 토큰 합계와 `unknown` 건수처럼 비용 예측에 필요한 지표만 남기고 호출·Task·run·attempt 식별자나 원문으로 역추적할 수 있는 필드를 넣지 않는 방향이다. 단일 호출만 든 집계 칸이 사실상 호출별 기록이 되지 않도록 최소 칸 크기·기간 granularity·합치기 규칙을 비합성 활성화 전에 확정한다. `unknown`을 0으로 합산하거나 미관측 호출을 누락하지 않는다. 집계 차원과 집계 자체의 최종 보존·삭제 기한도 CLI-A이 새로 승인한 수치가 아니므로 같은 gate에서 확정한다. 실제 API 청구·사용자 credit·Agent 예산·canonical 감사는 v22의 분리 경계를 유지한다.
 
 삭제·집계 경로와 그 시험이 갖춰지기 전에는 비합성 사용량 수집을 먼저 켜지 않는다. 이 보존 수치만으로 schema/migration 적용, 운영 수집·정리 worker, 라이브 CLI 호출, 자동 실행, PR 병합·배포는 열리지 않는다. 합성 검증과 독립 검토, 그 뒤 단계별 운영자 승인이 필요하다.
 
-## v24 — CLI 장기 집계 보존·최소 칸 크기 [결정, 운영자 mposition 2026-10-02]
+### CLI-B — CLI 장기 집계 보존·최소 칸 크기 [결정, 운영자 mposition 2026-10-02]
 
-v23의 호출별 행을 13개월 뒤 삭제하고 남기는 비식별 토큰 집계는 **집계 칸이 처음 기록된 불변 서버 시각부터 36개월** 보존한 뒤 삭제한다. 재계산·병합으로 삭제 시계를 다시 시작하지 않으며, 여러 칸을 합칠 때는 가장 이른 원래 시각을 이어받는다. 한 집계 칸은 **서로 다른 CLI 호출 최소 5건**을 포함해야 한다. 처음 분류한 칸이 5건 미만이면 기간·분류를 더 넓은 칸으로 합친 뒤 다시 검사한다. 합쳐도 5건이 되지 않으면 장기 집계에서 제외한다. 5건은 토큰 수나 완료된 Task 수가 아니라 호출 건수다. `unknown` 호출은 0토큰으로 바꾸지 않고 별도 건수로 세며, 소수 칸이 제외됐다는 이유로 사용량이 0이었다고 표시하지 않는다. 이 절은 v23에서 미정이던 최소 칸 크기와 집계 보존 기간만 확정한다. 기간 granularity·분류 차원·합치기 순서는 여전히 구현 gate에서 확정한다.
+CLI-A의 호출별 행을 13개월 뒤 삭제하고 남기는 비식별 토큰 집계는 **집계 칸이 처음 기록된 불변 서버 시각부터 36개월** 보존한 뒤 삭제한다. 재계산·병합으로 삭제 시계를 다시 시작하지 않으며, 여러 칸을 합칠 때는 가장 이른 원래 시각을 이어받는다. 한 집계 칸은 **서로 다른 CLI 호출 최소 5건**을 포함해야 한다. 처음 분류한 칸이 5건 미만이면 기간·분류를 더 넓은 칸으로 합친 뒤 다시 검사한다. 합쳐도 5건이 되지 않으면 장기 집계에서 제외한다. 5건은 토큰 수나 완료된 Task 수가 아니라 호출 건수다. `unknown` 호출은 0토큰으로 바꾸지 않고 별도 건수로 세며, 소수 칸이 제외됐다는 이유로 사용량이 0이었다고 표시하지 않는다. 이 절은 CLI-A에서 미정이던 최소 칸 크기와 집계 보존 기간만 확정한다. 기간 granularity·분류 차원·합치기 순서는 여전히 구현 gate에서 확정한다.
 
-집계에는 호출·Task·run·attempt·worker의 식별자, 원문, 모델 전송 payload, 자유형 실패 문구를 넣지 않는다. 세분 칸과 합친 칸, 겹치는 기간이나 갱신 전후의 값을 동시에 공개해 차이로 5건 미만 칸을 복원하는 것도 금지한다. 정확한 기간 granularity·분류 차원·합치기 순서·중복/누락 방지·36개월 삭제와 백업 복원 시험은 구현 계약에서 고정하고 합성 데이터로 검증한다. v24의 숫자와 원칙은 그 미완 구현을 대신하지 않으며, 비합성 원장 수집·집계 worker·Admin 장기 조회·migration 적용·staging/live 활성화는 별도 승인 전까지 닫힌다. v23 호출별 13개월 및 승인·사고 canonical 감사 7년은 바뀌지 않는다.
+집계에는 호출·Task·run·attempt·worker의 식별자, 원문, 모델 전송 payload, 자유형 실패 문구를 넣지 않는다. 세분 칸과 합친 칸, 겹치는 기간이나 갱신 전후의 값을 동시에 공개해 차이로 5건 미만 칸을 복원하는 것도 금지한다. 정확한 기간 granularity·분류 차원·합치기 순서·중복/누락 방지·36개월 삭제와 백업 복원 시험은 구현 계약에서 고정하고 합성 데이터로 검증한다. CLI-B의 숫자와 원칙은 그 미완 구현을 대신하지 않으며, 비합성 원장 수집·집계 worker·Admin 장기 조회·migration 적용·staging/live 활성화는 별도 승인 전까지 닫힌다. CLI-A 호출별 13개월 및 승인·사고 canonical 감사 7년은 바뀌지 않는다.
 
-## v25 — CLI 장기 집계 분류·병합 순서 [결정, 운영자 mposition 2026-10-02]
+### CLI-C — CLI 장기 집계 분류·병합 순서 [결정, 운영자 mposition 2026-10-02]
 
-v25는 v24의 "기간 granularity·분류 차원·합치기 순서는 구현 gate에서 확정"이라는 두 문장에 한해 그 결정을 대체한다. 중복·누락 방지, 삭제·백업 복원 시험과 운영 활성화 조건은 여전히 구현 gate에 남는다. v24의 서로 다른 호출 5건 하한을 적용할 때 첫 분류는 **불변 서버 `recordedAt`의 UTC 월·실제 실행 공급자·실제 모델·worker 역할**이다. 호출이 뒤늦게 기록되면 과거 실행 시각의 월을 소급 수정하지 않고 기록된 월에 속한다. 한 칸이 5건 미만이면 같은 공급자 안에서 다음 순서로만 범위를 넓히고 매 단계에서 다시 판정한다: **worker 역할을 합침 → 모델을 합침 → UTC 분기로 기간을 합침 → UTC 연도로 기간을 합침**. 따라서 순서대로 `월·공급자·모델·역할`, `월·공급자·모델`, `월·공급자`, `분기·공급자`, `연도·공급자`가 된다. 한 형제 칸이 미달해 상위로 접으면 같은 상위 칸에 속하는 형제 칸 **전체**를 함께 접고, 잔여분만 상위 라벨로 공개하지 않는다. 연도·공급자 칸도 5건 미만이면 장기 집계에서 제외한다. 공급자를 넘어 합치거나, 5건을 채우기 위해 임의로 기간을 확장하지 않는다. 실제 공급자를 증명할 수 없는 호출은 선택 공급자를 실제 공급자로 꾸미지 않고 `actualProviderUnknown`이라는 독립 공급자 칸에만 넣는다. 실제 모델을 증명할 수 없는 호출은 선택 모델을 실제 모델로 꾸미지 않고 `actualModelUnknown`으로 구분한다. 이 둘은 v24의 토큰 사용량 `unknown`과 다른 차원이다.
+CLI-C는 CLI-B의 "기간 granularity·분류 차원·합치기 순서는 구현 gate에서 확정"이라는 두 문장에 한해 그 결정을 대체한다. 중복·누락 방지, 삭제·백업 복원 시험과 운영 활성화 조건은 여전히 구현 gate에 남는다. CLI-B의 서로 다른 호출 5건 하한을 적용할 때 첫 분류는 **불변 서버 `recordedAt`의 UTC 월·실제 실행 공급자·실제 모델·worker 역할**이다. 호출이 뒤늦게 기록되면 과거 실행 시각의 월을 소급 수정하지 않고 기록된 월에 속한다. 한 칸이 5건 미만이면 같은 공급자 안에서 다음 순서로만 범위를 넓히고 매 단계에서 다시 판정한다: **worker 역할을 합침 → 모델을 합침 → UTC 분기로 기간을 합침 → UTC 연도로 기간을 합침**. 따라서 순서대로 `월·공급자·모델·역할`, `월·공급자·모델`, `월·공급자`, `분기·공급자`, `연도·공급자`가 된다. 한 형제 칸이 미달해 상위로 접으면 같은 상위 칸에 속하는 형제 칸 **전체**를 함께 접고, 잔여분만 상위 라벨로 공개하지 않는다. 연도·공급자 칸도 5건 미만이면 장기 집계에서 제외한다. 공급자를 넘어 합치거나, 5건을 채우기 위해 임의로 기간을 확장하지 않는다. 실제 공급자를 증명할 수 없는 호출은 선택 공급자를 실제 공급자로 꾸미지 않고 `actualProviderUnknown`이라는 독립 공급자 칸에만 넣는다. 실제 모델을 증명할 수 없는 호출은 선택 모델을 실제 모델로 꾸미지 않고 `actualModelUnknown`으로 구분한다. 이 둘은 CLI-B의 토큰 사용량 `unknown`과 다른 차원이다.
 
-세분 칸과 그 상위·겹치는 칸을 동시에 공개하거나, 순차 조회·기간 차분으로 하한 미만의 호출을 복원할 수 있게 해서는 안 된다. Admin 조회와 보존된 집계는 한 호출이 공개된 칸 하나에만 기여하는 서로 겹치지 않는 결과 집합이어야 한다. **같은 공급자·UTC 연도의 전체 형제 칸은 연도가 닫히고 최종 집계가 확정될 때까지 하나도 공개하지 않는다.** 그 전의 5건 미만 중간 칸은 장기 집계 행으로 저장하거나 Admin에서 조회하지 않고, 13개월 보존 중인 호출별 행에서만 재계산한다. 최종 집계는 그 연도의 가장 이른 호출별 행의 13개월 삭제 기한보다 먼저 확정·저장하며, 이 기한 내 확정에 실패하면 해당 미확정분을 장기 집계에서 제외하고 원래 기한에 호출별 행을 삭제한다. 이때 사용량 0이라고 표시하지 않고 집계 불완전 사건을 감사한다. 공개된 칸을 재계산·갱신하거나 이전 공개값·캐시·export와의 차분으로 소수 호출을 복원할 수 없게 해야 한다. 호출별 13개월 삭제 전에 집계가 정확히 한 번 반영되고, 재시도·삭제 후에도 5건 하한과 36개월 시계가 유지됨을 검증하기 전에는 비합성 집계·Admin 장기 조회를 활성화하지 않는다. v25는 분류·병합 순서의 승인이지 migration 적용이나 운영 수집·삭제·조회 활성화 승인이 아니다.
+세분 칸과 그 상위·겹치는 칸을 동시에 공개하거나, 순차 조회·기간 차분으로 하한 미만의 호출을 복원할 수 있게 해서는 안 된다. Admin 조회와 보존된 집계는 한 호출이 공개된 칸 하나에만 기여하는 서로 겹치지 않는 결과 집합이어야 한다. **같은 공급자·UTC 연도의 전체 형제 칸은 연도가 닫히고 최종 집계가 확정될 때까지 하나도 공개하지 않는다.** 그 전의 5건 미만 중간 칸은 장기 집계 행으로 저장하거나 Admin에서 조회하지 않고, 13개월 보존 중인 호출별 행에서만 재계산한다. 최종 집계는 그 연도의 가장 이른 호출별 행의 13개월 삭제 기한보다 먼저 확정·저장하며, 이 기한 내 확정에 실패하면 해당 미확정분을 장기 집계에서 제외하고 원래 기한에 호출별 행을 삭제한다. 이때 사용량 0이라고 표시하지 않고 집계 불완전 사건을 감사한다. 공개된 칸을 재계산·갱신하거나 이전 공개값·캐시·export와의 차분으로 소수 호출을 복원할 수 없게 해야 한다. 호출별 13개월 삭제 전에 집계가 정확히 한 번 반영되고, 재시도·삭제 후에도 5건 하한과 36개월 시계가 유지됨을 검증하기 전에는 비합성 집계·Admin 장기 조회를 활성화하지 않는다. CLI-C는 분류·병합 순서의 승인이지 migration 적용이나 운영 수집·삭제·조회 활성화 승인이 아니다.
 
-## v26 — 한 CLI 호출의 다중 실제 모델 분류 [결정, 운영자 mposition 2026-10-02]
+### CLI-D — 한 CLI 호출의 다중 실제 모델 분류 [결정, 운영자 mposition 2026-10-02]
 
-한 CLI 호출 안에서 **서로 다른 실제 모델이 둘 이상 독립적으로 확인되면**, v25의 실제 모델 차원에는 해당 호출을 `multi_model`로 분류한다. 한 호출을 모델별 칸으로 나누거나 호출 건수·토큰을 둘 이상에 중복 합산하지 않는다. 모델별 사용량이 따로 보고되어도 장기 집계의 호출 단위는 하나이며, 호출 전체에서 확인된 토큰 사용량만 한 번 반영한다. `multi_model`은 실제 모델 확인 증거가 둘 이상일 때만 쓰고, 실제 모델을 증명하지 못한 `actualModelUnknown` 및 단순 선택·요청 모델과 구분한다. 실제 공급자를 증명할 수 없는 호출에는 v25의 `actualProviderUnknown` 규칙을 그대로 적용한다. 서로 다른 실제 공급자가 둘 이상 확인된 호출의 공급자 차원은 아직 정하지 않았다. 그런 호출이 발견되면 장기 집계 확정을 보류하고 별도 운영자 결정을 요청하며, 호출을 조용히 제외하거나 공급자를 임의로 합치지 않는다. 토큰의 완전성이 불명확한 필드는 v22~v25처럼 `unknown`으로 유지한다.
+한 CLI 호출 안에서 **서로 다른 실제 모델이 둘 이상 독립적으로 확인되면**, CLI-C의 실제 모델 차원에는 해당 호출을 `multi_model`로 분류한다. 한 호출을 모델별 칸으로 나누거나 호출 건수·토큰을 둘 이상에 중복 합산하지 않는다. 모델별 사용량이 따로 보고되어도 장기 집계의 호출 단위는 하나이며, 호출 전체에서 확인된 토큰 사용량만 한 번 반영한다. `multi_model`은 실제 모델 확인 증거가 둘 이상일 때만 쓰고, 실제 모델을 증명하지 못한 `actualModelUnknown` 및 단순 선택·요청 모델과 구분한다. 실제 공급자를 증명할 수 없는 호출에는 CLI-C의 `actualProviderUnknown` 규칙을 그대로 적용한다. 서로 다른 실제 공급자가 둘 이상 확인된 호출의 공급자 차원은 아직 정하지 않았다. 그런 호출이 발견되면 장기 집계 확정을 보류하고 별도 운영자 결정을 요청하며, 호출을 조용히 제외하거나 공급자를 임의로 합치지 않는다. 토큰의 완전성이 불명확한 필드는 v22~CLI-C처럼 `unknown`으로 유지한다.
 
-이 분류는 v25의 역할→모델→분기→연도 병합 순서와 5건 하한, v23·v24의 보존 기간, 비용·감사 분리 경계를 바꾸지 않는다. 실제 모델 확인 증거와 단일 호출 멱등 결속을 검증하기 전에는 비합성 집계 writer·Admin 장기 조회를 열지 않는다. v26은 분류 결정이지 migration 적용, 운영 수집·삭제·조회 활성화 승인이 아니다.
+이 분류는 CLI-C의 역할→모델→분기→연도 병합 순서와 5건 하한, CLI-A·CLI-B의 보존 기간, 비용·감사 분리 경계를 바꾸지 않는다. 실제 모델 확인 증거와 단일 호출 멱등 결속을 검증하기 전에는 비합성 집계 writer·Admin 장기 조회를 열지 않는다. CLI-D은 분류 결정이지 migration 적용, 운영 수집·삭제·조회 활성화 승인이 아니다.

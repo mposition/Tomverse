@@ -1,0 +1,24 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-manifest-witnesses-v1",
+  "requirement": "Under mposition's exact 2026-10-01 approval of one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, implement only a development-only, owner-runner 80-slot challenge-witness pass using public synthetic fixtures. Codex authors, Claude Code Max first-party subscription CLI independently reviews read-only with user-approved --skip-preflight. No actual holdout content, full manifest/rubric truth claim, seal, provider/API call, stage/run, product integration, dispatch authority, PR merge or deployment. Anthropic API forbidden.",
+  "completionCriteria": [
+    "Inspect the exact package digest and scoped diff, including inherited root, allocation, core and individual challenge helper semantics.",
+    "Every one of the 80 cases must explicitly bind null for an unallocated challenge or a structurally valid witness for its single allocated tag; exactly 32 allocated witnesses are checked after the root and allocation are reverified.",
+    "Each language's four adversarial witnesses must contain at least two distinct closed attack forms, without returning or logging case content, IDs or roots.",
+    "Malformed or missing witnesses, unallocated witnesses, inadequate attack diversity and post-root mutation must fail closed in synthetic tests.",
+    "Returned flags explicitly keep semanticTruthVerified, rubricTruthVerified, fullManifestValidated and dispatchAuthorized false; no development helper value becomes seal or operational admission.",
+    "New source and synthetic tests are byte-pinned by a separate development-only closure, with LF attributes and a closure self-test.",
+    "Require focused tests, typecheck, lint and whitespace guards; distinguish controller-recorded checks from commands actually run by the reviewer.",
+    "Return exactly one raw JSON verdict without Markdown fences and only reproducible actionable findings; approve with findings is not a controller pass."
+  ],
+  "baseCommit": "8eb95f30f145fbb2643204ef3f30099a2ce82712",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-witnesses-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-witnesses-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnessesClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

@@ -1,0 +1,14 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-manifest-rubrics-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "semanticTruthVerified": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotRubric.ts": "45dcbab1f8617606bff9657856cb0fa2ef713ab8438999858eb414cc1227ff61",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.ts": "4ec0d7e08291a6ad0deae2a557fee3103b7e4f2205808922c527a184c2f78d3c",
+    "tests/promptRefinerQualityEvaluationVnextOneShotRubric.test.mjs": "976c2091f28680b90cdc32bc6f7c7f378f52d8a4c84b77c44be9971e570e1e69",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs": "ab55907ee90d8d5f118a901a18938580f13cdd9ac62fa226e91e51d2e4ba41b3",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubricsClosure.test.mjs": "1cc65bcf3c65024f7e78774a1f99e2c7bb82d07946f523ea924de465ee036a5e"
+  }
+}

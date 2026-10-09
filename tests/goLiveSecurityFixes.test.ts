@@ -889,6 +889,53 @@ test("staging readiness requires a test key, and rejects a live one", async () =
   }
 });
 
+test("dev readiness requires a test key, like staging", async () => {
+  // dev deploys every develop merge. Before it was a known environment, a
+  // Railway environment named "dev" resolved to production and demanded a
+  // live key -- the opposite of what an unverified build should hold.
+  const { getSecurityEnvironmentStatus } = await import(
+    "../lib/securityEnvironment.ts"
+  );
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalStripeKey = process.env.STRIPE_SECRET_KEY;
+  const originalAppEnv = process.env.APP_ENV;
+  const originalRailwayEnv = process.env.RAILWAY_ENVIRONMENT_NAME;
+  try {
+    // @ts-expect-error NODE_ENV is typed as a literal union but is writable.
+    process.env.NODE_ENV = "production";
+    delete process.env.APP_ENV;
+    process.env.RAILWAY_ENVIRONMENT_NAME = "dev";
+
+    process.env.STRIPE_SECRET_KEY = "sk_test_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, true);
+
+    for (const rejected of ["sk_live_fixture", "rk_live_fixture", "unknown_key", ""]) {
+      process.env.STRIPE_SECRET_KEY = rejected;
+      assert.equal(
+        getSecurityEnvironmentStatus().checks.stripeLiveMode,
+        false,
+        rejected
+      );
+    }
+
+    // APP_ENV is the same answer from the other variable.
+    delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    process.env.APP_ENV = "dev";
+    process.env.STRIPE_SECRET_KEY = "sk_live_fixture";
+    assert.equal(getSecurityEnvironmentStatus().checks.stripeLiveMode, false);
+  } finally {
+    // @ts-expect-error see above.
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = originalStripeKey;
+    if (originalAppEnv === undefined) delete process.env.APP_ENV;
+    else process.env.APP_ENV = originalAppEnv;
+    if (originalRailwayEnv === undefined)
+      delete process.env.RAILWAY_ENVIRONMENT_NAME;
+    else process.env.RAILWAY_ENVIRONMENT_NAME = originalRailwayEnv;
+  }
+});
+
 test("Stripe key mode parsing fails closed and webhook checks before DB writes", () => {
   assert.equal(stripeKeyLiveMode("sk_live_fixture"), true);
   assert.equal(stripeKeyLiveMode("rk_live_fixture"), true);

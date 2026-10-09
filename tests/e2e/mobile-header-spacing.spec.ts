@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { expectNoHorizontalOverflow, prepareGuestPage } from "./support/app-fixtures";
+import {
+  expectNoHorizontalOverflow,
+  prepareGuestPage,
+  type QaConversationMessage,
+} from "./support/app-fixtures";
 import {
   freezeAnimations,
   installChatModelStub,
@@ -169,6 +173,12 @@ type EnterOptions = {
   existingConversation?: boolean;
   title?: string;
   modelStub?: ChatModelStubSpec;
+  /**
+   * Seeded history. The new-chat button only renders once the conversation
+   * has content, so any test that needs it seeds this with
+   * `existingConversation`.
+   */
+  messages?: QaConversationMessage[];
 };
 
 async function enterMobileChat(
@@ -182,6 +192,7 @@ async function enterMobileChat(
     existingConversation = false,
     title,
     modelStub,
+    messages,
   } = options;
 
   // prepareGuestPage first, then mockAuthenticatedApi -- the convention the
@@ -190,7 +201,10 @@ async function enterMobileChat(
   // so the tab never passes through a transient "unauthenticated" frame on
   // its way to signed-in.
   await prepareGuestPage(page, "en");
-  const authState = await mockAuthenticatedApi(page, { selectedModels });
+  const authState = await mockAuthenticatedApi(page, {
+    selectedModels,
+    ...(messages ? { messages } : {}),
+  });
   // The fixture's conversation() closure reads this at request time, so
   // setting it before navigating is what puts the title in the very first
   // paint of the header.
@@ -288,6 +302,84 @@ async function enterGuestChat(
   await freezeAnimations(page);
 }
 
+// ---------------------------------------------------------------------------
+// MOBILE-HEADER-NARROW-01: reachability of the three header controls.
+// ---------------------------------------------------------------------------
+
+/** A conversation with content, so the header renders its new-chat button. */
+const HISTORY: QaConversationMessage[] = [
+  { id: "narrow-u1", role: "user", content: "Which city is the capital of France?" },
+  { id: "narrow-a1", role: "assistant", content: "Paris.", modelId: MODEL_A },
+];
+
+type ControlBox = {
+  width: number;
+  height: number;
+  left: number;
+  right: number;
+  /** The control's own centre hit-tests to the control (sidebar drawer contract). */
+  centreHits: boolean;
+};
+
+/**
+ * The menu, model and new-chat controls, measured in one frame, plus the
+ * header's content box. A control counts as reachable only when its centre
+ * hit-tests to it through `elementFromPoint`, the measure the sidebar drawer
+ * contract uses -- a box that exists but is clipped or covered is not reached.
+ */
+async function readHeaderControls(page: Page) {
+  return page.evaluate(() => {
+    const headerNode = document.querySelector<HTMLElement>(
+      '[data-testid="mobile-chat-header"]'
+    );
+    if (!headerNode) throw new Error("mobile-chat-header is not rendered");
+    const measure = (node: Element | null): ControlBox | null => {
+      if (!node) return null;
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return {
+        width: box.width,
+        height: box.height,
+        left: box.left,
+        right: box.right,
+        centreHits: !!hit && (hit === node || node.contains(hit)),
+      };
+    };
+    const style = getComputedStyle(headerNode);
+    const headerBox = headerNode.getBoundingClientRect();
+    return {
+      contentLeft: headerBox.left + parseFloat(style.paddingLeft),
+      contentRight: headerBox.right - parseFloat(style.paddingRight),
+      height: headerBox.height,
+      menu: measure(headerNode.querySelector('[data-testid="mobile-sidebar-open"]')),
+      model: measure(headerNode.querySelector('[data-testid="mobile-header-model-summary"]')),
+      newChat: measure(headerNode.querySelector('button[aria-label="New Chat"]')),
+    };
+  });
+}
+
+type ControlName = "menu" | "model" | "newChat";
+
+/** Each control is whole, at least 44px both ways, inside the content box and hit by its centre. */
+function expectControlsReachable(
+  controls: Awaited<ReturnType<typeof readHeaderControls>>,
+  label: string
+) {
+  for (const name of ["menu", "model", "newChat"] as ControlName[]) {
+    const control = controls[name];
+    expect(control, `${label}: ${name} is not rendered`).not.toBeNull();
+    expect(control!.width, `${label}: ${name} is narrower than 44px`).toBeGreaterThanOrEqual(TOUCH_MIN);
+    expect(control!.height, `${label}: ${name} is shorter than 44px`).toBeGreaterThanOrEqual(TOUCH_MIN);
+    expect(control!.left, `${label}: ${name} starts outside the header`).toBeGreaterThanOrEqual(
+      controls.contentLeft - 0.5
+    );
+    expect(control!.right, `${label}: ${name} runs past the header's edge`).toBeLessThanOrEqual(
+      controls.contentRight + 0.5
+    );
+    expect(control!.centreHits, `${label}: ${name}'s centre does not reach it`).toBe(true);
+  }
+}
+
 // ===========================================================================
 // 1. The default header: no status, no reserved row
 // ===========================================================================
@@ -362,6 +454,30 @@ test.describe("Default header (no status)", { tag: "@ui-risk" }, () => {
     expect(metrics.summaryHeight).toBeGreaterThanOrEqual(TOUCH_MIN);
     await expect(summary(page)).toHaveAccessibleName(/3 active models total/);
   });
+
+  // Ordinary widths are untouched by MOBILE-HEADER-NARROW-01: with content in
+  // the conversation all three controls keep their full size on one row.
+  for (const width of MOBILE_WIDTHS) {
+    test(`a conversation with history keeps all three header controls whole on one row at ${width}px`, async ({
+      page,
+    }) => {
+      await enterMobileChat(page, {
+        existingConversation: true,
+        selectedModels: [MODEL_A],
+        messages: HISTORY,
+        viewport: { width, height: 800 },
+      });
+
+      const controls = await readHeaderControls(page);
+      expectControlsReachable(controls, `${width}px`);
+      expect(controls.height).toBeGreaterThanOrEqual(HEADER_MIN_HEIGHT);
+      expect(controls.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+      // The height band above already proves one row; these pin that the two
+      // fixed controls are exactly their declared 44px, not merely at least.
+      expect(controls.menu!.width).toBeCloseTo(44, 0);
+      expect(controls.newChat!.width).toBeCloseTo(44, 0);
+    });
+  }
 
   test("the header is not pinned to a fixed height", async ({ page }) => {
     await enterMobileChat(page);
@@ -719,6 +835,116 @@ test.describe("Zoom and orientation", { tag: "@ui-risk" }, () => {
 
     await summary(page).click();
     await expect(page.locator("#chat-input-popover")).toBeVisible();
+  });
+
+  // MOBILE-HEADER-NARROW-01. 300% page zoom lays a phone out at ~137px: 113px
+  // inside the padding, less than three 44px controls and their gaps need.
+  // Before the fix the model button refused to shrink, so the menu and
+  // new-chat buttons were squeezed to 22px and 20px and new chat ran past the
+  // edge the header clips at. 137x247 is the composer contract's 300% shape.
+  for (const models of [[MODEL_A], THREE_MODELS]) {
+    test(`300% zoom (~137px) keeps menu, model and new chat reachable at 44px with ${models.length} model(s)`, async ({
+      page,
+    }) => {
+      await enterMobileChat(page, {
+        existingConversation: true,
+        selectedModels: models,
+        messages: HISTORY,
+        viewport: { width: 137, height: 247 },
+      });
+
+      await expectNoHorizontalOverflow(page);
+      expectControlsReachable(await readHeaderControls(page), "137px");
+
+      // And each one actually works from where it now sits.
+      await page.getByTestId("mobile-sidebar-open").click();
+      const drawer = page.getByTestId("mobile-chat-shell").getByRole("dialog");
+      await expect(drawer).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
+
+      await summary(page).click();
+      await expect(page.locator("#chat-input-popover")).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.locator("#chat-input-popover")).toBeHidden();
+
+      // A new conversation is empty, which is exactly when the header stops
+      // offering this button -- so its disappearing is the click landing.
+      const newChat = header(page).getByRole("button", { name: "New Chat" });
+      await newChat.click();
+      await expect(newChat).toHaveCount(0);
+    });
+  }
+
+  test("300% zoom without history keeps the menu and model on one row", async ({ page }) => {
+    await enterMobileChat(page, {
+      selectedModels: [MODEL_A],
+      viewport: { width: 137, height: 247 },
+    });
+
+    const controls = await readHeaderControls(page);
+    expect(controls.newChat).toBeNull();
+    expect(controls.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+    for (const name of ["menu", "model"] as const) {
+      const control = controls[name];
+      expect(control).not.toBeNull();
+      expect(control!.width).toBeGreaterThanOrEqual(TOUCH_MIN);
+      expect(control!.right).toBeLessThanOrEqual(controls.contentRight + 0.5);
+      expect(control!.centreHits).toBe(true);
+    }
+  });
+
+  // The same squeeze at 200% zoom: the menu and new-chat buttons were 29-32px
+  // wide at 195-206px. Here the model button shrinks instead and the row stays
+  // one line, so the header keeps its usual height.
+  for (const width of [195, 206]) {
+    test(`200% zoom (${width}px) keeps menu and new chat at 44px on one row`, async ({ page }) => {
+      await enterMobileChat(page, {
+        existingConversation: true,
+        selectedModels: THREE_MODELS,
+        messages: HISTORY,
+        viewport: { width, height: 422 },
+      });
+
+      await expectNoHorizontalOverflow(page);
+      const controls = await readHeaderControls(page);
+      expectControlsReachable(controls, `${width}px`);
+      expect(controls.height).toBeGreaterThanOrEqual(HEADER_MIN_HEIGHT);
+      expect(controls.height).toBeLessThanOrEqual(HEADER_MAX_HEIGHT);
+    });
+  }
+
+  for (const width of [182, 188]) {
+    test(`narrow header at ${width}px keeps the model glyph inside its button`, async ({ page }) => {
+      await enterMobileChat(page, {
+        existingConversation: true,
+        selectedModels: THREE_MODELS,
+        messages: HISTORY,
+        viewport: { width, height: 422 },
+      });
+
+      expectControlsReachable(await readHeaderControls(page), `${width}px`);
+      const chevronFits = await summary(page).evaluate((button) => {
+        const chevron = button.querySelector("svg:last-of-type");
+        if (!chevron || getComputedStyle(chevron).display === "none") return true;
+        return chevron.getBoundingClientRect().right <= button.getBoundingClientRect().right - 1;
+      });
+      expect(chevronFits, `${width}px: the chevron paints beyond the model button`).toBe(true);
+    });
+  }
+
+  test("200% text scaling keeps all three header controls reachable", async ({ page }) => {
+    await enterMobileChat(page, {
+      existingConversation: true,
+      selectedModels: THREE_MODELS,
+      messages: HISTORY,
+      viewport: { width: 320, height: 568 },
+    });
+
+    await page.evaluate(() => {
+      document.documentElement.style.fontSize = "32px";
+    });
+    expectControlsReachable(await readHeaderControls(page), "320px at 200% text size");
   });
 
   // Landscape widths that still mount the mobile shell: past 768px the

@@ -15,12 +15,12 @@ import {
   prepareVerifiedSessionGrant,
   requestConsentConfirmation,
 } from "@/lib/emailConsentConfirmation";
-import { applyPreferenceChange } from "@/lib/emailPreferences";
+import { applyPreferenceChange, ensureDefaultPreferences } from "@/lib/emailPreferences";
 import { recordEstimatedCountry } from "@/lib/emailJurisdiction";
 import { profileForCountry, type ResolvedJurisdiction } from "@/lib/emailJurisdictionCore";
 import { normalizeEmailLoginAddress } from "@/lib/emailLogin";
 import { recordNoticeObjection, recordNoticeShown } from "@/lib/inProductConsentNotice";
-import { noticeJurisdictionColumns } from "@/lib/inProductConsentNoticeCore";
+import { noticeJurisdictionColumns, noticePurposes } from "@/lib/inProductConsentNoticeCore";
 import { recordRelationshipStarted } from "@/lib/auRelationship";
 import { isEmailPolicyPublished } from "@/lib/emailPolicyPublication";
 import {
@@ -58,16 +58,16 @@ const copyLanguage = (value: string | null | undefined): ConsentCopyLanguage =>
     : "en";
 
 /**
- * The purpose the opt-in box requests confirmation for.
+ * The purposes the opt-in box consents to: the three its wording names
+ * (product news, newsletters, promotions), the same set the in-product
+ * notice's "Yes" covers.
  *
- * One, not the three the notice lists. The double opt-in design confirms one
- * purpose per mail (docs/policy/email-double-opt-in.md), so ticking one box would
- * otherwise send three confirmation mails at sign-up. Product updates is the
- * purpose this redesign exists for; newsletters and promotions stay off until the
- * person switches them on in settings. Sending less than was asked for is the
- * direction that can be corrected.
+ * It was product updates alone while every consent took a confirmation mail
+ * per purpose, to spare three mails at sign-up. A session that proved the
+ * address now consents at once (docs/policy/email-double-opt-in.md §14), so
+ * the box does what its words say (owner decision 2026-10-01, §14.8).
  */
-export const SIGNUP_OPT_IN_PURPOSE = "product_updates";
+export const signupOptInPurposes = () => noticePurposes();
 
 /**
  * Whether the sign-up screen may show its devices, for a request whose trusted
@@ -380,7 +380,7 @@ export async function finalizeSignupConsentAttempt(input: {
       ? await prepareVerifiedSessionGrant({
           userId: input.userId,
           proof: input.addressProof,
-          purposes: [SIGNUP_OPT_IN_PURPOSE],
+          purposes: signupOptInPurposes(),
           // The estimate this transaction is about to record: the user row does
           // not hold it yet.
           jurisdiction: {
@@ -393,6 +393,17 @@ export async function finalizeSignupConsentAttempt(input: {
           } satisfies ResolvedJurisdiction,
         })
       : null;
+
+  // The confirmation mail is the fallback for a missing proof only, as on the
+  // settings screen. Any other refusal -- the flag, a country marketing cannot
+  // reach -- would also refuse the link's confirmation, so mailing it would
+  // queue mail that can never become consent; it rolls back instead.
+  const mailFallback =
+    sessionGrant !== null && !sessionGrant.ok && sessionGrant.reason === "no_proof";
+  // Seeded before the transaction, and only on the path that requests: a
+  // request inside it seeding on the root client would wait on the row the
+  // first purpose locked, and a refusal must leave no rows behind.
+  if (mailFallback) await ensureDefaultPreferences(input.userId);
 
   let confirmationRequested = false;
   let consentGranted = false;
@@ -446,41 +457,49 @@ export async function finalizeSignupConsentAttempt(input: {
       // is the lane going away between the two, not an ordinary path.
       if (attempt.expressOptInRequested && sessionGrant?.ok) {
         const { grant } = sessionGrant;
-        const outcome = await applyPreferenceChange(tx, {
-          userId: input.userId,
-          purpose: SIGNUP_OPT_IN_PURPOSE,
-          enabled: true,
-          capturedVia: "signup_form",
-          source: "signup",
-          evidenceVia: "signup_form",
-          jurisdiction: grant.jurisdiction.countryCode,
-          jurisdictionSource: grant.jurisdiction.source,
-          confirmation: grant.confirmation,
-          onConsentRecorded: grant.onConsentRecorded,
-          now,
-          policyVersionId: grant.policyVersionId,
-          confirmedCountry: null,
-        });
-        // A consent that could not be written leaves nothing: the whole
-        // consumption rolls back and the landing tries again.
-        if (outcome !== "changed" && outcome !== "already_set") throw CONFIRMATION_UNAVAILABLE;
+        // All or none, and one result notice for the lot (the grant's hook).
+        for (const purpose of signupOptInPurposes()) {
+          const outcome = await applyPreferenceChange(tx, {
+            userId: input.userId,
+            purpose,
+            enabled: true,
+            capturedVia: "signup_form",
+            source: "signup",
+            evidenceVia: "signup_form",
+            jurisdiction: grant.jurisdiction.countryCode,
+            jurisdictionSource: grant.jurisdiction.source,
+            confirmation: grant.confirmation,
+            onConsentRecorded: grant.onConsentRecorded,
+            now,
+            policyVersionId: grant.policyVersionId,
+            confirmedCountry: null,
+          });
+          // A consent that could not be written leaves nothing: the whole
+          // consumption rolls back and the landing tries again.
+          if (outcome !== "changed" && outcome !== "already_set") throw CONFIRMATION_UNAVAILABLE;
+        }
         consentGranted = true;
       } else if (attempt.expressOptInRequested) {
-        if (!candidate) throw CONFIRMATION_UNAVAILABLE;
-        const requested = await requestConsentConfirmation({
-          userId: input.userId,
-          purpose: SIGNUP_OPT_IN_PURPOSE,
-          capturedVia: "signup_form",
-          confirmedCountry: candidate.country,
-          jurisdiction: candidate.country,
-          jurisdictionSource: "ip_estimated",
-          countrySource: "ip_estimated",
-          evidenceVia: "signup_form",
-          language: attempt.language,
-          now,
-          client: tx,
-        });
-        if (!requested.requested) throw CONFIRMATION_UNAVAILABLE;
+        if (!candidate || !mailFallback) throw CONFIRMATION_UNAVAILABLE;
+        // Without a proof, one confirmation per purpose, as the in-product
+        // notice asks them (docs/policy/email-double-opt-in.md §14.8).
+        for (const purpose of signupOptInPurposes()) {
+          const requested = await requestConsentConfirmation({
+            userId: input.userId,
+            purpose,
+            capturedVia: "signup_form",
+            confirmedCountry: candidate.country,
+            jurisdiction: candidate.country,
+            jurisdictionSource: "ip_estimated",
+            countrySource: "ip_estimated",
+            evidenceVia: "signup_form",
+            language: attempt.language,
+            now,
+            client: tx,
+            preferencesSeeded: true,
+          });
+          if (!requested.requested) throw CONFIRMATION_UNAVAILABLE;
+        }
         confirmationRequested = true;
       }
     });

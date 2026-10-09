@@ -9,10 +9,20 @@
 // Usage:
 //   node --import tsx scripts/report-issue-backlog.mjs [--json]
 //   node --import tsx scripts/report-issue-backlog.mjs --issues-file open.json
+//   node --import tsx scripts/report-issue-backlog.mjs --json \
+//     --branch-sha develop=<sha> --branch-sha main=<sha> [--repository <path>]
 //
 // Issues come from the GitHub REST API when GITHUB_TOKEN (or GH_TOKEN) is set,
 // and from --issues-file otherwise. The file may be either a bare
 // [{ "number": 1, "title": "..." }] array or a saved API response.
+//
+// Without --branch-sha the release branches are resolved by name, once per git
+// call. That is fine for a person reading the report now, and wrong for anything
+// that has to say later which commits it read: `git log origin/main` resolves the
+// name again on every call, so a fetch landing mid-run moves what the report
+// describes, and the report cannot name the commits it actually looked at.
+// --branch-sha pins both branches to commits up front; the names are never
+// resolved, so a ref that moves or is deleted during the run changes nothing.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -51,9 +61,68 @@ const RELEASE_BRANCHES = ["develop", "main"];
 
 const MODEL_PRICING_PATH = "lib/modelPricing.ts";
 
+/**
+ * Repeated `--branch-sha <branch>=<sha>` pairs, parsed before anything reads
+ * git. A single one of them turns on SHA mode for both branches: pinning one
+ * branch and resolving the other by name would produce a report whose two
+ * halves came from different moments, which is the failure this input exists
+ * to remove.
+ */
+const parseBranchShaArguments = (argv) => {
+  const pairs = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== "--branch-sha") continue;
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) {
+      return { problem: "--branch-sha needs <branch>=<sha>." };
+    }
+    const separator = value.indexOf("=");
+    if (separator <= 0) {
+      return { problem: `--branch-sha ${value} is not <branch>=<sha>.` };
+    }
+    pairs.push({
+      branch: value.slice(0, separator),
+      sha: value.slice(separator + 1),
+    });
+  }
+  return { pairs };
+};
+
+const branchShaArguments = parseBranchShaArguments(args);
+if (branchShaArguments.problem) {
+  console.error(branchShaArguments.problem);
+  process.exit(1);
+}
+const shaMode = branchShaArguments.pairs.length > 0;
+
+const repositoryIndex = args.indexOf("--repository");
+const repositoryArgument =
+  repositoryIndex === -1 ? null : args[repositoryIndex + 1];
+if (
+  repositoryIndex !== -1 &&
+  (!repositoryArgument || repositoryArgument.startsWith("--"))
+) {
+  console.error("--repository needs a path.");
+  process.exit(1);
+}
+if (repositoryArgument && !shaMode) {
+  // Another checkout's branch names are not this one's. Reading them by name
+  // would silently report on whatever that clone happens to call `develop`,
+  // so the pinned commits have to come with it.
+  console.error("--repository needs --branch-sha for each release branch.");
+  process.exit(1);
+}
+
+/**
+ * Where git runs. The pricing-parser check below deliberately does not follow
+ * it: that check compares the parser against the module this process imported,
+ * so it has to read this checkout's file, not the one being reported on.
+ */
+const gitDirectory = repositoryArgument ?? root;
+
 const git = (...argv) => {
   const result = spawnSync("git", argv, {
-    cwd: root,
+    cwd: gitDirectory,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -68,16 +137,74 @@ const resolveRef = (name) => {
   return null;
 };
 
+const SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+/**
+ * Every release branch pinned exactly once to a commit that exists. Anything
+ * else exits before a report is produced: a partial pin, a typo in a branch
+ * name or an abbreviated sha would each still print a report, and the report
+ * would describe something other than what the caller asked for.
+ */
+const refsFromBranchShaArguments = (pairs) => {
+  const problems = [];
+  const byBranch = new Map();
+  for (const { branch, sha } of pairs) {
+    if (!RELEASE_BRANCHES.includes(branch)) {
+      problems.push(
+        `--branch-sha ${branch}=... names no release branch (expected ${RELEASE_BRANCHES.join(", ")}).`
+      );
+      continue;
+    }
+    if (byBranch.has(branch)) {
+      problems.push(`--branch-sha ${branch}=... was given more than once.`);
+      continue;
+    }
+    if (!SHA_PATTERN.test(sha)) {
+      problems.push(
+        `--branch-sha ${branch}=${sha} is not a full 40-character commit sha.`
+      );
+      continue;
+    }
+    // `cat-file -e` answers with its exit status and prints nothing, so the
+    // check is against null -- the empty string it returns on success is the
+    // same falsy value a failure would be.
+    if (git("cat-file", "-e", `${sha}^{commit}`) === null) {
+      problems.push(`--branch-sha ${branch}=${sha} is not a commit here.`);
+      continue;
+    }
+    byBranch.set(branch, sha);
+  }
+  for (const branch of RELEASE_BRANCHES) {
+    if (!byBranch.has(branch)) {
+      problems.push(`--branch-sha ${branch}=<sha> is missing.`);
+    }
+  }
+  return { problems, byBranch };
+};
+
 const refByBranch = new Map();
-for (const name of RELEASE_BRANCHES) {
-  const ref = resolveRef(name);
-  if (ref) refByBranch.set(name, ref);
-}
-if (refByBranch.size === 0) {
-  console.error(
-    `No release branch is available locally (looked for ${RELEASE_BRANCHES.join(", ")}).`
-  );
-  process.exit(1);
+if (shaMode) {
+  const pinned = refsFromBranchShaArguments(branchShaArguments.pairs);
+  if (pinned.problems.length > 0) {
+    for (const problem of pinned.problems) console.error(problem);
+    process.exit(1);
+  }
+  // Ordered by RELEASE_BRANCHES rather than by argument order: the report's
+  // branch order is promotion order, and a caller should not be able to swap it.
+  for (const branch of RELEASE_BRANCHES) {
+    refByBranch.set(branch, pinned.byBranch.get(branch));
+  }
+} else {
+  for (const name of RELEASE_BRANCHES) {
+    const ref = resolveRef(name);
+    if (ref) refByBranch.set(name, ref);
+  }
+  if (refByBranch.size === 0) {
+    console.error(
+      `No release branch is available locally (looked for ${RELEASE_BRANCHES.join(", ")}).`
+    );
+    process.exit(1);
+  }
 }
 
 // Unit and record separators, written as escapes: a commit subject may contain

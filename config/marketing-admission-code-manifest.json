@@ -6,13 +6,13 @@
     "lib/marketingFacts.ts",
     "lib/marketingStore.ts"
   ],
-  "digest": "cea7dcc4df6bec3e10b72387678bc663b4808b2a83d1e62ad3436fc1e5df9602",
-  "totalSizeBytes": 435408,
+  "digest": "5328a2b0606cd0c89d07912535f169505b63070108f3224bb89bcd692381d71f",
+  "totalSizeBytes": 499946,
   "files": [
     {
       "path": "lib/adminAudit.ts",
-      "sizeBytes": 10435,
-      "sha256": "c377d81e882edfc348767da6b2d44ce2a1ef5da682631bbb642cfc89bdc8ba58"
+      "sizeBytes": 11638,
+      "sha256": "54ceafbb2b0256711b812a44df092f16ef81d88b665c5ed243095e7e60c88724"
     },
     {
       "path": "lib/adminAuditIntegrityCore.ts",
@@ -21,8 +21,8 @@
     },
     {
       "path": "lib/adminAuditSystemActors.ts",
-      "sizeBytes": 4087,
-      "sha256": "d00d861bd4c3d72a1e6db6496ce8c9a84cf5ce2c600b12228ca584661c5a0b1c"
+      "sizeBytes": 8133,
+      "sha256": "9942f4502ac517e72ffc27228dc9e28921e356950ebc1ddd4b7606e18943d1c0"
     },
     {
       "path": "lib/clientIp.ts",
@@ -36,18 +36,18 @@
     },
     {
       "path": "lib/marketingAuditEvidence.ts",
-      "sizeBytes": 9816,
-      "sha256": "3eb055b2ad783a15def3f4942db243420514cbabe448cc5041c66cde4a406309"
+      "sizeBytes": 13235,
+      "sha256": "d44d7efdf5df8db749bf8ac3dac9d36ae90bb3b6a0fb3aab8b2696b42bc17bc9"
     },
     {
       "path": "lib/marketingAutomationAccess.ts",
-      "sizeBytes": 38157,
-      "sha256": "5987fabd7ee92033342fbae325a9499c34c56ca09121fe240ab0127ff5b09617"
+      "sizeBytes": 44218,
+      "sha256": "6697063f59c714c4ba563d31eb51155fda0f08b93da7c7970ae710b843a39b93"
     },
     {
       "path": "lib/marketingAutomationSchema.ts",
-      "sizeBytes": 30616,
-      "sha256": "3c72dc347094a20c51406e97478e00821dfc31853a6446dec5fa027712ac706b"
+      "sizeBytes": 32448,
+      "sha256": "59617d8fcece79f15e66ab8a2477ad58834d1ee0e30fc3429c89eaaeb2886c1b"
     },
     {
       "path": "lib/marketingBannedClaims.ts",
@@ -101,8 +101,8 @@
     },
     {
       "path": "lib/marketingStore.ts",
-      "sizeBytes": 159481,
-      "sha256": "6c8ed2c7cdfd0b75dd71286c8eaa42f41b1e4b9b74f83a5d450e592bf19e0012"
+      "sizeBytes": 206905,
+      "sha256": "d2578a17bdf00ca2d4eeb15e85cb45b70dc73826ae0a35920de0c686d0752c83"
     },
     {
       "path": "lib/postgresConnectionConfigCore.mjs",
@@ -111,8 +111,8 @@
     },
     {
       "path": "lib/prisma.ts",
-      "sizeBytes": 1271,
-      "sha256": "c3245196e95f7c9198b0d6834f221969eeede43b9bf59bf01c8d77000056bedc"
+      "sizeBytes": 1824,
+      "sha256": "9baae0af58f21d2abfa8d95af49a84e793969b3ee9f679c2add623c96d3c0cf6"
     }
   ]
 }

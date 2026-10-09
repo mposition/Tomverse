@@ -41,7 +41,12 @@ import {
   adminAuditIntegrityKeys,
   ADMIN_AUDIT_VERIFICATION_KEY_ORDERS,
 } from "@/lib/adminAuditIntegrityCore";
-import { metadataClaimsSystemActor } from "@/lib/adminAuditSystemActors";
+import {
+  auditRowActorKind,
+  metadataClaimsSystemActor,
+  SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  type SystemAuditActor,
+} from "@/lib/adminAuditSystemActors";
 
 export type MarketingAuditReader = PrismaClient | Prisma.TransactionClient;
 
@@ -175,11 +180,30 @@ export async function verifyMarketingAuditEvidence(
     return { ok: false, problem: "entry_predates_decision" };
   }
 
+  const placed = await chainPlacementProblem(database, entry);
+  if (placed) return { ok: false, problem: placed };
+
+  return { ok: true, createdAt: entry.createdAt };
+}
+
+type StoredAuditEntry = NonNullable<
+  Awaited<ReturnType<MarketingAuditReader["adminAuditLog"]["findUnique"]>>
+>;
+
+/**
+ * Whether a stored entry's own hash reproduces under a listed key and it still
+ * sits where it was written. Shared by the human and the system verifier: the
+ * part of being evidence that does not depend on who wrote the entry.
+ */
+async function chainPlacementProblem(
+  database: MarketingAuditReader,
+  entry: StoredAuditEntry,
+): Promise<"entry_unhashed" | "entry_hash_mismatch" | "entry_not_linked" | null> {
   // An entry with no hash is outside what verification covers
   // (lib/adminAudit.ts writes one whenever a key is configured), so it is not
   // evidence either -- a decision that cannot be checked is not a decision that
   // was recorded.
-  if (!entry.entryHash) return { ok: false, problem: "entry_unhashed" };
+  if (!entry.entryHash) return "entry_unhashed";
 
   const input = {
     previousHash: entry.previousHash,
@@ -203,7 +227,7 @@ export async function verifyMarketingAuditEvidence(
     );
   });
 
-  if (!reproduced) return { ok: false, problem: "entry_hash_mismatch" };
+  if (!reproduced) return "entry_hash_mismatch";
 
   // Where the entry sits. The chain is ordered by (createdAt, id), so the row
   // before it must be the one its `previousHash` names, and the row after it --
@@ -234,14 +258,75 @@ export async function verifyMarketingAuditEvidence(
     }),
   ]);
 
-  if (entry.previousHash !== (before?.entryHash ?? null)) {
-    return { ok: false, problem: "entry_not_linked" };
-  }
-  if (after && after.previousHash !== entry.entryHash) {
-    return { ok: false, problem: "entry_not_linked" };
-  }
+  if (entry.previousHash !== (before?.entryHash ?? null)) return "entry_not_linked";
+  if (after && after.previousHash !== entry.entryHash) return "entry_not_linked";
+  return null;
+}
 
-  return { ok: true, createdAt: entry.createdAt };
+/** The target type the store writes for a post's audit entries. */
+export const MARKETING_POST_AUDIT_TARGET_TYPE = "MarketingPost";
+
+/** The target type a shadow report's audit entry names. */
+export const MARKETING_REPORT_AUDIT_TARGET_TYPE = "MarketingReport";
+
+/** Why a system audit entry is not evidence of what the system recorded. */
+export const MARKETING_SYSTEM_AUDIT_PROBLEMS = [
+  "entry_missing",
+  "actor_not_system",
+  "actor_mismatch",
+  "target_mismatch",
+  "entry_unhashed",
+  "entry_hash_mismatch",
+  "entry_not_linked",
+] as const;
+
+export type MarketingSystemAuditProblem = (typeof MARKETING_SYSTEM_AUDIT_PROBLEMS)[number];
+
+/**
+ * The latest entry a system actor wrote for this action and target, read as
+ * evidence -- or why it is not.
+ *
+ * What the dispatch of an autonomous post compares against is what the
+ * autonomous insert recorded: the admission code digest, configuration
+ * generation and deployment it was admitted under. Values alone are not enough:
+ * a row with the right metadata and no hash, a row written by another actor, or
+ * a row lifted out of the chain would all carry the same values. So the row has
+ * to be a system row (no session fields, a listed marker), by the named actor,
+ * about the named target, with a hash that reproduces under a listed key and
+ * links to the rows either side of it.
+ *
+ * The latest one, because a requeued post may have been scheduled more than
+ * once, and the admission it goes out under is the most recent.
+ */
+export async function verifyMarketingSystemAuditEvidence(
+  database: MarketingAuditReader,
+  requirement: {
+    readonly action: string;
+    readonly systemActor: SystemAuditActor;
+    readonly targetType: string;
+    readonly targetId: string;
+  },
+): Promise<
+  | { readonly ok: true; readonly auditLogId: string; readonly metadata: unknown }
+  | { readonly ok: false; readonly problem: MarketingSystemAuditProblem }
+> {
+  const entry = await database.adminAuditLog.findFirst({
+    where: { action: requirement.action, targetId: requirement.targetId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+  });
+  if (!entry) return { ok: false, problem: "entry_missing" };
+  if (auditRowActorKind(entry) !== "system") {
+    return { ok: false, problem: "actor_not_system" };
+  }
+  if (metadataValue(entry.metadata, SYSTEM_AUDIT_ACTOR_METADATA_KEY) !== requirement.systemActor) {
+    return { ok: false, problem: "actor_mismatch" };
+  }
+  if (entry.targetType !== requirement.targetType || entry.targetId !== requirement.targetId) {
+    return { ok: false, problem: "target_mismatch" };
+  }
+  const placed = await chainPlacementProblem(database, entry);
+  if (placed) return { ok: false, problem: placed };
+  return { ok: true, auditLogId: entry.id, metadata: entry.metadata };
 }
 
 export async function verifyMarketingWebhookSignatureAuditEvidence(

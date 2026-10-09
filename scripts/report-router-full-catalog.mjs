@@ -26,6 +26,7 @@ import { dirname } from "node:path";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
 import { diagnoseFullCatalog, TIE_BREAK_ORDER } from "../lib/routerFullCatalogDiagnostic.ts";
 import { adoptedItems } from "../lib/routerQualityEvalSet.ts";
+import { TASK_KINDS } from "../lib/taskProfileCore.ts";
 import { NO_WEB_SEARCH_BACKENDS } from "../lib/webSearchBackends.ts";
 
 const args = new Map(
@@ -92,12 +93,34 @@ say(`|---|---|`);
 say(`| items | ${report.inputs.itemCount} |`);
 say(`| items whose explanation disagrees with the product decision | ${report.summary.consistencyProblems} |`);
 say(
-  `| (model, kind) cells with approved quality evidence | ${report.summary.evidenceCells.withEvidence} of ${report.summary.evidenceCells.total} |`
+  `| (enabled model, observed item kind) cells with approved quality evidence | ${report.summary.evidenceCells.withEvidence} of ${report.summary.evidenceCells.total} |`
 );
 say(`| items where dispatch's output cap differs from the Router's | ${report.summary.outputCapMismatchItems} |`);
-say(`| pairwise inversions against the primary | ${report.summary.pairwiseInversions} |`);
+say(`| items with subset-context reversals against the primary | ${report.summary.subsetContextReversals} |`);
 say(`| enabled models never eligible on any item | ${report.summary.neverEligible.filter((e) => AVAILABLE_MODELS.find((m) => m.id === e.modelId)?.enabled).length} |`);
 say(`| models eligible at least once and never primary | ${report.summary.eligibleNeverPrimary.length} |`);
+say();
+
+say("### Per-model declared capability and quality-evidence coverage");
+say();
+say(
+  "This is the supplied static catalogue and the Router score snapshot, not the runtime model registry, " +
+    "live search-backend readiness, provider dispatchability, or product approval. " +
+    "Input `not_declared` differs from an explicit `unsupported` declaration. " +
+    "`no_evidence` means no approved quality record for that model and task, not a measured low score."
+);
+say();
+say(`| model | enabled | image input | native PDF input | declared web search | ${TASK_KINDS.join(" | ")} |`);
+say(`|---|---|---|---|---| ${TASK_KINDS.map(() => "---").join(" | ")} |`);
+for (const row of report.catalogueCoverage) {
+  const evidence = TASK_KINDS
+    .map((kind) => row.qualityEvidenceByKind[kind].evidenceRef ?? "no_evidence");
+  say(
+    `| ${row.modelId} | ${row.enabledInSuppliedCatalogue ? "yes" : "no"} | ` +
+      `${row.declaredInput.image} | ${row.declaredInput.nativePdf} | ` +
+      `${row.declaredWebSearch} | ${evidence.join(" | ")} |`
+  );
+}
 say();
 
 say("### Primary by model");

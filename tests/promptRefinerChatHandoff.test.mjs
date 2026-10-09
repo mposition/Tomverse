@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  promptRefinerAutoMessageView,
   projectPromptRefinerChatHandoff,
   PromptRefinerChatProjectionError,
 } from "../lib/promptRefinerChatHandoff.ts";
@@ -247,6 +249,147 @@ test("keeping the original returns byte-identical authored and execution views",
     inputScope: PROMPT_REFINER_INPUT_SCOPE,
     decision: "kept_original",
   });
+});
+
+test("only an explicit accepted choice projects the suggestion into execution", () => {
+  const accepted = projectPromptRefinerChatHandoff(inputFor("accepted"));
+  const kept = projectPromptRefinerChatHandoff(inputFor("kept_original"));
+  assert.equal(accepted.authoredMessages[2].content, sourcePrompt);
+  assert.equal(kept.authoredMessages[2].content, sourcePrompt);
+  assert.equal(accepted.executionMessages[2].content, refinedPrompt);
+  assert.equal(kept.executionMessages[2].content, sourcePrompt);
+  expectCode("prompt_refiner_chat_decision_invalid", () =>
+    projectPromptRefinerChatHandoff({ ...inputFor("accepted"), decision: undefined })
+  );
+  expectCode("prompt_refiner_chat_resolution_invalid", () =>
+    projectPromptRefinerChatHandoff({ ...inputFor("accepted"), suppliedResolution: null })
+  );
+});
+
+test("Auto live and shadow inputs stay authored without a handoff and share the accepted execution view", () => {
+  const ordinary = promptRefinerAutoMessageView({ authoredMessages: messages });
+  assert.equal(ordinary, messages);
+  assert.equal(profileTextFor(ordinary), sourcePrompt);
+
+  const accepted = promptRefinerAutoMessageView({
+    authoredMessages: messages,
+    projection: projectPromptRefinerChatHandoff(inputFor("accepted")),
+    currentScope: scope,
+  });
+  assert.equal(profileTextFor(accepted), refinedPrompt);
+  assert.ok(
+    preflightInputEstimate(accepted).estimatedInputTokens >
+      preflightInputEstimate(ordinary).estimatedInputTokens
+  );
+  assert.equal(accepted[0], ordinary[0]);
+  assert.equal(accepted[1], ordinary[1]);
+  assert.equal(accepted[2].attachments, ordinary[2].attachments);
+  assert.equal(messages[2].content, sourcePrompt);
+
+  const kept = promptRefinerAutoMessageView({
+    authoredMessages: messages,
+    projection: projectPromptRefinerChatHandoff(inputFor("kept_original")),
+    currentScope: scope,
+  });
+  assert.equal(kept, messages);
+  assert.equal(profileTextFor(kept), sourcePrompt);
+});
+
+test("Auto input selector rejects forged or mismatched local projections", () => {
+  const accepted = projectPromptRefinerChatHandoff(inputFor());
+  expectCode("prompt_refiner_chat_projection_untrusted", () =>
+    promptRefinerAutoMessageView({
+      authoredMessages: messages,
+      projection: { ...accepted },
+    })
+  );
+  expectCode("prompt_refiner_chat_projection_untrusted", () =>
+    promptRefinerAutoMessageView({
+      authoredMessages: [...messages],
+      projection: accepted,
+    })
+  );
+  expectCode("prompt_refiner_chat_scope_stale", () =>
+    promptRefinerAutoMessageView({
+      authoredMessages: messages,
+      projection: accepted,
+      currentScope: { ...scope, conversationId: "conversation:stale" },
+    })
+  );
+  const mutable = messages.map((message) => ({ ...message }));
+  const projected = projectPromptRefinerChatHandoff({
+    ...inputFor(),
+    messages: mutable,
+  });
+  mutable[2].content = `${sourcePrompt}!`;
+  expectCode("prompt_refiner_chat_draft_stale", () =>
+    promptRefinerAutoMessageView({
+      authoredMessages: mutable,
+      projection: projected,
+      currentScope: scope,
+    })
+  );
+});
+
+test("Auto rebuilds execution from pinned bytes and refuses post-projection transcript mutation", () => {
+  const makeMutable = () =>
+    messages.map((message) => ({
+      ...message,
+      attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    }));
+  const source = makeMutable();
+  const projection = projectPromptRefinerChatHandoff({
+    ...inputFor(),
+    messages: source,
+  });
+  projection.executionMessages[2].content = "forged execution";
+  projection.executionMessages[0] = { ...source[0], content: "forged history" };
+  const autoMessages = promptRefinerAutoMessageView({
+    authoredMessages: source,
+    projection,
+    currentScope: scope,
+  });
+  assert.equal(autoMessages[0], source[0]);
+  assert.equal(autoMessages[2].content, refinedPrompt);
+  assert.equal(source[2].content, sourcePrompt);
+
+  for (const mutate of [
+    (transcript) => { transcript[0].content = "changed history"; },
+    (transcript) => { transcript[2].id = "changed source id"; },
+    (transcript) => { transcript[2].attachments[0].attachmentId = "changed attachment"; },
+    (transcript) => { transcript.push({ ...currentUser, id: "later user" }); },
+  ]) {
+    const transcript = makeMutable();
+    const bound = projectPromptRefinerChatHandoff({
+      ...inputFor(),
+      messages: transcript,
+    });
+    mutate(transcript);
+    expectCode("prompt_refiner_chat_draft_stale", () =>
+      promptRefinerAutoMessageView({
+        authoredMessages: transcript,
+        projection: bound,
+        currentScope: scope,
+      })
+    );
+  }
+});
+
+test("Chat Auto and shadow call sites use the default-off routing view", () => {
+  const route = readFileSync("app/api/chat/route.ts", "utf8");
+  assert.match(
+    route,
+    /const autoRoutingMessages = promptRefinerAutoMessageView\(\{\s*authoredMessages: messages,\s*\}\)/
+  );
+  assert.match(route, /text: profileTextFor\(autoRoutingMessages\)/);
+  assert.match(
+    route,
+    /reservedInputTokens: preflightInputEstimate\(autoRoutingMessages\)\.estimatedInputTokens/
+  );
+  assert.match(
+    route,
+    /text: autoRoutingMessages === messages\s*\? profileText\s*: profileTextFor\(autoRoutingMessages\)/
+  );
 });
 
 test("scope, draft, source target and duplicate ids fail closed", () => {

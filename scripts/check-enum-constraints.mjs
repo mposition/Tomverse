@@ -620,6 +620,26 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_id_check: {
+    owner: "database",
+    reason:
+      "The one-shot stage has exactly two immutable identities: the audited original v1 and its single approved unrun replacement v2. Admission, run approval, and readback use pinned literals rather than a runtime list; a future identity requires a separate policy and migration.",
+  },
+  PromptRefinerVnextOneShotStage_status_check: {
+    owner: "database",
+    reason:
+      "The dark one-shot stage has no active writer. The database permits staged, separately run-approved, then permanently closed; any future admission must match this closed vocabulary.",
+  },
+  PromptRefinerVnextOneShotSlot_status_check: {
+    owner: "database",
+    reason:
+      "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
+  },
+  PromptRefinerAutoBudgetWindow_period_check: {
+    owner: "database",
+    reason:
+      "The default-off product Auto budget books exactly the Brisbane day and month windows. An unknown period cannot acquire a bounded reservation or authorize a provider call.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",
@@ -651,6 +671,31 @@ const REGISTRY = {
     reason:
       "The v4 model-transfer preview has one confirmed or in-flight attempt per idea chunk; outcome_unknown remains occupied until read-back and owner resolution.",
   },
+  AmuxIdeaAnalysisBudgetHold_mode_check: {
+    owner: "database",
+    reason:
+      "The dark v4 analysis hold distinguishes subscription CLI API-conversion estimates from actual API-mode costs. No reservation writer is enabled by the schema migration.",
+  },
+  AmuxIdeaAnalysisBudgetHold_provider_check: {
+    owner: "database",
+    reason:
+      "Only the currently approved OpenAI and Anthropic analysis providers may appear in the dark hold ledger. A later provider needs a policy and migration change.",
+  },
+  AmuxIdeaAnalysisBudgetHold_status_check: {
+    owner: "database",
+    reason:
+      "The dark hold lifecycle preserves outcome_unknown as occupied and distinguishes an owner-consumed worst-case reserve from a verified non-start release. The future single writer must validate the same states.",
+  },
+  AmuxIdeaAnalysisPriceVersion_provider_check: {
+    owner: "database",
+    reason:
+      "Only OpenAI and Anthropic may have owner-approved AMUX v4 analysis prices; adding a provider requires an explicit policy and migration change.",
+  },
+  AmuxIdeaAnalysisPriceVersion_mode_check: {
+    owner: "database",
+    reason:
+      "Each approved analysis price is tied to subscription CLI or API mode so estimates and actual API costs cannot be silently interchanged.",
+  },
   AmuxIdeaAnalysisChunk_state_check: {
     owner: "database",
     reason:
@@ -665,6 +710,16 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "DraftUnitRetentionState in lib/amux/ideaRetentionCore.ts has proposed, approved, rejected, and expired. The read-only cleanup planner knows these four states, but no runtime writer list or live transition route exists yet.",
+  },
+  AmuxIdeaContentKeyRetirement_purpose_check: {
+    owner: "database",
+    reason:
+      "Only the four per-unit AMUX analysis bodies with approved retention clocks can enter the external key-retirement ledger. Other content categories require their own deletion contract before admission.",
+  },
+  AmuxIdeaRetentionHold_reason_check: {
+    owner: "database",
+    reason:
+      "AMUX idea-wide retention holds record a constrained reason category rather than free-text personal data in the seven-year approval audit.",
   },
   AmuxIdeaUnitDecision_action_check: {
     owner: "database",
@@ -686,10 +741,27 @@ const REGISTRY = {
     reason:
       "An owner-approved v4 hierarchy node remains active or is archived. This is not the AMUX work-item execution status.",
   },
+  AmuxPortfolioAssessment_uncertainty_check: {
+    owner: "database",
+    reason:
+      "Owner-confirmed portfolio evidence has exactly low, medium or high uncertainty; the score uses the worst uncertainty across the hierarchy.",
+  },
+  AmuxPortfolioAssessment_reasonCode_check: {
+    owner: "database",
+    reason:
+      "The append-only portfolio assessment records why the operator entered a new evidence version or override; it never edits a prior score.",
+  },
   AmuxWorkItem_status_check: {
     owner: "database",
     reason:
       "The durable board lifecycle: backlog, todo, doing, review, done, blocked, cancelled. Backlog is catalog-only and cannot be dispatched; the scheduler and execution boundary still select only literal todo. A separately approved promotion, not this schema migration, may move a card from backlog to todo. The database remains the complete closed vocabulary.",
+  },
+  AmuxV22LaneDecision_lane_check: {
+    owner: "list",
+    module: "lib/amux/v22WorkerClaimCore.ts",
+    list: "AMUX_V22_CLAIM_LANES",
+    reason:
+      "The owner-declared normal, parallel and SEV1 worker-assignment lanes are a closed v22 capacity contract. A fourth value must update the guard and owner route together.",
   },
   AmuxWorkItem_kind_check: {
     owner: "database",
@@ -899,6 +971,34 @@ const REGISTRY = {
     reason:
       "The closed critical-violation codes. Ordinary refusals such as graduation_unmet are not in this list. Null is the outcome-unknown burst.",
   },
+  QaReleaseMergeAttempt_state_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_STATES",
+    reason:
+      "The merge lane attempt's lifecycle (docs/policy/qa-release-agent.md version 4, section 8 item 5): issued, consumed, awaiting_deploy, closed. The migration's trigger enforces the core's transition table; tests/integration/qa-release-merge-attempt.db.test.ts checks the two against each other.",
+  },
+  QaReleaseMergeLaneLatch_reason_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeLaneLatchCore.ts",
+    list: "QA_RELEASE_MERGE_LANE_LATCH_REASONS",
+    reason:
+      "Why the merge lane latched (docs/policy/qa-release-agent.md version 4, section 8 item 5). A set event carries one; a person's release carries none.",
+  },
+  QaReleaseMergeAttempt_outcome_check: {
+    owner: "list",
+    module: "lib/qaReleaseMergeAttemptCore.ts",
+    list: "QA_RELEASE_MERGE_ATTEMPT_OUTCOMES",
+    reason:
+      "Why a closed attempt closed, each naming who decided it: the lane from what it read, or a person through the latch release from what they confirmed. Set exactly when the state becomes closed.",
+  },
+  AgentDigestItem_agent_key_check: {
+    owner: "list",
+    module: "lib/agentDigestContract.ts",
+    list: "AGENT_DIGEST_AGENT_KEYS",
+    reason:
+      "The agents that may store digests in the shared AgentDigestItem table. Adding an agent is a reviewed migration that also gives it a kind list and a body retention; an unknown key would be a write no agent owns.",
+  },
   AmuxOrchestratorWrite_call_kind_check: {
     owner: "list",
     module: "lib/amux/orchestratorHaltCore.ts",
@@ -927,6 +1027,181 @@ const REGISTRY = {
     reason:
       "The six halt reasons of policy version 20, section 2. The first four carry the write's request id as the halt key; contract_violation and selection_read_failures carry none. The orchestrator's Rust list is pinned to the same six by tests/amuxOrchestratorHaltCore.test.mjs.",
   },
+  AmuxDecisionMakerSwitchEvent_scope_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_SCOPES",
+    reason:
+      "The Decision Maker kill switch and the two DM instances (docs/policy/amux-decision-maker.md sections 7 and 8). The instances are the S1a router's own, pinned to it by tests/amuxDecisionMakerSwitch.test.mjs; a third vendor is a policy version.",
+  },
+  AmuxDecisionMakerSwitchEvent_value_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_VALUES",
+    reason:
+      "on, off and proposal, and a second CHECK pairs them with the scope: the kill switch takes on or off, an instance off or proposal (section 8). There is no autonomous value; version 1 is proposal-only, and an autonomous mode is a v2 policy and a schema change, never a stored string.",
+  },
+  AmuxDecisionMakerSwitchEvent_reason_code_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_REASON_CODES",
+    reason:
+      "operator for a person's change; validation_latch (three consecutive DM validation failures, section 8) and cleanup_latch (a request directory whose removal could not be confirmed, section 5) for the system, which may only turn an instance off.",
+  },
+  AmuxDecisionMakerSwitchEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_SWITCH_ACTOR_KINDS",
+    reason:
+      "human or system. The guard trigger binds each to its own audit entry of the same transaction: a person's under amux.decision.mode or amux.decision.latch_release, a latch under amux.decision.latch by the instance's own system actor.",
+  },
+  AmuxDecisionMakerRequest_route_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_REQUEST_ROUTES",
+    reason:
+      "routeDmQuestion()'s two results (docs/policy/amux-decision-maker.md section 3). There is no autonomous route in policy version 1; a third value would be a v2 policy and a schema change. Further CHECKs tie the route to the refusal codes: dm_proposal carries none, operator at least one.",
+  },
+  AmuxDecisionMakerRequest_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The two DM instances, the switch store's own list (section 7), or NULL for a provider the router does not verify. A separate CHECK pairs the instance with the asking provider: claude to decision-maker-openai, codex to decision-maker-anthropic.",
+  },
+  AmuxDecisionMakerRequestEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_LEDGER_EVENT_KINDS",
+    reason:
+      "The request lifecycle, each kind named after its section 10 audit action, which the guard trigger requires (amux.decision.<kind>): the nine of stage S1c, which the request store writes and dmEventRefusal() mirrors, and since stage S1e (migration 20261008130100_amux_decision_maker_judgment_delivery, which recreated this CHECK) a person's judgment -- confirm, edit_confirm, reject -- which the judgment table's trigger writes beside the judgment row and which closes the request. Deliveries, retention and body events have tables of their own and are not values here.",
+  },
+  AmuxDecisionMakerRequestEvent_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The instance a transmission, result or rejection event comes from; NULL on the router's assignment and closing events. The guard trigger also requires it to be the request's own instance.",
+  },
+  AmuxDecisionMakerRequestEvent_vendor_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_VENDORS",
+    reason:
+      "The vendor a transmission intent records (section 10), paired with the instance by a second CHECK: openai with decision-maker-openai, anthropic with decision-maker-anthropic. The writer derives it from the instance.",
+  },
+  AmuxDecisionMakerRequestEvent_snapshot_state_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_SNAPSHOT_STATES",
+    reason:
+      "Section 5's three snapshot states, recorded on the transmission intent: none (card only), worker_head and develop. A second CHECK requires the target SHA and the manifest digest exactly when the state is not none.",
+  },
+  AmuxDecisionMakerRequestEvent_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "Section 6's five terminal results. A partial unique index keeps one per request; the first three are DM output and are held to the result deadline when recorded and at COMMIT, timeout and unavailable only hand the question to the operator.",
+  },
+  AmuxDecisionMakerRequestEvent_rejection_reason_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_REJECTION_REASONS",
+    reason:
+      "Why an arriving result was recorded as rejected (sections 6 and 9). The guard trigger checks the first five against the ledger's own state; binding_mismatch and kill_switch are decided from the submission and the switch store, outside the ledger.",
+  },
+  AmuxDecisionMakerBody_field_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_BODY_FIELDS",
+    reason:
+      "Section 10's five body fields and nothing else: the card text, the DM's answer, rationale and escalation reason, and the operator's edited answer. A second CHECK holds each field's byte cap, and a unique index keeps one row per field per request, so a request holds at most 37 KiB of the 40 KiB section 10 allows. The guard binds each field to the audit row of what it belongs to.",
+  },
+  AmuxDecisionMakerRetentionEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_RETENTION_EVENT_KINDS",
+    reason:
+      "Section 10's three retention events: retention_set (once per request, written by the database when the request closes) and a person's hold_set and hold_release. An open hold counts hold events only; retention_set never enters it.",
+  },
+  AmuxDecisionMakerRetentionEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_RETENTION_ACTOR_KINDS",
+    reason:
+      "system for retention_set, human for a legal hold or its release (section 10: a person with ops:write and a recent step-up). A second CHECK pairs the actor with the kind and requires the person's id exactly for human.",
+  },
+  AmuxDecisionMakerResultDetail_result_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_RESULT_KINDS",
+    reason:
+      "The terminal result a detail row belongs to, the ledger's own five kinds (section 6). The guard requires it to equal the kind of the result event it names, of the same transaction.",
+  },
+  AmuxDecisionMakerResultDetail_output_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_OUTPUT_KINDS",
+    reason:
+      "Section 6's three kinds of DM output: select, free_text and escalate; NULL for a validation failure, a timeout and an unavailable DM. A shape CHECK ties it to the result kind, the option id and the irreversible flag.",
+  },
+  AmuxDecisionMakerDigestKeyEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerBodyCore.ts",
+    list: "DM_DIGEST_KEY_EVENT_KINDS",
+    reason:
+      "A key period's rotation into use and its destruction (section 10: the rotation and destruction of keys are recorded as system audits), each once per period by partial unique indexes and each under its own router audit action, amux.decision.digest_key_rotate or .digest_key_destroy.",
+  },
+  AmuxDecisionMakerJudgment_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_JUDGMENT_KINDS",
+    reason:
+      "Section 2-6: a person confirms the proposal as it is, confirms it edited, or rejects it, once per request. The same three kinds close the request in the ledger, and each is recorded under the person's amux.decision.<kind> audit, which the guard requires.",
+  },
+  AmuxDecisionMakerJudgment_instance_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerSwitchCore.ts",
+    list: "DM_INSTANCE_SCOPES",
+    reason:
+      "The DM instance whose proposal was judged, the switch store's own list (section 7). The guard requires it to be the request's own instance; section 4's report counts judgments per instance.",
+  },
+  AmuxDecisionMakerJudgment_declaration_accuracy_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DECLARATION_ACCURACIES",
+    reason:
+      "Section 4: matched, mismatched or not_judged, not_judged by default. A second CHECK requires the wrong items (effect_class, resolution, paths) exactly when mismatched; section 4's report counts each.",
+  },
+  AmuxDecisionMakerJudgment_shown_snapshot_state_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerRequestCore.ts",
+    list: "DM_SNAPSHOT_STATES",
+    reason:
+      "The snapshot state Admin showed beside a confirmed proposal (section 6: none shown as card only, worker_head or develop), the transmission's own list; NULL on a rejection. The guard requires it to equal the transmission intent's state.",
+  },
+  AmuxDecisionMakerDeliveryEvent_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_EVENT_KINDS",
+    reason:
+      "Sections 2-7 and 9: the delivery decision of a confirmed answer, then its receipt or an unknown outcome, then a person's resolution of an unknown outcome -- each once per request by a partial unique index, in that order by the guard.",
+  },
+  AmuxDecisionMakerDeliveryEvent_outcome_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_RESOLVE_OUTCOMES",
+    reason:
+      "What a person found when they checked an unknown delivery (section 9): delivered or not_delivered; NULL on every other kind. A shape CHECK requires it exactly on the resolution.",
+  },
+  AmuxDecisionMakerDeliveryEvent_actor_kind_check: {
+    owner: "list",
+    module: "lib/amux/decisionMakerJudgmentCore.ts",
+    list: "DM_DELIVERY_ACTOR_KINDS",
+    reason:
+      "system for the decision, the receipt and the unknown outcome (the router's audit), human for the resolution (a person's audit). A shape CHECK pairs the actor with the kind and requires the person's id exactly for human.",
+  },
   AmuxIntakeDraft_status_check: {
     owner: "list",
     module: "lib/amux/intakeRegistrationCore.ts",
@@ -940,6 +1215,167 @@ const REGISTRY = {
     list: "AMUX_INTAKE_APPROVAL_STATUSES",
     reason:
       "consumed, outcome_unknown. The consumed row is written in the same transaction as the backlog card and the human audit. This list is not the catalog import approval list.",
+  },
+  OpsObserverDelivery_status_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "DELIVERY_STATUSES",
+    reason:
+      "reserved, confirmed, shadowed, abandoned. Created reserved and closed once; the trigger binds confirmed to a live genesis and shadowed to a shadow one, and a CHECK ties each status to its one timestamp.",
+  },
+  OpsObserverDelivery_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the genesis by the trigger, never written by a caller.",
+  },
+  OpsObserverDeliveryItem_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the reservation by the trigger, so a shadow item never occupies a live incident slot.",
+  },
+  OpsObserverDeliveryItem_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "MESSAGE_KINDS",
+    reason:
+      "new_open, worsening, reopen, recovery. Each kind is reserved once per incident within a mode (the unique on mode, signal, scope, kind, openedAt).",
+  },
+  OpsObserverDeliveryItem_origin_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "ITEM_ORIGINS",
+    reason:
+      "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
+  },
+  OpsObserverRunGuard_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "RUN_GUARD_KINDS",
+    reason:
+      "daily_digest. The one run whose last write is to shared tables; its guard row carries the deadline the deferred trigger checks at COMMIT (docs/policy/sre-ops.md §6 item 5).",
+  },
+  OpsObserverGenesis_reason_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_REASONS",
+    reason:
+      "initial, recovery, activation. The trigger holds each to its place in the chain: initial only first and shadow, recovery in the head mode, activation shadow to live once. Only the Admin genesis action writes a row.",
+  },
+  OpsObserverGenesis_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. There is no path from live back to shadow; stopping is the switch, not a genesis (docs/policy/sre-ops.md §8).",
+  },
+  ProductResearchObservation_outcome_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_OUTCOMES",
+    reason:
+      "ok, failed. A failed slot has nowhere to put a payload: the shape CHECK requires every success column to be null, so a failure cannot display an earlier success content.",
+  },
+  ProductResearchObservation_failureStage_check: {
+    owner: "list",
+    module: "lib/productResearchObservationCore.mjs",
+    list: "OBSERVATION_FAILURE_STAGES",
+    reason:
+      "Where a failed run stopped. Closed because the stage is stored and displayed with a label of its own; a free string would render as itself.",
+  },
+  SupportTriageDecisionRecord_decisionKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "DECISION_KINDS",
+    reason:
+      "What a person decided: a suggestion accepted or rejected, a group confirmed or dismissed, a sample judged. One record per decision; the record itself is never changed.",
+  },
+  SupportTriageGroup_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_STATES",
+    reason:
+      "candidate and confirmed are open; dismissed, expired and invalidated are terminal. The guard trigger allows only the core table's transitions, and a terminal group takes nothing but its tombstone clearing.",
+  },
+  SupportTriageGroup_primaryKind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "The one kind a group is an equivalence class of, in priority order. Fixed for the life of the group.",
+  },
+  SupportTriageGroup_decision_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_DECISIONS",
+    reason:
+      "A person's decision, kept apart from the state so that a confirmed group that later loses members still says it was confirmed.",
+  },
+  SupportTriageGroup_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a candidate group has been shown to a person; the same two values as a suggestion's, reached once and stamped by the database.",
+  },
+  SupportTriageGroupSignal_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "GROUP_KIND_PRIORITY",
+    reason:
+      "One signal row per group and kind. Every kind is an equality over a server fact; a report's text is never one.",
+  },
+  SupportTriageGroupSignal_provenanceClass_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SIGNAL_PROVENANCE_CLASSES",
+    reason:
+      "Where the signal's server value comes from. A second CHECK ties it to the kind, so the column can never disagree with SIGNAL_PROVENANCE.",
+  },
+  SupportTriageSuggestion_state_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_STATES",
+    reason:
+      "pending, claimed, ready and six terminal states. The guard trigger allows only the core table's transitions and never changes a terminal row.",
+  },
+  SupportTriageSuggestion_failureCode_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUGGESTION_FAILURE_CODES",
+    reason:
+      "Why a suggestion failed; present exactly when the state is failed. retry_exhausted is what a fourth reclaim must become, because the attempt count stops at three.",
+  },
+  SupportTriageSuggestion_lane_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "TRIAGE_LANES",
+    reason:
+      "Six lanes. Account and privacy reports share trust_safety_human with security, legal and self-harm reports (operator decision 2026-10-03); there is no separate account lane.",
+  },
+  SupportTriageSuggestion_ownerQueueState_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "OWNER_QUEUE_STATES",
+    reason:
+      "Whether a ready suggestion has been shown to a person. Separate from the state, reached once and stamped by the database.",
+  },
+  SupportTriageRun_kind_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_KINDS",
+    reason:
+      "worker and retention. Each kind has its own deadline (5 minutes, 100 seconds) and its own daily cap of 52, both applied by the row-creation trigger from the kind alone.",
+  },
+  SupportTriageRun_outcome_check: {
+    owner: "list",
+    module: "lib/supportTriageCore.ts",
+    list: "SUPPORT_TRIAGE_RUN_OUTCOMES",
+    reason:
+      "running until the run finishes, then one final outcome. The finishing trigger turns a late success or partial into deadline_exceeded, so the list holds a value the database records and the application never asks for.",
   },
   EngineeringAgentRun_status_check: {
     owner: "list",

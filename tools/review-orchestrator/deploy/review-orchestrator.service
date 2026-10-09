@@ -1,0 +1,22 @@
+[Unit]
+Description=Independent review orchestrator
+After=network-online.target
+
+[Service]
+Type=simple
+# The account whose reviewer CLIs (claude, codex, cursor-agent) are logged in.
+User=review
+Environment=REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json
+# systemd does not read the login shell's PATH. List the directories that
+# hold node and the reviewer CLIs (`which node claude codex cursor-agent`),
+# because the CLIs are themselves started with `#!/usr/bin/env node`.
+Environment=PATH=/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Absolute node path from `which node`.
+ExecStart=/usr/bin/node /opt/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs daemon
+# An unknown outcome is not retried: a restart closes in-flight reviews as unknown.
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

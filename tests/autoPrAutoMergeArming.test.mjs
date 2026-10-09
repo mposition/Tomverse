@@ -1,5 +1,15 @@
 /**
- * Auto-merge is armed once, by the run that opens the pull request.
+ * Auto PR to Develop opens pull requests; it never merges them and never arms
+ * auto-merge.
+ *
+ * It used to arm auto-merge once, at creation. GitHub merges an armed PR the
+ * moment its checks pass, regardless of what Railway is doing, so green PRs
+ * merged minutes apart stacked "Wait for CI" deployments on staging. Merging
+ * moved to the operator-run merge train (scripts/merge-train.mjs), which holds
+ * while the environment has a deployment in flight. The last test below pins
+ * that nothing in the workflow can merge or arm.
+ *
+ * Earlier history, still why the create step reports what it reports:
  *
  * The workflow used to run its arming step on every push to a `to-develop`
  * branch: it looked up whatever PR was open for the branch and called
@@ -9,13 +19,9 @@
  * pushed, this workflow turned it back on, and the pull request squash-merged
  * into develop as 0c7eb828 while its author was still working on it.
  *
- * Two halves are pinned here, because either one alone would have passed under
- * the old behaviour:
- *
- *   - the create step reports `created=true` only for a PR it opened itself,
- *     proven by running its actual shell against a stubbed `gh`; and
- *   - the arming step is reachable only through that output, and never looks a
- *     pull request up for itself.
+ * What remains pinned: the create step reports `created=true` only for a PR it
+ * opened itself, proven by running its actual shell against a stubbed `gh`,
+ * and no step merges or arms anything.
  */
 
 import test from "node:test";
@@ -47,14 +53,8 @@ const noBash = bash
 // Looked up rather than asserted here: a workflow that has lost either step
 // should fail the test that names the property it lost, not the module load.
 const createStep = steps.find((step) => step.id === "create-pr");
-const armStep = steps.find((step) => /auto-merge/i.test(step.name ?? ""));
-
-test("the workflow still has the two steps this contract is about", () => {
-    assert.ok(
-        createStep,
-        'no step with id "create-pr": the arming condition has nothing to read'
-    );
-    assert.ok(armStep, "no auto-merge step");
+test("the workflow still has its create step", () => {
+    assert.ok(createStep, 'no step with id "create-pr"');
 });
 
 /**
@@ -158,13 +158,6 @@ test("a push to a branch whose PR is already open arms nothing", { skip: noBash 
     );
     assert.equal(run.createCalls, 0, "no second PR for the same branch");
     assert.match(run.stdout, /already open/);
-
-    // And with `created=false`, the arming step's own condition excludes it.
-    assert.equal(
-        armStep.if,
-        "steps.create-pr.outputs.created == 'true'",
-        "the arming step must be gated on this run having created the PR"
-    );
 });
 
 test("the run that opens the pull request reports the number it opened", {
@@ -180,29 +173,12 @@ test("the run that opens the pull request reports the number it opened", {
 
 test("a failed creation is not reported as a creation", { skip: noBash }, () => {
     // Without an explicit check `gh pr create` could fail and the step still
-    // fall through to its success path -- which would hand the arming step a
+    // fall through to its success path -- which would report a
     // number belonging to some other pull request, or none at all.
     const run = runCreateStep({ openPrNumber: "", createFails: true });
 
     assert.notEqual(run.status, 0, "a failed creation must fail the step");
     assert.notEqual(run.outputs.created, "true");
-});
-
-test("the arming step is handed a number and never looks one up", () => {
-    // A `gh pr list` here would reintroduce the defect by another route: the
-    // step would find the branch's existing PR regardless of what the create
-    // step decided.
-    assert.ok(armStep, "the workflow must still have an arming step");
-    assert.ok(
-        !/gh pr list/.test(armStep.run),
-        "the arming step must not search for a pull request of its own"
-    );
-    assert.match(armStep.run, /"\$PR_NUMBER"/);
-    assert.equal(
-        armStep.env?.PR_NUMBER,
-        "${{ steps.create-pr.outputs.number }}",
-        "the number must come from the step that created the PR"
-    );
 });
 
 test("the System32 launcher never wins, however early it sits on PATH", () => {
@@ -268,13 +244,17 @@ test("everywhere but Windows the PATH lookup is the right answer", () => {
     }
 });
 
-test("nothing else in the workflow can enable auto-merge", () => {
-    const armingCalls = steps.filter(
-        (step) => typeof step.run === "string" && /--auto\b/.test(step.run)
+test("no step in the workflow merges a pull request or arms auto-merge", () => {
+    // Re-arming here would let GitHub merge past a deployment the merge train
+    // is holding for; a `gh pr merge` of any kind would do the same directly.
+    const merging = steps.filter(
+        (step) =>
+            typeof step.run === "string" &&
+            (/gh pr merge/.test(step.run) || /--auto\b/.test(step.run))
     );
-    assert.deepEqual(
-        armingCalls.map((step) => step.name),
-        [armStep.name],
-        "auto-merge is enabled in exactly one step"
+    assert.deepEqual(merging.map((step) => step.name), []);
+    assert.ok(
+        !steps.some((step) => /auto-merge/i.test(step.name ?? "")),
+        "no auto-merge step"
     );
 });

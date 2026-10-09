@@ -449,6 +449,7 @@ fn every_request_body_is_what_main_and_this_tree_serialize() {
                     instance_id: str_at(&request, "instance_id"),
                     generation: i64_at(&request, "generation"),
                     expected_revision: i64_at(&request, "expected_revision"),
+                    assignment_id: None,
                 },
             ),
             "execution/heartbeat" => assert_request_parity(

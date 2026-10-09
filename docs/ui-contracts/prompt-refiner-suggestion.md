@@ -2,11 +2,12 @@
 
 - 상태: **실제 composer 무과금 검증 연결, 제품 미제공**. 서버는 default-off
   rollout과 환경 kill switch, adapter readiness를 합쳐 최종 offer를 정한다.
-  현재 준비된 adapter는 loopback Playwright fixture뿐이어서 실제 `ChatInput`의
-  상태 전이는 검증되지만 운영 환경은 항상 `off`다. provider 호출, 과금, Router
-  입력 변경, Message schema 변경은 아직 연결하지 않았다. 아래의 순수 Chat
-  projection은 구현됐지만 제품 route/runtime caller가 없고 이 상태나 readiness를
-  바꾸지 않는다.
+  공개 `/chat`에 offer를 내릴 수 있는 adapter는 loopback Playwright fixture뿐이어서
+  실제 `ChatInput`의 상태 전이는 검증되지만 제품 환경은 항상 `off`다. 아래의 E04
+  관리자 staging 합성 QA 예외도 이 제품 readiness를 바꾸지 않는다. provider 호출,
+  과금, Router 입력 변경, Message schema 변경은 아직 연결하지 않았다. 아래의 순수
+  Chat projection은 구현됐지만 제품 route/runtime caller가 없고 이 상태나
+  readiness를 바꾸지 않는다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - Chat 원문/실행 projection: `lib/promptRefinerChatHandoff.ts`
@@ -15,6 +16,31 @@
 
 이 단계의 목적은 모델을 먼저 붙이는 것이 아니라, 모델이 붙었을 때 사용자 원문과
 라우팅 입력이 조용히 같은 것으로 취급되지 않도록 경계를 고정하는 것이다.
+
+## E04 관리자 staging 합성 QA 예외
+
+E04 통합 검증에는 운영자가 승인한 좁은 관리자 전용 합성 QA 예외가 있다. 실제
+애플리케이션 session과 기존 administrator 판정, canonical `staging` 환경 판정을
+서버가 `/admin/chat-e2e` 페이지와 `/api/admin/chat-e2e-fixture` read endpoint에서
+각각 확인한 뒤에만 접근할 수 있다. 실제 staging에서는 정상 owner 또는 관리자
+로그인을 사용하며 local test JWT는 사용할 수 없다. 페이지는 닫힌 합성 transport를
+실제 `ChatPageClient`와 `ChatInput`보다 먼저 설치하며, Chat subtree에는 고정된
+합성 identity·conversation·content만 준다.
+
+read endpoint는 explicit same-origin인 GET의 `action` query 하나로 server-owned 고정
+결과 여섯 개만 고른다. encoded query는 512 bytes 이하이고 duplicate·추가 parameter,
+body, 다른 method를 거부하며 prompt·message·비교값·dispatch 권한을 받지 않는다.
+합성 결과는 상태를 쓰지 않고 LLM·provider를 부르지 않으며 비용과 되돌릴 수 없는
+행위가 없다. 따라서 기존 관리자 인증은 매 요청에 유지하되 별도 step-up과 fixture
+전용 rate limit을 두지 않는다. 이 전제 중 하나라도 바뀌면 예외는 더 이상 적용되지
+않는다.
+
+이 예외는 공개 `/chat`, 공개 proposal route, 기존 loopback `isE2EFixtureMode()`와
+auth/database bypass guard, rollout AppSetting, kill switch, product adapter readiness,
+provider·billing guard를 변경하거나 완화하지 않는다. 관리자 QA 페이지 안의
+`e2e_fixture` mode는 transport가 닫힌 뒤의 합성 관측에만 쓰이며 staging 제품
+adapter가 준비됐다는 뜻이 아니다. 전체 allowlist, 종료 규칙, 무과금 표식과 증거
+한계는 [`chat-e04-staging-fixture.md`](./chat-e04-staging-fixture.md)가 정한다.
 
 ## 1. 제안이지 자동 전송이 아니다
 
@@ -93,6 +119,8 @@ Message/Router 연결을 의미하지 않는다. fixture에서 채택은 **읽�
 남긴다. 합성 제안문을 controlled composer, `useConversationDrafts`, 제품 draft PUT에
 절대 쓰지 않으며 저작 원문은 그대로 유지한다. 미리보기 동안 새 제안 요청은
 거부하고, 원문을 편집하면 미리보기와 resolution을 폐기해 새 요청을 허용한다.
+실패 상태에서 `닫기`, 미리보기에서 `원문 유지`를 누르면 fixture 상태만 닫고 같은 원문으로
+새 요청을 할 수 있다. 이 동작도 controlled composer와 durable draft를 쓰지 않는다.
 
 제어 상태는 caller가 소유한다. `onPromptRefinerDecision`을 받은 caller는 채택과
 원문 유지 **모두**에서 `ready`를 즉시 벗어난다. fixture 채택은

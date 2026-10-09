@@ -65,6 +65,7 @@ import {
   type MarketingGraduationSnapshot,
   type MarketingHistoryEntry,
   type MarketingLocale,
+  type MarketingRemovalEvidence,
   type MarketingPausableMode,
   type MarketingPauseReasonCode,
   type MarketingPostKind,
@@ -76,12 +77,17 @@ import {
   type MarketingVerificationMethod,
   MARKETING_CHANNEL_CAPS,
   MARKETING_PAUSE_REASON_CODES,
+  MARKETING_REMOVAL_EVIDENCE,
+  MARKETING_VERIFICATION_METHODS,
   MARKETING_NO_AUTONOMY_CHANNELS,
   MARKETING_RESUME_REASON_CODES,
 } from "@/lib/marketingAutomationSchema";
 import {
   MARKETING_AUDIT_PROBLEMS,
+  MARKETING_POST_AUDIT_TARGET_TYPE,
+  MARKETING_REPORT_AUDIT_TARGET_TYPE,
   verifyMarketingAuditEvidence,
+  verifyMarketingSystemAuditEvidence,
 } from "@/lib/marketingAuditEvidence";
 import {
   marketingFactsDigest,
@@ -369,6 +375,65 @@ export const MARKETING_S2C_ACTIONS = Object.freeze({
 } as const);
 
 /**
+ * S2d2's actions, spelled as the plan's inventory spells them.
+ *
+ * Copied from rows 212-219 rather than composed, because an action name is the
+ * audit record's only handle on what happened and a near-miss is a record
+ * nobody can query for.
+ */
+export const MARKETING_S2D2_ACTIONS = Object.freeze({
+  dispatchStarted: "marketing_post.dispatch_started",
+  published: "marketing_post.published",
+  failed: "marketing_post.failed",
+  outcomeUnknown: "marketing_post.outcome_unknown",
+  accountOutcomeUnknownPaused: "marketing_account.outcome_unknown_paused",
+  pollPublished: "marketing_post.poll_published",
+  pollVerified: "marketing_post.poll_verified",
+  pollRemovedByPlatform: "marketing_post.poll_removed_by_platform",
+} as const);
+
+/**
+ * S2e's audit actions, exactly as the plan's inventory names them.
+ *
+ * Two are a person's (`shadow_changed`, `fault_arm_set`), written through the
+ * admin mutation runner; two are the receiver's, as system actor
+ * `marketing-webhook`. All four are staging-only: production and an unknown
+ * environment refuse each of them before anything is written.
+ */
+export const MARKETING_S2E_ACTIONS = Object.freeze({
+  shadowChanged: "marketing_webhook.shadow_changed",
+  faultArmSet: "marketing_webhook.fault_arm_set",
+  shadowRecorded: "marketing_webhook.shadow_recorded",
+  faultArmConsumed: "marketing_webhook.fault_arm_consumed",
+} as const);
+
+/**
+ * Why a dispatch did not start.
+ *
+ * Every one of these means the post stays exactly as it was and **no vendor
+ * call was made**. That is the point of the list: the caller has to be able to
+ * tell "nothing left this process" from "something left and we do not know what
+ * happened", and the second of those is not a refusal, it is
+ * `outcome_unknown`.
+ */
+export type MarketingDispatchRefusal =
+  | "channel_not_publishing"
+  | "not_admitted"
+  | "post_not_found"
+  | "post_not_scheduled"
+  | "claim_not_held"
+  | "claim_expired"
+  | "dispatch_conflict"
+  | "deadline_too_close"
+  /** An approval-mode post whose approval has expired or no longer covers its envelope. */
+  | "approval_not_current"
+  /**
+   * An autonomous post whose admission was decided under a different build,
+   * configuration generation or deployment than the one running now.
+   */
+  | "provenance_changed";
+
+/**
  * How long a claim is good for before a sweep may take it back.
  *
  * A lease, not a lock: the process holding it can die, and something has to be
@@ -589,6 +654,21 @@ export const MARKETING_REFUSAL_STATUS: Readonly<Record<string, number>> =
   claim_release_reason_unknown: 500,
   claim_release_lease_unreadable: 500,
   transaction_not_serializable: 500,
+  // S2d2's, for the same reason: the publisher is the only caller, and each of
+  // these is the publisher describing itself wrongly -- an empty token or key,
+  // an unreadable deadline, a URL that is not HTTPS, an evidence or method code
+  // off its closed list. Nothing a person could change in a request fixes them.
+  dispatch_token_empty: 500,
+  dispatch_lease_unreadable: 500,
+  dispatch_deadline_unreadable: 500,
+  dispatch_call_budget_not_positive: 500,
+  outcome_request_key_empty: 500,
+  outcome_error_code_empty: 500,
+  published_external_id_empty: 500,
+  published_url_unreadable: 500,
+  published_url_not_https: 500,
+  verification_method_unknown: 500,
+  removal_evidence_unknown: 500,
   autonomous_insert_binding_expired: 409,
   autonomous_insert_binding_not_sealed: 409,
   autonomous_insert_template_gone: 409,
@@ -886,6 +966,8 @@ type LockedMarketingChannel = {
   id: string;
   channel: MarketingChannelName;
   status: MarketingChannelStatus;
+  /** The account to post from, as the platform knows it. Read under the lock. */
+  externalAccountRef: string | null;
   connectionGeneration: number;
   scopesDigest: string;
   policyVersion: number;
@@ -910,7 +992,7 @@ async function lockMarketingChannel(
       "id", "channel", "status", "connectionGeneration", "scopesDigest",
       "policyVersion", "graduationEpoch", "graduatedAt", "graduationSnapshot",
       "pausedAt", "pausedFromMode", "pauseReasonCode", "lastResumeAuditLogId",
-      "dailyCapOverride", "weeklyCapOverride"
+      "dailyCapOverride", "weeklyCapOverride", "externalAccountRef"
     FROM "MarketingChannel"
     WHERE "id" = ${id}
     FOR UPDATE
@@ -2752,6 +2834,155 @@ async function lockDueMarketingPost(
 }
 
 /**
+ * The accounts a publisher run may try, in a stable order.
+ *
+ * A read, not a lock: each channel is locked again, `FOR UPDATE`, inside the
+ * claim that acts on it, and everything decided here is decided again there.
+ * What this list settles is only which channels are worth asking about -- one in
+ * a publishing mode and with an account the platform knows. A channel without
+ * `externalAccountRef` has no account to post from, and asking it for a claim
+ * would spend a slot the adapter cannot fill.
+ */
+export async function listPublishingMarketingChannels(
+  database: MarketingTransaction,
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly connectionGeneration: number;
+    readonly externalAccountRef: string;
+  }>
+> {
+  const rows = await database.marketingChannel.findMany({
+    where: {
+      status: { in: ["autonomous_mode", "approval_mode"] },
+      externalAccountRef: { not: null },
+    },
+    select: { id: true, connectionGeneration: true, externalAccountRef: true },
+    orderBy: { id: "asc" },
+  });
+  return rows.flatMap((row) =>
+    typeof row.externalAccountRef === "string" && row.externalAccountRef.trim() !== ""
+      ? [
+          {
+            id: row.id,
+            connectionGeneration: Number(row.connectionGeneration),
+            externalAccountRef: row.externalAccountRef,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * Dispatched posts whose worker is gone: `publishing`, with the lease expired.
+ *
+ * A dispatch commits `publishing` before the call, and only the worker that
+ * made the call writes its outcome. If that worker died in between, nothing
+ * else ever would: the claim path reads `scheduled` posts and polling reads
+ * `published` ones. The plan's rule for this row is the one for a lease that
+ * expires after the call began -- it follows the same rules as any started call
+ * without proof, which is `outcome_unknown` and, for an autonomous account, a
+ * pause. Never a lookup (there is none, amendment 4) and never a re-send.
+ *
+ * The lease is fifteen minutes and a run is bounded well inside that, so a
+ * `publishing` row past its lease has no live worker answering for it.
+ *
+ * `before` is the database's clock, read by the caller; the outcome writer
+ * locks the row and checks `status = 'publishing'` and the request key again.
+ */
+export async function listMarketingPostsPublishingPastLease(
+  database: MarketingTransaction,
+  input: { readonly before: Date; readonly limit: number },
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly requestKey: string;
+    readonly historyVersion: number;
+  }>
+> {
+  const before = new Date(input.before.getTime());
+  if (!Number.isFinite(before.getTime())) return [];
+  const take = Math.max(0, Math.min(Math.floor(Number(input.limit) || 0), 50));
+  if (take === 0) return [];
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: "publishing",
+      leaseUntil: { lt: before },
+      providerRequestKey: { not: null },
+    },
+    select: { id: true, providerRequestKey: true, historyVersion: true },
+    orderBy: [{ leaseUntil: "asc" }, { id: "asc" }],
+    take,
+  });
+  return rows.flatMap((row) =>
+    row.providerRequestKey
+      ? [
+          {
+            id: row.id,
+            requestKey: row.providerRequestKey,
+            historyVersion: Number(row.historyVersion),
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * Published posts a status query may confirm, oldest first.
+ *
+ * A read for the same reason as the channel list: `recordMarketingPostPollVerified`
+ * locks the row and checks its status and version again before it writes. The
+ * stored `externalUrl` comes back so the caller can require the live object to
+ * be the one that was published -- the plan's "matches expected published
+ * object" -- rather than any object under that id.
+ */
+export async function listMarketingPostsAwaitingVerification(
+  database: MarketingTransaction,
+  limit: number,
+): Promise<
+  ReadonlyArray<{
+    readonly id: string;
+    readonly historyVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+    readonly externalAccountRef: string;
+  }>
+> {
+  const take = Math.max(0, Math.min(Math.floor(Number(limit) || 0), 50));
+  if (take === 0) return [];
+  const rows = await database.marketingPost.findMany({
+    where: {
+      status: "published",
+      externalPostId: { not: null },
+      externalUrl: { not: null },
+      channel: { externalAccountRef: { not: null } },
+    },
+    select: {
+      id: true,
+      historyVersion: true,
+      externalPostId: true,
+      externalUrl: true,
+      channel: { select: { externalAccountRef: true } },
+    },
+    orderBy: [{ publishedAt: "asc" }, { id: "asc" }],
+    take,
+  });
+  return rows.flatMap((row) =>
+    row.externalPostId && row.externalUrl && row.channel.externalAccountRef
+      ? [
+          {
+            id: row.id,
+            historyVersion: Number(row.historyVersion),
+            externalPostId: row.externalPostId,
+            externalUrl: row.externalUrl,
+            externalAccountRef: row.channel.externalAccountRef,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
  * Take the next due post's slot for this worker.
  *
  * **A claim is not a dispatch.** The row stays `scheduled`, its history and
@@ -2782,7 +3013,18 @@ export async function claimDueMarketingPost(
     readonly leaseMs?: number;
   },
 ): Promise<
-  | { readonly claimed: true; readonly id: string; readonly leaseUntil: Date }
+  | {
+      readonly claimed: true;
+      readonly id: string;
+      readonly leaseUntil: Date;
+      /**
+       * The version the claim was made against, which a claim does not move.
+       * The dispatch CASes on it, so the caller has to be told it -- reading it
+       * again in another transaction would be reading it after anything that
+       * had happened in between.
+       */
+      readonly historyVersion: number;
+    }
   | { readonly claimed: false; readonly reason: MarketingClaimRefusal }
 > {
   const channelId = String(rawInput.channelId);
@@ -2989,7 +3231,12 @@ export async function claimDueMarketingPost(
     },
   });
 
-  return { claimed: true, id: due.id, leaseUntil };
+  return {
+    claimed: true,
+    id: due.id,
+    leaseUntil,
+    historyVersion: Number(due.historyVersion),
+  };
 }
 
 /**
@@ -4085,6 +4332,88 @@ export async function insertMarketingReport(
   });
 }
 
+/**
+ * One staging shadow report of a signed webhook event, with its audit entry.
+ *
+ * The report and the system audit commit together or not at all. A second
+ * delivery of the same event fails the insert on
+ * `MarketingReport_webhook_shadow_event_key` and the transaction rolls back --
+ * so a duplicate leaves no report and no audit entry. The caller recognises
+ * that unique violation and answers the delivery as already recorded; nothing
+ * here asks first, because asking first is a race the index does not have.
+ *
+ * Shadow means shadow: no post is read for update and none is changed.
+ */
+export async function recordMarketingWebhookShadow(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly eventIdDigest: string;
+    readonly eventType: string;
+    readonly channelId: string;
+    readonly derivedStatus: string;
+    readonly statusQueryMatch: boolean;
+  },
+): Promise<{ readonly reportId: string }> {
+  const input = {
+    eventIdDigest: String(rawInput.eventIdDigest),
+    eventType: String(rawInput.eventType),
+    channelId: String(rawInput.channelId),
+    derivedStatus: String(rawInput.derivedStatus),
+    statusQueryMatch: rawInput.statusQueryMatch === true,
+  };
+  // The audit chain first, as every writer here takes it.
+  await takeAuditChainLock(database);
+  const now = await marketingDatabaseNow(database);
+  const report = await insertMarketingReport(database, {
+    kind: "webhook_shadow",
+    periodStart: now,
+    periodEnd: now,
+    // Parsed against the strict `webhook_shadow` schema inside: a digest that
+    // is not lowercase SHA-256 or a status off the closed list is refused here.
+    payload: input,
+    sourceVersion: "marketing-webhook-shadow-v1",
+  });
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-webhook",
+    action: MARKETING_S2E_ACTIONS.shadowRecorded,
+    targetType: MARKETING_REPORT_AUDIT_TARGET_TYPE,
+    targetId: report.id,
+    summary: "Recorded a signed webhook event in shadow, without applying it.",
+    metadata: {
+      eventIdDigest: input.eventIdDigest,
+      eventType: input.eventType,
+      channelId: input.channelId,
+      derivedStatus: input.derivedStatus,
+      statusQueryMatch: input.statusQueryMatch,
+    },
+  });
+  return { reportId: report.id };
+}
+
+/**
+ * Whether a shadow report of this event already exists.
+ *
+ * Asked after an insert failed, not before one: the index is what refuses a
+ * duplicate, and this only tells a caller whether the failure it caught was
+ * that refusal. Matching on the stored digest rather than on how Prisma
+ * describes an expression index in its error keeps the answer about the row,
+ * not about an error format nobody here controls.
+ */
+export async function marketingWebhookShadowExists(
+  database: MarketingDatabase,
+  eventIdDigest: string,
+): Promise<boolean> {
+  const found = await database.marketingReport.findFirst({
+    where: {
+      kind: "webhook_shadow",
+      payload: { path: ["eventIdDigest"], equals: String(eventIdDigest) },
+    },
+    select: { id: true },
+  });
+  return found !== null;
+}
+
 // ---------------------------------------------------------------------------
 // AI visibility runs
 // ---------------------------------------------------------------------------
@@ -4130,6 +4459,915 @@ export async function insertAiVisibilityRun(
       accuracyFlags: accuracyFlags === null ? Prisma.DbNull : asJson(accuracyFlags),
     },
   });
+}
+
+/**
+ * Mark a claimed post as being published, immediately before the vendor call.
+ *
+ * **This is the last thing that happens before something leaves this system,
+ * and the first thing that could make a post go out twice.** So it is written
+ * as a transition rather than as a flag: `scheduled -> publishing`, once, with
+ * `publishAttempt` incremented and `providerRequestKey` set to the post's
+ * `logicalKey`. The database's own
+ * `MarketingPost_dispatched_has_request_key_check` requires exactly that
+ * pairing for every status from `publishing` onwards, so a row that reached
+ * this state without a request key cannot exist.
+ *
+ * ## Why the audit entry is written here and not after the call
+ *
+ * The plan puts `marketing_post.dispatch_started` before the call, and the
+ * reason is the case where nothing comes back. A process that dies between the
+ * request leaving and the response arriving leaves no trace of its own; what
+ * says a call was attempted is this row and this audit entry, committed before
+ * the attempt. Without them the next run sees a `scheduled` post with a stale
+ * claim and no evidence that anything was sent -- and publishes it again.
+ *
+ * That is also why the request key is the post's `logicalKey` rather than
+ * anything this call invents: it is unique in the database, so the idempotency
+ * lookup that recovers an unknown outcome can ask the platform about the exact
+ * key that was sent, without needing anything the failed call returned.
+ *
+ * ## Everything is re-checked here, not carried
+ *
+ * The claim was taken in an earlier transaction, and the plan requires the
+ * *entire* publish resolver to run again immediately before the call, including
+ * the health-freshness rule -- not a subset, and not a cached answer. An account
+ * can be paused, a connection can be rotated and a channel's health can go
+ * stale between the claim and the dispatch, and each of those is a reason not to
+ * post. So this takes the channel lock, re-runs the resolver, and only then
+ * writes.
+ *
+ * The deadline is checked too. A dispatch that starts with less time left than
+ * the call might take is a dispatch whose outcome will be unknown by
+ * construction: the supervisor kills the worker at the deadline, and a request
+ * in flight when that happens is exactly the state `outcome_unknown` exists for.
+ * Refusing early costs a five-minute wait; not refusing costs a human deciding
+ * what happened.
+ */
+export async function startMarketingPostDispatch(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly claimToken: string;
+    readonly expectedLeaseUntil: Date;
+    readonly expectedHistoryVersion: number;
+    /** The run's deadline, so a call with no time left is not begun. */
+    readonly runDeadlineAt: Date;
+    /** How long the vendor call may take, at worst. */
+    readonly callBudgetMs: number;
+    /**
+     * The whole resolver, re-run here. Not a boolean carried from the claim.
+     *
+     * Given the post's own mode, because the question differs: an approved post
+     * needs the approval decision, an autonomous one the autonomy decision. It
+     * answers with the database clock it judged health against, which this
+     * function uses for the deadline -- read after the locks and the resolver,
+     * not before them -- and with the provenance an autonomous post is compared
+     * against.
+     */
+    readonly resolveAdmission: (
+      database: MarketingTransaction,
+      channel: MarketingAdmissionChannel,
+      postMode: MarketingPostMode,
+    ) => Promise<{
+      readonly publish: boolean;
+      readonly checkedAt?: Date;
+      readonly admissionCodeDigest?: string;
+      readonly configGeneration?: number;
+      readonly deploymentId?: string;
+    }>;
+  },
+): Promise<
+  | {
+      readonly started: true;
+      /** What to send, and what to ask about if nothing comes back. */
+      readonly requestKey: string;
+      readonly attempt: number;
+      /**
+       * When the approval this post goes out under expires; null for an
+       * autonomous post. The caller checks it once more, on the database clock,
+       * immediately before the call -- this transaction's check is as of its
+       * own clock, and the call happens after it commits.
+       */
+      readonly approvalExpiresAt: Date | null;
+      /**
+       * The content to publish, read under the same row lock this transition
+       * took.
+       *
+       * Returned from here rather than read by the caller afterwards, because
+       * afterwards is a different transaction: an edit could land between the
+       * dispatch and the read, and the post sent would then not be the post that
+       * was dispatched. `renderedText` is sent byte for byte -- nothing is added
+       * at publish time, because anything added would be bytes the approval did
+       * not cover.
+       */
+      readonly payload: {
+        readonly channel: string;
+        readonly externalAccountRef: string | null;
+        readonly locale: string;
+        readonly renderedText: string;
+        readonly assetIds: readonly string[];
+        readonly finalUrl: string | null;
+      };
+    }
+  | { readonly started: false; readonly reason: MarketingDispatchRefusal }
+> {
+  const id = String(rawInput.id);
+  const claimToken = String(rawInput.claimToken);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const expectedLeaseUntil = new Date(rawInput.expectedLeaseUntil.getTime());
+  const runDeadlineAt = new Date(rawInput.runDeadlineAt.getTime());
+  const callBudgetMs = Number(rawInput.callBudgetMs);
+  if (!Number.isFinite(expectedLeaseUntil.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_lease_unreadable",
+      "A dispatch names the lease it holds, and that is not a time",
+    );
+  }
+  if (!Number.isFinite(runDeadlineAt.getTime())) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_deadline_unreadable",
+      "A dispatch is bounded by its run's deadline, and that is not a time",
+    );
+  }
+  if (!Number.isFinite(callBudgetMs) || callBudgetMs <= 0) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_call_budget_not_positive",
+      "A dispatch reserves time for the call it is about to make",
+    );
+  }
+  if (claimToken.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "dispatch_token_empty",
+      "A dispatch presents the claim it holds, and an empty token holds nothing",
+    );
+  }
+
+  // Same order as every other writer here: the audit chain first, then rows.
+  // This function's entry names the post it transitions, so it is written last,
+  // and taking the locks in the other order from the admin paths is how two of
+  // them deadlock.
+  await requireSerializableTransaction(database, "dispatch");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  // Refused early when there is plainly no time, so a run at its end does not
+  // take locks it cannot use. The check that counts is the one below, made
+  // after the locks and the resolver, because those take time too.
+  if (now.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
+    return { started: false, reason: "deadline_too_close" };
+  }
+
+  const rows = await database.$queryRaw<
+    Array<{
+      id: string;
+      channelId: string;
+      logicalKey: string;
+      status: string;
+      claimToken: string | null;
+      leaseUntil: Date | null;
+      historyVersion: number;
+      publishAttempt: number;
+      envelope: Prisma.JsonValue | null;
+      mode: string;
+      envelopeDigest: string;
+      approvedDigest: string | null;
+      approvedAt: Date | null;
+      approvalExpiresAt: Date | null;
+    }>
+  >(Prisma.sql`
+    SELECT
+      "id", "channelId", "logicalKey", "status", "envelope",
+      "claimToken", "leaseUntil", "historyVersion", "publishAttempt",
+      "mode", "envelopeDigest", "approvedDigest", "approvedAt", "approvalExpiresAt"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+      AND "deletedAt" IS NULL
+      AND "contentPurgedAt" IS NULL
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { started: false, reason: "post_not_found" };
+  if (post.status !== "scheduled") return { started: false, reason: "post_not_scheduled" };
+  if (post.claimToken !== claimToken) return { started: false, reason: "claim_not_held" };
+  if (
+    post.leaseUntil === null ||
+    post.leaseUntil.getTime() !== expectedLeaseUntil.getTime()
+  ) {
+    // A different lease under the same token: this worker paused, its lease ran
+    // out, and something renewed it. The renewal is somebody else's to dispatch.
+    return { started: false, reason: "claim_not_held" };
+  }
+  if (post.leaseUntil.getTime() <= now.getTime()) {
+    // Held, by us, and already expired. Not a conflict -- nobody else has it --
+    // but not a licence to publish either: the lease is what says this worker is
+    // still the one entitled to, and it is not. Checked again below, at the
+    // clock read after everything else here has taken its time.
+    return { started: false, reason: "claim_expired" };
+  }
+
+  // **Parsed before anything is written.** The envelope was digested and approved
+  // as a whole, so it is read with the same schema rather than picked apart field
+  // by field, and a row whose envelope no longer parses is not one this function
+  // can say it is sending. Parsing it here rather than just before returning
+  // means a malformed row is refused without moving the post or writing an audit
+  // entry -- not undone afterwards by the transaction rolling back.
+  const envelope = marketingEnvelopeSchema.parse(post.envelope);
+
+  const channel = await lockMarketingChannel(database, post.channelId);
+  if (channel.status !== "autonomous_mode" && channel.status !== "approval_mode") {
+    return { started: false, reason: "channel_not_publishing" };
+  }
+  const mode = post.mode;
+  let autonomousProvenance: {
+    admissionCodeDigest?: unknown;
+    configGeneration?: unknown;
+    deploymentId?: unknown;
+  } | null = null;
+  if (mode !== "approval" && mode !== "autonomous") {
+    return { started: false, reason: "not_admitted" };
+  }
+  // A post scheduled without a person goes out only while its account is still
+  // autonomous. An account moved back to approval mode has said a person decides,
+  // and this post was never shown to one.
+  if (mode === "autonomous" && channel.status !== "autonomous_mode") {
+    return { started: false, reason: "not_admitted" };
+  }
+  // **An approval is for an envelope.** Checked here; when it expires is
+  // checked below, at the clock read after the resolver.
+  if (
+    mode === "approval" &&
+    (post.approvedAt === null ||
+      post.approvedDigest === null ||
+      post.approvedDigest !== post.envelopeDigest ||
+      post.approvalExpiresAt === null)
+  ) {
+    return { started: false, reason: "approval_not_current" };
+  }
+
+  if (mode === "autonomous") {
+    // **What the autonomous insert recorded is what this compares against** --
+    // read as evidence, not as values. The row must be a system row written by
+    // the Guard, about this post, with a hash that reproduces and a place in
+    // the chain; a row with the right numbers and none of that is not the
+    // insert's record. Read before the resolver, so the resolver's clock is
+    // the one taken after this work too.
+    const scheduled = await verifyMarketingSystemAuditEvidence(database, {
+      action: MARKETING_S2B2_ACTIONS.postAutonomousScheduled,
+      systemActor: "marketing-guard",
+      targetType: MARKETING_POST_AUDIT_TARGET_TYPE,
+      targetId: id,
+    });
+    if (!scheduled.ok) return { started: false, reason: "provenance_changed" };
+    autonomousProvenance = scheduled.metadata as {
+      admissionCodeDigest?: unknown;
+      configGeneration?: unknown;
+      deploymentId?: unknown;
+    } | null;
+  }
+
+  const admission = await rawInput.resolveAdmission(
+    database,
+    {
+      id: channel.id,
+      channel: channel.channel as MarketingChannelName,
+      status: channel.status as MarketingChannelStatus,
+      connectionGeneration: Number(channel.connectionGeneration),
+    },
+    mode,
+  );
+  if (!admission.publish) return { started: false, reason: "not_admitted" };
+
+  if (mode === "autonomous") {
+    // A post admitted by one build, one configuration or one deployment is not
+    // sent by another without being admitted again.
+    const recorded = autonomousProvenance;
+    const same =
+      recorded !== null &&
+      typeof recorded.admissionCodeDigest === "string" &&
+      recorded.admissionCodeDigest !== "" &&
+      recorded.admissionCodeDigest === admission.admissionCodeDigest &&
+      typeof recorded.configGeneration === "number" &&
+      recorded.configGeneration === admission.configGeneration &&
+      typeof recorded.deploymentId === "string" &&
+      // "We do not know which deployment this is" is not a match, on either side.
+      recorded.deploymentId !== "" &&
+      recorded.deploymentId === admission.deploymentId;
+    if (!same) return { started: false, reason: "provenance_changed" };
+  }
+
+  // **Time, judged after everything above has taken its time,** on the
+  // database clock the resolver read last. The later of the two readings, so a
+  // resolver cannot move these checks earlier than the one made at the start.
+  // The lease, the approval and the deadline are all as of this instant.
+  const checkedAt =
+    admission.checkedAt instanceof Date && admission.checkedAt.getTime() > now.getTime()
+      ? admission.checkedAt
+      : now;
+  if (post.leaseUntil.getTime() <= checkedAt.getTime()) {
+    return { started: false, reason: "claim_expired" };
+  }
+  if (
+    mode === "approval" &&
+    (post.approvalExpiresAt === null ||
+      post.approvalExpiresAt.getTime() <= checkedAt.getTime())
+  ) {
+    return { started: false, reason: "approval_not_current" };
+  }
+  if (checkedAt.getTime() + callBudgetMs > runDeadlineAt.getTime()) {
+    return { started: false, reason: "deadline_too_close" };
+  }
+
+  const attempt = Number(post.publishAttempt) + 1;
+  const started = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "scheduled",
+      claimToken,
+      leaseUntil: expectedLeaseUntil,
+      historyVersion: expectedHistoryVersion,
+      deletedAt: null,
+      contentPurgedAt: null,
+    },
+    data: {
+      status: "publishing",
+      // The post's own key, which is unique in the database and is therefore the
+      // idempotency key end to end. Not a value this call invents: the recovery
+      // lookup has to be able to ask about the exact key that was sent.
+      providerRequestKey: post.logicalKey,
+      publishAttempt: attempt,
+    },
+  });
+  if (started.count !== 1) {
+    // The row is held by FOR UPDATE, so this means the history version moved
+    // before the lock -- somebody edited between the claim and here.
+    return { started: false, reason: "dispatch_conflict" };
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.dispatchStarted,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "About to send a scheduled post to its platform.",
+    metadata: {
+      channelId: post.channelId,
+      claimToken,
+      attempt,
+      // Recorded because it is what a recovery asks the platform about. It is
+      // the post's own key: it identifies a post, not a person.
+      requestKey: post.logicalKey,
+      leaseUntil: expectedLeaseUntil.toISOString(),
+      runDeadlineAt: runDeadlineAt.toISOString(),
+      callBudgetMs,
+    },
+  });
+
+  return {
+    started: true,
+    requestKey: post.logicalKey,
+    attempt,
+    approvalExpiresAt: mode === "approval" ? post.approvalExpiresAt : null,
+    payload: {
+      channel: envelope.channel,
+      externalAccountRef: channel.externalAccountRef ?? null,
+      locale: envelope.locale,
+      renderedText: envelope.renderedText,
+      assetIds: envelope.assets.map((asset) => asset.assetId),
+      finalUrl: envelope.finalUrl,
+    },
+  };
+}
+
+/**
+ * What became of a dispatched post: the three answers, and only these three.
+ *
+ * `published` means the platform confirmed an object. `failed` means it
+ * confirmed there is none and said why. `outcome_unknown` means we do not know
+ * -- and that is a result, not an error to swallow. The policy says never blind
+ * retry, and this is the value that makes the caller stop.
+ *
+ * All three share a shape, so it is written once: lock the post, require the
+ * exact request key the dispatch sent and `status = 'publishing'`, append one
+ * strict `attempt` entry, and move `historyVersion` by one under a CAS. What
+ * differs is the status, the columns each answer owns, and the audit action.
+ *
+ * **The request key, not the claim token, is what binds these.** By the time an
+ * answer comes back the lease may have expired -- the plan says a lease that
+ * expires after the call began follows the same rules and is never called
+ * reconciliation -- so requiring a live claim here would leave the row
+ * `publishing` forever with the answer in hand. The key is what the platform was
+ * told, so the key is what identifies the attempt being resolved.
+ */
+type MarketingOutcome =
+  | {
+      readonly kind: "published";
+      readonly externalPostId: string;
+      /** HTTPS, on the platform's own host. */
+      readonly externalUrl: string;
+    }
+  | { readonly kind: "failed"; readonly errorCode: string }
+  | { readonly kind: "outcome_unknown"; readonly errorCode: string };
+
+type MarketingOutcomeRefusal =
+  | "post_not_found"
+  | "post_not_publishing"
+  | "request_key_mismatch"
+  | "outcome_conflict";
+
+const OUTCOME_STATUS = Object.freeze({
+  published: "published",
+  failed: "failed",
+  outcome_unknown: "outcome_unknown",
+} as const);
+
+const OUTCOME_ACTION = Object.freeze({
+  published: MARKETING_S2D2_ACTIONS.published,
+  failed: MARKETING_S2D2_ACTIONS.failed,
+  outcome_unknown: MARKETING_S2D2_ACTIONS.outcomeUnknown,
+} as const);
+
+async function recordMarketingPostOutcome(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly outcome: MarketingOutcome;
+    /**
+     * Which action this was, when it was not the dispatch's own answer.
+     *
+     * A poll that finds the object the dispatch never heard about records the
+     * same fact arriving late, so it must write the same fields -- and sharing
+     * this function is what makes "the same exact published fields" true by
+     * construction rather than by two lists agreeing on the day they were
+     * written. What differs is how we learned it, which is the action and the
+     * sentence.
+     */
+    readonly action?: string;
+    readonly summary?: string;
+  },
+): Promise<
+  | { readonly recorded: true; readonly paused: boolean }
+  | { readonly recorded: false; readonly reason: MarketingOutcomeRefusal }
+> {
+  const id = String(rawInput.id);
+  const requestKey = String(rawInput.requestKey);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const outcome = rawInput.outcome;
+  if (requestKey.length === 0) {
+    throw new MarketingStoreRefusedError(
+      "outcome_request_key_empty",
+      "An outcome names the request it answers, and an empty key names nothing",
+    );
+  }
+  if (outcome.kind === "published") {
+    // HTTPS on the platform's own host. A URL is what a person clicks to check
+    // the post exists, and one this system cannot vouch for is worse than none.
+    let parsed: URL;
+    try {
+      parsed = new URL(outcome.externalUrl);
+    } catch {
+      throw new MarketingStoreRefusedError(
+        "published_url_unreadable",
+        "A published post carries a URL, and that is not one",
+      );
+    }
+    if (parsed.protocol !== "https:") {
+      throw new MarketingStoreRefusedError(
+        "published_url_not_https",
+        "A published post's URL is HTTPS",
+      );
+    }
+    if (String(outcome.externalPostId).length === 0) {
+      throw new MarketingStoreRefusedError(
+        "published_external_id_empty",
+        "A published post has an id on the platform",
+      );
+    }
+  } else if (String(outcome.errorCode).length === 0) {
+    throw new MarketingStoreRefusedError(
+      "outcome_error_code_empty",
+      "A failure says why, from a closed code",
+    );
+  }
+
+  await requireSerializableTransaction(database, "outcome");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  const rows = await database.$queryRaw<
+    Array<{
+      id: string;
+      channelId: string;
+      status: string;
+      providerRequestKey: string | null;
+      publishAttempt: number;
+      history: Prisma.JsonValue;
+      historyVersion: number;
+    }>
+  >(Prisma.sql`
+    SELECT
+      "id", "channelId", "status", "providerRequestKey",
+      "publishAttempt", "history", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "publishing") {
+    return { recorded: false, reason: "post_not_publishing" };
+  }
+  if (post.providerRequestKey !== requestKey) {
+    return { recorded: false, reason: "request_key_mismatch" };
+  }
+
+  const attempt = Number(post.publishAttempt);
+  // Parsed before being written back, like every other history append here: a
+  // row whose history this module cannot read is a row it must not rewrite.
+  const history = marketingHistorySchema.parse(post.history);
+  const entry = {
+    at: now.toISOString(),
+    type: "attempt" as const,
+    attempt,
+    outcome: outcome.kind,
+    errorCode: outcome.kind === "published" ? null : outcome.errorCode,
+  };
+
+  // Prisma's own input type, not `Record<string, unknown>`. An untyped bag would
+  // let a misspelled column through the compiler, and the fake in the unit tests
+  // accepts whatever it is handed -- so the mistake would surface only against a
+  // real database, which is the failure shape this feature keeps producing.
+  const data: Prisma.MarketingPostUpdateManyMutationInput = {
+    status: OUTCOME_STATUS[outcome.kind],
+    history: asJson([...history, entry]),
+    historyVersion: expectedHistoryVersion + 1,
+  };
+  if (outcome.kind === "published") {
+    data.externalPostId = outcome.externalPostId;
+    data.externalUrl = outcome.externalUrl;
+    // The database's clock, once, like every other instant this module writes.
+    // A published time a caller chose is a published time a caller could choose
+    // to be before its own deadline.
+    data.publishedAt = now;
+    // The attempt has concluded, so the claim describes nothing. Left set, it
+    // would hide a published post behind a dead lease.
+    data.claimToken = null;
+    data.leaseUntil = null;
+  } else if (outcome.kind === "failed") {
+    data.errorCode = outcome.errorCode;
+    data.claimToken = null;
+    data.leaseUntil = null;
+  } else {
+    data.outcomeUnknownAt = now;
+    // **The claim is deliberately left alone.** An unknown outcome is the one
+    // state where something may exist on the platform that this system cannot
+    // see, and clearing the claim would let the next run treat the row as free.
+    // It is a person who resolves this, through
+    // `marketing_post.resolve_outcome_unknown`.
+    data.errorCode = outcome.errorCode;
+  }
+
+  const recorded = await database.marketingPost.updateMany({
+    where: {
+      id,
+      status: "publishing",
+      providerRequestKey: requestKey,
+      historyVersion: expectedHistoryVersion,
+    },
+    data,
+  });
+  if (recorded.count !== 1) {
+    return { recorded: false, reason: "outcome_conflict" };
+  }
+
+  // **An unknown outcome stops an autonomous account, in this transaction.**
+  //
+  // Not afterwards and not on a schedule: the whole hazard is that something may
+  // already be live that nothing here can see, and an account that keeps posting
+  // while that is true compounds it. The channel is locked, and the trigger is
+  // what permits `autonomous_mode -> paused` and writes `pausedFromMode` and
+  // `pausedAt` itself, so this sets only the status and the reason.
+  //
+  // An account in `approval_mode` is not paused: a person is already looking at
+  // every post there, which is the thing pausing would achieve.
+  let paused = false;
+  if (outcome.kind === "outcome_unknown") {
+    const channel = await lockMarketingChannel(database, post.channelId);
+    if (channel.status === "autonomous_mode") {
+      const stopped = await database.marketingChannel.updateMany({
+        where: { id: post.channelId, status: "autonomous_mode" },
+        data: { status: "paused", pauseReasonCode: "outcome_unknown" },
+      });
+      paused = stopped.count === 1;
+      if (paused) {
+        await writeSystemAuditLog({
+          tx: database,
+          systemActor: "marketing-publisher",
+          action: MARKETING_S2D2_ACTIONS.accountOutcomeUnknownPaused,
+          targetType: "MarketingChannel",
+          targetId: post.channelId,
+          summary:
+            "Stopped an autonomous account because a post's outcome is unknown.",
+          metadata: {
+            postId: id,
+            attempt,
+            reasonCode: "outcome_unknown",
+            pausedFromMode: channel.status,
+          },
+        });
+      }
+    }
+  }
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: rawInput.action ?? OUTCOME_ACTION[outcome.kind],
+    targetType: "MarketingPost",
+    targetId: id,
+    summary:
+      rawInput.summary ??
+      (outcome.kind === "published"
+        ? "The platform confirmed the post."
+        : outcome.kind === "failed"
+          ? "The platform confirmed the post was not made, and said why."
+          : "A request left and nothing proves what became of it."),
+    metadata: {
+      channelId: post.channelId,
+      attempt,
+      requestKey,
+      ...(outcome.kind === "published"
+        ? { externalPostId: outcome.externalPostId, externalUrl: outcome.externalUrl }
+        : { errorCode: outcome.errorCode }),
+      ...(outcome.kind === "outcome_unknown" ? { accountPaused: paused } : {}),
+    },
+  });
+
+  return { recorded: true, paused };
+}
+
+/** The platform confirmed an object. */
+export async function recordMarketingPostPublished(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: {
+      kind: "published",
+      externalPostId: input.externalPostId,
+      externalUrl: input.externalUrl,
+    },
+  });
+}
+
+/** The platform confirmed there is no object, and said why. */
+export async function recordMarketingPostFailed(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: { kind: "failed", errorCode: input.errorCode },
+  });
+}
+
+/**
+ * A request left and nothing proves what became of it.
+ *
+ * The caller reaches this only after the idempotency lookup has also failed to
+ * settle it -- `outcome_unknown` is not what a timeout means on its own, it is
+ * what a timeout plus an unanswerable "did this happen" means. Recording it
+ * stops an autonomous account in the same transaction.
+ */
+export async function recordMarketingPostOutcomeUnknown(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly errorCode: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: { kind: "outcome_unknown", errorCode: input.errorCode },
+  });
+}
+
+/**
+ * What a later lookup found, for a post this system has already dispatched.
+ *
+ * Three questions, and polling answers each one differently:
+ *
+ * - a `publishing` row whose object the platform *does* have: the dispatch's
+ *   answer never arrived, and the lookup is that answer. Recorded with exactly
+ *   the fields and the attempt entry a direct success writes, because it is the
+ *   same fact arriving late. Its own audit action, because how we learned it is
+ *   part of the record.
+ * - a `published` row whose object is live and matches: verified.
+ * - a `published` or `verified` row whose object the platform has taken down:
+ *   removed by the platform, which is not a failure of ours and not a deletion.
+ *
+ * **Polling never resolves an `outcome_unknown`.** That is the plan's sentence
+ * and it is load-bearing: an unknown outcome means something may exist that this
+ * system cannot see, and a lookup that fails to find it has not established that
+ * it does not exist. Only a person moves a row out of `outcome_unknown`, through
+ * the S2b1 action that exists for it.
+ */
+export async function recordMarketingPostPolledPublished(
+  database: MarketingTransaction,
+  input: {
+    readonly id: string;
+    readonly requestKey: string;
+    readonly expectedHistoryVersion: number;
+    readonly externalPostId: string;
+    readonly externalUrl: string;
+  },
+) {
+  return recordMarketingPostOutcome(database, {
+    id: input.id,
+    requestKey: input.requestKey,
+    expectedHistoryVersion: input.expectedHistoryVersion,
+    outcome: {
+      kind: "published",
+      externalPostId: input.externalPostId,
+      externalUrl: input.externalUrl,
+    },
+    // The same write, a different account of how it was learned. Sharing the
+    // writer is what makes "the same exact published fields" true by
+    // construction rather than by two lists agreeing today.
+    action: MARKETING_S2D2_ACTIONS.pollPublished,
+    summary: "A lookup found the post the platform never confirmed to us.",
+  });
+}
+
+/** Why a poll changed nothing. Closed, because each one means something else. */
+export type MarketingPollRefusal =
+  | "post_not_found"
+  | "post_not_published"
+  | "post_not_live"
+  | "poll_conflict";
+
+/**
+ * The platform's live object matches what we published.
+ *
+ * `published -> verified`, and **history does not move**: verification is not an
+ * attempt, and appending to history here would make the array say a fourth thing
+ * happened to the post when nothing was sent.
+ */
+export async function recordMarketingPostPollVerified(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly expectedHistoryVersion: number;
+    readonly verificationMethod: MarketingVerificationMethod;
+  },
+): Promise<
+  | { readonly recorded: true }
+  | { readonly recorded: false; readonly reason: MarketingPollRefusal }
+> {
+  const id = String(rawInput.id);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const verificationMethod = rawInput.verificationMethod;
+  if (!(MARKETING_VERIFICATION_METHODS as readonly string[]).includes(verificationMethod)) {
+    throw new MarketingStoreRefusedError(
+      "verification_method_unknown",
+      "A verification says how it was made, from a closed list",
+    );
+  }
+
+  await requireSerializableTransaction(database, "poll");
+  await takeAuditChainLock(database);
+
+  const now = await marketingDatabaseNow(database);
+  const rows = await database.$queryRaw<
+    Array<{ id: string; channelId: string; status: string; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT "id", "channelId", "status", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "published") {
+    return { recorded: false, reason: "post_not_published" };
+  }
+
+  const recorded = await database.marketingPost.updateMany({
+    where: { id, status: "published", historyVersion: expectedHistoryVersion },
+    data: {
+      status: "verified",
+      // The database's clock, as every instant this module writes is.
+      verifiedPublicAt: now,
+      verificationMethod,
+    },
+  });
+  if (recorded.count !== 1) return { recorded: false, reason: "poll_conflict" };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.pollVerified,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "A lookup confirmed the published post is live and matches.",
+    metadata: { channelId: post.channelId, verificationMethod },
+  });
+
+  return { recorded: true };
+}
+
+/**
+ * The platform has taken the object down.
+ *
+ * `published` or `verified` -> `removed_by_platform`, history unchanged. The
+ * evidence goes in the **audit entry**, not the row: the row records the state,
+ * and why we believe it is a fact about one observation rather than a property of
+ * the post.
+ *
+ * This is not `deleted`. A deletion is something this system did, with a
+ * `deletedAt` and a `deletionMethod`; a removal is something the platform did,
+ * and conflating them would let a retention sweep treat a platform takedown as
+ * evidence that we had already retracted the post.
+ */
+export async function recordMarketingPostPollRemovedByPlatform(
+  database: MarketingTransaction,
+  rawInput: {
+    readonly id: string;
+    readonly expectedHistoryVersion: number;
+    readonly evidence: MarketingRemovalEvidence;
+  },
+): Promise<
+  | { readonly recorded: true; readonly from: "published" | "verified" }
+  | { readonly recorded: false; readonly reason: MarketingPollRefusal }
+> {
+  const id = String(rawInput.id);
+  const expectedHistoryVersion = Number(rawInput.expectedHistoryVersion);
+  const evidence = rawInput.evidence;
+  if (!(MARKETING_REMOVAL_EVIDENCE as readonly string[]).includes(evidence)) {
+    throw new MarketingStoreRefusedError(
+      "removal_evidence_unknown",
+      "A platform removal says what was observed, from a closed list",
+    );
+  }
+
+  await requireSerializableTransaction(database, "poll");
+  await takeAuditChainLock(database);
+
+  const rows = await database.$queryRaw<
+    Array<{ id: string; channelId: string; status: string; historyVersion: number }>
+  >(Prisma.sql`
+    SELECT "id", "channelId", "status", "historyVersion"
+    FROM "MarketingPost"
+    WHERE "id" = ${id}
+    FOR UPDATE
+  `);
+  const post = rows[0];
+  if (!post) return { recorded: false, reason: "post_not_found" };
+  if (post.status !== "published" && post.status !== "verified") {
+    return { recorded: false, reason: "post_not_live" };
+  }
+  const from = post.status;
+
+  const recorded = await database.marketingPost.updateMany({
+    where: { id, status: from, historyVersion: expectedHistoryVersion },
+    data: { status: "removed_by_platform" },
+  });
+  if (recorded.count !== 1) return { recorded: false, reason: "poll_conflict" };
+
+  await writeSystemAuditLog({
+    tx: database,
+    systemActor: "marketing-publisher",
+    action: MARKETING_S2D2_ACTIONS.pollRemovedByPlatform,
+    targetType: "MarketingPost",
+    targetId: id,
+    summary: "A lookup found the platform had taken the post down.",
+    metadata: { channelId: post.channelId, evidence, fromStatus: from },
+  });
+
+  return { recorded: true, from };
 }
 
 /** Unused by this module, exported so a caller can narrow a paused mode. */

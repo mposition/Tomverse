@@ -1,0 +1,29 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v3",
+  "requirement": "Formal final supersession of the preserved v1 and v2 on_hold exchanges. Keep the dark, content-free N80 PostgreSQL reservation slice under the owner-approved CHAT-01 one-shot v2 policy. The latest v2 findings concern arbitrary run-audit reuse and time-dependent synthetic fixtures. No real stage, holdout content, provider call, flag, or product traffic is introduced. Claude Code Max first-party subscription CLI independently reviews source and test evidence; Anthropic API is not used.",
+  "completionCriteria": [
+    "The schema and migration admit one exact stage and exactly 80 fixed-price slots for the entire one-shot slice, with immutable source/root/deployment/price pins, separate stage/run approval, reserved-only slot insertion, database-owned timestamps, and irreversible consumption without changing the v1 100-slot authority.",
+    "Stage and run audit witnesses are read under key-share locks and bound to distinct exact actions, the approved actor, stage target, full source/root/deployment/price metadata, valid entry hash, and a one-minute freshness window; neither arbitrary nor stale audit rows can authorize a transition.",
+    "The integration test creates fresh synthetic audit witnesses adjacent to their use and covers stale, unrelated-action, and wrong-root audits without reading or writing actual holdout content; the v1 reservation/admission suites and new vNext suite pass on a disposable PostgreSQL 17 test database.",
+    "The dark-table guard rejects runtime reads and writes to the two new Prisma delegates until a separately reviewed owner admission path exists. Prisma validation, typecheck, lint, enum/protected-writer/dark-table guards, and whitespace checks pass. Previous on_hold records remain unchanged, the reviewer has zero findings, and the bounded controller passes."
+  ],
+  "baseCommit": "da75d6184d7d7d91fcd3029122e31e7e250935d2",
+  "writableScope": [
+    "prisma/schema.prisma",
+    "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    "scripts/run-db-integration-tests.mjs",
+    "scripts/db-integration-groups.mjs",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/check-protected-table-writers-core.mjs",
+    "scripts/check-dark-tables.mjs",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v2.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v3.task.json"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v2",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-durable-slots-v2/exchange.json"
+  }
+}

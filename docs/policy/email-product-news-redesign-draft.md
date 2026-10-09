@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v26)
+# 제품 소식 이메일: 권한과 기계 (초안 v27)
 
 > **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
 > [이메일 알림](email-notifications.md) v15).
@@ -15,6 +15,16 @@
 
 ## 0. 개정 이력
 
+### v27 (2026-10-01) — 가입 opt-in은 세 항목
+
+**소유자 결정(2026-10-01)**: 가입 화면의 opt-in은 문안이 말하는 세 항목(제품 소식·
+뉴스레터·프로모션) 모두에 대한 동의입니다. 지금까지는 `product_updates` 하나만 켰고,
+그 이유(항목마다 확인 메일 한 통)는 v26으로 사라졌습니다. 한 번의 동의에 대한 한국 처리
+결과 알림은 한 통입니다. 근거와 적용은 [double opt-in](email-double-opt-in.md) §14.8.
+
+- §5.2 증명된 세션은 세 항목을 **즉시 `granted`**, 아니면 세 항목 각각 확인 메일.
+- §5.4 "네"의 범위는 그대로이고, 처리 결과 알림이 세 통에서 한 통으로 줄어듭니다.
+
 ### v26 (2026-09-30) — 증명된 주소의 동의는 확인 메일 없이
 
 **소유자 결정(2026-09-30)**: 동의를 체크하는 세션이 그 주소의 소유를 이미 증명했다면
@@ -27,7 +37,8 @@
 - §5.4 "네, 받겠습니다는 세 항목 각각의 확인 메일을 요청" → 증명된 세션이면 세 항목
   **즉시 동의**, 아니면 확인 메일.
 
-Microsoft만으로 로그인한 세션은 증명이 아니므로 확인 메일이 남습니다(§14.1).
+Microsoft만으로 로그인한 세션은 증명이 아니므로 확인 메일이 남습니다(§14.1) — **2026-10-01
+개정: Microsoft 로그인도 증명입니다([double opt-in](email-double-opt-in.md) §14.7).**
 
 ### v25 (2026-09-30) — 로그인과 가입을 나눕니다(§5.2a)
 
@@ -581,10 +592,11 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
   - 착지에서 가입 선택을 처리했으면 그 세션의 IP 추정 기록(기존 계정용)은 건너뜁니다
     — 방금 기록한 가입 시점의 추정을 곧바로 덮지 않기 위해서입니다.
   - 체크한 opt-in은 **그 자리의 동의, 확인 메일, 또는 아무것도 아닌 것**으로 끝납니다(v26).
-    계정을 만든 로그인이 주소를 증명했으면(이메일 코드·링크, 또는 `email_verified`인
-    Google) 소비 트랜잭션에서 `product_updates`를 **즉시 `granted`** 로 기록합니다
-    ([double opt-in](email-double-opt-in.md) §14). 그렇지 않으면(Microsoft 가입 등)
-    확인 메일입니다. 둘 다 불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
+    계정을 만든 로그인이 주소를 증명했으면(이메일 코드·링크, `email_verified`인
+    Google, 또는 Microsoft) 소비 트랜잭션에서 문안이 말하는 세 항목(`product_updates`·
+    `newsletter`·`promotions`)을 **즉시 `granted`** 로 기록하고 처리 결과 알림은 한 통입니다
+    (v27, [double opt-in](email-double-opt-in.md) §14.8). 그렇지 않으면(증명 없는 세션)
+    세 항목 각각 확인 메일입니다. 둘 다 불가하면 소비 전체를 롤백하고 attempt는 pending으로 남으며(`confirmation_unavailable`,
     503), 그 착지가 몇 번 다시 시도합니다. 그래서 화면은 **수집 게이트·확인 게이트와
     키·신뢰할 수 있는 국가**가 모두 있을 때만 장치를 보여 주고, 하나라도 없으면 장치
     없이 예전처럼 로그인합니다.
@@ -752,7 +764,7 @@ DOI 확인 화면은 동의한 사람의 **주소 확인**만 담당합니다. �
 문안이 말하는 세 항목(제품 소식·뉴스레터·프로모션)에 대한 동의**이고, 이메일 설정
 화면으로 보냅니다. 세션이 주소를 증명했으면 세 항목을 한 트랜잭션에서 **즉시
 `granted`** 로 기록하고, 하나라도 거절되면 전부 롤백합니다(v26,
-[double opt-in](email-double-opt-in.md) §14). 증명이 없으면 항목별 확인 메일 세 통을
+[double opt-in](email-double-opt-in.md) §14). 처리 결과 알림은 세 항목에 한 통입니다(v27, §14.8). 증명이 없으면 항목별 확인 메일 세 통을
 요청하며, 그 갈래에서는 각 링크를 누르기 전에는 동의가 아닙니다. 그래서 안내는 **계정이 해석되는 국가로 마케팅을 보낼 수 있을 때만**
 뜹니다. 거부가 기록되지 못하면 창은 닫히지 않고 실패를 알립니다(닫기로 바뀌지 않게).
 관할권과 후보는 서버가 해석하며 클라이언트가 보내지 않습니다. 수집 게이트·확인
@@ -1722,15 +1734,21 @@ EEA·영국을 여는 선행 게이트입니다.
   함수를 묻고, 저장된 flag가 켜져 있어도 개정이 게시되기 전에는 `false`입니다.
 - **게시 여부는 "개정을 담은 승인된 버전인가"입니다.** 문서마다 개정을 담았다고
   승인된 버전의 digest 목록(`APPROVED_AMENDED_DIGESTS`)을 두고, 현재 렌더되는
-  digest(`/privacy`는 `lib/sitemapContentDates.ts`, `tests/sitemapLastModified.test.mjs`가
-  실제 페이지와 대조)가 그 목록에 있어야 인정합니다. 처음에는 "개정 전 digest에서
+  digest가 그 목록에 있어야 인정합니다. 현재 digest와 표시 날짜는 `AMENDED_DOCUMENT_EVIDENCE`
+  (`lib/emailPolicyPublication.ts`)에 두고, `tests/support/amendedDocumentVerifiers.mjs`의
+  검증기가 실제 페이지에서 다시 계산해 대조합니다. `/privacy`는 2026-09-28 판까지
+  `lib/sitemapContentDates.ts`에 있었지만, S10 개정을 시행일(2026-11-16)보다 먼저 게시하면서
+  옮겼습니다 — 미래의 시행일은 sitemap `lastmod`가 될 수 없습니다. 처음에는 "개정 전 digest에서
   바뀌었는가"로 판정했는데, 2026-09-28에 `/privacy`가 release notes와 **무관한 이유로**
   바뀌었고 그 설계는 그것을 개정 게시로 셌을 것입니다. 개정 뒤의 모든 편집은 그
   버전이 여전히 개정을 담는다고 승인해 목록에 넣기 전까지 게이트를 닫습니다.
-- **`/terms`는 지금 판정할 수 없습니다.** 그 페이지의 "Last updated" 줄은 본문이 세
-  번 바뀌는 동안 움직이지 않았고(`lib/sitemapContentDates.ts`), 이 저장소에는
-  `/terms`의 내용이나 시점을 보증하는 것이 없습니다. 게이트는 이를 통과가 아니라
-  `document_state_unrecorded`로 보고합니다.
+- **`/terms`는 sitemap이 아니라 게이트가 보증합니다.** 개정 전에는 그 페이지의 "Last
+  updated" 줄이 본문이 세 번 바뀌는 동안 움직이지 않았고, 게시 뒤로는 그 줄이 미래의
+  시행일(2026-11-16)이므로, 어느 쪽이든 sitemap `lastmod`가 될 수 없습니다
+  (`lib/sitemapContentDates.ts`). 그래서 현재 digest와 표시 날짜를
+  `AMENDED_DOCUMENT_EVIDENCE`에 두고 검증기가 다시 계산합니다. 개정이 게시되기 전에는
+  승인된 버전이 없어 `document_state_unrecorded`였고, 2026-10-03 게시 뒤로는 시행일
+  전까지 `effective_date_not_reached`입니다.
 - **문서는 `/privacy`와 `/terms` 둘입니다**(`AMENDED_DOCUMENTS`). 동의 문안과
   로그인 화면의 동의 문장은 개정 대상이 아닙니다 — 2026-09-29 결정 B가 동의 장치의
   약속("요청하지 않으면 보내지 않는다")을 유지했으므로, 그 약속을 지우도록 요구하던
@@ -1783,14 +1801,35 @@ EEA·영국을 여는 선행 게이트입니다.
 (`tests/support/amendedDocumentVerifiers.mjs`). 변경 고지 template
 `policy_change_notice`가 등록돼 있습니다.
 
-**남은 것은 전부 소유자 결정입니다** —
-[방침·약관 개정 초안](email-policy-amendment-draft.md)의 (1) `/privacy` 개정안 승인,
-(2) 변경 고지 문안 승인(그 template version의 `contentHash`를
-`CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에), (3) 시행일. 그 뒤 게시한 두 페이지의
-digest를 `APPROVED_AMENDED_DIGESTS`에 적고, 고지를 **사람이** 대상 전원에게 기한 안에
-보내면 게이트가 스스로 열립니다.
-`tests/emailPolicyPublication.test.mjs`의 마지막 테스트는 지금 게이트가 닫혀
-있음을 고정하므로, 그때 함께 고칩니다.
+**소유자 승인과 게시 (2026-10-03).**
+[방침·약관 개정](email-policy-amendment-draft.md)의 `/privacy` 개정안(7개 언어),
+`/terms` 조항, 변경 고지 문안(7개 언어), 시행일 **2026-11-16**을 mposition이 승인했습니다.
+
+- 두 페이지에 게시했고, 그 digest를 `APPROVED_AMENDED_DIGESTS`에 적었습니다.
+- 고지의 production `contentHash` 7개를 `CHANGE_NOTICE_APPROVED_CONTENT_HASHES`에 적었습니다.
+- `tests/emailPolicyPublication.test.mjs`가 그 승인된 상태를 고정합니다.
+
+**남은 것은 둘이고, 코드가 아닙니다.**
+
+1. 결정 F의 봉인 뒤, **사람이** 고지를 대상 전원에게 보내 **2026-10-18 00:00 UTC 전**에
+   메일함에 도착시킵니다.
+2. 게이트는 **시행일(2026-11-16 00:00 UTC) 이후, 대상 계정 중 late·untold가 하나도 없을 때**
+   열립니다. 대상은 시행일 전에 생긴 계정 전부(생성 시각을 모르는 계정 포함)이고,
+   unreachable은 막지 않습니다.
+   - 고지가 **2026-10-18 00:00 UTC 전**에 메일함에 도착한 계정은 told입니다.
+   - 그 뒤에 도착한 계정은 — 늦게 가입했든 늦게 받았든 — 그 계정에 **처음** 도착한 UTC
+     날짜로부터 30달력일이 지나야 told가 됩니다(나중에 다시 도착한 고지는 그 날을 미루지
+     않습니다). 예를 들어 10-18 도착은 11-17 00:00 UTC, 11-15 도착은 12-15 00:00 UTC에
+     told입니다. 그때까지는 late입니다.
+   - **고지가 아직 도착하지 않은 계정은 — unreachable이 아니라면 — untold이고, 시간으로
+     풀리지 않습니다.** unreachable이 아닌 계정이 소프트 바운스, `failed`·`abandoned`, 또는
+     아직 보내지 않은 상태라면 고지가 도착해야 풀리며, 그런 계정 하나가 게이트 전체를
+     막습니다. 주소가 없거나, 고지가
+     거부·반송된 적이 있고 지금 레인이 그 주소로 법정 고지를 보내지 않는 계정은
+     unreachable이라 막지 않고 보고됩니다(위의 분류). 기한 뒤에 가입한 계정도 대상이므로 그들에게도 고지를
+     보내야 합니다.
+   - 그러므로 게이트는 **unreachable을 뺀 모든 대상 계정에 고지가 도착한 뒤**, 시행일과
+     각 late 계정의 첫 도착 + 30일 중 가장 늦은 때에 열립니다.
 
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.

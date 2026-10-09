@@ -12,11 +12,12 @@ import {
 import { DRY_RUN_BINDING_MAX_AGE_MS } from "@/lib/adminSoleApproverCore";
 import { AdminReauthenticationRequiredError } from "@/lib/adminReauthentication";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 import { getScheduledJobsDashboard } from "@/lib/scheduledJobs";
 import { SCHEDULED_JOB_DEFINITIONS } from "@/lib/scheduledJobsCore";
 
 const resetAdminSecurityData = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "AdminActionApproval",
       "AdminAuditLog",

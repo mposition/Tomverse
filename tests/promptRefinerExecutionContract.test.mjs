@@ -81,8 +81,9 @@ const envSnapshot = (keys) =>
 
 // These callbacks and their restoration are synchronous: no promise or timer
 // can outlive the `finally`. Top-level tests in this file use node:test's
-// default sequential scheduling, and the repository unit runner additionally
-// pins `--test-concurrency=1` in scripts/run-unit-tests.mjs. A leaf test's
+// default sequential scheduling, and the repository unit runner gives every
+// test file its own process, so files running concurrently never share
+// `process.env` (scripts/run-unit-tests.mjs). A leaf test's
 // `concurrency` option only limits its own subtests, so it would not add an
 // isolation guarantee here.
 const withIsolatedPriceEnv = (overrides, callback) => {

@@ -30,8 +30,9 @@ digest:
 | 실기기 — iOS | 기기·OS·Safari 버전 |
 | 실기기 — Android | 기기·OS·Chrome 버전 |
 
-**merge SHA를 옮겨 적지 않습니다.** staging은 develop에 무엇이 병합되든
-재배포되고, 2026-09-10 하루에 다섯 번 움직였습니다.
+**merge SHA를 옮겨 적지 않습니다.** staging은 `test`가 가리키는 release
+candidate를 배포합니다. develop을 따르던 2026-09-10에는 하루에 다섯 번
+움직였습니다.
 
 ## 사전 조건
 

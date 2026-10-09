@@ -1,0 +1,111 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/amux-core",
+    "crates/amux-server",
+    "crates/amux-cli",
+    "crates/amux-dashboard",
+]
+
+# Workspace-wide dependency versions: every crate inherits from here so the
+# whole system agrees on one version of each concern (RR-0001).
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: serde_json's DEFAULT float parser is not correctly rounded --
+# it can land one ULP from the nearest f64 to the decimal it is reading, so an
+# f64 written with `to_string` does NOT reliably read back with `from_str`.
+# Measured on 1.0.151 over 1,023,542 f64 values sampled across one second at
+# current epoch magnitude: 126,027 (12.3%) drifted; with this feature, 0.
+# That 12% is why AF-595/ATE-93 read as a flake for two rounds (git_guard's
+# stored mtime came back one ULP under the reported one). Writing is exact
+# (ryu); the drift is entirely on the read. Costs ~2x on float parsing only.
+# `invariants::checks::f64_survives_json_roundtrip` fails loudly if this is
+# ever dropped, because a Cargo feature is otherwise invisible at runtime.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["http2"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rusqlite = { version = "0.32", features = ["bundled", "functions"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.25"
+thiserror = "2"
+anyhow = "1"
+ulid = "1"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+regex = "1"
+# debug-embed: embed the dashboard assets at COMPILE time in debug builds too,
+# not just release (AF-60). Without it rust-embed falls back to reading
+# static/ from disk at runtime in debug, so on this 50-lane shared checkout a
+# peer saving app.js mid-run made four unrelated tests fail -- branding, sse,
+# static_files and the invariants extractor -- pointing at subsystems the
+# author never touched. Reproduced deterministically: truncate app.js without
+# rebuilding and those tests fail; with this feature they pass even if app.js
+# is DELETED, because the binary carries its own copy.
+#
+# It costs the debug hot-reload of dashboard assets, which nothing here uses:
+# the auto-builder ships `cargo build --release` (scripts/rust-auto-build.sh),
+# so what deploys has always embedded at compile time. CLAUDE.md states the
+# rule this restores -- "editing the working tree changes nothing that is
+# live; COMMITTED source is what ships" -- which the debug fallback was
+# quietly contradicting.
+rust-embed = { version = "8", features = ["debug-embed"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2"
+tokio-rustls = "0.26"
+rcgen = "0.13"
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], default-features = false }
+cron = "0.12"
+# calamine: pure-Rust reader for .xlsx/.xls/.ods, so the Files viewer can render a
+# spreadsheet as a table server-side (AMUX-3343) without shipping a heavy client
+# library to a mobile-first PWA.
+calamine = "0.26"
+# jsonwebtoken: RS256 signing of the Google service-account JWT assertion for
+# domain-wide delegation (AMUX-3347), so amux mints impersonated access tokens
+# for the Mixpeek Google connectors without a per-user browser grant.
+jsonwebtoken = "9"
+proptest = "1"
+tempfile = "3"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "compression-gzip"] }
+sha2 = "0.10"
+# sha1 is NOT for security here: /api/file/prepare's media-cache key must be
+# byte-identical to python's hashlib.sha1 derivation (amux-server.py:68158) so
+# already-prepared copies in ~/.amux/media-cache survive the cutover.
+sha1 = "0.10"
+hex = "0.4"
+# The CLI only needs libc to restore the DEFAULT SIGPIPE disposition, which Rust
+# sets to SIG_IGN before main. Already in the tree transitively (rusqlite, tokio).
+libc = "0.2"
+# Web Push (RR-0094): ES256 VAPID + RFC 8291 aes128gcm. `ecdh` and `pem` are
+# feature additions to the same crate: ecdh for the RFC 8291 key agreement,
+# pem so the Python server's PKCS#8 PEM VAPID key (~/.amux/vapid_private.pem)
+# loads unchanged and existing dashboard subscriptions keep verifying.
+p256 = { version = "0.13", features = ["ecdsa", "ecdh", "pem"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
+aes = "0.8"
+cbc = "0.1"
+pbkdf2 = { version = "0.12", features = ["hmac"] }
+hmac = "0.12"
+base64 = "0.22"
+toml = "0.8"
+futures = "0.3"
+# CDP WebSocket client (browser driver cutover, AMUX-2598): Chrome's DevTools
+# protocol speaks JSON-RPC over a LOCAL ws:// endpoint — no TLS features
+# needed, and screenshot payloads (multi-MB base64 text frames) ride
+# tungstenite's default 64MB message cap.
+tokio-tungstenite = "0.24"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license-file = "LICENSE"
+
+# Fast iteration: thin LTO only for release, debug builds favor compile speed.
+[profile.release]
+lto = "thin"
+strip = "symbols"

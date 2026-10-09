@@ -48,7 +48,7 @@ const showsDateInEveryLocale = (textFor, date, locales = PRIVACY_LOCALES) =>
  */
 export const AMENDED_DOCUMENT_VERIFIERS = {
   "/privacy": {
-    record: "sitemap",
+    record: "amended",
     digest: () => {
       const digest = createHash("sha256");
       digest.update(source("components/legal/PrivacyPolicy.tsx"));

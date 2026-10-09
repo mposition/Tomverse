@@ -1069,7 +1069,8 @@ export function ChatPageClient({
       // A validated acceptance is a read-only preview until the authored
       // draft changes. Do not clear its provenance for a second request.
       if (promptRefinerResolutionRef.current?.decision === "accepted") return;
-      promptRefinerAbortControllerRef.current?.abort();
+      // Two clicks can reach this callback before React commits requesting.
+      if (promptRefinerAbortControllerRef.current) return;
       const requestSequence = ++promptRefinerRequestSequenceRef.current;
       const request: PromptRefinerRequest = {
         requestId: `fixture_${requestSequence}`,
@@ -1184,6 +1185,28 @@ export function ChatPageClient({
       return;
     }
   }, [promptRefinerMode, identityKey, mountedSurface, currentChatId, inputValue, resetPromptRefinerFixture]);
+
+  const handlePromptRefinerDismiss = useCallback((requestId: string) => {
+    if (promptRefinerMode !== "e2e_fixture") return false;
+    const dismissable = promptRefinerState.status === "failed"
+      ? promptRefinerState.request
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
+        ? promptRefinerState.suggestion
+        : null;
+    const sourcePrompt = promptRefinerState.status === "failed"
+      ? promptRefinerState.request.prompt
+      : promptRefinerState.status === "ready" ||
+          promptRefinerState.status === "accepted_preview"
+        ? promptRefinerState.suggestion.sourcePrompt
+        : null;
+    if (!dismissable || dismissable.requestId !== requestId) return false;
+    if (promptRefinerDraftRef.current !== sourcePrompt) return false;
+    // Dismissal discards only fixture state. The controlled composer and
+    // durable authored draft have never received the synthetic proposal.
+    resetPromptRefinerFixture();
+    return true;
+  }, [promptRefinerMode, promptRefinerState, resetPromptRefinerFixture]);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -5777,7 +5800,7 @@ export function ChatPageClient({
       // question it carried came from a finished turn, not from the composer.
       if (!isOverrideSend && !preparedDraft) {
         const currentDraft = readDraft(activeChatId);
-        if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
+        if (chatDraftMatchesSubmission({
           submittedText: inputValue,
           submittedAttachmentIds: attachments.map((attachment) => attachment.id),
           currentText: currentDraft.text,
@@ -8178,6 +8201,7 @@ export function ChatPageClient({
           promptRefinerState={promptRefinerState}
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
+          onPromptRefinerDismiss={handlePromptRefinerDismiss}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -8319,6 +8343,7 @@ export function ChatPageClient({
           promptRefinerState={promptRefinerState}
           onPromptRefinerRequest={handlePromptRefinerRequest}
           onPromptRefinerDecision={handlePromptRefinerDecision}
+          onPromptRefinerDismiss={handlePromptRefinerDismiss}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}

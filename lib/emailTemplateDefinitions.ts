@@ -5,6 +5,8 @@ import {
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
+  renderEmailParagraph,
+  renderTransactionalEmailLayout,
 } from "@/lib/accountEmails";
 import {
   buildAdminPlanChangedEmail,
@@ -564,7 +566,7 @@ export const allTemplateDefinitions = () => [...definitions];
  * out. A payload date made the approved hash and the sent bytes two different
  * things. A test holds it equal to the documents' effective date once set.
  */
-export const POLICY_CHANGE_NOTICE_EFFECTIVE_DATE: string | null = null;
+export const POLICY_CHANGE_NOTICE_EFFECTIVE_DATE: string | null = "2026-11-16";
 
 type NoticeLanguage = "en" | "ko" | "zh" | "fr" | "de" | "es" | "pt";
 
@@ -722,13 +724,21 @@ export function buildPolicyChangeNoticeEmail(input: {
       `${copy.read}\n${privacy}\n${terms}`,
       copy.why,
     ].join("\n\n"),
-    html: [
-      `<p>${escapeNoticeHtml(copy.intro(effectiveDate))}</p>`,
-      `<p>${escapeNoticeHtml(copy.releaseNotes)}</p>`,
-      `<p>${escapeNoticeHtml(copy.consent)}</p>`,
-      `<p>${escapeNoticeHtml(copy.read)}<br><a href="${escapeNoticeHtml(privacy)}">${escapeNoticeHtml(privacy)}</a><br><a href="${escapeNoticeHtml(terms)}">${escapeNoticeHtml(terms)}</a></p>`,
-      `<p>${escapeNoticeHtml(copy.why)}</p>`,
-    ].join(""),
+    // The branded frame every other account mail uses; the wording is the
+    // same paragraphs, so the frame adds no sentence of its own.
+    html: renderTransactionalEmailLayout({
+      preview: copy.subject,
+      title: copy.subject,
+      bodyHtml: [
+        renderEmailParagraph(escapeNoticeHtml(copy.intro(effectiveDate))),
+        renderEmailParagraph(escapeNoticeHtml(copy.releaseNotes)),
+        renderEmailParagraph(escapeNoticeHtml(copy.consent)),
+        renderEmailParagraph(
+          `${escapeNoticeHtml(copy.read)}<br><a href="${escapeNoticeHtml(privacy)}" style="color:#2563eb;">${escapeNoticeHtml(privacy)}</a><br><a href="${escapeNoticeHtml(terms)}" style="color:#2563eb;">${escapeNoticeHtml(terms)}</a>`
+        ),
+        renderEmailParagraph(escapeNoticeHtml(copy.why), "muted"),
+      ].join(""),
+    }),
   };
 }
 
@@ -825,8 +835,14 @@ export function buildProcessingResultNotice(
   return {
     subject: copy.subject,
     text: `${lines.join("\n")}\n\n${copy.closing}`,
-    html:
-      `<p>${lines.map(escapeResultHtml).join("<br>")}</p>` +
-      `<p>${escapeResultHtml(copy.closing)}</p>`,
+    // The approved lines and closing, unchanged, in the branded frame; its
+    // title is the approved subject.
+    html: renderTransactionalEmailLayout({
+      preview: copy.subject,
+      title: copy.subject,
+      bodyHtml:
+        renderEmailParagraph(lines.map(escapeResultHtml).join("<br>")) +
+        renderEmailParagraph(escapeResultHtml(copy.closing)),
+    }),
   };
 }

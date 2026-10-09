@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import pg from "pg";
-import { insertSyntheticAmuxAudit } from "./amux-v4-audit-fixture.mjs";
+import { appendSyntheticAdminAudit } from "./helpers/appendSyntheticAdminAudit.mjs";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const allowed = (() => {
@@ -53,11 +53,9 @@ test("AMUX v4 source-plan revisions enforce identity, order and plan-bound chunk
   }
 
   async function addAudit(targetId) {
-    return insertSyntheticAmuxAudit(client, {
-      actorUserId: owner,
-      action: "amux.v4.plan.create",
-      targetType: "AmuxIdeaSourcePlanRevision",
-      targetId,
+    return appendSyntheticAdminAudit(client, {
+      actorUserId: owner, action: "amux.v4.plan.create",
+      targetType: "AmuxIdeaSourcePlanRevision", targetId,
       summary: "synthetic source-plan probe",
     });
   }

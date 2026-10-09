@@ -10,7 +10,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describeFindings, findRetiredProductName } from "./check-retired-product-name-core.mjs";
+import {
+    describeFindings,
+    findRetiredProductName,
+    toPosixPath,
+} from "./check-retired-product-name-core.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -82,7 +86,13 @@ const paths = [...SCANNED_DIRECTORIES.flatMap((dir) => walk(dir)), ...rootMarkdo
     SCANNED_EXTENSIONS.has(extname(path))
 );
 
-const sources = paths.map((path) => ({ path: relative(".", path), text: read(path) }));
+// `join` and `relative` hand back `\` on Windows, so the path is normalised
+// before the core sees it -- both so the allowlist matches and so a finding
+// reads with the same separator the allowlist is written in.
+const sources = paths.map((path) => ({
+    path: toPosixPath(relative(".", path)),
+    text: read(path),
+}));
 
 const findings = findRetiredProductName({ sources });
 

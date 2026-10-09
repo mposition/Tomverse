@@ -103,3 +103,21 @@ halt 뒤에는 로그(`journalctl --user -u tomverse-wsl-bridge`)와 Tomverse의
 ## 검증
 
 래치가 꺼져 있던 `fff30f8dd`의 독립 검토는 Codex `gpt-5.6-sol` pass다. 버전 14의 래치 변경은 그 판정 대상이 아니다. 배포된 staging에서 runner를 실행하지 않았다.
+
+## 전용 Ubuntu 서버 이전 절차 (정책 v23 승인, 운영 활성화 대기)
+
+이 절은 `docs/policy/development-agent-orchestration.md` v23의 실행 절차다. 운영자 `mposition`이 2026-10-01 승인했고 Claude 독립 검토에서 정책 문구 차단 사항이 없음을 확인했다. 아래 운영 게이트를 통과하기 전에는 새 호스트의 bridge를 켜지 않는다. 위 WSL 사용자 서비스 예시는 기존 호스트의 기록이며, 새 호스트에 그대로 적용하지 않는다. Linux 세션 이전과 8개 worker 자동 시작은 이미 끝났지만 제품 bridge는 꺼져 있다. v23 승인은 그 사전 작업을 소급 승인하지 않는다.
+
+1. 새 서버의 worker 계정에서 AMUX 서버와 8개 worker를 Linux native worktree로 운행한다. `amux-worker-start.service`가 재부팅 후 8개를 시작했는지 각 세션의 실제 프로세스와 작업 디렉터리로 확인한다. 새 서버의 옛 `tomverse-wsl-bridge.service` **사용자** unit은 disabled/inactive로 둔다. AMUX invariant 관측은 승인된 v24 정정 계약으로 판정한다.
+2. 기존 WSL AMUX 서버·bridge의 systemd뿐 아니라 Windows Task Scheduler·시작 프로그램·`wsl.conf` boot 명령 등 자동 시작 경로를 읽어 끈다. 새 등록 전에 제품 DB에서 이전 worker **각각**의 열린 attempt 0건, 소유된 Todo 0건, 미해결 `AmuxOrchestratorWrite` 영수증 0건, lease·generation을 read-back한다. 종료되지 않은 로컬 카드 중 `Execution attempt:`를 담은 카드는 원래 Tomverse attempt에 모두 대응시킨다. 해소된 attempt의 로컬 작업은 claim을 열기 전에 멈춘다. 남은 건은 기존 app route의 lease expiry/recover 또는 사람 Review·escalation으로 해소하고 다시 읽는다. 직접 SQL로 고치거나 로컬 카드 상태를 제품 상태로 추정하지 않는다.
+3. 유출 가능성이 있는 기존 `TOMVERSE_AMUX_SYNC_SECRET`을 교체하고 옛 값이 거부됨을 확인한다. 새 서버 worker 홈·AMUX DB·백업·shell 기록에 비밀 사본이 남았는지 값 출력 없이 검사한다. 기존 WSL 인증 파일은 원본 기록으로만 보존한다. bridge 값은 worker 계정에 다시 복사하지 않는다.
+4. 운영자 권한으로 worker와 별도의 무권한 Linux 계정과 **system** unit을 준비한다. 운영자 계정은 worker와 분리한다. 이전된 `tommy`는 현재 `sudo`·`docker`·`lxd` 그룹에 있으므로 worker로 계속 쓰려면 이 세 권한을 제거하고 `NOPASSWD`·공유 sudo 캐시도 없앤다. 별도 운영자 로그인 경로를 먼저 확보한다. 그룹 제거 뒤 worker의 user systemd manager·tmux·AMUX 서버·8개 세션을 재시작하고 각 프로세스의 `/proc/<pid>/status` `Groups`를 확인한다. 이전 root 동등 권한으로 만들어졌을 수 있는 sudoers·system unit/timer·root cron·setuid 파일·docker/lxd 컨테이너와 이미지를 점검한 뒤 bridge를 설치한다. 승인된 commit에서 빌드한 bridge 바이너리와 unit은 root 소유로 설치해 worker 쓰기를 막는다. 인증 파일은 bridge 계정만 읽는다. 필요한 변수는 `TOMVERSE_INTERNAL_URL`, 새 `TOMVERSE_AMUX_SYNC_SECRET`, loopback `TOMVERSE_AMUX_WSL_LOCAL_URL`이며, AMUX API가 토큰을 요구하면 별도 bridge 토큰도 이 파일에 둔다. `TOMVERSE_AMUX_WSL_BRIDGE=1`은 활성화 결정 때에만 넣는다. `TOMVERSE_AMUX_EXECUTE`는 켜지 않는다. system unit에는 `User=`와 `NoNewPrivileges`, 적절한 `ProtectHome`·`ProtectSystem`, `Restart=on-failure`, `RestartSec=60`, `RestartPreventExitStatus=3`을 둔다. AMUX 서버는 **사용자** unit이므로 `After=amux-server.service`로 두 unit을 순서화할 수 없다. bridge 시작 전에 loopback AMUX readiness를 별도로 기다리며 실패 시 재시도한다.
+5. AMUX 수신 주소를 loopback으로 제한하거나 방화벽에서 운영자 SSH 외 접근을 막고 외부 호스트에서 포트가 닫혔는지 확인한다. 전용 계정의 AMUX loopback API 접근과 Tomverse 내부 route 호출, `record_history` owner 전송 시 로컬 카드 생성 가능성을 실측한다. worker가 bridge 인증 파일·프로세스 환경에 접근하거나 root 소유 바이너리·unit을 바꾸지 못하고, bridge가 worker 자격증명을 읽지 못하는지 확인한다. 제품 DB·GitHub 쓰기·배포 인증은 bridge 계정에 없다. 비밀값과 내부 URL은 로그에 출력하지 않는다.
+6. 승인된 정책 SHA, bridge 바이너리 SHA, 서버·CLI 버전, 제품 실행 API 게이트, 시간 동기화, AMUX DB `quick_check`와 복사 digest, 8개 worktree SHA, Git origin, 이전·새 서비스 상태를 기록한다. **Railway claim 루프가 꺼지거나 orchestrator가 halt한 상태**, 소유된 Todo 0건, `TOMVERSE_AMUX_WSL_SESSIONS`를 worker 하나로 제한한 상태에서 등록·heartbeat를 관측한다. bridge에는 register-only 모드가 없으므로 이 창에서는 실행이 없었다는 증거를 확인한다. 그 다음 운영자가 claim을 열어 제한 실행을 관측한다.
+7. 오류·결과 불명·lease 충돌·감사 누락·비밀 접근이 보이면 새 **system** unit을 중지한다. bridge의 exit 3 halt는 자동 재시작하지 않는다. 제품 DB에서 attempt와 영수증을 대조하고 운영자가 재개 또는 fallback을 결정한다. 새 unit의 재개는 `systemctl`의 system scope를 사용한다. WSL 원본 파일은 보존하되 old bridge를 무조건 재시작하지 않는다. 제품 DB를 로컬 백업으로 덮어쓰지 않는다.
+
+이 절은 승인 후에도 운영값을 기록하는 곳이 아니다. 호스트명, 내부 URL, 인증값, 계정별 접근 증거와 실제 활성화 판단은 운영 기록에 남긴다.
+
+### v24 관측 게이트 정정 (2026-10-02 승인, 활성화 대기)
+
+v23 절차 1의 `confidence=healthy` 요구는 승인된 정책 v24의 관측 계약으로 대체한다. `unknown`을 pass로 세지 않고, 관련 unknown의 표본 부재를 면제 사유로 삼지 않는다. 작성자와 다른 provider의 독립 reviewer 또는 운영자가 컬럼별 관련성·증거를 확인한다. 제품 claim 전에 관련 안전 조건을 코드·테스트와 격리된 직접 관측 양쪽으로 증명하고, worker 보고 hook은 제품 카드가 아닌 로컬 합성 AMUX 작업으로 확인한다. v23 계정·그룹 정리와 AMUX 재시작 뒤, claim을 막은 관측 창 직전·사람의 claim 해제 직전·첫 제한 실행 중·후에 정책 v24의 상태·invariant·write probe와 두 유효 예산값을 재확인한다. 새 unknown·실패·예산 초과나 값 변경이 있거나 연속 관측이 불가능하면 bridge를 중지하고 claim을 막는다. 100만 행 예산은 v24 승인 시점 이후의 운영값이며 그 전 0 fail 관측은 게이트 증거가 아니다. 예산 80% 초과와 행 수·증가율·보존 종료 시점 추정치를 운영자에게 알린다. 실패가 재발하면 예산을 다시 올리는 대신 원인을 조사한다. v24 승인만으로 bridge·claim·제품 실행이 활성화되지는 않는다.

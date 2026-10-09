@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { z } from "zod";
 
 import { readLimitedJson } from "@/lib/apiSecurity";
-import { isEngineeringAgentAmuxAdapterOpen } from "@/lib/engineeringAgentAmuxAdapter";
+import { engineeringAgentAmuxAdapterPermittedNow } from "@/lib/engineeringAgentAmuxAdapter";
 import { OBSERVABLE_HALTS } from "@/lib/engineeringAgentCore";
 import {
   engineeringAgentErrorResponse,
@@ -24,7 +24,7 @@ const requestSchema = z.object({ halt: z.enum(OBSERVABLE_HALTS) }).strict();
 
 export async function POST(request: Request) {
   if (!isEngineeringAgentRouteAuthorized(request, "runner")) return engineeringAgentUnauthorized();
-  if (!isEngineeringAgentAmuxAdapterOpen()) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
+  if (!(await engineeringAgentAmuxAdapterPermittedNow())) return engineeringAgentJson({ refused: "adapter_closed" }, 409);
   try {
     const body = await readLimitedJson(request, 128, requestSchema);
     const recorded = await runEngineeringAgentTransaction(prisma, (tx) =>

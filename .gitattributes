@@ -82,6 +82,31 @@ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 /lib/promptRefinerShadowAdmissionCore.ts text eol=lf
 /tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf
 
+# CHAT-01 one-shot development-only challenge witness closure reads exact bytes.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-challenge-witness-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitnessClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only 80-slot witness pass closure.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-witnesses-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnessesClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only rubric structure closure.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotRubric.ts text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotRubric.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestRubricsClosure.test.mjs text eol=lf
+
+# CHAT-01 one-shot development-only manifest envelope closure reads exact bytes.
+/docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json text eol=lf
+/lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts text eol=lf
+/tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs text eol=lf
+
 # The approved consent copy and the test that holds it to the record must be
 # byte-identical on every platform: the test reads the document, and a CRLF
 # checkout used to fail three of its comparisons on Windows.

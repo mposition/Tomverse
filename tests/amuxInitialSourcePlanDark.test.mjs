@@ -16,7 +16,7 @@ function sourceFiles(directory) {
   });
 }
 
-test("the v4 initial source-plan writer stays unreachable from runtime call sites", () => {
+test("the v4 initial source-plan writer has only its gated Admin access caller", () => {
   const rootFiles = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name))
     .map((entry) => resolve(root, entry.name));
@@ -29,6 +29,16 @@ test("the v4 initial source-plan writer stays unreachable from runtime call site
     .filter(({ source }) => source.includes("ideaInitialSourcePlanService") ||
       source.includes("createInitialIdeaOnlySourcePlan"))
     .map(({ path }) => path);
-  assert.deepEqual(callSites, [],
-    "the privacy/deletion gate must be approved before this dark writer gets a runtime caller");
+  assert.deepEqual(callSites, [
+    "app/api/admin/amux/ideas/initial-source-plan/route.ts",
+    "lib/amux/ideaInitialSourcePlanAccess.ts",
+  ]);
+  const route = readFileSync(resolve(root, callSites[0]), "utf8");
+  const access = readFileSync(resolve(root, callSites[1]), "utf8");
+  const core = readFileSync(resolve(root, "lib/amux/ideaInitialSourcePlanCore.ts"), "utf8");
+  assert.match(route, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
+  assert.match(route, /!initialPlanReadbackPermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_READBACK_ENV\]\)/);
+  assert.match(access, /!initialPlanWritePermitted\(process\.env\[AMUX_V4_INITIAL_PLAN_WRITE_ENV\]\)/);
+  assert.match(core, /AMUX_V4_INITIAL_PLAN_WRITE_CODE_ENABLED = true/);
+  assert.match(core, /AMUX_V4_INITIAL_PLAN_READBACK_CODE_ENABLED = true/);
 });

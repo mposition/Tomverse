@@ -282,7 +282,10 @@ export function SidebarAccountRailButton({
                                 }}
                                 className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 text-sm font-bold text-white transition hover:bg-blue-500"
                             >
-                                {t("sidebar.guestMenuCreateAccount")}
+                                {/* One entry for both: the sign-in screen links to sign-up,
+                                    so naming only one of them misdirects the other. Same
+                                    label as the drawer's guest button. */}
+                                {t("auth.login")}
                             </button>
                             <div className="mt-1 space-y-1">
                                 <Link

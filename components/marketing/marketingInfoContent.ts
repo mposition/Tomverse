@@ -39,7 +39,7 @@ export const infoPages = {
       eyebrow: "Legal",
       title: "Terms and Conditions",
       description: "These terms govern free and paid use of Tomverse, including accounts, AI providers, subscriptions, monthly and additional credits, cancellation, and disputes.",
-      updated: "Last updated: July 15, 2026",
+      updated: "Last updated: November 16, 2026",
       sections: [
         {
           title: "Agreement, operator, and contact",
@@ -48,6 +48,10 @@ export const infoPages = {
         {
           title: "Accounts and use of the service",
           body: "You must provide accurate account information, protect access to your account, and take responsibility for account activity, prompts, uploaded files, and content you use or share. We may reasonably limit, suspend, or terminate access where necessary to address abuse, security risk, non-payment, legal requirements, or a material breach of these terms.",
+        },
+        {
+          title: "Marketing email consent",
+          body: "Your consent stays in effect until you withdraw it. There is no fixed expiry. You can withdraw it at any time in your email settings or with the unsubscribe link in any marketing message, without signing in. Withdrawing does not stop sign-in codes, billing receipts or service notices.",
         },
         {
           title: "Third-party AI providers and outputs",
@@ -96,7 +100,7 @@ export const infoPages = {
       eyebrow: "법적 고지",
       title: "이용약관",
       description: "계정, AI 제공자, 구독, 월 크레딧과 추가 크레딧, 취소 및 분쟁을 포함한 Tomverse의 무료·유료 서비스 이용 조건입니다.",
-      updated: "최종 업데이트: 2026년 7월 15일",
+      updated: "최종 업데이트: 2026년 11월 16일",
       sections: [
         {
           title: "약관 동의, 운영 주체 및 연락처",
@@ -105,6 +109,10 @@ export const infoPages = {
         {
           title: "계정 및 서비스 이용",
           body: "사용자는 정확한 계정 정보를 제공하고 계정 접근을 보호해야 하며, 계정 활동, 프롬프트, 업로드 파일, 사용하거나 공유하는 콘텐츠에 책임을 집니다. 남용, 보안 위험, 미결제, 법적 의무 또는 중대한 약관 위반에 대응하기 위해 합리적으로 필요한 범위에서 접근을 제한·정지·종료할 수 있습니다.",
+        },
+        {
+          title: "광고성 이메일 수신동의",
+          body: "수신동의는 철회하실 때까지 유효하며 별도의 만료 기간을 두지 않습니다. 이메일 설정 또는 광고성 메일에 포함된 수신거부 링크에서 로그인 없이 언제든 철회하실 수 있습니다. 철회하셔도 로그인 코드, 결제 영수증, 서비스 공지는 계속 발송됩니다.",
         },
         {
           title: "제3자 AI 제공자와 출력",
@@ -153,10 +161,11 @@ export const infoPages = {
       eyebrow: "法律",
       title: "条款与条件",
       description: "这些条款适用于 Tomverse 的免费和付费服务，包括账户、AI 提供商、订阅、月度积分、附加积分、取消和争议。",
-      updated: "最后更新：2026 年 7 月 15 日",
+      updated: "最后更新：2026 年 11 月 16 日",
       sections: [
         { title: "协议、运营方和联系方式", body: "Tomverse 是 tomverse.app 使用的服务和运营名称（‘我们’），旗下运营 Tomverse Review 等 Tomverse 产品。付费交易的法定销售方或合同运营方，是相应 Stripe 结账页、收据或发票上标明的实体。账单和法律通知可发送至 support@tomverse.app，或通过 tomverse.app/support 的支持表单提交。" },
         { title: "账户和服务使用", body: "你必须提供准确的账户信息、保护账户访问，并对账户活动、提示词、上传文件以及使用或分享的内容负责。为处理滥用、安全风险、未付款、法律要求或重大违约，我们可在合理必要范围内限制、暂停或终止访问。" },
+        { title: "营销邮件同意", body: "您的同意在您撤回之前一直有效，没有固定的到期时间。您可以随时在邮件设置中，或通过任何营销邮件中的退订链接撤回同意，无需登录。撤回同意不会停止登录验证码、账单收据或服务通知的发送。" },
         { title: "第三方 AI 提供商和输出", body: "Tomverse 会把提示词和所选上下文发送给第三方 AI 提供商并显示其响应。AI 输出可能不准确、不完整、过时、不安全或不适合你的情况，也不构成法律、医疗、金融、安全或其他专业建议。" },
         { title: "方案、AI 积分和公平使用", body: "Free、Pro 和 Max 适用价格页及账户页显示的功能和月度积分额度。积分消耗因模型、推理方式和输入规模而异。月度积分在每个自然月开始时按 UTC 重置，不结转、不可转让且无现金价值。公平使用、防滥用、模型、提供商成本、文件和上下文限制仍然适用。" },
         { title: "附加积分包", body: "附加积分包是与订阅及其月度积分分开的单次购买。附加积分自购买之日起 12 个月（365 天）后到期，不可转让，也不可兑换现金。Tomverse 先扣除可用的月度方案积分，再按最早到期顺序扣除附加积分。积分包只增加可用积分余额，不会升级方案，也不会增加模型访问、功能、每日限制、方案特定的高成本模型限制、公平使用限制或其他保障。" },

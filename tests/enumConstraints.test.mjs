@@ -15,6 +15,18 @@ import {
 
 const migration = (name, sql) => ({ name, sql });
 
+test("composite checks do not masquerade as a closed enum", () => {
+  const constraints = readEnumConstraints([migration("composite", `
+    CREATE TABLE "Example" (
+      "operation" TEXT NOT NULL,
+      CONSTRAINT "Example_shape_check" CHECK (
+        "operation" IN ('split', 'merge') AND "state" IN ('draft', 'done')
+      )
+    );
+  `)]);
+  assert.deepEqual(constraints, []);
+});
+
 test("the newest definition of a constraint wins", () => {
   const constraints = readEnumConstraints([
     migration(

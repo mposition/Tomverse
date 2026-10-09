@@ -3,10 +3,11 @@ import {
   type IdeaInput,
   type IdeaInputInspection,
 } from "./ideaInputCore.ts";
+import { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
+
+export { isAmuxIdeaRequestId } from "./ideaRequestIdCore.ts";
 
 export const AMUX_IDEA_SUBMISSION_ENVELOPE_MAX_BYTES = 70_000;
-const UUID_V4 = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-export const isAmuxIdeaRequestId = (value: string) => UUID_V4.test(value);
 
 const exactKeys = (value: Record<string, unknown>, names: readonly string[]) =>
   Object.keys(value).sort().join("\0") === [...names].sort().join("\0");
@@ -50,15 +51,15 @@ export function inspectAmuxIdeaSubmission(raw: string): IdeaSubmissionInspection
   };
 }
 
-/** Shipment remains dark. No v1-v3 intake flag can open this new writer. */
-export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = false;
+/** v4 code is available; only its dedicated environment gate opens writes. */
+export const AMUX_V4_IDEA_SUBMISSION_CODE_LATCH = true;
 export const AMUX_V4_IDEA_SUBMISSION_ENV = "TOMVERSE_AMUX_V4_IDEA_SUBMIT";
 export const ideaSubmissionWritePermitted = (value: string | undefined) =>
   AMUX_V4_IDEA_SUBMISSION_CODE_LATCH && value === "enabled";
 
 /** Read-back has an independent gate so stopping new writes cannot hide an
- * uncertain in-flight submission. Both gates ship closed. */
-export const AMUX_V4_IDEA_READBACK_CODE_LATCH = false;
+ * uncertain in-flight submission. The environment gate remains independent. */
+export const AMUX_V4_IDEA_READBACK_CODE_LATCH = true;
 export const AMUX_V4_IDEA_READBACK_ENV = "TOMVERSE_AMUX_V4_IDEA_READBACK";
 export const ideaSubmissionReadBackPermitted = (value: string | undefined) =>
   AMUX_V4_IDEA_READBACK_CODE_LATCH && value === "enabled";

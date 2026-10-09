@@ -25,6 +25,13 @@
 #     id, never a trace ID or any user-influenced string.
 name: Feedback Auto-Fix (Phase 3)
 
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
+
 on:
   workflow_dispatch:
 
@@ -116,7 +123,17 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
-          cache: npm
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment package.json
+          # names a package manager. This job holds a credential, and nothing can write
+          # a cache in a scope this job runs in any more, so the entry it used to look
+          # for was already a certain miss: daily-security-audit run 37162314395, in the
+          # same scope and while it still asked for the cache, logged "npm cache is not
+          # found" and then "cache write denied: token has no writable scopes".
+          # Declaring it costs nothing here and takes the job out of the analyser's
+          # cache-restoring set.
+          # .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and P3.
+          package-manager-cache: false
 
       - name: Install dependencies
         if: steps.claim.outputs.claimed == 'true'

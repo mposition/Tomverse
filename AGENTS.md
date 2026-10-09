@@ -25,6 +25,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 입니다. `.github/audits/` 아래 감사·작업 보고서처럼 이미 한국어로 작성된
 문서는 계속 한국어로 씁니다.
 
+<!-- development-execution -->
+## Development sessions deliver small working changes
+
+For a feature or bug fix, choose the smallest useful behavior within the approved scope, implement it, and run the relevant test or check. Keep investigation and design focused on what is needed for that next code change. Do not substitute policy revisions, plans, or repeated independent reviews for working functionality.
+
+Follow required approvals, policy gates, and independent review for the changes to which they apply. Once those requirements are clear, continue with code that is already authorized. If a decision blocks one change, name the exact blocker and complete another authorized, testable slice when available.
+
+Report implemented and tested behavior separately from documentation, review, merge, and deployment. A plan or review alone is not implementation progress. For an explicitly documentation-only or review-only request, deliver that requested artifact without inventing a code task.
+<!-- /development-execution -->
+
 # 의미 있는 개발 사이클의 완료 보고
 
 작은 오타·단순 문구 수정 같은 소규모 작업을 제외하고, 의미 있는 규모의 Chat
@@ -111,6 +121,7 @@ UI-012에서 승인된 정책(B안)입니다. accent 색은 **hue가 아니라 �
 | Account identity | `accent-account-*` | teal |
 | Account memory 제어 | `accent-account-memory-*` | teal |
 | 성공·검증 상태 | `status-success-*` | emerald |
+| 스위치 켜짐 상태 | `status-switch-on-*` | emerald |
 
 ## 규칙
 
@@ -153,7 +164,7 @@ codex/to-develop/fix-picker          자동 PR
 docs/to-develop/release-policy       자동 PR
 to-develop/ime-submit                자동 PR
 
-claude/to-main/dependabot-hold       없음 — main PR은 손으로 엽니다
+claude/to-main/dependabot-hold       없음 — main PR도 열 수 없습니다(아래 절)
 release/**, hotfix/**                없음 — production에 닿습니다
 dependabot/**, autofix/**,
 feedback-autofix/**                  없음 — 각자 자기 PR을 엽니다
@@ -177,23 +188,87 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
 
-## auto-merge는 PR을 만든 실행이 한 번만 켭니다
+## main으로 가는 PR은 release와 hotfix뿐입니다
 
-`Auto PR to Develop`은 **자기 실행이 PR을 새로 열었을 때만** auto-merge를
-켭니다. 이미 열려 있는 PR에는 켜지 않습니다 — push마다 다시 켜면 사람이 끈
-auto-merge가 다음 commit까지만 유효해지고, 그 사실을 아무도 말해 주지 않습니다.
+**기능은 develop으로 보내고, main에는 release가 가져갑니다.**
+`.github/RELEASE_CHECKLIST.md` 7.9절의 세 경로 — `develop`(release),
+`release/**`(선택 release), `hotfix/**`(사고·보안 권고) — 만 main에 닿습니다.
+`to-main`이라는 이름은 경로가 아닙니다. 2026-10-02부터 PR Fast Gate가 이를
+검사하며(`scripts/main-pr-source-policy.mjs`,
+`tests/mainPrSourcePolicy.test.mjs`), 그 밖의 head는 필수 check가 실패합니다.
 
-2026-09-05에 그렇게 됐습니다. PR #1256은 02:13:06Z에 auto-merge가 꺼졌고,
-draft인 동안의 push 일곱 번은 draft 검사가 막았지만, ready로 되돌린 뒤
-05:20:16Z push 하나에 workflow가 다시 켰고 13분 뒤 병합됐습니다. 병합을
-보류하라는 지시가 있던 PR입니다.
+```
+develop                              통과 — release
+release/2026-10-02-consent           통과 — 선택 release (체크리스트 7.9.1)
+hotfix/stripe-timeout                통과 — 체크리스트 7.9.2의 여섯 항목이 필요합니다
+claude/hotfix/stripe-timeout         통과 — `hotfix`는 경로 조각
+dependabot/**, autofix/**,
+feedback-autofix-main/**             통과 — 각자의 승인 게이트가 있습니다
+claude/to-main/..., codex/...        거부 — `gh pr edit <번호> --base develop`
+```
 
-**끈 것은 꺼진 채로 있습니다.** 판정은 workflow의 `if:`가 create 단계의
-`created` 출력을 읽는 것이고, `tests/autoPrAutoMergeArming.test.mjs`가 그 단계의
-실제 shell을 stub `gh`로 돌려 양쪽 경로를 고정합니다.
+근거는 수치입니다. 2026-09-20~10-02에 main에 병합된 PR 80건 중 78건이 기능
+브랜치였고, 각각 CI를 두 번 돌았으며(PR과 main push), develop으로 되돌아오는
+back-merge가 아홉 번 자동으로, 한 번(#1794, 충돌 34개 파일)은 손으로 필요했습니다.
 
-그래서 이미 열린 PR에 auto-merge가 필요하면 **사람이 켭니다.** 그것이 이 규칙이
-지키려는 결정입니다.
+규칙 이전에 main으로 열려 있던 PR 4건(#1798, #1858, #1880, #1882)은
+`scripts/main-pr-source-policy.mjs`의 예외 목록으로 통과시킵니다. 이 목록은 줄기만 하고,
+테스트가 새 항목 추가를 막습니다.
+
+## workflow는 PR을 열기만 하고 auto-merge를 켜지 않습니다
+
+`Auto PR to Develop`은 PR을 열 뿐 **병합하지도, auto-merge를 켜지도 않습니다**
+(2026-10-02 운영자 결정). auto-merge가 켜진 PR은 check가 통과하는 순간 GitHub가
+병합하므로, Railway가 무엇을 하고 있든 상관없이 몇 분 간격으로 병합된 PR들이
+staging에 "Wait for CI" 배포를 겹겹이 쌓았습니다.
+
+병합은 운영자가 로컬에서 실행하는 merge train(`npm run merge-train`,
+`scripts/merge-train.mjs`)이 맡습니다. 가장 오래된 non-draft·CI 통과 PR을 하나씩
+병합하고, 그 환경에 진행 중인 Railway 배포가 하나라도 있으면 hold합니다. 자기가
+병합한 배포가 실패하면 멈추고 재시도하지 않습니다.
+
+이전 규칙의 교훈은 그대로입니다. 2026-09-05에 PR #1256은 사람이 auto-merge를
+끈 뒤 push 한 번에 workflow가 다시 켜서, 병합을 보류하라는 지시가 있던 상태로
+병합됐습니다. 자동화가 사람이 끈 스위치를 다시 켜서는 안 됩니다.
+
+`tests/autoPrAutoMergeArming.test.mjs`와 `security-regression-check`가 workflow에
+`gh pr merge`·`--auto`가 없음을 고정합니다. 개별 PR에 auto-merge가 필요하면
+**사람이 켭니다.**
+
+## PR은 draft로 시작하고, 끝나면 ready로 바꿉니다
+
+**draft PR에서는 PR CI가 아무것도 돌지 않습니다**(2026-10-03). `Auto PR to Develop`은
+PR을 `--draft`로 열고, 브랜치 작업을 마친 세션이 직접 ready로 바꿉니다. ready로
+바꾸는 순간 전체 검사가 한 번 돌고, 녹색이 되면 merge train이 가져갑니다(merge
+train은 draft를 건너뜁니다).
+
+```
+gh pr ready <번호>        작업 완료 — CI 시작
+gh pr ready <번호> --undo 다시 손볼 때 — 이후 push는 CI를 돌리지 않음
+```
+
+- **작업 중에는 draft로 둡니다.** push할 때마다 약 20개 job이 돌던 것이 이 규칙의
+  이유입니다. 동시 실행 한도를 40으로 올린 뒤에도 2026-10-03에 실행 40·대기 68이었고,
+  Railway가 기다리는 develop·main push 검사가 그 뒤에 줄을 섰습니다.
+- **CI 결과가 필요하면 ready로 바꿉니다.** draft 상태로는 검사 결과를 얻을 수 없으니,
+  로컬에서 먼저 확인할 수 있는 것(`npm run test:unit`, 관련 check script)은 로컬에서
+  돌립니다.
+- 판정은 PR workflow들의 job 조건 하나이고, `tests/draftPrCiSkip.test.mjs`가 모든
+  job과 `ready_for_review` trigger, Auto PR의 `--draft`를 함께 고정합니다.
+
+## develop은 dev에, Test는 `test` 브랜치에 배포됩니다
+
+2026-10-07부터 환경이 셋입니다. **develop 병합이 닿는 곳은 dev**(`dev.tomverse.app`)이고,
+staging(사람에게는 Test, `staging.tomverse.app`)은 `test` 브랜치를 배포합니다. `test`는
+사람이 고른 release candidate로 `npm run promote:test -- --sha=<commit>`만 옮깁니다.
+
+- "develop에 병합했으니 staging에서 확인"은 이제 틀린 문장입니다. 병합 직후의 동작은 dev에서
+  보고, 고정된 SHA로 하는 검증(체크리스트·기록)은 그 SHA로 `test`를 옮긴 뒤 Test에서 합니다.
+- merge train은 dev 배포가 끝나기를 기다립니다. `test`로 병합하는 레인은 없습니다.
+- Railway 환경 이름은 `staging` 그대로이고, 환경 판정(`lib/deploymentEnvironment.ts`)도 `staging`
+  입니다. Test 전용 게이트는 계속 staging에서만 동작합니다.
+- release 경로는 `.github/RELEASE_CHECKLIST.md` 7.9, 승격 절차와 한 번만 하는 전환은
+  `docs/ops/dev-test-lanes.md`.
 
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
@@ -1117,6 +1192,31 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   게이트는 셋입니다: 수동 승인(초안 스위치 + kill switch 아님), 계정 제어
   (kill switch만), 그리고 **멈추거나 좁히는 변경은 아무것도 요구하지 않습니다** —
   스위치가 거절할 수 있는 정지는 정지가 아닙니다.
+- **S2d(게시기)**: `app/api/internal/marketing-publisher/route.ts`,
+  `app/api/_marketing/zernioAdapter.ts`, `lib/marketingPublisherRun.ts`,
+  `lib/marketingPublisherBatch.ts`, `lib/zernioPublishAdapter.ts`.
+  **`ZERNIO_API_KEY`는 `app/` 경계에서만 읽고 `lib/`에는 만들어진 adapter만
+  넘깁니다.** publisher의 트랜잭션은 전부 `lib/marketingPublisherRun.ts`의 이름
+  붙은 bounded 연산이며, vendor 호출은 트랜잭션 밖에서만 합니다
+  (`tests/marketingPublisherBoundedCallers.test.mjs`). statement 예산은 측정값이고
+  `tests/marketingPublisherStatementBudget.test.ts`가 고정합니다 — store 연산에
+  statement를 더하면 그 테스트가 먼저 알립니다.
+- **S2e(staging webhook shadow)**: `app/api/webhooks/zernio/route.ts`,
+  `app/api/admin/marketing/webhook/**`, `lib/marketingWebhookCore.ts`,
+  `lib/marketingWebhookReceiver.ts`, `lib/marketingWebhookSettings.ts`.
+  **staging이 아니면 수신기는 본문을 읽지 않고 404이며, shadow 기록·fault arm·
+  의도적 5xx 어느 것도 일어나지 않습니다**(배포 표식 환경변수와 해석된 배포
+  환경이 둘 다 staging — `marketingWebhookIsStaging()`). `ZERNIO_WEBHOOK_SECRET`은 route와,
+  운영자가 staging에서 실행하는 검증 기록 생성기의 서명 변조 probe에서만 읽습니다(값은 출력하지
+  않고 HMAC 계산에만 씁니다, 운영자 승인 2026-10-02). 게시물은 바꾸지 않습니다 — 적용은 S2f이고
+  staging 서명 이후입니다.
+- **S2e-verification(검증 기록과 서명)**: `lib/marketingWebhookRecordDraft.ts`,
+  `lib/marketingWebhookVerification.ts`, `scripts/marketing-webhook-verification-record.mjs`,
+  `app/api/admin/marketing/webhook/verification-sign/route.ts`. **증거는 현재 빌드가 현재 설정에서
+  답한 전달만**입니다 — 수신기가 응답마다 pipeline fingerprint와 설정 digest를 찍고, 생성기는 그
+  표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
+  강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
+  2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
 
 # 엔지니어링 Agent
 
@@ -1178,6 +1278,123 @@ engineering Agent의 판정·상태·게시·등록 코드, 그리고 그 에이
   갱신하는 변경이 곧 독립 검토의 대상**입니다(docs/policy/engineering-agent.md §8).
 - **tier 비율 보고**: `npm run report:engineering-agent-tiers`. 최근 병합들을 앱과 같은
   판정으로 다시 계산해 개수만 출력하며, 아무것도 쓰지 않습니다(docs/policy/engineering-agent.md §14).
+
+# AMUX Decision Maker
+
+AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·저장·전송·runner 코드를
+건드리기 전에 읽습니다.
+
+- `docs/policy/amux-decision-maker.md`
+
+절대 조건:
+
+- **v1은 제안 모드만입니다.** DM의 출력은 운영자가 Admin에서 확정하기 전에는 worker에게 가지
+  않습니다. 자율 경로를 만들지 않습니다 — 그것은 v2 정책과 공통 기반 원칙 3의 별도 개정입니다.
+- **라우팅은 `lib/amux/decisionMakerCore.ts`의 `routeDmQuestion()` 한 곳입니다.** 모든 검사를
+  실행하고 모든 거절 사유를 남기며, 결과는 `dm_proposal`과 `operator` 둘뿐입니다.
+- **용어 목록·비밀 경로 목록·경로 문법·출력 상한을 바꾸면 정책 버전이 바뀝니다.** 테스트의
+  고정값이 그 목록의 기준입니다.
+- DM은 승인 게이트에서 사람으로 인정되지 않고, 운영자가 확정한 답도 승인 계약의 승인이 아닙니다.
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/amux-decision-maker.md §12를 따르며, 새 경로는 그
+  단계의 PR이 이 절에 추가합니다.
+- **S1a(결정적 핵심)**: `lib/amux/decisionMakerCore.ts`, `tests/amuxDecisionMakerCore.test.mjs`.
+  I/O가 없습니다. DB·route·DM 호출은 다음 단계입니다.
+- **S1b(스위치 저장소)**: `lib/amux/decisionMakerSwitchCore.ts`, `lib/amux/decisionMakerSwitchStore.ts`,
+  `lib/amux/decisionMakerSwitchSystemAudit.ts`,
+  `prisma/migrations/20261008030000_amux_decision_maker_switch/migration.sql`,
+  `tests/amuxDecisionMakerSwitch.test.mjs`, `tests/integration/amux-decision-maker-switch.db.test.ts`.
+  스위치는 append-only 사건 표이고 scope마다 가장 새 사건이 상태입니다. **값은 DB CHECK가 닫습니다** —
+  인스턴스는 `off`·`proposal`, kill switch는 `on`·`off`뿐이고, 시스템은 인스턴스를 `off`로 latch만
+  합니다. 사건마다 같은 트랜잭션의 감사 행을 trigger가 요구하며, latch 뒤 사람의 첫 변경은
+  `amux.decision.latch_release`입니다. 읽기 실패나 목록 밖의 행은 전부 `null`(fail-closed)이고,
+  `routeDmQuestion()`이 `settings_unreadable`로 운영자에게 보냅니다. 표를 읽고 쓰는 곳은 store
+  하나이며, 시스템 감사는 별도 모듈이 씁니다(한 파일이 두 writer를 부르지 않습니다). route·Admin
+  화면·DM 호출은 없습니다.
+- **S1c(요청 원장)**: `lib/amux/decisionMakerRequestCore.ts`, `lib/amux/decisionMakerRequestStore.ts`,
+  `lib/amux/decisionMakerRequestSystemAudit.ts`,
+  `prisma/migrations/20261008090000_amux_decision_maker_switch_serialization/migration.sql`,
+  `prisma/migrations/20261008090100_amux_decision_maker_request_ledger/migration.sql`,
+  `tests/amuxDecisionMakerRequest.test.mjs`, `tests/integration/amux-decision-maker-request.db.test.ts`.
+  요청은 (카드 id, 질문 revision)당 한 행이고 고칠 수 없으며, 상태는 append-only 사건 표의 합입니다.
+  **전이 그래프는 trigger가 강제하고 `dmEventRefusal()`·`dmEventSwitchRefusal()`이 같은 그래프를
+  옮깁니다** — 한쪽만 바꾸지 않습니다. 배정 마감(생성 + 2분)과 결과 마감(배정 + 30분)은 DB 시계이고,
+  배정·전송 의도·DM 출력(제안·이관·검증 실패)은 삽입 때와 COMMIT 때(`AX001`) 모두 마감에서 commit
+  예비시간 200 ms를 뺀 D로 거부되며, writer는 같은 마감을 `requireLeaseAt`으로 fence에 넘깁니다. 종결
+  결과는 요청당 하나이고 (요청, 결과 digest) 쌍으로 멱등입니다. 사건마다 같은 트랜잭션의 감사 행을
+  요구합니다 — 배정·종료는 router, 전송·결과는 요청의 인스턴스 actor입니다.
+  **스위치 값은 호출자가 넘기지 않습니다.** 라우팅·전송 의도·결과는 store가 audit chain lock(모든
+  스위치 변경도 먼저 잡는 lock) 뒤에 S1b reader로 직접 읽고, trigger는 스위치 gate(스위치 trigger는
+  배타, 원장 trigger는 공유)를 잡은 뒤 다시 읽어 kill switch on·인스턴스 off에서 DM 라우팅·전송
+  의도를, kill switch on에서 제안을 거부합니다. lock 순서는 audit chain lock → 스위치 gate →
+  요청·scope lock입니다. 원장 trigger와 S1b 스위치 trigger는 lock 뒤에 읽으므로 READ COMMITTED가
+  아니면 거부합니다. 운영자 직접 답의 종료, 본문, 보존, digest 키, 판정, 전달, route·Admin 화면·DM
+  호출은 없습니다.
+- **S1d(본문 저장소·보존)**: `lib/amux/decisionMakerBodyCore.ts`, `lib/amux/decisionMakerBodyStore.ts`,
+  `lib/amux/decisionMakerBodySystemAudit.ts`, `lib/amux/decisionMakerDigestKeys.ts`,
+  `prisma/migrations/20261008120000_amux_decision_maker_body_store/migration.sql`,
+  `tests/amuxDecisionMakerBody.test.mjs`, `tests/integration/amux-decision-maker-body.db.test.ts`.
+  본문은 docs/policy/amux-decision-maker.md §10의 다섯 필드뿐이고(필드당 한 행, 상한은 CHECK) 고칠 수
+  없습니다. 본문 행은 열린 DM 요청에만, 그것이 속한 것을 쓴 같은 트랜잭션의 감사 행(카드는 route, DM
+  출력은 그 종류의 result, 운영자 답은 그 요청을 target으로 하는 edit_confirm)과 함께 들어갑니다. **종결
+  결과마다 `AmuxDecisionMakerResultDetail` 한 행이 결과와 같은 트랜잭션에 남습니다** — 출력 종류,
+  select가 고른 선택지 id, `irreversible`(docs/policy/amux-decision-maker.md §6: Admin이 판정 전에 먼저
+  보임)와 그 결과를 digest한 key check 값이며, 원장의 일부라 지우지 않고 자유 텍스트가 없습니다. 선택지
+  id는 S1a 문법(영숫자·`_`·`-`, 32자)이고, 어기거나 겹치는 카드는 라우팅이 DM에 보내지 않습니다.
+  **digest 키는 30일 key period마다 하나이고 서버 비밀 `AMUX_DM_DIGEST_KEYS`에만 있습니다** — DB에는
+  key check 값만 둡니다. 요청의 period는 그 DB 시계 `createdAt`에서 나오고, 요청 키 K_R = HMAC(K_P, 요청
+  id)로 선택지 집합 digest(라우팅 때 store가 카드의 선택지로 계산하고, 결과는 같은 선택지 목록을
+  가져와야 받아들여짐), broker의 payload·manifest digest, 앱이 저장한 출력으로 계산하는 결과 digest,
+  본문 digest를 모두 keyed로 만듭니다. 평문 hash는 어디에도 없습니다. 결과는 레지스트리가 그 키를
+  등록했고 파기하지 않았을 때만 commit됩니다. 보존은 별도 append-only 사건 표입니다: 요청이
+  닫히면(assign_discarded·stale_close) 같은 문장에서 trigger가 `retention_set`(닫힘 + 2160시간, 고정
+  길이)을 한 번 쓰고, hold는 사람의 `hold_set`·`hold_release`이며 열린 hold는 hold 사건 수로만 셉니다.
+  본문 삭제는 hold가 없을 때 router의 `.body_purge`(보존 기한 뒤) 또는 사람의 `.body_erase`(개인정보
+  삭제 예외) 감사와 같은 트랜잭션에서만 됩니다. 키 파기는 period가 끝났고 본문·열린 hold·열린 요청이
+  남지 않았을 때만 기록되며, 그 뒤로는 그 period의 본문을 쓸 수 없습니다.
+  docs/policy/amux-decision-maker.md §6의 표대로 이 단계의 쓰기는 kill switch 중에도 모두 허용되므로
+  스위치를 읽지 않습니다. 같은 변경에서 S1c의 스위치 읽기 실패는 트랜잭션을 이미 중단시키므로 writer가
+  그 자리에서 `settings_unreadable`을 던지고 아무것도 쓰지 않습니다(SAVEPOINT는
+  docs/policy/amux-decision-maker.md §9의 12문장을 넘깁니다). 라우팅·결과 제출·배정은 이 store의 세
+  조합을 거쳐서만 부릅니다. **카드 본문은 라우팅이 같은 트랜잭션에서 씁니다**(2026-10-09) —
+  `recordDecisionMakerRequestWithCardText()`가 DM으로 라우팅된 새 요청에만 `dmCardText()`(S1a의 JSON
+  직렬화, `format` 표시 포함)를 그 route 감사에 묶어 저장하고, 운영자 라우팅은 본문이 없습니다. 본문
+  guard가 카드를 그 요청의 route 트랜잭션에만 받으므로 나중에 채울 수 없습니다.
+  docs/policy/amux-decision-maker.md §5의 16 KiB와 카드 secret 검사는 이 직렬화 바이트로 판정하므로 DM으로
+  가는 카드는 언제나 본문 store가 받습니다. Admin은
+  `readDecisionMakerCardText()`로 읽습니다. cron·route·Admin 화면은 없습니다.
+- **S1e(운영자 판정·전달)**: `lib/amux/decisionMakerJudgmentCore.ts`,
+  `lib/amux/decisionMakerJudgmentStore.ts`, `lib/amux/decisionMakerJudgmentSystemAudit.ts`,
+  `prisma/migrations/20261008130000_amux_decision_maker_stale_close_hours/migration.sql`,
+  `prisma/migrations/20261008130100_amux_decision_maker_judgment_delivery/migration.sql`,
+  `tests/amuxDecisionMakerJudgment.test.mjs`, `tests/integration/amux-decision-maker-judgment.db.test.ts`.
+  판정은 요청당 하나(`confirm`·`edit_confirm`·`reject`)이고 사람의 `amux.decision.<kind>` 감사가 같은
+  트랜잭션에서 **요청**을 target으로 합니다(S1d 본문 guard가 이미 그렇게 묶음). **판정이 요청을
+  닫습니다** — 판정 표의 trigger가 같은 문장에서 같은 종류의 닫힘 사건을 원장에 쓰고, 원장의 event
+  guard는 그 판정 행 옆에서만 받으며, S1d 닫힘 trigger가 그때부터 보존(2160시간)을 시작합니다. 원장의
+  닫힘 종류는 다섯이고(request core의 닫힘 목록과 같음), event guard·본문 guard·보존 guard·키 guard와
+  request store의 두 읽기가 같은 목록을 씁니다 — 한쪽만 바꾸지 않습니다. 확정(`confirm`·`edit_confirm`)은 kill switch 중 거부되고 거절은
+  허용되며, Admin이 보여 준 값(답·근거 본문의 keyed digest, select의 선택지, `irreversible`, 스냅샷
+  상태·SHA·manifest digest)이 저장값과 모두 같을 때만 됩니다. 고친 답은 S1d 본문 store가 판정 직전 같은
+  트랜잭션에 쓰고 판정이 그 digest를 기록합니다. 선언 정확도는 기본 `not_judged`, `mismatched`면
+  `effect_class`·`resolution`·`paths` 중 하나 이상입니다. 전달은 확정 뒤 결정 한 번(kill switch 중 거부),
+  그 뒤 영수증 또는 `delivery_unknown` 한 번, `delivery_unknown`에만 사람의 해결 한 번입니다 —
+  docs/policy/amux-decision-maker.md §10이 영수증 action을 따로 두지 않으므로 결정과 영수증 모두 router의
+  `amux.decision.deliver`입니다. docs/policy/amux-decision-maker.md §4의 보고는 읽기만 하며 분모가 비면 `insufficient_evidence`이고 스위치·졸업과 닿지 않습니다. 같은 변경에서 원장의
+  stale close를 `720 hours`로 고정했습니다(이전 `30 days`는 DST에서 한 시간 어긋남). 함수 네 개를
+  교체하는 migration은 header 선언이 하나뿐이라 이전 본문 digest를 첫 DO 블록에서 대조합니다.
+  route·Admin 화면·bridge는 없습니다.
+- **S1f1(스위치 route)**: `app/api/admin/amux/decision-maker/switches/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerSwitchRead`·`decisionMakerSwitchChange`,
+  `tests/server-contract/admin-amux-decision-maker-switches-route.test.ts`. 읽기는 관리자 누구나이고
+  (kill switch 중에도 DM 기록 열람은 허용), 변경은 `ops:write`와 최근 step-up을 body보다 먼저 검사합니다.
+  두 handler는 첫 줄부터 `withAmuxRouteBudget` 안에서 돌므로 세션·rate limit·body에 쓴 시간이 15초
+  예산에서 빠지고, 남은 시간이 경계 예산보다 짧으면 트랜잭션을 시작하지 않습니다
+  (`tests/server-contract/admin-amux-decision-maker-switches-route-budget.test.ts`).
+  route는 S1b store를 AMUX DB 경계 안에서 직접 부르며 감사는 store가 씁니다. **경계 상한은 store의 가장
+  긴 문장 수 + setup + fence입니다** — `tests/amuxDecisionMakerSwitch.test.mjs`가 그 셈을, switch DB
+  테스트가 하나 줄인 상한의 거부를 고정하므로 store에 문장을 더하면 상한도 함께 올립니다. 결과를 모르면
+  `outcome_unknown`(503)으로 답하고 다시 보내지 않고 GET으로 확인합니다. Admin 화면·라우팅 route·bridge는
+  없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
@@ -1434,6 +1651,7 @@ Before changing the Prompt Refiner surface or request boundary in
 `tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
+- `docs/ui-contracts/chat-e04-staging-fixture.md`
 - `docs/policy/prompt-refiner-observability.md`
 - `docs/ops/prompt-refiner-shadow-harness.md`
 
@@ -1627,6 +1845,48 @@ Non-negotiable requirements:
 - A card that promises a feature this build does not have is a release blocker.
   Everything else here is ordinary review.
 <!-- END:chat-starter-catalog-invariant -->
+
+<!-- BEGIN:independent-review-requests -->
+# 독립 검토는 검토 서버에 요청합니다
+
+작업을 마치고 독립 검토가 필요하면 **reviewer를 직접 고르지 않습니다.** 다른
+공급사의 앱이나 CLI를 손으로 부르지 않고 검토 서버에 요청합니다. 서버가 작성자와
+**모델 공급사가 다른** reviewer를 부하에 따라 배정하고, 판정을 결정적 규칙으로
+돌려줍니다. 설치와 동작은 `tools/review-orchestrator/README.md`에 있습니다.
+
+1. **검토할 변경을 commit합니다.** commit되지 않은 변경은 서버로 가지 않습니다.
+2. **요청합니다.** 클라이언트는 운영자 PC의 고정 위치에 있으므로 어느 브랜치에서나
+   같은 명령을 씁니다. 이 도구가 들어 있는 checkout에서는 `npm run -s review --`도 같습니다.
+
+   ```
+   node "$HOME/bin/review.mjs" submit --author <자기 이름> --scope "<무엇을 왜 바꿨는지 한두 줄>"
+   ```
+
+   - `--author`는 **지금 작업한 앱 자신**입니다. Claude Code는 `claude`, Codex는
+     `codex`, Cursor는 `cursor`이고, Cursor는 실제로 쓴 모델의 공급사를
+     `--author-vendor`(`anthropic`·`openai`·`xai`·`google` 등)로 함께 적습니다.
+     서버가 이 값으로 같은 공급사를 빼므로, 다른 앱의 이름을 쓰지 않습니다.
+   - base는 클라이언트가 고릅니다. `origin/develop`과 `origin/main`의 분기점 중 **더 가까운 것**이
+     base가 되므로 `--base`는 붙이지 않습니다. 먼 기준점은 이미 병합된 남의 변경을 끌고 와서
+     reviewer를 둘로 늘리고 대기열을 막습니다(2026-10-02, 대기 20건 전부가 그랬습니다).
+   - 계약 경로(migration, 과금, 정책 문서 등)를 건드린 변경은 서버가 reviewer를 두 명으로
+     올립니다. 더 필요하면 `--reviewers 2`를 붙입니다.
+   - 같은 브랜치의 다음 검토 round라면 `--focus <지난 round의 마지막 commit>`을 붙입니다.
+     reviewer에게는 그 commit 이후의 diff만 보여 주고, 지시 파일과 계약 경로 판정은 base부터
+     전체를 기준으로 합니다. push하지 않은 commit도 focus가 될 수 있습니다.
+3. **기다립니다.** `node "$HOME/bin/review.mjs" wait <jobId>`를 종료 코드가 3이 아닐 때까지
+   반복합니다. 한 번에 최대 9분 기다리므로 명령 하나의 시간 제한 안에 들어갑니다.
+4. **결과대로 처리합니다.**
+   - `0` accept: 결과를 보고합니다.
+   - `1` reject: 지적을 고치고 commit한 뒤 **새로 submit**합니다. 같은 job을 다시 쓰지 않습니다.
+   - `2` unknown: **다시 보내지 않습니다.** `report <jobId>`의 원문과 함께 사람에게 알립니다.
+     결과를 모르는 것을 다른 reviewer로 몰래 다시 보내면 부하가 한쪽으로 쏠립니다.
+   - `64`·`65`: 요청이나 서버의 오류입니다. 오류 출력을 그대로 사람에게 알립니다.
+     SSH 접속 오류(`Permission denied`, `Could not resolve hostname`)도 여기에 속합니다.
+
+검토 결과는 **신호이지 승인이 아닙니다.** accept가 병합이나 배포 승인을 대신하지
+않고, 정책 문서가 기록을 요구하는 별도 교차 검토 절차가 있으면 그 절차를 따릅니다.
+<!-- END:independent-review-requests -->
 
 <!-- BEGIN:agent-delegation-policy -->
 # 작업을 어느 모델에 보낼지

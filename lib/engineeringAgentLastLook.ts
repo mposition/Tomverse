@@ -19,6 +19,11 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { AMUX_INCIDENT_SETTING_KEY, parseAmuxIncidentSetting } from "@/lib/amux/incidentCore";
+import { AMUX_V22_ENGINEERING_PUBLICATION_ENV,
+  amuxV22EngineeringPublicationEnabled } from
+  "@/lib/amux/v22TaskExecutionCore";
+import { readAmuxV22PublicPrConsent } from
+  "@/lib/amux/v22PublicPrConsent";
 import { decideLastLook, type LastLookVerdict } from "@/lib/engineeringAgentCapability";
 import {
   ENGINEERING_AGENT_KILL_SWITCH_ENV,
@@ -32,7 +37,8 @@ import {
 
 export type EngineeringAgentLastLookVerdict =
   | LastLookVerdict
-  | { verdict: "refuse"; reason: "lease_passed" | "commit_digest_mismatch" };
+  | { verdict: "refuse"; reason: "lease_passed" |
+      "commit_digest_mismatch" | "v22_publication_disabled" };
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -47,7 +53,10 @@ export async function readEngineeringAgentLastLook(
     db.appSetting.findUnique({ where: { key: AMUX_INCIDENT_SETTING_KEY }, select: { value: true } }),
     db.engineeringAgentWorkItem.findUnique({
       where: { id: input.workItemId },
-      select: { kind: true, state: true, claimMode: true, fencingToken: true, leaseExpiresAt: true },
+      select: { kind: true, state: true, claimMode: true,
+        fencingToken: true, leaseExpiresAt: true,
+        run: { select: { cardId: true,
+          card: { select: { sourceSystem: true } } } } },
     }),
     db.engineeringAgentCapability.findFirst({
       where: { workItemId: input.workItemId, claimFencingToken: input.fencingToken, consumedAt: { not: null } },
@@ -70,6 +79,11 @@ export async function readEngineeringAgentLastLook(
     workItemId: input.workItemId,
   });
   if (verdict.verdict === "refuse") return verdict;
+  if (item?.run?.card.sourceSystem === "admin-idea-v4" &&
+      (!amuxV22EngineeringPublicationEnabled(
+        env[AMUX_V22_ENGINEERING_PUBLICATION_ENV]) ||
+        !(await readAmuxV22PublicPrConsent(item.run.cardId, db))))
+    return { verdict: "refuse", reason: "v22_publication_disabled" };
   if (!item?.leaseExpiresAt || item.leaseExpiresAt.getTime() <= clock[0].now.getTime()) {
     return { verdict: "refuse", reason: "lease_passed" };
   }

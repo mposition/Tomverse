@@ -11,6 +11,7 @@ import {
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { prisma } from "@/lib/prisma";
+import { resetTestFixture } from "./resetTestFixture";
 
 // Lifting by the release matrix, and the locking that makes a lift safe.
 //
@@ -33,7 +34,7 @@ import { prisma } from "@/lib/prisma";
 const RETIRED_AUTHORITY_KEY = "email.suppressionReadAuthority";
 
 const reset = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "SuppressionCause", "SuppressionEntry", "AppSetting", "AdminAuditLog",
       "EmailPreferenceTransition", "ConsentRecord", "EmailPreference",

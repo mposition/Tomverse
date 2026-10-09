@@ -5,6 +5,7 @@ import {
   AMUX_ANALYSIS_CHUNK_CARD_CAP,
   AMUX_ANALYSIS_CHUNK_MAX_BYTES,
   inspectAmuxAnalysisChunk,
+  inspectAmuxStoredAnalysisUnit,
 } from "../lib/amux/ideaAnalysisChunkCore.ts";
 
 const sourceRef = "idea:sha256_opaque";
@@ -89,6 +90,42 @@ test("one bounded chunk can propose hierarchy, Story, Task, and Error evidence w
   assert.equal(result.chunk.units[2].kind, "card");
   assert.equal("digest" in result, false, "a plain content digest must not escape this parser");
   assert.equal(typeof result.canonical, "string");
+});
+
+test("v3 model portfolio signals are bounded suggestions with source evidence", () => {
+  const proposed = { ...chunk([
+    { ...node(), portfolioSignal: { metrics: { value: 4 },
+      uncertainty: "medium", rationale: "This supports a platform-wide need.",
+      evidenceRefIds: [sourceRef] } },
+    { ...story(), portfolioSignal: { metrics: { impact: 3 },
+      uncertainty: "high", rationale: "The observed gap has a bounded impact.",
+      evidenceRefIds: [sourceRef] } },
+    { ...task(), portfolioSignal: { metrics: { contribution: 3, urgency: 2,
+      dependencyUnlock: 4, workerCoverage: 2, effort: 3, deliveryRisk: 2 },
+      uncertainty: "medium", rationale: "The task unlocks one prerequisite.",
+      evidenceRefIds: [sourceRef] } },
+  ]), schemaVersion: 3 };
+  const accepted = inspect(proposed);
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal(accepted.chunk.units[0].portfolioSignal.metrics.value, 4);
+  assert.deepEqual(inspect({ ...proposed, units: [node()] }),
+    { ok: false, code: "schema_rejected" });
+  assert.deepEqual(inspect({ ...proposed, units: [{ ...proposed.units[0],
+    portfolioSignal: { ...proposed.units[0].portfolioSignal,
+      evidenceRefIds: ["not_confirmed"] } }] }),
+  { ok: false, code: "source_ref_unapproved" });
+});
+
+test("a retained unit is still readable after another unit's body is purged", () => {
+  const result = inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify(story()), chunkIndex: 0, permittedSourceRefIds: [sourceRef],
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.unit.localId, "c0:card-1");
+  assert.deepEqual(inspectAmuxStoredAnalysisUnit({
+    raw: JSON.stringify({ ...story(), sourceRefIds: ["unapproved"] }),
+    chunkIndex: 0, permittedSourceRefIds: [sourceRef],
+  }), { ok: false });
 });
 
 test("eight cards cap a chunk, not an entire project idea", () => {

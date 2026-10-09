@@ -1,0 +1,29 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-challenge-witness-followup-v2",
+  "requirement": "Continue the concluded chat01-refiner-vnext-one-shot-challenge-witness-v1 exchange, which remains on_hold after two revisions and two reproducible Claude Code Max nit findings. Preserve all v1 round packages, verdicts and final status; this successor is not a retroactive pass or a round-limit reset. The operator approved a formal successor review on 2026-10-02. Codex authors; Claude Code Max first-party subscription CLI reviews read-only using the approved --skip-preflight exception. Within one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, this is only a development-only challenge witness helper. No real holdout content, Anthropic API, full manifest claim, seal, provider call, stage/run approval, flag change, product traffic, PR merge or deployment is authorized.",
+  "completionCriteria": [
+    "Review the exact scoped diff and inherited v1 on_hold findings; bind the verdict to this successor package digest.",
+    "Verify NFD Hangul lexical counting is canonically equivalent to NFC without changing original source code-point span offsets or source text.",
+    "Verify synthetic negative assertions reject invalid boundaryKind, prohibitedOutcome and mixed predicate kind with the expected fail-closed codes.",
+    "Recheck strict shapes, bounded source and fixture text, four challenge tag handling, and no arbitrary script, regex or provider execution.",
+    "Confirm semanticTruthVerified, fullManifestValidated and dispatchAuthorized remain false; no owner holdout is read, authored, logged or returned.",
+    "Confirm source and synthetic tests are byte-pinned by the development-only closure, including its own closure test, and LF checkout attributes remain pinned.",
+    "Require focused tests, typecheck, lint and whitespace guards; distinguish controller-recorded checks from commands actually run by the reviewer.",
+    "Return exactly one raw JSON verdict without Markdown fences and only reproducible actionable findings; approve with any finding is not a controller pass."
+  ],
+  "baseCommit": "998753664e8361862bd31860269cbfbce258900e",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-challenge-witness-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-challenge-witness-followup-v2.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-challenge-witness-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitness.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotChallengeWitnessClosure.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-challenge-witness-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-challenge-witness-v1/exchange.json"
+  }
+}

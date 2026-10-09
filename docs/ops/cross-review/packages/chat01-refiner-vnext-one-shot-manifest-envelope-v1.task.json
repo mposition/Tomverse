@@ -1,0 +1,23 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-manifest-envelope-v1",
+  "requirement": "Under mposition's approved one-shot policy v2 commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b, add only an owner-process development-stage closed-envelope and duplicate-source check using synthetic fixtures. Codex authors; Claude Code Max first-party subscription CLI independently reviews read-only with user-approved --skip-preflight. The owner's actual holdout is neither authored nor viewed. No seal, independent-authorship or semantic/privacy proof, provider/API call, stage/run, product traffic, or dispatch authority is implemented. Anthropic API is forbidden.",
+  "completionCriteria": [
+    "Inspect the exact diff and package digest, including the inherited root, allocation, challenge witness and rubric checks.",
+    "After full existing structural passes, the versioned manifest and all 80 cases reject extra or missing fields and Unicode-, whitespace- or case-equivalent duplicate source texts without returning any restricted content or digest.",
+    "Malformed shapes and duplicates fail closed in public synthetic tests, while a valid synthetic manifest remains accepted.",
+    "Returned flags explicitly keep semantic truth, independent authorship, privacy exclusion, full-manifest validation and dispatch authority false; a caller boolean never becomes operational admission.",
+    "Changed source and synthetic tests are byte-pinned in development-only closures with LF checkout attributes; both rubrics and envelope closure tests, focused tests, typecheck, lint and whitespace guards pass.",
+    "Return one raw JSON verdict without Markdown fences; approval with a reproducible finding is not a controller pass."
+  ],
+  "baseCommit": "2519aeda2f87721f7f937207235f1ca925e936c2",
+  "writableScope": [
+    ".gitattributes",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-manifest-envelope-v1.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

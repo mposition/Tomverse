@@ -11,6 +11,7 @@ import {
   AMUX_DB_MAX_WAIT_MS,
   AMUX_DB_STATEMENT_TIMEOUT_MS,
 } from "../lib/amux/dbBoundary.ts";
+import { isAmuxExecutionApiEnabled } from "../lib/amux/executionGate.ts";
 import {
   ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH,
   ENGINEERING_AGENT_AMUX_ROUTE_BUDGET_MS,
@@ -27,6 +28,7 @@ import {
 import {
   HALT_VALUES,
   RUNNER_REPORTABLE_HALTS,
+  RUNNER_REPORTABLE_OUTCOMES,
   RUN_OUTCOMES,
   combineRunHalt,
   decideHalt,
@@ -43,12 +45,44 @@ import {
 // docs/policy/development-agent-orchestration.md, Authority, version 12) and
 // the round-5 review fixes that sit beside it.
 
-test("the adapter ships closed, and opens only with both its latch and the execution API", () => {
-  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, false, "version 12 ships the latch off");
-  assert.equal(isEngineeringAgentAmuxAdapterOpen(), false);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true }), true);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false }), false);
-  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true }), false);
+test("the latch ships on, and the adapter opens only with it, the execution API and a mode that is not off", () => {
+  assert.equal(ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH, true, "version 25 turns the latch on");
+  // With the latch on, the fast check is exactly the execution API gate.
+  assert.equal(isEngineeringAgentAmuxAdapterOpen(), isAmuxExecutionApiEnabled());
+  for (const mode of ["shadow", "t1"]) {
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode }), true, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: false, mode }), false, mode);
+    assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: false, executionApiEnabled: true, mode }), false, mode);
+  }
+  // Authority: the writer path runs only when the latch and the operating mode
+  // are both open. Mode off closes every adapter call, not only a new run.
+  assert.equal(engineeringAgentAmuxAdapterPermitted({ codeLatch: true, executionApiEnabled: true, mode: "off" }), false);
+});
+
+test("every adapter operation checks the whole gate, mode included, before it touches AMUX", () => {
+  const source = readFileSync(new URL("../lib/engineeringAgentAmuxAdapter.ts", import.meta.url), "utf8");
+  const sliceFrom = (start) => source.slice(source.indexOf(start), source.indexOf("\n};", source.indexOf(start)));
+  const gate = sliceFrom("export const engineeringAgentAmuxAdapterPermittedNow = async");
+  assert.match(gate, /readEngineeringAgentSwitches\(prisma\)/, "the gate reads the effective mode");
+  assert.match(gate, /engineeringAgentAmuxAdapterPermitted\(/, "the gate applies the whole decision");
+  assert.match(sliceFrom("const requireOpen = async"), /await engineeringAgentAmuxAdapterPermittedNow\(\)/, "requireOpen is that gate");
+  assert.equal((source.match(/^ {2}requireOpen\(\);$/gm) ?? []).length, 0, "a requireOpen() call is not awaited");
+  const exported = [...source.matchAll(/^export async function (\w+)/gm)].map((match) => match[1]);
+  for (const name of exported) {
+    const body = source.slice(source.indexOf(`export async function ${name}`));
+    const next = body.indexOf("\nexport ", 1);
+    const own = next < 0 ? body : body.slice(0, next);
+    if (!/(?:register|heartbeat|pull|ack|start|finish|record|settle|claim)/i.test(name)) continue;
+    if (name === "recordEngineeringAgentPublisherResult") {
+      // A reported pull request already exists: a closed adapter records it on
+      // the engineering side with a mismatch for a person, and never reaches AMUX.
+      const closed = own.indexOf('if (!(await engineeringAgentAmuxAdapterPermittedNow())) return settleWithoutCard("adapter_closed");');
+      assert.ok(closed > 0, "the publisher result checks the whole gate");
+      assert.ok(closed < own.indexOf("recordAmuxReviewPullRequest("), "and checks it before AMUX");
+      continue;
+    }
+    assert.match(own, /await requireOpen\(\);/, `${name} calls AMUX without the whole gate`);
+  }
 });
 
 test("the worker is the policy's one identity, and a run id is minted in the widest run-id form", () => {
@@ -61,6 +95,10 @@ test("the worker is the policy's one identity, and a run id is minted in the wid
 });
 
 test("a run's outcome settles its attempt to review, todo or blocked, never done, and abandoned is not the runner's", () => {
+  assert.equal(RUNNER_REPORTABLE_OUTCOMES.includes("private_result"), false);
+  assert.equal(RUNNER_REPORTABLE_OUTCOMES.includes("abandoned"), false);
+  const finish = readFileSync("app/api/internal/engineering-agent/run/finish/route.ts", "utf8");
+  assert.match(finish, /outcome: z\.enum\(RUNNER_REPORTABLE_OUTCOMES\)/);
   for (const outcome of RUN_OUTCOMES) {
     if (outcome === "abandoned") {
       assert.throws(() => amuxSettlementForRunOutcome(outcome), /outcome_not_settled_by_agent/);
@@ -98,11 +136,18 @@ test("no engineering route takes a worker from its body, and only runner routes 
       continue;
     }
     assert.match(text, /isEngineeringAgentRouteAuthorized\(request, "runner"\)/, `${file} is a runner route`);
-    assert.match(text, /isEngineeringAgentAmuxAdapterOpen\(\)/, `${file} checks the latch before the body`);
+    // The whole gate, mode included, before the body: a closed gate records no request row.
+    const gate = 'if (!(await engineeringAgentAmuxAdapterPermittedNow())) return engineeringAgentJson({ refused: "adapter_closed" }, 409);';
+    assert.ok(text.includes(gate), `${file} checks the whole gate before the body`);
+    assert.ok(text.indexOf(gate) < text.indexOf("readLimitedJson("), `${file} checks the gate before it reads or records anything`);
   }
   const adapter = readFileSync("lib/engineeringAgentAmuxAdapter.ts", "utf8");
   const publisherResult = adapter.slice(adapter.indexOf("export async function recordEngineeringAgentPublisherResult"));
-  assert.match(publisherResult, /requireOpen\(\);\n\s+const item = await prisma/, "the AMUX path is behind the latch");
+  assert.match(
+    publisherResult,
+    /return settleWithoutCard\("adapter_closed"\);\r?\n\s+const item = await prisma/,
+    "the AMUX path is behind the whole gate, and a closed gate still records the result",
+  );
 });
 
 test("each attached writer fits the adapter routes' budget, as the AMUX routes' writers fit theirs", () => {

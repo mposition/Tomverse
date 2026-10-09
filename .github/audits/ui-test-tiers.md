@@ -374,7 +374,7 @@ push의 무필터 실행에서만 잡히는데, 승격 후에 말하는 보안 �
 
 - `chat-state-visual-regression.spec.ts` (63 golden). PR에서 제거한 성능 근거가
   유효하고, security regression 검사가 이 파일 이름이 `pr-fast-gate.yml`에
-  다시 등장하는 것을 금지합니다. golden은 main push와 nightly에서
+  다시 등장하는 것을 금지합니다. golden은 main으로 가는 PR과 nightly에서
   `--retries=0`으로 first-run 검증됩니다.
 - `--update-snapshots`는 어떤 tier에서도 사용하지 않습니다. 같은 검사에서
   `pr-fast-gate.yml`과 `nightly-visual-regression.yml` 양쪽에 대해 부재를

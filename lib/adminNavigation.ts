@@ -86,6 +86,13 @@ export type AdminNavItem = {
   viewRoles?: readonly AdminRole[];
   badge?: AdminNavBadgeKey;
   tabs?: readonly AdminNavTab[];
+  /**
+   * The page uses the main column's full width instead of the console's
+   * reading width. Only for a page whose content is a canvas that grows with
+   * the space it gets (the Agent office floor); tables and forms keep the
+   * reading width.
+   */
+  wide?: true;
 };
 
 export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
@@ -558,7 +565,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     label: "Engineering agent",
     href: "/admin/engineering-agent",
     description:
-      "T2 drafts waiting on a decision, runs, the pull requests the agent opened, and its mode",
+      "The agents' record: engineering T2 drafts and runs, and the product-research observation slots",
     group: "Operations",
     writeRoles: ["owner", "ops"],
     aliases: [
@@ -570,6 +577,13 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "publisher",
       "runner",
       "freeze",
+      // The product-research section lives on this screen as a tab
+      // (docs/policy/product-research-agent.md §4), so the palette has to find
+      // it under its own words rather than under the engineering agent's.
+      "product research",
+      "observation",
+      "issue backlog",
+      "slot",
     ],
     tabs: [
       {
@@ -591,6 +605,70 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "settings",
         label: "Mode",
         description: "Mode, freeze, the kill switch and the owner queue against its caps",
+      },
+      {
+        id: "product-research",
+        label: "Product research",
+        description:
+          "Observation slots, the newest one's rows, and the staging and production windows",
+      },
+    ],
+  },
+  {
+    id: "sre-ops",
+    label: "SRE agent",
+    href: "/admin/sre-ops",
+    description: "The ops observer's state chain, its trust verdict and the owner's genesis",
+    group: "Operations",
+    writeRoles: ["owner"],
+    aliases: ["sre", "ops observer", "genesis", "trust", "state chain", "pager"],
+  },
+  {
+    id: "agent-digests",
+    label: "Agent digests",
+    href: "/admin/agent-digests",
+    description: "What each agent reported each day, and the operator control it runs under",
+    group: "Operations",
+    writeRoles: ["owner", "ops"],
+    aliases: ["digest", "qa", "release", "release readiness", "merge lane", "control revision", "price deadline", "billing-finance-ops"],
+    tabs: [
+      {
+        id: "qa-release",
+        label: "QA and release",
+        description: "The daily release-readiness digest and the operator control revision",
+      },
+      {
+        id: "billing-finance-ops",
+        label: "Billing and finance",
+        description: "The daily pending-price deadline digest, the agent switch and the monitor check",
+      },
+    ],
+  },
+  {
+    // A shell: a pixel office for the eight agent teams that plays a demo day
+    // and links each team to the page that holds its record. A LIVE room reads
+    // that team's operating state, read only; nothing on the page writes, so
+    // it carries no badge and no writeRoles.
+    id: "office",
+    label: "Agent office",
+    href: "/admin/office",
+    // The office floor scales to the space it is given.
+    wide: true,
+    description: "A pixel office shell for the eight agent teams, with a link to each team's record",
+    group: "Operations",
+    aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
+    // The office draws its own tab strip, as the original UI did; its tabs are
+    // links to these sections, and one demo engine runs under both.
+    tabs: [
+      {
+        id: "live",
+        label: "Live office",
+        description: "The office floor, the operator console and the demo approval",
+      },
+      {
+        id: "dashboard",
+        label: "Dashboard",
+        description: "Team board, demo approval, digest brief and each team's record link",
       },
     ],
   },
@@ -912,6 +990,18 @@ export const ADMIN_DETAIL_ROUTES = [
       "The copy this campaign sends, who has attested to what, and whether it may go out",
     parentLabel: "Email campaigns",
     parentHref: "/admin/email-campaigns",
+    group: "Operations" as const,
+  },
+  {
+    // The ops-observer page message link (docs/policy/sre-ops.md §3 rule 1).
+    // Its path is fixed by scripts/ops-observer/content-guard-core.mjs, so it
+    // lives under /admin/agents rather than beside its parent entry.
+    id: "sre-ops-item",
+    pattern: /^\/admin\/agents\/sre-ops\/items\/[^/]+$/,
+    label: "Ops observer message",
+    description: "What one page message was about: its signals, message kinds and times",
+    parentLabel: "SRE agent",
+    parentHref: "/admin/sre-ops",
     group: "Operations" as const,
   },
   {

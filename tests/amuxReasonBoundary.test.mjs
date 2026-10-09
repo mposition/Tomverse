@@ -33,6 +33,7 @@ test("escalation creation stores only server reason codes and audits its opening
   assert.match(source, /amux\.human_escalation\.opened/);
   assert.doesNotMatch(source, /reason:\s*input\.reason/);
   assert.equal(storedAmuxEscalationReasonCode("secret\n".repeat(2_000), "execution-recovery"), "execution_blocked");
+  assert.equal(storedAmuxEscalationReasonCode("usage_outcome_unknown", "execution-recovery"), "usage_outcome_unknown");
   assert.equal(storedAmuxEscalationReasonCode("secret", "planning-review"), "canonical_deadline_review_required");
   assert.equal(storedAmuxEscalationReasonCode("secret", "cost-operations"), "operational_cost_blocked");
   assert.equal(storedAmuxEscalationReasonCode("attempt_budget_exhausted", null), "attempt_budget_exhausted");

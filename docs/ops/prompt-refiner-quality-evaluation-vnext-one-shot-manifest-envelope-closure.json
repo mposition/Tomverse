@@ -1,0 +1,12 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-manifest-envelope-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "independentAuthorshipVerified": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts": "7434176cff734f2fea86ea32262539032bea7e58062188b406148f7ce91017c6",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestRubrics.test.mjs": "ab55907ee90d8d5f118a901a18938580f13cdd9ac62fa226e91e51d2e4ba41b3",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestEnvelopeClosure.test.mjs": "0f83c0fcafe38b265542b5eff638013002d05966a503aa80ad4dac2db3901027"
+  }
+}

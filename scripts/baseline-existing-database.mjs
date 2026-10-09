@@ -1,12 +1,22 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join as joinPath, resolve as resolvePath } from "node:path";
 import pg from "pg";
 
 import {
   CONNECT_RETRY_COUNT,
   connectWithRetry,
 } from "./direct-database-connect-core.mjs";
+import {
+  checkDefinitionQuery,
+  checkReplacementAnswer,
+  checkReplacementSetAnswer,
+  pendingProbes,
+  presenceAnswer,
+  presenceQueryFor,
+  presenceVerdict,
+  replacementAnswer,
+} from "./baseline-presence-core.mjs";
 
 /**
  * Reconciles a database that already holds the schema with a migration history
@@ -59,6 +69,20 @@ import {
  * migrations *and* a schema that already matches `schema.prisma` exactly --
  * and refuses with the commands to resolve it. Refusing leaves the database
  * untouched; proceeding would not.
+ *
+ * ## Migrations the diff cannot see
+ *
+ * "Matches `schema.prisma`" is evidence only about what `migrate diff`
+ * compares. A migration that adds only a partial or expression index, a CHECK
+ * constraint, a trigger or a function matches before it is applied as well as
+ * after, so on its own it would always be refused. Such a migration names the
+ * relation it creates (`-- baseline-check: present-if-relation "Name"`), or the
+ * function (`present-if-function "name"`) when it creates only a function.
+ * A function replacement may instead pin the exact prior body digest. A
+ * checksum-bound `baseline-check.json` may pin every exact prior CHECK
+ * definition for already-shipped SQL that cannot gain a header declaration.
+ * Only a proven absent object or an exact prior replacement state permits the deploy.
+ * See `scripts/baseline-presence-core.mjs`.
  */
 
 const BASELINE_MIGRATION = "00000000000000_baseline";
@@ -189,14 +213,82 @@ try {
     (name) => name !== BASELINE_MIGRATION && !recordedSet.has(name)
   );
   if (pending.length > 0 && schemaMatchesPrisma()) {
-    fail(
-      "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
-      {
-        pending,
-        recordedMigrations: recorded.length,
-        command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
-      }
+    // The match is no evidence about a migration the diff cannot see. Each one
+    // may name the relation or function it creates; only proof that every one of them is
+    // absent lets the deploy go on.
+    const { probes, undeclared } = pendingProbes(pending, (name) =>
+      readFileSync(joinPath(MIGRATIONS_DIR, name, "migration.sql"), "utf8"),
+      (name) => {
+        try {
+          return readFileSync(joinPath(MIGRATIONS_DIR, name, "baseline-check.json"), "utf8");
+        } catch (error) {
+          if (error && typeof error === "object" && error.code === "ENOENT") return undefined;
+          throw error;
+        }
+      },
     );
+    if (undeclared.length === 0) {
+      const answers = new Map();
+      for (const probe of probes) {
+        const { name } = probe;
+        // One fixed question with the declared name bound as a parameter: a
+        // migration supplies a name, never SQL. Read-only and rolled back as
+        // well, though the fixed query has nothing to write.
+        await client.query(
+          probe.replacedChecks !== undefined
+            ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            : "BEGIN READ ONLY",
+        );
+        try {
+          if (probe.replacedChecks !== undefined) {
+            const checkAnswers = [];
+            for (const check of probe.replacedChecks) {
+              const { rows } = await client.query(checkDefinitionQuery(check));
+              checkAnswers.push(
+                checkReplacementAnswer(rows, check.previousDefinitionSha256),
+              );
+            }
+            answers.set(name, checkReplacementSetAnswer(checkAnswers));
+          } else {
+            const { rows } = await client.query(presenceQueryFor(probe));
+            // A replacement must match the exact previous body. Other probes
+            // answer one boolean. Unknown or malformed answers fail closed.
+            answers.set(
+              name,
+              probe.previousBodySha256 !== undefined
+                ? replacementAnswer(rows, probe.previousBodySha256)
+                : presenceAnswer(rows)
+            );
+          }
+        } catch {
+          answers.set(name, undefined);
+        } finally {
+          await client.query("ROLLBACK").catch(() => undefined);
+        }
+      }
+      const verdict = presenceVerdict(pending, answers);
+      if (verdict.proceed) {
+        log(
+          "Pending migrations change nothing schema.prisma describes; every declared object is absent or every replacement has the exact prior function/CHECK definition. Letting migrate deploy apply them.",
+          { pending }
+        );
+      } else {
+        fail(
+          "This database already matches schema.prisma, and at least one pending migration is neither proven absent nor in its exact prior function/CHECK state. Nothing has been changed.",
+          { pending, notProvenAbsent: verdict.notProvenAbsent }
+        );
+      }
+    } else {
+      fail(
+        "This database already matches schema.prisma, but migrations are recorded as unapplied. `migrate deploy` would try to re-apply them and fail with P3018, leaving a failed row that blocks every later deploy. This usually means a restore paired a database dump with an older _prisma_migrations. Nothing has been changed. If these migrations really are already in place, record them and re-run the deploy.",
+        {
+          pending,
+          recordedMigrations: recorded.length,
+          command: `prisma migrate resolve --applied ${pending.join(" --applied ")}`,
+          undeclared,
+        }
+      );
+    }
   }
 } catch (error) {
   const message =

@@ -1,0 +1,11 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-manifest-witnesses-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "fullManifestValidated": false,
+  "files": {
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.ts": "cafa092aba591f5b9ff96a6d403d8b0b0e06ebe404c9b172da4e069e8e0b77e1",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnesses.test.mjs": "fdba3ad2d18eee2337f708c3e194f8354ba9a83399dcbe3a966fedca76efd091",
+    "tests/promptRefinerQualityEvaluationVnextOneShotManifestWitnessesClosure.test.mjs": "8c70e7d9a00b26e0996829812aaa46cec71705c7115465fa49c1ca259261acb0"
+  }
+}

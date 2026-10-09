@@ -6,6 +6,8 @@ import { getServerSession } from "next-auth/next";
 import { AdminAmuxRoutingPanel } from "@/components/admin/AdminAmuxRoutingPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxCardListPanel } from "@/components/admin/AmuxCardListPanel";
+import { AmuxExecutionWorkspace } from "@/components/admin/AmuxExecutionWorkspace";
+import { AmuxCliUsagePanel } from "@/components/admin/AmuxCliUsagePanel";
 import { AmuxOrchestratorHaltsPanel } from "@/components/admin/AmuxOrchestratorHaltsPanel";
 import { amuxTabChips, type AmuxTabStatus } from "@/lib/adminAmuxTabStatus";
 import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
@@ -17,6 +19,7 @@ import {
   countAwaitingAmuxEscalations,
 } from "@/lib/adminNavigationCounts";
 import { listAmuxCardsForAdmin } from "@/lib/amux/adminCardList";
+import { readAmuxCliUsageSummaryForAdmin } from "@/lib/amux/adminCliUsageSummary";
 import {
   AMUX_ORCHESTRATOR_ADMIN_CLEARED_LIMIT,
   AMUX_ORCHESTRATOR_ADMIN_OPEN_LIMIT,
@@ -87,11 +90,16 @@ export default async function AdminAmuxExecutionPage({
     // Authorization for the section, decided here and not by the route
     // table's `viewRoles`, exactly as the page it replaced decided it.
     if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
-    const { rows, total, limit } = await listAmuxCardsForAdmin();
+    const [{ rows, total, limit }, usage] = await Promise.all([
+      listAmuxCardsForAdmin(),
+      readAmuxCliUsageSummaryForAdmin().catch(() => null),
+    ]);
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
+        <AmuxExecutionWorkspace />
         <AmuxCardListPanel rows={rows} total={total} limit={limit} />
+        <AmuxCliUsagePanel view={usage} />
       </div>
     );
   }
@@ -120,7 +128,10 @@ export default async function AdminAmuxExecutionPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      <AdminAmuxRoutingPanel />
+      <AdminAmuxRoutingPanel focusEscalationId={
+        typeof query.focusEscalation === "string" &&
+        /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
+          query.focusEscalation : null} />
     </div>
   );
 }

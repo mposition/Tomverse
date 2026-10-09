@@ -31,7 +31,18 @@ export type { PolicyChangeNoticePayload };
  * one. The hash covers the whole placeholder render, links included, so it is
  * the value the production environment computes that gets listed here.
  */
-export const POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [];
+export const POLICY_CHANGE_NOTICE_APPROVED_CONTENT_HASHES: readonly string[] = [
+  // docs/policy/email-policy-amendment-draft.md §4, approved by mposition on
+  // 2026-10-03, effective 2026-11-16. Rendered with production's site URL
+  // (https://tomverse.app), the value production computes.
+  "10f95cbc8325ebdc2b9bd76689a17f3c55cb16ec7e568369bba030fe64369e37", // en
+  "f21ae3558a04d72ce633bc5bc766c1d10a16554dd2ed3be8c679fc8f9db4ee5d", // ko
+  "fb30001e52b6a2a64a53ac323a7621e9fbfd3a89bce30ae84ecf76990ef84fa7", // zh
+  "b63d899bffd80627008ebf9d9afb23a05e70e97c69654080a47cf5f3a9053d1f", // fr
+  "85a86993fe2db189c9b6760c9d34fd3459df6307763d0b75133e9a331c8c3ee5", // de
+  "18edaaf3f15216bcf72a421804a00eecc6719209279d21f95f250e50ee9767d7", // es
+  "6c89e42c23482d172b5f84dd0c6c4f713d219638bfac17e8746aedc30f395691", // pt
+];
 
 /**
  * The hash the template registry takes of this render

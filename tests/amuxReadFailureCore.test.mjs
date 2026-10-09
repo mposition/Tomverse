@@ -6,6 +6,7 @@ import { DriverAdapterError } from "@prisma/driver-adapter-utils";
 import {
   AMUX_DATABASE_BUSY_REASON,
   AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS,
+  amuxDatabaseDiagnosticCode,
   amuxTransientDatabaseCode,
 } from "../lib/amux/readFailureCore.ts";
 
@@ -27,6 +28,15 @@ const postgres = (code) =>
 test("the reason and the Retry-After are the ones the Rust client and the scheduler cadence use", () => {
   assert.equal(AMUX_DATABASE_BUSY_REASON, "amux_database_busy");
   assert.equal(AMUX_DATABASE_BUSY_RETRY_AFTER_SECONDS, 5);
+});
+
+test("a Prisma raw-query error exposes only its nested PostgreSQL code", () => {
+  assert.equal(
+    amuxDatabaseDiagnosticCode({ code: "P2010", meta: { driverAdapterError: postgres("57014") } }),
+    "57014",
+  );
+  assert.equal(amuxDatabaseDiagnosticCode({ code: "P2010", meta: { code: "42P01" } }), "42P01");
+  assert.equal(amuxDatabaseDiagnosticCode({ code: "P2010", meta: { database_error: "secret 57014" } }), null);
 });
 
 test("the pool, the transaction API, the statement timeout and a lost connection are transient", () => {

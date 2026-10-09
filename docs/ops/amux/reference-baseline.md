@@ -52,7 +52,7 @@ semantics를 고정한다. 검증 시 reference worktree는 clean이었고
 
 - Frozen local reference는 semantic comparison과 provenance 확인에만 사용한다.
 - Reference directory는 일반 개발 branch처럼 수정하거나 삭제하지 않는다.
-- Upstream full source와 전체 Git history를 Tomverse root에 합치지 않는다.
+- 이 frozen reference의 전체 Git history나 checkout은 Tomverse root에 합치지 않는다. 2026-10-02 별도 운영자 결정으로 편입한 `vendor/amux/` 서버 소스는 `architecture.md`의 독립 workspace이며, 이 frozen reference와 다른 소스 기준이다.
 - Productized AMUX의 authoritative development repository는
   `mposition/Tomverse`다.
 - Productized source는 PR `#1570`, merge commit

@@ -198,6 +198,77 @@ export const checkListing = (entries: readonly TreeEntry[]): ListingCheck => {
   return { ok: true, rootTreeId };
 };
 
+/** v22's bounded sparse transport: compute a result listing from app-read
+ * GitHub base entries and complete replacement bytes for existing regular
+ * files. This never parses or applies the worker's patch. The Publisher must
+ * still apply that patch independently and match this exact root before push. */
+export const resultListingFromModifiedBlobs = (input: {
+  base: readonly TreeEntry[];
+  baseRootTreeId: string;
+  files: readonly { path: string; mode: "100644"; bytes: Uint8Array }[];
+}): { ok: true; result: TreeEntry[]; rootTreeId: string;
+  changedBlobs: ReadonlyMap<string, Uint8Array> } |
+  { ok: false; reason: "base_invalid" | "files_invalid" | "result_invalid" } => {
+  const checked = checkListing(input.base);
+  if (!checked.ok || checked.rootTreeId !== input.baseRootTreeId)
+    return { ok: false, reason: "base_invalid" };
+  if (input.files.length < 1 || input.files.length > PUSH_LIMITS.maxFiles)
+    return { ok: false, reason: "files_invalid" };
+  const entries = new Map(input.base.map((entry) => [entry.path, { ...entry }]));
+  const seen = new Set<string>();
+  const baseBlobIds = new Set(input.base.filter((entry) =>
+    entry.type === "blob").map((entry) => entry.oid));
+  const changedBlobs = new Map<string, Uint8Array>();
+  for (const file of input.files) {
+    const old = entries.get(file.path);
+    if (!isCanonicalRepoPath(file.path) || seen.has(file.path) ||
+        file.mode !== "100644" || old?.type !== "blob" ||
+        old.mode !== file.mode || !(file.bytes instanceof Uint8Array) ||
+        file.bytes.byteLength > PUSH_LIMITS.maxFileBytes) {
+      return { ok: false, reason: "files_invalid" };
+    }
+    seen.add(file.path);
+    const oid = gitObjectId("blob", file.bytes);
+    if (oid === old.oid) return { ok: false, reason: "files_invalid" };
+    entries.set(file.path, { ...old, oid });
+    if (!baseBlobIds.has(oid)) changedBlobs.set(oid, file.bytes);
+  }
+  const children = new Map<string, TreeEntry[]>();
+  for (const entry of entries.values()) {
+    const slash = entry.path.lastIndexOf("/");
+    const parent = slash < 0 ? "" : entry.path.slice(0, slash);
+    const group = children.get(parent) ?? [];
+    group.push(entry);
+    children.set(parent, group);
+  }
+  const treeHash = (path: string): string | null => {
+    const group = children.get(path);
+    if (!group?.length) return null;
+    const sorted = group.map((entry) => ({ entry,
+      name: entry.path.slice(path ? path.length + 1 : 0),
+    })).sort((a, b) => byteCompare(
+      sortKey(a.name, a.entry.type === "tree"),
+      sortKey(b.name, b.entry.type === "tree")));
+    const parts: Uint8Array[] = [];
+    for (const { entry, name } of sorted) {
+      const oid = entry.type === "tree" ? treeHash(entry.path) : entry.oid;
+      if (oid === null) return null;
+      if (entry.type === "tree") entries.set(entry.path, { ...entry,
+        oid });
+      parts.push(encoder.encode(`${entry.type === "tree" ? "40000" :
+        entry.mode} ${name}\0`), hexToBytes(oid));
+    }
+    return gitObjectId("tree", concat(parts));
+  };
+  const rootTreeId = treeHash("");
+  if (rootTreeId === null) return { ok: false, reason: "result_invalid" };
+  const result = [...entries.values()];
+  const confirmed = checkListing(result);
+  return confirmed.ok && confirmed.rootTreeId === rootTreeId ?
+    { ok: true, result, rootTreeId, changedBlobs } :
+    { ok: false, reason: "result_invalid" };
+};
+
 /* ------------------------------------------------------------------------- */
 /* .gitattributes                                                             */
 /* ------------------------------------------------------------------------- */

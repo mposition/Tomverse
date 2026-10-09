@@ -83,6 +83,8 @@ const eslintConfig = defineConfig([
     // produces hundreds of warnings -- enough to fail `npm run check`, which
     // runs with --max-warnings=0.
     "apps/*/dist/**",
+    // AMUX has its own ESLint config and CI step.
+    "vendor/amux/**",
   ]),
   {
     // The one rule PACKAGE-01 is measured on. `npm run check:shared-packages`

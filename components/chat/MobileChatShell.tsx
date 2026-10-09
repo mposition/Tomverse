@@ -169,6 +169,7 @@ type MobileChatShellProps = {
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -451,6 +452,7 @@ export function MobileChatShell({
   promptRefinerState,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1227,14 +1229,33 @@ export function MobileChatShell({
         ref={headerRef}
         data-testid="mobile-chat-header"
         data-has-status={hasHeaderStatus ? "true" : "false"}
-        className={`min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950 ${headerBottomPadding}`}
+        className={`@container/header min-w-0 shrink-0 overflow-hidden border-b border-zinc-200 bg-white px-3 pt-[calc(0.45rem+env(safe-area-inset-top))] dark:border-zinc-800 dark:bg-zinc-950 ${headerBottomPadding}`}
       >
-        <div className="flex items-center gap-2">
+        {/*
+          MOBILE-HEADER-NARROW-01. At 300% page zoom a phone lays out at
+          ~137px, leaving 113px inside the padding. The model button was the
+          one item that refused to shrink (`shrink-0`), so flex took the room
+          from the menu and new-chat buttons instead: 22px and 20px wide at
+          137px, 29-32px at 195-206px, and new chat pushed past the edge this
+          header clips at.
+
+          Now the two fixed controls never shrink, and the model button is
+          the one that does. It gives up its label first and stops at a 44px
+          icon (`min-w-11`). Below a 9.75rem content box even three 2.75rem
+          controls and their horizontal gaps (3 x 2.75rem + 3 x 0.5rem) no longer fit on one line,
+          so only there may the row wrap when New Chat is present. Wrapped rows
+          keep a compact 0.125rem vertical gap: all controls retain their full
+          44px target while a single viewport-height drag can still reach Send
+          at 300% page zoom. It is measured on the header's own
+          width, so 320px and wider -- where all three fit at full size --
+          lay out exactly as before.
+        */}
+        <div className={`flex items-center gap-x-2 gap-y-0.5 ${!isActiveConversationEmpty ? "@max-[9.75rem]/header:flex-wrap" : ""}`}>
         <button
           type="button"
           onClick={(event) => openDrawer(event.currentTarget)}
           data-testid="mobile-sidebar-open"
-          className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
           aria-label={t("chat.openChatMenu")}
         >
           <Menu className="h-5 w-5" />
@@ -1252,7 +1273,7 @@ export function MobileChatShell({
             onClick={handleOpenModelPicker}
             aria-haspopup="dialog"
             aria-label={modelSummaryLabel}
-            className="flex h-11 min-w-0 max-w-[52%] shrink-0 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:active:bg-zinc-800"
+            className="flex h-11 min-w-11 max-w-[52%] shrink items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-2 text-[11px] font-bold text-zinc-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 active:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:active:bg-zinc-800"
           >
             {isMultiModelConversation ? (
               <>
@@ -1289,7 +1310,7 @@ export function MobileChatShell({
                 </span>
               </>
             )}
-            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" aria-hidden="true" />
+            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400 @max-[10.5rem]/header:hidden" aria-hidden="true" />
           </button>
         ) : (
           // Never paint "1 model" and correct it to "3" a frame later: until
@@ -1308,7 +1329,7 @@ export function MobileChatShell({
           <button
             type="button"
             onClick={onNewChat}
-            className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm shadow-blue-950/20"
             aria-label={t("sidebar.newChat")}
           >
             <SquarePen className="h-5 w-5" />
@@ -1814,6 +1835,7 @@ export function MobileChatShell({
             promptRefinerState={promptRefinerState}
             onPromptRefinerRequest={onPromptRefinerRequest}
             onPromptRefinerDecision={onPromptRefinerDecision}
+            onPromptRefinerDismiss={onPromptRefinerDismiss}
             identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}

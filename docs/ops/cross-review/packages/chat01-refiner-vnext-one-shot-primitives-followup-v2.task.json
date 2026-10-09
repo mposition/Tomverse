@@ -1,0 +1,32 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-primitives-followup-v2",
+  "requirement": "Continue the concluded chat01-refiner-vnext-one-shot-primitives-v1 exchange, which remains on_hold (revisions_exhausted) with four reproduced low-severity findings. Preserve its three packages, verdicts, invalid-format and timeout attempt evidence, and final status; this successor is not a retroactive pass or a round-limit reset. The user approved independent Claude review until approval, within the controller's fixed supersession cap. Codex remains author, Claude Code Max first-party subscription CLI is the read-only independent reviewer, and the approved --skip-preflight exception is recorded. This is only the exact policy commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e / SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b free one-shot primitives implementation. It cannot write or read actual holdout, authorize dispatch, reserve cost, call a provider, approve stage/run, change flags, activate product traffic, merge a PR or deploy. Anthropic API is forbidden.",
+  "completionCriteria": [
+    "Read the original requirement and full scoped diff before tests and author explanation; bind the verdict to the successor package digest and inspect the inherited v1 on_hold findings.",
+    "For inherited finding 1, test reachable non-object manifest and invalid case branches, and explicitly identify the closure-pin, fixed-ID and strict-JSON defensive branches that cannot be reached without changing those pinned contracts.",
+    "For inherited finding 2, check that the read-only source snapshot enforces the existing per-file and aggregate byte limits before allocation, with an oversize synthetic file regression.",
+    "For inherited finding 3, check the development-only primitives closure now includes its own verification test; the server primitive intentionally cannot attest its own bytes without an external deployment trust anchor and must report successorClosureVerified false and dispatchAuthorized false. Do not mistake this limitation for operational approval.",
+    "For inherited finding 4, check that known safe-reader boundary, non-regular, changed and size denials retain distinct machine-readable codes while unknown I/O remains unavailable; no content or paths are exposed in return values.",
+    "Confirm unchanged v1 corpus/closure, numeric thresholds and v6 13/16 FAIL; all new tests must be synthetic and no real holdout or provider data may appear in the diff.",
+    "Require passing focused tests, TypeScript, lint, policy-reference and whitespace guards. Distinguish controller-recorded checks from reviewer-observed checks.",
+    "Return exactly one raw JSON object without Markdown fences. Include only actionable reproduced findings; a reviewer approve with any finding is not a controller pass. Keep nextAction under 120 characters."
+  ],
+  "baseCommit": "4f215bfcc3b9d3b0098303d333d1dd7fea19f30e",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-primitives-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-primitives-v1.authorization.md",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-primitives-followup-v2.task.json",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-v2-approval.md",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-primitives-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotRoot.ts",
+    "lib/promptRefinerQualityEvaluationVnextOneShotSource.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotRoot.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotSource.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotClosure.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-primitives-v1",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-primitives-v1/exchange.json"
+  }
+}

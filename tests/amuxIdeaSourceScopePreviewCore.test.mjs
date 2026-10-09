@@ -13,8 +13,8 @@ const scope = { version: 1, sources: [{ kind: "repository_file", repository: "mp
   commitSha: "a".repeat(40), path: "lib/amux/ideaSourceScopeCore.ts" }] };
 const scopeJson = JSON.stringify(scope);
 
-test("source scope preview stays closed even if an environment value is set", () => {
-  assert.equal(sourceScopePreviewPermitted("enabled"), false);
+test("source scope preview requires its dedicated environment value", () => {
+  assert.equal(sourceScopePreviewPermitted("enabled"), true);
   assert.equal(sourceScopePreviewPermitted(undefined), false);
 });
 

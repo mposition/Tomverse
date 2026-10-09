@@ -676,6 +676,12 @@ impl Scheduler {
                     promoted = outcome.promoted,
                     reason = ?outcome.reason,
                     consumption_id = ?outcome.consumption_id,
+                    policy_version = ?outcome.policy_version,
+                    receipt_id = ?outcome.receipt_id,
+                    task_id = ?outcome.task_id,
+                    claimed = ?outcome.claimed,
+                    assignment_id = ?outcome.assignment_id,
+                    worker_name = ?outcome.worker_name,
                     expired_grants = outcome.expired.unwrap_or(0),
                     "AMUX automatic promotion tick"
                 );

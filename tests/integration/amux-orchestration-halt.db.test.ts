@@ -366,6 +366,9 @@ test("a refusal-only claim and a rolled-back write leave no receipt", async () =
   // 영수증이 없다.
   await withEnv({ TOMVERSE_AMUX_SYNC_SECRET: secret, TOMVERSE_AMUX_EXECUTION_API_ENABLED: undefined }, async () => {
     const requestId = randomUUID();
+    const refusalAuditsBefore = await prisma.adminAuditLog.count({
+      where: { action: "amux.claim.refused" },
+    });
     const response = await claimPost(
       post("/api/internal/amux/claim", identityHeaders(requestId), { task_id: "x" }),
     );
@@ -373,11 +376,9 @@ test("a refusal-only claim and a rolled-back write leave no receipt", async () =
     assert.deepEqual(await response.json(), { claimed: false, reason: "execution_api_disabled" });
     assert.equal((await receiptsOf(requestId)).length, 0);
     // The refusal audit itself was written.
-    assert.ok(
-      (await prisma.adminAuditLog.count({
-        where: { action: "amux.claim.refused", createdAt: { gte: (await writeRow(requestId)).admittedAt } },
-      })) >= 1,
-    );
+    assert.equal(await prisma.adminAuditLog.count({
+      where: { action: "amux.claim.refused" },
+    }), refusalAuditsBefore + 1);
     // The definite acknowledgement of a refusal succeeds too.
     const ack = await ackPost(post("/api/internal/amux/orchestrator/ack", {}, { request_id: requestId, kind: "definite" }));
     assert.equal(ack.status, 200);

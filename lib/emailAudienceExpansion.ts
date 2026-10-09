@@ -5,11 +5,19 @@ import type { Prisma } from "@prisma/client";
 import { appUrl } from "@/lib/accountEmails";
 import {
   emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
   POLICY_CHANGE_NOTICE_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
-import { isEmailReleaseNotesLiveForEnqueue } from "@/lib/emailPolicyPublication";
+import {
+  CHANGE_NOTICE_APPROVED_CONTENT_HASHES,
+  isEmailReleaseNotesLiveForEnqueue,
+} from "@/lib/emailPolicyPublication";
+import {
+  CHANGE_NOTICE_WINDOW_DAYS,
+  TOLD_STATUSES,
+} from "@/lib/emailPolicyPublicationCore";
 import {
   marketingFlagApplies,
   releaseNotesFlagApplies,
@@ -27,6 +35,8 @@ import {
   EXPANSION_BATCH_SIZE,
   expansionRefusal,
   nextBatchPlan,
+  NOTICE_SENT_IN_FLIGHT_DAYS,
+  policyChangeNoticePairingProblem,
   readExpansionSpec,
   type AudienceCohortSpec,
   type ExpansionRefusalReason,
@@ -124,6 +134,54 @@ const waveForEvent = (eventId: string) =>
   });
 
 /**
+ * The accounts an amendment notice wave writes to.
+ *
+ * The publication gate's own owed set and evidence window
+ * (lib/emailPolicyPublication.ts `noticeFactsFor`): an account created before
+ * the effective day, or with no creation time, that holds no approved notice
+ * that arrived (a told state with a recorded arrival, as the gate reads it) or
+ * is still on its way (`NOTICE_SENT_IN_FLIGHT_DAYS`). Every wave asks afresh, so a second wave
+ * reaches accounts created since the first and the ones whose notice did not
+ * arrive, and nobody is written to twice. The audience estimate counts the same
+ * condition, so the number an approver reads is the one the wave expands.
+ */
+export const policyChangeNoticeAudienceWhere = (
+  effectiveDate: string,
+  now: Date
+): Prisma.UserWhereInput => {
+  const effective = new Date(`${effectiveDate}T00:00:00.000Z`);
+  const windowStart = new Date(
+    effective.getTime() - CHANGE_NOTICE_WINDOW_DAYS * 86_400_000
+  );
+  return {
+    AND: [
+      { OR: [{ createdAt: null }, { createdAt: { lt: effective } }] },
+      {
+        emailDeliveries: {
+          none: {
+            createdAt: { gte: windowStart },
+            OR: [
+              { status: "pending" },
+              {
+                status: "sent",
+                sentAt: {
+                  gte: new Date(now.getTime() - NOTICE_SENT_IN_FLIGHT_DAYS * 86_400_000),
+                },
+              },
+              { status: { in: [...TOLD_STATUSES] }, deliveredAt: { not: null } },
+            ],
+            templateVersion: {
+              contentHash: { in: [...CHANGE_NOTICE_APPROVED_CONTENT_HASHES] },
+              template: { key: POLICY_CHANGE_NOTICE_TEMPLATE },
+            },
+          },
+        },
+      },
+    ],
+  };
+};
+
+/**
  * Who a cohort wave looks at next.
  *
  * A first notice asks the audience query. A reminder asks the people the
@@ -178,6 +236,35 @@ const cohortCandidates = async (input: {
         excludedReason: candidate.email ? null : "no_email",
         malformed: false,
       },
+      inAudience: true,
+    }));
+  }
+
+  if (input.cohort.kind === "policy_change_notice") {
+    const rows = await prisma.user.findMany({
+      where: {
+        AND: [
+          policyChangeNoticeAudienceWhere(input.cohort.effectiveDate, new Date()),
+          ...(input.after ? [{ id: { gt: input.after } }] : []),
+        ],
+      },
+      orderBy: { id: "asc" },
+      take: input.take,
+      select: {
+        id: true,
+        email: true,
+        settings: { select: { language: true } },
+      },
+    });
+    // No ledger. The recipient ledger's cohort names are a closed CHECK, and
+    // this cohort's record is the delivery row itself, which outlives the
+    // account and is what the gate counts. An account with no address gets no
+    // row, and the gate already counts it as unreachable.
+    return rows.map((candidate) => ({
+      id: candidate.id,
+      email: candidate.email,
+      language: candidate.settings?.language ?? null,
+      ledger: null,
       inAudience: true,
     }));
   }
@@ -374,6 +461,34 @@ export async function expandEmailEvent(input: {
   });
   if (refusal) return { refused: refusal };
 
+  // The notice and its cohort, both ways, before anything is written. The
+  // cohort reaches people who turned every email off, and the notice to any
+  // other audience would leave out accounts the gate then waits on; a draft
+  // checks this, and an event stored before that check or written another way
+  // must stop here instead.
+  const noticePairing = policyChangeNoticePairingProblem({
+    templateKey: event.template.key,
+    noticeTemplateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+    noticeEffectiveDate: POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
+    spec,
+  });
+  if (noticePairing) {
+    await reportOperationalIncident({
+      code: "EMAIL_NOTICE_AUDIENCE_MISMATCH",
+      title: "An amendment notice fan-out was refused before writing anything",
+      error: noticePairing,
+      severity: "error",
+      context: {
+        component: "email-audience-expansion",
+        eventId: event.id,
+        templateKey: event.template.key,
+      },
+    });
+    return { refused: "notice_audience_mismatch" };
+  }
+  const noticeEffectiveDate =
+    spec.cohort?.kind === "policy_change_notice" ? spec.cohort.effectiveDate : null;
+
   // Before the event is moved to `expanding` and before a single row is
   // written. A fan-out that started and then found the feature off would leave
   // an event mid-expansion and a partial audience already queued.
@@ -567,6 +682,24 @@ export async function expandEmailEvent(input: {
         // does not keep that narrowing.
         const emailAddress = candidate.email;
         const written = await prisma.$transaction(async (tx) => {
+          if (noticeEffectiveDate) {
+            // One notice per account across every wave and campaign. The page
+            // query ran outside this transaction, so a second wave expanding
+            // at the same moment could have read the same account; the lock
+            // makes the two take turns, and the re-read after it sees whatever
+            // the other one committed. Keyed by account, not by event, because
+            // the event's own unique index cannot see another event's row.
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`policy-change-notice:${candidate.id}`}))`;
+            const stillOwed = await tx.user.count({
+              where: {
+                AND: [
+                  { id: candidate.id },
+                  policyChangeNoticeAudienceWhere(noticeEffectiveDate, new Date()),
+                ],
+              },
+            });
+            if (stillOwed === 0) return [];
+          }
           const rows = await tx.emailDelivery.createManyAndReturn({
             select: { id: true },
             data: [

@@ -76,6 +76,13 @@ export async function POST(request: Request) {
           available: true,
           delivery: {
             attempt_id: outcome.delivery.attemptId,
+            ...(outcome.delivery.assignmentId ?
+              { assignment_id: outcome.delivery.assignmentId } : {}),
+            ...(outcome.delivery.v22Execution ? { v22_execution: {
+              model_id: outcome.delivery.v22Execution.modelId,
+              role: outcome.delivery.v22Execution.role,
+              budget_microusd: outcome.delivery.v22Execution.budgetMicrousd,
+            } } : {}),
             task_id: outcome.delivery.taskId,
             worker: outcome.delivery.worker,
             task_revision: outcome.delivery.taskRevision,

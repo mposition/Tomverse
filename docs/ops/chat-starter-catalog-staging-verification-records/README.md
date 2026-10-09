@@ -17,8 +17,9 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
 시간순으로 정렬되게 하기 위해서입니다.
 
 **merge SHA를 옮겨 적지 말고 실행 시점에 `GET /api/build-info`를 읽으십시오** —
-그 endpoint는 로그인 없이 열립니다. staging은 develop에 무엇이 병합되든
-재배포되므로, 병합 SHA와 서빙 SHA는 자주 다릅니다.
+그 endpoint는 로그인 없이 열립니다. staging은 병합이 아니라 `test`가 가리키는
+release candidate를 배포하므로(`npm run promote:test`, 2026-10-07 전에는 develop의
+모든 병합), 병합 SHA와 서빙 SHA는 자주 다릅니다.
 
 ## 규칙
 

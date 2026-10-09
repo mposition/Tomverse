@@ -1034,11 +1034,17 @@ const checks = [
   },
   {
     name: "Production readiness fails closed on database or security configuration",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       source.includes('SELECT 1 AS "ready"') &&
       source.includes("getSecurityEnvironmentStatus") &&
-      source.includes("database && securityEnvironment") &&
+      source.includes("database && securityEnvironment"),
+  },
+  {
+    name: "The readiness route answers 503 and reports what the shared checks found",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
+      source.includes("computeReadinessChecks") &&
       source.includes("status: ready ? 200 : 503") &&
       source.includes("reportOperationalDependencyStatus") &&
       source.includes("DATABASE_READINESS_FAILED") &&
@@ -1321,8 +1327,9 @@ const checks = [
         source.includes("resolveDeploymentEnvironment()") &&
         body.includes('deployment === "production"') &&
         body.includes('deployment === "staging"') &&
-        // The production branch still demands live, and staging still refuses
-        // it: a live key in staging bills real cards from test flows.
+        body.includes('deployment === "dev"') &&
+        // The production branch still demands live, and staging and dev still
+        // refuse it: a live key there bills real cards from test flows.
         body.includes("=== true") &&
         body.includes("=== false") &&
         !/!production\s*\|\|\s*stripeKeyLiveMode/.test(source)
@@ -1380,7 +1387,7 @@ const checks = [
   },
   {
     name: "A thrown image-budget check reads as not ready, never as healthy",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       // `status?.ready ?? true` made the loudest failure the quietest signal:
       // a missing environment variable was fatal, while the check that finds
@@ -1757,9 +1764,15 @@ const checks = [
   },
   {
     name: "Readiness gates on the image provider budget while the flag is on",
-    file: "app/api/ready/route.ts",
+    file: "lib/readinessChecks.ts",
     test: (source) =>
       source.includes("getImageProviderBudgetReadiness") &&
+      source.includes("imageProviderBudget &&"),
+  },
+  {
+    name: "The readiness route reports a broken image provider budget",
+    file: "app/api/ready/route.ts",
+    test: (source) =>
       source.includes("IMAGE_PROVIDER_COST_BUDGET_NOT_READY") &&
       source.includes("imageProviderBudget"),
   },
@@ -3219,7 +3232,20 @@ const checks = [
         source.includes("gitleaks/gitleaks-action@v3") &&
         source.includes("actions/checkout@v6") &&
         source.includes("actions/setup-node@v6") &&
-        source.includes("actions/cache@v5") &&
+        // Restore, never save. This workflow runs on the default branch, so an
+        // entry it wrote would be restorable by every run in the repository --
+        // the required pull-request gate included -- and it runs third-party
+        // npm install scripts before it builds. The combined `actions/cache`
+        // writes from its post step and cannot be guarded, so its absence is
+        // the thing worth pinning here, not just the version.
+        // .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1.
+        source.includes("actions/cache/restore@v5") &&
+        // Any version, any pin, and any spelling of the `uses:` line. Forbidding
+        // the literal `actions/cache@v5` let `@v4`, `@v6` or a SHA save from a
+        // post step; forbidding the literal `uses: actions/cache@` still let
+        // `uses:  actions/cache@v6` and `uses: "actions/cache@v6"` through.
+        !/uses:\s*["']?actions\/cache@/.test(source) &&
+        !/uses:\s*["']?actions\/cache\/save@/.test(source) &&
         source.includes("actions/upload-artifact@v7") &&
         source.includes("fetch-depth: 0") &&
         source.includes("npm audit --omit=dev --json") &&
@@ -3360,6 +3386,10 @@ const checks = [
         prWorkflow.includes("fetch-depth: 0") &&
         prWorkflow.includes("npm run security:regression") &&
         prWorkflow.includes("npm run test:unit") &&
+        // The unit suite has its own job; running is not gating unless that
+        // job is in the required check's `needs` and its verdict is enforced.
+        prWorkflow.includes("UNIT_TESTS: ${{ needs.unit-tests.result }}") &&
+        prWorkflow.includes('"unit-tests=$UNIT_TESTS"') &&
         prWorkflow.includes("npm run check:encoding:strict") &&
         // `npm run check` is split into its two halves here for step-level
         // timing; both halves must still run, at the same strictness.
@@ -3426,9 +3456,13 @@ const checks = [
         // Which spec runs in which tier is documented, and the document is
         // the thing reviewers read -- so it has to exist.
         read(".github/audits/ui-test-tiers.md").includes("@ui-risk") &&
-        // Everything the PR tier stopped running still runs here, unfiltered.
-        mainWorkflow.includes("push:") &&
-        !mainWorkflow.includes("pull_request:") &&
+        // Everything the PR tier stopped running still runs here, unfiltered,
+        // on every pull request into main (before 2026-10-02: on every main
+        // push, where it held Railway's production deployment for ~36 min).
+        mainWorkflow.includes(
+          "\non:\n  pull_request:\n    branches:\n      - main\n"
+        ) &&
+        !/^  push:/m.test(mainWorkflow) &&
         mainWorkflow.includes("npm run build") &&
         mainWorkflow.includes("npm run test:e2e:chromium") &&
         !mainWorkflow.includes("--grep") &&
@@ -3451,26 +3485,23 @@ const checks = [
         !prWorkflow.includes("chat-state-visual-regression") &&
         !prWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
         !mainWorkflow.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION") &&
-        // Every push to main is a release and needs its own verdict, so this
-        // run must not cancel its predecessor. `cancel-in-progress: false` is
-        // half of it: the default group still holds only one pending run, and
-        // a third arrival evicts it, so a release burst loses the middle of
-        // the sequence. `queue: max` is the half that preserves a verdict per
-        // SHA. Asserted together because either alone is a silent regression
-        // -- nothing fails at the time, the runs simply stop existing.
+        // On a pull request only the latest head can merge, so a run is
+        // grouped by pull request and a newer head cancels the older run.
+        // Grouped by ref alone, every pull request into main would share one
+        // group and cancel each other's verdicts.
         //
         // Read from the workflow-level `concurrency:` block rather than from
-        // the file, because the header comment above it quotes the forbidden
-        // combination in prose; a whole-file match reads that as the setting.
+        // the file, because the header comment above it quotes the old
+        // settings in prose; a whole-file match reads that as the setting.
         workflowConcurrencyBlock(mainWorkflow).includes(
-          "cancel-in-progress: false"
+          "github.event.pull_request.number"
         ) &&
-        workflowConcurrencyBlock(mainWorkflow).includes("queue: max") &&
-        // Not merely wrong together: GitHub rejects the workflow outright,
-        // which would take the canonical run offline rather than weaken it.
-        !workflowConcurrencyBlock(mainWorkflow).includes(
+        workflowConcurrencyBlock(mainWorkflow).includes(
           "cancel-in-progress: true"
-        )
+        ) &&
+        // GitHub rejects `queue: max` with `cancel-in-progress: true`,
+        // which would take the canonical run offline rather than weaken it.
+        !workflowConcurrencyBlock(mainWorkflow).includes("queue: max")
       );
     },
   },
@@ -3702,11 +3733,6 @@ const checks = [
       // drift underneath it goes unread.
       const source = raw.replace(/\r\n/g, "\n");
       const policy = read("scripts/auto-pr-branch-policy.mjs");
-      // The arming step's own block, so what is asserted about it does not
-      // depend on where it sits in the file.
-      const armStep = source
-        .split(/\r?\n {6}- name: /)
-        .find((block) => /^[^\r\n]*auto-merge/i.test(block));
       // The whole list, not a match inside it. A pattern that only asserted
       // the two entries were present would pass with `- "claude/**"` appended
       // underneath them, which is the opt-out rule restored one line at a
@@ -3729,27 +3755,16 @@ const checks = [
         listed[0] === "to-develop/**" &&
         listed[1] === "**/to-develop/**" &&
         source.includes('node scripts/auto-pr-branch-policy.mjs "$BRANCH"') &&
-        // The diff check and the step that creates the pull request. Two,
-        // not three: the arming step used to carry this same condition and
-        // now reads the create step's output instead, which is a stricter
-        // gate rather than a missing one -- `created` can only be `true` on
-        // a run where the create step ran, and that step is gated on the
-        // module. The chain is asserted rather than assumed, because an
-        // arming step that went back to consulting the glob directly would
-        // restore the count and lose the property.
+        // The diff check and the step that creates the pull request.
         (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 2 &&
-        // Armed once, by the run that opened the pull request. This step
-        // used to run on every push: it looked up whatever PR was open for
-        // the branch and called `gh pr merge --auto` on it, so auto-merge
-        // turned off by a person came back on at the next commit -- on
-        // 2026-09-05 #1256 merged into develop that way, under an
-        // instruction to hold it.
-        Boolean(armStep) &&
-        source.includes("if: steps.create-pr.outputs.created == 'true'") &&
-        // And it is handed the number rather than searching for one. A
-        // lookup here reaches an already-open pull request whatever the
-        // create step decided, which is the same defect by another route.
-        !armStep.includes("gh pr list") &&
+        // The workflow opens pull requests and never merges or arms them. It
+        // once re-armed auto-merge on every push (#1256 merged into develop
+        // that way on 2026-09-05, under an instruction to hold it), then armed
+        // it once at creation, and GitHub merged each green PR the moment its
+        // checks passed -- stacking Railway "Wait for CI" deployments. Merging
+        // belongs to the operator-run merge train (scripts/merge-train.mjs).
+        !/gh pr merge/.test(source) &&
+        !/--auto\b/.test(source) &&
         // The namespaces that open their own PRs are still refused, and still
         // refused ahead of the marker -- `feedback-autofix` records the number
         // of the PR its own workflow created, so a second one is not a
@@ -4005,9 +4020,9 @@ const checks = [
     // docs/policy/engineering-agent.md §8: each service holds exactly its own
     // table row -- no database, AMUX, platform or other service's credential.
     name: "Engineering agent services declare only the variables their policy row names",
-    file: ".railway/scheduled-jobs.ts",
+    file: ".railway/agent-runners.ts",
     test: (source) => {
-      const start = source.indexOf("export const RAILWAY_AGENT_SERVICES");
+      const start = source.indexOf("export const ENGINEERING_AGENT_SERVICES");
       const stop = source.indexOf("];", start);
       if (start < 0 || stop < 0) return false;
       const block = source.slice(start, stop);
@@ -4025,7 +4040,11 @@ const checks = [
         "ENGINEERING_AGENT_RUNNER_DEADMAN_URL",
         "ENGINEERING_AGENT_RUNNER_SECRET",
       ];
-      return JSON.stringify(declared) === JSON.stringify(allowed) && !/staging:/.test(block);
+      return (
+        JSON.stringify(declared) === JSON.stringify(allowed) &&
+        !/staging:/.test(block) &&
+        !/dev:/.test(block)
+      );
     },
   },
   {

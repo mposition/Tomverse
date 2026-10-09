@@ -25,6 +25,30 @@ Date / timezone:    ____________________
 - [ ] `npm run test:unit`
 - [ ] `npm run test:server-contract`
 - [ ] `npm run security:regression`
+- [ ] `npm run check:ci-cache-keys` — an Actions cache key decides who may
+      restore the entry, and an entry written while a run is on `main` or
+      `develop` is restorable by every run that can see that scope. Five
+      workflows once shared one exact Playwright key, so one entry held the
+      browser binaries eight jobs launch, and a bare `Linux-next-` restore-key
+      served one workflow's Next 16.3.4 build cache to another and broke its
+      16.3.5 font build. Reads YAML only, no credential.
+- [ ] `npm run check:credential-cache-separation` — a job holding a write
+      permission or an external secret may restore a package manager's cache,
+      which `npm ci` checks against the lockfile, and may not restore build
+      output or browser binaries, which nothing checks and which the job
+      executes. Reads YAML only, no credential.
+- [ ] `npm run check:agent-pr-cache-isolation` — the narrower question the
+      engineering agent's cache isolation record rests on, and a stronger
+      answer: no credentialed job in a workflow an event the agent raises
+      reaches may restore **any** Actions cache, the package manager's own
+      included. GitHub lets re-runs of a pull request restore that pull
+      request's entries, so isolation cannot answer for the agent's own pull
+      request, and `check:credential-cache-separation` does not keep this
+      condition — it permits the verified package-manager cache, and the
+      lockfile comparison agrees with whatever the agent put in
+      `package-lock.json` in the same pull request. While this check fails,
+      `docs/policy/engineering-agent.md` §5 forbids writing that record.
+      Reads YAML only, no credential.
 - [ ] `npm run check:accent-tokens`
 - [ ] `npm run check:e2e-copy-selectors` — a copy-based locator that steers a
       branch (`isVisible()`, `count()`) resolves instead of retrying, so when
@@ -202,6 +226,12 @@ Date / timezone:    ____________________
       it leaves its card behind promising something that is gone, on the first
       screen a new account sees (docs/ui-contracts/chat-starter-catalog.md)
 - [ ] `npm run check:encoding:strict`
+- [ ] `npm run check:package-json-duplicate-keys` — proves no tracked
+      `package.json` declares the same key twice. JSON allows the repetition
+      and every reader keeps one entry, so the file stays valid, nothing else
+      in the gate reports it, and the losing entry does not exist for anything
+      reading the parsed object — a tool that parses and re-serialises the
+      file then drops it from the bytes as well
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
 - [ ] `npm run check:ai-review-eval` — proves the AI Review evaluation dataset
@@ -290,6 +320,9 @@ Date / timezone:    ____________________
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`
+- [ ] `npm run verify:prompt-refiner-vnext-one-shot-gate-source` — proves the
+      pinned deterministic one-shot gate source still matches its approved
+      closure before any signed owner result is accepted
 - [ ] `npm run check:doc-references` — proves AGENTS.md and every contract and
       policy document under it, and every source comment that names a path,
       still point at files that exist. A comment naming a test file is a claim
@@ -406,8 +439,9 @@ over: the next release needs its own reviewed run or its own waiver.
 
 ## 3. Staging verification
 
-- [ ] `/api/build-info` reports the release SHA
-- [ ] local, `origin/develop` and staging SHAs agree
+- [ ] the release SHA, `origin/test` and Test's `/api/build-info` agree
+      (`npm run promote:test -- --sha=<release SHA>` moves `test` and waits for
+      the last; staging deploys `test`, not `develop`, §7.9)
 - [ ] `/status` and `/api/models/status` queried in the same window, with no
       per-provider contradiction between them
 - [ ] Model picker, provider banner and chat send agree with both of the above
@@ -885,8 +919,8 @@ later.
 ## 7.9 How a change reaches production
 
 Everything above assumes the build being released came through `develop` and
-was deployed to staging. On 2026-08-15 four changes did not, in one day,
-against one release that did. That is not four people being careless; it is
+was verified on staging (shown to people as Test). On 2026-08-15 four changes
+did not, in one day, against one release that did. That is not four people being careless; it is
 one structural gap, and the gap was never staging itself.
 
 **The gap was selective release.** `develop` sat 36 commits ahead of `main`.
@@ -895,14 +929,47 @@ rest, and the only mechanism the repository offered for "some of develop, now"
 was a merge straight to `main`. Widening the exception would have made that
 official; the fix is to give the need its own path.
 
+**Three environments, three branches** (2026-10-07). Each environment deploys
+one branch, and only one thing moves each branch:
+
+| Environment | Deploys | Moved by |
+|---|---|---|
+| dev (`dev.tomverse.app`) | `develop` | every merge; the merge train waits on dev's deployments |
+| staging, shown as Test (`staging.tomverse.app`) | `test` | only `npm run promote:test -- --sha=<RC>`, a person's choice of candidate |
+| production | `main` | a release pull request |
+
+Test therefore holds one release candidate for as long as its verification
+takes while `develop` keeps landing on dev. Before the split both shared one
+environment: a verification pinned to a staging SHA either held every develop
+deploy or had its build replaced mid-run.
+
+`promote:test` takes a commit `develop` actually pointed at -- a merge
+commit, never a pull request's head -- or, for 7.9.1, one on the `release/**`
+branch named by `--source`. It refuses a candidate whose GitHub Actions suites
+did not all pass (a cancelled one included: Wait for CI would skip it), and a
+move that drops the current candidate unless `--allow-rewind` says nobody is
+verifying it. It pushes with a lease on the `test` it read and waits until
+Test's `/api/build-info` names the candidate. `--dry-run` reads only. A
+selective release's candidate is not on `develop`, so moving `test` to it, and
+back to `develop` afterwards, are both rewinds. The one-time switch and the
+order it needs are in `docs/ops/dev-test-lanes.md`.
+
 Three lanes. Which one a change takes is decided by what it is, not by how
 inconvenient the alternative feels.
 
 | Change | Lane | Verification |
 |---|---|---|
-| Ordinary work | `develop` | staging, then a release cut from `develop` |
-| Part of `develop`, needed sooner | `release/**`, cut from `main` | the exact RC SHA verified on staging or a scratch environment, then merged to `main` |
+| Ordinary work | `develop` | dev on every merge; then the RC SHA promoted to Test and verified there, and a `release/<date>-<subject>` branch at that same SHA merged to `main` |
+| Part of `develop`, needed sooner | `release/**`, cut from `main` | the exact RC SHA promoted to Test (`--source=release/...`) or a scratch environment, then merged to `main` |
 | A declared incident or a security advisory | `hotfix/**` | §7.9.2, and the incident or advisory is named |
+
+A full release merges a `release/<date>-<subject>` branch made at the RC SHA
+(`git push origin <RC SHA>:refs/heads/release/<date>-<subject>`), not
+`develop`'s head:
+`develop` has moved on since the candidate was promoted, and its head is a
+build nobody verified. A `develop` -> `main` pull request is still accepted by
+the source policy, and is the same thing only when `develop` has not moved
+since the candidate.
 
 The branch prefix is the declaration. `*-main` in a name says where somebody
 meant it to go and proves nothing about urgency or approval, which is why it
@@ -911,7 +978,17 @@ is not one of the three. `scripts/auto-pr-branch-policy.mjs` already refuses
 develop pull request, so these names carry no automation of their own -- their
 pull requests are opened and merged by a person on purpose.
 
+Since 2026-10-02 PR Fast Gate enforces the other direction too: a pull
+request into `main` from anything but `develop`, `release/**`, a `hotfix`
+branch or the automation that carries its own gates fails the required check
+(`scripts/main-pr-source-policy.mjs`). A `to-main` branch is retargeted to
+`develop` and ships with the next release.
+
 ### 7.9.1 Selective release: `release/**`
+
+A full release's branch shares the prefix but is cut at the candidate on
+`develop` (7.9); the cut-from-`main` and cherry-pick items below are for a
+selective release.
 
 For a change that is finished, is already on `develop`, and should not wait for
 everything else on `develop`. This is not an exception and needs no waiver; it
@@ -927,10 +1004,11 @@ git cherry-pick <the commits, and only those>
 - [ ] Only the intended commits are on it. If a cherry-pick needs a conflict
       resolution the original never had, that resolution is new code and is
       reviewed as such
-- [ ] **The RC SHA is deployed to staging or a scratch environment**, and
-      `/api/build-info` is read back to confirm it names that SHA. Not the
-      current `develop`, which is further ahead and would measure a different
-      build
+- [ ] **The RC SHA is deployed to Test or a scratch environment**, and
+      `/api/build-info` is read back to confirm it names that SHA
+      (`npm run promote:test -- --sha=<RC SHA> --source=release/<date>-<subject>`
+      does both). Not the current `develop`, which is further ahead and would
+      measure a different build
 - [ ] Whatever the change touches is exercised there: a provider turn, a Stripe
       path in test mode, a signed asset URL, an admin flow -- CI reaches none
       of these
@@ -950,7 +1028,7 @@ Done this way, a selective release is a release. It gets a record under
 
 ### 7.9.2 The exception: `hotfix/**`
 
-Staging is skipped entirely here, so the bar is what makes it an exception
+Test is skipped entirely here, so the bar is what makes it an exception
 rather than a faster lane. All six apply, and the first is the one that
 qualifies it:
 
@@ -958,7 +1036,7 @@ qualifies it:
       its link. Dependabot security updates arrive on the default branch
       whatever `target-branch` says, and belong here. A change that is merely
       finished, or merely wanted sooner, is §7.9.1
-- [ ] **A person approved it before the merge**, and recorded that staging is
+- [ ] **A person approved it before the merge**, and recorded that Test is
       being skipped. A record written afterwards is not this: it describes the
       skip, it cannot authorise it retroactively
 - [ ] **The new release SHA is recorded** -- the merge commit production will
@@ -997,8 +1075,8 @@ shorter record.
 
 ### 7.9.4 Wait for CI
 
-Railway's **Wait for CI** (`checkSuites`) is on for both environments as of
-2026-08-15. It holds a deployment until the pushed commit's check suite
+Railway's **Wait for CI** (`checkSuites`) is on for production and staging as
+of 2026-08-15, and for dev from its creation on 2026-10-07. It holds a deployment until the pushed commit's check suite
 finishes, which removes the race where production deployed while its own checks
 were still running.
 
@@ -1009,7 +1087,7 @@ https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
 ### 7.9.5 The next full release after `main` has carried a cherry-pick
 
 A `release/**` lane (7.9.1) leaves `main` holding commits that also exist on
-`develop` **as different objects**. The next full `develop` -> `main` release
+`develop` **as different objects**. The next full release
 meets them again, and how it meets them has to be checked rather than assumed.
 
 **`main` having the files does not mean the branches converged.** On 2026-09-08

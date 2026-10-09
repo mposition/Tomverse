@@ -9,13 +9,43 @@ import ts from "typescript";
  * Work inside a bounded publisher transaction can reach no client but its own.
  *
  * `runBoundedMarketingTransaction` promises three things: a transaction that
- * cannot outlast 115 seconds, statements that cannot outlast 5 seconds, and at
- * most twelve of them. All three are properties of one connection. A callback
+ * cannot outlast 175 seconds, statements that cannot outlast 5 seconds, and at
+ * most eighteen of them. All three are properties of one connection. A callback
  * that reaches a different client is on a different connection: none of the
  * three applies to it, the statement counter never sees it, and -- the part that
  * is not merely inaccurate -- its writes can commit after this transaction rolls
  * back, or after the run's deadline has passed and the run has been recorded
  * failed. No proxy can catch that, because it does not go through the proxy.
+ *
+ * ## Where the calls are
+ *
+ * **Only in `lib/marketingPublisherRun.ts`, and each one is a single store
+ * call.** The first real caller showed that the rules below cannot admit the code
+ * they exist for: the store reaches a client module through `lib/adminAudit.ts`,
+ * so a body calling any store function was refused, though every store function
+ * the publisher needs uses only the transaction it is handed. Loosening the
+ * allowlist by name was tried and withdrawn -- it made the safety of this check
+ * depend on a list anyone could extend. Instead the calls were moved to one place
+ * and given one shape:
+ *
+ *   - no module but the definition module calls the wrapper at all;
+ *   - inside it, each body is `(tx) => storeFunction(tx, ...)`: one parameter,
+ *     one call, a callee imported by name from `lib/marketingStore.ts`, the
+ *     transaction as the first argument and nowhere else;
+ *   - the store binds no client instance, and every writer it takes from
+ *     `lib/adminAudit.ts` requires a transaction, so the store cannot reach the
+ *     audit module's client through them;
+ *   - the admission module the bodies' resolvers call binds no client instance
+ *     either.
+ *
+ * What remains unchecked is that a store function issues every statement on the
+ * transaction it is given. That is the store's contract as the sole writer,
+ * reviewed with it -- and the statement budget test measures each of these
+ * operations through the real counting proxy, so a statement that went
+ * elsewhere would also be a count that changed.
+ *
+ * The rules below still run, on any call site outside the definition module;
+ * there are none, and the probes at the end prove each rule would refuse one.
  *
  * ## What is checked
  *
@@ -232,7 +262,10 @@ const imports = (tree) => {
     // direction bans a module full of types from the work body, and the first
     // version of this did the second thing to `export { Prisma }`.
     const clientLocals = new Set();
-    if (isPrismaModule(specifier)) {
+    // A type-only import has no runtime value, so it cannot hand anyone a client.
+    // Counting `import type { PrismaClient }` as one made a module that binds only
+    // a type look as though it bound a client instance.
+    if (isPrismaModule(specifier) && !clause?.isTypeOnly) {
       const bindings = clause?.namedBindings;
       if (clause?.name) clientLocals.add(clause.name.text);
       if (bindings && ts.isNamespaceImport(bindings)) clientLocals.add(bindings.name.text);
@@ -845,6 +878,174 @@ test("no bounded publisher transaction opens a transaction of its own", () => {
 /* The rules above are dormant until S2d2 writes the first caller, so what     */
 /* follows proves each one refuses, and that the intended shape is accepted.   */
 /* -------------------------------------------------------------------------- */
+
+/* -------------------------------------------------------------------------- */
+/* The definition module is the only caller, and its bodies have one shape     */
+/* -------------------------------------------------------------------------- */
+
+const STORE_SPECIFIER = /(^|[./@~])lib[/]marketingStore([.](?:ts|tsx|js|mjs|cjs))?$/;
+
+/**
+ * Problems with the bounded calls inside a definition-module-shaped file.
+ *
+ * Each body must be `(tx) => storeFunction(tx, ...)`. Written as a function so
+ * the probes below can show each refusal on source that is not the real module.
+ */
+const definitionBodyProblems = (file, tree) => {
+  const problems = [];
+  const storeNames = new Set();
+  eachNode(tree, (node) => {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) return;
+    if (!STORE_SPECIFIER.test(node.moduleSpecifier.text)) return;
+    const clause = node.importClause;
+    if (!clause || clause.isTypeOnly) return;
+    const bindings = clause.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) return;
+    for (const element of bindings.elements) {
+      if (!element.isTypeOnly) storeNames.add(element.name.text);
+    }
+  });
+  let calls = 0;
+  eachNode(tree, (node) => {
+    if (!ts.isCallExpression(node)) return;
+    if (!ts.isIdentifier(node.expression) || node.expression.text !== WRAPPER) return;
+    calls += 1;
+    const where = `${file}:${lineOf(tree, node)}`;
+    const work = node.arguments[1];
+    if (!work || !ts.isArrowFunction(work)) {
+      problems.push(`${where}: the work must be an arrow function written inline.`);
+      return;
+    }
+    if (work.parameters.length !== 1 || !ts.isIdentifier(work.parameters[0].name)) {
+      problems.push(`${where}: the work takes exactly one parameter, the transaction.`);
+      return;
+    }
+    const tx = work.parameters[0].name.text;
+    const body = work.body;
+    if (!ts.isCallExpression(body)) {
+      problems.push(
+        `${where}: the work's body must be a single store call -- \`(tx) => storeFunction(tx, ...)\` -- so the only statements in it are the store's.`,
+      );
+      return;
+    }
+    if (!ts.isIdentifier(body.expression) || !storeNames.has(body.expression.text)) {
+      problems.push(
+        `${where}: the work calls something that is not a function imported by name from lib/marketingStore.ts.`,
+      );
+    }
+    const first = body.arguments[0];
+    if (!first || !ts.isIdentifier(first) || first.text !== tx) {
+      problems.push(`${where}: the transaction must be the store call's first argument.`);
+    }
+    // The transaction is handed to the store and to nothing else: a second use
+    // is a second place it could go, and the store's contract is the only one
+    // this design relies on.
+    let uses = 0;
+    eachNode(body, (inner) => {
+      if (ts.isIdentifier(inner) && inner.text === tx) uses += 1;
+    });
+    if (uses !== 1) {
+      problems.push(`${where}: the transaction is used ${uses} times; it is passed to the store once and used nowhere else.`);
+    }
+  });
+  return { problems, calls };
+};
+
+test("no module but the definition module calls the bounded transaction", () => {
+  // Every other rule in this file runs per call site outside the definition
+  // module. This one says there are none, so the publisher's transactions are
+  // all in the one module whose bodies have the shape checked below.
+  const sites = callSites().map((site) => `${site.file}:${site.line}`);
+  assert.deepEqual(
+    sites,
+    [],
+    `call ${WRAPPER} only from ${DEFINITION}, through a named operation there`,
+  );
+});
+
+test("inside the definition module, each bounded body is one store call on its own transaction", () => {
+  const path = join(ROOT, DEFINITION);
+  const { problems, calls } = definitionBodyProblems(DEFINITION, parse(path));
+  assert.deepEqual(problems, []);
+  // The publisher's operations, so a module that quietly stopped calling the
+  // wrapper -- and so stopped being checked -- does not pass as clean.
+  assert.ok(calls >= 9, `expected the publisher's bounded operations, found ${calls}`);
+});
+
+test("the store and the admission module bind no client instance of their own", () => {
+  for (const file of ["lib/marketingStore.ts", "lib/marketingAutonomousAdmission.ts"]) {
+    const bound = [];
+    for (const entry of imports(parse(join(ROOT, file)))) {
+      for (const local of entry.clientLocals) bound.push(`${entry.specifier}: ${local}`);
+    }
+    assert.deepEqual(bound, [], `${file} must bind no Prisma client instance`);
+  }
+});
+
+test("every writer the store takes from the audit module requires a transaction", () => {
+  // The store reaches `lib/adminAudit.ts`, which binds the module client for its
+  // own reads. What keeps the store off that client is that each function it
+  // takes from there needs a transaction to be called at all.
+  const store = parse(join(ROOT, "lib", "marketingStore.ts"));
+  const audit = parse(join(ROOT, "lib", "adminAudit.ts"));
+  const taken = [];
+  eachNode(store, (node) => {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) return;
+    if (!/(^|[./@~])lib[/]adminAudit([.](?:ts|js))?$/.test(node.moduleSpecifier.text)) return;
+    if (node.importClause?.isTypeOnly) return;
+    const bindings = node.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) return;
+    for (const element of bindings.elements) {
+      if (!element.isTypeOnly) taken.push((element.propertyName ?? element.name).text);
+    }
+  });
+  assert.ok(taken.length > 0, "the store is expected to take audit writers");
+  for (const name of taken) {
+    let found = false;
+    let requiresTransaction = false;
+    eachNode(audit, (node) => {
+      const declared =
+        (ts.isFunctionDeclaration(node) && node.name?.text === name) ||
+        (ts.isVariableDeclaration(node) &&
+          ts.isIdentifier(node.name) &&
+          node.name.text === name &&
+          node.initializer &&
+          (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer)));
+      if (!declared) return;
+      found = true;
+      const fn = ts.isFunctionDeclaration(node) ? node : node.initializer;
+      const first = fn.parameters[0];
+      if (!first) return;
+      const text = first.getText(audit);
+      requiresTransaction = /TransactionClient/.test(text) || /\btx\b/.test(text);
+    });
+    assert.ok(found, `lib/adminAudit.ts: ${name} is taken by the store and was not found as a function`);
+    assert.ok(
+      requiresTransaction,
+      `lib/adminAudit.ts: ${name} is taken by the store and does not require a transaction, so the store could reach that module's client through it`,
+    );
+  }
+});
+
+test("each shape the definition module may not use is refused", () => {
+  const probe = (body) =>
+    definitionBodyProblems(
+      "probe.ts",
+      parse(
+        join(ROOT, "lib", "probe.ts"),
+        'import { runBoundedMarketingTransaction } from "@/lib/marketingPublisherRun";\n' +
+          'import { claimDueMarketingPost } from "@/lib/marketingStore";\n' +
+          'import { somethingElse } from "@/lib/elsewhere";\n' +
+          `export const op = (client) => runBoundedMarketingTransaction(client, ${body});\n`,
+      ),
+    ).problems;
+  assert.deepEqual(probe("(tx) => claimDueMarketingPost(tx, {})"), [], "the intended shape");
+  assert.notDeepEqual(probe("async (tx) => { await claimDueMarketingPost(tx, {}); }"), [], "a block body");
+  assert.notDeepEqual(probe("(tx) => somethingElse(tx, {})"), [], "a callee from elsewhere");
+  assert.notDeepEqual(probe("(tx) => claimDueMarketingPost({}, tx)"), [], "the transaction not first");
+  assert.notDeepEqual(probe("(tx) => claimDueMarketingPost(tx, { leak: tx })"), [], "the transaction used twice");
+  assert.notDeepEqual(probe("work"), [], "work passed by name");
+});
 
 test("the specifier pattern matches every form this repository uses", () => {
   // `../lib/prisma.ts` is used by 22 files and the previous pattern matched none

@@ -1,0 +1,17 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-price-lock-v1",
+  "requirement": "Under approved CHAT-01 one-shot policy v2, make the app-owned model registry price read-back transaction-stable. Codex authors and Claude Code Max first-party subscription CLI independently reviews. The price read must lock the registry table in SHARE mode before findUnique, including the absent-row case, and fail closed when the lock cannot be acquired. This change does not approve stage/run, dispatch, holdout or product traffic. Do not use Anthropic API.",
+  "completionCriteria": [
+    "Acquire the same registry SHARE lock used by the existing Refiner reservation authority before reading the exact pinned registry row.",
+    "A lock failure yields the existing closed read-failure code and never reaches the model row read.",
+    "Keep dispatchAuthorized false on all outputs and preserve existing pin checks.",
+    "Synthetic focused tests, typecheck, lint and the protected-table-writer gate pass; review the exact diff with zero findings."
+  ],
+  "baseCommit": "040855238b85214887af61bf86bc2b8cd3d21bd4",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-price-lock-v1.task.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotPriceReadback.test.mjs"
+  ],
+  "generatedPaths": []
+}

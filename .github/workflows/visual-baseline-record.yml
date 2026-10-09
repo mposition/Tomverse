@@ -1,4 +1,11 @@
 name: Record Visual Baseline
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # The one place a screenshot golden may be rewritten.
 #
@@ -35,8 +42,14 @@ on:
         required: false
         default: tests/e2e/chat-state-visual-regression.spec.ts
 
+# Read only: the one write, the review branch push, uses GH_AUTOMATION_PAT in
+# that step alone. The workflow token cannot push it: every branch but develop
+# refuses updates from actors off the merge lane ruleset's bypass list, and on
+# this personal-account repository GitHub Actions cannot be on that list
+# (docs/policy/qa-release-agent.md section 8 item 7; GitHub refused it on
+# 2026-10-08). The PAT acts as the repository admin, which the list holds.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: visual-baseline-record-${{ github.ref }}
@@ -53,16 +66,50 @@ jobs:
     env:
       NEXTAUTH_URL: http://127.0.0.1:3100
       NEXT_PUBLIC_TURNSTILE_SITE_KEY: tomverse-playwright-turnstile-site-key
+      # The dispatch input reaches every step as data in this variable, never
+      # as text spliced into a script: an expression inside `run:` is pasted
+      # into the shell before it runs, so an input holding `$(...)` would
+      # execute -- in the push step, next to the PAT.
+      SPEC: ${{ inputs.spec }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # No credential is left in .git/config for the build and the
+          # Playwright runs; only the push step below receives one.
+          persist-credentials: false
+
+      - name: Refuse a spec that is not a Playwright spec file in this repository
+        run: |
+          set -euo pipefail
+          case "$SPEC" in
+            *..*) echo "The spec path may not contain '..'."; exit 1 ;;
+          esac
+          if ! printf '%s' "$SPEC" | grep -Eq '^tests/e2e/[A-Za-z0-9][A-Za-z0-9._/-]*\.spec\.ts$'; then
+            echo "The spec must be a tests/e2e/**/*.spec.ts path."
+            exit 1
+          fi
+          if [ ! -f "$SPEC" ]; then
+            echo "No such spec file: $SPEC"
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment package.json
+          # names a package manager. This job holds a credential, and nothing can write
+          # a cache in a scope this job runs in any more, so the entry it used to look
+          # for was already a certain miss: daily-security-audit run 37162314395, in the
+          # same scope and while it still asked for the cache, logged "npm cache is not
+          # found" and then "cache write denied: token has no writable scopes".
+          # Declaring it costs nothing here and takes the job out of the analyser's
+          # cache-restoring set.
+          # .github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.3 and P3.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
@@ -79,7 +126,7 @@ jobs:
       - name: Capture the diff against the current baseline
         id: baseline
         continue-on-error: true
-        run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
+        run: npx playwright test "$SPEC" --project=desktop-chromium --retries=0
 
       - name: Preserve the diff evidence
         if: always()
@@ -91,15 +138,18 @@ jobs:
 
       - name: Re-record on the canonical environment
         run: |
-          npx playwright test "${{ inputs.spec }}" \
+          npx playwright test "$SPEC" \
             --project=desktop-chromium --retries=0 --update-snapshots
 
       - name: Confirm the new baseline is stable on a clean run
-        run: npx playwright test "${{ inputs.spec }}" --project=desktop-chromium --retries=0
+        run: npx playwright test "$SPEC" --project=desktop-chromium --retries=0
 
       - name: Push the recording to a review branch
         env:
           BASELINE_OUTCOME: ${{ steps.baseline.outcome }}
+          # This step alone: the token is never in .git/config and never in a
+          # step that runs repository code (see `permissions` above).
+          GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           # Playwright's default snapshot location: the spec path plus a
@@ -109,7 +159,7 @@ jobs:
           # changed files end in `.png`, not in `-snapshots`. The first run of
           # this workflow re-recorded all 63 goldens correctly and then
           # reported "nothing to push".
-          snapshots="${{ inputs.spec }}-snapshots"
+          snapshots="${SPEC}-snapshots"
           if [ ! -d "$snapshots" ]; then
             echo "Expected a snapshot directory at $snapshots and found none."
             exit 1
@@ -141,7 +191,7 @@ jobs:
           git commit \
             -m "Re-record visual goldens on the canonical environment" \
             -m "Recorded by Record Visual Baseline, run ${{ github.run_id }}, on ubuntu-24.04 with the Chromium bundled with the pinned Playwright version. Reviewed and merged separately -- see the run's baseline-evidence artifact for the diff against the previous baseline."
-          git push origin "$branch"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$branch"
           echo "Pushed $branch"
           # No `to-develop` segment, so Auto PR to Develop leaves this branch
           # alone and opens nothing (scripts/auto-pr-branch-policy.mjs). That

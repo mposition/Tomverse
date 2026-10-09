@@ -5,6 +5,7 @@ import {
   AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
   advanceAmuxIdeaAnalysisFailureState,
   assessAmuxIdeaAnalysisBudget,
+  assessAmuxIdeaAnalysisSettlement,
 } from "../lib/amux/ideaAnalysisBudgetCore.ts";
 
 const basis = (overrides = {}) => ({
@@ -158,4 +159,47 @@ test("invalid failure state is rejected and cannot become an extra invocation", 
   assert.equal(advanceAmuxIdeaAnalysisFailureState({
     consecutiveFailures: 3, haltReason: "outcome_unknown",
   }, "invocation_failed"), null);
+});
+
+const settlement = (overrides = {}) => ({
+  outcome: "verified_success", reservedMicroUsd: "5000",
+  inputTokensCap: 1_000, outputTokensCap: 2_000,
+  inputMicroUsdPerMillion: 1_000_000,
+  outputMicroUsdPerMillion: 2_000_000,
+  inputTokens: 200, outputTokens: 300, ...overrides,
+});
+
+test("verified usage settles a bounded amount and frees only the unused reservation", () => {
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement()), {
+    decision: "settlement_candidate", status: "succeeded",
+    settledMicroUsd: "800", releasedMicroUsd: "4200",
+  });
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    outcome: "invocation_failed", inputTokens: 200, outputTokens: 0,
+  })), { decision: "settlement_candidate", status: "failed",
+    settledMicroUsd: "200", releasedMicroUsd: "4800" });
+});
+
+test("unknown or unmeasured invocation never settles as zero", () => {
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    outcome: "outcome_unknown", inputTokens: null, outputTokens: null,
+  })), { decision: "hold", reason: "usage_unknown" });
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    inputTokens: 0, outputTokens: 0,
+  })), { decision: "hold", reason: "basis_invalid" });
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    outcome: "outcome_unknown", inputTokens: 1,
+  })), { decision: "hold", reason: "basis_invalid" });
+});
+
+test("a provider over cap or a mismatched reservation blocks settlement", () => {
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    inputTokens: 1_001,
+  })), { decision: "hold", reason: "usage_exceeds_cap" });
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    reservedMicroUsd: "799",
+  })), { decision: "hold", reason: "reservation_mismatch" });
+  assert.deepEqual(assessAmuxIdeaAnalysisSettlement(settlement({
+    extra: true,
+  })), { decision: "hold", reason: "basis_invalid" });
 });

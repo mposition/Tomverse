@@ -6,18 +6,23 @@ import type { Session } from "next-auth";
 
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
-  AMUX_REVIEW_DISPLAY_MAX_BYTES,
+  amuxReviewApprovalHasEvidence,
+  amuxReviewDisplayIsExact,
   amuxReviewTextExceedsDisplay,
   amuxReviewRequestDigest,
   amuxReviewSubjectDigest,
   amuxReviewTargetStatus,
+  amuxV22ReviewRetryHasVerifiedOutcome,
+  amuxV4ReviewEvidenceMatches,
   sha256Hex,
+  safeReviewDisplayText,
   type AmuxReviewOutcome,
   type AmuxReviewSubject,
 } from "@/lib/amux/reviewApprovalCore";
 import { AMUX_MAX_EXECUTION_ATTEMPTS, decideAmuxAttemptBudget } from "@/lib/amux/executionBudgetCore";
 import { normalizeAmuxUntrustedReason, openAmuxHumanEscalation, publicAmuxEscalationReasonCode } from "@/lib/amux/escalation";
 import { readAmuxReviewPullRequest, type AmuxReviewPullRequest } from "@/lib/amux/reviewGitHub";
+import { readAmuxExecutionTaskDetail } from "@/lib/amux/adminExecutionRead";
 import { evaluateLockedAmuxCostAdmission, lockAmuxResourcePolicies } from "@/lib/amux/resourcePolicy";
 import { amuxResourceRefs } from "@/lib/amux/resourcePolicyCore";
 import { prisma } from "@/lib/prisma";
@@ -30,26 +35,49 @@ export class AmuxReviewRefusal extends Error {
 }
 
 type Client = Prisma.TransactionClient;
+type V4ReviewEvidence = {
+  taskId: string; revision: number; title: string; description: string;
+  titleDigest: string | null; bodyDigest: string | null;
+  briefDigest: string | null; resultAttemptId: string | null;
+  resultSha256: string | null;
+};
+
+/** Verified private content is read outside the row-lock transaction. The
+ * transaction checks its revision, keyed digests and result SHA again. */
+async function v4EvidenceForEscalation(escalationId: string):
+  Promise<V4ReviewEvidence | null> {
+  const escalation = await prisma.amuxHumanEscalation.findUnique({
+    where: { id: escalationId },
+    select: { task: { select: { id: true, sourceSystem: true,
+      reviewPrNumber: true } } },
+  });
+  if (!escalation || escalation.task.sourceSystem !== "admin-idea-v4") return null;
+  try {
+    const detail = await readAmuxExecutionTaskDetail(escalation.task.id);
+    if (!detail?.title || !detail.body || !detail.brief ||
+        !detail.v4EvidenceDigests?.title || !detail.v4EvidenceDigests.body ||
+        !detail.v4EvidenceDigests.brief) return null;
+    const retainedResult = detail.result?.state === "available" &&
+      detail.result.text ? detail.result : null;
+    const retainedResultText = retainedResult?.text ?? null;
+    return {
+      taskId: escalation.task.id, revision: detail.revision,
+      title: detail.title,
+      description: `Scope and completion criteria:\n${detail.body}\n\nApproved brief:\n${detail.brief}` +
+        (escalation.task.reviewPrNumber === null && retainedResultText ?
+          `\n\nVerified worker result:\n${retainedResultText}` : ""),
+      titleDigest: detail.v4EvidenceDigests.title,
+      bodyDigest: detail.v4EvidenceDigests.body,
+      briefDigest: detail.v4EvidenceDigests.brief,
+      resultAttemptId: retainedResult?.attemptId ?? null,
+      resultSha256: retainedResultText ?
+        retainedResult?.sha256 ?? sha256Hex(retainedResultText) : null,
+    };
+  } catch { return null; }
+}
 
 const refuse = (code: string, status = 409): never => {
   throw new AmuxReviewRefusal(code, status);
-};
-
-/** Privileged display only. Keep task prose apart from immutable PR identity. */
-const safeReviewDisplayText = (value: string | null) => {
-  if (value === null) return null;
-  const cleaned = value.normalize("NFC")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u061C\u200E\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069]/gu, "")
-    .replace(/\r\n?/gu, "\n");
-  let text = "";
-  let bytes = 0;
-  for (const character of cleaned) {
-    const size = Buffer.byteLength(character, "utf8");
-    if (bytes + size > AMUX_REVIEW_DISPLAY_MAX_BYTES) break;
-    text += character;
-    bytes += size;
-  }
-  return text;
 };
 
 const dbNow = async (tx: Client) => {
@@ -104,6 +132,7 @@ async function snapshot(
   tx: Client,
   escalationId: string,
   fetchedArtifact: AmuxReviewPullRequest | null,
+  fetchedV4: V4ReviewEvidence | null,
 ) {
   const escalation = await tx.amuxHumanEscalation.findUnique({
     where: { id: escalationId },
@@ -113,7 +142,7 @@ async function snapshot(
   const task = escalation.task;
   const artifact = task.status === "review" &&
     task.reviewPrNumber === fetchedArtifact?.prNumber ? fetchedArtifact : null;
-  const [lastAttempt, attemptCount, activeDelivery, previousBlock] = await Promise.all([
+  const [lastAttempt, attemptCount, activeDelivery, previousBlock, latestV4Result] = await Promise.all([
     tx.amuxExecutionAttempt.findFirst({
       where: { taskId: task.id },
       orderBy: [{ taskRevision: "desc" }, { startedAt: "desc" }, { id: "desc" }],
@@ -132,6 +161,11 @@ async function snapshot(
       orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
       select: { resolution: true },
     }),
+    task.sourceSystem === "admin-idea-v4" ?
+      tx.amuxV22TaskResult.findFirst({ where: { taskId: task.id },
+        orderBy: [{ createdAt: "desc" }, { attemptId: "desc" }],
+        select: { attemptId: true, sourceSha256: true, bodyPurgedAt: true } }) :
+      Promise.resolve(null),
   ]);
   const budget = decideAmuxAttemptBudget({
     historical_rows: attemptCount._count._all,
@@ -147,23 +181,48 @@ async function snapshot(
     ? escalation.openedTaskRevision !== null &&
       task.revision > escalation.openedTaskRevision && task.dueParseState === "valid"
     : task.dueParseState === "valid" || task.dueParseState === "none";
-  const description = task.description;
+  const v4ContentValid = task.sourceSystem === "admin-idea-v4" &&
+    fetchedV4?.taskId === task.id && fetchedV4.revision === task.revision &&
+    fetchedV4.titleDigest === task.v4TitleDigest &&
+    fetchedV4.bodyDigest === task.v4BodyDigest &&
+    fetchedV4.briefDigest === task.v4BriefDigest;
+  const v4Valid = amuxV4ReviewEvidenceMatches({
+    task: { id: task.id, sourceSystem: task.sourceSystem,
+      revision: task.revision, titleDigest: task.v4TitleDigest,
+      bodyDigest: task.v4BodyDigest, briefDigest: task.v4BriefDigest },
+    evidence: fetchedV4, result: latestV4Result, attempt: lastAttempt,
+  });
+  const description = v4ContentValid && fetchedV4 ? fetchedV4.description : task.description;
+  const reviewTitle = v4ContentValid && fetchedV4 ? fetchedV4.title : task.title;
   // Ingress allows 50,000 Unicode characters, not 50,000 UTF-8 bytes. The
   // normal case fits within 200 kB; a legacy oversized row cannot be silently
   // approved or retried while the administrator sees only a prefix.
-  const displayTruncated = amuxReviewTextExceedsDisplay(description);
+  const displayTruncated = amuxReviewTextExceedsDisplay(reviewTitle) ||
+    amuxReviewTextExceedsDisplay(description);
+  // Every approval must bind exactly the text the owner can inspect. A control
+  // character, bidi override, or normalization change is not silently hidden.
+  const displayExact = amuxReviewDisplayIsExact(reviewTitle) &&
+    amuxReviewDisplayIsExact(description);
   const safe = escalation.status === "open" || escalation.status === "acknowledged";
   const baseEligible = safe && task.archivedAt === null &&
     (task.status === "review" || task.status === "blocked") &&
     lastTerminal && activeDelivery === null;
   const outcomes: AmuxReviewOutcome[] = [];
   if (baseEligible && task.status === "review" && reviewAttempt) {
-    if (artifact && !displayTruncated) outcomes.push("approve");
+    if (amuxReviewApprovalHasEvidence({ sourceSystem: task.sourceSystem,
+      cardType: task.cardType, taskRole: task.taskRole,
+      reviewPrNumber: task.reviewPrNumber,
+      artifactAvailable: artifact !== null,
+      v4EvidenceVerified: v4Valid, displayTruncated,
+      displayExact })) outcomes.push("approve");
     outcomes.push("block");
   }
   if (baseEligible && task.status === "blocked") {
     outcomes.push("block");
-    if (!displayTruncated && budget.allowed && dueCorrected &&
+    if (!displayTruncated && displayExact && budget.allowed && dueCorrected &&
+        amuxV22ReviewRetryHasVerifiedOutcome({
+          sourceSystem: task.sourceSystem, attempt: lastAttempt,
+        }) &&
         (lastAttempt !== null || escalation.specialty === "planning-review")) {
       outcomes.push("retry");
     }
@@ -178,7 +237,7 @@ async function snapshot(
     task_id: task.id,
     task_revision: task.revision,
     task_status: task.status === "review" ? "review" : "blocked",
-    title: task.title,
+    title: reviewTitle,
     description,
     due_parse_state: task.dueParseState,
     due_at: task.dueAt?.toISOString() ?? null,
@@ -194,23 +253,38 @@ async function snapshot(
     review_base_sha: artifact?.baseSha ?? null,
     review_head_sha: artifact?.headSha ?? null,
     review_diff_digest: artifact?.diffDigest ?? null,
+    ...(task.sourceSystem === "admin-idea-v4" ? { v4_evidence: {
+      title_digest: task.v4TitleDigest,
+      body_digest: task.v4BodyDigest,
+      brief_digest: task.v4BriefDigest,
+      result_attempt_id: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+        fetchedV4.resultAttemptId : null,
+      result_sha256: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+        fetchedV4.resultSha256 : null,
+    } } : {}),
   };
   const digest = amuxReviewSubjectDigest(subject);
   const text = `Task ID: ${task.id}\nRevision: ${task.revision}\nEscalation ID: ${escalation.id}`;
   const context = {
-    title: safeReviewDisplayText(task.title),
+    title: safeReviewDisplayText(reviewTitle),
     description: safeReviewDisplayText(description),
+    result_sha256: task.reviewPrNumber === null && v4Valid && fetchedV4 ?
+      fetchedV4.resultSha256 : null,
     escalation_reason: reason,
     last_attempt_reason: attemptReason,
     previous_block_reason: previousBlockReason,
   };
-  return { escalation, task, lastAttempt, budget, used, subject, digest, text, context, displayTruncated, outcomes, artifact };
+  return { escalation, task, lastAttempt, budget, used, subject, digest, text,
+    context, displayTruncated, displayExact, outcomes, artifact };
 }
 
 export async function getAmuxReviewDetail(escalationId: string) {
-  const fetchedArtifact = await artifactForEscalation(escalationId);
-  const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact));
-  const { escalation, task, lastAttempt, used, digest, text, context, displayTruncated, outcomes, artifact } = state;
+  const [fetchedArtifact, fetchedV4] = await Promise.all([
+    artifactForEscalation(escalationId), v4EvidenceForEscalation(escalationId),
+  ]);
+  const state = await prisma.$transaction((tx) => snapshot(tx, escalationId, fetchedArtifact, fetchedV4));
+  const { escalation, task, lastAttempt, used, digest, text, context,
+    displayTruncated, displayExact, outcomes, artifact } = state;
   return {
     available: true,
     escalation: {
@@ -222,7 +296,7 @@ export async function getAmuxReviewDetail(escalationId: string) {
     },
     task: {
       id: task.id,
-      title: task.title,
+      title: context.title ?? task.title,
       status: task.status,
       revision: task.revision,
       due_parse_state: task.dueParseState,
@@ -233,7 +307,8 @@ export async function getAmuxReviewDetail(escalationId: string) {
       to_status: lastAttempt.toStatus,
       ended_at: lastAttempt.endedAt?.toISOString() ?? null,
     } : null,
-    review_content: { text, digest, truncated: displayTruncated },
+    review_content: { text, digest, truncated: displayTruncated,
+      display_mismatch: !displayExact },
     review_context: context,
     review_artifact: artifact ? {
       pr_number: artifact.prNumber,
@@ -260,10 +335,13 @@ export async function createAmuxReviewProposal(input: {
   session: Session;
   request: Request;
 }) {
-  const artifact = await artifactForEscalation(input.escalationId, input.outcome === "approve");
+  const [artifact, v4Evidence] = await Promise.all([
+    artifactForEscalation(input.escalationId, input.outcome === "approve"),
+    v4EvidenceForEscalation(input.escalationId),
+  ]);
   return prisma.$transaction(async (tx) => {
     await lockTaskAndEscalation(tx, input.escalationId);
-    const state = await snapshot(tx, input.escalationId, artifact);
+    const state = await snapshot(tx, input.escalationId, artifact, v4Evidence);
     if (!state.outcomes.includes(input.outcome)) return refuse("AMUX_REVIEW_OUTCOME_UNAVAILABLE");
     if (state.digest !== input.expectedSubjectDigest) return refuse("AMUX_REVIEW_SUBJECT_CHANGED");
     const target = amuxReviewTargetStatus(
@@ -403,7 +481,10 @@ export async function resolveAmuxReview(input: {
       } },
     },
   });
-  const artifact = await artifactForEscalation(input.escalationId, retryPlanning?.outcome === "approve");
+  const [artifact, v4Evidence] = await Promise.all([
+    artifactForEscalation(input.escalationId, retryPlanning?.outcome === "approve"),
+    v4EvidenceForEscalation(input.escalationId),
+  ]);
   return prisma.$transaction(async (tx) => {
     const costPolicies = retryPlanning?.outcome === "retry"
       ? await lockAmuxResourcePolicies(tx, amuxResourceRefs(retryPlanning.task))
@@ -427,7 +508,7 @@ export async function resolveAmuxReview(input: {
         task_revision: proposal.taskRevision + 1,
       };
     }
-    const state = await snapshot(tx, input.escalationId, artifact);
+    const state = await snapshot(tx, input.escalationId, artifact, v4Evidence);
     const now = await dbNow(tx);
     if (proposal.outcome === "retry") {
       if (!retryPlanning || !costPolicies ||
@@ -450,10 +531,10 @@ export async function resolveAmuxReview(input: {
       return refuse("AMUX_REVIEW_PROPOSAL_CHANGED");
     }
     if (proposal.outcome === "approve" &&
-        (proposal.reviewPrNumber !== state.artifact?.prNumber ||
-         proposal.reviewBaseSha !== state.artifact?.baseSha ||
-         proposal.reviewHeadSha !== state.artifact?.headSha ||
-         proposal.reviewDiffDigest !== state.artifact?.diffDigest)) {
+        (proposal.reviewPrNumber !== (state.artifact?.prNumber ?? null) ||
+         proposal.reviewBaseSha !== (state.artifact?.baseSha ?? null) ||
+         proposal.reviewHeadSha !== (state.artifact?.headSha ?? null) ||
+         proposal.reviewDiffDigest !== (state.artifact?.diffDigest ?? null))) {
       return refuse("AMUX_REVIEW_SOURCE_CHANGED");
     }
     const target = amuxReviewTargetStatus(

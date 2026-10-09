@@ -147,6 +147,16 @@ test.describe("build-info UI", () => {
     await expect(page.getByTestId("build-staging-badge")).toHaveText("Staging");
   });
 
+  test("dev shows its own badge, not the staging one", async ({ page }, testInfo) => {
+    await prepareGuestPage(page, "en");
+    await mockBuildInfo(page, { ...VALID_BUILD_INFO, environment: "dev" });
+    await page.goto("/chat");
+    await openSidebarIfNeeded(page, testInfo);
+
+    await expect(page.getByTestId("build-staging-badge")).toBeVisible();
+    await expect(page.getByTestId("build-staging-badge")).toHaveText("Dev");
+  });
+
   test("production shows no staging badge", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await mockBuildInfo(page, { ...VALID_BUILD_INFO, environment: "production" });

@@ -1,14 +1,20 @@
 # 엔지니어링 Agent 정책
 
-상태: **승인됨 — 구현 없음.** 최초 작성 2026-09-21, 두 번째 초안 2026-09-27, 승인 2026-09-28.
-approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 1
+상태: **승인됨 — 단계별 구현 중.** 최초 작성 2026-09-21, 두 번째 초안 2026-09-27, 최초 승인 2026-09-28.
+approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 4
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | (미부여) | (미승인) | 최초 초안 |
+| 4 | 2026-10-07 mposition | 배포 이미지에 실제로 없는 비런타임 파일만 통제 평면 slice에서 제외할 수 있는 좁은 예외. 동일 base commit·tree·운영자가 확인한 이미지 digest와 전체 파일 목록, 앱의 목록 SHA 재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석과 배포 후 실측이 모두 필요하다. 앱이 OCI digest를 독립 조회한다고 주장하지 않는다. v22 게시 경로는 Task 실행·기존 Publisher 스위치와 별도인 기본 꺼짐 코드 latch를 둔다. 게시 산출물이 없는 성공에는 `private_result`를 기록한다. 하나라도 없으면 기존 T2 유지 |
+| 3 | 2026-10-07 mposition | v22 경로에서 전체 결과 tree 목록 대신 변경 파일 경로·mode·새 blob 바이트만 제출하는 동등 검증 방식을 승인. 앱은 GitHub 기준 tree로 결과 tree를 재구성하지만 patch는 적용·실행하지 않으며 Publisher가 실제 적용 결과 hash를 다시 대조한다 |
+| 2 | 2026-10-06 mposition | v22 로컬 Ubuntu 구현 Task의 검증된 패치를 별도 Engineering Publisher의 기존 T1 경계로 전달하는 좁은 원천 예외. `develop` PR 게시까지만 허용하고 자동 병합·배포와 `main` 행위는 허용하지 않는다. 기존 auto-merge 없는 규칙을 명시한다 |
 | 1 | 2026-09-28 mposition | 최초 승인(두 번째 초안). 작업 원천을 승격된 AMUX 카드로 바꾸고 issue 작업 승인을 없앰, 카드 자기 등록, 외부 행위 유형 `engineering.publish_pr`, AMUX 부착 방식과 교차 잠금, tree 목록 검증과 capability, 병합 관측 일곱 조건, 본 앱의 시간 상한 |
 
-운영자 `mposition`이 2026-09-28 대화 세션에서 이 문서를 승인했다(버전 1). 이제 이 문서는
+운영자 `mposition`이 2026-09-28 대화 세션에서 버전 1을, 2026-10-06 대화 세션에서
+v22 구현 Task의 좁은 Publisher 연결을 승인했고(버전 2), 2026-10-07에는
+변경 파일 제출 방식의 결과 tree 대조를 승인했고(버전 3), 같은 날 이미지 증거 방식과
+좁은 비런타임 제외 계약을 최종 승인했다(버전 4). 이제 이 문서는
 engineering Agent 구현의 규범 근거다. **승인은 단계별 착수 조건을 없애지 않는다** — §14의
 순서와 각 단계의 종료 증거, §8의 AMUX 쪽 선행 개정, §2.2의 등록 원천 선행 조건, 각 단계의
 독립 검토는 그대로 적용된다. 이 승인은 어떤 workflow·secret·branch protection·GitHub App·
@@ -56,7 +62,7 @@ AMUX 문서가, engineering의 권한에 대해서는 이 문서가 좁은 쪽�
 4. 우리 backlog에서 한 카드로 검증할 수 있는 작업을 찾아 AMUX backlog에 **등록**한다.
    등록은 실행이 아니며, 실행은 사람이 승격한 카드에서만 시작한다.
 5. 소유자에게 가는 산출은 상한과 만료가 있는 대기열 안에서만 생긴다.
-6. 기존 계약(branch 이름 권한, auto-merge 1회 규칙, feedback-autofix 정책, release
+6. 기존 계약(branch 이름 권한, auto-merge를 켜지 않는 규칙, feedback-autofix 정책, release
    checklist)을 재사용하고 약화하지 않는다.
 
 ### 하지 않는 것
@@ -75,7 +81,24 @@ AMUX 문서가, engineering의 권한에 대해서는 이 문서가 좁은 쪽�
 
 ### 2.1 작업 원천
 
-**작업 원천은 하나다 — 이 에이전트의 lane으로 넘어온, 승격된 AMUX 카드.** 카드가
+**v22 구현 Task 예외(버전 2).** `admin-idea-v4`의 승인된 구현 Task가 로컬 Ubuntu
+단발 worker에서 만든 변경은, AMUX의 해당 attempt·카드·승인된 brief에 결속된
+패치를 본 앱이 base SHA와 실제 변경 파일 목록으로 다시 검증한 경우에만 §3의
+T1 후보가 될 수 있다. 카드 승인 화면의 별도 공개 PR 확인 항목은 기본 꺼짐이며,
+운영자가 해당 구현 Task의 패치·PR 제목·본문 공개에 명시적으로 동의한 경우에만
+T1 후보가 된다. 동의는 카드 확인 digest와 canonical audit에 결속한다. 비공개
+아이디어 원문과 실행 brief 자체는 게시하지 않는다. 동의가 없거나 증명할 수
+없으면 패치는 비공개 결과로만 남는다. 로컬 worker와 AMUX 앱은 GitHub 쓰기 자격증명을 받지 않는다.
+별도 Engineering Publisher만 기존 §4·§5·§7·§9·§10·§11의 결정적 검사와
+단회 capability를 거쳐 `develop` PR을 게시한다. 모델의 결과 본문, 사람이 한
+AMUX 작업 검토 또는 카드의 우선순위는 capability가 아니다. patch·base·tree
+중 하나라도 검증 불가이거나 통제 평면에 닿으면 공개 게시 없이 비공개 결과로
+남긴다. `main` PR·병합·production 배포는 운영자 전용이며, `develop` 자동 병합과
+staging 자동 배포도 이 예외에 포함하지 않는다. 새 경로의 코드·운영 스위치는
+독립 검토와 합성 검증 전에는 열지 않는다.
+
+**작업 원천은 승격된 AMUX 카드 하나다.** 버전 1의 Railway runner 경로와 위 버전 2의
+로컬 Ubuntu v22 구현 Task 경로는 같은 AMUX 카드의 서로 다른, 혼용하지 않는 실행 경로다. 카드가
 실행 가능해지는 것은 AMUX의 승격 승인이며 이 문서는 그 승인을 정의하지 않는다.
 에이전트가 받는 것은 카드의 최소 실행 계약(execution brief)과 종류·우선순위·분류·명시적
 의존성이고, 비공개 상세 원문은 받지 않는다.
@@ -143,7 +166,7 @@ branch 이름은 등급을 정하지 못한다.
 | 등급 | 에이전트가 하는 것 | 되돌릴 수 있는 근거 |
 |---|---|---|
 | **T2 초안** | branch를 push하지 않는다. patch와 제안을 **본 앱 테이블**에 제출하고 결정 항목 하나를 만든다 | 저장소 상태가 변하지 않는다. patch는 비공개 DB에만, 크기 상한과 두 번의 secret 검사 뒤에 저장된다 |
-| **T1 PR** | 전용 branch를 push하고 `develop` 대상 PR을 연다. auto-merge 없음 | 병합은 사람이 한다. push와 PR은 공개되어 회수되지 않으므로, 내용이 공개 입력에서만 파생되고 §13의 조건을 통과할 때만 허용한다 |
+| **T1 PR** | 전용 branch를 push하고 `develop` 대상 PR을 연다. auto-merge 없음 | 병합은 사람이 한다. push와 PR은 공개되어 회수되지 않으므로, 공개 입력에서만 파생된 변경 또는 §2.1의 별도 공개 동의를 받은 v22 구현 Task의 검증된 패치에 한해 §13의 조건을 통과해야 한다. 동의가 있어도 아이디어 원문·실행 brief는 공개하지 않는다 |
 | 무인 병합 | **이 정책에서 부여하지 않는다** | — |
 
 ## 4. push 금지 집합
@@ -181,6 +204,19 @@ manifest가 판정 근거이고 이름 패턴은 보조다.
 전체가 T2다. 런타임 탐색, framework 관례에 따른 자동 등록, 환경변수·AppSetting·
 registry로 통제 평면의 동작을 바꾸는 경로도 같다.
 
+**승인된 좁은 예외 — 배포 이미지에 없는 비런타임 파일.** 2026-10-07 읽기 전용 실측에서
+staging과 production의 앱 이미지 모두 `/app/tests`, `/app/docs`, `/app/lib`와 대표 파일을
+포함했다. 따라서 현재 이미지에는 제외할 수 있는 확인된 경로가 없고 T1 판정은 바뀌지
+않는다. 후속 빌드에서 `tests/`의 원본을 제외하더라도, 동일 `develop` base commit·tree 및
+배포 이미지 digest에 운영자가 결속해 확인한 완전한 이미지 파일 목록, 앱의 목록 SHA
+재계산, 런타임 source SHA·deployment ID 대조, 동적 파일 접근 분석, 배포 후 실측과
+독립 검토가 없으면 제외 목록은 비어 있고 T2다. 앱은 OCI 이미지 digest를 독립적으로
+조회하지 않으며 그 결속은 운영자 확인 기록의 책임이다. Task 실행과 공개 게시의 별도
+코드·운영 스위치는 이 정책 승인만으로 열리지 않는다. `docs/` 전체는 제외 대상이 아니다. 앱이 `docs/ops`의 웹훅 검증 기록을 런타임에
+읽으므로, 문서는 실제 접근을 파일 단위로 검증한 경우에만 별도 제안할 수 있다. 이미지에
+없는 것이 증명되어도 runtime code·import·경로 참조·설정 이름을 통한 기존 T2 판정은
+그대로 유지한다. 측정 대상 commit 또는 이미지가 달라지면 이전 증거를 재사용하지 않는다.
+
 ## 5. 쓰기 가능 자격증명 도달 분석
 
 "쓰기 가능 자격증명"은 repository secret만이 아니라 workflow·job이 부여한 토큰 쓰기
@@ -199,6 +235,38 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   path filter와 무관하게 도달한 것으로 보고 **모든 변경이 push 금지**다. 이 가정을
   푸는 방법은 job별 제외가 아니라, cache의 ref 간 공유 범위에 대한 날짜 있는 확인
   기록 하나를 분석기 설정에 고정하는 것뿐이다.
+  **그 설정은 `lib/agentCacheIsolationRecord.ts`이고, 기록은 초안 상태로 거기 있다**
+  — 세 방향과 각 근거는 채워져 있고 `approvedBy`·`approvedAt`가 비어 있다. 두 칸을
+  채우는 것이 이 규칙을 푸는 행위이며 **소유자만 한다**(§7). 비어 있는 동안 기록은
+  아무것도 풀지 않는다.
+  분석기는 복원하는 cache의 **종류**도 함께 보고하지만(§5.1), 그것이 이 규칙을
+  좁히지는 않는다 — 어떤 종류든 복원하면 금지다.
+- **그 기록이 담아야 하는 것**(§5.1): 기록은 **방향을 구분해서** 써야 하고, 아래
+  세 문장을 각각 근거와 함께 담지 않은 기록은 이 규칙을 풀지 못한다.
+  1. **PR run → 다른 ref: 닫혀 있다.** 근거는 GitHub의 cache scope 규칙이다 —
+     PR run의 cache는 merge ref scope에 만들어지고 그 PR의 re-run만 복원한다.
+     에이전트가 심을 수 있는 cache는 자기 PR의 것뿐이므로, 이 한 문장이 "에이전트가
+     심은 cache가 자격증명 job에 도달하는가"에 답한다.
+  2. **기본 branch·base → PR: 열려 있다.** 기본 branch의 항목은 모든 run이, base의
+     항목은 그 base를 향한 모든 PR이 복원할 수 있다. 이 방향은 주체가 에이전트가
+     아니므로 이 규칙이 다루는 위협이 아니고, 근거를 격리에서 가져올 수 없다.
+     **"Actions cache는 ref 간에 격리된다"고 쓰면 거짓이다.**
+  3. **같은 PR 안: 열려 있다.** 위 규칙의 같은 문장이 "re-runs of the pull request"는
+     복원할 수 있다고 말한다. 그러므로 기록은 "에이전트의 PR에서 실제로 도는 자격증명
+     cache 복원 job이 없다"를 따로 확인해야 하고, 그 확인은 workflow의 trigger만이
+     아니라 **job의 조건식까지** 읽어야 성립한다 — trigger만 보고 판정하면 틀린다.
+
+     **이 조건을 유지하는 장치는 `npm run check:agent-pr-cache-isolation`이다**
+     (§5.2). §5.1의 검사는 이 조건을 유지하지 못한다 — 그것은 자격증명 job의
+     `unverified`·`unreadable` 복원만 거절하고 `verified_package_manager` 복원은
+     허용하므로, 에이전트 PR에서 자격증명 job이 npm cache를 복원하는 상태를 막지
+     못한다. 그 상태는 이 조건을 깨뜨린다 — 에이전트는 자기 PR에서
+     `package-lock.json`을 바꿀 수 있고, 그러면 lockfile integrity 대조는
+     에이전트가 넣은 값과 맞아떨어진다. 초안은 §5.1의 검사가 이 조건을 책임진다고
+     적었고, 그것은 거짓이었다(독립 검토 지적).
+
+     **그 검사가 실패하는 동안에는 이 기록을 쓸 수 없다.** 검사가 통과한다는 것은
+     이 조건이 오늘 참이라는 뜻이고, 기록이 근거로 쓸 수 있는 것은 그것뿐이다.
 - **결과**: 자격증명을 가진 job이 있는 도달 workflow마다 그 workflow의 path filter에
   걸리는 파일이 push 금지다. filter가 없거나 해석되지 않으면 모든 변경이 금지다.
 - **사람이 검토한 제외**: 결과를 좁히는 유일한 방법은 `{workflow 경로, job id, blob
@@ -209,6 +277,74 @@ scope, OIDC, environment secret, 재사용 workflow로 넘어가는 secret을 �
   변경이 push 금지다.
 
 **아직 해소되지 않은 도달 경로의 구체 목록은 이 문서에 싣지 않는다**(§16).
+
+### 5.1 cache 종류와 그것을 유지하는 검사
+
+이 분석은 저장소 전체 CI의 cache 위생 감사에서 나온 결과를 함께 쓴다
+(`.github/audits/actions-cache-poisoning-audit-2026-10-03.md`).
+
+- **분석기는 복원하는 cache의 종류를 보고한다.** `verified_package_manager`는
+  package manager 자신의 cache이고, `npm ci`가 lockfile의 integrity와 대조하므로
+  조작된 항목은 실패하거나 다시 내려받는다. `unverified`는 build 산출물과 browser
+  binary처럼 **아무것도 검증하지 않는** 것이고, job이 그것을 그대로 실행한다.
+  `unreadable`은 읽을 수 없는 것이며 둘 중 나쁜 쪽으로 취급한다.
+- **종류는 §5의 cache 규칙을 좁히지 않는다.** 어떤 종류든 복원하면 모든 변경이
+  push 금지다. 종류를 보고하는 이유는 하나다 — 자격증명 job이 verified에서
+  unverified로 옮겨 가는 것이 **같은 reason의 반복이 아니라 다른 사실**이 되게
+  하는 것. 그 전환은 `tests/agentCredentialReachability.test.mjs`의 posture digest가
+  본다.
+- **`npm run check:credential-cache-separation`이 그 전환을 막는다.** 자격증명을
+  가진 job은 `unverified`·`unreadable` cache를 복원할 수 없고, 이 검사는 PR Fast
+  Gate의 static 단계에서 돈다. 판정은 같은 모듈(`lib/agentCredentialReachability.ts`)
+  이 하므로 "어느 job이 자격증명을 가졌는가"에 답이 둘로 갈라지지 않는다.
+- **이 검사는 §5의 기록 3번을 유지하지 않는다.** 그것이 거절하는 것은
+  `unverified`·`unreadable`뿐이고, 자격증명 job이 `verified_package_manager`를
+  복원하는 것은 통과시킨다. 3번이 요구하는 것은 **에이전트 PR에서 도는 자격증명
+  cache 복원 job이 하나도 없다**는 더 강한 조건이므로, 이 검사를 그 근거로 쓰면
+  안 된다. 3번을 위한 장치는 "에이전트가 일으키는 이벤트에 걸리는 workflow의
+  자격증명 job은 **어떤** cache도 복원하지 않는다"를 묻는 별개 검사이고, 그것이
+  §5.2다.
+- 검사와 보고는 **이름을 출력하지 않는다**. 저장소가 공개이므로 §16이 미해소 대상의
+  목록을 여기에 두지 못하게 한다. 수치만 남기고, 목록은 운영자가 로컬에서
+  `npm run report:engineering-agent-tiers`로 본다.
+
+### 5.2 에이전트 PR의 cache 격리를 유지하는 검사
+
+`npm run check:agent-pr-cache-isolation`이 §5 기록 3번의 조건을 유지한다.
+**에이전트가 일으키는 이벤트에 걸리는 workflow의 자격증명 job은 어떤 cache도
+복원하지 않는다** — `verified_package_manager`도 포함한다. PR Fast Gate의 static
+단계에서 돈다.
+
+- **§5.1의 검사와 묻는 것이 다르다.** §5.1은 모든 workflow를 보면서 종류 둘만
+  거절하고, 이 검사는 도달하는 workflow만 보면서 종류 전부를 거절한다. 어느
+  쪽도 다른 쪽을 포함하지 않으므로 둘 다 필요하다.
+- **lockfile 대조는 이 주체에 대한 방어가 아니다.** 에이전트는 자기 PR에서
+  `package-lock.json`을 바꿀 수 있고, 그러면 `npm ci`의 integrity 대조는
+  에이전트가 넣은 값과 맞아떨어진다. 그래서 여기서는 package manager 자신의
+  cache도 거절한다.
+- **판정은 `lib/agentCredentialReachability.ts`가 한다.** 도달 여부·자격증명
+  여부·cache 종류를 다시 계산하지 않고 그 모듈이 보고한 `reachedWorkflows`와
+  cache 이유를 교차한다. 판정기를 둘로 만들면 숫자가 어긋난다(감사 P3).
+- **분석기는 여전히 job의 조건식을 해석하지 않는다.** §5의 "사람이 검토한 제외"
+  규칙은 그대로이고, 이 검사는 제외 목록을 하나도 쓰지 않는다. 조건식으로
+  통과하는 길을 만들지 않은 이유는 F5가 두 번 틀린 지점이 바로 trigger만 읽고
+  조건식을 읽지 않은 것이기 때문이다. **그래서 조건이 면제가 아니라 사실로
+  유지된다** — 2026-10-03에 도달 workflow 안에서 npm cache를 복원하던 자격증명
+  job 하나는 조건식으로 제외하지 않고 그 job에서 cache를 뗐다(소유자 결정).
+- **검사는 기록을 읽지 않는다.** 분석을 `cacheIsolationRecorded: false`로 받는다.
+  `true`로 받으면 분석기가 cache 이유를 보고하지 않으므로, 기록을 쓰는 순간 그
+  기록을 참으로 유지하는 장치가 꺼진다. `tests/agentPrCacheIsolation.test.mjs`가
+  이것을 고정한다.
+- 이 검사도 **이름을 출력하지 않는다**(§16). 수치만 남긴다.
+- **기록을 적용하는 쪽은 먼저 기록을 무시한 분석으로 판정한다.** 기록을 적용한
+  분석은 cache 이유를 아예 보고하지 않으므로, 그 분석으로 이 조건을 물으면 조건이
+  참이어서가 아니라 **증거가 가려져서** 충족으로 보인다. 그래서 소비자
+  (`scripts/report-engineering-agent-tiers.mjs`)는 `cacheIsolationRecorded: false`로
+  한 번 판정하고, 서명과 그 판정이 **둘 다** 성립할 때만 기록을 적용한다.
+  `tests/agentCacheIsolationRecord.test.mjs`가 이 순서를 고정한다.
+- **서명이 조건보다 오래 살지 않는다.** 같은 테스트가 "기록이 서명됐는데 이 조건이
+  깨진" 상태를 실패로 만든다. 서명은 한 파일의 두 칸이지만, 그 칸이 참이 아닌 상태를
+  만들 수는 없다.
 
 ## 6. 신뢰 경계와 외부 텍스트
 
@@ -411,6 +547,19 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 서비스(게시 직전)이고, 게시 서비스의 결과 tree hash가 본 앱이 판정한 tree hash와 다르면
 게시하지 않는다.
 
+**v22 구현 Task의 전송 예외(버전 3).** 전체 결과 목록이 sidecar 응답 한도를 넘으므로,
+로컬 worker는 변경 파일의 정규 경로·Git mode·새 blob의 원본 바이트(삭제에는 바이트 없음)만
+상한 안에서 제출한다. 앱은 고정된 `develop` base commit의 전체 tree를 GitHub에서 직접
+읽고 제출된 변경 파일을 그 tree에 대응시켜 결과 tree 목록과 hash를 계산한다. 앱은
+patch 본문을 파싱·적용·실행하지 않는다. 제출에 빠진 변경이나 거짓 내용이 있더라도
+별도 Publisher가 실제 patch를 적용해 얻은 tree hash가 기대값과 다르면 원격 push 전에
+거절한다. 결과가 불완전하거나 바이트·mode·경로·base를 검증할 수 없으면 T1은 거절한다.
+**v4 구현 현황:** 현재 v22
+구현은 기존 `100644` 일반 파일의 본문 수정만 완전한 변경 바이트로
+제출한다. 추가·삭제·mode 변경은 전송 계약의 가능 형태라도 아직 구현되지 않았으므로
+게시 후보가 되지 않고 비공개 결과로만 남는다. 삭제의 무바이트 표현을 지원한다고
+간주하거나 T1로 분류하지 않는다.
+
 - 제출된 blob의 hash가 목록의 object id와 같아야 하고, 바뀌지 않은 항목은 base 목록과
   같아야 한다. 변경 파일 집합은 blob만이 아니라 mode·type까지 비교해 얻으므로 mode 변경·
   symlink·submodule이 판정에서 사라지지 않는다.
@@ -441,6 +590,10 @@ snapshot과 같아야 한다) → 사람이 병합하고 본 앱이 병합을 �
 
   카드·실행 시도·전달·작업 검토는 **AMUX가 소유**하고 이 에이전트는 AMUX의 writer를
   통해서만 그 행에 닿는다.
+- **v4의 v22 결과:** Task가 성공했지만 게시 가능한 산출물이 없으면 run의
+  `outcome`을 `private_result`로 끝낸다. 이는 비공개 Task 결과만 있고
+  `EngineeringAgentWorkItem` 초안이나 공개 PR은 없다는 뜻이다. AMUX 쪽은 사람 검토
+  상태로 이동하며, `t2_draft`나 T1 게시로 집계하지 않는다.
 - engineering run은 AMUX 실행 시도 하나와 1:1이고 AMUX 실행 시작과 같은 트랜잭션에서
   만들어진다. 두 쪽 상태가 어긋나면 한쪽을 다른 쪽에 맞춰 고치지 않고 **불일치 항목**을
   만들어 사람에게 넘긴다. 사람의 조치는 양쪽을 한 트랜잭션에서 잠그고 다시 읽은 뒤에만

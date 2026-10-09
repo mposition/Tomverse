@@ -10,8 +10,8 @@ import {
 } from "@/lib/adminAuditIntegrityCore";
 import {
   AMUX_V4_IDEA_SYSTEM_ACTOR,
-  AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE,
   SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  amuxV4SystemAuditScope,
   isSystemAuditActor,
   metadataClaimsSystemActor,
   systemAuditActionAllowed,
@@ -98,11 +98,14 @@ export async function takeAuditChainLock(
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
 }
 
+/** What an append wrote: the row id, and its hash (null only with no integrity key). */
+export type AppendedAuditEntry = { id: string; entryHash: string | null };
+
 async function appendAuditChainEntry(
   client: Prisma.TransactionClient,
   entry: AuditChainEntry,
   integritySecret: string | undefined
-): Promise<string> {
+): Promise<AppendedAuditEntry> {
   await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
   const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
     -- AdminAuditLog.createdAt is a naive timestamp. Always materialize the
@@ -163,7 +166,7 @@ async function appendAuditChainEntry(
       createdAt,
     },
   });
-  return created.id;
+  return { id: created.id, entryHash };
 }
 
 /**
@@ -214,7 +217,7 @@ export async function writeAdminAuditLog({
   // a retired key would put fresh rows in a span that is on its way out.
   const integritySecret = adminAuditIntegrityKeys(process.env)[0];
   const write = (client: Prisma.TransactionClient) =>
-    appendAuditChainEntry(client, entry, integritySecret);
+    appendAuditChainEntry(client, entry, integritySecret).then((appended) => appended.id);
 
   // The id is returned so a caller can name this entry as evidence in the same
   // transaction (docs/policy/email-product-news-redesign-draft.md, section 7.4).
@@ -248,8 +251,12 @@ type SystemAuditInput = {
  *
  * Everything is checked at runtime as well as by the types, because callers
  * reach this from jobs whose inputs are assembled at runtime.
+ *
+ * Returns the entry's hash with its id, so a caller can copy the hash into its
+ * own row in the same transaction (the sre-ops transition ledger,
+ * docs/policy/sre-ops.md §3-10) without reading the entry back.
  */
-export async function writeSystemAuditLog({
+export async function writeSystemAuditLogEntry({
   tx,
   systemActor,
   action,
@@ -257,7 +264,7 @@ export async function writeSystemAuditLog({
   targetId,
   summary,
   metadata,
-}: SystemAuditInput): Promise<string> {
+}: SystemAuditInput): Promise<AppendedAuditEntry> {
   if (!tx) {
     throw new AuditWriteRefusedError(
       "writeSystemAuditLog needs the caller's transaction."
@@ -294,11 +301,20 @@ export async function writeSystemAuditLog({
     metadata: {
       ...(metadata || {}),
       [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor,
-      ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR ? { actorScope: AMUX_V4_INITIAL_SOURCE_PLAN_SCOPE } : {}),
+      ...(systemActor === AMUX_V4_IDEA_SYSTEM_ACTOR
+        ? { actorScope: amuxV4SystemAuditScope(action, targetType) } : {}),
     },
     ipAddress: null,
     userAgent: null,
   };
   const integritySecret = adminAuditIntegrityKeys(process.env)[0];
   return appendAuditChainEntry(tx, entry, integritySecret);
+}
+
+/**
+ * `writeSystemAuditLogEntry` for a caller that needs only the id -- the one
+ * every system writer had before the entry's hash was returned too.
+ */
+export async function writeSystemAuditLog({ tx, ...entry }: SystemAuditInput): Promise<string> {
+  return (await writeSystemAuditLogEntry({ tx, ...entry })).id;
 }

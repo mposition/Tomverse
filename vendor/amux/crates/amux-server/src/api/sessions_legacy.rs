@@ -1,0 +1,6926 @@
+//! GET /api/sessions — the PYTHON-SHAPED session list (RR-0075 enabler).
+//!
+//! The alias layer rewrites legacy PATHS, but the SPA also expects the
+//! Python RESPONSE SHAPE: a bare array of `{name, status, preview, ...}`.
+//! The modern /api/workers envelope (items/total, display_name, typed
+//! state) is right for new clients; this projection is what lets the
+//! 44k-line dashboard render workers today, unchanged. It is registered
+//! BEFORE the rewrite middleware so it wins over the path alias.
+
+use super::AppState;
+use crate::backend::tmux::pane_target;
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+/// WorkerState -> the Python status vocabulary the SPA's badges render.
+fn python_status(state_json: &str) -> &'static str {
+    let value: serde_json::Value = serde_json::from_str(state_json).unwrap_or_default();
+    match value.get("state").and_then(serde_json::Value::as_str) {
+        Some("active") => "active",
+        Some("idle") => "idle",
+        Some("waiting") => "waiting",
+        Some("rate_limited") => "rate_limited",
+        Some("error") => "error",
+        Some("starting") => "starting",
+        _ => "", // stopped renders as blank in the legacy wire format
+    }
+}
+
+// ---- status derivation (AMUX-2589) ---------------------------------------
+//
+// Python's `status` is its scanner's judgment (pane regex) overridden by a
+// fresh self-report (amux-server.py:20201-20263). The Rust server runs no
+// scanner (D1: scrapers are the deviation, not the goal), so the honest
+// equivalents are, in Python-precedence order:
+//   base:  the Python scanner's own LAST PERSISTED judgment — the
+//          session.working/idle/waiting transition it writes to
+//          `session_events` (py:20268-20270, the D1 report-endpoint shape:
+//          a durable store the producer already writes) — guarded against
+//          staleness (pre-restart events discarded; an `active` with no
+//          pane output for AMUX_ACTIVE_HEARTBEAT_S is not active);
+//          falling back to tmux activity (<60s = active, else idle).
+//   over:  self_report when fresh, with Python's ASYMMETRIC freshness
+//          (py:20233-20263): `idle` does not decay (the only exit is a
+//          prompt, which fires UserPromptSubmit -> a new report; window
+//          AMUX_HOOKS_LIVE_IDLE_S=86400), `active`/`waiting` do
+//          (AMUX_HOOKS_LIVE_S=1800), and a stale `active` report (older
+//          than the heartbeat, AMUX_ACTIVE_HEARTBEAT_S=120) never
+//          overrides — a long turn is byte-identical to a wedged one.
+//   last:  CONTRADICTION — physical evidence overrides a stale `idle`
+//          (AMUX-2646, below).
+//   "" :   not running.
+//
+// AMUX-2646 — "it is running but says idle". The asymmetric window above
+// says an `idle` report never decays, on the reasoning that "the only exit
+// from idle is a prompt, and every prompt fires UserPromptSubmit". That
+// premise is false in at least four reachable ways, and each of them leaves
+// a lane permanently mislabelled because nothing else in the derivation
+// could ever disagree:
+//
+//   1. The UserPromptSubmit POST is best-effort (`curl -m 2`, no retry). The
+//      server re-execs on every save of its own source on a shared checkout,
+//      so a dropped report is routine, not exotic.
+//   2. `report_post` then REFUSES every `tool-hook` heartbeat for the rest of
+//      the turn ("a heartbeat must not resurrect a finished turn",
+//      AMUX-2538) — the one signal that could self-heal is suppressed by
+//      design, correctly, for a different reason.
+//   3. Anything can write any state for any session over `/report`; a hand
+//      -run hook test wrote `{"state":"idle","source":"stop-hook-test"}` onto
+//      a LIVE working lane and it stuck for 1076s until a human noticed.
+//   4. Work resumes without a prompt: a backgrounded command re-invoking the
+//      agent, a resumed session, a hookless provider (gemini/codex) whose
+//      stale claude-era report outlives its hooks.
+//
+// A claim that no evidence can contradict is not a status, it is an axiom.
+// So `idle` still survives SILENCE for the full 24h — a parked lane must not
+// be re-scraped forever, which is the asymmetry's real purpose — but it does
+// not survive CONTRADICTION: a pane that is unambiguously mid-turn AND has
+// painted within AMUX_IDLE_CONTRADICTION_S overrides an idle report older
+// than that same window. Both halves are required, and the "has painted"
+// half is what keeps this from re-reading a parked lane's scrollback: a lane
+// that quotes "esc to interrupt" in a transcript it wrote hours ago (a real
+// self-block here, AMUX-2642) emits no output, so it is never probed.
+//
+// KNOWN residual, measured 2026-08-09 against the live fleet (114/116
+// exact): Python emits "" for a RUNNING session whose pane shows no
+// recognizable agent UI (claude exited to a shell). That cell exists only
+// in the pane regex; this derivation reads idle for it. Re-implementing
+// the regex would deepen D1, so the residual is documented, not coded away.
+
+fn env_secs(name: &str, default: f64) -> f64 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Is a stored self-report authoritative RIGHT NOW? The ONE trust rule, so the
+/// DISPLAY and the MECHANISMS that act on a report cannot disagree about the
+/// same row (AMUX-3756).
+///
+/// They did disagree, for months, and it deadlocked lanes permanently. The
+/// status derivation below applies this test and records `applied:false` for a
+/// report it refuses. `steer_lane_at_boundary` — the gate on auto-pickup, board
+/// nudges and steering delivery — read the SAME row and asked only
+/// `state == "idle"`, with no age, no life and no staleness. So a lane whose
+/// Stop hook never fired kept a stuck `active` report, the dashboard correctly
+/// showed IDLE (`decided_by: activity_fallback`), and the drive loop skipped it
+/// as `mid-turn` forever. Measured live 2026-08-26: 4 of 52 running lanes held
+/// this way — ai-video-editor 59.5h, creative-dna 61.4h, mixpeek-autopilot 6.4h,
+/// primer 1.0h — every one of them `auto_pickup: true` with eligible cards
+/// waiting.
+///
+/// The deadlock is SELF-PERPETUATING, which is what made it Ethan's "why do i
+/// need to push X to continue": only a turn writes a new report, and only a
+/// human starts a turn on a lane the drive loop refuses to touch. Pushing it by
+/// hand was the sole exit, and doing so cleared the evidence.
+///
+/// Pure and parameterised so both callers can be tested on the same cells.
+pub fn report_applies(state: &str, ts: f64, started: f64, now: f64) -> bool {
+    // A report from BEFORE the session's last (re)start describes a PREVIOUS
+    // LIFE. A restarted claude lane loses nothing: its hooks re-report on the
+    // first turn, and until then the pane and activity decide.
+    let from_this_life = started <= ts;
+    let age = now - ts;
+    // An `active` report is a claim about a turn in flight, and a turn in
+    // flight paints. Silence past the heartbeat means the claim outlived its
+    // evidence — a Stop hook that never fired, a crashed turn, an interrupt.
+    let stale_active = state == "active" && age > env_secs("AMUX_ACTIVE_HEARTBEAT_S", 120.0);
+    // `idle` and `blocked` survive silence (an idle lane has nothing to report
+    // until its next prompt; a blocked lane is parked on a dialog until a human
+    // answers it); every other state has a much shorter trust window.
+    let trust_window = if state == "idle" || state == "blocked" {
+        env_secs("AMUX_HOOKS_LIVE_IDLE_S", 86400.0)
+    } else {
+        env_secs("AMUX_HOOKS_LIVE_S", 1800.0)
+    };
+    from_this_life
+        && !stale_active
+        && age < trust_window
+        && matches!(state, "active" | "idle" | "waiting" | "blocked")
+}
+
+/// Pane captures abandoned on a deadline, and the lanes they were for.
+///
+/// AMUX-3700. Surfaced in `GET /api/debug/tmux` because a bounded capture is
+/// invisible by construction: the request succeeds, the lane's preview is
+/// simply absent, and the next poll usually works. Without a counter, a tmux
+/// that has started hanging looks exactly like a fleet that is quiet.
+pub static PANE_CAPTURE_TIMEOUTS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+pub static PANE_CAPTURE_LAST_TIMEOUT: std::sync::Mutex<Option<(String, f64)>> =
+    std::sync::Mutex::new(None);
+pub static PANE_CAPTURE_LAST_TIMEOUT_DETAIL: std::sync::Mutex<Option<serde_json::Value>> =
+    std::sync::Mutex::new(None);
+
+/// One `tmux capture-pane`, bounded.
+///
+/// THE DEFECT THIS REPLACES: this was `Command::output()`, which blocks until
+/// the child exits, with no deadline anywhere. `capture_panes` spawns twelve of
+/// those and then `join()`s them, so ONE tmux that does not return blocks the
+/// whole chunk, and every later chunk behind it — inside `build_array`, inside
+/// a request. That is `GET /api/sessions` at 12.1s (AMUX-3700) and at 93.3s
+/// (the 7-day worst), with 4,174 of 38,377 requests over a second.
+///
+/// It also explains the two things that made the outlier hard to read: the
+/// slow requests arrive in BURSTS (a busy tmux server affects consecutive
+/// polls), and they do not correlate with host load, because the server is
+/// blocked rather than working. The card's own evidence said "1-minute load 9.3
+/// on 28 cores (0.33x)" and that is exactly right and exactly not the cause.
+///
+/// A killed capture returns None, so the lane's pane is simply missing from
+/// this round. That is already a state the callers handle — `pane_of` returns
+/// Option and the status derivation treats an absent pane as "no contradicting
+/// evidence" — which is why bounding is safe here and would not be if the pane
+/// were load-bearing for a decision.
+fn capture_pane_bounded(pt: &str, lane: &str) -> Option<String> {
+    // THE CHOKE POINT FOR EVERY PANE READ, which is why suppression belongs
+    // here rather than at the three call sites.
+    //
+    // `SUPPRESS_FLEET_FOR_TEST` used to cover only `python_fleet_sessions`, the
+    // env-file enumeration, so a unit test could still scrape the machine's
+    // real tmux. `legacy_sessions_http_serializes_sticky_runtime_board_truth`
+    // inserts a fixture worker named `tubescience` with backend_ref
+    // `amux-tubescience`, which is the live TubeScience lane's actual session
+    // name on this box, so the test's verdict was whatever that lane happened
+    // to be doing. It failed on 2026-09-15 with status "waiting" instead of
+    // "unattributed", carrying the real pane verbatim
+    // ("Enter to select / navigate / Esc to cancel"), and passed 40 minutes
+    // earlier on the same code. On a GitHub runner no such session exists, so
+    // this is green in CI and red only on the box the fleet runs on, which is
+    // backwards for a dogfooding repo (AMUX-4703).
+    //
+    // Returning None is already a supported answer: see this function's own
+    // docstring above, a killed capture returns None and callers treat an
+    // absent pane as no contradicting evidence. So suppression reuses a path
+    // the callers already handle rather than inventing a test-only one.
+    #[cfg(test)]
+    if fleet_suppressed() {
+        return None;
+    }
+    use std::process::{Command, Stdio};
+    // POLICY IN CONFIG, not a constant (ethos D4). A timeout hardcoded here is
+    // a ceiling nobody can move when the fleet grows.
+    let budget = std::time::Duration::from_secs_f64(env_secs("AMUX_PANE_CAPTURE_TIMEOUT_S", 3.0));
+    // `pt`, not `target`: tests/tmux_target_audit.rs requires every `-t` value
+    // to be a variable built by pane_target()/session_target(), and it enforces
+    // that by NAME. It caught this refactor — the caller does pass a real
+    // pane_target(), and renaming the parameter is what keeps the audit able to
+    // see that at the call site it inspects.
+    let mut cmd = Command::new("tmux");
+    cmd.args(["capture-pane", "-t", pt, "-p", "-e", "-S", "-30"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    run_bounded(cmd, budget, lane)
+}
+
+/// Run a child to completion or KILL it on the deadline, returning its stdout.
+///
+/// Split out from `capture_pane_bounded` so it is testable: that one hardcodes
+/// `tmux`, and a test cannot make the real tmux hang on demand. The mechanism
+/// being bounded is the part that can be wrong, so the mechanism is what the
+/// test drives — with `sh -c "sleep 30"`, which hangs for real rather than
+/// standing in for hanging.
+/// The budget for the fleet-list PROBES — `tmux list-sessions`, the two
+/// `tmux list-panes`, and the per-shell-pane `pgrep` (AF-301).
+///
+/// Separate from `AMUX_PANE_CAPTURE_TIMEOUT_S` because they answer different
+/// questions: pane capture reads ONE lane's screen and 3s is generous, while
+/// these enumerate the whole fleet and a slow-but-working tmux should not be
+/// mistaken for a wedged one.
+fn probe_budget() -> std::time::Duration {
+    std::time::Duration::from_secs_f64(env_secs("AMUX_SESSIONS_PROBE_TIMEOUT_S", 5.0))
+}
+
+/// `run_bounded`, but returning the whole `Output` so a caller can read
+/// `status` and `stderr` (AF-301).
+///
+/// `run_bounded` returns stdout only, which is why `tmux list-sessions` at the
+/// call site below kept using bare `.output()`: it WARNs with the exit status
+/// and stderr when tmux fails, and converting it to the stdout-only helper
+/// would have silently dropped that diagnostic to buy the timeout. Widening the
+/// helper keeps both.
+/// Drain both output pipes while polling the child. Waiting for exit first
+/// deadlocks as soon as either pipe fills, then misreports amux's unread pipe
+/// as a stalled tmux server (AMUX-4203). The deadline also covers pipe EOF:
+/// a descendant can keep a pipe open after the direct child has exited.
+fn run_bounded_output(
+    mut cmd: std::process::Command,
+    budget: std::time::Duration,
+    lane: &str,
+) -> Option<std::process::Output> {
+    use std::io::{self, Read};
+    use std::os::fd::AsRawFd;
+
+    fn nonblocking(pipe: &impl AsRawFd) -> io::Result<()> {
+        // SAFETY: pipe owns this valid descriptor throughout both fcntl calls.
+        let flags = unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_GETFL) };
+        if flags == -1 || unsafe {
+            libc::fcntl(pipe.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK)
+        } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    fn drain(pipe: &mut Option<impl Read>, bytes: &mut Vec<u8>) -> io::Result<bool> {
+        let mut progressed = false;
+        let mut buf = [0; 8192];
+        // Fairness per pass, not an output limit: revisit the deadline and the
+        // other pipe even when a producer writes continuously.
+        for _ in 0..32 {
+            let Some(reader) = pipe.as_mut() else { break };
+            match reader.read(&mut buf) {
+                Ok(0) => { *pipe = None; break; }
+                Ok(n) => { bytes.extend_from_slice(&buf[..n]); progressed = true; }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(progressed)
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            tracing::warn!(target: "amux::sessions", lane, %error,
+                verdict = "probe_spawn_failed", measured = false,
+                "fleet probe could not start; no tmux response was measured");
+            return None;
+        }
+    };
+    let pid = child.id();
+    let start = std::time::Instant::now();
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut status = None;
+    let result = (|| -> io::Result<Option<std::process::Output>> {
+        if let Some(pipe) = &stdout_pipe { nonblocking(pipe)?; }
+        if let Some(pipe) = &stderr_pipe { nonblocking(pipe)?; }
+        loop {
+            let stdout_progress = drain(&mut stdout_pipe, &mut stdout)?;
+            let stderr_progress = drain(&mut stderr_pipe, &mut stderr)?;
+            if status.is_none() { status = child.try_wait()?; }
+            if let Some(status) = status {
+                if stdout_pipe.is_none() && stderr_pipe.is_none() {
+                    return Ok(Some(std::process::Output {
+                        status, stdout: std::mem::take(&mut stdout), stderr: std::mem::take(&mut stderr),
+                    }));
+                }
+            }
+            if start.elapsed() >= budget { return Ok(None); }
+            if !stdout_progress && !stderr_progress {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    })();
+    match result {
+        Ok(Some(out)) => Some(out),
+        failure => {
+            let _ = child.kill();
+            let _ = child.wait();
+            match failure {
+                Ok(None) => {
+                    PANE_CAPTURE_TIMEOUTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let now = crate::config::now_f64();
+                    if let Ok(mut last) = PANE_CAPTURE_LAST_TIMEOUT.lock() {
+                        *last = Some((lane.to_string(), now));
+                    }
+                    let phase = if status.is_some() { "pipe_eof" } else { "child_exit" };
+                    let detail = json!({"measured": true, "n_considered": 1,
+                        "lane": lane, "pid": pid, "ts": now, "phase": phase,
+                        "elapsed_s": start.elapsed().as_secs_f64(), "budget_s": budget.as_secs_f64(),
+                        "stdout_bytes": stdout.len(), "stderr_bytes": stderr.len(),
+                        "child_exited": status.is_some()});
+                    if let Ok(mut last) = PANE_CAPTURE_LAST_TIMEOUT_DETAIL.lock() { *last = Some(detail.clone()); }
+                    tracing::warn!(target: "amux::sessions", lane, pid, phase,
+                        budget_s = budget.as_secs_f64(), elapsed_s = start.elapsed().as_secs_f64(),
+                        stdout_bytes = stdout.len(), stderr_bytes = stderr.len(),
+                        verdict = "probe_output_timeout",
+                        "fleet probe exceeded its deadline while draining output; partial output is discarded (AMUX-4203)");
+                    crate::backend::tmux_health::capture_after_probe_timeout(detail);
+                }
+                Err(error) => {
+                    tracing::warn!(target: "amux::sessions", lane, pid, %error,
+                        stdout_bytes = stdout.len(), stderr_bytes = stderr.len(),
+                        verdict = "probe_output_io_failed", "fleet probe output could not be measured");
+                }
+                Ok(Some(_)) => unreachable!(),
+            }
+            None
+        }
+    }
+}
+
+fn run_bounded(
+    cmd: std::process::Command,
+    budget: std::time::Duration,
+    lane: &str,
+) -> Option<String> {
+    let out = run_bounded_output(cmd, budget, lane)?;
+    String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
+}
+
+/// Derive the waiting_reason from a pane capture: "permission_prompt",
+/// "user_input", "rate_limit", or "" (not waiting / unknown).
+///
+/// Mirrors the logic in backend::adapter but runs against the preview
+/// pane content that build_array already has in hand. Does not spawn
+/// any subprocess.
+fn derive_waiting_reason(raw: &str) -> &'static str {
+    if crate::backend::adapter::claude_auto_resume_banner(raw).is_some()
+        || crate::api::session_verbs::is_rate_limit_menu(raw) {
+        return "rate_limit";
+    }
+    let clean = strip_ansi(raw);
+    let lines: Vec<_> = clean.lines().collect();
+    let start = lines.iter().rposition(|l| matches!(l.trim(), "❯" | "›"))
+        .unwrap_or_else(|| lines.len().saturating_sub(12));
+    let current = lines[start..].join("\n");
+    // Cancellation is also offered during generation, retry and quota waits.
+    // Only a current selector can ask a human for input. Older quoted pickers
+    // above the empty composer do not describe this turn.
+    if crate::api::session_verbs::detect_claude_status(&current) != "waiting" {
+        return "";
+    }
+    let low = current.to_lowercase();
+    if low.contains("do you want to proceed") || low.contains("approve") {
+        return "permission_prompt";
+    }
+    "user_input"
+}
+
+/// Preview enrichment must not downgrade quota/errors/stopped to human input.
+fn apply_preview_waiting_status(v: &mut serde_json::Value, raw: &str) {
+    let wr = derive_waiting_reason(raw);
+    if wr.is_empty() || v["running"].as_bool() != Some(true) { return; }
+    let previous = v["status"].as_str().unwrap_or("").to_string();
+    if wr == "rate_limit" {
+        v["status"] = json!("rate_limited");
+        v["waiting_reason"] = json!(wr);
+        v["rate_limit_banner"] = json!(true);
+        if let Some(banner) = crate::backend::adapter::claude_auto_resume_banner(raw) {
+            v["credit_limited"] = json!(false);
+            if let Some(reset) = crate::api::session_verbs::parse_rate_limit_reset(&banner) {
+                v["rate_limited_until"] = json!(crate::api::session_verbs::effective_rate_limit_reset(
+                    v["rate_limited_until"].as_i64().unwrap_or(0), reset, chrono::Utc::now().timestamp()));
+            }
+        }
+        if previous != "rate_limited" {
+            tracing::info!(target: "amux::status", session = %v["name"],
+                previous, verdict = "preview_quota_over_input",
+                "provider quota wait supersedes generic input classification");
+        }
+    } else if !matches!(previous.as_str(), "active" | "rate_limited" | "api_error" | "error" | "starting") {
+        v["waiting_reason"] = json!(wr);
+        v["status"] = json!("waiting");
+    }
+}
+
+/// The whole-fleet pane snapshot, shared by every reader inside the TTL.
+///
+/// A process global rather than a field on `AppState`: `FleetSignals::load` is
+/// a free function called from three places that do not share a handle, and
+/// threading one through would be a wider change to files other lanes are
+/// editing. The value is a pure cache — dropping it costs one re-capture and
+/// changes no verdict.
+#[allow(clippy::type_complexity)]
+fn pane_cache() -> &'static std::sync::Mutex<(f64, BTreeMap<String, String>)> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<(f64, BTreeMap<String, String>)>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new((0.0, BTreeMap::new())))
+}
+
+// ---------------------------------------------------------------------------
+// Pane churn — the MODEL-AGNOSTIC generation signal (AMUX-3433)
+// ---------------------------------------------------------------------------
+//
+// Every active-detection rule bets on provider UI strings (spinner glyph
+// ranges, esc-to-interrupt, verb lists), and each new provider or skin change
+// costs another regex — the AMUX-3426 middle-dot miss is only the latest
+// instance, and its fix is still a string bet. The provider-agnostic fact
+// underneath all of them: a generating lane REPAINTS (Claude Code ~6x/s,
+// gemini/codex similar) while a parked lane's pane is byte-stable. So: hash
+// each freshly captured frame's CONTENT (ANSI-stripped, MINUS the bottom bar
+// zone, so a bar-only repaint or an agents-count tick never counts) and call
+// a lane churning when the recent window holds several DISTINCT frames.
+//
+// In-memory on purpose, and the loss mode is named: a restart drops the
+// history and churn reads "no evidence" for one window, which degrades to
+// exactly today's string-based detection — never to a wrong answer. A lane
+// that stops painting falls out of the capture candidate set, so its
+// observations age out and churn goes quiet on its own.
+
+/// Distinct content-frames within the window required to call it churning.
+/// 1 is a parked pane; 2 can be one legitimate single repaint (a notification
+/// landing, a human's pasted line); 3+ inside a minute is something REDRAWING.
+const CHURN_MIN_DISTINCT: usize = 3;
+
+/// Distinct content-frames required inside a window that STARTS AT A LANE'S OWN
+/// `idle` CLAIM (AMUX-3896). Two, not three, and the difference is the window.
+///
+/// [`CHURN_MIN_DISTINCT`]'s 3 buys margin over a fixed 60s window where a
+/// legitimate single repaint (a notification, a pasted line) is common. Here the
+/// window is bounded by the age of the claim and the frames are the only ones
+/// recorded AFTER it, so the thing being excluded is different: a stale
+/// post-Stop frame, which is FROZEN and therefore contributes exactly one
+/// content hash however many times it is sampled. Two distinct contents means
+/// the pane changed after the lane said it was done, which a frozen frame cannot
+/// do — and the gate additionally requires a spinner in the same frame.
+///
+/// It also carries a floor for free. Captures sit behind a 2s response cache, so
+/// N distinct frames cannot exist in less than ~2*(N-1) seconds; 2 means the
+/// claim is at least a couple of seconds old, which is the repaint lag the
+/// contradiction window was written for. Raising this to 3 would push the
+/// earliest possible correction to ~4-8s at real sampling rates and miss the
+/// shorter live specimens (4.4s, 8.1s) outright.
+const CHURN_MIN_SINCE_CLAIM: usize = 2;
+
+/// lane -> recent (ts, content-hash) observations.
+type ChurnMap = BTreeMap<String, Vec<(f64, u64)>>;
+
+fn churn_store() -> &'static std::sync::Mutex<ChurnMap> {
+    static S: std::sync::OnceLock<std::sync::Mutex<ChurnMap>> = std::sync::OnceLock::new();
+    S.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+/// Hash of the frame's content EXCLUDING the bar zone (last 3 non-blank
+/// lines) and blank lines. The exclusion is what keeps a shift-tab mode
+/// change, an agents-count tick, or any future bar decoration from reading
+/// as generation; the spinner line, streaming prose, and tool output all
+/// live above it.
+fn pane_content_hash(raw: &str) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let clean = crate::backend::adapter::strip_ansi(raw);
+    let lines: Vec<&str> = clean.lines().filter(|l| !l.trim().is_empty()).collect();
+    let body = &lines[..lines.len().saturating_sub(3)];
+    if body.is_empty() {
+        return None;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for l in body {
+        l.hash(&mut h);
+    }
+    Some(h.finish())
+}
+
+/// Record one freshly captured frame. `window_s` bounds both pruning and the
+/// later distinct-count, so an observation can never outlive its relevance.
+pub(crate) fn note_pane_frame(name: &str, raw: &str, now: f64, window_s: f64) {
+    let Some(hash) = pane_content_hash(raw) else { return };
+    if let Ok(mut g) = churn_store().lock() {
+        let v = g.entry(name.to_string()).or_default();
+        v.retain(|(ts, _)| now - *ts <= window_s);
+        v.push((now, hash));
+    }
+}
+
+/// ≥ CHURN_MIN_DISTINCT distinct content-frames inside the window.
+fn pane_churn_distinct(name: &str, now: f64, window_s: f64) -> usize {
+    let Ok(g) = churn_store().lock() else { return 0 };
+    let Some(v) = g.get(name) else { return 0 };
+    v.iter()
+        .filter(|(ts, _)| now - *ts <= window_s)
+        .map(|(_, h)| *h)
+        .collect::<std::collections::BTreeSet<u64>>()
+        .len()
+}
+
+/// Response-level cache for `build_array`: the serialized JSON string + the
+/// epoch it was computed at. At 3,714 req/hr (~1/s) with each call spawning
+/// ~100 tmux subprocesses for previews + N git subprocesses + ~226 filesystem
+/// reads, a 2s TTL collapses the real work by ~2x while being invisible to a
+/// human polling the dashboard.
+struct ListSnapshot {
+    /// Keep snapshots scoped to the database owner, including parallel test apps.
+    store: std::sync::Weak<crate::db::Store>,
+    /// When the build that produced `json` was entered.
+    stamp: f64,
+    /// The serialized array; empty = no snapshot (cold or invalidated).
+    json: String,
+    /// `SESSIONS_EPOCH` at build start — serving requires it unchanged.
+    epoch: u64,
+    /// Runtime/report epoch. Unlike `epoch`, this may be stale-while-
+    /// revalidate because it cannot change who a caller is allowed to see.
+    runtime_epoch: u64,
+    /// `registry_fingerprint()` at build start — see that function.
+    registry: u64,
+}
+
+fn build_array_cache() -> &'static std::sync::Mutex<ListSnapshot> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<ListSnapshot>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        std::sync::Mutex::new(ListSnapshot {
+            store: std::sync::Weak::new(),
+            stamp: 0.0,
+            json: String::new(),
+            epoch: 0,
+            runtime_epoch: 0,
+            registry: 0,
+        })
+    })
+}
+
+/// Invalidation epoch (AMUX-2960): bumped by [`invalidate_sessions_cache`].
+/// A builder snapshots it before building and only writes its result back if
+/// no invalidation landed mid-build. Without this, a build that STARTED
+/// before a worker create finishes AFTER the create's invalidation and stamps
+/// the pre-create list into the cache — resurrecting exactly the staleness
+/// the invalidation was for.
+static SESSIONS_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static SESSIONS_RUNTIME_EPOCH: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Order-independent fingerprint of WHICH workers exist: the set of `*.env`
+/// stems in the sessions dir.
+///
+/// This is the structural half of AMUX-2960. The per-call-site
+/// `invalidate_sessions_cache()` discipline failed twice in one week — the
+/// AMUX-2926 config-write hole, then `create_session_legacy`/`delete_post`
+/// writing the registry with no invalidation, which made the worker-card-counts
+/// e2e flaky-red for a day (the SPA's one post-reload fetch served the
+/// pre-create fleet and SSE never corrected it). A guard on the substrate
+/// covers the NEXT forgotten call site too, and any out-of-band write (a human
+/// `rm`, the bash CLI).
+///
+/// Deliberately the `.env` NAME SET, not the dir mtime: `.meta.json` files in
+/// the same dir churn on every send fleet-wide, so an mtime guard would
+/// invalidate ~every request and resurrect the AR-135 pool-starvation
+/// stampede this cache exists to prevent. Content edits inside an env file
+/// don't move the set — those paths already invalidate explicitly.
+fn registry_fingerprint() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let dir = amux_home().join("sessions");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    let mut acc = 0u64;
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) == Some("env") {
+            if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                stem.hash(&mut h);
+                acc ^= h.finish(); // XOR: order-independent, names are unique
+            }
+        }
+    }
+    acc
+}
+
+/// Drop the cached session list so the very next GET rebuilds (AMUX-2926).
+///
+/// Any write that changes a worker's config must call this. Python invalidated
+/// its equivalent cache on every config write, and the rust config-write path
+/// carried a comment saying it did not need to — "this origin computes the list
+/// per request, so the write IS the refresh". That was TRUE when written and
+/// stopped being true when the 2s cache landed (7ca14b5, a later commit).
+/// Nothing failed; the comment just quietly became a lie, and for up to 2s
+/// after a config write the list served the OLD value.
+///
+/// That mattered because tags configure GROUP ISOLATION and the gate reads them
+/// live: the messaging gate saw the new tag while the dashboard still showed the
+/// old one, so an operator could tag a lane, see no change, and re-tag or give
+/// up while the isolation behaviour had already moved underneath them (found by
+/// amux-frustrations while peer-verifying AMUX-2916).
+///
+/// Cheap by construction — it clears one string; the next reader pays the
+/// rebuild it would have paid 2s later anyway.
+pub fn invalidate_sessions_cache() {
+    // Epoch first: an in-flight builder checks it AFTER building, so bumping
+    // before the clear means no interleaving lets a pre-bump build survive.
+    SESSIONS_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(mut c) = build_array_cache().lock() {
+        c.stamp = 0.0;
+        c.json.clear();
+    }
+    tracing::debug!(target: "amux::sessions", "sessions list cache invalidated by a config write");
+}
+
+/// Invalidate status/model/token evidence without erasing the last safe fleet
+/// snapshot.
+///
+/// Worker hooks report frequently. Treating every heartbeat like a registry or
+/// access-policy change cleared the cache while a fleet build was still in
+/// progress, so no build could ever publish and every client started another
+/// tmux scrape. Runtime evidence may be briefly stale; fleet membership and
+/// isolation may not. A structural invalidation still uses
+/// [`invalidate_sessions_cache`] and clears the snapshot.
+pub fn invalidate_sessions_runtime_cache() {
+    SESSIONS_RUNTIME_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(mut c) = build_array_cache().lock() {
+        c.stamp = 0.0;
+    }
+}
+
+/// Git branch cache: dir -> (branch, epoch). Branches change on the scale of
+/// minutes; re-running `git rev-parse` per directory on every request is pure
+/// waste.
+fn git_branch_cache() -> &'static std::sync::Mutex<(f64, BTreeMap<String, String>)> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<(f64, BTreeMap<String, String>)>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new((0.0, BTreeMap::new())))
+}
+
+/// Preview capture cache: name -> raw pane text, with a TTL matching the
+/// status-pane cache. Previews are the dominant cost in build_array (~100
+/// tmux capture-pane subprocesses per call).
+fn preview_cache() -> &'static std::sync::Mutex<(f64, BTreeMap<String, String>)> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<(f64, BTreeMap<String, String>)>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new((0.0, BTreeMap::new())))
+}
+
+/// Sessions in `tmux list-panes -a -F '#{session_name}:#{pane_dead}'` output
+/// whose panes are ALL dead (AMUX-2644).
+///
+/// Pure so the decision is testable without a tmux server, and so a control can
+/// mutate the LOGIC rather than a string — the same reason `spans_restart` is a
+/// function rather than an inline comparison.
+///
+/// EMPTY INPUT YIELDS AN EMPTY SET, which is the fail-open contract the caller
+/// depends on: unreadable output must exclude NOTHING. A liveness filter that
+/// can empty the fleet is worse than the bug it fixes, and this card's own probe
+/// warning records what that looks like — "48 of 48 running lanes have no tmux
+/// session", absurd on its face and entirely an artifact.
+///
+/// A session with one dead pane and one live pane is LIVE. Partial death is not
+/// death, and treating it as such would evict working lanes that happen to have
+/// a finished side pane.
+fn sessions_with_all_panes_dead(stdout: &str) -> std::collections::BTreeSet<String> {
+    let mut live: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
+    for l in stdout.lines() {
+        // rsplit_once: a session name may contain ':', the flag cannot, so the
+        // LAST separator is the field boundary.
+        let Some((name, dead)) = l.trim().rsplit_once(':') else { continue };
+        if name.is_empty() {
+            continue;
+        }
+        let is_live = dead.trim() != "1";
+        *live.entry(name.to_string()).or_insert(false) |= is_live;
+    }
+    live.into_iter().filter(|(_, any_live)| !*any_live).map(|(n, _)| n).collect()
+}
+
+/// One `tmux list-sessions` line -> (name, last-painted, created).
+///
+/// Pulled out of `load` so the ACTIVITY RULE is testable without a tmux
+/// server: it is the rule that was silently wrong for the whole fleet, and a
+/// test that re-types the parse inline would have agreed with whatever it was
+/// re-typing. Returns `None` for a line that does not carry at least a name.
+fn parse_list_sessions_line(l: &str) -> Option<(&str, Option<i64>, Option<i64>)> {
+    let mut it = l.split(':');
+    let name = it.next()?;
+    if name.is_empty() {
+        return None;
+    }
+    let (a, c, w) = (it.next(), it.next(), it.next());
+    // max(session_activity, window_activity) — see `FleetSignals::activity`.
+    let last_paint: Option<i64> = a
+        .and_then(|x| x.parse().ok())
+        .into_iter()
+        .chain(w.and_then(|x| x.parse::<i64>().ok()))
+        .max();
+    Some((name, last_paint, c.and_then(|x| x.parse().ok())))
+}
+
+/// Signals the derivation reads, loaded once per request and shared with the
+/// board's `stale` computation (`active_python_sessions`) so the two can
+/// never disagree about who is working.
+/// Resolve Codex tool descendants from the same one-shot process snapshot used
+/// for shell-pane liveness. A plain idle Codex lane has
+/// `pane shell -> node wrapper -> native codex`; only a process BELOW the
+/// native provider is tool work. This avoids treating the provider process's
+/// mere existence as activity while keeping a long-running cargo/browser child
+/// authoritative when rollout writes are naturally quiet.
+fn sessions_with_codex_tool_children(
+    pane_roots: &[(String, String)],
+    ps_output: &str,
+) -> BTreeSet<String> {
+    let mut processes: BTreeMap<String, (String, String, String)> = BTreeMap::new();
+    for line in ps_output.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(pid) = fields.next() else { continue };
+        let Some(ppid) = fields.next() else { continue };
+        let state = fields.next().unwrap_or("").to_string();
+        let command = fields.next().unwrap_or("").to_string();
+        processes.insert(pid.to_string(), (ppid.to_string(), state, command));
+    }
+    let mut active = BTreeSet::new();
+    for (session, root) in pane_roots {
+        for (pid, (ppid, state, _)) in &processes {
+            // A persistent sleeping provider helper (for example an MCP
+            // process) is not current tool execution. Require a process the
+            // kernel observes running or in an active/uninterruptible I/O wait.
+            if !matches!(state.chars().next(), Some('R' | 'D' | 'U')) {
+                continue;
+            }
+            let mut cursor = ppid.as_str();
+            let mut below_codex = false;
+            let mut reached_root = false;
+            for _ in 0..32 {
+                if cursor == root {
+                    reached_root = true;
+                    break;
+                }
+                let Some((parent, _, command)) = processes.get(cursor) else { break };
+                if Path::new(command)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == "codex")
+                {
+                    below_codex = true;
+                }
+                if parent == cursor {
+                    break;
+                }
+                cursor = parent;
+            }
+            if reached_root && below_codex {
+                // `pid` is below native codex because the codex process was an
+                // ancestor, not the candidate itself.
+                let _ = pid;
+                active.insert(session.clone());
+                break;
+            }
+        }
+    }
+    active
+}
+
+pub struct FleetSignals {
+    /// Gemini has no structured report/rollout bridge; its idle UI is its only
+    /// boundary signal and must still be sampled after it stops repainting.
+    pub(crate) hookless_workers: BTreeSet<String>,
+    /// tmux session name (`amux-<n>`) -> when its pane last PAINTED, i.e.
+    /// `max(#{session_activity}, #{window_activity})`.
+    ///
+    /// It has to be the max, and that is not a belt-and-braces choice.
+    /// `#{session_activity}` does not track pane output for a DETACHED
+    /// session, and every amux lane is detached: measured on tmux 3.6a,
+    /// 2026-08-09, 60 of 63 live sessions had a `session_activity` more than
+    /// 60s older than their `window_activity`, and `amux-rust` — mid-turn,
+    /// spinner repainting ~6/s — reported a `session_activity` that had not
+    /// moved in 34.5 HOURS (it was still equal to `session_created`).
+    ///
+    /// Everything downstream read that as silence, so the two places this
+    /// derivation consults physical liveness were both dead: the
+    /// `now - act < 60` fallback could never say `active`, and the guard that
+    /// demotes a stale `active` transition fired for EVERY session on every
+    /// request. The fleet's status was therefore whatever the self-reports
+    /// said and nothing else — which is precisely why one wrong report could
+    /// not be contradicted by anything.
+    pub activity: BTreeMap<String, i64>,
+    /// tmux session name -> `#{session_created}`.
+    pub created: BTreeMap<String, i64>,
+    /// Live tmux session names.
+    pub running: BTreeSet<String>,
+    /// tmux session names whose pane is sitting in a bare SHELL — the tmux
+    /// session exists but the agent inside it is gone. `stop` deliberately
+    /// leaves the tmux session alive (Python parity), so tmux-existence alone
+    /// says "there is a window", not "there is a worker": a stopped lane read
+    /// as running=true forever on the card while `/api/sessions/<n>/info`
+    /// (which checks the pane) said false. Two answers to one question, and
+    /// the card is the one the user is looking at — clicking Stop appeared to
+    /// do nothing. Measured 2026-08-09.
+    pub shell_only: BTreeSet<String>,
+    /// The persisted self-report store (prefs `session_reports`,
+    /// amux-server.py:3943) — the same bytes Python hydrates at boot.
+    pub reports: serde_json::Value,
+    /// session -> (status, ts) of its latest working/idle/waiting transition.
+    pub transitions: BTreeMap<String, (String, f64)>,
+    /// session -> ts of its latest `session.started` event.
+    pub started: BTreeMap<String, f64>,
+    /// Codex/ollama worker -> latest structured rollout turn boundary. This is
+    /// the hook-equivalent signal for providers whose terminal UI can redraw
+    /// without advancing tmux's activity timestamp.
+    pub(crate) codex_turns: BTreeMap<String, crate::api::session_verbs::CodexTurnSignal>,
+    /// Codex/ollama worker names with a process below the provider process
+    /// (for example a running shell/test command). This is the positive
+    /// process-side control for a quiet structured rollout: a stale Working
+    /// footer cannot vote, but a live tool child can.
+    pub(crate) provider_child_activity: BTreeSet<String>,
+    pub(crate) provider_children_measured: bool,
+    /// session name -> raw pane capture, for lanes that PAINTED recently.
+    ///
+    /// The only physical evidence in this struct: everything else is a claim
+    /// somebody wrote down. Populated by [`FleetSignals::capture_panes`] and
+    /// read only through [`FleetSignals::pane_of`], which re-applies the same
+    /// candidacy predicate the capture used — so a caller that captures more
+    /// (the session list, which already has every running pane in hand for
+    /// previews) and one that captures less (the board) still derive the same
+    /// status for the same lane. A view that disagrees with the mechanism it
+    /// describes is worse than no view.
+    pub panes: BTreeMap<String, String>,
+    /// session -> newest mtime across its SUBAGENT transcripts
+    /// (`~/.claude/projects/<proj>/<conv>/subagents/*.jsonl`).
+    ///
+    /// A lane's Stop hook fires when the MAIN turn ends, so a lane whose
+    /// background agents are still working reports `idle` — correctly, about
+    /// the main turn, and misleadingly about the lane. Measured 2026-08-11:
+    /// primis read `idle` while a subagent had written 20 seconds earlier.
+    ///
+    /// This is the structured answer to that, not a pane marker: it is durable,
+    /// survives a lane that is not painting, and does not break when Claude
+    /// Code changes a glyph (D1). One walk per pass — 21ms for 1844 transcripts
+    /// on this machine, 0.16% of a scan tick.
+    pub subagent_activity: BTreeMap<String, f64>,
+    pub now: f64,
+}
+
+fn no_current_hook_report(report: Option<&Value>, started: f64) -> bool {
+    let ts=report.and_then(|r|r.get("ts")).and_then(Value::as_f64).unwrap_or(0.0);
+    ts <= 0.0 || ts < started
+}
+
+impl FleetSignals {
+    pub fn load(conn: &rusqlite::Connection) -> Self {
+        Self::load_scoped(conn, None)
+    }
+
+    /// Fresh send-time check of one worker, using the Workers derivation.
+    /// Only this worker's rollout and pane are read; a fleet tick loads once.
+    pub(crate) fn load_lane(conn: &rusqlite::Connection, name: &str) -> Self {
+        let mut signals = Self::load_scoped(conn, Some(name));
+        let pt = pane_target(&format!("amux-{name}"));
+        if let Some(raw) = capture_pane_bounded(&pt, name) {
+            signals.panes.insert(name.to_string(), raw);
+        }
+        signals
+    }
+
+    /// Target the worker's active window for fields such as
+    /// `#{window_activity}` and `#{pane_pid}`. Tmux accepts a bare `=session`
+    /// target for `display-message` but expands those fields to empty strings,
+    /// which made single-worker steering probes see no running lane while the
+    /// fleet-wide status path correctly reported the same worker as IDLE.
+    fn lane_probe_target(name: &str) -> String {
+        pane_target(&format!("amux-{name}"))
+    }
+
+    fn load_scoped(conn: &rusqlite::Connection, lane: Option<&str>) -> Self {
+        let mut activity = BTreeMap::new();
+        let mut created = BTreeMap::new();
+        let mut running = BTreeSet::new();
+        // The Ok() only means the SPAWN worked — tmux exiting non-zero (no
+        // server, wrong socket) still lands here with empty stdout, and an
+        // empty fleet is indistinguishable from a dead probe (ethos rule 4;
+        // live incident 2026-08-09: launchd build served running=0 for 116
+        // cards while 62 tmux sessions ran, with nothing in the log).
+        //
+        // Separator is ':' NOT '\t': under launchd there is no LANG, and in
+        // the POSIX locale tmux sanitizes non-printable output chars to '_',
+        // so a tab-separated format came back as `name_123_456` and every
+        // parse silently missed (the same 2026-08-09 incident — /api/debug/tmux
+        // is what caught it). ':' is safe because tmux forbids it in session
+        // names (target syntax), and printable chars are never sanitized.
+        //
+        // `#{window_activity}` is the 4th field because `#{session_activity}`
+        // is not a liveness signal for a detached session — see the `activity`
+        // field's doc for the measurement. It resolves to the session's
+        // CURRENT window; amux creates one window per session, and the agent
+        // runs in it.
+        // BOUNDED (AF-301). This was a bare `.output()`, which blocks until the
+        // child exits with no timeout; a wedged tmux held this request open for
+        // 697s on 2026-08-28. `run_bounded_output` rather than `run_bounded`
+        // because the WARN below needs `status` and `stderr`.
+        let mut lsc = std::process::Command::new("tmux");
+        let format = "#{session_name}:#{session_activity}:#{session_created}:#{window_activity}";
+        if let Some(name) = lane {
+            let pt = Self::lane_probe_target(name);
+            lsc.args(["display-message", "-p", "-t", &pt, format]);
+        } else {
+            lsc.args(["list-sessions", "-F", format]);
+        }
+        lsc.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+        let tmux_out = run_bounded_output(lsc, probe_budget(), "list-sessions").ok_or(());
+        match &tmux_out {
+            Ok(o) if !o.status.success() => tracing::warn!(
+                status = %o.status,
+                stderr = %String::from_utf8_lossy(&o.stderr).trim(),
+                "tmux list-sessions failed — fleet will read as not-running"
+            ),
+            Err(_) => tracing::warn!(
+                "tmux list-sessions did not answer within the probe budget, or failed to \
+                 spawn — fleet will read as not-running (AF-301)"
+            ),
+            _ => {}
+        }
+        // A SESSION WHOSE PANES ARE ALL DEAD HOSTS NOTHING (AMUX-2644).
+        //
+        // amux sets `remain-on-exit on` at spawn (backend/tmux.rs:208,
+        // session_verbs.rs:5993) so a finished or failed command leaves a DEAD
+        // PANE behind and its exit status stays observable, instead of the
+        // whole session vanishing. That is deliberate and worth keeping. The
+        // consequence nobody carried through to here: `list-sessions` still
+        // lists such a session, so a worker whose pane died AT LAUNCH landed in
+        // `running`, `agent_running` returned true at its first branch (a dead
+        // pane is not "shell only"), and the lane reported running:true/idle
+        // forever. It looks alive and it is a corpse.
+        //
+        // backend/tmux.rs has known how to see this since it was written — it
+        // reads `#{pane_dead}` via list-panes for exactly this reason — and the
+        // fleet listing never asked. One tmux call, not one per session, so the
+        // cost is a second subprocess rather than N.
+        //
+        // FAILS OPEN, and that is the load-bearing half. If the query fails,
+        // returns nothing, or tmux is absent, EVERY session stays in `running`.
+        // Dropping the fleet on an unreadable probe is the failure this card's
+        // own probe warning records: the obvious measurement reported "48 of 48
+        // running lanes have no tmux session", which was absurd on its face and
+        // entirely an artifact. A liveness filter that can empty the fleet is
+        // worse than the bug it fixes.
+        // BOUNDED (AF-301) — was a bare `.output()`.
+        let all_panes_dead = {
+            let mut c = std::process::Command::new("tmux");
+            if let Some(name) = lane {
+                let pt = Self::lane_probe_target(name);
+                c.args(["list-panes", "-t", &pt, "-F", "#{session_name}:#{pane_dead}"]);
+            } else {
+                c.args(["list-panes", "-a", "-F", "#{session_name}:#{pane_dead}"]);
+            }
+            c.stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null());
+            run_bounded(c, probe_budget(), "list-panes/dead")
+                .map(|out| sessions_with_all_panes_dead(&out))
+                .unwrap_or_default()
+        };
+        if !all_panes_dead.is_empty() {
+            tracing::warn!(
+                target: "sessions",
+                count = all_panes_dead.len(),
+                sessions = %all_panes_dead.iter().take(10).cloned().collect::<Vec<_>>().join(","),
+                "tmux sessions whose panes are ALL DEAD — excluded from running \
+                 (remain-on-exit keeps the session after the command exits; AMUX-2644)"
+            );
+        }
+        if let Ok(o) = tmux_out {
+            for l in String::from_utf8_lossy(&o.stdout).lines() {
+                let Some((n, a, c)) = parse_list_sessions_line(l) else {
+                    continue;
+                };
+                if lane.is_some_and(|lane| n != format!("amux-{lane}")) || all_panes_dead.contains(n) {
+                    continue;
+                }
+                running.insert(n.to_string());
+                if let Some(ts) = a {
+                    activity.insert(n.to_string(), ts);
+                }
+                if let Some(ts) = c {
+                    created.insert(n.to_string(), ts);
+                }
+            }
+        }
+        // ONE extra batched tmux call for the whole fleet (not per session):
+        // which panes are a bare shell. `#{pane_current_command}` is the
+        // foreground command, so an agent shows as `claude`/`node`/`codex`
+        // and a stopped lane shows as `bash`. A session with several panes
+        // counts as shell-only only if EVERY pane is a shell.
+        let mut shell_only = BTreeSet::new();
+        let mut provider_child_activity = BTreeSet::new();
+        let mut provider_children_measured = false;
+        // BOUNDED (AF-301) — was a bare `.output()`.
+        let panes_probe = {
+            let mut c = std::process::Command::new("tmux");
+            if let Some(name) = lane {
+                let pt = Self::lane_probe_target(name);
+                c.args(["list-panes", "-t", &pt, "-F", "#{session_name}:#{pane_pid}:#{pane_current_command}"]);
+            } else {
+                c.args(["list-panes", "-a", "-F", "#{session_name}:#{pane_pid}:#{pane_current_command}"]);
+            }
+            c.stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null());
+            run_bounded(c, probe_budget(), "list-panes/pids")
+        };
+        if let Some(o) = panes_probe {
+            const SHELLS: [&str; 8] = ["bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh", "csh"];
+            let mut any_live: BTreeSet<String> = BTreeSet::new();
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            let mut pane_roots: Vec<(String, String)> = Vec::new();
+            // Panes whose FOREGROUND command is a shell but which might still host
+            // an agent as a CHILD: (session, pane_pid). Collected here and probed
+            // below only for sessions not already proven live by another pane.
+            let mut shell_panes: Vec<(String, String)> = Vec::new();
+            for l in o.lines() {
+                // format is session:pid:cmd, but a session NAME can contain ':',
+                // so split from the RIGHT twice: cmd, then pid.
+                let Some((rest, cmd)) = l.rsplit_once(':') else { continue };
+                let Some((sess, pid)) = rest.rsplit_once(':') else { continue };
+                if !running.contains(sess) { continue; }
+                seen.insert(sess.to_string());
+                pane_roots.push((sess.to_string(), pid.trim().to_string()));
+                let cmd = cmd.trim().trim_start_matches('-');
+                if !SHELLS.contains(&cmd) {
+                    any_live.insert(sess.to_string());
+                } else {
+                    shell_panes.push((sess.to_string(), pid.trim().to_string()));
+                }
+            }
+            // AMUX-3: a foreground SHELL can still host a live agent as a child.
+            // ai-video-editor read as not-running while claude (working, 80k tokens)
+            // ran as a child of its pane's bash, so #{pane_current_command}="bash".
+            // The live is_running() already uses pgrep -P; do the same here so the
+            // fleet list agrees with it instead of hiding a running lane behind a
+            // shell it never actually returned to. Bounded: only shell-foreground
+            // panes whose session is not already proven live by another pane.
+            // BOUNDED PER CALL *AND* IN TOTAL (AF-301). This was a bare
+            // `.output()` inside a per-shell-pane loop, so a 50-lane fleet did
+            // ~50 unbounded subprocess spawns per cache miss (TTL 2s) — the
+            // densest place in the request for a wedge to start. A per-call
+            // bound alone is not enough: 50 calls each just under budget is
+            // still minutes, so the LOOP carries its own deadline.
+            //
+            // Skipping is disclosed rather than silent (ethos rule 4). A lane
+            // dropped here is simply not proven live by its children, which
+            // reads as shell-only — so the count has to be visible or the fleet
+            // quietly looks idler than it is.
+            // ONE `ps`, NOT N `pgrep`s (AMUX-3894, 2026-08-29).
+            //
+            // The loop deadline above did its job and then BECAME the defect. Every
+            // amux lane is launched as `bash -c "... ; claude ..."`, so its pane's
+            // `#{pane_current_command}` is `bash` and essentially EVERY lane needs
+            // this child rescue — the rescue is the common path, not the rare one.
+            // At 57 lanes the cumulative 5s budget ran out partway through, and the
+            // remainder were counted as unproven, which reads as shell-only, which
+            // reads as `running: false`.
+            //
+            // Measured 2026-08-29 21:00, load 25, 57 tmux sessions and 122 live
+            // claude processes: `skipped=22 budget_s=5.0`, and three consecutive
+            // GETs of /api/sessions returned 40, 37 and 32 running out of 58, with a
+            // DIFFERENT set each time. Nothing had died. The set flapped because
+            // which lanes fell past the deadline depended on scheduling.
+            //
+            // That is not cosmetic. `steering skipped session=<x> reason=not-running`
+            // appeared 143 times in the same window, so queued steering was being
+            // dropped for lanes that were alive and idle — which is exactly the
+            // `queue.has_live_consumer` invariant firing on AMUX-3883 ("a live
+            // consumer sitting IDLE with an old item in front of it"). One bad
+            // liveness read produced a false fleet view, silent message loss, and a
+            // failing invariant that read as a delivery bug.
+            //
+            // The budget was the right instinct against a wedge and the wrong shape
+            // for the load: N sequential subprocesses cannot be made safe by timing
+            // them, only by not being N. `pgrep -P <pid>` asks "does this pid have a
+            // child"; `ps -eo ppid=` answers that for EVERY pid in one call, so the
+            // whole question costs one subprocess regardless of fleet size. That is
+            // the same move already made directly above for the per-session tmux
+            // calls ("One tmux call, not one per session").
+            //
+            // FAILS DISCLOSED, not silent (ethos rule 4). If the single probe fails
+            // there is no partial answer to misread: nothing is proven live by
+            // children, the WARN says so once, and the count it reports is the whole
+            // shell-pane set rather than a scheduling-dependent slice of it.
+            let mut ppids_with_children: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            let ps_probe = {
+                let mut c = std::process::Command::new("ps");
+                c.args(["-eo", "pid=,ppid=,state=,comm="])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null());
+                run_bounded(c, probe_budget(), "ps/ppid")
+            };
+            match &ps_probe {
+                Some(out) => {
+                    provider_children_measured = !out.trim().is_empty();
+                    for line in out.lines() {
+                        let mut fields = line.split_whitespace();
+                        let _pid = fields.next();
+                        if let Some(ppid) = fields.next() {
+                            ppids_with_children.insert(ppid.to_string());
+                        }
+                    }
+                    provider_child_activity =
+                        sessions_with_codex_tool_children(&pane_roots, out);
+                }
+                None => tracing::warn!(
+                    target: "amux::sessions",
+                    budget_s = probe_budget().as_secs_f64(),
+                    "child-process liveness probe (ps -eo ppid=) did not answer — no lane can be \
+                     proven live by its children this pass, so shell-foreground lanes will read \
+                     as shell-only (AMUX-3894)"
+                ),
+            }
+            let mut pgrep_skipped = 0usize;
+            for (sess, pid) in shell_panes {
+                if any_live.contains(&sess) || pid.is_empty() {
+                    continue;
+                }
+                if ps_probe.is_none() {
+                    pgrep_skipped += 1;
+                    continue;
+                }
+                if ppids_with_children.contains(&pid) {
+                    any_live.insert(sess.clone());
+                }
+            }
+            // Reached only when the single `ps` probe itself failed, so the count is
+            // now the WHOLE shell-pane set rather than a scheduling-dependent slice
+            // of it. That distinction is the point of AMUX-3894: this number used to
+            // vary run to run on a healthy machine, which made it unreadable as a
+            // signal. A non-zero count here now means one thing — `ps` did not
+            // answer — and the advice is no longer "raise the timeout", because
+            // there is no longer a per-lane cost for a timeout to be too small for.
+            if pgrep_skipped > 0 {
+                tracing::warn!(
+                    target: "amux::sessions",
+                    unproven = pgrep_skipped,
+                    "child-process liveness could not be established for these shell-foreground \
+                     lanes because `ps -eo ppid=` did not answer; they will read as shell-only \
+                     (and therefore not-running) this pass. This is a wedged/absent ps, NOT a \
+                     budget that needs raising (AMUX-3894)."
+                );
+            }
+            for s in seen {
+                if !any_live.contains(&s) {
+                    shell_only.insert(s);
+                }
+            }
+        }
+        let reports = conn
+            .query_row("SELECT value FROM prefs WHERE key='session_reports'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(serde_json::Value::Null);
+        // Both event queries tolerate the table being absent (a fresh Rust-only
+        // AMUX_HOME): no events simply means the activity fallback decides.
+        let mut transitions = BTreeMap::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT session, type, MAX(ts) FROM session_events \
+             WHERE type IN ('session.working','session.idle','session.waiting') \
+             GROUP BY session",
+        ) {
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, f64>(2)?,
+                ))
+            });
+            if let Ok(rows) = rows {
+                for row in rows.flatten() {
+                    let st = match row.1.as_str() {
+                        "session.working" => "active",
+                        "session.waiting" => "waiting",
+                        _ => "idle",
+                    };
+                    transitions.insert(row.0, (st.to_string(), row.2));
+                }
+            }
+        }
+        let mut started = BTreeMap::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT session, MAX(ts) FROM session_events \
+             WHERE type='session.started' GROUP BY session",
+        ) {
+            if let Ok(rows) =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
+            {
+                for (s, ts) in rows.flatten() {
+                    started.insert(s, ts);
+                }
+            }
+        }
+        let codex_turns = running.iter()
+            .filter_map(|tmux| tmux.strip_prefix("amux-"))
+            .filter_map(|name| {
+                crate::api::session_verbs::codex_rollout_turn_signal(name)
+                    .map(|signal| (name.to_string(), signal))
+            })
+            .collect();
+        let hookless_workers = running.iter().filter_map(|tmux| tmux.strip_prefix("amux-"))
+            .filter(|name| {
+                let no_current_report = no_current_hook_report(reports.get(*name), started.get(*name).copied().unwrap_or(0.0));
+                // A fresh Claude worker has no Stop hook yet. Its recognized idle
+                // composer must stay observable after its last repaint ages out.
+                no_current_report || crate::config::parse_env_file(&amux_home().join("sessions").join(format!("{name}.env")))
+                    .get("CC_PROVIDER").is_some_and(|provider| provider == "gemini")
+            })
+            .map(str::to_string).collect();
+        FleetSignals {
+            hookless_workers,
+            activity,
+            created,
+            running,
+            shell_only,
+            reports,
+            transitions,
+            started,
+            codex_turns,
+            provider_child_activity,
+            provider_children_measured,
+            panes: BTreeMap::new(),
+            subagent_activity: scan_subagent_activity(),
+            now: chrono::Utc::now().timestamp() as f64,
+        }
+    }
+
+    /// A derived idle is usable only with positive evidence. The activity
+    /// fallback can label a silent/missing probe idle for display, never grant
+    /// permission to send into an unknown worker.
+    pub(crate) fn turn_boundary_status(&self, name: &str) -> Option<String> {
+        if !self.agent_running(&format!("amux-{name}")) {
+            return None;
+        }
+        let (status, ex) = self.derive_status_explain(name, true);
+        let structured = ex["report"]["applied"] == true
+            || ex["codex_rollout"]["from_this_life"] == true;
+        let pane_boundary = self.pane_of(name).map(crate::api::session_verbs::pane_is_at_boundary);
+        let measured = structured || pane_boundary.is_some();
+        if !structured && status == "idle" && pane_boundary != Some(true) {
+            let key = format!("unrecognized-idle-boundary:{name}");
+            if crate::log_dedupe::first_this_bucket(&key, crate::log_dedupe::hour_bucket(self.now)) {
+                tracing::warn!(target: "status_truth", session = name, measured = pane_boundary.is_some(),
+                    verdict = "idle_display_without_delivery_boundary",
+                    "worker displays idle but no recognized terminal boundary permits queued delivery; inspect provider UI drift");
+            }
+            return None;
+        }
+        if measured && ex["decided_by"] == "codex_stale_active_refused" {
+            let key = format!("structured-boundary:{name}");
+            if crate::log_dedupe::first_this_bucket(&key, crate::log_dedupe::hour_bucket(self.now)) {
+                tracing::warn!(target: "status_truth", session = name, measured = true, n_considered = 1,
+                    verdict = "boundary_stale_codex_footer_refused",
+                    "Workers and steering agree: stale Codex footer has no live heartbeat or child; boundary is idle");
+            }
+        }
+        measured.then_some(status)
+    }
+
+    /// Is there a WORKER in this tmux session, not merely a tmux session?
+    /// This is the question the card is asking, and the one
+    /// `session_verbs::is_running` answers for `/info`, restart and delete.
+    /// Call this instead of touching `running` directly, or the two answers
+    /// drift again.
+    pub fn agent_running(&self, tmux_name: &str) -> bool {
+        // The tmux SESSION must exist either way — a self-report cannot resurrect a
+        // lane whose session is gone.
+        if !self.running.contains(tmux_name) {
+            return false;
+        }
+        // Primary: the pane scrape says an agent is the foreground command (or, via
+        // the pgrep rescue, a child of a foreground shell).
+        if !self.shell_only.contains(tmux_name) {
+            return true;
+        }
+        // AF-82 / D1: a lane that SELF-REPORTED an active agent recently is running,
+        // even when the pane scrape reads shell-only — an agent launched as a child
+        // of a wrapper shell, or nested a level deeper than the pgrep rescue reaches.
+        // The self-report is the harness reporting its own state (the D1 exit) and
+        // the scrape is the FALLBACK; `running` ignored it while `status` already
+        // honoured it, so ai-video-editor read running=False with an `active` report
+        // 57s old. Same freshness guards the status override uses (from_this_life +
+        // live), active/waiting only (an idle report does not assert a live agent).
+        if let Some(name) = tmux_name.strip_prefix("amux-") {
+            if let Some(rep) = self.reports.get(name) {
+                let st = rep["state"].as_str().unwrap_or("");
+                let ts = rep["ts"].as_f64().unwrap_or(0.0);
+                let from_this_life = self.started.get(name).copied().unwrap_or(0.0) <= ts;
+                let live = self.now - ts < env_secs("AMUX_HOOKS_LIVE_S", 1800.0);
+                if from_this_life && live && (st == "active" || st == "waiting" || st == "blocked") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// How recent must physical evidence be to falsify a reported `idle`, and
+    /// how old must that report be before evidence is allowed to falsify it?
+    ///
+    /// One number for both halves because it is one question: how long after a
+    /// lane last spoke do we keep taking its word for it. Inside the window the
+    /// report wins (it is the D1 exit — the harness reporting its own state
+    /// beats any scrape of it, and this is where the report/repaint race
+    /// lives); outside it, a pane that is demonstrably mid-turn wins.
+    fn contradiction_window(&self) -> f64 {
+        env_secs("AMUX_IDLE_CONTRADICTION_S", 60.0)
+    }
+
+    /// Is this lane's pane worth reading, and worth believing?
+    ///
+    /// ONE predicate, two callers — [`Self::capture_panes`] decides what to
+    /// capture and [`Self::pane_of`] decides what to believe. If they ever
+    /// drift, the derivation reads a pane the capture never took (or refuses
+    /// one it did) and two readers of the same struct disagree about the same
+    /// lane. Keeping it here also means a caller CANNOT make a parked lane's
+    /// scrollback count as evidence by stuffing the map.
+    pub fn pane_probe_candidate(&self, name: &str) -> bool {
+        let act = self.activity.get(&format!("amux-{name}")).copied().unwrap_or(0) as f64;
+        // Hookless providers have no structured turn-boundary signal. An idle
+        // Gemini terminal stops painting; aging out its only observable signal
+        // makes a future queued task permanently ineligible for delivery.
+        // Keep measuring these lanes. A nonempty recognized composer is still
+        // required by turn_boundary_status; silence itself never permits sends.
+        self.now - act < self.contradiction_window() || self.hookless_workers.contains(name)
+    }
+
+    /// Raw pane for a lane whose evidence is admissible: recently painted and
+    /// non-empty.
+    ///
+    /// An EMPTY capture is `None`, never "no markers, therefore idle". A herdr
+    /// lane refuses a history read while it is working, so mid-turn its
+    /// capture is empty BY DESIGN — reading that as idle would label a working
+    /// lane idle, which is this whole bug in a different costume.
+    fn pane_of(&self, name: &str) -> Option<&str> {
+        if !self.pane_probe_candidate(name) {
+            return None;
+        }
+        let raw = self.panes.get(name)?;
+        (!raw.trim().is_empty()).then_some(raw.as_str())
+    }
+
+    /// Does the pane show UNAMBIGUOUS work — the evidence that may contradict
+    /// a claim of idle?
+    ///
+    /// Composed from the two detectors that already exist rather than a third
+    /// one: `pane_bar_says_generating` (the status bar's `esc to interrupt`,
+    /// scoped to the bottom 3 lines by AMUX-2642 so a lane quoting the phrase
+    /// cannot self-block) and `detect_claude_status` (the live spinner). Both
+    /// answer "is the MAIN turn generating", which is the same question the
+    /// steering gate asks — so a lane this reports as working is exactly a
+    /// lane that would refuse a mid-turn delivery. A second spelling of the
+    /// detector would be a second thing to keep in step with Claude Code's UI.
+    /// Has a background agent of this lane written within the contradiction
+    /// window? Reported `idle` describes the MAIN turn; this describes the lane.
+    fn subagents_working(&self, name: &str) -> bool {
+        // A SUBAGENT'S CADENCE IS NOT THE MAIN PANE'S. The main pane paints ~6/s,
+        // so 60s of silence (contradiction_window) means it went stale. A
+        // subagent transcript is touched ONLY when the subagent emits a message
+        // or tool result — an xhigh-effort THINKING subagent can go minutes
+        // between writes while very much working. Gating on the 60s window read
+        // a lane whose subagent was "still thinking with xhigh effort" as IDLE
+        // while it was visibly crunching (primis, 2026-08-13: header IDLE over a
+        // "✻ Crunching… still thinking" pane with 2 live agents). Use a window
+        // sized to the subagent write cadence, not the pane's. idle -> active is
+        // one-way, so the worst case of a generous window is a bounded LATE
+        // CORRECTION after the agents actually finish — never a false "busy" that
+        // sticks, which is the property this whole derivation protects.
+        let window = env_secs("AMUX_SUBAGENT_WORKING_S", 240.0);
+        // AMUX-3048: an EVENT-DRIVEN live count, when the lane reports one, is the
+        // durable answer the mtime window could not give. A subagent transcript's
+        // mtime cannot tell "thinking, will write in 90s" from "finished 30s ago";
+        // a start (SubagentStart) / stop (SubagentStop) event pair can. A
+        // positive reported count means a subagent is live RIGHT NOW even while
+        // its transcript sits silent (the xhigh-thinking case, AMUX-3030), so it
+        // flips the lane working where the mtime window read it idle.
+        //
+        // This is the SAFE half of the durable exit: it only ADDS a working
+        // verdict (OR with the window), so it cannot regress a hookless lane —
+        // gemini/codex send no such event, so there is no `subagents` key and the
+        // verdict is pure mtime, unchanged. The count-AUTHORITATIVE "off"
+        // direction (a count of 0 overriding a still-warm mtime — AMUX-3047's
+        // up-to-4-minute false WORKING after a turn is done) is deliberately NOT
+        // wired here yet: it needs a leak-safe reset that does not zero a live
+        // run_in_background agent (which outlives the main turn, AMUX-2904).
+        // Tracked as the follow-up on AMUX-3048.
+        //
+        // AMUX-4024: THE COUNT IS NOW AUTHORITATIVE IN BOTH DIRECTIONS, because
+        // it finally exists. The paragraph above deferred the "off" direction
+        // for a good reason and a wrong one. The good reason: zeroing on a
+        // stale signal would kill a live `run_in_background` agent, which
+        // outlives the main turn (AMUX-2904). The wrong one: it assumed the
+        // count was being reported and only the rule was missing. It was not
+        // being reported by anybody — `subagents_live` was null for 125 of 125
+        // lanes on 2026-09-02, because no hook ever POSTed a lifecycle event
+        // (now fixed in `scripts/hooks/hook-report.sh`). So this OR was not a
+        // conservative choice between two signals; it was the mtime window
+        // alone, wearing a second name.
+        //
+        // With real start/stop events the deferral's own condition is met: a
+        // background agent's `stop` fires when IT finishes, not when the main
+        // turn does, so a count that is still positive is exactly the live
+        // background agent the comment was protecting. Preferring the count
+        // where we have one ends AMUX-3047's up-to-four-minute false WORKING —
+        // Ethan, 2026-09-02, mvs-pitr: header WORKING with an AGENTS badge over
+        // an empty composer, decided_by `contradiction_subagents_working`, on
+        // nothing but a warm transcript from agents that had already finished.
+        //
+        // `None` still means the mtime window, unchanged, and that is the whole
+        // blast radius for a lane amux cannot hook: gemini and codex send no
+        // events, have no `subagents` key, and read exactly as they did before.
+        // A LOST `stop` is the residual and it is one-directional (a lane stuck
+        // WORKING, never a lane stuck idle); `subagents_live` is published in
+        // the sessions payload and in every status-history row so the leak is
+        // countable rather than mysterious.
+        match self.reported_subagent_count(name) {
+            Some(c) => c > 0,
+            None => self
+                .subagent_activity
+                .get(name)
+                .is_some_and(|m| self.now - m < window),
+        }
+    }
+
+    /// The raw event-driven live-subagent count a lane last reported (AMUX-3048),
+    /// or `None` when the lane has never reported one (a hookless / mtime-only
+    /// lane, e.g. gemini/codex). Exposed in the sessions payload so a LEAKED
+    /// count — a lost SubagentStop pinning a lane "working" — is diagnosable
+    /// rather than hidden. It is also the field the count-AUTHORITATIVE "off"
+    /// direction follow-up (AMUX-3047) will read to override a warm mtime.
+    fn reported_subagent_count(&self, name: &str) -> Option<i64> {
+        self.reports
+            .get(name)
+            .and_then(|r| r.get("subagents"))
+            .and_then(|s| s.get("count"))
+            .and_then(serde_json::Value::as_i64)
+    }
+
+    /// Provider agent identities behind `subagents_live`. Empty is distinct
+    /// from unavailable through the sibling count: count=null means this lane
+    /// has no lifecycle producer; count=0 plus [] means it reported a final
+    /// stop. Keeping the ids in status-explain makes duplicate/missing-agent
+    /// failures visible without reconstructing hook delivery from text logs.
+    fn reported_subagent_ids(&self, name: &str) -> Option<Vec<String>> {
+        self.reports
+            .get(name)
+            .and_then(|r| r.get("subagents"))
+            .and_then(|s| s.get("live_ids"))
+            .and_then(serde_json::Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+    }
+
+    fn pane_says_working(&self, name: &str) -> bool {
+        let Some(raw) = self.pane_of(name) else {
+            return false;
+        };
+        // Codex/ollama have an explicit, ordered terminal boundary. If the
+        // newest frame paints a fresh prompt/model bar, that current-state
+        // evidence outranks stale "Working" rows, queued-message prose, and
+        // the model-agnostic churn history below. Active Codex frames still
+        // return true when their newest boundary is the working row. `None`
+        // means this is not structurally a Codex-family pane, so Claude/Gemini
+        // retain the existing hooks + bar + churn logic unchanged.
+        if let Some(generating) =
+            crate::backend::adapter::codex_pane_generation_state(raw)
+        {
+            return generating;
+        }
+        // THE BAR PHRASE ALONE NO LONGER PROVES A GENERATING MAIN TURN
+        // (AMUX-2959, Ethan at 1am: "this worker says working" over an idle
+        // prompt). Claude Code now shows "esc to interrupt" in the status bar
+        // whenever BACKGROUND AGENTS exist — including with the main turn idle
+        // at an empty composer. Three lanes read WORKING that way while their
+        // agents sat "awaiting input" (transcripts quiet, agents_working:false
+        // in the same payload — the response was disagreeing with itself).
+        //
+        // pane_bar_says_generating's own doc records the ambiguity and decides
+        // fail-CLOSED, which is right for its other consumer (steer_decide:
+        // reading ambiguous as busy defers a message; reading it as idle types
+        // into a live turn). For DISPLAY the costs invert: this predicate
+        // feeds the idle->active contradiction, whose contract is UNAMBIGUOUS
+        // work — and an agents-hint bar over an idle composer is ambiguous by
+        // the detector's own documentation. So here the bar phrase only counts
+        // when the bar does NOT carry the agents hint; a generating main turn
+        // with agents still flips via the spinner (detect == "active"), which
+        // the streaming-essay counterexample in that doc block also shows.
+        let bar_generating = crate::api::session_verbs::pane_bar_says_generating(raw);
+        let bar_has_agents = {
+            let clean = crate::backend::adapter::strip_ansi(raw);
+            clean
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .rev()
+                .take(3)
+                .any(|l| l.contains("agents") || l.contains("agent ·"))
+        };
+        (bar_generating && !bar_has_agents)
+            || crate::api::session_verbs::detect_claude_status(raw) == "active"
+            // The model-agnostic leg (AMUX-3433): several DISTINCT content
+            // frames inside the window means something is REDRAWING above the
+            // bar, whatever glyphs it uses. This is what catches the spinner
+            // variant no string rule knows yet — the AMUX-3426 class without
+            // the next screenshot. Observations exist only for admissible
+            // captured panes, so a lane that stops painting goes quiet here
+            // on its own.
+            || self.pane_churning(name)
+    }
+
+    /// See the churn block above [`note_pane_frame`].
+    pub(crate) fn pane_churning(&self, name: &str) -> bool {
+        if self.pane_of(name).is_none() {
+            return false;
+        }
+        pane_churn_distinct(name, self.now, self.contradiction_window()) >= CHURN_MIN_DISTINCT
+    }
+
+    /// Distinct content-frames observed in the last `age_s` seconds — i.e.
+    /// SINCE a claim made that long ago (AMUX-3896).
+    ///
+    /// [`Self::pane_churning`] asks "is this lane redrawing?" over the fixed
+    /// contradiction window. This asks the narrower question the fresh-idle
+    /// gate needs: "has it redrawn since it told us it was DONE?" The window
+    /// has to start at the claim, or the count includes frames from the turn
+    /// the lane just finished and every stop-hook would look like live work.
+    ///
+    /// Zero when the pane is inadmissible, same as `pane_churning` — no
+    /// captured frames means no evidence, never "therefore idle".
+    pub(crate) fn pane_churn_since(&self, name: &str, age_s: f64) -> usize {
+        if self.pane_of(name).is_none() {
+            return 0;
+        }
+        pane_churn_distinct(name, self.now, age_s.max(0.0))
+    }
+
+    /// Capture the panes that could contradict a report.
+    ///
+    /// Only lanes that painted inside the contradiction window — typically a
+    /// handful of a 60-lane fleet (measured: 4 of 63 on 2026-08-09). A lane
+    /// that has not painted cannot be mid-turn: Claude Code repaints its
+    /// spinner roughly six times a second.
+    ///
+    /// Behind a 2s cache, because the typical case is not the one that hurts.
+    /// Measured on this box: 4 painting lanes cost 44ms, but a fleet-wide
+    /// broadcast puts all 63 lanes in the candidate set and costs 473ms — and
+    /// this runs on the board's `stale` computation, which the dashboard polls.
+    /// A TTL two orders of magnitude below the contradiction window cannot
+    /// change a verdict, and it makes the board and the session list read the
+    /// SAME frame rather than two captures 20ms apart.
+    pub fn capture_panes(&mut self) {
+        let ttl = env_secs("AMUX_PANE_CACHE_TTL_S", 2.0);
+        let cache = pane_cache();
+        if let Ok(c) = cache.lock() {
+            if self.now - c.0 < ttl {
+                self.panes = c.1.clone();
+                return;
+            }
+        }
+        let names: Vec<String> = self
+            .running
+            .iter()
+            .filter_map(|t| t.strip_prefix("amux-"))
+            .filter(|n| self.pane_probe_candidate(n))
+            .map(String::from)
+            .collect();
+        for chunk in names.chunks(12) {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|name| {
+                    let n = name.clone();
+                    std::thread::spawn(move || {
+                        let pt = pane_target(&format!("amux-{n}"));
+                        capture_pane_bounded(&pt, &n).map(|raw| (n, raw))
+                    })
+                })
+                .collect();
+            for h in handles {
+                if let Ok(Some((n, raw))) = h.join() {
+                    // Churn evidence (AMUX-3433): only REAL captures record —
+                    // a cache hit re-serves the same frame and adds no
+                    // information about repainting.
+                    note_pane_frame(&n, &raw, self.now, self.contradiction_window());
+                    self.panes.insert(n, raw);
+                }
+            }
+        }
+        // Store even an EMPTY result: "nothing was painting" is an answer, and
+        // a cache that only remembers hits re-probes hardest exactly when the
+        // fleet is quiet and there is nothing to find.
+        if let Ok(mut c) = pane_cache().lock() {
+            *c = (self.now, self.panes.clone());
+        }
+    }
+
+    /// Lanes whose pane was actually read, with the evidence verdict for each.
+    ///
+    /// The consistency check (`invariants::checks::status_agrees_with_pane`)
+    /// reads its two sides from here and from `derive_status` — one struct,
+    /// one capture, one pair of detectors. A check that re-derives either side
+    /// its own way is a second implementation that can drift from the thing it
+    /// audits, and then its verdict is about itself.
+    ///
+    /// Excludes shell-only lanes: those have a tmux window and no worker, so
+    /// "the card disagrees with the pane" is not a meaningful question for
+    /// them.
+    pub fn probed_lanes(&self) -> Vec<(String, bool)> {
+        self.panes
+            .keys()
+            .filter(|n| self.agent_running(&format!("amux-{n}")))
+            .filter(|n| self.pane_of(n).is_some())
+            .map(|n| (n.clone(), self.pane_says_working(n)))
+            .collect()
+    }
+
+    /// Python's status value for one session (see the derivation note above).
+    pub fn derive_status(&self, name: &str, running: bool) -> String {
+        self.derive_status_explain(name, running).0
+    }
+
+    /// The derivation WITH its why (AMUX-3434). This IS the implementation —
+    /// `derive_status` discards the explanation — so the explain can never
+    /// drift from the verdict it describes (a view must share the predicate of
+    /// the mechanism, ethos rule 1). Built because AMUX-3426 cost a screenshot
+    /// investigation: nothing could answer "which rule decided, over what
+    /// evidence, inside which trust window". Served by
+    /// GET /api/sessions/{name}/status-explain.
+    pub fn derive_status_explain(
+        &self,
+        name: &str,
+        running: bool,
+    ) -> (String, serde_json::Value) {
+        use serde_json::json;
+        let mut ex = serde_json::Map::new();
+        if !running {
+            ex.insert("decided_by".into(), json!("not_running"));
+            return (String::new(), serde_json::Value::Object(ex));
+        }
+        let mut decided = "activity_fallback";
+        let heartbeat = env_secs("AMUX_ACTIVE_HEARTBEAT_S", 120.0);
+        let act = self
+            .activity
+            .get(&format!("amux-{name}"))
+            .copied()
+            .unwrap_or(0) as f64;
+        ex.insert(
+            "activity".into(),
+            json!({"age_s": (self.now - act).max(0.0), "heartbeat_s": heartbeat}),
+        );
+        let mut status: Option<String> = None;
+        if let Some((st, ts)) = self.transitions.get(name) {
+            // A transition from before the session's last (re)start describes
+            // a previous life — Python never emits a transition out of the ""
+            // state, so a restart leaves the old row behind (verified: the
+            // guard flipped 1 live mismatch on 2026-08-09).
+            let from_this_life = self.started.get(name).copied().unwrap_or(0.0) <= *ts;
+            let demoted = st == "active" && self.now - act > heartbeat;
+            ex.insert(
+                "transition".into(),
+                json!({
+                    "state": st,
+                    "age_s": (self.now - ts).max(0.0),
+                    "from_this_life": from_this_life,
+                    "stale_active_demoted_to_idle": from_this_life && demoted,
+                }),
+            );
+            if from_this_life {
+                decided = "transition";
+                if demoted {
+                    // An active session paints its pane continuously; silence
+                    // past the heartbeat means the transition went stale.
+                    status = Some("idle".into());
+                } else {
+                    status = Some(st.clone());
+                }
+            }
+        }
+        // The pane evidence, recorded regardless of which rule ends up
+        // deciding — when the verdict is wrong, this is what the reader needs.
+        ex.insert(
+            "pane".into(),
+            json!({
+                "admissible": self.pane_of(name).is_some(),
+                "detect": self
+                    .pane_of(name)
+                    .map(crate::api::session_verbs::detect_claude_status)
+                    .unwrap_or_default(),
+                "says_working": self.pane_says_working(name),
+                // AMUX-3433: the model-agnostic leg, visible where people
+                // look — distinct content-frames in the window vs the bar.
+                "churn_distinct_frames": pane_churn_distinct(
+                    name,
+                    self.now,
+                    self.contradiction_window()
+                ),
+                "churn_threshold": CHURN_MIN_DISTINCT,
+                "contradiction_window_s": self.contradiction_window(),
+            }),
+        );
+        // THE SUBAGENT COUNT, WHERE THE READERS ALREADY LOOK (AMUX-4024).
+        // `status_history.rs` has recorded `explain.subagents_live` in every row
+        // since it shipped, on the same "carry the EVIDENCE, not only the
+        // verdict" argument as the report and pane blocks beside it — and this
+        // key was never inserted here, so every stored row carried null. The
+        // field is now the deciding evidence for
+        // `contradiction_subagents_reported_live`, and it is the one place a
+        // LEAKED count (a lost SubagentStop pinning a lane WORKING) would be
+        // visible after the fact. `null` is a real answer and a different one
+        // from `0`: it means this lane reports no lifecycle events at all and is
+        // being judged on the mtime window instead.
+        ex.insert(
+            "subagents_live".into(),
+            self.reported_subagent_count(name).map(|c| json!(c)).unwrap_or(serde_json::Value::Null),
+        );
+        ex.insert(
+            "subagent_live_ids".into(),
+            self.reported_subagent_ids(name)
+                .map(|ids| json!(ids))
+                .unwrap_or(serde_json::Value::Null),
+        );
+        ex.insert("subagents_working".into(), json!(self.subagents_working(name)));
+        // No transition: prefer the PANE over the activity timestamp when the
+        // pane is admissible. A timestamp says something painted; the pane
+        // says what. `detect_claude_status` returning "" is the documented
+        // Python residual (an agentless shell) and reads idle here, as it did
+        // before — the fallback below stays for a lane with no readable pane,
+        // which after `capture_panes` means a silent one (idle) or a herdr
+        // lane mid-turn (empty capture, and `act` is fresh, so: active).
+        let mut status = status.unwrap_or_else(|| {
+            match self.pane_of(name).map(crate::api::session_verbs::detect_claude_status) {
+                Some(v) if v == "active" || v == "waiting" => {
+                    decided = "pane";
+                    v
+                }
+                Some(_) => {
+                    decided = "pane";
+                    "idle".into()
+                }
+                None if self.now - act < 60.0 => "active".into(),
+                None => "idle".into(),
+            }
+        });
+        // self_report override — Python's exact gate (py:20248-20263).
+        let mut idle_report_age: Option<f64> = None;
+        if let Some(rep) = self.reports.get(name) {
+            let st = rep["state"].as_str().unwrap_or("");
+            // ts is time.time() — a FLOAT. as_i64() on it is None, which
+            // silently read every report as epoch-0 (the age_s bug).
+            let ts = rep["ts"].as_f64().unwrap_or(0.0);
+            // A report from BEFORE the session's last (re)start describes a
+            // PREVIOUS LIFE — the same guard the transition block above has
+            // had all along, missing here. Found live 2026-08-11: board-exp-1
+            // switched claude -> codex, its hours-old claude `idle` report
+            // (24h trust window) outranked the codex trust picker the pane
+            // was showing, and a lane blocked on input read idle. A restarted
+            // claude lane loses nothing: its hooks re-report on the first
+            // turn, and until then the pane and activity decide — which is
+            // exactly right for the boot window.
+            let started = self.started.get(name).copied().unwrap_or(0.0);
+            let from_this_life = started <= ts;
+            let age = self.now - ts;
+            let stale_active = st == "active" && age > heartbeat;
+            let trust_window = if st == "idle" {
+                env_secs("AMUX_HOOKS_LIVE_IDLE_S", 86400.0)
+            } else {
+                env_secs("AMUX_HOOKS_LIVE_S", 1800.0)
+            };
+            // THE VERDICT COMES FROM THE SHARED PREDICATE, never from the
+            // locals above — those exist only to publish the evidence. The
+            // steering/pickup gate calls the same function, so the display and
+            // the mechanism cannot drift (AMUX-3756, ethos rule 1).
+            let applied = report_applies(st, ts, started, self.now);
+            ex.insert(
+                "report".into(),
+                json!({
+                    "state": st,
+                    "source": rep.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                    "age_s": age.max(0.0),
+                    "trust_window_s": trust_window,
+                    "from_this_life": from_this_life,
+                    "stale_active": stale_active,
+                    "applied": applied,
+                }),
+            );
+            if applied {
+                decided = "report";
+                status = st.to_string();
+                if st == "idle" {
+                    idle_report_age = Some(age);
+                }
+            }
+        }
+        // CONTRADICTION (AMUX-2646). `idle` survives silence, never
+        // contradiction. Fires only when BOTH halves hold: the claim is older
+        // than the window (a fresh report is still the authority — D1), and
+        // the pane both painted inside the window and shows the main turn
+        // generating. It can only ever flip idle -> active, so a missed frame
+        // costs a late correction, never a false "busy".
+        let idle_gate_open =
+            idle_report_age.map(|a| a > self.contradiction_window()).unwrap_or(true);
+        // ...AND A FRESH ONE IS FALSIFIABLE TOO, BY EVIDENCE THE RACE CANNOT
+        // MANUFACTURE (AMUX-3896). The window above is one number doing two
+        // jobs, and its own doc says so: "one number for both halves because it
+        // is one question". They are two questions. How recent must a frame be
+        // to be admissible wants 60s. How long does a lane's own word survive
+        // contrary evidence wants ~1s — the repaint lag after a Stop hook is
+        // the entire race the window was written for.
+        //
+        // Conflating them costs the normal amux flow: a lane ends a turn
+        // (stop-hook -> idle) and immediately starts another (auto-continue,
+        // standing orders, input queued at the boundary), then reads IDLE until
+        // 60s pass or its first tool call fires a tool-hook. Ethan, 22:54
+        // 2026-08-29: "tubescience worker says idle but its not". The specimen
+        // is in that lane's own status-explain history — status=idle,
+        // decided_by=report, report age 8.8s, over pane detect=active with 20
+        // distinct content frames. It sat that way for 49s. Sampling every
+        // running lane found the same shape on 8 of 57, all stop-hook, ages
+        // 0.6s to 34s.
+        //
+        // So: keep the window for weak evidence (a bar phrase, a single
+        // spinner-shaped frame — a stale frame can show either), and add one
+        // narrow gate for evidence a frozen frame cannot produce. The pane must
+        // show a spinner AND have REDRAWN since the claim: `CHURN_MIN_DISTINCT`
+        // distinct content-frames inside a window that starts at the report's
+        // own timestamp. A stale frame is by definition one frame and stops
+        // there; a lane really working repaints ~6x/s. That flips the 8.8s,
+        // 16.3s and 34.0s specimens and leaves the 0.6s and 0.7s ones — which
+        // ARE the repaint race — exactly as they are.
+        //
+        // Measured in the same window as the claim, never a fixed one: at age
+        // 3s only the last 3s of frames may vote, so the evidence can never
+        // include the turn the lane just finished.
+        let churn_since_claim = idle_report_age.map(|a| self.pane_churn_since(name, a)).unwrap_or(0);
+        let fresh_idle_contradicted = !idle_gate_open
+            && churn_since_claim >= CHURN_MIN_SINCE_CLAIM
+            && self
+                .pane_of(name)
+                .map(crate::api::session_verbs::detect_claude_status)
+                .as_deref()
+                == Some("active");
+        ex.insert(
+            "idle_report_age_s".into(),
+            idle_report_age.map(|a| json!(a)).unwrap_or(serde_json::Value::Null),
+        );
+        ex.insert("idle_contradiction_gate_open".into(), json!(idle_gate_open));
+        ex.insert("churn_since_claim".into(), json!(churn_since_claim));
+        ex.insert("churn_since_claim_threshold".into(), json!(CHURN_MIN_SINCE_CLAIM));
+        ex.insert("fresh_idle_contradicted".into(), json!(fresh_idle_contradicted));
+        // Provider-owned background work is not the repaint-race evidence the
+        // fresh-idle gate protects against. Claude explicitly says it is
+        // waiting for live agents; Codex explicitly says its background
+        // terminal is running. Both describe the lane AFTER the parent prompt
+        // became idle, so a fresh parent report cannot contradict them.
+        let provider_background_working = self
+            .pane_of(name)
+            .is_some_and(crate::api::session_verbs::provider_background_working);
+        ex.insert(
+            "provider_background_working".into(),
+            json!(provider_background_working),
+        );
+        if status == "idle" && provider_background_working {
+            status = "active".into();
+            decided = "contradiction_provider_background_working";
+        }
+        if status == "idle" && (idle_gate_open || fresh_idle_contradicted) && self.pane_says_working(name)
+        {
+            status = "active".into();
+            // NAMED APART from the aged path, because the two rest on different
+            // evidence and a sweep that cannot tell them apart cannot tell
+            // whether this gate is earning its keep or firing on the race.
+            decided = if idle_gate_open {
+                "contradiction_pane_generating"
+            } else {
+                "contradiction_pane_redrew_since_claim"
+            };
+        }
+        // A PICKER CONTRADICTS IDLE TOO (AMUX-2952's status half). The rule
+        // above only ever flips idle -> active on a GENERATING pane, so a lane
+        // sitting at an input-required selector kept reading `idle` — measured
+        // live on tubescience 2026-08-11: the pane showed AskUserQuestion's
+        // "Ready to submit your answers?" while the header said IDLE, and
+        // Ethan pressed Enter into a lane nothing had flagged as waiting.
+        // `waiting` is the one state whose whole purpose is to summon a human;
+        // mislabelling it idle is strictly worse than mislabelling work,
+        // because nothing and nobody is coming.
+        //
+        // Same shape as the rule above on purpose: one-way (idle -> waiting),
+        // gated on the same report-age window, evidence from the same
+        // admissible pane. A missed frame costs a late correction, never a
+        // false "waiting".
+        if status == "idle" && idle_gate_open {
+            if let Some(raw) = self.pane_of(name) {
+                if crate::api::session_verbs::detect_claude_status(raw) == "waiting" {
+                    status = "waiting".into();
+                    decided = "contradiction_picker_waiting";
+                }
+            }
+        }
+        // SUBAGENTS ARE THE LANE WORKING TOO (AMUX-2904) — but a FRESH idle
+        // self-report outranks the subagent-mtime window, exactly as it does
+        // over a working pane. This is now LITERALLY "the same one-way rule as
+        // the pane contradiction above": same `idle_report_age >
+        // contradiction_window` gate, same admissible evidence, still only ever
+        // idle -> active. The gate was MISSING here while the comment above
+        // claimed sameness (Ethan, 2026-08-13: "says working but it appears
+        // done", over a "✻ Crunched for 1m 7s" idle prompt with a ~30s-old
+        // stop-hook idle report and 2 background agents). A stopped main turn is
+        // a stop-hook idle report, and a stopped main turn means its FOREGROUND
+        // subagents have necessarily finished — so a fresh idle report is the
+        // stronger signal and must win for the window, instead of the 240s
+        // `AMUX_SUBAGENT_WORKING_S` mtime window pinning the header WORKING for
+        // up to four minutes after the turn was done. AMUX-2904 is unchanged: a
+        // main turn ACTIVE with foreground subagents has NOT stopped, so there
+        // is no fresh idle report (`idle_report_age` is None -> `unwrap_or(true)`
+        // -> the flip still fires), and once a real idle report ages past the
+        // window a still-writing subagent flips it active as the bounded late
+        // correction the window was always documented to cost.
+        //
+        // AMUX-4024: A REPORTED LIVE COUNT DOES NOT WAIT FOR THAT GATE. Read the
+        // justification above one more time — "a stopped main turn means its
+        // FOREGROUND subagents have necessarily finished". True, and it is the
+        // whole argument, and BACKGROUND agents are the case it does not cover:
+        // they outlive the main turn by construction (AMUX-2904), so the stop
+        // hook fires, the report is fresh, and the gate holds the correction
+        // shut for a full minute while the lane sits there working.
+        //
+        // Ethan, 2026-08-30, tubescience: header IDLE over a pane reading
+        // "Waiting for 1 background agent to finish". Its status-explain history
+        // flapped idle -> active -> idle on a ~30s cycle, every idle row
+        // `decided_by: report`, because each new report restarted the window.
+        //
+        // The gate exists because an MTIME can be stale — it cannot tell
+        // "finished 30s ago" from "thinking, will write in 90s", so a fresh
+        // self-report is the better evidence and should win. An event-driven
+        // count has no such defect: it moves only when a subagent actually
+        // starts or stops, so a positive count is a statement about NOW, and
+        // there is nothing for the window to protect against. Gate the mtime,
+        // trust the count.
+        //
+        // Deliberately NOT the pane-churn leg, which stays gated: content churn
+        // is also what a human typing at the composer produces
+        // (`churn_without_a_spinner_does_not_falsify_a_fresh_idle_claim`), and
+        // flipping a lane to WORKING because someone is typing into it is the
+        // error the other half of this card is about. A subagent count cannot be
+        // typed.
+        let subagents_reported_live = self.reported_subagent_count(name).is_some_and(|c| c > 0);
+        if status == "idle" && (idle_gate_open || subagents_reported_live) && self.subagents_working(name)
+        {
+            status = "active".into();
+            // Named apart from the aged path, same reason the pane rules are:
+            // one rests on a timestamp inside a window, the other on an event.
+            decided = if idle_gate_open {
+                "contradiction_subagents_working"
+            } else {
+                "contradiction_subagents_reported_live"
+            };
+        }
+        // CODEX'S STRUCTURED TURN BOUNDARY IS ITS HOOK (AMUX-4051 E2E).
+        // tmux's activity clock stayed 41 minutes old while a Codex worker's
+        // terminal visibly showed `Working (5m … esc to interrupt)`, so the
+        // pane was rejected before the existing Codex-aware scraper could read
+        // it. The rollout is append-only and emits task_started/task_complete;
+        // honour that direct provider signal after scrape-based contradictions.
+        //
+        // A signal from before the latest worker restart is a previous life and
+        // cannot vote. A visible selector still wins as `waiting`: an open turn
+        // says work is unfinished, not that it is safe to type into the picker.
+        if let Some(signal) = self.codex_turns.get(name) {
+            let started = self.started.get(name).copied().unwrap_or(0.0);
+            let from_this_life = started > 0.0 && signal.ts >= started;
+            let heartbeat_age = (self.now - signal.heartbeat_ts).max(0.0);
+            let heartbeat_window = env_secs("AMUX_CODEX_TURN_HEARTBEAT_S", 300.0);
+            let heartbeat_fresh = heartbeat_age <= heartbeat_window;
+            let tool_child_running = self.provider_child_activity.contains(name);
+            let active_is_live = signal.state != "active" || heartbeat_fresh || tool_child_running || self.subagents_working(name);
+            let applied = from_this_life && active_is_live;
+            let pane_waiting = self.pane_of(name)
+                .map(crate::api::session_verbs::detect_claude_status)
+                .as_deref() == Some("waiting");
+            ex.insert("codex_rollout".into(), json!({
+                "state": signal.state,
+                "boundary": signal.boundary,
+                "rollout_file": signal.rollout_file,
+                "age_s": (self.now - signal.ts).max(0.0),
+                "heartbeat_age_s": heartbeat_age,
+                "heartbeat_window_s": heartbeat_window,
+                "heartbeat_fresh": heartbeat_fresh,
+                "tool_child_running": tool_child_running,
+                "tool_children_measured": self.provider_children_measured,
+                "from_this_life": from_this_life,
+                "applied": applied,
+            }));
+            if applied {
+                if signal.state == "active" && pane_waiting {
+                    status = "waiting".into();
+                    decided = "codex_rollout_with_picker";
+                } else {
+                    status = signal.state.clone();
+                    decided = "codex_rollout";
+                }
+            } else if from_this_life && signal.state == "active" {
+                // A `task_started` edge can survive a provider crash or an
+                // interrupted generation indefinitely. Codex also keeps its
+                // Working timer/footer repainting, so pane mtime/churn are not
+                // independent evidence. With neither a bounded structured
+                // heartbeat nor a live tool descendant, force the fossil idle
+                // and name the rejected evidence in status-explain.
+                if self.provider_children_measured {
+                    status = "idle".into();
+                    decided = "codex_stale_active_refused";
+                } else {
+                    status = "active".into();
+                    decided = "codex_child_probe_unmeasured";
+                }
+            }
+        }
+        // Main-turn completion does not complete its live tool/subagents.
+        if status == "idle" && (self.provider_child_activity.contains(name) || subagents_reported_live) {
+            status = "active".into();
+            decided = "structured_live_children";
+        }
+        // API-ERROR (5xx / Overloaded) is its own status (Ethan 2026-08-18).
+        // Claude Code ENDS the turn on a 529 and returns to the prompt, so its
+        // Stop hook reports `idle` and the scrape reads `idle` too — which is
+        // exactly what @backend showed while its pane sat on
+        // "API Error: 529 Overloaded". A stuck-on-error lane is not idle in the
+        // sense a human cares about: it wants a retry/continue, so a sweep has
+        // to be able to FIND it — surfacing it as `idle` hides it in the same
+        // bucket as every parked lane. Overrides idle/waiting but never
+        // `active`: an actively-retrying lane (spinner) is genuinely working,
+        // and `has_current_api_error` only honours the banner when it sits in
+        // the TAIL, so a lane that recovered and produced newer output does not
+        // read as errored (the bounded false-positive here costs a glance, not
+        // a wrong action — unlike ghost-rescue, nothing force-acts on this).
+        if (status == "idle" || status == "waiting")
+            && self
+                .pane_of(name)
+                .map(crate::api::session_verbs::has_current_api_error)
+                .unwrap_or(false)
+        {
+            status = "api_error".into();
+            decided = "api_error_banner";
+        }
+        if self.panes.get(name).and_then(|raw| crate::backend::adapter::claude_auto_resume_banner(raw)).is_some() {
+            status = "rate_limited".into();
+            decided = "provider_auto_resume_quota";
+        }
+        ex.insert("decided_by".into(), json!(decided));
+        (status, serde_json::Value::Object(ex))
+    }
+}
+
+
+/// lane -> newest subagent-transcript mtime, in ONE pass over
+/// `~/.claude/projects/<proj>/<conversation>/subagents/`.
+///
+/// The owning lane resolves through `session_verbs::conversation_owner` —
+/// meta claim first, LAST title record second — the same resolution the
+/// token-ledger indexer and the /subagents endpoint use, not a fourth
+/// spelling of it. The first cut here read the parent's FIRST line, which
+/// reintroduced the staleness AMUX-2612 fixed: the `amux` lane's conversation
+/// is still titled 'amux-rust' on line 0, so its agents were attributed to a
+/// lane that no longer exists and `amux` itself read as having none.
+///
+/// Only conversations with subagent activity in the last hour resolve an
+/// owner — every consumer asks about minutes, and the title fallback is a
+/// bounded tail read that is not worth paying for July's transcripts.
+///
+/// TTL-cached: FleetSignals::load runs per /api/sessions request AND the
+/// stuck-composer sweep reads the same map; the underlying answer cannot
+/// change faster than agents write, so 10s of staleness is free.
+pub(crate) fn scan_subagent_activity() -> BTreeMap<String, f64> {
+    use std::sync::{Mutex, OnceLock};
+    type Cache = (f64, BTreeMap<String, f64>);
+    static C: OnceLock<Mutex<Cache>> = OnceLock::new();
+    let now = chrono::Utc::now().timestamp() as f64;
+    let cache = C.get_or_init(|| Mutex::new((0.0, BTreeMap::new())));
+    if let Ok(g) = cache.lock() {
+        if now - g.0 < 10.0 {
+            return g.1.clone();
+        }
+    }
+    let projects = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".claude/projects");
+    let mut out: BTreeMap<String, f64> = BTreeMap::new();
+    let claims = crate::api::session_verbs::conversation_claims();
+    let Ok(projs) = std::fs::read_dir(&projects) else { return out };
+    for proj in projs.flatten() {
+        let Ok(entries) = std::fs::read_dir(proj.path()) else { continue };
+        for e in entries.flatten() {
+            let conv = e.path();
+            if conv.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let subs = conv.with_extension("").join("subagents");
+            let Ok(files) = std::fs::read_dir(&subs) else { continue };
+            let mut newest = 0.0f64;
+            for f in files.flatten() {
+                if !f.file_name().to_string_lossy().ends_with(".jsonl") {
+                    continue;
+                }
+                if let Some(m) = f
+                    .metadata()
+                    .ok()
+                    .and_then(|md| md.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                {
+                    newest = newest.max(m.as_secs_f64());
+                }
+            }
+            if newest <= 0.0 || now - newest > 3600.0 {
+                continue;
+            }
+            let owner = crate::api::session_verbs::conversation_owner(&conv, &claims);
+            if owner.is_empty() {
+                continue;
+            }
+            let slot = out.entry(owner).or_insert(0.0);
+            if newest > *slot {
+                *slot = newest;
+            }
+        }
+    }
+    if let Ok(mut g) = cache.lock() {
+        *g = (now, out.clone());
+    }
+    out
+}
+
+/// The set of sessions currently `active` — the board's `stale` flag reads
+/// this (Python: `_session_prev_status[sess] == "active"`, py:15671-15697).
+/// Shares `FleetSignals` with the session list: one derivation, two readers.
+pub fn active_python_sessions(conn: &rusqlite::Connection) -> BTreeSet<String> {
+    let mut signals = FleetSignals::load(conn);
+    // The board must see the same evidence the session list sees, or a lane
+    // reads active on one screen and idle on the other. Bounded: only lanes
+    // that painted inside the contradiction window are probed.
+    signals.capture_panes();
+    let mut out = BTreeSet::new();
+    let Ok(entries) = std::fs::read_dir(amux_home().join("sessions")) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("env") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let running = signals.agent_running(&format!("amux-{name}"));
+        if signals.derive_status(name, running) == "active" {
+            out.insert(name.to_string());
+        }
+    }
+    out
+}
+
+// ---- preview (AMUX-2588) -------------------------------------------------
+
+/// Python's strip_ansi (amux-server.py:20225) — ported verbatim, OSC
+/// hyperlink forms included: Claude panes emit `\x1b]8;` constantly, and a
+/// simpler regex leaves fragments the intelligibility filter then rejects.
+pub(crate) fn strip_ansi(s: &str) -> String {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(
+            "\\x1b\\[[0-9;?]*[a-zA-Z]|\\x1b\\]8;[^\\x1b]*\\x1b\\\\|\\x1b\\][^\\x07]*\\x07|\\x1b\\][^\\x1b]*\\x1b\\\\|\\x1b[()][A-Z0-9]|\\x1b[\\x20-\\x2f]*[\\x40-\\x7e]",
+        )
+        .expect("strip_ansi regex")
+    });
+    re.replace_all(s, "").into_owned()
+}
+
+fn chars_truncate(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// True when a line — already ANSI-stripped and trimmed — is TUI CHROME
+/// rather than real content: a status-bar hint ("bypass permissions",
+/// "plan mode"), a box-drawing/separator row, or too little alphanumeric
+/// content to be a genuine line of text. Extracted from `preview_of`'s
+/// "intelligible" pass (2026-08-30) so `telegram_relay`'s reply-extraction
+/// can share the SAME answer to "is this real content or terminal
+/// furniture" instead of drifting its own copy — both read the identical
+/// raw pane capture (`tmux capture-pane -e`) and hit the identical noise:
+/// the bottom status bar, box-drawing dividers, and the like are exactly
+/// what leaked into a Telegram relay before this existed (found live,
+/// `@frontstage status` producing "[38;5;231m...bypass permissions on..."
+/// and walls of "─" instead of the model's actual reply).
+pub(crate) fn is_chrome_line(cl: &str) -> bool {
+    if cl.is_empty() {
+        return true;
+    }
+    let lower = cl.to_lowercase();
+    if cl.contains("⏵⏵") || lower.contains("bypass permissions") || lower.contains("plan mode") {
+        return true;
+    }
+    // Claude Code's own "shared session" footer card: a fixed boilerplate
+    // block CC prints under an OSC-8 hyperlink. The escape FRAMING gets
+    // stripped upstream, but the URL and label text inside it are genuine
+    // visible characters, not escape-sequence payload — ANSI stripping alone
+    // cannot remove them (found live 2026-08-30, alongside the ANSI leak:
+    // this card survived stripping and reached Telegram as a raw link plus
+    // "Claude Code" / "A shared Claude Code session on claude.ai/code").
+    if cl.contains("claude.ai/code/session_") || lower.contains("a shared claude code session") {
+        return true;
+    }
+    // The card's own EXACT heading line. An exact match (not `contains`) on
+    // purpose — prose that genuinely mentions "Claude Code" mid-sentence must
+    // still survive; only the standalone title line, printed verbatim by
+    // every instance of this card, is chrome.
+    if cl == "Claude Code" {
+        return true;
+    }
+    let n_chars = cl.chars().count();
+    if n_chars <= 2 {
+        return true;
+    }
+    let alnum = cl.chars().filter(|c| c.is_alphanumeric() || *c == ' ').count();
+    if n_chars > 3 && (alnum as f64) / (n_chars as f64) < 0.3 {
+        return true;
+    }
+    let distinct: BTreeSet<char> = cl.chars().filter(|c| *c != ' ').collect();
+    distinct.len() <= 2
+}
+
+/// Python's preview pair (amux-server.py:20224-20316): the scalar is the
+/// last non-blank RAW line, sliced to 120 chars THEN stripped (that order is
+/// Python's); `preview_lines` is an ARRAY of up to 5 intelligible lines —
+/// the SPA calls `.map()` on it (app.js:2602), so the previous line COUNT
+/// failed its `&& s.preview_lines.length` check and previews silently never
+/// rendered on the Rust side (AMUX-2588).
+fn preview_of(raw: &str) -> (String, Vec<String>) {
+    let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+    let preview = lines
+        .iter()
+        .rev()
+        .map(|l| strip_ansi(&chars_truncate(l, 120)))
+        .find(|cl| {
+            let lower = cl.to_lowercase();
+            let n = cl.chars().count();
+            if n <= 2 { return false; }
+            if cl.contains("\u{23f5}\u{23f5}")
+                || lower.contains("bypass permissions")
+                || lower.contains("plan mode")
+                || cl.starts_with('\u{276f}')
+            {
+                return false;
+            }
+            let alnum = cl.chars().filter(|c| c.is_alphanumeric() || *c == ' ').count();
+            n <= 3 || (alnum as f64) / (n as f64) >= 0.3
+        })
+        .unwrap_or_default();
+    let mut intelligible: Vec<String> = Vec::new();
+    for l in &lines {
+        let cl = strip_ansi(l).trim().to_string();
+        if is_chrome_line(&cl) {
+            continue;
+        }
+        intelligible.push(strip_elapsed_suffix(&chars_truncate(&cl, 200)));
+    }
+    let preview_lines: Vec<String> = if intelligible.is_empty() {
+        // Fallback: last few non-empty stripped lines (spinner/tool output).
+        let start = lines.len().saturating_sub(8);
+        let cleaned: Vec<String> = lines[start..]
+            .iter()
+            .map(|l| strip_elapsed_suffix(&chars_truncate(strip_ansi(l).trim(), 200)))
+            .filter(|l| !l.is_empty())
+            .collect();
+        let s = cleaned.len().saturating_sub(5);
+        cleaned[s..].to_vec()
+    } else {
+        let s = intelligible.len().saturating_sub(5);
+        intelligible[s..].to_vec()
+    };
+    (preview, preview_lines)
+}
+
+/// Drop a trailing elapsed-time counter — `3m 17s`, `47s`, `1h 2m 3s` —
+/// separated from the line's text by a run of 2+ spaces (Claude Code's
+/// column-padded subagent status lines). The counter ticks every repaint, so
+/// with 40+ live lanes SOME preview churned on every poll and the sessions
+/// ETag (AMUX-3504) could never 304: measured, 5 of 119 rows differed across
+/// an idle 3s and every diff was this suffix. The counter is decoration in a
+/// 5-line preview; the TEXT still churns when activity is real, which is the
+/// correct invalidation. A line without the shape passes through untouched.
+fn strip_elapsed_suffix(line: &str) -> String {
+    let trimmed = line.trim_end();
+    let Some(gap) = trimmed.rfind("  ") else { return trimmed.to_string() };
+    let suffix = trimmed[gap..].trim_start();
+    let is_elapsed = !suffix.is_empty()
+        && suffix.split_whitespace().all(|tok| {
+            // Char-based, not split_at: a byte index panics on a multi-byte
+            // final char, and pane text is arbitrary UTF-8.
+            let mut cs = tok.chars();
+            let Some(unit) = cs.next_back() else { return false };
+            let num = cs.as_str();
+            matches!(unit, 'h' | 'm' | 's')
+                && !num.is_empty()
+                && num.chars().all(|c| c.is_ascii_digit())
+        });
+    if is_elapsed {
+        trimmed[..gap].trim_end().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Saved-log tail for a STOPPED session (py:20218-20223): last 16KB of
+/// ~/.amux/logs/<name>.log, last 30 lines.
+fn stopped_session_raw(name: &str) -> String {
+    let p = amux_home().join("logs").join(format!("{name}.log"));
+    let Ok(mut f) = std::fs::File::open(&p) else {
+        return String::new();
+    };
+    use std::io::{Read, Seek, SeekFrom};
+    let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if size > 16_384 {
+        let _ = f.seek(SeekFrom::Start(size - 16_384));
+    }
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(30);
+    lines[start..].join("\n")
+}
+
+// ---- misc shared helpers -------------------------------------------------
+
+use crate::config::amux_home;
+
+/// ~/.amux/sessions/<name>.meta.json (py:_load_meta) — last_send,
+/// last_started, task_summary live here.
+///
+/// Cached per build_array call via a process-global with a 2s TTL.
+/// load_meta is called TWICE per session in build_array (once in
+/// python_fleet_sessions, once in board linkage) — 226 filesystem reads
+/// per request collapsed to ~113.
+fn load_meta(name: &str) -> serde_json::Value {
+    fn meta_cache() -> &'static std::sync::Mutex<(f64, BTreeMap<String, serde_json::Value>)> {
+        static CACHE: std::sync::OnceLock<std::sync::Mutex<(f64, BTreeMap<String, serde_json::Value>)>> =
+            std::sync::OnceLock::new();
+        CACHE.get_or_init(|| std::sync::Mutex::new((0.0, BTreeMap::new())))
+    }
+    let now = chrono::Utc::now().timestamp() as f64;
+    if let Ok(c) = meta_cache().lock() {
+        if now - c.0 < 2.0 {
+            if let Some(v) = c.1.get(name) {
+                return v.clone();
+            }
+        }
+    }
+    let p = amux_home().join("sessions").join(format!("{name}.meta.json"));
+    let val = std::fs::read_to_string(p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    if let Ok(mut c) = meta_cache().lock() {
+        if now - c.0 >= 2.0 {
+            c.1.clear();
+            c.0 = now;
+        }
+        c.1.insert(name.to_string(), val.clone());
+    }
+    val
+}
+
+fn confirmed_active_model(meta: &serde_json::Value, provider: &str) -> String {
+    let same_provider = meta["active_model_provider"].as_str() == Some(provider);
+    let from_this_life = meta["active_model_confirmed_at"].as_i64().unwrap_or(0)
+        >= meta["last_started"].as_i64().unwrap_or(0);
+    if same_provider && from_this_life {
+        meta["active_model_confirmed"].as_str().unwrap_or("").to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Pick the worker's task label and its source from the freshness verdicts.
+///
+/// Pure so the precedence — and especially the SUMMARY freshness gate — can be
+/// tested without a DB or meta files. The gate is the fix for the 2026-08-13
+/// "these task names are out of date" report: `summary` is a point-in-time label
+/// that nothing refreshes, so an ungated `!summary.is_empty()` let an unstamped
+/// relic outrank both the live board card and the honest desc, permanently. Both
+/// `board_fresh` and `summary_fresh` carry the SAME rule (`ts > 0 && age <= 24h`)
+/// so the two time-sensitive sources age out identically; a stale summary falls
+/// through to a stale board title, then to desc.
+fn resolve_task_name(
+    board_title: Option<&str>,
+    board_fresh: bool,
+    summary: &str,
+    summary_fresh: bool,
+    desc: &str,
+) -> (String, &'static str) {
+    if board_fresh {
+        (board_title.unwrap_or_default().to_string(), "board")
+    } else if summary_fresh {
+        (summary.to_string(), "summary")
+    } else if let Some(t) = board_title {
+        (t.to_string(), "board")
+    } else {
+        (desc.to_string(), "desc")
+    }
+}
+
+/// Reconcile the runtime verdict with the board attribution exposed by the
+/// sessions API.
+///
+/// `active` is a stronger claim than "the pane exists": it says the model is
+/// working on either one exact, still-owned `doing` card or on an explicitly
+/// cardless informational/control turn. A missing or stale card reference must
+/// not retain the ordinary WORKING status, because every dashboard consumer
+/// would otherwise present runtime activity and board ownership as two
+/// contradictory truths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeBoardTruth {
+    status: String,
+    card_id: String,
+    card_live: bool,
+    verdict: &'static str,
+    measured: bool,
+    n_considered: usize,
+    violation: bool,
+}
+
+/// A causal marker emitted by direct delivery or runtime task ownership.
+///
+/// Markers are retained as a timeline: a later control/cardless turn cannot
+/// erase an earlier claim while that card still exists as this lane's Doing
+/// work. The board row is the release signal, so no second, lossy ownership
+/// state is needed here.
+type TaskMarker = (f64, Option<String>, bool, String);
+
+/// A cardless event must carry the semantic classification which licensed it.
+/// Transport intent (`[no-board]`) is not such a classification: a substantive
+/// turn remains work even when its sender asked not to mint a duplicate card.
+pub(crate) fn cardless_event_allowed(data: &serde_json::Value) -> bool {
+    matches!(
+        data["reason"].as_str(),
+        Some("informational-query") | Some("control-prompt") | Some("peer-coordination")
+    )
+}
+
+struct RuntimeMarkerSelection<'a> {
+    marker: Option<&'a TaskMarker>,
+    conflicting_live_claims: bool,
+    newer_cardless_suppressed: bool,
+}
+
+/// The surviving exact `task.claimed` identities behind runtime reconciliation.
+///
+/// Kept as a small shared primitive because recovery dispatch must make the
+/// same ownership decision the sessions API publishes: one exact live claim is
+/// actionable even beside unrelated Doing rows; two distinct ones are an
+/// explicit ambiguity, never a newest-row guess.
+pub(crate) fn surviving_claimed_card_ids(
+    markers: &[TaskMarker],
+    session: &str,
+    doing_by_id: &BTreeMap<String, (String, String, i64)>,
+) -> BTreeSet<String> {
+    markers
+        .iter()
+        .filter_map(|marker| {
+            let card = marker.1.as_deref()?;
+            doing_by_id
+                .get(card)
+                .filter(|(owner, _, _)| owner == session)
+                .map(|_| card.to_string())
+        })
+        .collect()
+}
+
+/// Select the causal marker which describes this runtime now.
+///
+/// A still-live claimed card is sticky across later informational/control
+/// prompts. If two distinct claimed cards are live, naming either would be a
+/// guess, so retain the newest only as diagnostic evidence and publish the
+/// conflict to reconciliation instead.
+fn select_runtime_marker<'a>(
+    markers: &'a [TaskMarker],
+    started_at: f64,
+    session: &str,
+    doing_by_id: &BTreeMap<String, (String, String, i64)>,
+) -> RuntimeMarkerSelection<'a> {
+    let live_claims: Vec<&TaskMarker> = markers
+        .iter()
+        .filter(|marker| {
+            // A Doing row is the durable release boundary. A process/runtime
+            // restart must not make an earlier claimed card stale while the
+            // board still says this lane owns it.
+            marker.1.as_deref().is_some_and(|card| {
+                doing_by_id
+                    .get(card)
+                    .is_some_and(|(owner, _, _)| owner == session)
+            })
+        })
+        .collect();
+    let distinct_live_claims = surviving_claimed_card_ids(markers, session, doing_by_id);
+    if let Some(marker) = live_claims
+        .into_iter()
+        .max_by(|left, right| left.0.total_cmp(&right.0))
+    {
+        return RuntimeMarkerSelection {
+            marker: Some(marker),
+            conflicting_live_claims: distinct_live_claims.len() > 1,
+            newer_cardless_suppressed: markers
+                .iter()
+                .any(|other| other.0 >= started_at && other.2 && other.0 > marker.0),
+        };
+    }
+    RuntimeMarkerSelection {
+        marker: markers
+            .iter()
+            .filter(|marker| marker.0 >= started_at)
+            .max_by(|left, right| left.0.total_cmp(&right.0)),
+        conflicting_live_claims: false,
+        newer_cardless_suppressed: false,
+    }
+}
+
+fn reconcile_runtime_board(
+    running: bool,
+    runtime_status: &str,
+    claimed_card: Option<&str>,
+    claimed_card_valid: bool,
+    conflicting_live_claims: bool,
+    cardless_allowed: bool,
+    doing_count: usize,
+) -> RuntimeBoardTruth {
+    let claimed = claimed_card.unwrap_or_default().trim();
+    if !running {
+        return RuntimeBoardTruth {
+            status: String::new(),
+            card_id: String::new(),
+            card_live: false,
+            verdict: "not-running",
+            measured: true,
+            n_considered: doing_count,
+            violation: false,
+        };
+    }
+    if runtime_status != "active" {
+        return RuntimeBoardTruth {
+            status: runtime_status.to_string(),
+            card_id: if claimed_card_valid { claimed.to_string() } else { String::new() },
+            card_live: false,
+            verdict: "runtime-not-active",
+            measured: true,
+            n_considered: doing_count,
+            violation: false,
+        };
+    }
+    // One exact live causal marker is stronger evidence than an aggregate
+    // count: other Doing rows can be stale, subagent-owned, or unrelated.
+    // Only distinct surviving claimed identities make the runtime ambiguous.
+    if !claimed.is_empty() && claimed_card_valid && !conflicting_live_claims {
+        return RuntimeBoardTruth {
+            status: "active".into(),
+            card_id: claimed.to_string(),
+            card_live: true,
+            verdict: "linked",
+            measured: true,
+            n_considered: doing_count,
+            violation: false,
+        };
+    }
+    if claimed.is_empty() && cardless_allowed && !conflicting_live_claims {
+        return RuntimeBoardTruth {
+            status: "active".into(),
+            card_id: String::new(),
+            card_live: false,
+            verdict: "cardless-allowed",
+            measured: true,
+            n_considered: doing_count,
+            violation: false,
+        };
+    }
+    RuntimeBoardTruth {
+        // Preserve the physical activity as a distinct state for diagnostics,
+        // but do not publish the ordinary WORKING value without its board
+        // operand. The build-array integration logs this violation.
+        status: "unattributed".into(),
+        card_id: String::new(),
+        card_live: false,
+        verdict: if conflicting_live_claims {
+            "active-conflicting-claims"
+        } else if claimed.is_empty() {
+            "active-without-card"
+        } else if claimed_card_valid {
+            "active-multiple-doing"
+        } else {
+            "active-card-invalid"
+        },
+        measured: true,
+        n_considered: doing_count,
+        violation: true,
+    }
+}
+
+fn announce_runtime_board_truth(
+    session: &str,
+    runtime_status: &str,
+    observed_card: &str,
+    truth: &RuntimeBoardTruth,
+) {
+    static ACTIVE_VIOLATIONS: std::sync::OnceLock<std::sync::Mutex<BTreeSet<String>>> =
+        std::sync::OnceLock::new();
+    let active = ACTIVE_VIOLATIONS.get_or_init(|| std::sync::Mutex::new(BTreeSet::new()));
+    let Ok(mut active) = active.lock() else { return };
+    if truth.violation {
+        if active.insert(session.to_string()) {
+            tracing::warn!(
+                target: "amux::sessions",
+                %session,
+                runtime_status,
+                observed_card,
+                verdict = truth.verdict,
+                measured = truth.measured,
+                n_considered = truth.n_considered,
+                "runtime/board truth violation: WORKING withheld until one exact live card is attributable"
+            );
+        }
+    } else if active.remove(session) {
+        tracing::info!(
+            target: "amux::sessions",
+            %session,
+            verdict = truth.verdict,
+            measured = truth.measured,
+            n_considered = truth.n_considered,
+            "runtime/board truth healed"
+        );
+    }
+}
+
+/// A cardless marker is a turn classification, not an implicit release. Log
+/// the precedence once per active lane so a fleet sweep can find this causal
+/// edge without turning normal polling into log noise.
+fn announce_sticky_runtime_claim(session: &str, observed_card: &str, suppressed: bool) {
+    static STICKY_CLAIMS: std::sync::OnceLock<std::sync::Mutex<BTreeSet<String>>> =
+        std::sync::OnceLock::new();
+    let active = STICKY_CLAIMS.get_or_init(|| std::sync::Mutex::new(BTreeSet::new()));
+    let Ok(mut active) = active.lock() else { return };
+    if suppressed {
+        if active.insert(session.to_string()) {
+            tracing::info!(
+                target: "amux::sessions",
+                %session,
+                observed_card,
+                "runtime/board sticky claim preserved across a later cardless control marker"
+            );
+        }
+    } else {
+        active.remove(session);
+    }
+}
+
+/// The legacy array as a JSON string, shared by the GET handler and the
+/// SSE `sessions` pushes (one serializer, two transports).
+///
+/// Cached with a short TTL: the real work (tmux subprocesses, filesystem
+/// reads, git calls) costs ~80-950ms and runs ~1/s from dashboard polling.
+/// A 2s-stale response is invisible to a human and halves the subprocess
+/// load.
+pub fn legacy_sessions_array(store: &crate::db::SharedStore) -> anyhow::Result<String> {
+    let store_key = std::sync::Arc::downgrade(store);
+    let ttl = env_secs("AMUX_SESSIONS_CACHE_TTL_S", 2.0);
+    let now = chrono::Utc::now().timestamp() as f64;
+    let epoch_now = SESSIONS_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+    let runtime_epoch_now = SESSIONS_RUNTIME_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+    if let Ok(c) = build_array_cache().lock() {
+        if now - c.stamp < ttl
+            && c.store.ptr_eq(&store_key)
+            && !c.json.is_empty()
+            && c.epoch == epoch_now
+            && c.runtime_epoch == runtime_epoch_now
+        {
+            // Substrate guard (AMUX-2960): a fresh-looking snapshot whose
+            // worker SET no longer matches the registry on disk means an
+            // env file was created/deleted by a path that never called
+            // invalidate_sessions_cache(). Rebuild — and say so, because
+            // this line firing is how the next missing call site announces
+            // itself instead of shipping another flaky-stale list.
+            if c.registry == registry_fingerprint() {
+                return Ok(c.json.clone());
+            }
+            tracing::info!(
+                target: "amux::sessions",
+                "sessions registry changed on disk without an API invalidation — rebuilding \
+                 (a write path is missing invalidate_sessions_cache, or an out-of-band env-file write)"
+            );
+        }
+    }
+    // SINGLE-FLIGHT, STALE-WHILE-REVALIDATE (AR-135). This build historically
+    // held a pooled read connection across ~100 tmux + git subprocesses
+    // (80-950ms), and the pool is only CPU-count deep. When the 2s TTL expired under a client
+    // burst, EVERY concurrent request became a builder, each holding a
+    // connection for the better part of a second — and the pool starved.
+    // Measured 08-10 13:03-13:05: ten "timed out waiting for connection" 5xxs
+    // across /api/sessions, /api/board/statuses, /api/board/session-gates and
+    // /api/calendar.ics, real iPhone/macOS clients; two more 08-11 14:38. The
+    // victims were endpoints that never shell out at all — they just could not
+    // get a connection because five copies of THIS function held them.
+    //
+    // Blocking here is safe: both callers (this handler and graph.rs's
+    // fleet_graph) run this function inside spawn_blocking (AF-300), so a
+    // wait costs one blocking-pool thread, never an executor slot — the
+    // "try_lock, never lock" rule this comment used to state predates that
+    // migration and no longer holds.
+    //
+    // A COLD cache (no snapshot yet — true on every restart) used to bypass
+    // the guard entirely: try_lock's Err arm found `c.json` empty and fell
+    // through to an INDEPENDENT build, one per concurrent caller. That is
+    // the exact N-builders-one-pool failure AR-135 exists to prevent, just
+    // gated on "cache empty" instead of "TTL expired" — and it is the worse
+    // moment to hit it, since a restart is when every dashboard/fleet client
+    // reconnects and hits this endpoint at once. Confirmed live 2026-09-09:
+    // a post-restart reconnect burst held `read_pool_exhausted` for minutes
+    // (152 failures/60s), sessions_legacy.rs's own single-flight guard doing
+    // nothing because it only ever guarded the warm path.
+    //
+    // Fix, first attempt (2026-09-09 morning): a loser WAITS (bounded 3s) for
+    // the in-flight build's result instead of racing it, falling back to an
+    // independent build past the deadline. THAT BOUND ALONE DOES NOT BOUND
+    // THE BUILDER COUNT: under a single instantaneous burst it works (one
+    // straggler, at most), but under SUSTAINED reconnect pressure — the real
+    // shape of a restart, where clients keep arriving over many seconds, not
+    // in one instant — every new wave of waiters can independently miss the
+    // same 3s deadline and each spin up its own build. Confirmed live
+    // 2026-09-09 afternoon: read_pool_exhausted recurred in bursts for
+    // minutes AFTER this fix was deployed, box load average at 62 (4 cores),
+    // amux-server-rs itself at 400%+ CPU — N independent builds each
+    // spawning ~100 subprocesses, stacking faster than any of them finished,
+    // which is the same failure this whole guard exists to prevent, just
+    // arriving in waves instead of one instant.
+    //
+    // FINAL SHAPE: exactly ONE builder. The former fallback lock started a
+    // second identical fleet scrape immediately whenever two clients arrived
+    // on a cold cache. On the live 127-lane fleet that doubled hundreds of
+    // tmux captures, made tmux miss its own deadlines, and stretched both
+    // builds long enough that every later caller got the persistent
+    // "Worker updates are unavailable" banner. A fallback doing the same work
+    // against the same substrate cannot rescue a slow primary; it only makes
+    // that substrate slower.
+    //
+    // Runtime reports preserve the last structurally safe snapshot. While one
+    // caller refreshes it, every other caller may serve that snapshot even if
+    // its status epoch is old. Structural/config changes still clear it, so a
+    // peer can never see a worker that was just isolated or deleted.
+    static FLIGHT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let take_flight = || match FLIGHT.try_lock() {
+        Ok(g) => Some(g),
+        Err(std::sync::TryLockError::Poisoned(p)) => {
+            tracing::error!(
+                target: "amux::sessions",
+                verdict = "sessions_flight_poison_recovered",
+                "the prior sessions builder panicked; recovering its single-flight lock"
+            );
+            FLIGHT.clear_poison();
+            Some(p.into_inner())
+        }
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    };
+    let _flight = if let Some(g) = take_flight() {
+        g
+    } else {
+        if let Ok(c) = build_array_cache().lock() {
+            if c.store.ptr_eq(&store_key)
+                && !c.json.is_empty()
+                && c.epoch == epoch_now
+                && c.registry == registry_fingerprint()
+            {
+                return Ok(c.json.clone());
+            }
+        }
+        let wait_s = env_secs("AMUX_SESSIONS_BUILD_WAIT_S", 30.0);
+        let overall_deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs_f64(wait_s);
+        let mut acquired = None;
+        loop {
+            if let Some(g) = take_flight() {
+                acquired = Some(g);
+                break;
+            }
+            if let Ok(c) = build_array_cache().lock() {
+                if c.store.ptr_eq(&store_key)
+                    && !c.json.is_empty()
+                    && c.epoch == epoch_now
+                    && c.registry == registry_fingerprint()
+                {
+                    return Ok(c.json.clone());
+                }
+            }
+            if std::time::Instant::now() >= overall_deadline {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        match acquired {
+            Some(g) => g,
+            None => {
+                tracing::error!(
+                    target: "amux::sessions",
+                    verdict = "sessions_cache_stuck",
+                    waited_ms = (wait_s * 1000.0) as u64,
+                    "the single sessions builder did not publish a structurally safe snapshot \
+                     before the wait deadline; refusing duplicate fleet work"
+                );
+                anyhow::bail!(
+                    "sessions list temporarily unavailable: builder busy after {wait_s:.1}s"
+                );
+            }
+        }
+    };
+    // Double-check under the flight lock: the previous holder may have just
+    // refreshed, and rebuilding immediately would waste its work.
+    if let Ok(c) = build_array_cache().lock() {
+        if now - c.stamp < ttl
+            && c.store.ptr_eq(&store_key)
+            && !c.json.is_empty()
+            && c.epoch == epoch_now
+            && c.runtime_epoch == runtime_epoch_now
+            && c.registry == registry_fingerprint()
+        {
+            return Ok(c.json.clone());
+        }
+    }
+    // Snapshot both guards BEFORE the build: a create/delete racing the build
+    // then fails the epoch check (API path) or the fingerprint check on the
+    // next read (out-of-band path), instead of hiding inside the snapshot.
+    let epoch_start = SESSIONS_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+    // Snapshot runtime evidence before the SQL read too. If a report lands
+    // during the build, tagging pre-report JSON with the post-report epoch
+    // would make stale status look current until some later report happened.
+    let runtime_epoch_start =
+        SESSIONS_RUNTIME_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+    let registry_start = registry_fingerprint();
+    // Never reserve one of the request pool's readers while external probes
+    // run. Cheap board/status requests remain independent of fleet discovery.
+    let conn = store.dedicated_read()?;
+    let arr = build_array(&conn)?;
+    let json = serde_json::to_string(&arr)?;
+    match race_verdict(
+        epoch_start,
+        SESSIONS_EPOCH.load(std::sync::atomic::Ordering::SeqCst),
+        registry_start,
+        registry_fingerprint(),
+    ) {
+        Ok(()) => {
+            if let Ok(mut c) = build_array_cache().lock() {
+                *c = ListSnapshot {
+                    store: store_key,
+                    stamp: now,
+                    json: json.clone(),
+                    epoch: epoch_start,
+                    runtime_epoch: runtime_epoch_start,
+                    registry: registry_start,
+                };
+            }
+        }
+        Err(raced) => {
+            // Fail closed as well as refusing the cache write. Returning JSON that
+            // predates an isolation/delete/config change would leak the old fleet
+            // shape to the one request that happened to race the change.
+            tracing::warn!(
+                target: "amux::sessions",
+                "session-list build raced a structural change — refusing the stale response"
+            );
+            return Err(raced.into());
+        }
+    }
+    Ok(json)
+}
+
+/// The session-list build raced a structural change and refused to serve it.
+///
+/// AMUX-4637: this was a `bail!`, which every handler turned into a 500, so a
+/// documented, retryable race reached each 5xx sweep as a server fault
+/// (AMUX-4513, then AMUX-4637 once that card closed). The request was fine and
+/// the answer exists a moment later, so handlers answer 503 with Retry-After,
+/// the status the other readers of this projection (commit mentions, deleted
+/// substrate, session detail) already give a discovery failure. Display keeps
+/// the old message, which clients and tests quote.
+#[derive(Debug)]
+pub struct DiscoveryRaced;
+
+impl std::fmt::Display for DiscoveryRaced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("sessions list changed during discovery; retry")
+    }
+}
+
+impl std::error::Error for DiscoveryRaced {}
+
+/// Serve a finished build only if neither the epoch nor the on-disk registry
+/// moved while it ran. Extracted so the construction of [`DiscoveryRaced`] is
+/// pinned by a test rather than only the classifier that reads it.
+fn race_verdict(
+    epoch_start: u64,
+    epoch_now: u64,
+    registry_start: u64,
+    registry_now: u64,
+) -> Result<(), DiscoveryRaced> {
+    if epoch_now == epoch_start && registry_now == registry_start {
+        Ok(())
+    } else {
+        Err(DiscoveryRaced)
+    }
+}
+
+/// 503 with `Retry-After: 1` for the discovery race, 500 for any other build
+/// failure, both as `{"error": message}`. Decided on the TYPE, so rewording the
+/// message cannot move the status.
+pub(crate) fn discovery_failure(e: &anyhow::Error, message: String) -> Response {
+    if e.downcast_ref::<DiscoveryRaced>().is_some() {
+        let mut r = (StatusCode::SERVICE_UNAVAILABLE, Json(json!({ "error": message }))).into_response();
+        r.headers_mut().insert(
+            axum::http::header::RETRY_AFTER,
+            axum::http::HeaderValue::from_static("1"),
+        );
+        r
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": message }))).into_response()
+    }
+}
+
+/// Parsed access to the shared sessions projection for sibling APIs.
+///
+/// Keeping this async seam prevents a new endpoint from calling `build_array`
+/// directly, bypassing the fleet-wide single flight, and from running the
+/// synchronous tmux/git projection on a Tokio worker.
+pub(crate) async fn legacy_sessions_values(
+    store: crate::db::SharedStore,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let json = tokio::task::spawn_blocking(move || legacy_sessions_array(&store))
+        .await
+        .map_err(|e| anyhow::anyhow!("sessions build task failed: {e}"))??;
+    Ok(serde_json::from_str(&json)?)
+}
+
+pub async fn list_sessions_legacy(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    // OFF THE ASYNC RUNTIME (AF-300). `legacy_sessions_array` is synchronous and
+    // shells out — `tmux list-sessions`, two `tmux list-panes`, and a `pgrep`
+    // PER SESSION — so awaiting it inline blocks a tokio WORKER thread, and
+    // there are only as many of those as CPUs. On 2026-08-28 eight concurrent
+    // requests from one iPhone each ran ~696s (18:17:19 -> 18:28:58); while
+    // they held worker threads, every other read failed `timed out waiting for
+    // connection` at 30s — 22 x 500 across /api/sessions, /api/board,
+    // /api/board/statuses and /api/board/session-gates, all dashboard UAs. The
+    // same burst happened on 08-24 (29 rows). This is the most-polled endpoint
+    // in the system (81,935 requests in 24h), so it is the worst possible place
+    // to block on a subprocess.
+    //
+    // `spawn_blocking` moves it to the blocking pool (512 threads by default),
+    // where a hung tmux costs one pool thread instead of starving the runtime.
+    // NOT A NEW PATTERN: api/graph.rs:123 already calls this exact function this
+    // exact way. The fix existed on the LOW-traffic caller and was missing on
+    // the hot one.
+    //
+    // It does not stop a single request taking 11 minutes — the four unbounded
+    // `.output()` calls in this file are AF-301 — but it stops one client's slow
+    // request from taking the server down for everyone else.
+    let store = state.store.clone();
+    let built = tokio::task::spawn_blocking(move || legacy_sessions_array(&store)).await;
+    match built.unwrap_or_else(|e| Err(anyhow::anyhow!("sessions build panicked: {e}"))) {
+        Ok(json) => {
+            let body = filter_isolated_for_peer(&json, &headers);
+            let body = filter_for_local_member(&body, &headers);
+            // CONTENT-hash ETag (AMUX-3504), not a store-rev one: this payload
+            // is part store, part scrape (pane previews, token counts), so a
+            // rev ETag would serve stale 304s when scrape state moved. The
+            // hash costs the build either way; what the 304 saves is the 19KB
+            // gzipped transfer — which is the whole bill on the reconnect and
+            // resume refetches an intermittent mobile client fires constantly.
+            // Only meaningful because the payload is now byte-stable between
+            // real changes (age_s/task_board_age churn fixed above); hashed
+            // over the FILTERED body, since peers and the owner see different
+            // fleets and must never share a validator.
+            let etag = {
+                use sha2::Digest;
+                let mut h = sha2::Sha256::new();
+                h.update(body.as_bytes());
+                format!("\"sess-{}\"", &hex::encode(h.finalize())[..16])
+            };
+            if let Some(inm) = headers.get("if-none-match").and_then(|v| v.to_str().ok()) {
+                if inm == etag || inm == format!("W/{etag}") {
+                    let mut h = axum::http::HeaderMap::new();
+                    if let Ok(v) = etag.parse() {
+                        h.insert("etag", v);
+                    }
+                    return (StatusCode::NOT_MODIFIED, h).into_response();
+                }
+            }
+            let mut h = axum::http::HeaderMap::new();
+            h.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            if let Ok(v) = etag.parse() {
+                h.insert("etag", v);
+            }
+            (StatusCode::OK, h, body).into_response()
+        }
+        Err(e) => discovery_failure(&e, e.to_string()),
+    }
+}
+
+/// Whether the caller is a PEER worker rather than the owner. A peer's request
+/// carries a server-verified worker/session header (the `amux` CLI stamps it);
+/// the owner's dashboard is a browser and sends neither. Same owner-vs-peer
+/// split the send guard uses (empty origin = owner).
+fn caller_is_peer(headers: &axum::http::HeaderMap) -> bool {
+    if crate::api::org::is_verified_local_member(headers) {
+        return false;
+    }
+    ["x-amux-worker", "x-amux-session"].iter().any(|k| {
+        headers
+            .get(*k)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+/// A human invited at worker/group scope sees only the fleet slice they were
+/// granted. Filtering happens before the content ETag is computed, so a scope
+/// change cannot reuse a validator for a broader response.
+fn filter_for_local_member(json: &str, headers: &axum::http::HeaderMap) -> String {
+    let Some(scope) = crate::api::org::local_member_scope(headers) else {
+        return json.to_string();
+    };
+    if scope.is_global() {
+        return json.to_string();
+    }
+    let Ok(mut rows) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
+        return json.to_string();
+    };
+    rows.retain(|row| {
+        row.get("name")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|worker| scope.allows_worker(worker))
+    });
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into())
+}
+
+/// ISOLATED (AMUX-3232): strip isolated (raw-agent) workers from the fleet list
+/// a PEER sees, so they are undiscoverable to other sessions. The OWNER
+/// dashboard sees the full fleet (it must still control them), so the shared
+/// cache stays owner-complete and the peer view is applied per request here.
+/// Greppable trace on a real strip so the exclusion is not silent.
+fn filter_isolated_for_peer(json: &str, headers: &axum::http::HeaderMap) -> String {
+    if !caller_is_peer(headers) {
+        return json.to_string();
+    }
+    let Ok(mut arr) = serde_json::from_str::<Vec<serde_json::Value>>(json) else {
+        return json.to_string();
+    };
+    let before = arr.len();
+    arr.retain(|s| !s.get("isolated").and_then(serde_json::Value::as_bool).unwrap_or(false));
+    let hidden = before - arr.len();
+    if hidden > 0 {
+        tracing::debug!(hidden, "sessions list: isolated worker(s) hidden from a peer caller");
+    }
+    serde_json::to_string(&arr).unwrap_or_else(|_| json.to_string())
+}
+
+// ---- POST /api/sessions — CREATE a fleet worker --------------------------
+//
+// The cutover carried GET across and left POST behind, so the dashboard's
+// "New worker" dialog has been 405ing: the toast said "Create failed: error
+// 405" and the dialog stayed open, which reads as the Create button doing
+// nothing. `POST /api/workers` is NOT the same thing — it inserts a row in
+// the `workers` table, a different substrate from the ~/.amux/sessions/*.env
+// registry this list (and tmux, and every session verb) reads, so a worker
+// created there is invisible to the fleet.
+//
+// A fleet worker IS its env file. This writes exactly the file the Python
+// server wrote (`# updated:` header, K="V", 0600 atomic) and nothing else —
+// `/start` does the rest, as it already does for a duplicated session.
+
+/// Python's sanitizer, same as `duplicate`'s: anything outside
+/// `[A-Za-z0-9_-]` becomes `-`, so a name can never escape the sessions dir.
+fn sanitize_session_name(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .collect()
+}
+
+/// `# updated:` header + K="V" lines, 0600, atomic rename — byte-compatible
+/// with `EnvFile::write` in session_verbs (which is private to that module;
+/// duplicating ~15 lines here is cheaper than widening a file another lane is
+/// actively editing).
+fn write_env_file(path: &std::path::Path, pairs: &[(&str, String)]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut out = format!(
+        "# updated: {}\n",
+        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.6f")
+    );
+    for (k, v) in pairs {
+        out.push_str(&format!("{k}=\"{v}\"\n"));
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    // ONE implementation, shared with session_verbs::EnvFile::write (AF-104).
+    // The pid-only temp name lived in BOTH copies, so the same race had to be
+    // found twice; the header above still explains why the ~15 lines around it
+    // were duplicated, and this is the line where that duplication cost money.
+    let tmp = crate::api::session_verbs::unique_tmp_path(path);
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(out.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+/// Provider-shaped model -> env wiring for a newly created worker. Pure and
+/// unit-tested (ethos rule 7) so the rule cannot be re-derived subtly wrong at
+/// the call site, and matches env_config::render_worker_env so the create route
+/// and the env-apply route agree about one worker's model (ethos rule 4).
+///
+/// Returns `(cc_flags, cc_model, resolved_model)`:
+/// - Agent CLIs (claude/codex/gemini): the model rides in `cc_flags` as
+///   `--model X`; `cc_model` is empty. An empty caller model falls back to
+///   `default_model`.
+/// - Ollama: the model rides in `cc_model` (the ollama start arm reads CC_MODEL
+///   and never appends CC_FLAGS); `cc_flags` stays empty unless the caller sent
+///   explicit `flags`. `default_model` is NEVER applied — a local-model worker
+///   must not inherit the Claude default (AMUX-3182); an empty model lets the
+///   start path use the ollama default (qwen3.8:27b).
+///
+/// Explicit `flags` always win (AMUX-3114): honoured verbatim as `cc_flags`.
+/// `resolved_model` is what the create response echoes so a defaulted/unpinned
+/// model is visible at create time.
+pub(crate) fn worker_model_env(
+    provider: &str,
+    raw_model: &str,
+    explicit_flags: &str,
+    default_model: &str,
+) -> (String, String, String) {
+    let is_ollama = provider == "ollama";
+    // THE CLAUDE DEFAULT MODEL BELONGS TO CLAUDE ONLY (Ethan, 2026-08-27,
+    // screenshot of gtm-researcher-gemini).
+    //
+    // AMUX-3182 fixed this for ollama BY NAME — `is_ollama` — and left the same
+    // defect for every other non-Claude provider. A gemini worker created with
+    // no model got CC_FLAGS="--model sonnet", and a Claude model name is not a
+    // thing the Gemini API can be asked for: every request died with
+    // `models/sonnet is not found for API version v1beta`. The worker was dead
+    // on arrival and the failure named a model the user never chose.
+    // Reproduced before fixing: POST {"provider":"gemini"} -> "--model sonnet".
+    //
+    // An UNSPECIFIED model now means "let the provider's own CLI decide", which
+    // is the only answer that is right for a provider amux does not have a
+    // model table for. Guessing a gemini model name here would be the same bug
+    // one name over — the enumeration is what failed, not the value in it.
+    let model = if is_ollama || !raw_model.is_empty() {
+        raw_model.to_string()
+    } else if provider == "claude" {
+        default_model.to_string()
+    } else {
+        String::new()
+    };
+    let cc_flags = if !explicit_flags.is_empty() {
+        explicit_flags.to_string()
+    } else if !is_ollama && !model.is_empty() {
+        format!("--model {model}")
+    } else {
+        String::new()
+    };
+    let cc_model = if is_ollama { model.clone() } else { String::new() };
+    let resolved_model = if is_ollama {
+        model
+    } else {
+        cc_flags
+            .split_whitespace()
+            .skip_while(|t| *t != "--model")
+            .nth(1)
+            .unwrap_or("")
+            .to_string()
+    };
+    (cc_flags, cc_model, resolved_model)
+}
+
+pub async fn create_session_legacy(
+    State(_state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<Json<serde_json::Value>>,
+) -> Response {
+    let body = body.map(|Json(v)| v).unwrap_or(serde_json::Value::Null);
+    let s = |k: &str| {
+        body.get(k)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let raw_name = s("name");
+    if raw_name.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "name is required"})),
+        )
+            .into_response();
+    }
+    let name = sanitize_session_name(&raw_name);
+    if name.is_empty() || name.starts_with('.') {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": format!("'{raw_name}' is not a usable worker name")})),
+        )
+            .into_response();
+    }
+    // A worktree create needs `git worktree add` + branch bookkeeping that
+    // does not exist here yet. REFUSE loudly rather than create a plain
+    // worker and let the user believe they got an isolated checkout — a
+    // silently-ignored option is the failure mode this whole sweep is about.
+    if body.get("worktree").and_then(serde_json::Value::as_bool) == Some(true) {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(json!({
+                "error": "worktree creation is not implemented on this server yet — \
+                          uncheck 'Use worktree' to create a normal worker"
+            })),
+        )
+            .into_response();
+    }
+    let path = amux_home().join("sessions").join(format!("{name}.env"));
+    if path.exists() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": format!("session '{name}' already exists")})),
+        )
+            .into_response();
+    }
+    let dir = s("dir");
+    match ensure_work_dir(&dir) {
+        WorkDirOutcome::Ok => {}
+        WorkDirOutcome::Created => {
+            tracing::info!(dir = %dir, "created working directory for new worker");
+        }
+        WorkDirOutcome::Refused(msg) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response();
+        }
+    }
+    let provider = {
+        let p = s("provider");
+        if p.is_empty() { "claude".to_string() } else { p }
+    };
+    // NOT validated against SESSION_PROVIDERS, deliberately. A create-time
+    // refusal here was tried and reverted (2026-09-29): external integrations
+    // — confirmed live, `devin-amux` — create sessions with a `provider` this
+    // server does not itself launch (`devin`; `ps` on this box shows the real
+    // `devin` CLI, started outside amux-server entirely) and only use this
+    // registry entry for tracking/display. Refusing those at create time
+    // breaks that integration, not a bug. `set_provider` (session_verbs.rs,
+    // PATCH .../config) keeps its own narrower validation — that endpoint is
+    // for CHANGING an amux-launched worker's provider, a different action
+    // than registering an externally-managed one.
+    // Provider-shaped model -> env wiring, factored into worker_model_env so the
+    // rule is unit-tested (ethos rule 7) instead of re-derived here, and cannot
+    // silently drift from the ollama start path that reads it. In short: agent
+    // CLIs pin `--model` in CC_FLAGS; ollama's model is CC_MODEL (the start arm
+    // reads CC_MODEL and never appends CC_FLAGS); the Claude default model never
+    // touches a local-model worker. Before this, an ollama worker created here
+    // got CC_FLAGS="--model <claude-default>" and no CC_MODEL, so it silently ran
+    // qwen3.8:27b while its row displayed a Claude model and any non-default
+    // local model the caller picked was dropped (AMUX-3182).
+    let explicit_flags = s("flags");
+    let default_model = crate::api::settings::get_default_model(&amux_home());
+    let (cc_flags, cc_model, resolved_model) = worker_model_env(
+        &provider,
+        s("model").trim(),
+        explicit_flags.trim(),
+        &default_model,
+    );
+    let mut pairs: Vec<(&str, String)> = vec![("CC_DIR", dir.clone())];
+    // An invited human's author comes from the verified member cookie. The
+    // request body and ordinary worker/session headers are caller-controlled,
+    // so neither may decide who appears as the worker's creator.
+    let creator = super::org::local_member_actor(&headers)
+        .map(str::to_string)
+        .unwrap_or_else(|| s("creator"));
+    if !creator.is_empty() {
+        pairs.push(("CC_CREATOR", creator.clone()));
+    }
+    if provider != "claude" {
+        pairs.push(("CC_PROVIDER", provider.clone()));
+    }
+    if !cc_model.is_empty() {
+        pairs.push(("CC_MODEL", cc_model.clone()));
+    }
+    if !cc_flags.is_empty() {
+        pairs.push(("CC_FLAGS", cc_flags.clone()));
+    }
+    // ISOLATED AT CREATE TIME (Ethan, 2026-08-27). `CC_ISOLATED` was settable
+    // only by hand-editing the env file after the fact, so the one decision
+    // that has to be true from the FIRST launch — spawn injects no
+    // AMUX_SESSION/AMUX_URL and no --mcp-config for an isolated lane
+    // (AMUX-3232) — could not be made at the moment the lane is created. A
+    // worker created normally and isolated afterwards has already started with
+    // the harness attached.
+    //
+    // Written only when true: absent means "not isolated", which is what every
+    // reader already assumes (`env_flag_on(cfg.get("CC_ISOLATED"))`), so an
+    // explicit CC_ISOLATED=0 would add a second spelling of the default.
+    if body.get("isolated").map(crate::api::py_truthy).unwrap_or(false) {
+        pairs.push(("CC_ISOLATED", "1".to_string()));
+    }
+    // ACCEPT tags AS AN ARRAY, which is what the dashboard and API send
+    // (AMUX-3114). `s("tags")` only matched a STRING, so `{"tags":["gtm"]}` read
+    // "" and the worker was created with NO groups, the same silent drop the
+    // PATCH handler was already fixed for.
+    let tags = match body.get("tags") {
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|x| x.as_str().map(str::trim))
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => s("tags"),
+    };
+    if !tags.is_empty() {
+        pairs.push(("CC_TAGS", tags.clone()));
+    }
+    let desc = s("desc");
+    if !desc.is_empty() {
+        pairs.push(("CC_DESC", desc));
+    }
+    if let Err(e) = write_env_file(&path, &pairs) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("could not write session env: {e}")})),
+        )
+            .into_response();
+    }
+    // The worker now exists on disk; the cached list must not outlive that
+    // fact (AMUX-2960). Without this the creator's own next fetch — the
+    // dashboard reloading after its Create dialog, the worker-card-counts
+    // e2e reloading after seeding — served the PRE-create fleet for up to
+    // TTL, and SSE never corrected it (this handler emits no revision
+    // event, a residual noted on the card).
+    invalidate_sessions_cache();
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "ok": true,
+            "name": name,
+            "dir": dir,
+            "provider": provider,
+            "creator": creator,
+            "running": false,
+            "archived": false,
+            // Echo what was actually stored so a dropped or defaulted field is
+            // visible in the create response, not only via a later GET
+            // (AMUX-3114): flags is the effective CC_FLAGS, model the resolved
+            // model ("" = unpinned / ambient default), tags the stored groups.
+            "flags": cc_flags,
+            "model": resolved_model,
+            "tags": tags,
+        })),
+    )
+        .into_response()
+}
+
+/// The PYTHON fleet's sessions, from the same sources the Python server
+/// reads: ~/.amux/sessions/*.env registry + live tmux state. Read-only —
+/// the Rust server OBSERVES the Python fleet during coexistence; managing
+/// it stays Python's job until cutover. Without this the dashboard on the
+/// Rust port says "no workers yet" while 60+ real sessions run (Ethan's
+/// first verification finding).
+/// Sessions quarantined via blocked-sessions.txt — the Python "archived"
+/// flag's source of truth (CC_BLOCKED_SESSIONS, amux-server.py:65).
+fn blocked_names(home: &std::path::Path) -> std::collections::BTreeSet<String> {
+    std::fs::read_to_string(home.join("blocked-sessions.txt"))
+        .map(|t| {
+            t.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Test-only fleet suppression. The handler reads `amux_home()` + live tmux at
+/// CALL time, so a unit test on a temp DB still merges the machine's real
+/// fleet — `legacy_sessions_route_serves_workers…` failed with 117 rows on a
+/// box running 116 sessions, and broke every full-suite run (2026-08-09, two
+/// lanes hit it). Named deviation: the root fix is capturing home in AppState
+/// at startup instead of re-reading env per request (carded); until then this
+/// is the only race-free way to keep the unit test's verdict machine-independent.
+/// How many live guards are asking for suppression.
+///
+/// A DEPTH, NOT A BOOL, because cargo runs a binary's tests in PARALLEL and the
+/// obvious RAII shape is wrong here. With a bool and a saved previous value:
+/// test A stores true (saw false), test B stores true (saw true), A finishes and
+/// restores FALSE while B is still running, and B silently loses its
+/// suppression mid-assertion. A counter has no such ordering hazard: the flag is
+/// on while anyone holds it and off when the last guard drops.
+#[cfg(test)]
+static SUPPRESS_FLEET_DEPTH: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Hold host-fleet suppression for as long as this value is alive.
+///
+/// The three call sites used to `store(true)` and never restore, so the flag was
+/// a one-way switch: once any of them ran, EVERY later test in that binary
+/// inherited suppression without asking for it. The failure that hides is a
+/// false green, a test meaning to exercise the fleet path and silently getting a
+/// suppressed one (AMUX-4703).
+#[cfg(test)]
+pub(crate) struct FleetSuppression;
+
+#[cfg(test)]
+impl Drop for FleetSuppression {
+    fn drop(&mut self) {
+        SUPPRESS_FLEET_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Suppress host-fleet reads until the returned guard drops. Bind it
+/// (`let _fleet = suppress_fleet_for_test();`), because `let _ =` drops it
+/// immediately and suppresses nothing.
+#[cfg(test)]
+pub(crate) fn suppress_fleet_for_test() -> FleetSuppression {
+    SUPPRESS_FLEET_DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    FleetSuppression
+}
+
+#[cfg(test)]
+pub(crate) fn fleet_suppressed() -> bool {
+    SUPPRESS_FLEET_DEPTH.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+/// AMUX-2820 / last_human_ts. The rows are already ordered `ts ASC` by the
+/// caller's own query (they double as the source for `task_markers`), so an
+/// unconditional overwrite per session is the max: the LAST row seen for a
+/// session is its most recent human message. Pure and DB-free specifically so
+/// this property is unit-testable without standing up a connection.
+fn last_human_ts_from_user_messages(
+    rows: &[(String, String, Option<String>, i64)],
+) -> BTreeMap<String, i64> {
+    let mut out = BTreeMap::new();
+    for (session, _text, _card_id, ts_ms) in rows {
+        out.insert(session.clone(), *ts_ms);
+    }
+    out
+}
+
+fn python_fleet_sessions(signals: &FleetSignals) -> Vec<serde_json::Value> {
+    #[cfg(test)]
+    if fleet_suppressed() {
+        return vec![];
+    }
+    let home = amux_home();
+    let sessions_dir = home.join("sessions");
+    let blocked = blocked_names(&home);
+    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for e in entries.flatten() {
+        let path = e.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("env") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
+            continue;
+        };
+        let env = crate::config::parse_env_file(&path);
+        let tmux = format!("amux-{name}");
+        let is_running = signals.agent_running(&tmux);
+        // CC_ARCHIVED=1 is Python's session-archive marker (amux-server.py
+        // :20346) — blocked-sessions.txt is QUARANTINE, a different thing;
+        // conflating them reported 0 archived against a fleet with dozens.
+        let archived = env.get("CC_ARCHIVED").map(|v| v == "1").unwrap_or(false)
+            || blocked.contains(&name);
+        let paused = env.get("CC_PAUSED").map(|v| v == "1").unwrap_or(false);
+        // One label rule with the peer-interaction gate (AMUX-4566).
+        let lifecycle = crate::api::session_verbs::lifecycle_label(archived, paused);
+        let flags = env.get("CC_FLAGS").cloned().unwrap_or_default();
+        let backend = env
+            .get("CC_BACKEND")
+            .map(|b| b.trim().to_lowercase())
+            .filter(|b| b == "herdr")
+            .unwrap_or_else(|| "tmux".into());
+        // Python's session_created is the TMUX session's creation time
+        // (tinfo["created"], 0 when not running) — not the env file's mtime.
+        let session_created = signals.created.get(&tmux).copied().unwrap_or(0);
+        // Python's last_activity is meta.last_send falling back to
+        // meta.last_started (py:20207-20211) — DELIBERATELY not tmux
+        // activity, which updates every snapshot tick and made every lane
+        // look equally busy.
+        let meta = load_meta(&name);
+        // The RAW stored value, verbatim — reverted 2026-09-29 after routing
+        // this through the launch-fallback resolver turned out to be wrong.
+        // An externally-managed session (confirmed live: `devin-amux`'s
+        // `devin-worker`, whose actual process is the real `devin` CLI,
+        // started entirely outside amux-server) writes a `provider` this
+        // server never validates or launches itself, and the fleet list is
+        // that integration's only visibility into what it wrote. Reporting
+        // anything other than the stored string here would make the list
+        // claim a fact about a process amux-server never touched.
+        let configured_provider = env
+            .get("CC_PROVIDER")
+            .cloned()
+            .unwrap_or_else(|| "claude".into());
+        // What amux-server's OWN launch arm would run on this session's next
+        // (re)start, from the same predicate `provider_of` uses
+        // (`session_verbs::resolve_session_provider`) — a SEPARATE fact from
+        // `provider` above, and this never overwrites it. For a session amux
+        // itself launches (codex, cursor, claude, ...) the two agree; for an
+        // externally-managed one they can legitimately differ, and that
+        // difference is the useful signal: `provider` is what this row
+        // claims to be, `launch_provider` is what pressing Start in this
+        // dashboard would actually run. `env` is parsed by
+        // `crate::config::parse_env_file`, a different parser than
+        // session_verbs' `EnvFile` (see `configured_model_for`'s doc comment
+        // for why two parsers exist), so this calls the string-in/string-out
+        // resolver rather than `provider_of`, which takes an `EnvFile` this
+        // function does not have.
+        let launch_provider =
+            crate::api::session_verbs::resolve_session_provider(&configured_provider).to_string();
+        // Written only after a restart/hot switch has positively applied. A
+        // provider tag prevents a manual/provider edit from reusing another
+        // runtime's model, and the start boundary rejects facts from a prior
+        // process life.
+        let confirmed_model = confirmed_active_model(&meta, &configured_provider);
+        let last_activity = {
+            let send = meta["last_send"].as_i64().unwrap_or(0);
+            if send != 0 { send } else { meta["last_started"].as_i64().unwrap_or(0) }
+        };
+        let mut status = signals.derive_status(&name, is_running);
+        // A lane parked on a real picker is WAITING, never idle (AMUX-2834). The
+        // derivation above cannot see a picker — it reads self-reports and tmux
+        // activity, and a lane at a prompt is producing neither. The sweep in
+        // session_verbs stamps this after a pane capture; read it here rather
+        // than capturing again, which would be ~113 tmux calls per request.
+        // Only overrides a NON-active status: if the lane is genuinely
+        // generating, that is the more urgent truth and the picker reading is
+        // stale by definition.
+        if is_running && matches!(status.as_str(), "idle" | "waiting") && meta["input_required_since"].as_i64().unwrap_or(0) > 0
+        {
+            status = "waiting".to_string();
+        }
+        // STUCK COMPOSER (AMUX-2904): genuinely TYPED text sits under `❯`
+        // with no live turn and no live agents — an Enter that never landed,
+        // or a human's committed-but-unsubmitted command. Same shape as the
+        // picker above: blocked on a human, the opposite of idle. The sweep
+        // stamps it (through composer_state's dim-vs-typed discrimination —
+        // NOT a stripped read of the ❯ line, which is the 2026-08-09
+        // 13-lane false positive); here it becomes the state the fleet list
+        // shows. Ghost-rescue auto-submits the amux-prefixed subset; this
+        // surfaces the rest instead of deciding for a human.
+        if is_running && matches!(status.as_str(), "idle" | "waiting") && meta["composer_stuck_since"].as_i64().unwrap_or(0) > 0
+        {
+            status = "waiting".to_string();
+        }
+        let cross_group = crate::api::session_verbs::cross_group_allow_resolution_in(
+            &crate::config::amux_home(),
+            &name,
+        );
+        out.push(json!({
+            "archived": archived,
+            "lifecycle": lifecycle,
+            // Why a `waiting` lane is waiting, and proof a lane is genuinely
+            // busy: the dashboard renders both — a status with no visible
+            // reason is a status nobody can act on (ethos rule 4).
+            "composer_stuck_since": meta["composer_stuck_since"].as_i64().unwrap_or(0),
+            "composer_preview": meta["composer_preview"].as_str().unwrap_or(""),
+            "agents_working": signals.subagents_working(&name),
+            // Published so the toggle can render its CURRENT state instead of
+            // guessing, and so a value supplied by a group or global layer shows
+            // as on rather than as an unset worker key (AMUX-4055).
+            "auto_drain_backlog": crate::runtime_jobs::board_drive::dispatch_backlog_when_idle(&name),
+            "auto_drain_backlog_own": env.contains_key(crate::runtime_jobs::board_drive::DISPATCH_BACKLOG_KEY),
+            // AMUX-3048: the raw event-driven count behind agents_working, so a
+            // LEAKED count (a lost SubagentStop pinning a lane "working") is
+            // diagnosable rather than hidden — null on a hookless/mtime-only lane.
+            "subagents_live": signals.reported_subagent_count(&name),
+            "subagent_live_ids": signals.reported_subagent_ids(&name),
+            // The lightning button's state derives from THIS field in the
+            // SPA (isYolo checks flags for the provider's skip-permissions
+            // flag) — a card without flags renders the wrong YOLO badge
+            // (Ethan: "the lightning button isn't correct").
+            "flags": flags,
+            // The YOLO badge's source of truth, computed by the SAME function the
+            // toggle acts on (`session_verbs::yolo_enabled`). The SPA previously
+            // derived this itself as `flags.includes(...) || !!s.auto_continue`,
+            // but `auto_continue` below is `standing_orders_on`, which is
+            // DEFAULT-ON — so lanes with no skip-permissions flag rendered a YOLO
+            // badge and users trusted a worker not to stop for approval when it
+            // would. Ship the verdict, not the ingredients.
+            "yolo": crate::api::session_verbs::yolo_enabled(
+                &flags,
+                env.get("CC_AUTO_CONTINUE").map(|v| v.as_str()),
+            ),
+            "creator": env.get("CC_CREATOR").cloned().unwrap_or_default(),
+            "backend": backend,
+            // Same predicate as board_drive's nudge gate — the view must not
+            // disagree with the mechanism it describes. That means the SCOPED
+            // one (AMUX-2930): reading the worker env alone reported
+            // auto_continue=true for a lane whose group or global env had
+            // turned standing orders off, so the card said "on" while the
+            // nudger said "off". `standing_orders` is the master switch's own
+            // state, exposed so the SPA can show WHY a lane is quiet without
+            // re-deriving the layering.
+            "auto_continue": crate::api::session_verbs::standing_orders_on(&name, "CC_AUTO_CONTINUE"),
+            "auto_continue_own": env.contains_key("CC_AUTO_CONTINUE"),
+            "auto_pickup": crate::api::session_verbs::standing_orders_on(&name, "CC_AUTO_PICKUP"),
+            "auto_pickup_own": env.contains_key("CC_AUTO_PICKUP"),
+            "standing_orders": crate::api::session_verbs::standing_orders_on(&name, "CC_STANDING_ORDERS"),
+            "standing_orders_own": env.contains_key("CC_STANDING_ORDERS"),
+            // Standing authorization for worker-originated external email.
+            // This uses the SAME scoped predicate the send/reply gate reads, so
+            // the Configurations control cannot disagree with the next send.
+            "external_email_allowed": crate::api::email_approval::external_email_allowed(
+                &crate::config::amux_home(), &name,
+            ),
+            "external_email_allowed_own": env.contains_key("AMUX_EMAIL_EXTERNAL_ALLOW"),
+            "worktree": env.get("CC_WORKTREE").cloned().unwrap_or_default(),
+            "worktree_repo": env.get("CC_WORKTREE_REPO").cloned().unwrap_or_default(),
+            "worktree_active": home.join("worktrees").join(&name).exists(),
+            "ephemeral": env.get("CC_EPHEMERAL").map(|v| v == "1").unwrap_or(false),
+            "ephemeral_parent": env.get("CC_PARENT").cloned().unwrap_or_default(),
+            "mcp": env.get("CC_MCP").cloned().unwrap_or_default(),
+            "session_created": session_created,
+            "last_activity": last_activity,
+            // Scanner-internal state the Python server holds in memory with
+            // no durable trace (rate/credit limits, the model detector) stays a
+            // correct-TYPED honest empty (Invariant 20: never invent). `status`
+            // is no longer in that set — it derives above from stores the Python
+            // scanner itself persists.
+            "active_model": confirmed_model,
+            "model_source": if confirmed_model.is_empty() { "" } else { "confirmed-switch" },
+            // api_error IS computed now (Ethan 2026-08-18) — it is exactly the
+            // `api_error` status derived above, exposed as a side boolean so a
+            // log sweep / autofix can find a 5xx-stuck lane without re-deriving
+            // the status string (the ethos-rule-4 lesson from `credit_limited`:
+            // a condition whose own field says `false` is invisible to every
+            // consumer). code/count stay honest empties — the tail scrape
+            // proves a 5xx is PRESENT, not which one or how many times.
+            "api_error": status == "api_error",
+            "api_error_code": "",
+            "api_error_count": 0,
+            // COMPUTED, NOT HARDCODED (AMUX-2820). These were literal `false`
+            // and `0`, with a comment calling them "a correct-TYPED honest
+            // empty (Invariant 20: never invent)". That was right at cutover
+            // and became a lie by omission the moment nothing filled them:
+            // `false` and "not computed" are byte-identical over JSON, so every
+            // consumer read a lane parked on Claude Code's rate-limit menu as
+            // HEALTHY. mvs-infra sat there with two of Ethan's messages queued
+            // behind it and /api/sessions reported status=idle,
+            // credit_limited=false the whole time. Nothing downstream — not the
+            // log sweep, not autofix, not the invariants monitor — could see a
+            // condition its own field says is absent (ethos rule 4).
+            //
+            // The writer is the rate-limit detector in session_verbs, which
+            // stamps meta when it sees the menu and clears it when it answers.
+            // Read from meta because THIS LOOP ALREADY LOADS IT — computing it
+            // here from a pane capture would cost ~113 tmux calls per request.
+            "credit_limited": is_running && meta["rate_limited_since"].as_i64().unwrap_or(0) > 0
+                && meta["rate_limited_by"].as_str() != Some("auto-resume"),
+            "credit_limit_model": meta["rate_limited_model"].as_str().unwrap_or(""),
+            "credit_limited_since": meta["rate_limited_since"].as_i64().unwrap_or(0),
+            "rate_limit_banner": meta["rate_limited_since"].as_i64().unwrap_or(0) > 0,
+            "rate_limit_weekly": meta["rate_limited_weekly"].as_bool().unwrap_or(false),
+            "rate_limited_until": meta["rate_limited_until"].as_i64().unwrap_or(0),
+            "last_human_ts": 0,
+            "waiting_since": 0,
+            "self_report": serde_json::Value::Null,
+            // Filled from the shared steering_queue table in build_array —
+            // Python's card shape (py:20373), entries {id,text,queued_at,guard}.
+            "steering": [],
+            "tokens": {"input": 0, "output": 0, "total": 0},
+            "preview_lines": [],
+            "task_source": "",
+            "task_override": "",
+            "task_override_updated": 0,
+            "task_time": 0,
+            "task_updated": 0,
+            "task_board_id": "",
+            // The client treats an unmeasured verdict as synchronizing, never
+            // as a licence to display WORKING beside a generic description.
+            // The reconciliation below replaces this on every successful list
+            // build; its presence also makes an old/incomplete snapshot honest.
+            "runtime_board": {
+                "measured": false,
+                "status": "unmeasured",
+                "verdict": "unmeasured",
+                "card_id": serde_json::Value::Null,
+                "card_count": 0,
+                "n_considered": 0,
+                "card_live": false,
+                "violation": false,
+            },
+            "task_board_age": 0,
+            "sched_on": 0,
+            "sched_off": 0,
+            "name": name,
+            // Rate-limit IS a status (Ethan, 2026-08-16: "capture workers rate
+            // limit as a status"). A lane blocked on a provider usage limit must be
+            // distinguishable in the fleet view, not hidden behind idle/waiting with
+            // only the side boolean `credit_limited` two lines down. Derives from the
+            // same meta stamp the rate_limit_sweep now keeps set for the whole
+            // blocked window (menu OR post-menu banner).
+            "status": if is_running && meta["rate_limited_since"].as_i64().unwrap_or(0) > 0 {
+                json!("rate_limited")
+            } else {
+                json!(status.clone())
+            },
+            "running": is_running,
+            "provider": configured_provider,
+            // What amux-server's own launch arm would actually run on this
+            // session's next (re)start — see the field's own doc comment
+            // above for why this can legitimately differ from `provider`.
+            "launch_provider": launch_provider,
+            "model": env.get("CC_MODEL").cloned().unwrap_or_default(),
+            "dir": env.get("CC_DIR").cloned().unwrap_or_default(),
+            "preview": "",
+            "task_name": "",
+            "desc": env.get("CC_DESC").cloned().unwrap_or_default(),
+            // TRIMMED, matching Python's t.strip(): CC_TAGS="mvs, gtm"
+            // otherwise yields " gtm" beside "gtm" — TWO gtm groups in the
+            // UI (Ethan's finding).
+            "tags": env.get("CC_TAGS").map(|t| t.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect::<Vec<_>>()).unwrap_or_default(),
+            "pinned": env.get("CC_PINNED").map(|v| v == "1").unwrap_or(false),
+            // ISOLATED (AMUX-3232): a raw agent (tmux + the CLI, no amux
+            // harness). The OWNER dashboard reads this to show the toggle state /
+            // badge; the peer-facing list strips these entries entirely in
+            // list_sessions_legacy (a peer must not even see it exists).
+            "isolated": env.get("CC_ISOLATED").map(|v| v == "1").unwrap_or(false),
+            // SPANS GROUPS (AMUX-4015 / AMUX-4016): may this worker send across
+            // group boundaries with no per-message approval.
+            //
+            // Nonempty global/group/worker allow-lists compose; an explicit
+            // empty lower layer is the visible deny/reset. The gate and both
+            // worker config routes use this exact resolution object too.
+            //
+            // `_own` says whether the WORKER's own file sets it, so the UI can
+            // tell "this worker" from "inherited" and can refuse to offer a
+            // local switch-off for something it did not set locally.
+            "spans_groups": !cross_group.value.is_empty(),
+            "spans_groups_value": cross_group.value,
+            "spans_groups_source": cross_group.source,
+            "spans_groups_reason": cross_group.reason,
+            "spans_groups_explicit_deny": cross_group.explicit_deny,
+            "spans_groups_own": cross_group.worker_defined,
+            "steering_queue": [],
+            "managed_by": "python",
+        }));
+    }
+    out
+}
+
+/// pub(crate): session_verbs' bare GET /api/sessions/{name} serves ONE
+/// record from the SAME array (py:74892 — the natural URL answers the
+/// natural shape).
+fn steering_with_transport(conn: &rusqlite::Connection) -> rusqlite::Result<BTreeMap<String, Vec<Value>>> {
+    let mut steering: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    let mut stmt=conn.prepare("SELECT id, session, text, queued_at, COALESCE(guard,''),
+        (SELECT substr(msg_id,7) FROM send_dedup d WHERE d.session=steering_queue.session
+          AND d.receipt_id=steering_queue.id AND d.msg_id LIKE 'steer:%' LIMIT 1)
+        FROM steering_queue ORDER BY queued_at ASC")?;
+    let rows=stmt.query_map([],|r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,
+        r.get::<_,f64>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?)))?;
+    for row in rows {
+        let (id,session,text,queued_at,guard,transport_id)=row?;
+        let system=crate::api::session_verbs::steer_guard_is_system(&guard);
+        steering.entry(session).or_default().push(json!({"id":id,"text":text,"queued_at":queued_at,
+            "guard":guard,"system":system,"transport_id":transport_id}));
+    }
+    Ok(steering)
+}
+
+fn build_array(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<serde_json::Value>> {
+    let mut signals = FleetSignals::load(conn);
+    // Before any status is derived: the pane is the only signal that can
+    // contradict a self-report, and a report that nothing can contradict is
+    // what shipped a working lane as `idle` for 1076s (AMUX-2646).
+    signals.capture_panes();
+    let signals = signals;
+    let mut stmt = conn.prepare(
+        "SELECT w.display_name, w.state, w.provider, w.model, w.cwd,
+                (SELECT COUNT(*) FROM _amux_sessions s
+                 WHERE s.worker_id = w.id AND s.ended_at IS NULL) AS live,
+                w.lifecycle
+         FROM _amux_workers w
+         WHERE w.lifecycle != 'deleted'
+         ORDER BY w.display_name",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        let name: String = r.get(0)?;
+        let state_json: String = r.get(1)?;
+        let provider: String = r.get(2)?;
+        let model: Option<String> = r.get(3)?;
+        let cwd: String = r.get(4)?;
+        let live: i64 = r.get(5)?;
+        let lifecycle: String = r.get::<_, Option<String>>(6)?.unwrap_or_else(|| "active".into());
+        let archived = lifecycle == "archived";
+        Ok(json!({
+            // The Python list's load-bearing fields; ones the Rust side
+            // cannot honestly fill yet are present-and-empty, NOT omitted —
+            // the SPA indexes into them.
+            "name": name,
+            "status": python_status(&state_json),
+            "running": live > 0,
+            "archived": archived,
+            "lifecycle": lifecycle,
+            "provider": provider,
+            "model": model.unwrap_or_default(),
+            "dir": cwd,
+            "preview": "",
+            "preview_lines": [],
+            "task_name": "",
+            "task_source": "",
+            "task_override": "",
+            "task_override_updated": 0,
+            "task_board_id": "",
+            "runtime_board": {
+                "measured": false,
+                "status": "unmeasured",
+                "verdict": "unmeasured",
+                "card_id": serde_json::Value::Null,
+                "card_count": 0,
+                "n_considered": 0,
+                "card_live": false,
+                "violation": false,
+            },
+            "task_updated": 0,
+            "task_board_age": 0,
+            "last_activity": 0,
+            "pinned": false,
+            "desc": "",
+            "tags": [],
+            "steering_queue": [],
+        }))
+    })?;
+    let mut out: Vec<serde_json::Value> = rows.collect::<Result<_, _>>()?;
+    // The Python fleet rides alongside Rust-managed workers, deduped by
+    // name (a name registered in BOTH belongs to the Rust row — it carries
+    // real state).
+    let rust_names: std::collections::BTreeSet<String> = out
+        .iter()
+        .filter_map(|v| v["name"].as_str().map(|s| s.to_lowercase()))
+        .collect();
+    for s in python_fleet_sessions(&signals) {
+        if let Some(n) = s["name"].as_str() {
+            if !rust_names.contains(&n.to_lowercase()) {
+                out.push(s);
+            }
+        }
+    }
+    // Board linkage per card, Python's exact query + precedence
+    // (py:20187-20197, 20348-20365): ORDER BY updated ASC with dict
+    // overwrite so the NEWEST-touched doing card wins (the 2026-07-22
+    // wrong-task bug), then board-if-fresh(24h) -> meta task_summary ->
+    // stale board title -> CC_DESC.
+    {
+        let mut stmt = conn.prepare(
+            "SELECT session, id, title, COALESCE(updated, 0) FROM issues
+             WHERE status = 'doing' AND deleted IS NULL AND session IS NOT NULL
+             ORDER BY updated ASC",
+        )?;
+        let mut doing: BTreeMap<String, (String, String, i64)> = BTreeMap::new();
+        let mut doing_by_id: BTreeMap<String, (String, String, i64)> = BTreeMap::new();
+        let mut doing_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut blocked_doing_counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut epic_doing_counts: BTreeMap<String, usize> = BTreeMap::new();
+        for row in stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })? {
+            let (sess, id, title, updated) = row?;
+            let issue = crate::db::board_store::get_issue(conn, &id)?;
+            // Decomposition keeps the parent epic Doing while its children run.
+            // Like board-drive's WIP/resume selection, runtime attribution must
+            // treat that container as context, not a competing execution claim.
+            if issue.as_ref().is_some_and(|row| row.item_type == "epic") {
+                *epic_doing_counts.entry(sess).or_default() += 1;
+                continue;
+            }
+            let blocked = issue
+                .is_some_and(|issue| !crate::runtime_jobs::board_drive::doing_is_unblocked(conn, &issue));
+            if blocked {
+                *blocked_doing_counts.entry(sess).or_default() += 1;
+                continue;
+            }
+            *doing_counts.entry(sess.clone()).or_default() += 1;
+            doing_by_id.insert(id.clone(), (sess.clone(), title.clone(), updated));
+            doing.insert(sess, (id, title, updated));
+        }
+
+        // Exact runtime attribution is a causal fact, not "whichever doing
+        // card was edited last". A directly delivered human prompt is linked
+        // atomically through cmd_history.card_id; manual/automatic pickup emits
+        // task.claimed. Keep the whole causal timeline: a newer cardless
+        // control prompt is not a release of a still-live claimed card.
+        let mut task_markers: BTreeMap<String, Vec<TaskMarker>> = BTreeMap::new();
+
+        // Collected once rather than consumed as a cursor, so the SAME rows
+        // feed both `task_markers` below and `last_human_ts` (AMUX-2820's own
+        // lesson, missed by this field: `last_human_ts` was a literal `0` for
+        // every session, a correct-typed empty that became a lie the moment
+        // nothing filled it). app.js's "messages from a person" sort
+        // (_humanSortSessions) reads it to tell a lane you last messaged an
+        // hour ago from one you have never messaged; a hardcoded 0 made every
+        // session read as the latter.
+        let user_msgs: Vec<(String, String, Option<String>, i64)> = if let Ok(mut messages) =
+            conn.prepare(
+                "SELECT session, text, card_id, ts FROM cmd_history \
+                 WHERE type='user' AND COALESCE(submit_verdict,'') <> 'stuck' \
+                 ORDER BY ts ASC, id ASC",
+            ) {
+            let rows = messages.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            })?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        let last_human_ts = last_human_ts_from_user_messages(&user_msgs);
+        {
+            for (session, text, card_id, ts_ms) in user_msgs {
+                let card_id = card_id.filter(|id| !id.trim().is_empty());
+                let cardless = card_id.is_none()
+                    && (amux_core::board::title_from_prompt(&text).is_none()
+                        || amux_core::board::is_informational_query(&text));
+                if card_id.is_some() || cardless {
+                    task_markers
+                        .entry(session)
+                        .or_default()
+                        .push((
+                            ts_ms as f64 / 1000.0,
+                            card_id,
+                            cardless,
+                            if cardless { "cardless-prompt" } else { "message-card" }.into(),
+                        ));
+                }
+            }
+        }
+        if let Ok(mut events) = conn.prepare(
+            "SELECT session, type, data, ts FROM session_events \
+             WHERE type IN ('task.claimed','task.cardless') ORDER BY ts ASC, id ASC",
+        ) {
+            let rows = events.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, f64>(3)?,
+                ))
+            })?;
+            for row in rows {
+                let (session, kind, data, ts) = row?;
+                let parsed = data
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let card_id = parsed["issue"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string);
+                let cardless = kind == "task.cardless" && cardless_event_allowed(&parsed);
+                if kind == "task.cardless" && !cardless {
+                    continue;
+                }
+                if card_id.is_some() || cardless {
+                    task_markers
+                        .entry(session)
+                        .or_default()
+                        .push((ts, card_id, cardless, kind));
+                }
+            }
+        }
+        let now = signals.now as i64;
+        for v in out.iter_mut() {
+            let Some(name) = v["name"].as_str().map(String::from) else {
+                continue;
+            };
+            let runtime_status = v["status"].as_str().unwrap_or("").to_string();
+            let running = v["running"].as_bool().unwrap_or(false);
+            let selection = task_markers
+                .get(&name)
+                .map(|markers| {
+                    select_runtime_marker(
+                        markers,
+                        signals.started.get(&name).copied().unwrap_or(0.0),
+                        &name,
+                        &doing_by_id,
+                    )
+                })
+                .unwrap_or(RuntimeMarkerSelection {
+                    marker: None,
+                    conflicting_live_claims: false,
+                    newer_cardless_suppressed: false,
+                });
+            let marker = selection.marker;
+            let observed_card = marker
+                .and_then(|(_, card, _, _)| card.as_deref())
+                .unwrap_or("");
+            let exact_board = if observed_card.is_empty() {
+                None
+            } else {
+                doing_by_id.get(observed_card)
+            }
+            .filter(|(owner, _, _)| owner == &name);
+            // At a boundary, preserve the existing WIP label fallback. During
+            // active runtime only the causal marker may name the live card.
+            let board = (!selection.conflicting_live_claims || runtime_status != "active")
+                .then_some(exact_board)
+                .flatten()
+                .or_else(|| {
+                if runtime_status == "active" { None } else { doing.get(&name) }
+                });
+            let causal_card = marker.and_then(|(_, card, _, _)| card.as_deref());
+            // `doing_by_id` intentionally stores (owner, title, updated), so
+            // its first tuple field is the lane name—not the card id. Keep the
+            // causal marker's ID when it still matches that row, including at
+            // an idle boundary; only a markerless WIP fallback reads `doing`.
+            let (claimed_card, claimed_card_valid) = if causal_card.is_some() && exact_board.is_some() {
+                (causal_card, true)
+            } else if runtime_status == "active" {
+                (causal_card, exact_board.is_some())
+            } else {
+                (board.map(|(id, _, _)| id.as_str()), board.is_some())
+            };
+            let doing_count = doing_counts.get(&name).copied().unwrap_or(0);
+            let blocked_doing_count = blocked_doing_counts.get(&name).copied().unwrap_or(0);
+            let truth = reconcile_runtime_board(
+                running,
+                &runtime_status,
+                claimed_card,
+                claimed_card_valid,
+                selection.conflicting_live_claims,
+                marker.is_some_and(|(_, _, cardless, _)| *cardless),
+                doing_count,
+            );
+            announce_runtime_board_truth(&name, &runtime_status, observed_card, &truth);
+            announce_sticky_runtime_claim(
+                &name,
+                observed_card,
+                selection.newer_cardless_suppressed,
+            );
+            let board_updated = board.map(|(_, _, u)| *u).unwrap_or(0);
+            let board_fresh = board.is_some() && now - board_updated <= 86400;
+            let meta = load_meta(&name);
+            let summary = meta["task_summary"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let summary_ts = meta["task_summary_ts"].as_i64().unwrap_or(0);
+            // GATE THE SUMMARY BY FRESHNESS, exactly as `board_fresh` above gates
+            // the board card (Ethan, 2026-08-13: "these task names are out of
+            // date"). A summary is a POINT-IN-TIME label that nothing refreshes,
+            // so an ungated `!summary.is_empty()` meant a frozen relic
+            // ("Luke's Wilderness Tales" on the Obsidian lane) outranked the live
+            // board card AND the honest desc, forever. Two things made these
+            // relics: they are unstamped (`task_summary_ts == 0`, written before
+            // AMUX-2676 added the stamp) and there is no automated writer that
+            // re-stamps them. `ts > 0 && age <= 24h` is the SAME rule the board
+            // uses, so a summary now ages out the way a doing card does; an
+            // unstamped one is treated as unknown-age and skipped. A stale
+            // summary falls through to the stale board title, then to desc — the
+            // worker's role, which is honest rather than a wrong task claim.
+            let summary_fresh = !summary.is_empty() && summary_ts > 0 && now - summary_ts <= 86400;
+            let desc = v["desc"].as_str().unwrap_or("").to_string();
+            let (tname, tsrc) = resolve_task_name(
+                board.map(|(_, t, _)| t.as_str()),
+                board_fresh,
+                &summary,
+                summary_fresh,
+                &desc,
+            );
+            v["task_name"] = json!(tname);
+            v["task_source"] = json!(tsrc);
+            v["task_override"] = json!(summary);
+            v["task_override_updated"] = json!(summary_ts);
+            v["status"] = json!(truth.status);
+            v["task_board_id"] = json!(truth.card_id);
+            v["last_human_ts"] = json!(last_human_ts.get(&name).copied().unwrap_or(0));
+            v["runtime_board"] = json!({
+                "measured": truth.measured,
+                // `status` is the compact client contract; retain the
+                // descriptive `verdict` spelling for logs and older clients.
+                "status": truth.verdict,
+                "n_considered": truth.n_considered,
+                "card_count": truth.n_considered,
+                "blocked_doing_count": blocked_doing_count,
+                "epic_container_count": epic_doing_counts.get(&name).copied().unwrap_or(0),
+                "verdict": truth.verdict,
+                "violation": truth.violation,
+                "runtime_status": runtime_status,
+                "card_live": truth.card_live,
+                "card_id": if truth.card_id.is_empty() { serde_json::Value::Null } else { json!(truth.card_id) },
+                "observed_card_id": if observed_card.is_empty() { serde_json::Value::Null } else { json!(observed_card) },
+                "source": marker.map(|(_, _, _, source)| source.as_str()).unwrap_or("none"),
+                "cardless_allowed": marker.is_some_and(|(_, _, cardless, _)| *cardless),
+                "cardless_suppressed_by_live_claim": selection.newer_cardless_suppressed,
+            });
+            // A summary-sourced task now carries its own stamp (AMUX-2676);
+            // it is 0 only for tasks written before that existed, and 0 still
+            // means "unknown" rather than "just now" — the client must not
+            // render an age it does not have.
+            v["task_updated"] = json!(match tsrc {
+                "board" => board_updated,
+                "summary" => meta["task_summary_ts"].as_i64().unwrap_or(0),
+                _ => 0,
+            });
+            // Day-quantized (AMUX-3504): the one consumer (app.js:3373)
+            // renders floor(age/86400) days, so second-precision here only
+            // churned the payload every poll and defeated the response ETag.
+            // Quantizing to whole days preserves every rendered value while
+            // the byte churn drops from per-request to once a day per row.
+            v["task_board_age"] = json!(
+                if board.is_some() && board_updated != 0 && !board_fresh {
+                    ((now - board_updated).max(0) / 86400) * 86400
+                } else {
+                    0
+                }
+            );
+        }
+    }
+
+    if let Some(report) = crate::runtime_jobs::board_drive::last_report() {
+        let traces: BTreeMap<&str, &crate::runtime_jobs::board_drive::LaneTrace> =
+            report.lanes.iter().map(|trace| (trace.session.as_str(), trace)).collect();
+        for worker in out.iter_mut() {
+            let Some(name) = worker["name"].as_str() else { continue };
+            if let Some(trace) = traces.get(name) {
+                worker["board_drive"] = json!({
+                    "outcome": trace.outcome,
+                    "reason": trace.reason,
+                    "detail": trace.detail,
+                    "eligible_todos": trace.eligible_todos,
+                    "open_cards": trace.open_cards,
+                    "card": trace.card,
+                    "checked_at": report.finished_at,
+                });
+            }
+        }
+    }
+
+    // Schedule counts per session — Python's exact aggregation
+    // (amux-server.py:20179).
+    {
+        let mut stmt = conn.prepare(
+            "SELECT session, SUM(CASE WHEN enabled=1 THEN 1 ELSE 0 END) o,
+                    SUM(CASE WHEN enabled=1 THEN 0 ELSE 1 END) f
+             FROM schedules
+             WHERE deleted IS NULL AND session IS NOT NULL AND session != ''
+             GROUP BY session",
+        )?;
+        let sched: std::collections::BTreeMap<String, (i64, i64)> = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get(1)?, r.get(2)?))))?
+            .flatten()
+            .collect();
+        for v in out.iter_mut() {
+            if let Some(name) = v["name"].as_str() {
+                if let Some((on, off)) = sched.get(name) {
+                    v["sched_on"] = json!(on);
+                    v["sched_off"] = json!(off);
+                }
+            }
+        }
+    }
+
+    // steering: Python's card carries the session's queued steering entries
+    // (py:20373, `_steering_queue.get(name, [])`) — and that queue is
+    // persisted in the shared steering_queue TABLE (INSERT on enqueue,
+    // DELETE on delivery, py:8632/8796), so the durable store IS the
+    // in-memory queue's mirror. Entry shape matches Python's hydrate
+    // (py:11873): {id, text, queued_at, guard} with guard "" for NULL.
+    {
+        let steering=steering_with_transport(conn).map_err(|error| {
+            tracing::warn!(target:"amux::message_acceptance",verdict="steering_identity_read_failed",measured=false,n_considered=0,%error,
+                "Steering snapshot unavailable; refusing to report an empty queue");
+            error
+        })?;
+        for v in out.iter_mut() {
+            if let Some(name) = v["name"].as_str() {
+                if let Some(q) = steering.get(name) {
+                    v["steering"] = json!(q);
+                }
+            }
+        }
+    }
+
+    // self_report from the SHARED persisted store (prefs key
+    // 'session_reports', amux-server.py:3943) — the same bytes Python
+    // hydrates at boot, not its memory. state/ts/source -> Python's
+    // {state, age_s, source} card shape (py:20429).
+    if signals.reports.is_object() {
+        for v in out.iter_mut() {
+            if let Some(name) = v["name"].as_str().map(str::to_string) {
+                if let Some(rep) = signals.reports.get(&name) {
+                    // ts is time.time() — a FLOAT; as_i64() read it as 0 and
+                    // age_s came out as the whole epoch (found 2026-08-09).
+                    let ts = rep["ts"].as_f64().unwrap_or(0.0);
+                    // `ts`, not the old `age_s` (AMUX-3504). age_s was
+                    // (now - ts) stamped at REQUEST time, so 52 of 119 rows
+                    // churned every poll while nothing had actually changed —
+                    // singlehandedly defeating the response ETag (a 304 that
+                    // can never fire is rule-7 theatre). Nothing in this repo
+                    // ever read age_s (Python-dashboard parity shape; that
+                    // client is gone); a reader that wants an age derives it
+                    // from ts, which is the stable fact.
+                    v["self_report"] = json!({
+                        "state": rep["state"].as_str().unwrap_or(""),
+                        "ts": ts as i64,
+                        "source": rep["source"].as_str().unwrap_or(""),
+                    });
+                    let state = rep["state"].as_str().unwrap_or("");
+                    let started = signals.started.get(&name).copied().unwrap_or(0.0);
+                    let report_current = report_applies(state, ts, started, signals.now);
+                    // AMUX-2676: a REPORTED model/token count replaces the
+                    // honest-empty above. Still never invented — the empty
+                    // stays empty unless the harness itself said otherwise,
+                    // which is the whole point of preferring the report
+                    // endpoint over a scraper.
+                    if report_current {
+                        if let Some(m) = rep["model"].as_str().filter(|m| !m.is_empty()) {
+                            v["active_model"] = json!(m);
+                            v["model_source"] = json!("self-report");
+                        }
+                    }
+                    // Same over-window rejection the compaction path applies
+                    // (a5b272e). Without it the two disagree about one fact:
+                    // /api/sessions rendered this session at 3,156,510 tokens
+                    // while the trigger rejected the identical number as not a
+                    // context size. A dashboard showing an impossible value is
+                    // how the number stops being questioned — and it is the
+                    // only lane on the fleet where the two paths could differ,
+                    // so the disagreement would have stayed invisible.
+                    let plausible = rep["tokens"]["total"]
+                        .as_u64()
+                        .map(|t| t <= crate::api::session_verbs::context_window())
+                        .unwrap_or(false);
+                    if report_current && rep["tokens"].is_object() && plausible {
+                        v["tokens"] = rep["tokens"].clone();
+                    }
+                }
+            }
+        }
+    }
+
+    // FALLBACK TO THE TRANSCRIPT when the report carried neither field.
+    //
+    // The report path above is correct and stays PREFERRED — this only fills a
+    // gap it cannot currently reach. Measured 2026-08-11: 42 lanes reporting, 2
+    // with a model, 1 with tokens, because Claude Code loads hook config at
+    // SESSION START and every running lane predates the settings change that
+    // repointed the hook at the extracting script. All 292 sampled report POSTs
+    // carried the predecessor's byte-exact 37/39/41-byte body. No edit on disk
+    // reaches a command string already baked into a running process.
+    //
+    // Without tokens, orchestrator/compaction.rs is never called, so no lane
+    // ever auto-compacts — which is the thing Ethan asked for in as many words.
+    // A capability that exists and reaches nobody is the failure ethos rule 1
+    // names, and waiting for ~47 lanes to restart is not a fix.
+    //
+    // Never invents: absent transcript, unreadable file, or records carrying
+    // neither field all leave the honest empty in place.
+    for v in out.iter_mut() {
+        let Some(name) = v["name"].as_str().map(str::to_string) else { continue };
+        let need_model = v["active_model"].as_str().unwrap_or("").is_empty();
+        let need_tokens = v["tokens"]["total"].as_u64().unwrap_or(0) == 0;
+        if !need_model && !need_tokens {
+            continue;
+        }
+        let (m, t) = crate::api::session_verbs::transcript_evidence(&name);
+        if need_model {
+            if let Some(m) = m {
+                v["active_model"] = json!(m);
+                v["model_source"] = json!("transcript");
+            }
+        }
+        if need_tokens {
+            if let Some(t) = t {
+                v["tokens"] = json!({"input": t, "output": 0, "total": t});
+                v["tokens_source"] = json!("transcript");
+            }
+        }
+    }
+
+    // branch: bounded parallel git lookups, deduped by directory (many
+    // sessions share a checkout — one git call per DISTINCT dir).
+    // Cached with a 30s TTL: branches change on the scale of minutes.
+    {
+        let git_ttl = env_secs("AMUX_GIT_BRANCH_CACHE_TTL_S", 30.0);
+        let mut branches: std::collections::BTreeMap<String, String> =
+            if let Ok(c) = git_branch_cache().lock() {
+                if signals.now - c.0 < git_ttl {
+                    c.1.clone()
+                } else {
+                    Default::default()
+                }
+            } else {
+                Default::default()
+            };
+        if branches.is_empty() {
+            let dirs: std::collections::BTreeSet<String> = out
+                .iter()
+                .filter_map(|v| v["dir"].as_str())
+                .filter(|d| !d.is_empty())
+                .map(String::from)
+                .collect();
+            let dir_list: Vec<String> = dirs.into_iter().collect();
+            for chunk in dir_list.chunks(12) {
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|d| {
+                        let d = d.clone();
+                        std::thread::spawn(move || {
+                            // BOUNDED (AF-301). `git rev-parse` on a repo whose
+                            // index is locked, or on a network filesystem, blocks
+                            // as long as git does — and this runs per checkout on
+                            // a spawned thread, so the join below waits for the
+                            // slowest one.
+                            let mut gc = std::process::Command::new("git");
+                            gc.args(["-C", &d, "rev-parse", "--abbrev-ref", "HEAD"])
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::null());
+                            let out = run_bounded_output(gc, probe_budget(), "git-branch")?;
+                            out.status.success().then(|| {
+                                (d, String::from_utf8_lossy(&out.stdout).trim().to_string())
+                            })
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    if let Ok(Some((d, b))) = h.join() {
+                        branches.insert(d, b);
+                    }
+                }
+            }
+            if let Ok(mut c) = git_branch_cache().lock() {
+                *c = (signals.now, branches.clone());
+            }
+        }
+        for v in out.iter_mut() {
+            let b = v["dir"].as_str().and_then(|d| branches.get(d)).cloned().unwrap_or_default();
+            v["branch"] = json!(b);
+        }
+    }
+
+    // Previews: RUNNING sessions get a bounded parallel tmux capture (30
+    // lines like Python's batch, py:20137); STOPPED sessions get the saved
+    // log tail (py:20218-20223). Both feed Python's preview pair: scalar +
+    // the preview_lines ARRAY the SPA maps over (AMUX-2588).
+    //
+    // Cached with a TTL matching the status-pane cache: previews are the
+    // dominant cost (~100 tmux capture-pane subprocesses per uncached call).
+    {
+        let preview_ttl = env_secs("AMUX_PREVIEW_CACHE_TTL_S", 3.0);
+        let cached_previews: Option<BTreeMap<String, String>> =
+            if let Ok(c) = preview_cache().lock() {
+                if signals.now - c.0 < preview_ttl && !c.1.is_empty() {
+                    Some(c.1.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+        let raws = if let Some(cached) = cached_previews {
+            cached
+        } else {
+            let names: Vec<(String, bool)> = out
+                .iter()
+                .filter_map(|v| {
+                    let n = v["name"].as_str()?.to_string();
+                    let running = v["running"].as_bool().unwrap_or(false);
+                    Some((n, running))
+                })
+                .collect();
+            // Seed from the status probe's captures — same command, same 30 lines.
+            let mut raws: std::collections::BTreeMap<String, String> = signals
+                .panes
+                .iter()
+                .filter(|(_, raw)| !raw.trim().is_empty())
+                .map(|(n, raw)| (n.clone(), raw.clone()))
+                .collect();
+            let names: Vec<(String, bool)> =
+                names.into_iter().filter(|(n, _)| !raws.contains_key(n)).collect();
+            for chunk in names.chunks(12) {
+                let handles: Vec<_> = chunk
+                    .iter()
+                    .map(|(name, running)| {
+                        let n = name.clone();
+                        let running = *running;
+                        std::thread::spawn(move || {
+                            if running {
+                                let pt = pane_target(&format!("amux-{n}"));
+                                // BOUNDED (AF-301). This was a bare `.output()`
+                                // capture-pane — the exact operation
+                                // `capture_pane_bounded` exists to bound, done
+                                // unbounded, in the same file. It runs on a
+                                // spawned thread rather than the async runtime,
+                                // so a wedge here blocks the `h.join()` below
+                                // instead of a worker; still unbounded, still
+                                // holds the request open.
+                                Some((n.clone(), capture_pane_bounded(&pt, &n)?))
+                            } else {
+                                let raw = stopped_session_raw(&n);
+                                (!raw.is_empty()).then_some((n, raw))
+                            }
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    if let Ok(Some((n, p))) = h.join() {
+                        raws.insert(n, p);
+                    }
+                }
+            }
+            if let Ok(mut c) = preview_cache().lock() {
+                *c = (signals.now, raws.clone());
+            }
+            raws
+        };
+        for v in out.iter_mut() {
+            if let Some(name) = v["name"].as_str() {
+                if let Some(raw) = raws.get(name) {
+                    let (preview, lines) = preview_of(raw);
+                    v["preview"] = json!(preview);
+                    v["preview_lines"] = json!(lines);
+                    apply_preview_waiting_status(v, raw);
+                }
+            }
+        }
+    }
+
+    // Python's exact sort (py:20456-20457): pinned first, running next,
+    // active/waiting before idle/blank, then most-recent human activity.
+    let status_rank = |s: &str| -> i64 {
+        match s {
+            "active" | "waiting" | "blocked" => 0,
+            _ => 1,
+        }
+    };
+    out.sort_by(|a, b| {
+        let key = |v: &serde_json::Value| {
+            (
+                !v["pinned"].as_bool().unwrap_or(false),
+                !v["running"].as_bool().unwrap_or(false),
+                status_rank(v["status"].as_str().unwrap_or("")),
+                -v["last_activity"].as_i64().unwrap_or(0),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    Ok(out)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    static PROBE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// AMUX-4703. The flag was a one-way switch and the pane read ignored it.
+    ///
+    /// Serialised against other suppression users: this cell asserts on the
+    /// GLOBAL depth returning to zero, which a concurrent holder would
+    /// legitimately keep above zero. The lock is what makes the assertion about
+    /// this test's own guards rather than about scheduling.
+    #[test]
+    fn fleet_suppression_is_scoped_and_reaches_the_pane_read() {
+        let _serial = PROBE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!fleet_suppressed(), "precondition: nothing is suppressing yet");
+
+        {
+            let _outer = suppress_fleet_for_test();
+            assert!(fleet_suppressed(), "a held guard suppresses");
+
+            // THE ROOT FIX: the pane read consults the same flag. Before this,
+            // suppression covered only the env-file enumeration, so a unit test
+            // still scraped the machine's real tmux and inherited whatever a
+            // live lane of the same name was doing.
+            assert_eq!(
+                capture_pane_bounded(&pane_target("amux-tubescience"), "tubescience"),
+                None,
+                "a suppressed pane read must not reach the host's tmux"
+            );
+
+            // NESTING, and this is why the depth is a counter rather than a
+            // bool with a saved previous value. Cargo runs a binary's tests in
+            // parallel; with the bool shape the inner guard would observe
+            // `true`, restore `true` on drop, and the outer would then restore
+            // `false` while a third holder was still mid-assertion.
+            {
+                let _inner = suppress_fleet_for_test();
+                assert!(fleet_suppressed(), "two guards still suppress");
+            }
+            assert!(
+                fleet_suppressed(),
+                "dropping the INNER guard must not release the outer one's suppression"
+            );
+        }
+
+        // The leak this card is about: three call sites stored `true` and never
+        // restored, so every later test in the binary inherited suppression and
+        // a test meaning to exercise the fleet path got a suppressed one.
+        assert!(
+            !fleet_suppressed(),
+            "suppression must end when the last guard drops, not persist for the binary"
+        );
+    }
+
+    #[test]
+    fn steering_transport_identity_joins_receipt_and_session_without_text_deduplication() {
+        let conn=crate::db::migrate::test_memdb_pub();
+        // A sessions snapshot uses a read-only pool, including before any send.
+        conn.pragma_update(None,"query_only","ON").unwrap();
+        assert!(steering_with_transport(&conn).unwrap().is_empty());
+        conn.pragma_update(None,"query_only","OFF").unwrap();
+        conn.execute_batch("INSERT INTO steering_queue(id,session,text,queued_at,guard) VALUES('row-1','lane','same',1,''),('row-2','lane','same',2,''),('system','lane','system',3,'board-drive');
+            INSERT INTO send_dedup(session,msg_id,ts,receipt_id) VALUES('lane','steer:transport-1',1,'row-1'),('other','steer:wrong-lane',1,'row-2');").unwrap();
+        conn.pragma_update(None,"query_only","ON").unwrap();
+        let rows=steering_with_transport(&conn).unwrap();
+        assert_eq!(rows["lane"].len(),3);
+        assert_eq!(rows["lane"][0]["transport_id"],"transport-1");
+        assert!(rows["lane"][1]["transport_id"].is_null());
+        assert_eq!(rows["lane"][2]["system"],true);
+        conn.pragma_update(None,"query_only","OFF").unwrap();
+        conn.execute("ALTER TABLE steering_queue RENAME COLUMN text TO missing_text",[]).unwrap();
+        conn.pragma_update(None,"query_only","ON").unwrap();
+        assert!(steering_with_transport(&conn).is_err(),"unmeasured must not be an empty queue");
+    }
+
+    #[test]
+    fn single_lane_fleet_probe_targets_the_active_window() {
+        assert_eq!(
+            FleetSignals::lane_probe_target("mixpeek-homepage-claude"),
+            "=amux-mixpeek-homepage-claude:",
+            "a session-only target exits successfully while returning empty pane/window fields"
+        );
+    }
+
+    #[test]
+    fn bounded_probe_drains_large_stdout_and_stderr_before_waiting() {
+        let _guard = PROBE_TEST_LOCK.lock().unwrap();
+        use std::process::{Command, Stdio};
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "head -c 262144 /dev/zero; head -c 262144 /dev/zero >&2"])
+            .stdout(Stdio::piped()).stderr(Stdio::piped());
+        let out = run_bounded_output(cmd, std::time::Duration::from_secs(3), "large-probe")
+            .expect("a productive child must not be killed because amux left its output pipe full");
+        assert!(out.status.success());
+        assert_eq!(out.stdout, vec![0; 262144]);
+        assert_eq!(out.stderr, vec![0; 262144]);
+    }
+
+    #[test]
+    fn bounded_probe_pane_capture_preserves_large_output() {
+        let _guard = PROBE_TEST_LOCK.lock().unwrap();
+        use std::process::{Command, Stdio};
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "head -c 262144 /dev/zero"])
+            .stdout(Stdio::piped()).stderr(Stdio::null());
+        let out = run_bounded(cmd, std::time::Duration::from_secs(3), "large-pane")
+            .expect("pane length in lines does not bound bytes in its output pipe");
+        assert_eq!(out.as_bytes(), vec![0; 262144]);
+    }
+
+    #[test]
+    fn bounded_probe_deadline_survives_continuous_output_and_inherited_pipes() {
+        let _guard = PROBE_TEST_LOCK.lock().unwrap();
+        use std::process::{Command, Stdio};
+        for (script, phase) in [("exec yes x", "child_exit"), ("sleep 2 & printf finished", "pipe_eof")] {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", script]).stdout(Stdio::piped()).stderr(Stdio::null());
+            let started = std::time::Instant::now();
+            assert!(run_bounded_output(cmd, std::time::Duration::from_millis(150), "deadline-probe").is_none());
+            assert!(started.elapsed() < std::time::Duration::from_secs(1), "pipe reads escaped the deadline");
+            let detail = PANE_CAPTURE_LAST_TIMEOUT_DETAIL.lock().unwrap().clone().unwrap();
+            assert_eq!(detail["phase"], phase);
+            assert_eq!(detail["measured"], true);
+            assert!(detail["stdout_bytes"].as_u64().unwrap() > 0);
+        }
+    }
+
+    #[test]
+    fn confirmed_model_must_match_provider_and_current_process_life() {
+        let current = json!({
+            "active_model_confirmed": "gpt-5.6-sol",
+            "active_model_provider": "codex",
+            "active_model_confirmed_at": 200,
+            "last_started": 190,
+        });
+        assert_eq!(confirmed_active_model(&current, "codex"), "gpt-5.6-sol");
+        assert_eq!(confirmed_active_model(&current, "claude"), "");
+
+        let stale = json!({
+            "active_model_confirmed": "claude-sonnet-5",
+            "active_model_provider": "claude",
+            "active_model_confirmed_at": 100,
+            "last_started": 101,
+        });
+        assert_eq!(confirmed_active_model(&stale, "claude"), "");
+    }
+
+    /// AMUX-3700: a pane capture that will not return is KILLED, and one that
+    /// returns is not.
+    ///
+    /// THE DEFECT: `capture_panes` spawned twelve `tmux capture-pane` children
+    /// with `Command::output()` — no deadline anywhere — and then `join()`ed
+    /// them, inside `build_array`, inside a request. One tmux that does not
+    /// answer blocked the whole chunk and every chunk behind it. That is
+    /// `GET /api/sessions` at 12,080ms (this card) and 93,344ms (the 7-day
+    /// worst), with 4,174 of 38,377 requests over a second.
+    ///
+    /// It also explains why the outlier read as unattributable: the card's own
+    /// evidence said "1-minute load 9.3 on 28 cores (0.33x)", which is true and
+    /// is not the cause — a blocked server is not a busy one.
+    ///
+    /// `sh -c "sleep 30"` HANGS FOR REAL rather than standing in for hanging. A
+    /// fixture that merely returns slowly would pass against a version that
+    /// waits patiently, which is the bug.
+    #[test]
+    fn a_pane_capture_that_never_returns_is_killed_on_its_budget() {
+        let _guard = PROBE_TEST_LOCK.lock().unwrap();
+        use std::process::{Command, Stdio};
+        let budget = std::time::Duration::from_millis(300);
+
+        // 1. THE HANG. Must come back on the budget, not in 30s.
+        let mut hang = Command::new("sh");
+        hang.args(["-c", "sleep 30"]).stdout(Stdio::piped()).stderr(Stdio::null());
+        let before = PANE_CAPTURE_TIMEOUTS.load(std::sync::atomic::Ordering::Relaxed);
+        let t0 = std::time::Instant::now();
+        let got = run_bounded(hang, budget, "hung-lane");
+        let waited = t0.elapsed();
+        assert!(got.is_none(), "a killed capture yields no pane, not a partial one: {got:?}");
+        assert!(
+            waited < std::time::Duration::from_secs(5),
+            "the whole point is the bound: waited {waited:?} for a 300ms budget"
+        );
+        assert!(
+            waited >= budget,
+            "and it must actually WAIT the budget, not return instantly — an\
+             always-None implementation would pass the cell above: {waited:?}"
+        );
+
+        // 2. THE COUNTER. A bounded capture is invisible otherwise: the request
+        //    succeeds and the preview is merely absent, so a hanging tmux reads
+        //    as a quiet fleet.
+        let after = PANE_CAPTURE_TIMEOUTS.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(after, before + 1, "the kill must be counted");
+        let last = PANE_CAPTURE_LAST_TIMEOUT.lock().unwrap().clone();
+        assert_eq!(last.map(|(l, _)| l).as_deref(), Some("hung-lane"), "and must name the lane");
+
+        // 3. THE HAPPY PATH, which is what stops this becoming a capture that
+        //    always fails. Output must survive intact.
+        let mut ok = Command::new("sh");
+        ok.args(["-c", "printf 'pane line one'"]).stdout(Stdio::piped()).stderr(Stdio::null());
+        assert_eq!(
+            run_bounded(ok, std::time::Duration::from_secs(5), "ok-lane").as_deref(),
+            Some("pane line one"),
+            "a capture that returns must still return its bytes"
+        );
+        assert_eq!(
+            PANE_CAPTURE_TIMEOUTS.load(std::sync::atomic::Ordering::Relaxed),
+            after,
+            "a successful capture must NOT increment the timeout counter"
+        );
+    }
+
+    /// Worker creation CREATES a missing working directory instead of refusing
+    /// (Ethan, 2026-08-22). The four cells are separated because the single
+    /// message this replaces was false about two of them.
+    #[test]
+    fn a_missing_working_directory_is_created_not_refused() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Empty = inherit. Not a path question at all.
+        assert!(matches!(ensure_work_dir(""), WorkDirOutcome::Ok));
+
+        // Already a directory: untouched.
+        let existing = tmp.path().join("already");
+        std::fs::create_dir_all(&existing).unwrap();
+        assert!(matches!(
+            ensure_work_dir(existing.to_str().unwrap()),
+            WorkDirOutcome::Ok
+        ));
+
+        // THE REPORTED CASE: absent, absolute, nested. Created, and it is
+        // really on disk afterwards — asserting the enum alone would pass on a
+        // function that only ever returned Created.
+        let fresh = tmp.path().join("Vault").join("Datacenter");
+        assert!(!fresh.exists(), "fixture must start absent");
+        assert!(matches!(
+            ensure_work_dir(fresh.to_str().unwrap()),
+            WorkDirOutcome::Created
+        ));
+        assert!(fresh.is_dir(), "the directory must actually exist afterwards");
+
+        // Exists as a FILE: creation is impossible, and "does not exist" was a
+        // false statement about this path.
+        let file = tmp.path().join("a-file");
+        write!(std::fs::File::create(&file).unwrap(), "x").unwrap();
+        match ensure_work_dir(file.to_str().unwrap()) {
+            WorkDirOutcome::Refused(m) => {
+                assert!(m.contains("is not a directory"), "{m}");
+                assert!(!m.contains("does not exist"), "must not claim absence: {m}");
+            }
+            _ => panic!("a file must be refused, not created over"),
+        }
+
+        // RELATIVE and absent: refused. create_dir_all would resolve this
+        // against the SERVER's cwd and silently make a directory nobody asked
+        // for, so a typo must not succeed.
+        //
+        // HERMETICITY (amux, 2026-08-22): this fixture is a literal relative
+        // path, so it resolves against the TEST's cwd — the shared checkout.
+        // One run of a pre-refusal build created it via create_dir_all, and
+        // the residue then failed every later run on this machine (is_dir()
+        // short-circuits to Ok) while CI's fresh checkout stayed green: a red
+        // test on green code, discovered blocking an unrelated commit's gate.
+        // Clean the residue rather than asserting on it.
+        if std::path::Path::new("some").exists() {
+            std::fs::remove_dir_all("some").expect("clearing fixture residue");
+        }
+        match ensure_work_dir("some/relative/path-that-does-not-exist") {
+            WorkDirOutcome::Refused(m) => assert!(m.contains("absolute"), "{m}"),
+            _ => panic!("a relative path must be refused"),
+        }
+        assert!(
+            !std::path::Path::new("some/relative/path-that-does-not-exist").exists(),
+            "the refusal must not have created it anyway"
+        );
+    }
+
+    /// ISOLATED (AMUX-3232): the peer-facing fleet list strips isolated
+    /// (raw-agent) workers so peers cannot discover them, while the OWNER
+    /// dashboard (no worker header) sees the full fleet. The normal worker is the
+    /// negative control that lets this test actually fail.
+    #[test]
+    fn peer_list_hides_isolated_workers_owner_sees_all() {
+        let arr = serde_json::to_string(&serde_json::json!([
+            {"name": "normal", "isolated": false},
+            {"name": "secret", "isolated": true},
+        ]))
+        .unwrap();
+
+        // A PEER carries a server-stamped worker header, so the isolated worker
+        // is gone and the normal one remains.
+        let mut peer = axum::http::HeaderMap::new();
+        peer.insert("x-amux-worker", "some-peer".parse().unwrap());
+        let peer_view: Vec<serde_json::Value> =
+            serde_json::from_str(&filter_isolated_for_peer(&arr, &peer)).unwrap();
+        let peer_names: Vec<&str> =
+            peer_view.iter().filter_map(|s| s["name"].as_str()).collect();
+        assert_eq!(peer_names, vec!["normal"], "peer must not see the isolated worker");
+
+        // The OWNER dashboard sends no worker/session header, so it sees BOTH.
+        let owner = axum::http::HeaderMap::new();
+        let owner_view: Vec<serde_json::Value> =
+            serde_json::from_str(&filter_isolated_for_peer(&arr, &owner)).unwrap();
+        let owner_names: Vec<&str> =
+            owner_view.iter().filter_map(|s| s["name"].as_str()).collect();
+        assert_eq!(owner_names, vec!["normal", "secret"], "owner sees the full fleet");
+
+        // An EMPTY worker header is the owner, not a peer (the send guard's same
+        // rule), so it must not trigger the strip.
+        let mut empty = axum::http::HeaderMap::new();
+        empty.insert("x-amux-worker", "".parse().unwrap());
+        assert!(!caller_is_peer(&empty), "an empty header is the owner, not a peer");
+    }
+
+    /// AMUX-3182: the create modal could not honestly make an ollama worker.
+    /// An ollama worker's model must land in CC_MODEL (the start arm reads it),
+    /// never as `--model` in CC_FLAGS, and the CLAUDE default model must never
+    /// be applied to a local-model worker. Each assertion carries a positive
+    /// control on the SAME inputs so a vacuous pass is impossible (ethos rule 7).
+    /// Ethan, 2026-08-27: a gemini worker was launched with `--model sonnet` and
+    /// every request died with `models/sonnet is not found for API version
+    /// v1beta`. AMUX-3182 fixed this for ollama BY NAME and left it for every
+    /// other non-Claude provider.
+    ///
+    /// The last two cells are the controls and they are what stop the obvious
+    /// wrong fix: "never default a model" would break Claude, and an explicit
+    /// model must still win for any provider. Without them a version that just
+    /// deleted the default would look correct.
+    #[test]
+    fn the_claude_default_model_never_reaches_another_providers_worker() {
+        for p in ["gemini", "codex", "grok", "whatever-ships-next"] {
+            let (flags, ccm, resolved) = worker_model_env(p, "", "", "sonnet");
+            assert_eq!(
+                flags, "",
+                "{p} with no model must get NO --model flag, not the Claude default: {flags:?}"
+            );
+            assert_eq!(ccm, "", "{p} must not get CC_MODEL either: {ccm:?}");
+            assert_eq!(resolved, "", "and nothing to display as its model: {resolved:?}");
+        }
+
+        // CONTROL 1: an EXPLICIT model still wins, for any provider. The fix
+        // must not make non-Claude workers unconfigurable.
+        let (flags, _, resolved) = worker_model_env("gemini", "gemini-2.5-flash", "", "sonnet");
+        assert_eq!(flags, "--model gemini-2.5-flash");
+        assert_eq!(resolved, "gemini-2.5-flash");
+
+        // CONTROL 2: claude with no model STILL inherits the default. This is
+        // the cell that fails if someone "fixes" this by deleting the default.
+        let (flags, _, resolved) = worker_model_env("claude", "", "", "sonnet");
+        assert_eq!(flags, "--model sonnet", "claude must still get its default");
+        assert_eq!(resolved, "sonnet");
+    }
+
+    #[test]
+    fn worker_model_env_wires_ollama_to_cc_model_not_flags() {
+        // Ollama + a chosen model -> CC_MODEL, and NO --model in CC_FLAGS.
+        let (flags, model, resolved) = worker_model_env("ollama", "qwen3.8:27b", "", "opus");
+        assert_eq!(model, "qwen3.8:27b", "ollama model must be CC_MODEL");
+        assert!(flags.is_empty(), "ollama must not put --model in CC_FLAGS, got {flags:?}");
+        assert!(!flags.contains("--model"), "ollama CC_FLAGS must never carry --model");
+        assert_eq!(resolved, "qwen3.8:27b", "resolved model echoed to the response");
+        // POSITIVE CONTROL: identical inputs, codex provider -> the model DOES
+        // ride in CC_FLAGS as --model and CC_MODEL is empty. Proves the ollama
+        // branch actually diverges rather than the assertions being vacuous.
+        let (cflags, cmodel, cresolved) = worker_model_env("codex", "qwen3.8:27b", "", "opus");
+        assert_eq!(cflags, "--model qwen3.8:27b");
+        assert!(cmodel.is_empty(), "agent CLIs have no CC_MODEL");
+        assert_eq!(cresolved, "qwen3.8:27b");
+
+        // Ollama + NO model -> CC_MODEL empty (start uses the ollama default),
+        // and the CLAUDE default ("opus") must appear NOWHERE. This is the exact
+        // incident: pre-fix this produced CC_FLAGS="--model opus".
+        let (flags2, model2, resolved2) = worker_model_env("ollama", "", "", "opus");
+        assert!(model2.is_empty(), "no claude default in CC_MODEL for ollama");
+        assert!(flags2.is_empty(), "no claude default in CC_FLAGS for ollama");
+        assert!(!flags2.contains("opus") && resolved2 != "opus", "claude default leaked to an ollama worker");
+        // POSITIVE CONTROL: claude + no model DOES apply the default.
+        let (dflags, dmodel, _) = worker_model_env("claude", "", "", "opus");
+        assert_eq!(dflags, "--model opus", "claude default must apply to a claude worker");
+        assert!(dmodel.is_empty());
+
+        // Ollama + a NON-default local model is honoured, not dropped.
+        let (_, model3, _) = worker_model_env("ollama", "qwen2.5vl:7b", "", "opus");
+        assert_eq!(model3, "qwen2.5vl:7b", "a non-default ollama model pick must be kept");
+
+        // Explicit flags win for both, and ollama keeps its model in CC_MODEL.
+        let (eflags, emodel, _) = worker_model_env("ollama", "qwen3.8:27b", "--sandbox danger", "opus");
+        assert_eq!(eflags, "--sandbox danger", "explicit flags honoured verbatim (AMUX-3114)");
+        assert_eq!(emodel, "qwen3.8:27b", "ollama model stays in CC_MODEL alongside explicit flags");
+    }
+
+    /// The 2026-08-13 "task names are out of date" bug: a stale, UNSTAMPED
+    /// `task_summary` ("Luke's Wilderness Tales" on the Obsidian lane) outranked
+    /// the honest desc because summary had no freshness gate. The gate must make
+    /// an unstamped/stale summary lose to desc, while a fresh summary still wins.
+    #[test]
+    fn task_name_precedence_gates_a_stale_summary() {
+        // Unstamped/stale summary (summary_fresh=false), no board -> desc, NOT
+        // the frozen relic. This is the exact incident.
+        let (name, src) = resolve_task_name(None, false, "Luke's Wilderness Tales", false, "Ethan's personal notes");
+        assert_eq!(src, "desc", "a stale summary must not be the task name");
+        assert_eq!(name, "Ethan's personal notes");
+
+        // A FRESH summary still wins over desc — the gate does not kill the
+        // feature, only stale values.
+        let (name, src) = resolve_task_name(None, false, "Draft the county reply", true, "role desc");
+        assert_eq!(src, "summary");
+        assert_eq!(name, "Draft the county reply");
+
+        // A fresh board card outranks even a fresh summary (the ledger is truth).
+        let (name, src) = resolve_task_name(Some("AMUX-9 do the thing"), true, "a summary", true, "desc");
+        assert_eq!(src, "board");
+        assert_eq!(name, "AMUX-9 do the thing");
+
+        // Stale board beats desc but loses to a fresh summary; a stale summary
+        // with a stale board falls to the stale board (last resort before desc).
+        let (name, src) = resolve_task_name(Some("old board title"), false, "stale summary", false, "desc");
+        assert_eq!(src, "board");
+        assert_eq!(name, "old board title");
+
+        // Nothing anywhere -> desc, never an empty task claim from a blank summary.
+        let (name, src) = resolve_task_name(None, false, "", false, "just the role");
+        assert_eq!(src, "desc");
+        assert_eq!(name, "just the role");
+    }
+
+    /// ATE-92: a control/checkpoint turn does not release still-live causal
+    /// board work. Only terminal/released board state can let cardless win.
+    #[test]
+    fn a_live_claim_is_sticky_across_newer_cardless_markers() {
+        let mut doing = BTreeMap::new();
+        doing.insert("ATE-92".into(), ("lane".into(), "title".into(), 1));
+        let markers = vec![
+            (10.0, Some("ATE-92".into()), false, "task.claimed".into()),
+            (20.0, None, true, "task.cardless".into()),
+        ];
+        // The claim belongs to the prior runtime life; it is still current
+        // because its owned board row remains Doing. The newer control turn
+        // belongs to this life and cannot implicitly release it.
+        let selected = select_runtime_marker(&markers, 15.0, "lane", &doing);
+        assert_eq!(selected.marker.and_then(|marker| marker.1.as_deref()), Some("ATE-92"));
+        assert!(!selected.conflicting_live_claims);
+        assert!(selected.newer_cardless_suppressed);
+
+        // A terminal/released card no longer appears in Doing, so the later
+        // explicit cardless turn correctly becomes the runtime's truth.
+        let released = select_runtime_marker(&markers, 15.0, "lane", &BTreeMap::new());
+        assert!(released.marker.is_some_and(|marker| marker.2));
+        assert!(!released.conflicting_live_claims);
+        assert!(!released.newer_cardless_suppressed);
+
+        doing.insert("ATE-93".into(), ("lane".into(), "other".into(), 2));
+        let conflicting = vec![
+            (10.0, Some("ATE-92".into()), false, "task.claimed".into()),
+            (20.0, Some("ATE-93".into()), false, "task.claimed".into()),
+        ];
+        assert!(select_runtime_marker(&conflicting, 0.0, "lane", &doing).conflicting_live_claims);
+    }
+
+    #[test]
+    fn transport_intent_cannot_classify_substantive_work_as_cardless() {
+        assert!(cardless_event_allowed(&json!({"reason": "informational-query"})));
+        assert!(cardless_event_allowed(&json!({"reason": "control-prompt"})));
+        assert!(cardless_event_allowed(&json!({"reason": "peer-coordination"})));
+        for invalid in [
+            json!({}),
+            json!({"reason": "explicit-no-board"}),
+            json!({"reason": "substantive-work"}),
+        ] {
+            assert!(
+                !cardless_event_allowed(&invalid),
+                "Primis's substantive CARDLESS TURN shape must be rejected: {invalid}"
+            );
+        }
+    }
+
+    /// ATE-92: one decision owns the runtime/board join. These cells are the
+    /// whole contract: exact live attribution, explicit non-task exemption,
+    /// missing/invalid attribution, idle suppression, and a vanished worker.
+    #[test]
+    fn runtime_board_reconciliation_requires_exact_attribution_except_cardless_turns() {
+        let linked = reconcile_runtime_board(true, "active", Some("ATE-92"), true, false, false, 3);
+        assert_eq!(linked.status, "active");
+        assert_eq!(linked.card_id, "ATE-92");
+        assert!(linked.card_live);
+        assert_eq!(linked.verdict, "linked");
+        assert!(linked.measured);
+        assert_eq!(linked.n_considered, 3, "an exact claim beats unrelated Doing rows");
+        assert!(!linked.violation);
+
+        let conflicting = reconcile_runtime_board(true, "active", Some("ATE-92"), true, true, false, 2);
+        assert_eq!(conflicting.status, "unattributed");
+        assert_eq!(conflicting.verdict, "active-conflicting-claims");
+        assert!(conflicting.card_id.is_empty(), "two surviving exact claims must stay explicit ambiguity");
+        assert!(conflicting.violation);
+
+        let informational = reconcile_runtime_board(true, "active", None, false, false, true, 0);
+        assert_eq!(informational.status, "active");
+        assert_eq!(informational.verdict, "cardless-allowed");
+        assert!(!informational.card_live);
+        assert!(!informational.violation);
+
+        let missing = reconcile_runtime_board(true, "active", None, false, false, false, 2);
+        assert_eq!(missing.status, "unattributed");
+        assert_eq!(missing.verdict, "active-without-card");
+        assert!(missing.violation);
+        assert_eq!(missing.n_considered, 2);
+
+        let invalid = reconcile_runtime_board(true, "active", Some("ATE-OLD"), false, false, false, 1);
+        assert_eq!(invalid.status, "unattributed");
+        assert_eq!(invalid.verdict, "active-card-invalid");
+        assert!(invalid.card_id.is_empty(), "a stale/wrong card must not be exposed as live");
+        assert!(invalid.violation);
+
+        let idle = reconcile_runtime_board(true, "idle", Some("ATE-92"), true, false, false, 1);
+        assert_eq!(idle.status, "idle");
+        assert_eq!(idle.card_id, "ATE-92", "idle WIP remains visible but is not live");
+        assert!(!idle.card_live, "an idle runtime must never highlight its doing card");
+        assert_eq!(idle.verdict, "runtime-not-active");
+
+        let vanished = reconcile_runtime_board(false, "active", Some("ATE-92"), true, false, false, 1);
+        assert!(vanished.status.is_empty());
+        assert!(vanished.card_id.is_empty());
+        assert!(!vanished.card_live);
+        assert_eq!(vanished.verdict, "not-running");
+    }
+
+    /// AMUX-2904. A lane's Stop hook fires when the MAIN turn ends, so a lane
+    /// whose background agents are still working self-reports `idle` —
+    /// correctly about the turn, misleadingly about the lane. Measured
+    /// 2026-08-11: primis read `idle` with a subagent write 20s old.
+    ///
+    /// One-way, like the pane contradiction beside it: idle -> active only, so
+    /// a missed signal is a late correction and never a false "busy".
+    #[test]
+    fn a_lane_with_live_subagents_is_not_idle() {
+        let mut sig = signals();
+        sig.now = 1_000_000.0;
+        // CONTROL FIRST: with no subagent activity the lane stays idle, or the
+        // assertion below proves nothing.
+        assert!(!sig.subagents_working("primis"));
+
+        // A recent write contradicts `idle`.
+        sig.subagent_activity.insert("primis".into(), sig.now - 20.0);
+        assert!(sig.subagents_working("primis"), "a 20s-old subagent write must contradict idle");
+
+        // THE INCIDENT (2026-08-13): a subagent "still thinking with xhigh
+        // effort" writes nothing for a stretch, so its newest transcript write is
+        // minutes old while it is very much working. A 90s-old write is PAST the
+        // 60s contradiction_window that used to gate this — the lane read IDLE
+        // while crunching. It must now read as working (subagent cadence window).
+        sig.subagent_activity.insert("primis".into(), sig.now - 90.0);
+        assert!(
+            sig.subagents_working("primis"),
+            "a 90s-old subagent write (a thinking agent between writes) must still contradict idle"
+        );
+
+        // Stale activity does NOT. An agent that finished an hour ago is not
+        // evidence the lane is busy now — the window is generous, not unbounded.
+        sig.subagent_activity.insert("primis".into(), sig.now - 86_400.0);
+        assert!(!sig.subagents_working("primis"), "stale subagent activity must not pin a lane active");
+
+        // Scoped per lane.
+        sig.subagent_activity.insert("other".into(), sig.now - 5.0);
+        assert!(!sig.subagents_working("primis"));
+        assert!(sig.subagents_working("other"));
+    }
+
+    /// AMUX-3048: the EVENT-DRIVEN count, when a lane reports one, flips the lane
+    /// working even with NO recent transcript write — the xhigh-thinking case the
+    /// mtime window could not catch (AMUX-3030). Additive: a lane that reports no
+    /// subagent event (gemini/codex, or one that spawned none) is pure mtime.
+    #[test]
+    fn reported_subagent_count_drives_working_over_a_silent_mtime() {
+        let mut sig = signals();
+        sig.now = 1_000_000.0;
+        // CONTROL: no report, no mtime -> not working, or nothing below proves out.
+        assert!(!sig.subagents_working("primis"));
+
+        // A live count with NO transcript activity at all still reads working —
+        // exactly what the mtime window missed.
+        sig.reports = serde_json::json!({
+            "primis": {"state": "idle", "subagents": {
+                "count": 2, "live_ids": ["explore-1", "explore-2"], "ts": sig.now - 5.0
+            }}
+        });
+        assert!(
+            sig.subagents_working("primis"),
+            "a reported live count must contradict idle even with a silent transcript"
+        );
+        assert_eq!(
+            sig.reported_subagent_ids("primis"),
+            Some(vec!["explore-1".into(), "explore-2".into()]),
+            "the identities behind the count must survive into status diagnostics"
+        );
+
+        // Count back to 0 with no mtime -> not working (the count invents nothing).
+        sig.reports = serde_json::json!({
+            "primis": {"subagents": {"count": 0, "ts": sig.now - 5.0}}
+        });
+        assert!(!sig.subagents_working("primis"), "count 0 with no mtime must read idle");
+
+        // A hookless lane (no `subagents` key) is unaffected: pure mtime fallback.
+        sig.reports = serde_json::json!({"gemini-lane": {"state": "active"}});
+        sig.subagent_activity.insert("gemini-lane".into(), sig.now - 30.0);
+        assert!(sig.subagents_working("gemini-lane"), "hookless lane still uses the mtime window");
+        sig.subagent_activity.insert("gemini-lane".into(), sig.now - 86_400.0);
+        assert!(!sig.subagents_working("gemini-lane"), "stale mtime on a hookless lane reads idle");
+    }
+
+    #[test]
+    fn status_vocabulary_matches_python() {
+        assert_eq!(python_status(r#"{"state":"active","turn":null}"#), "active");
+        assert_eq!(python_status(r#"{"state":"idle","since":"x"}"#), "idle");
+        assert_eq!(python_status(r#"{"state":"rate_limited","reset_at":null}"#), "rate_limited");
+        assert_eq!(python_status(r#"{"state":"stopped"}"#), "");
+    }
+
+    pub(crate) fn signals() -> FleetSignals {
+        FleetSignals {
+            hookless_workers: BTreeSet::new(),
+            activity: BTreeMap::new(),
+            created: BTreeMap::new(),
+            running: BTreeSet::new(),
+            shell_only: BTreeSet::new(),
+            reports: serde_json::Value::Null,
+            subagent_activity: BTreeMap::new(),
+            transitions: BTreeMap::new(),
+            started: BTreeMap::new(),
+            codex_turns: BTreeMap::new(),
+            provider_child_activity: BTreeSet::new(),
+            provider_children_measured: true,
+            panes: BTreeMap::new(),
+            now: 1_000_000.0,
+        }
+    }
+
+    /// AF-82 / D1: `running` must honour a fresh self-report, not only the pane
+    /// scrape. A lane launched as a child of a wrapper shell scrapes shell_only,
+    /// but an `active` report 57s old means an agent IS running (the exact
+    /// ai-video-editor case). The scrape is the fallback; ignoring the report is
+    /// what showed a working lane as stopped.
+    #[test]
+    fn a_session_whose_panes_are_all_dead_is_not_running() {
+        use std::collections::BTreeSet;
+        let set = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>();
+
+        // THE INCIDENT: a worker whose pane died at launch. remain-on-exit keeps
+        // the session, so list-sessions still lists it and the lane read
+        // running:true/idle forever.
+        assert_eq!(
+            sessions_with_all_panes_dead("amux-corpse:1\n"),
+            set(&["amux-corpse"]),
+            "a session with only a dead pane hosts nothing"
+        );
+
+        // CONTROLS — each of these must be KEPT, and they are why this is not
+        // just `contains(\"1\")`.
+        assert!(
+            sessions_with_all_panes_dead("amux-alive:0\n").is_empty(),
+            "a live pane is a live session"
+        );
+        assert!(
+            sessions_with_all_panes_dead("amux-mixed:1\namux-mixed:0\n").is_empty(),
+            "PARTIAL DEATH IS NOT DEATH — a lane with a finished side pane is still working, \
+             and evicting it would take healthy lanes down with the corpses"
+        );
+
+        // FAIL OPEN. Unreadable or absent output must exclude NOTHING. This is
+        // the half that matters: a liveness filter which can empty the fleet is
+        // worse than the bug it fixes, and this card's own probe warning
+        // records what that looks like — "48 of 48 running lanes have no tmux
+        // session", absurd on its face and entirely an artifact.
+        for junk in ["", "\n\n", "garbage with no colon", ":1", "\n"] {
+            assert!(
+                sessions_with_all_panes_dead(junk).is_empty(),
+                "unreadable pane output must exclude nothing, got something for {junk:?}"
+            );
+        }
+
+        // A session name containing ':' still parses — the flag cannot contain
+        // one, so the LAST separator is the boundary.
+        assert_eq!(
+            sessions_with_all_panes_dead("weird:name:1\n"),
+            set(&["weird:name"]),
+            "split on the last ':', not the first"
+        );
+
+        // Realistic fleet shape: many live, one corpse.
+        let mut fleet = String::new();
+        for i in 0..49 {
+            fleet.push_str(&format!("amux-lane{i}:0\n"));
+        }
+        fleet.push_str("amux-deadlane:1\n");
+        assert_eq!(
+            sessions_with_all_panes_dead(&fleet),
+            set(&["amux-deadlane"]),
+            "exactly one corpse in a 50-session fleet — not zero, and NOT all 50"
+        );
+    }
+
+    #[test]
+    fn agent_running_honours_a_fresh_active_self_report_over_a_shell_scrape() {
+        let mut s = signals();
+        let tmux = "amux-avetest";
+        s.running.insert(tmux.into()); // the tmux session exists
+        s.shell_only.insert(tmux.into()); // but the pane scrapes as a bare shell
+        assert!(!s.agent_running(tmux), "shell scrape + no report reads not-running");
+
+        // A fresh active report from THIS life -> running, despite the shell scrape.
+        s.started.insert("avetest".into(), s.now - 1000.0);
+        s.reports = serde_json::json!({ "avetest": { "state": "active", "ts": s.now - 57.0 } });
+        assert!(s.agent_running(tmux), "a 57s-old active self-report means an agent is running");
+
+        // A PREVIOUS-LIFE report (before the session (re)started) must NOT count.
+        s.started.insert("avetest".into(), s.now - 10.0);
+        assert!(!s.agent_running(tmux), "a report from before the last start is a dead life");
+
+        // An idle report does not assert a live agent.
+        s.started.insert("avetest".into(), s.now - 1000.0);
+        s.reports = serde_json::json!({ "avetest": { "state": "idle", "ts": s.now - 5.0 } });
+        assert!(!s.agent_running(tmux), "an idle report does not make it running");
+
+        // A STALE active report (older than the live window) must NOT count.
+        s.reports = serde_json::json!({ "avetest": { "state": "active", "ts": s.now - 4000.0 } });
+        assert!(!s.agent_running(tmux), "a stale active report (>30min) is not a live agent");
+
+        // The session GONE: no report resurrects it.
+        s.running.clear();
+        s.reports = serde_json::json!({ "avetest": { "state": "active", "ts": s.now - 5.0 } });
+        assert!(!s.agent_running(tmux), "a report cannot resurrect a lane whose session is gone");
+
+        // Normal case: a non-shell foreground pane is running with no report at all.
+        s.running.insert(tmux.into());
+        s.shell_only.clear();
+        s.reports = serde_json::Value::Null;
+        assert!(s.agent_running(tmux), "a non-shell foreground pane is running");
+    }
+
+    #[test]
+    fn status_blank_when_not_running() {
+        let s = signals();
+        assert_eq!(s.derive_status("x", false), "");
+    }
+
+    #[test]
+    fn status_active_on_recent_activity_idle_otherwise() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), 999_970); // 30s ago
+        assert_eq!(s.derive_status("x", true), "active");
+        s.activity.insert("amux-x".into(), 999_000); // 1000s ago
+        assert_eq!(s.derive_status("x", true), "idle");
+    }
+
+    #[test]
+    fn status_prefers_persisted_transition_including_waiting() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), 999_000);
+        s.transitions.insert("x".into(), ("waiting".into(), 999_900.0));
+        assert_eq!(s.derive_status("x", true), "waiting");
+    }
+
+    #[test]
+    fn stale_active_transition_demotes_to_idle() {
+        let mut s = signals();
+        // Transition says active, but the pane has been silent 1000s (>120).
+        s.activity.insert("amux-x".into(), 999_000);
+        s.transitions.insert("x".into(), ("active".into(), 999_100.0));
+        assert_eq!(s.derive_status("x", true), "idle");
+    }
+
+    #[test]
+    fn pre_restart_transition_is_discarded() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), 999_970);
+        s.transitions.insert("x".into(), ("waiting".into(), 900.0));
+        s.started.insert("x".into(), 999_000.0); // restarted AFTER the event
+        assert_eq!(s.derive_status("x", true), "active"); // falls to activity
+    }
+
+    #[test]
+    fn self_report_overrides_with_asymmetric_freshness() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), 999_970); // scrape would say active
+        // A 4h-old idle report STILL wins (idle does not decay, py:20233).
+        s.reports = json!({"x": {"state": "idle", "ts": 985_600.0, "source": "stop-hook"}});
+        assert_eq!(s.derive_status("x", true), "idle");
+        // A 4h-old ACTIVE report licenses nothing (heartbeat lapsed).
+        s.reports = json!({"x": {"state": "active", "ts": 985_600.0, "source": "hb"}});
+        s.activity.insert("amux-x".into(), 999_000);
+        assert_eq!(s.derive_status("x", true), "idle");
+        // A fresh waiting report wins over the activity fallback.
+        s.reports = json!({"x": {"state": "waiting", "ts": 999_990.0, "source": "hook"}});
+        assert_eq!(s.derive_status("x", true), "waiting");
+    }
+
+    /// A report from BEFORE the session's last (re)start is a PREVIOUS LIFE
+    /// and licenses nothing — live specimen 2026-08-11: board-exp-1 switched
+    /// claude -> codex, and its hours-old claude `idle` report (24h idle
+    /// window) outranked the codex trust picker on the pane, reading a lane
+    /// blocked on input as idle. The control half: the same report with no
+    /// restart after it keeps its authority.
+    #[test]
+    fn a_report_from_before_the_last_restart_is_a_previous_life() {
+        let mut s = signals();
+        // Pane paints a picker; activity fresh so the pane is admissible.
+        s.activity.insert("amux-x".into(), 999_970);
+        s.panes.insert("x".into(), "Do you trust this directory?\n\u{203a} 1. Yes, continue\n  2. No, quit\n  Press enter to continue".into());
+        // CONTROL: a FRESH idle report (inside the contradiction window) with
+        // no restart recorded still wins over the picker on the pane — the
+        // report is the D1 authority and this is the report/repaint race.
+        //
+        // This control used to use a 4h-OLD idle report and expect "idle".
+        // That pinned the exact defect Ethan hit live on tubescience
+        // (2026-08-11): a stale idle outranking a visible AskUserQuestion
+        // picker, with him pressing Enter into a lane nothing had flagged as
+        // waiting. The waiting-contradiction now lets the pane show through
+        // once the report is older than the window, so the control moves
+        // INSIDE the window — which is what "no restart, report wins" was
+        // always supposed to mean.
+        s.reports = json!({"x": {"state": "idle", "ts": 999_970.0, "source": "stop-hook"}});
+        assert_eq!(s.derive_status("x", true), "idle");
+        // A STALE idle report (4h) over the same picker: the pane's waiting
+        // shows through — no restart needed. This is tonight's fix.
+        s.reports = json!({"x": {"state": "idle", "ts": 985_600.0, "source": "stop-hook"}});
+        assert_eq!(s.derive_status("x", true), "waiting");
+        // The lane restarted AFTER the report (provider switch): the report
+        // is void and the pane's waiting shows through.
+        s.started.insert("x".into(), 999_000.0);
+        assert_eq!(s.derive_status("x", true), "waiting");
+    }
+
+    /// A lane parked on a 5xx banner reads `api_error`, not `idle` (Ethan
+    /// 2026-08-18, @backend). End-to-end through derive_status: the pane shows
+    /// the 529 banner with no spinner, so every existing signal says idle and
+    /// the override is what lifts it out of the parked bucket where a sweep
+    /// cannot find it. The control: a lane actively RETRYING (spinner in the
+    /// tail) is genuine work and stays `active` — the override never fires over
+    /// active.
+    #[test]
+    fn a_lane_parked_on_a_5xx_banner_reads_api_error() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), 999_970); // fresh: pane admissible
+        s.panes.insert(
+            "x".into(),
+            "\u{23fa} Running the migration\n\
+             \u{23fa} API Error: 529 Overloaded. This is a server-side issue, usually temporary \u{2014} try again in a moment...\n\
+             \u{276f} "
+                .into(),
+        );
+        assert_eq!(s.derive_status("x", true), "api_error");
+        // CONTROL: actively retrying (spinner present) is genuine work.
+        s.panes.insert(
+            "x".into(),
+            "\u{23fa} API Error: 529 Overloaded. retrying...\n\u{273b} Crunching\u{2026} (3s)\n\u{276f} "
+                .into(),
+        );
+        assert_eq!(s.derive_status("x", true), "active");
+    }
+
+    #[test]
+    fn a_fresh_idle_report_outranks_the_subagent_window() {
+        // gtm-engine, 2026-08-13 (Ethan: "says working but it appears done"):
+        // the main turn ENDED — a stop-hook posted a fresh idle report and the
+        // pane showed "✻ Crunched for 1m 7s" at an empty prompt — but a
+        // BACKGROUND subagent had written 30s ago, inside the 240s
+        // AMUX_SUBAGENT_WORKING_S window. The subagent contradiction flipped
+        // idle->active with NO report-age gate (the pane and waiting
+        // contradictions both have one), so the header read WORKING for up to
+        // 240s after the turn was done. FAILS on the pre-fix code (active),
+        // passes on the gated rule (idle).
+        let mut s = signals();
+        s.reports = json!({"x": {"state": "idle", "ts": s.now - 30.0, "source": "stop-hook"}});
+        s.subagent_activity.insert("x".into(), s.now - 30.0);
+        assert_eq!(
+            s.derive_status("x", true),
+            "idle",
+            "a fresh stop-hook idle report (main turn stopped -> foreground \
+             subagents finished) outranks the subagent-mtime window"
+        );
+
+        // AMUX-2904 PRESERVED: a main turn ACTIVE with foreground subagents has
+        // not stopped, so there is NO fresh idle report (idle_report_age None ->
+        // unwrap_or(true)) and live subagents still flip idle->active.
+        let mut s = signals();
+        s.subagent_activity.insert("x".into(), s.now - 30.0);
+        assert_eq!(
+            s.derive_status("x", true),
+            "active",
+            "with no fresh idle report, live subagents still flip idle->active"
+        );
+
+        // BOUNDED LATE CORRECTION: once the idle report ages past the
+        // contradiction window (60s), a still-writing subagent flips it active —
+        // the generous window's only documented cost, unchanged by the gate.
+        let mut s = signals();
+        s.reports = json!({"x": {"state": "idle", "ts": s.now - 120.0, "source": "stop-hook"}});
+        s.subagent_activity.insert("x".into(), s.now - 30.0);
+        assert_eq!(
+            s.derive_status("x", true),
+            "active",
+            "a stale idle report (past the window) lets live subagents show through"
+        );
+    }
+
+    #[test]
+    fn preview_lines_is_a_filtered_array_of_strings() {
+        let raw = "\u{1b}[1mDoing the work\u{1b}[0m\n\
+                   ⏵⏵ bypass permissions on\n\
+                   ══════════════════════\n\
+                   ok\n\
+                   Implemented the fix in board.rs\n\
+                   x\n";
+        let (preview, lines) = preview_of(raw);
+        // Scalar preview: last intelligible line (skips ⏵⏵, short, low-alnum).
+        assert_eq!(preview, "Implemented the fix in board.rs");
+        // Array: bars (low alnum ratio), the ⏵⏵ line, and <=2-char lines
+        // are dropped; ANSI is stripped from kept lines.
+        assert_eq!(lines, vec!["Doing the work", "Implemented the fix in board.rs"]);
+    }
+
+    #[test]
+    fn preview_skips_status_bar_line() {
+        let raw = "Some output text\n\
+                   \u{276f}\u{a0}\n\
+                   ──────\n\
+                   \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)\n";
+        let (preview, _) = preview_of(raw);
+        assert_eq!(preview, "Some output text");
+    }
+
+    #[test]
+    fn preview_lines_falls_back_to_raw_tail_when_nothing_intelligible() {
+        // Every line >3 chars with alnum ratio < 0.3 -> nothing intelligible.
+        let raw = "════\n────\n╭──╮\n";
+        let (_, lines) = preview_of(raw);
+        // Fallback keeps the stripped non-empty tail lines (py:20314-20316).
+        assert_eq!(lines, vec!["════", "────", "╭──╮"]);
+    }
+
+    #[test]
+    fn preview_truncates_at_python_lengths() {
+        let long = "a".repeat(300);
+        let (preview, lines) = preview_of(&long);
+        assert_eq!(preview.chars().count(), 120);
+        assert_eq!(lines[0].chars().count(), 200);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AMUX-2646 — "it is running but says idle".
+//
+// The frames below are VERBATIM captures of the live fleet on 2026-08-09,
+// not constructed ones. That matters: the convenient fixture is convenient
+// precisely because it lacks the property that made the incident. Two of
+// these were built by hand first and were wrong in ways that would have made
+// the suite pass against the bug —
+//
+//   * a "generating" frame with `esc to interrupt` on the bar. The lane that
+//     was actually mislabelled (`amux-rust`) had NO such bar; its only mark
+//     was a live spinner. A suite built on the first frame alone would have
+//     been green against the specimen it exists for.
+//   * an "idle with background agents" frame carrying `esc to interrupt` on
+//     the bar — the shape of the theory `pane_bar_says_generating` records
+//     itself REJECTING ("empty ❯ + esc to interrupt = idle with background
+//     agents"). Whether that frame exists decides whether the override below
+//     is safe at all, and it had never been measured either way. It was here:
+//     across four live lanes, this Claude Code build prints `esc to interrupt`
+//     only while the MAIN turn is generating — an idle lane with two agents
+//     shows `⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents` and
+//     a completed-turn marker (`✻ Churned for 2m 57s`). So the bar is a sound
+//     work signal, and the rejection in that function was right for a reason
+//     nobody had confirmed. IDLE_WITH_AGENTS below is the real frame; if a
+//     future Claude Code starts painting `esc to interrupt` for background
+//     agents, that test goes red and this override needs rethinking, which is
+//     the whole point of keeping the frame rather than a paraphrase of it.
+// ---------------------------------------------------------------------------
+
+/// What [`ensure_work_dir`] decided about the `dir` field on worker creation.
+pub(crate) enum WorkDirOutcome {
+    /// Empty (inherit) or already a directory.
+    Ok,
+    /// Did not exist and was created.
+    Created,
+    /// Cannot be used, with the sentence the user sees.
+    Refused(String),
+}
+
+/// Resolve the working directory a new worker asked for, CREATING it when it is
+/// missing (Ethan, 2026-08-22: "it should create the folder/dir if it doesnt
+/// exist").
+///
+/// Refusing was the wrong shape for what the user had just done: naming a
+/// directory in the create form IS the instruction for where this worker should
+/// work, and answering "it does not exist" hands back a fact they already know,
+/// with no way forward except leaving the dialog, running `mkdir -p` by hand and
+/// starting over.
+///
+/// Pure, so the four cases are testable without standing up the router — the
+/// handler only maps the outcome to a status code. Three of them are separated
+/// deliberately, because the single old message was FALSE about two:
+///
+/// - exists as a FILE: creation is impossible, and "does not exist" was simply
+///   untrue about that path.
+/// - creation FAILED (permissions, read-only mount): name which, with the OS
+///   error, instead of the generic refusal.
+/// - RELATIVE path: still refused, and this is the one restriction added rather
+///   than removed. `create_dir_all` on a relative path resolves against the
+///   SERVER's cwd, so accepting one would silently create a directory somewhere
+///   nobody was looking — a typo would succeed and the worker would run in the
+///   wrong place. A relative path does not name a location from here.
+pub(crate) fn ensure_work_dir(dir: &str) -> WorkDirOutcome {
+    if dir.is_empty() {
+        return WorkDirOutcome::Ok;
+    }
+    let p = std::path::Path::new(dir);
+    if p.is_dir() {
+        return WorkDirOutcome::Ok;
+    }
+    if p.exists() {
+        return WorkDirOutcome::Refused(format!(
+            "'{dir}' exists but is not a directory — pick another working directory"
+        ));
+    }
+    if !p.is_absolute() {
+        return WorkDirOutcome::Refused(format!(
+            "working directory '{dir}' does not exist and is not an absolute path — give a \
+             full path (e.g. /Users/you/Projects/thing) and it will be created"
+        ));
+    }
+    match std::fs::create_dir_all(p) {
+        Ok(()) => WorkDirOutcome::Created,
+        Err(e) => WorkDirOutcome::Refused(format!(
+            "could not create working directory '{dir}': {e}"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod status_truth {
+    use super::tests::signals;
+    use super::*;
+
+    /// Live `amux`, mid-turn: spinner AND `esc to interrupt` on the bar.
+    const WORKING_BAR: &str = "\
+2436    const _active = document.activeElement;
+\u{273b} Doing\u{2026} (3m 56s \u{b7} \u{2193} 6.8k tokens)
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+\u{276f}
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} esc to interrupt \u{b7} \u{2190} 2 agents";
+
+    /// Live `amux-rust`, mid-turn — THE SPECIMEN. Nothing on the status bar;
+    /// the spinner is the only evidence. This is the lane that showed `idle`
+    /// on its card for 1076s while it was demonstrably working.
+    const WORKING_SPINNER_ONLY: &str = "\
+\u{273b} Nesting\u{2026} (4m 24s \u{b7} \u{2193} 6.4k tokens)
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+\u{276f} [05:08 PM] this worker is doing work but there isnt anything in inprogress
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)";
+
+    /// Live `amux-frustrations`: genuinely idle, two BACKGROUND agents still
+    /// running. The completed-turn marker (`for 2m 57s`), an empty composer,
+    /// and no `esc to interrupt`. This is the frame that must NOT be read as
+    /// work, or every finished lane with agents flips to active forever.
+    const IDLE_WITH_AGENTS: &str = "\
+  Left at done, not verified \u{2014} live behaviour confirmed.
+\u{273b} Churned for 2m 57s
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+\u{276f}
+\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 2 agents";
+
+    /// Live `uitest-a`: the agent exited, tmux session still up.
+    const SHELL_PROMPT: &str = "\
+tmp$ unset ANTHROPIC_API_KEY
+tmp$ claude --model claude-opus-4-6 --dangerously-skip-permissions
+Resume this session with:
+claude --resume \"uitest-a\"
+tmp$";
+
+    /// A permission selector — waiting on a human, not working.
+    const WAITING_SELECTOR: &str = "\
+Do you want to proceed?
+\u{276f} 1. Yes
+  2. No, and tell Claude what to do differently (esc)
+  \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle)";
+
+    /// The usage-limit menu (D2). Also a human decision, never work.
+    const RATE_LIMIT_MENU: &str = "\
+Claude usage limit reached. Your limit will reset at 3pm.
+\u{276f} 1. Wait and continue
+  2. Switch to a different model";
+
+    /// A herdr lane MID-TURN. herdr refuses a history read while it is
+    /// working, so the capture is empty BY DESIGN — the one frame where
+    /// "no markers" must not mean "idle".
+    const HERDR_MID_TURN: &str = "";
+
+    /// One row of the truth table.
+    struct Case {
+        what: &'static str,
+        /// (state, age_s, source)
+        report: Option<(&'static str, f64, &'static str)>,
+        /// (state, age_s)
+        transition: Option<(&'static str, f64)>,
+        pane: Option<&'static str>,
+        /// How long ago the pane last painted.
+        activity_age_s: f64,
+        running: bool,
+        expect: &'static str,
+    }
+
+    fn run(c: &Case) -> String {
+        let mut s = signals();
+        s.activity.insert("x".into(), 0); // never matched: keys are `amux-<n>`
+        s.activity.insert("amux-x".into(), (s.now - c.activity_age_s) as i64);
+        if c.running {
+            s.running.insert("amux-x".into());
+        }
+        if let Some((st, age, src)) = c.report {
+            s.reports = json!({"x": {"state": st, "ts": s.now - age, "source": src}});
+        }
+        if let Some((st, age)) = c.transition {
+            s.transitions.insert("x".into(), (st.into(), s.now - age));
+        }
+        if let Some(p) = c.pane {
+            s.panes.insert("x".into(), p.into());
+        }
+        s.derive_status("x", c.running)
+    }
+
+    /// AMUX-3434: the explanation must NAME the rule that decided, and its
+    /// evidence must be what the verdict actually weighed. The AMUX-3426/2646
+    /// specimen (stale idle report + working pane) explains as the
+    /// contradiction firing; a FRESH idle report explains as report-trusted
+    /// with the gate closed — the two cells a screenshot investigation had to
+    /// reconstruct by hand.
+    #[test]
+    fn status_explain_names_the_deciding_rule_and_its_evidence() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), (s.now - 1.0) as i64);
+        s.running.insert("amux-x".into());
+        s.reports =
+            json!({"x": {"state": "idle", "ts": s.now - 1076.0, "source": "stop-hook-test"}});
+        s.panes.insert("x".into(), WORKING_BAR.into());
+        let (status, ex) = s.derive_status_explain("x", true);
+        assert_eq!(status, "active");
+        assert_eq!(ex["decided_by"], json!("contradiction_pane_generating"), "{ex}");
+        assert_eq!(ex["report"]["state"], json!("idle"));
+        assert_eq!(ex["report"]["applied"], json!(true));
+        assert!(ex["report"]["age_s"].as_f64().unwrap() > 1000.0, "{ex}");
+        assert!(ex["report"]["trust_window_s"].as_f64().unwrap() > 0.0, "{ex}");
+        assert_eq!(ex["idle_contradiction_gate_open"], json!(true), "{ex}");
+        assert_eq!(ex["pane"]["says_working"], json!(true), "{ex}");
+
+        // A FRESH idle report: trusted, gate closed, no contradiction — the
+        // report/repaint race grace window, now legible.
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), (s.now - 1.0) as i64);
+        s.running.insert("amux-x".into());
+        s.reports = json!({"x": {"state": "idle", "ts": s.now - 3.0, "source": "stop-hook"}});
+        s.panes.insert("x".into(), WORKING_BAR.into());
+        let (status, ex) = s.derive_status_explain("x", true);
+        assert_eq!(status, "idle");
+        assert_eq!(ex["decided_by"], json!("report"), "{ex}");
+        assert_eq!(ex["idle_contradiction_gate_open"], json!(false), "{ex}");
+
+        // Not running explains itself rather than returning a bare "".
+        let s = signals();
+        let (status, ex) = s.derive_status_explain("x", false);
+        assert_eq!(status, "");
+        assert_eq!(ex["decided_by"], json!("not_running"));
+    }
+
+    #[test]
+    fn codex_rollout_lifecycle_overrides_stale_tmux_activity() {
+        let mut s = signals();
+        s.running.insert("amux-codex-lane".into());
+        s.activity.insert("amux-codex-lane".into(), (s.now - 2_500.0) as i64);
+        s.started.insert("codex-lane".into(), s.now - 300.0);
+        s.codex_turns.insert(
+            "codex-lane".into(),
+            crate::api::session_verbs::CodexTurnSignal {
+                state: "active".into(),
+                ts: s.now - 120.0,
+                heartbeat_ts: s.now - 2.0,
+                boundary: "task_started".into(),
+                rollout_file: Some("rollout-codex-lane.jsonl".into()),
+            },
+        );
+        let (status, ex) = s.derive_status_explain("codex-lane", true);
+        assert_eq!(
+            status, "active",
+            "structured turn-start must beat a 41-minute-old tmux clock: {ex}"
+        );
+        assert_eq!(ex["decided_by"], json!("codex_rollout"));
+        assert_eq!(ex["codex_rollout"]["applied"], json!(true));
+        assert_eq!(ex["codex_rollout"]["rollout_file"], json!("rollout-codex-lane.jsonl"));
+
+        let signal = s.codex_turns.get_mut("codex-lane").unwrap();
+        signal.state = "idle".into();
+        signal.boundary = "task_complete".into();
+        let (status, ex) = s.derive_status_explain("codex-lane", true);
+        assert_eq!(status, "idle", "task-complete is the provider's terminal truth: {ex}");
+        assert_eq!(ex["decided_by"], json!("codex_rollout"));
+
+        s.started.insert("codex-lane".into(), s.now - 10.0);
+        let (status, ex) = s.derive_status_explain("codex-lane", true);
+        assert_eq!(status, "idle", "pre-restart rollout evidence must be ignored: {ex}");
+        assert_eq!(ex["codex_rollout"]["applied"], json!(false));
+        assert_ne!(ex["decided_by"], json!("codex_rollout"));
+    }
+
+    /// Primis live acceptance, 2026-09-08: the parent Codex turn had stopped
+    /// producing provider events 56 minutes earlier and both named subagents
+    /// were historical, but Codex kept repainting `Working (11h 27m)`. Pane
+    /// mtime and churn therefore looked fresh forever. The worker is active
+    /// only with a bounded rollout heartbeat or a process below native Codex.
+    #[test]
+    fn stale_codex_parent_and_historical_children_cannot_hold_working() {
+        let lane = "primis";
+        let frame = "\
+• Interacted with `/root/video_media_hydration_fix`
+• Interacted with `/root/cache_invalidation_root`
+• Working (11h 27m • esc to interrupt)
+› Ask Codex to do anything
+  gpt-6-astra xhigh · ~/Dev/mixpeek/customers/primis";
+        let mut s = signals();
+        s.running.insert(format!("amux-{lane}"));
+        s.started.insert(lane.into(), s.now - 12.0 * 3600.0);
+        // The footer counter repaints every second even though no work event
+        // has landed for nearly an hour.
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.panes.insert(lane.into(), frame.into());
+        s.reports = json!({lane: {
+            "state": "idle", "ts": s.now - 13.0 * 3600.0,
+            "subagents": {"count": 0, "live_ids": []}
+        }});
+        s.codex_turns.insert(
+            lane.into(),
+            crate::api::session_verbs::CodexTurnSignal {
+                state: "active".into(),
+                ts: s.now - 11.5 * 3600.0,
+                heartbeat_ts: s.now - 56.0 * 60.0,
+                boundary: "task_started".into(),
+                rollout_file: None,
+            },
+        );
+
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "stale provider chrome is not a current turn: {ex}");
+        assert_eq!(ex["decided_by"], json!("codex_stale_active_refused"), "{ex}");
+        assert_eq!(ex["codex_rollout"]["heartbeat_fresh"], json!(false), "{ex}");
+        assert_eq!(ex["codex_rollout"]["tool_child_running"], json!(false), "{ex}");
+        assert_eq!(ex["subagents_live"], json!(0), "{ex}");
+
+        s.provider_child_activity.insert(lane.into());
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "active", "a real tool descendant is positive live evidence: {ex}");
+        assert_eq!(ex["codex_rollout"]["tool_child_running"], json!(true), "{ex}");
+    }
+
+    #[test]
+    fn quiet_hookless_gemini_still_has_a_measurable_boundary() {
+        let mut s = signals();
+        let lane = "gemini-boundary";
+        s.hookless_workers.insert(lane.into());
+        let frame = include_str!("../../tests/fixtures/boundary/gemini-0.58-idle.txt");
+        s.running.insert(format!("amux-{lane}"));
+        s.activity.insert(format!("amux-{lane}"), (s.now - 7200.0) as i64);
+        s.panes.insert(lane.into(), frame.into());
+        assert!(s.pane_probe_candidate(lane), "a quiet hookless worker must still be probed");
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("idle"));
+        s.panes.insert(lane.into(), format!("⠙ Thinking... (esc to cancel, 9s)\n{frame}"));
+        assert_ne!(s.turn_boundary_status(lane).as_deref(), Some("idle"));
+        s.panes.insert(lane.into(), String::new());
+        assert!(s.turn_boundary_status(lane).is_none());
+        s.panes.clear();
+        assert!(s.turn_boundary_status(lane).is_none());
+    }
+
+    #[test]
+    fn fresh_claude_without_a_hook_keeps_its_quiet_composer_observable() {
+        let mut s=signals(); let lane="fresh-claude";
+        s.running.insert(format!("amux-{lane}"));
+        s.activity.insert(format!("amux-{lane}"),(s.now-7200.0) as i64);
+        assert!(no_current_hook_report(None,s.now-100.0));
+        assert!(no_current_hook_report(Some(&json!({"state":"idle","ts":s.now-200.0})),s.now-100.0));
+        assert!(!no_current_hook_report(Some(&json!({"state":"idle","ts":s.now-50.0})),s.now-100.0));
+        if no_current_hook_report(None,s.now-100.0) { s.hookless_workers.insert(lane.into()); }
+        s.panes.insert(lane.into(),"Claude Code\n❯ \n────────────────────\n⏵⏵ bypass permissions on (shift+tab to cycle) · ← 5 agents".into());
+        assert_eq!(s.turn_boundary_status(lane).as_deref(),Some("idle"));
+        s.panes.insert(lane.into(),WORKING_BAR.into());
+        assert_ne!(s.turn_boundary_status(lane).as_deref(),Some("idle"));
+        s.panes.insert(lane.into(),String::new());
+        assert!(s.turn_boundary_status(lane).is_none());
+    }
+
+    #[test]
+    fn boundary_and_workers_share_structured_codex_truth_and_fail_closed() {
+        let mut s = signals();
+        let lane = "boundary";
+        s.running.insert(format!("amux-{lane}"));
+        s.activity.insert(format!("amux-{lane}"), s.now as i64);
+        s.started.insert(lane.into(), s.now - 7200.0);
+        s.reports = json!({lane: {"state":"idle", "ts":s.now - 7300.0, "subagents":{"count":0}}});
+        s.panes.insert(lane.into(), "• Working (1h • esc to interrupt)\n› Ask Codex to do anything\n  gpt-6-astra xhigh · /tmp".into());
+        s.codex_turns.insert(lane.into(), crate::api::session_verbs::CodexTurnSignal {
+            state: "active".into(), ts: s.now - 3600.0, heartbeat_ts: s.now - 3500.0, boundary: "task_started".into(),
+            rollout_file: None,
+        });
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("idle"));
+        assert_eq!(s.derive_status(lane, true), "idle");
+        s.provider_children_measured = false;
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("active"), "missing process probe must hold");
+        s.provider_children_measured = true;
+        s.codex_turns.get_mut(lane).unwrap().heartbeat_ts = s.now;
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("active"));
+        s.codex_turns.get_mut(lane).unwrap().heartbeat_ts = s.now - 3500.0;
+        s.provider_child_activity.insert(lane.into());
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("active"));
+        s.provider_child_activity.clear();
+        s.reports[lane]["subagents"]["count"] = json!(1);
+        assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("active"));
+        s.reports[lane]["subagents"]["count"] = json!(0);
+        for edge in ["task_complete", "turn_aborted"] {
+            let signal = s.codex_turns.get_mut(lane).unwrap();
+            signal.state = "idle".into(); signal.boundary = edge.into();
+            assert_eq!(s.turn_boundary_status(lane).as_deref(), Some("idle"), "{edge}");
+        }
+        s.codex_turns.clear(); s.panes.clear(); s.reports = json!({});
+        assert!(s.turn_boundary_status(lane).is_none(), "no structured or pane evidence is not permission");
+        s.running.clear();
+        assert!(s.turn_boundary_status(lane).is_none());
+    }
+
+    #[test]
+    fn codex_tool_child_is_resolved_below_provider_not_from_provider_existence() {
+        let roots = vec![("primis".to_string(), "100".to_string())];
+        let idle = "100 1 S bash\n110 100 S node\n120 110 S /opt/codex\n";
+        assert!(sessions_with_codex_tool_children(&roots, idle).is_empty());
+        let sleeping_helper = format!("{idle}125 120 S mcp-server\n");
+        assert!(sessions_with_codex_tool_children(&roots, &sleeping_helper).is_empty());
+        let active = format!("{sleeping_helper}130 120 S cargo\n131 130 R rustc\n");
+        assert_eq!(
+            sessions_with_codex_tool_children(&roots, &active),
+            BTreeSet::from(["primis".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_codex_interrupted_turn_is_a_durable_terminal_edge_at_the_prompt() {
+        // ATE-45 live frame, 2026-09-04 16:28. The pane had returned to the
+        // provider's empty prompt, but the rollout's latest recognized event
+        // was still task_started because the real `turn_aborted` edge was
+        // ignored. That pinned both Workers surfaces WORKING until another turn
+        // eventually completed. The rollout boundary, not an mtime grace, owns
+        // this answer.
+        let lane = "ate45-codex-interrupted";
+        let frame = "\
+• Confirmed: b228d3dc is on origin/main, and live /health reports descendant commit b228d3dc1f03173fbccd07d7a36e0fbcdf10c5ef (build 73beeb35e4a579e2). Awaiting your browser reruns.
+
+• Ran amux board discard ATE-52 --outcome-stdin
+  └ ATE-52 → discarded
+
+■ Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.
+
+› Ask Codex to do anything
+
+  gpt-5.6-sol xhigh · ~/Dev/amux · Main [default]";
+        let mut s = signals();
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.started.insert(lane.into(), s.now - 300.0);
+        s.reports = json!({lane: {
+            "state": "idle", "ts": s.now - 1607.0, "source": "stop-hook"
+        }});
+        s.panes.insert(lane.into(), frame.into());
+        s.codex_turns.insert(
+            lane.into(),
+            crate::api::session_verbs::CodexTurnSignal {
+                state: "idle".into(),
+                ts: s.now - 1.0,
+                heartbeat_ts: s.now - 1.0,
+                boundary: "turn_aborted".into(),
+                rollout_file: None,
+            },
+        );
+
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "turn_aborted must close the live rollout: {ex}");
+        assert_eq!(ex["decided_by"], json!("codex_rollout"), "{ex}");
+        assert_eq!(ex["codex_rollout"]["boundary"], json!("turn_aborted"), "{ex}");
+        assert_eq!(ex["subagents_live"], serde_json::Value::Null, "{ex}");
+        assert_eq!(ex["provider_background_working"], json!(false), "{ex}");
+        assert_eq!(ex["subagents_working"], json!(false), "{ex}");
+    }
+
+    // ── AMUX-3896: a FRESH idle claim is falsifiable too ────────────────────
+    //
+    // Ethan, 2026-08-29 22:54: "tubescience worker says idle but its not". That
+    // lane's own status-explain history holds the derivation: status=idle,
+    // decided_by=report, a stop-hook `idle` 8.8s old, over a pane with a spinner
+    // and 20 distinct content frames. It read idle for 49s while generating,
+    // because the contradiction window (60s) refuses the pane's evidence until
+    // the claim is a minute old — and the normal amux flow (turn ends, next turn
+    // starts at once from queued input or standing orders) lives entirely inside
+    // that minute. 8 of 57 running lanes carried the same shape when sampled.
+    //
+    // These three cases are the whole discriminator: work redraws AFTER the
+    // claim, a stale post-Stop frame does not, and frames from BEFORE the claim
+    // are the finished turn's and may never vote.
+
+    /// One planted frame per element, spaced 1s apart, ending `newest_age_s`
+    /// ago. Distinct `body` values are what make a frame count as a redraw —
+    /// `pane_content_hash` ignores the bottom bar, so the varying line has to be
+    /// above it.
+    fn plant_frames(lane: &str, now: f64, bodies: &[&str], newest_age_s: f64) {
+        for (i, b) in bodies.iter().rev().enumerate() {
+            let frame = format!(
+                "{b}\n\u{273b} Doing\u{2026} (3m 56s \u{b7} \u{2193} 6.8k tokens)\n\
+                 \u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f}\n\u{2500}\u{2500}\u{2500}\u{2500}\n\
+                 \u{23f5}\u{23f5} bypass permissions on \u{b7} esc to interrupt \u{b7} \u{2190} 2 agents"
+            );
+            super::note_pane_frame(lane, &frame, now - newest_age_s - i as f64, 600.0);
+        }
+    }
+
+    fn fresh_idle_lane(lane: &str, claim_age_s: f64) -> FleetSignals {
+        let mut s = signals();
+        s.activity
+            .insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports = json!({lane: {"state": "idle", "ts": s.now - claim_age_s, "source": "stop-hook"}});
+        s.panes.insert(lane.into(), WORKING_BAR.into());
+        s
+    }
+
+    /// THE FIX. A spinner plus two distinct frames recorded since the claim is
+    /// evidence a frozen frame cannot manufacture, so the lane reads working —
+    /// and the verdict names the narrow rule, not the aged one.
+    #[test]
+    fn a_fresh_idle_claim_loses_to_a_pane_that_redrew_since_the_claim() {
+        let lane = "t3896-redrew";
+        let s = fresh_idle_lane(lane, 9.0);
+        plant_frames(lane, s.now, &["frame one", "frame two"], 1.0);
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "active", "a generating lane must not read idle: {ex}");
+        assert_eq!(ex["decided_by"], json!("contradiction_pane_redrew_since_claim"), "{ex}");
+        assert_eq!(ex["idle_contradiction_gate_open"], json!(false), "the 60s gate is still shut: {ex}");
+        assert_eq!(ex["fresh_idle_contradicted"], json!(true), "{ex}");
+        assert!(ex["churn_since_claim"].as_u64().unwrap() >= 2, "{ex}");
+    }
+
+    /// AMUX-4024, THE FALSE IDLE. A lane blocked on a BACKGROUND agent, with a
+    /// fresh stop-hook `idle` — which is not a contradiction but the expected
+    /// pair, because yielding to a background agent ends the main turn and
+    /// fires the stop hook while the agent keeps running.
+    ///
+    /// Ethan, 2026-08-30: tubescience read IDLE with its pane on "Waiting for 1
+    /// background agent to finish". The pane is deliberately IDLE_WITH_AGENTS
+    /// here — no spinner, nothing for a string rule to find, which is what such
+    /// a lane actually looks like once the main loop stops generating. The
+    /// reported count is the only evidence, and it must not have to wait out
+    /// the 60s window.
+    #[test]
+    fn a_reported_live_subagent_beats_a_fresh_idle_claim() {
+        let lane = "t4024-bg";
+        let mut s = fresh_idle_lane(lane, 9.0);
+        s.panes.insert(lane.into(), IDLE_WITH_AGENTS.into());
+        s.reports[lane]["subagents"] =
+            json!({"count": 1, "live_ids": ["explore-live"], "ts": s.now - 3.0});
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "active", "a lane waiting on a background agent is not idle: {ex}");
+        assert_eq!(ex["decided_by"], json!("contradiction_subagents_reported_live"), "{ex}");
+        assert_eq!(ex["idle_contradiction_gate_open"], json!(false), "the 60s gate is still shut: {ex}");
+        assert_eq!(ex["subagents_live"], json!(1), "the count is the evidence: {ex}");
+        assert_eq!(ex["subagent_live_ids"], json!(["explore-live"]), "{ex}");
+    }
+
+    /// AMUX-4024, THE FALSE WORKING — the same card's other direction, and the
+    /// reason the count has to be authoritative rather than OR'd.
+    ///
+    /// Ethan, 2026-09-02: mvs-pitr showed WORKING and an AGENTS badge over an
+    /// empty composer. Its agents had finished; their transcripts were merely
+    /// still inside the 240s mtime window, and `decided_by` was
+    /// `contradiction_subagents_working` on nothing else. A lane that REPORTS
+    /// zero live subagents is telling us the window is stale, so the window
+    /// must lose.
+    #[test]
+    fn a_reported_zero_count_beats_a_warm_subagent_mtime() {
+        let mut s = signals();
+        let lane = "t4024-finished";
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports = json!({lane: {"state": "idle", "ts": s.now - 1076.0, "source": "stop-hook"}});
+        // A transcript written 20s ago — well inside the 240s window, and on its
+        // own enough to pin the lane WORKING for four minutes.
+        s.subagent_activity.insert(lane.into(), s.now - 20.0);
+        assert!(s.subagents_working(lane), "control: the warm mtime alone reads as working");
+
+        s.reports[lane]["subagents"] = json!({"count": 0, "ts": s.now - 5.0});
+        assert!(!s.subagents_working(lane), "a reported zero must override the warm mtime");
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "finished agents must not pin a lane WORKING: {ex}");
+        assert_eq!(ex["subagents_live"], json!(0), "{ex}");
+    }
+
+    #[test]
+    fn a_final_prompt_after_background_wait_does_not_override_idle() {
+        // ATE-45 live Primis acceptance, including the provider's retained
+        // agent-count footer. The capture-shell card is attached later in
+        // build_array and never participates in this derivation; its presence
+        // cannot turn a terminal pane back into runtime work.
+        let lane = "ate45-primis-complete";
+        let mut s = fresh_idle_lane(lane, 4.0);
+        s.reports[lane]["subagents"] = json!({"count": 0, "live_ids": []});
+        s.panes.insert(
+            lane.into(),
+            "\
+\u{2736} Waiting for 1 background agent to finish
+\u{23fa} Agent \"Post-fix status verification\" finished \u{b7} 16s
+\u{23fa} The background Explore agent finished and returned CLAUDE-POSTFIX-DONE.
+CLAUDE-POSTFIX-COMPLETE
+\u{273b} Churned for 23s \u{b7} done 3:40 PM
+\u{276f}\u{a0}
+\u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 2 agents"
+                .into(),
+        );
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "the later terminal boundary must keep the lane idle: {ex}");
+        assert_eq!(ex["provider_background_working"], json!(false), "{ex}");
+        assert_eq!(ex["subagents_live"], json!(0), "{ex}");
+        assert_eq!(ex["decided_by"], json!("report"), "{ex}");
+    }
+
+    /// The blast radius of making the count authoritative, stated as a test: a
+    /// lane that reports NO count at all (gemini, codex, any hookless runtime)
+    /// is pure mtime exactly as before. Without this, "authoritative" could
+    /// quietly mean "lanes we cannot hook always read idle".
+    #[test]
+    fn a_lane_that_reports_no_count_still_uses_the_mtime_window() {
+        let mut s = signals();
+        let lane = "t4024-hookless";
+        s.reports = json!({lane: {"state": "idle", "ts": s.now - 1076.0, "source": "stop-hook"}});
+        s.subagent_activity.insert(lane.into(), s.now - 90.0);
+        assert_eq!(s.reported_subagent_count(lane), None, "fixture: this lane reports no count");
+        assert!(s.subagents_working(lane), "a hookless lane must still read its mtime window");
+    }
+
+    /// THE RACE THE WINDOW EXISTS FOR, WHICH MUST KEEP WINNING. The live
+    /// specimens at 0.6s and 0.7s are a stop-hook landing while the just-drawn
+    /// frame is still on screen. A frozen frame hashes the same however often it
+    /// is sampled, so it can never reach two distinct contents.
+    #[test]
+    fn a_frozen_post_stop_frame_does_not_falsify_a_fresh_idle_claim() {
+        let lane = "t3896-frozen";
+        let s = fresh_idle_lane(lane, 0.7);
+        // Sampled four times, same content every time — which is what "stale"
+        // means. Planting one distinct body four times is the point.
+        plant_frames(lane, s.now, &["same", "same", "same", "same"], 0.1);
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "a stale frame must not read as work: {ex}");
+        assert_eq!(ex["decided_by"], json!("report"), "{ex}");
+        assert_eq!(ex["fresh_idle_contradicted"], json!(false), "{ex}");
+        assert_eq!(ex["churn_since_claim"], json!(1), "{ex}");
+    }
+
+    /// THE WINDOW HAS TO START AT THE CLAIM. Frames from before it belong to the
+    /// turn the lane just finished; counting them would make every stop-hook
+    /// look like live work and turn the fix into "no idle status at all".
+    #[test]
+    fn frames_from_before_the_claim_do_not_count_as_redrawing_since_it() {
+        let lane = "t3896-before";
+        let s = fresh_idle_lane(lane, 5.0);
+        // Four distinct frames, all older than the 5s-old claim.
+        plant_frames(lane, s.now, &["a", "b", "c", "d"], 8.0);
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "the finished turn's own frames are not evidence: {ex}");
+        assert_eq!(ex["churn_since_claim"], json!(0), "{ex}");
+        assert_eq!(ex["fresh_idle_contradicted"], json!(false), "{ex}");
+    }
+
+    /// A REDRAWING PANE IS NOT ENOUGH ON ITS OWN. Churn is content-only and a
+    /// human typing at the composer also changes content; the gate requires a
+    /// SPINNER in the same frame, so a genuinely idle lane whose pane is
+    /// changing stays idle. Without this the fix would flip lanes that just
+    /// finished and are being typed into.
+    #[test]
+    fn churn_without_a_spinner_does_not_falsify_a_fresh_idle_claim() {
+        let lane = "t3896-nospinner";
+        let mut s = fresh_idle_lane(lane, 9.0);
+        s.panes.insert(lane.into(), IDLE_WITH_AGENTS.into());
+        plant_frames(lane, s.now, &["frame one", "frame two", "frame three"], 1.0);
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(
+            crate::api::session_verbs::detect_claude_status(IDLE_WITH_AGENTS),
+            "idle",
+            "fixture guard: this pane must not detect as active, or the test proves nothing"
+        );
+        assert_eq!(status, "idle", "content churn alone is not a generating turn: {ex}");
+        assert_eq!(ex["fresh_idle_contradicted"], json!(false), "{ex}");
+    }
+
+    /// AMUX-3756. The status badge and the turn-boundary gate must reach the
+    /// same verdict about the same stored report.
+    ///
+    /// The bug was not that either side was wrong in isolation. `derive_status`
+    /// judged the report and published `applied:false`; the gate on auto-pickup
+    /// / nudges / steering read the same row and asked only `state == "idle"`.
+    /// A stuck `active` report therefore showed IDLE on the dashboard and
+    /// `mid-turn` to the drive loop — permanently, because the only thing that
+    /// writes a new report is a turn and the only thing that starts a turn on a
+    /// lane the loop refuses to touch is a human typing at it.
+    ///
+    /// The cells below are the four lanes MEASURED in that state on 2026-08-26,
+    /// with their real ages. Each carries the drive loop's old answer beside the
+    /// new one, so the row that used to deadlock is named rather than implied.
+    #[test]
+    fn the_boundary_gate_and_the_badge_judge_a_report_the_same_way() {
+        let now = 1_787_766_000.0;
+        let born = now - 400_000.0; // every lane started well before its report
+        // (state, age_s, applies?, lane it was measured on)
+        let cells: &[(&str, f64, bool, &str)] = &[
+            ("active", 214_567.0, false, "ai-video-editor (59.5h, prompt-hook)"),
+            ("active", 221_356.0, false, "creative-dna (61.4h, tool-hook)"),
+            ("active", 22_952.0, false, "mixpeek-autopilot (6.4h, prompt-hook)"),
+            ("active", 3_390.0, false, "primer (56m, tool-hook)"),
+            ("active", 9.0, true, "tubescience — genuinely mid-turn, must stay held"),
+            // THE CELLS THAT ISOLATE `stale_active` FROM THE TRUST WINDOW.
+            // Every measured lane above is also past the 1800s active window,
+            // so without these three the whole `stale_active` leg could be
+            // deleted and this test would stay green — verified by mutation,
+            // which is the only reason they exist. An `active` report is
+            // refreshed by the tool hook on every tool call, so silence past
+            // the 120s heartbeat means the turn died; without this leg the
+            // deadlock window is 30 minutes rather than 2.
+            ("active", 119.0, true, "inside the heartbeat — a real turn between tool calls"),
+            ("active", 121.0, false, "one second past it: the turn stopped reporting"),
+            ("active", 600.0, false, "10m silent but inside the 1800s window — stale_active only"),
+            ("idle", 50.0, true, "gtm-research — fresh stop-hook idle"),
+            ("idle", 40_000.0, true, "idle survives silence inside its 24h window"),
+            ("idle", 90_000.0, false, "past the 24h idle window"),
+            ("waiting", 60.0, true, "a fresh selector report"),
+            ("blocked", 50.0, true, "a fresh blocked report — permission dialog"),
+            ("blocked", 40_000.0, true, "blocked survives silence inside its 24h window"),
+            ("blocked", 90_000.0, false, "past the 24h blocked window"),
+            ("compacting", 5.0, false, "a state no rule knows is not evidence"),
+        ];
+        for (st, age, want, why) in cells {
+            let ts = now - age;
+            assert_eq!(
+                report_applies(st, ts, born, now),
+                *want,
+                "report_applies({st}, age={age}s): {why}"
+            );
+            // THE ANTI-DRIFT HALF: the badge's own `applied` field, produced by
+            // the shipped derivation over the same row, must agree. A second
+            // copy of this rule inside derive_status_explain would pass every
+            // assertion above and still deadlock the fleet.
+            let mut s = signals();
+            s.now = now;
+            s.running.insert("amux-x".into());
+            s.reports = json!({"x": {"state": st, "ts": ts, "source": "t"}});
+            let (_, ex) = s.derive_status_explain("x", true);
+            assert_eq!(
+                ex["report"]["applied"],
+                json!(*want),
+                "the badge disagrees with the gate about {st}/{age}s: {ex}"
+            );
+        }
+
+        // A report from a PREVIOUS LIFE is refused whatever its age says. The
+        // gate had no life check at all, so a pre-restart `active` held a lane
+        // that had since been restarted and was sitting at a fresh prompt.
+        assert!(
+            !report_applies("active", now - 5.0, now - 1.0, now),
+            "a report predating the last session.started describes a dead process"
+        );
+    }
+
+    /// AMUX-3433, the property the card exists for: a lane generating with a
+    /// spinner glyph NO string rule knows must still read active, because its
+    /// pane demonstrably REDRAWS. Frames use ◐/◑/◒ (U+25D0..) — outside every
+    /// glyph range detect_claude_status covers, so detection says idle and
+    /// only churn can carry the flip. Distinct lane names on purpose: the
+    /// churn store is process-global and shared-key tests would pollute each
+    /// other (the ROLLUP_CACHE lesson).
+    #[test]
+    fn churn_flips_idle_to_active_for_a_glyph_no_string_rule_knows() {
+        let frame = |glyph: &str, secs: u32| {
+            format!(
+                "  {glyph} Mystifying\u{2026} ({secs}s \u{b7} \u{2193} 1.2k tokens)\n\
+                 \u{2500}\u{2500}\u{2500}\u{2500}\n\u{276f}\u{a0}\n\u{2500}\u{2500}\u{2500}\u{2500}\n  \
+                 \u{23f5}\u{23f5} bypass permissions on (shift+tab to cycle) \u{b7} \u{2190} 2 agents\n"
+            )
+        };
+        let mut s = signals();
+        let lane = "churn-glyphless";
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports =
+            json!({lane: {"state": "idle", "ts": s.now - 1076.0, "source": "stop-hook-test"}});
+        let last = frame("\u{25d2}", 5);
+        // The string rules genuinely do not know this glyph — the control
+        // that makes the churn assertion mean something.
+        assert_eq!(
+            crate::api::session_verbs::detect_claude_status(&last),
+            "idle",
+            "fixture must be invisible to string detection or this test proves nothing"
+        );
+        for (i, f) in
+            [frame("\u{25d0}", 3), frame("\u{25d1}", 4), last.clone()].iter().enumerate()
+        {
+            note_pane_frame(lane, f, s.now - 4.0 + i as f64, s.contradiction_window());
+        }
+        s.panes.insert(lane.into(), last);
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "active", "{ex}");
+        assert_eq!(ex["decided_by"], json!("contradiction_pane_generating"), "{ex}");
+        assert!(ex["pane"]["churn_distinct_frames"].as_u64().unwrap() >= 3, "{ex}");
+    }
+
+    /// ATE-36, the second live false-WORKING shape. Codex had finished and
+    /// painted its empty prompt/model bar below a queued-message notice, but
+    /// the dashboard projection OR'd recent pane churn back into "working".
+    /// A provider-specific terminal boundary is stronger evidence than the
+    /// model-agnostic churn fallback: the latter describes recent history,
+    /// while the former says what the newest frame is doing now.
+    #[test]
+    fn a_newer_codex_prompt_beats_queued_message_prose_and_recent_churn() {
+        let lane = "ate36-codex-complete";
+        let completed = "\
+• Messages to be submitted after next tool call (press esc to interrupt and send immediately)
+↳ [amux-origin: amux-frustrations]
+Checked, nothing of mine was at risk, no action needed from you.
+› Ask Codex to do anything
+  gpt-5.6-sol xhigh · ~/Dev/amux";
+        let mut s = signals();
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports = json!({lane: {
+            "state": "idle", "ts": s.now - 1076.0, "source": "stop-hook-test"
+        }});
+
+        // The preceding turn painted multiple distinct bodies. This is the
+        // exact stale history that the live status-explain exposed as
+        // churn_distinct_frames=9 after the prompt was already idle.
+        for (i, body) in ["working one", "working two", "working three"].iter().enumerate() {
+            let frame = format!("{body}\n{completed}");
+            note_pane_frame(lane, &frame, s.now - 4.0 + i as f64, s.contradiction_window());
+        }
+        s.panes.insert(lane.into(), completed.into());
+
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(
+            status, "idle",
+            "the newest Codex prompt is authoritative over queued-message prose and stale churn: {ex}"
+        );
+        assert_eq!(ex["pane"]["says_working"], json!(false), "{ex}");
+        assert!(ex["pane"]["churn_distinct_frames"].as_u64().unwrap() >= 3, "{ex}");
+    }
+
+    /// ATE-38, the opposite live edge of ATE-36. Codex leaves the prompt shell
+    /// visible while generating; an exact active status row immediately above
+    /// it means the prompt is disabled, not that the worker is idle.
+    #[test]
+    fn a_codex_working_row_above_its_prompt_shell_is_active() {
+        let lane = "ate38-codex-active";
+        let active = "\
+• Waiting for background terminal (16m 29s • esc to interrupt)
+› Ask Codex to do anything
+  gpt-5.6-sol xhigh · ~/Dev/amux";
+        let mut s = signals();
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports = json!({lane: {
+            "state": "idle", "ts": s.now - 1076.0, "source": "stop-hook-test"
+        }});
+        s.panes.insert(lane.into(), active.into());
+
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(
+            status, "active",
+            "the adjacent live status row must win: {ex}"
+        );
+        assert_eq!(ex["pane"]["says_working"], json!(true), "{ex}");
+        assert_eq!(
+            ex["decided_by"],
+            json!("contradiction_provider_background_working"),
+            "{ex}"
+        );
+
+        // ATE-45 live variant: an in-flight command moves to Codex's
+        // background terminal, but the parent conversation is still active
+        // and must not accept board-drive input.
+        let background_terminal = "\
+• Working (0s • esc to interrupt) · 1 background terminal running · /ps to view · /stop to close
+› Ask Codex to do anything
+  gpt-5.6-sol xhigh · ~/Dev/amux";
+        s.panes.insert(lane.into(), background_terminal.into());
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "active", "a live Codex background terminal is lane work: {ex}");
+        assert_eq!(ex["pane"]["says_working"], json!(true), "{ex}");
+        assert_eq!(ex["decided_by"], json!("contradiction_provider_background_working"), "{ex}");
+    }
+
+    /// The two controls that keep churn honest: the SAME frame re-captured is
+    /// one distinct hash (a parked pane never churns), and frames that differ
+    /// ONLY in the bar zone (an agents-count tick, a mode toggle) hash equal —
+    /// so neither flips idle.
+    #[test]
+    fn a_stable_or_bar_only_repaint_never_reads_as_churn() {
+        let bar_frame = |agents: u32| {
+            format!(
+                "  some finished output text\n\u{2500}\u{2500}\n\u{276f}\u{a0}\n\u{2500}\u{2500}\n  \
+                 \u{23f5}\u{23f5} bypass permissions on \u{b7} \u{2190} {agents} agents\n"
+            )
+        };
+        let mut s = signals();
+        let lane = "churn-baronly";
+        s.activity.insert(format!("amux-{lane}"), (s.now - 1.0) as i64);
+        s.running.insert(format!("amux-{lane}"));
+        s.reports =
+            json!({lane: {"state": "idle", "ts": s.now - 1076.0, "source": "stop-hook-test"}});
+        for (i, f) in [bar_frame(1), bar_frame(2), bar_frame(3)].iter().enumerate() {
+            note_pane_frame(lane, f, s.now - 4.0 + i as f64, s.contradiction_window());
+        }
+        s.panes.insert(lane.into(), bar_frame(3));
+        let (status, ex) = s.derive_status_explain(lane, true);
+        assert_eq!(status, "idle", "bar-only repaints must not read as generation: {ex}");
+        assert_eq!(ex["pane"]["churn_distinct_frames"], json!(1), "{ex}");
+    }
+
+    /// The wrapper IS the explain's verdict — one fn, so the view can never
+    /// disagree with the mechanism it describes.
+    #[test]
+    fn derive_status_is_the_explain_verdict() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), (s.now - 1.0) as i64);
+        s.running.insert("amux-x".into());
+        s.panes.insert("x".into(), WORKING_BAR.into());
+        assert_eq!(s.derive_status("x", true), s.derive_status_explain("x", true).0);
+    }
+
+    /// THE TABLE. Every cell is a (report, age, source, pane, activity,
+    /// running) combination with the status it must produce.
+    #[test]
+    fn status_truth_table() {
+        let cases = [
+            // ---- the bug, in both of its live shapes -------------------
+            Case {
+                what: "STALE idle report + pane mid-turn (bar) = THE BUG",
+                report: Some(("idle", 1076.0, "stop-hook-test")),
+                transition: None,
+                pane: Some(WORKING_BAR),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "active",
+            },
+            Case {
+                what: "STALE idle report + pane mid-turn (spinner only) = THE SPECIMEN",
+                report: Some(("idle", 1076.0, "stop-hook-test")),
+                transition: None,
+                pane: Some(WORKING_SPINNER_ONLY),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "active",
+            },
+            Case {
+                what: "a DAY-old idle report loses to a live pane just the same",
+                report: Some(("idle", 80_000.0, "stop-hook")),
+                transition: None,
+                pane: Some(WORKING_BAR),
+                activity_age_s: 2.0,
+                running: true,
+                expect: "active",
+            },
+            // ---- the grace window: a fresh report is still the authority
+            Case {
+                what: "FRESH idle report wins over the pane (report/repaint race)",
+                report: Some(("idle", 3.0, "stop-hook")),
+                transition: None,
+                pane: Some(WORKING_BAR),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "idle",
+            },
+            Case {
+                what: "fresh idle report + quiet pane: plain idle",
+                report: Some(("idle", 5.0, "stop-hook")),
+                transition: None,
+                pane: Some(IDLE_WITH_AGENTS),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "idle",
+            },
+            // ---- silence is NOT contradiction --------------------------
+            Case {
+                what: "stale idle + a parked lane that has not painted: stays idle",
+                report: Some(("idle", 9_000.0, "stop-hook")),
+                transition: None,
+                // The pane still holds a mid-turn frame in scrollback, but
+                // nothing has painted for an hour: not evidence.
+                pane: Some(WORKING_BAR),
+                activity_age_s: 3_600.0,
+                running: true,
+                expect: "idle",
+            },
+            Case {
+                what: "idle lane WITH BACKGROUND AGENTS is idle, not active",
+                report: Some(("idle", 700.0, "stop-hook")),
+                transition: None,
+                pane: Some(IDLE_WITH_AGENTS),
+                activity_age_s: 2.0,
+                running: true,
+                expect: "idle",
+            },
+            // ---- no report at all (hookless lane, dropped POST) --------
+            Case {
+                what: "no report + working pane",
+                report: None,
+                transition: None,
+                pane: Some(WORKING_SPINNER_ONLY),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "active",
+            },
+            Case {
+                what: "no report + shell prompt (agent exited)",
+                report: None,
+                transition: None,
+                pane: Some(SHELL_PROMPT),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "idle",
+            },
+            Case {
+                what: "no report + selector = waiting on a human",
+                report: None,
+                transition: None,
+                pane: Some(WAITING_SELECTOR),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "waiting",
+            },
+            Case {
+                what: "no report + usage-limit menu = waiting (never invented as active)",
+                report: None,
+                transition: None,
+                pane: Some(RATE_LIMIT_MENU),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "waiting",
+            },
+            // ---- active reports ---------------------------------------
+            Case {
+                what: "fresh active report + dead/unreadable pane: believed",
+                report: Some(("active", 10.0, "tool-hook")),
+                transition: None,
+                pane: Some(HERDR_MID_TURN),
+                activity_age_s: 1.0,
+                running: true,
+                expect: "active",
+            },
+            Case {
+                what: "STALE active report (past the heartbeat) never overrides",
+                report: Some(("active", 4_000.0, "tool-hook")),
+                transition: None,
+                pane: Some(IDLE_WITH_AGENTS),
+                activity_age_s: 2.0,
+                running: true,
+                expect: "idle",
+            },
+            // ---- herdr: an empty capture is not evidence of anything ---
+            Case {
+                what: "herdr lane, empty capture, painting: NOT idle",
+                report: None,
+                transition: None,
+                pane: Some(HERDR_MID_TURN),
+                activity_age_s: 2.0,
+                running: true,
+                expect: "active",
+            },
+            Case {
+                what: "herdr lane, empty capture, silent for an hour: idle",
+                report: None,
+                transition: None,
+                pane: Some(HERDR_MID_TURN),
+                activity_age_s: 3_600.0,
+                running: true,
+                expect: "idle",
+            },
+            // ---- transitions and liveness ------------------------------
+            Case {
+                what: "waiting transition survives (no report, no pane)",
+                report: None,
+                transition: Some(("waiting", 100.0)),
+                pane: None,
+                activity_age_s: 3_600.0,
+                running: true,
+                expect: "waiting",
+            },
+            Case {
+                what: "stale active transition demotes when the pane is silent",
+                report: None,
+                transition: Some(("active", 900.0)),
+                pane: None,
+                activity_age_s: 1_000.0,
+                running: true,
+                expect: "idle",
+            },
+            Case {
+                what: "not running is blank, whatever anything else says",
+                report: Some(("active", 1.0, "tool-hook")),
+                transition: None,
+                pane: Some(WORKING_BAR),
+                activity_age_s: 1.0,
+                running: false,
+                expect: "",
+            },
+        ];
+        let mut failed = vec![];
+        for c in &cases {
+            let got = run(c);
+            if got != c.expect {
+                failed.push(format!("  {}\n     want {:?}, got {:?}", c.what, c.expect, got));
+            }
+        }
+        assert!(failed.is_empty(), "status truth table:\n{}", failed.join("\n"));
+    }
+
+    /// THE PROPERTY, over the full product of the table's inputs: a lane whose
+    /// pane is unambiguously mid-turn is never reported `idle` — unless an
+    /// idle report younger than the contradiction window is standing behind
+    /// it, which is the one deliberate exception (the report is the D1
+    /// authority and this is where the report/repaint race lives).
+    ///
+    /// Exhaustive rather than random: the input space is small enough to
+    /// enumerate, and an enumerated space cannot get lucky.
+    #[test]
+    fn no_input_combination_reports_idle_over_a_working_pane() {
+        let states = ["idle", "active", "waiting", "error", "bogus"];
+        let ages = [0.0, 1.0, 59.0, 61.0, 121.0, 1_076.0, 1_801.0, 86_401.0];
+        let sources = ["stop-hook", "tool-hook", "prompt-hook", "stop-hook-test", ""];
+        let working_panes = [WORKING_BAR, WORKING_SPINNER_ONLY];
+        let act_ages = [0.0, 1.0, 30.0, 59.0];
+        let transitions = [None, Some(("idle", 10.0)), Some(("active", 900.0)), Some(("waiting", 5.0))];
+        let mut checked = 0usize;
+        for pane in working_panes {
+            for act in act_ages {
+                for tr in transitions {
+                    for st in states {
+                        for age in ages {
+                            for src in sources {
+                                let c = Case {
+                                    what: "property",
+                                    report: Some((st, age, src)),
+                                    transition: tr,
+                                    pane: Some(pane),
+                                    activity_age_s: act,
+                                    running: true,
+                                    expect: "",
+                                };
+                                let got = run(&c);
+                                checked += 1;
+                                // THE NAME OVER-CLAIMS, AND THIS LINE IS WHERE
+                                // (AMUX-3896). A totalizing title with a
+                                // carve-out reads as a total guarantee to
+                                // everyone who greps it, and the carve-out was
+                                // the bug: a lane starting its next turn read
+                                // idle for up to 60s. The window is now
+                                // falsifiable by a pane that REDREW since the
+                                // claim, which this table cannot express — it
+                                // plants no frames, so churn_since_claim is 0
+                                // in every row here. The discriminator is
+                                // pinned by the four `*_since_the_claim` tests
+                                // above; grace stays permissive so both
+                                // outcomes are legal here.
+                                let grace = st == "idle" && age <= 60.0;
+                                assert!(
+                                    got != "idle" || grace,
+                                    "idle over a working pane: report=({st},{age}s,{src}) \
+                                     transition={tr:?} activity_age={act}s"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The enumeration must have RUN. A property test over an empty product
+        // passes vacuously and looks identical to one that proved something.
+        assert_eq!(checked, 2 * 4 * 4 * 5 * 8 * 5);
+        // And the exception must be REACHABLE, or "unless grace" is dead prose
+        // rather than a documented carve-out.
+        assert_eq!(
+            run(&Case {
+                what: "grace is reachable",
+                report: Some(("idle", 5.0, "stop-hook")),
+                transition: None,
+                pane: Some(WORKING_BAR),
+                activity_age_s: 0.0,
+                running: true,
+                expect: "idle",
+            }),
+            "idle"
+        );
+    }
+
+    /// The two detectors this composes must actually discriminate the frames.
+    /// If `pane_says_working` returned true for everything, the table above
+    /// would still pass on its bug rows while quietly breaking every idle row
+    /// — so assert the evidence function's verdict directly, per frame.
+    #[test]
+    fn evidence_discriminates_between_the_live_frames() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), s.now as i64);
+        let verdict = |s: &mut FleetSignals, raw: &str| {
+            s.panes.insert("x".into(), raw.into());
+            s.pane_says_working("x")
+        };
+        assert!(verdict(&mut s, WORKING_BAR), "bar `esc to interrupt` is work");
+        assert!(verdict(&mut s, WORKING_SPINNER_ONLY), "a live spinner is work");
+        assert!(!verdict(&mut s, IDLE_WITH_AGENTS), "background agents are NOT the main turn");
+        assert!(!verdict(&mut s, SHELL_PROMPT), "a shell is not work");
+        assert!(!verdict(&mut s, WAITING_SELECTOR), "waiting on a human is not work");
+        assert!(!verdict(&mut s, RATE_LIMIT_MENU), "a usage-limit menu is not work");
+        assert!(!verdict(&mut s, HERDR_MID_TURN), "an empty capture proves nothing");
+    }
+
+    /// Evidence must be admissible only while it is FRESH — this is the half
+    /// that keeps `idle survives silence` true, and the half a reader is most
+    /// likely to delete as redundant.
+    #[test]
+    fn stale_evidence_is_inadmissible_however_loud_it_is() {
+        let mut s = signals();
+        s.panes.insert("x".into(), WORKING_BAR.into());
+        s.activity.insert("amux-x".into(), (s.now - 61.0) as i64);
+        assert!(!s.pane_says_working("x"), "a pane that has not painted in 61s is not evidence");
+        s.activity.insert("amux-x".into(), (s.now - 59.0) as i64);
+        assert!(s.pane_says_working("x"), "…and one that painted 59s ago is");
+    }
+
+    /// The capture predicate and the belief predicate are the same predicate.
+    /// If they drift, the board (which captures a few panes) and the session
+    /// list (which has every running pane in hand) derive different statuses
+    /// for the same lane, and the user sees a card that contradicts itself.
+    #[test]
+    fn a_pane_the_probe_would_not_have_taken_is_not_believed() {
+        let mut s = signals();
+        s.activity.insert("amux-x".into(), (s.now - 6_000.0) as i64);
+        assert!(!s.pane_probe_candidate("x"));
+        // A caller stuffs the map anyway (a superset capture, or a test).
+        s.panes.insert("x".into(), WORKING_BAR.into());
+        assert!(!s.pane_says_working("x"), "belief must re-apply the capture predicate");
+        assert_eq!(s.derive_status("x", true), "idle");
+    }
+
+    /// THE LIVE-FLEET CONSISTENCY CHECK, read-only, on demand:
+    ///
+    /// ```text
+    /// CARGO_TARGET_DIR=/tmp/amux-status-target cargo test -p amux-server \
+    ///   sessions_legacy::status_truth::live_fleet -- --ignored --nocapture
+    /// ```
+    ///
+    /// `#[ignore]` because it reads the machine's real fleet, so it is not a
+    /// CI check — it is the sweep instrument. It opens `~/.amux/amux.db`
+    /// READ-ONLY (never the live DB read-write: this is real user data) and
+    /// captures panes, which is what `tmux capture-pane -p` already does on
+    /// every dashboard poll.
+    ///
+    /// It exists because the ONLY thing that caught AMUX-2646 was a human
+    /// noticing a terminal. This is that human, as a command, in one second.
+    #[test]
+    #[ignore = "reads the live fleet; run explicitly with --ignored"]
+    fn live_fleet_status_matches_pane_truth() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let db = format!("{home}/.amux/amux.db");
+        let conn = rusqlite::Connection::open_with_flags(
+            &db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+        )
+        .unwrap_or_else(|e| panic!("live db {db} unreadable: {e}"));
+        let mut s = FleetSignals::load(&conn);
+        assert!(!s.running.is_empty(), "no tmux fleet visible — probe is broken, not fleet empty");
+        s.capture_panes();
+        let probed = s.probed_lanes();
+        let mut bad = vec![];
+        for (name, working) in &probed {
+            let status = s.derive_status(name, true);
+            let rep = s.reports.get(name).cloned().unwrap_or(json!({}));
+            if *working && status == "idle" {
+                bad.push(format!(
+                    "  {name}: card=idle but the pane is mid-turn \
+                     (report={} age={:.0}s source={} origin={})",
+                    rep["state"].as_str().unwrap_or("-"),
+                    s.now - rep["ts"].as_f64().unwrap_or(s.now),
+                    rep["source"].as_str().unwrap_or("-"),
+                    rep["origin"].as_str().unwrap_or("-"),
+                ));
+            }
+        }
+        // The whole registry, not only the probed lanes: a status histogram is
+        // how a REGRESSION in the other direction shows up (everything flipping
+        // to active), which a disagreement count of 0 would happily hide.
+        let mut hist: BTreeMap<String, usize> = BTreeMap::new();
+        if let Ok(entries) = std::fs::read_dir(amux_home().join("sessions")) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.extension().and_then(|x| x.to_str()) != Some("env") {
+                    continue;
+                }
+                let Some(n) = p.file_stem().and_then(|x| x.to_str()) else { continue };
+                let running = s.agent_running(&format!("amux-{n}"));
+                let st = s.derive_status(n, running);
+                *hist.entry(if st.is_empty() { "<blank>".into() } else { st }).or_default() += 1;
+            }
+        }
+        println!(
+            "live fleet: {} tmux sessions, {} painted inside the probe window, \
+             {} of those mid-turn, DISAGREEMENTS: {}\n  status histogram: {:?}",
+            s.running.len(),
+            probed.len(),
+            probed.iter().filter(|(_, w)| *w).count(),
+            bad.len(),
+            hist
+        );
+        for l in &bad {
+            println!("{l}");
+        }
+        assert!(bad.is_empty(), "card/pane disagreements:\n{}", bad.join("\n"));
+    }
+
+    /// tmux's `session_activity` does not move for a DETACHED session, and
+    /// every amux lane is detached — so the parser must take the max with
+    /// `window_activity` or the fleet's only liveness signal reads as
+    /// permanent silence (measured: 60/63 lanes, one of them 34.5h stale).
+    #[test]
+    fn activity_is_the_max_of_session_and_window() {
+        // The REAL line `amux-rust` produced while it was mid-turn, through
+        // the REAL parser. `session_activity` had not moved since the session
+        // was created 34.5h earlier; `window_activity` was current.
+        let line = "amux-rust:1786206640:1786206640:1786330900";
+        assert_eq!(
+            parse_list_sessions_line(line),
+            Some(("amux-rust", Some(1_786_330_900), Some(1_786_206_640))),
+            "window activity must win when it is newer — this is the whole fleet's \
+             only liveness signal"
+        );
+        // The other direction still works, and a short line does not panic.
+        assert_eq!(
+            parse_list_sessions_line("amux-x:200:100:50"),
+            Some(("amux-x", Some(200), Some(100)))
+        );
+        assert_eq!(parse_list_sessions_line("amux-x:200"), Some(("amux-x", Some(200), None)));
+        assert_eq!(parse_list_sessions_line(""), None);
+    }
+
+    /// AMUX-3504 — the elapsed-counter suffix is what kept the sessions ETag
+    /// from ever answering 304 (5 of 119 rows churned across an idle 3s, every
+    /// diff a ticking `3m 17s`). Specimens are the live capture's own lines.
+    /// The controls matter as much: prose that merely ENDS in something
+    /// time-shaped, and a single-space gap, must pass through untouched — an
+    /// over-eager strip would corrupt real preview text fleet-wide.
+    #[test]
+    fn elapsed_suffix_strips_the_ticker_and_only_the_ticker() {
+        // The live specimens (column-padded status lines).
+        assert_eq!(
+            strip_elapsed_suffix("◯ general-purpose  Pricing gala event ticket costs         3m 13s "),
+            "◯ general-purpose  Pricing gala event ticket costs"
+        );
+        assert_eq!(strip_elapsed_suffix("◯ x  Fetching pages   47s"), "◯ x  Fetching pages");
+        assert_eq!(strip_elapsed_suffix("task   1h 2m 3s"), "task");
+        // Controls: no elapsed shape, or no 2-space gap -> untouched.
+        assert_eq!(strip_elapsed_suffix("deploys in 3m 13s"), "deploys in 3m 13s");
+        assert_eq!(strip_elapsed_suffix("meeting at  9am sharp"), "meeting at  9am sharp");
+        assert_eq!(strip_elapsed_suffix("plain line"), "plain line");
+        assert_eq!(strip_elapsed_suffix(""), "");
+        // Multi-byte final char must not panic (byte-indexed split would).
+        assert_eq!(strip_elapsed_suffix("計測  3分"), "計測  3分");
+    }
+
+    // AMUX-2820 / last_human_ts. `"last_human_ts": 0` was a literal, not
+    // computed from anything — the exact "constant wearing a variable's
+    // clothes" shape the comment three lines above it in the source warns
+    // about for a sibling field. Reported live: a session that had just
+    // received several real human messages this turn still showed
+    // `last_human_ts: 0` over the API, silently disabling app.js's
+    // "messages from a person" sort for every session, fleet-wide, since
+    // nothing ever populated it.
+    #[test]
+    fn last_human_ts_takes_the_latest_row_per_session_pure() {
+        let rows = vec![
+            ("a".to_string(), "first".to_string(), None, 1_000),
+            ("b".to_string(), "only".to_string(), None, 5_000),
+            ("a".to_string(), "second, later".to_string(), None, 2_000),
+        ];
+        let out = last_human_ts_from_user_messages(&rows);
+        assert_eq!(out.get("a"), Some(&2_000), "the LATER row for session a must win, not the first");
+        assert_eq!(out.get("b"), Some(&5_000));
+        assert_eq!(out.get("c"), None, "a session with no rows must be absent, not zero");
+    }
+
+    #[test]
+    fn last_human_ts_query_counts_a_typed_message_and_excludes_a_peer_relay() {
+        // The REAL migration chain (AF-436/AMUX-3504's own lesson, walked into
+        // here): ensure_fleet_tables's base cmd_history predates `card_id`,
+        // `delivery`, `submit_verdict` — those arrive via migrations/0014 and
+        // 0016. A hand-rolled ALTER would test a schema production never runs.
+        let mut conn = crate::db::migrate::test_memdb();
+        crate::db::migrate::apply_all(&mut conn).expect("schema");
+        // A real human send: type='user' (session_verbs.rs's own distinction —
+        // `record_history` true -> ctype="user"; a peer's `amux send` instead
+        // stamps ctype="session", origin=<sender>). The LATER row here is the
+        // peer relay, which is the exact case that must NOT count: a lane
+        // fielding nothing but inter-session traffic must not look freshly
+        // human-messaged.
+        conn.execute(
+            "INSERT INTO cmd_history (text, type, session, ts, origin) VALUES (?,?,?,?,?)",
+            rusqlite::params!["hi from a person", "user", "amux-frustrations", 1_000_i64, "ethan"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cmd_history (text, type, session, ts, origin) VALUES (?,?,?,?,?)",
+            rusqlite::params!["peer relay, not a person", "session", "amux-frustrations", 9_000_i64, "amux-homepage"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cmd_history (text, type, session, ts, origin) VALUES (?,?,?,?,?)",
+            rusqlite::params!["cron fire, not a person", "schedule", "amux-frustrations", 9_500_i64, ""],
+        )
+        .unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT session, text, card_id, ts FROM cmd_history \
+                 WHERE type='user' AND COALESCE(submit_verdict,'') <> 'stuck' \
+                 ORDER BY ts ASC, id ASC",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, Option<String>, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let out = last_human_ts_from_user_messages(&rows);
+        assert_eq!(
+            out.get("amux-frustrations"),
+            Some(&1_000),
+            "the peer relay (ts=9000) and the schedule fire (ts=9500) are both LATER \
+             than the real human message (ts=1000) but must not win: the query's own \
+             type='user' filter, not the aggregation, is what excludes them"
+        );
+    }
+}
+
+#[cfg(test)]
+#[path = "status_chaos_tests.rs"]
+mod status_chaos_tests;
+
+#[cfg(test)]
+mod discovery_race_tests {
+    use super::*;
+
+    /// AMUX-4637: the race is 503 with Retry-After and keeps its message; any
+    /// other build failure stays 500.
+    #[tokio::test]
+    async fn a_discovery_race_is_503_with_retry_after_and_other_failures_stay_500() {
+        // The construction site: a moved epoch or a moved registry is the race.
+        assert!(race_verdict(1, 1, 7, 7).is_ok());
+        assert!(race_verdict(1, 1, 7, 8).is_err(), "a registry change alone is a race");
+        let raced: anyhow::Error = race_verdict(1, 2, 7, 7).unwrap_err().into();
+
+        let r = discovery_failure(&raced, raced.to_string());
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            r.headers().get(axum::http::header::RETRY_AFTER).and_then(|v| v.to_str().ok()),
+            Some("1")
+        );
+        let body = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"], "sessions list changed during discovery; retry");
+
+        // Wrapped in context, the way sessions-git reports it, it is still the race.
+        let wrapped = anyhow::Error::from(DiscoveryRaced).context("session list unavailable");
+        let r = discovery_failure(&wrapped, format!("{wrapped:#}"));
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // CONTROLS: the same words untyped, and an ordinary failure, stay 500
+        // with no Retry-After.
+        let untyped = anyhow::anyhow!("sessions list changed during discovery; retry");
+        let r = discovery_failure(&untyped, untyped.to_string());
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(r.headers().get(axum::http::header::RETRY_AFTER).is_none());
+        let db = anyhow::anyhow!("database query failed");
+        assert_eq!(discovery_failure(&db, db.to_string()).status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}

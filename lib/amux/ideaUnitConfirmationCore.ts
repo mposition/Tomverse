@@ -130,6 +130,8 @@ const card = z.object({
     grade: routeLabel,
     brief: keyedDigest,
     costReceipt,
+    /** Missing in pre-v2 prepared decisions means no public PR consent. */
+    publicPrDisclosureApproved: z.boolean().optional(),
   }).strict().nullable(),
 }).strict();
 
@@ -271,6 +273,8 @@ const semanticShapeValid = (
           c.dependencies.length !== 0 || currentTaskCost !== null) return false;
     } else {
       if (c.storyKind !== null || c.task === null) return false;
+      if (c.task.publicPrDisclosureApproved === true &&
+          c.task.role !== "implement") return false;
       if (currentTaskCost?.ok !== true) return false;
       const currentReceipt = costReceipt.safeParse(currentTaskCost.receipt);
       if (!currentReceipt.success) return false;

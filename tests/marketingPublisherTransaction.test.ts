@@ -159,7 +159,7 @@ test("below PostgreSQL 17 it refuses rather than run without the bound", async (
   assert.deepEqual(seen.settings, [], "nothing is set on a server that is refused");
 });
 
-test("the work may issue twelve statements and not a thirteenth", async () => {
+test("the work may issue its budget of statements and not one more", async () => {
   const { client, seen } = fakeClient(170002);
   await runBoundedMarketingTransaction(client, async (tx) => {
     for (let i = 0; i < MARKETING_PUBLISHER_MAX_STATEMENTS; i += 1) {
@@ -179,7 +179,7 @@ test("the work may issue twelve statements and not a thirteenth", async () => {
       error instanceof MarketingPublisherTransactionRefusedError &&
       error.code === "statement_budget_exhausted",
   );
-  // Refused on the call, before the statement is sent: the thirteenth never
+  // Refused on the call, before the statement is sent: the one over budget never
   // reaches the database.
   assert.equal(second.seen.workStatements, MARKETING_PUBLISHER_MAX_STATEMENTS);
 });
@@ -203,7 +203,7 @@ test("a model delegate call counts as a statement too", async () => {
 
 test("the wrapper's own settings are not charged to the work", async () => {
   // The version probe and the three set_config calls are four statements the
-  // wrapper issues; if they counted, the work would have eight, not twelve.
+  // wrapper issues; if they counted, the work would have four fewer than its budget.
   const { client, seen } = fakeClient(170002);
   await runBoundedMarketingTransaction(client, async (tx) => {
     for (let i = 0; i < MARKETING_PUBLISHER_MAX_STATEMENTS; i += 1) {
@@ -356,7 +356,7 @@ test("a transaction timeout already running is refused, not overwritten", async 
   // active, so `set_config` on a connection that opened with a role- or
   // database-level `transaction_timeout` changes what `current_setting`
   // reports and reschedules nothing. The bound in force would be somebody
-  // else's while this function claimed 115 seconds -- a bound it cannot state
+  // else's while this function claimed 175 seconds -- a bound it cannot state
   // is not one it can keep, so it refuses, including when the existing one is
   // shorter.
   for (const existing of ["30s", "200000", "5min"]) {

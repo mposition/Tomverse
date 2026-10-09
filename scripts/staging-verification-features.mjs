@@ -34,6 +34,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         records: "docs/ops/chat-starter-catalog-staging-verification-records",
     },
     {
+        key: "email-signup-consent",
+        label: "email sign-up consent and in-product notice (S4, S8)",
+        checklist: "docs/ops/email-signup-consent-staging-checklist.md",
+        records: "docs/ops/email-signup-consent-staging-verification-records",
+    },
+    {
         key: "external-import",
         label: "external conversation import (release A)",
         checklist: "docs/ops/external-import-staging-checklist.md",

@@ -26,7 +26,7 @@ const walk = (directory) =>
 const withoutComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-test("one store module writes the three tables; nothing else in the application names them", () => {
+test("one store module reads and writes the three tables", () => {
   // Foundation rule: one module writes an Agent's tables. A Prisma accessor or
   // a quoted table name anywhere else is a second writer or a reader that
   // bypasses the store's rules (the clear rule, the resolver rule).
@@ -46,9 +46,22 @@ test("one store module writes the three tables; nothing else in the application 
       pattern.test(withoutComments(readFileSync(join(root, path), "utf8"))),
   );
   assert.deepEqual(offenders, []);
+  assert.match(read(STORE), /export const findOpenAmuxOrchestratorHalt =/);
   assert.match(read(STORE), /INSERT INTO "AmuxOrchestratorWrite"/);
   assert.match(read(STORE), /INSERT INTO "AmuxOrchestratorWriteReceipt"/);
   assert.match(read(STORE), /INSERT INTO "AmuxOrchestratorHalt"/);
+});
+
+test("every AMUX admission path consults the central halt store", () => {
+  for (const path of [
+    "lib/amux/execution.ts",
+    "lib/amux/v4TaskReadyService.ts",
+    "lib/amux/v22WorkerClaimService.ts",
+    "lib/amux/v22AutoPromotionService.ts",
+  ]) {
+    const source = withoutComments(read(path));
+    assert.match(source, /findOpenAmuxOrchestratorHalt\(tx\)/, path);
+  }
 });
 
 test("the clear never runs the original claim, recovery or promotion", () => {

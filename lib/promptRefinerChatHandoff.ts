@@ -42,6 +42,7 @@ export const PROMPT_REFINER_CHAT_PROJECTION_ERROR_CODES = [
   "prompt_refiner_chat_draft_stale",
   "prompt_refiner_chat_resolution_invalid",
   "prompt_refiner_chat_resolution_forged",
+  "prompt_refiner_chat_projection_untrusted",
 ] as const;
 
 export type PromptRefinerChatProjectionErrorCode =
@@ -134,6 +135,74 @@ export type PromptRefinerChatProjection<
   /** Ephemeral validated handoff facts, not an execution or disposition receipt. */
   provenance: PromptRefinerChatProjectionProvenance;
 }>;
+
+// A routing view must come from the exact local projection call, not from a
+// structurally similar object supplied by a browser or another call site.
+// This does not prove that serverSuggestion was server-held or consumed.
+const localProjections = new WeakMap<
+  object,
+  Readonly<{
+    scope: PromptRefinerChatScope;
+    sourceIndex: number;
+    authoredSnapshot: string;
+    executionPrompt: string;
+  }>
+>();
+
+const transcriptSnapshot = (
+  messages: readonly PromptRefinerChatMessage[]
+): string => {
+  try {
+    const snapshot = JSON.stringify(messages);
+    if (typeof snapshot === "string") return snapshot;
+  } catch {
+    // A non-JSON transcript cannot be used as an Auto routing view.
+  }
+  return fail("prompt_refiner_chat_projection_untrusted");
+};
+
+/**
+ * Selects the text view for both Auto Router and shadow profiling. With no
+ * server-validated handoff the only possible view is the authored transcript.
+ * A future product caller must separately establish server-held suggestion
+ * provenance, one-time consumption, scope lifetime and rollout permission.
+ */
+export function promptRefinerAutoMessageView<
+  Message extends PromptRefinerChatMessage,
+>(input: {
+  authoredMessages: readonly Message[];
+  projection?: PromptRefinerChatProjection<Message> | null;
+  currentScope?: PromptRefinerChatScope;
+}): readonly PromptRefinerExecutionMessage<Message>[] {
+  if (input.projection == null) return input.authoredMessages;
+  const binding = localProjections.get(input.projection);
+  if (
+    !binding ||
+    input.projection.authoredMessages !== input.authoredMessages
+  ) {
+    return fail("prompt_refiner_chat_projection_untrusted");
+  }
+  const currentScope = scopeSchema.safeParse(input.currentScope);
+  if (!currentScope.success) return fail("prompt_refiner_chat_scope_invalid");
+  if (!sameScope(binding.scope, currentScope.data)) {
+    return fail("prompt_refiner_chat_scope_stale");
+  }
+  if (transcriptSnapshot(input.authoredMessages) !== binding.authoredSnapshot) {
+    return fail("prompt_refiner_chat_draft_stale");
+  }
+  const source = input.authoredMessages[binding.sourceIndex];
+  if (!source || source.role !== "user") {
+    return fail("prompt_refiner_chat_draft_stale");
+  }
+  if (binding.executionPrompt === source.content) return input.authoredMessages;
+  // Never hand an Auto caller the mutable executionMessages on the supplied
+  // projection. Reconstruct only the validated current user's content.
+  return input.authoredMessages.map((message, index) =>
+    index === binding.sourceIndex
+      ? { ...message, content: binding.executionPrompt }
+      : message
+  );
+}
 
 /**
  * Purely projects one already-parsed transcript into authorship and execution
@@ -238,7 +307,7 @@ export function projectPromptRefinerChatHandoff<
             : message
         );
 
-  return {
+  const projection = {
     authoredMessages: input.messages,
     executionMessages: executionMessages as readonly PromptRefinerExecutionMessage<Message>[],
     provenance: {
@@ -250,4 +319,11 @@ export function projectPromptRefinerChatHandoff<
       decision: expected.decision,
     },
   };
+  localProjections.set(projection, {
+    scope: boundScope,
+    sourceIndex,
+    authoredSnapshot: transcriptSnapshot(input.messages),
+    executionPrompt: expected.executionPrompt,
+  });
+  return projection;
 }

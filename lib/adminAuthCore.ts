@@ -5,7 +5,7 @@ export type AdminPermission =
   | "ops:write"
   | "marketing:write"
   | "engineering-agent:write"
-  | "user:delete";
+  | "sre-agent:write" | "user:delete";
 export type AdminSessionAccessState =
   | "authorized"
   | "reauthentication-required"
@@ -60,7 +60,7 @@ export const roleHasPermission = (
   // The engineering agent's T2 decisions, acknowledgements, mode and freeze:
   // owner and ops (docs/policy/engineering-agent.md §11). Routes check step-up.
   if (permission === "engineering-agent:write") return role === "ops";
-  return false;
+  return false; // Also "sre-agent:write": the owner's alone (docs/policy/sre-ops.md §8).
 };
 
 export const configuredAdminAccessExpiry = (

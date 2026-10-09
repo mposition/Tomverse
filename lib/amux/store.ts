@@ -7,6 +7,8 @@ import {
   type AmuxClaimAuditRefusalReason,
 } from "@/lib/amux/auditContract";
 import { AMUX_DB_BOUNDARIES, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_V22_TASK_EXECUTION_ENV,
+  amuxV22TaskExecutionEnabled } from "@/lib/amux/v22TaskExecutionCore";
 import { prisma } from "@/lib/prisma";
 import {
   scoreAmuxScheduler,
@@ -253,6 +255,14 @@ const runnableDependencyFilter =
     },
   });
 
+// A12 creates unassigned v4 Task Todo rows, but A13 has not made their
+// role/grade-based worker claim safe yet. Keep them out of every legacy
+// dispatch read and claim CAS; nullable legacy sourceSystem must still pass.
+const legacyDispatchSourceFilter = (): Prisma.AmuxWorkItemWhereInput => ({
+  OR: [{ sourceSystem: null },
+    { sourceSystem: { not: "admin-idea-v4" } }],
+});
+
 /**
  * The global scheduler needs the complete runnable population.
  *
@@ -275,6 +285,7 @@ export async function listDispatchable(): Promise<AmuxQueueTask[]> {
       const rows = await tx.amuxWorkItem.findMany({
         where: {
           status: "todo",
+          ...legacyDispatchSourceFilter(),
           owner: null,
           archivedAt: null,
           dueParseState: { in: ["none", "valid"] },
@@ -370,6 +381,7 @@ export async function getRoutingSnapshotTask(
       where: {
         id: taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: expectedRevision,
@@ -424,6 +436,7 @@ export async function getAuthoritativeSchedulerFacts(
       where: {
         id: taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: expectedRevision,
@@ -512,6 +525,7 @@ export async function claimUnownedTodo(
       where: {
         id: input.taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: input.expectedRevision,
@@ -573,6 +587,7 @@ export async function claimUnownedTodo(
       where: {
         id: input.taskId,
         status: "todo",
+        ...legacyDispatchSourceFilter(),
         owner: null,
         archivedAt: null,
         revision: input.expectedRevision,
@@ -718,6 +733,7 @@ export type AmuxOwnedTodo = {
   owner: string;
   revision: number;
   created_at: string;
+  assignment_id?: string;
 };
 
 /**
@@ -737,6 +753,9 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           owner: {
             not: null,
           },
+          ...(!amuxV22TaskExecutionEnabled(
+            process.env[AMUX_V22_TASK_EXECUTION_ENV])
+            ? legacyDispatchSourceFilter() : {}),
           archivedAt: null,
           dependencies: runnableDependencyFilter(),
         },
@@ -759,6 +778,8 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
           owner: true,
           revision: true,
           createdAt: true,
+          sourceSystem: true,
+          v22AssignmentId: true,
         },
         take: AMUX_OWNED_QUEUE_MAX_ITEMS + 1,
       }),
@@ -779,6 +800,8 @@ export async function listOwnedTodos(): Promise<AmuxOwnedTodo[]> {
             owner: row.owner,
             revision: row.revision,
             created_at: row.createdAt.toISOString(),
+            ...(row.sourceSystem === "admin-idea-v4" && row.v22AssignmentId
+              ? { assignment_id: row.v22AssignmentId } : {}),
           },
         ]
       : [],

@@ -1146,6 +1146,38 @@ domains:
       create-only, globally bounded, and expires after exactly 60 minutes; its
       retention decision is separate from its authority expiry.
 
+  - domain: promptRefinerVnextOneShotStage
+    prismaModel: PromptRefinerVnextOneShotStage
+    userLinkageRole: actor
+    owner: backend-ai
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Content-free evidence with immutable approval identities showing that
+        a named administrator approved
+        one bounded evaluation stage against exact source, deployment, manifest
+        and cost identities. Retention supports security investigation,
+        spending-control audit and defence of related legal claims under GDPR
+        Article 17(3)(b) and (e), subject to legal confirmation of the schedule.
+      retentionStartsFrom: "approvedAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-20"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      approvedBy is the operator id without a User foreign key so account
+      deletion cannot rewrite immutable approval evidence. The stage and its
+      synthetic slots contain no customer id, prompt, answer or provider prose.
+      Operator requests use the manual PrivacyRequest path and linked
+      tamper-evident AdminAuditLog entry. Approval authority and retention are
+      separate decisions; this dark table does not authorize execution.
+
   - domain: promptRefinerShadowRun
     prismaModel: PromptRefinerShadowRun
     userLinkageRole: actor
@@ -1421,6 +1453,167 @@ domains:
       registered, as with AmuxRecommendationAutoUnknown and
       AmuxRecommendationAutoCostEntry.
 
+  - domain: amuxDecisionMakerSwitchEvent
+    prismaModel: AmuxDecisionMakerSwitchEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker switch change or latch
+        (docs/policy/amux-decision-maker.md section 10, the append-only
+        decision ledger). A person's row names the administrator who set the
+        switch and is retained for security investigation and audit. The
+        retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who set the switch
+      and intentionally has no User foreign key; it is null on a system latch.
+      The row stores a closed scope, value and reason code and identifiers, not
+      a free-text reason, a question card or a customer's prompt or file. Rows
+      are never changed or removed by the application; the database refuses
+      both.
+
+  - domain: amuxDecisionMakerBody
+    prismaModel: AmuxDecisionMakerBody
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: ttl_purge
+    retentionPolicy: ttl
+    ttlDays: 120
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-decision-maker.md section 12 S1, the scheduled expiry
+      purge that calls purgeDecisionMakerBodies (stage S1d built the store
+      function and the database rules; nothing calls it on a schedule yet)
+    subjectReference:
+      kind: unverified
+    inUnifiedExport: excluded
+    note: >-
+      An operational record (docs/policy/amux-decision-maker.md section 10):
+      the AMUX Decision Maker's five body fields -- question card text, the
+      DM's answer, rationale and escalation reason, and the operator's edited
+      answer. Worker-written free text may carry anyone's personal data, but
+      the table has no account key, so it is not in the per-account customer
+      export and account deletion does not reach it; a request to see or
+      delete a person's data is handled by an operator searching the bodies,
+      and section 10's privacy erase deletes them under a person's audit. A
+      row is deleted at most 120 days after its request was created (a stale
+      close at 30 days plus 90 days' retention); an open legal hold keeps it
+      until released. The userLinkageRole is nominal: no column names a person.
+
+  - domain: amuxDecisionMakerRetentionEvent
+    prismaModel: AmuxDecisionMakerRetentionEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker legal hold or its
+        release, and the system's retention start when a request closes
+        (docs/policy/amux-decision-maker.md section 10, the append-only
+        retention history). A hold row names the administrator who set or
+        released it and is retained for security investigation and audit. The
+        retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who set or released
+      a hold and intentionally has no User foreign key; it is null on the
+      system's retention_set. The row stores a closed kind, a key period, a
+      retention instant and identifiers, not a body or a free-text reason.
+      Rows are never changed or removed by the application; the database
+      refuses both.
+
+  - domain: amuxDecisionMakerJudgment
+    prismaModel: AmuxDecisionMakerJudgment
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for one AMUX Decision Maker judgment -- a person's
+        confirmation, edited confirmation or rejection of a proposal and the
+        declaration accuracy they recorded (docs/policy/amux-decision-maker.md
+        sections 4 and 10, the append-only decision ledger). The row names
+        the administrator who judged and is retained for security
+        investigation and audit, and section 4's report is computed from it.
+        The retention period is not a legal determination; it stays TBD until
+        security and legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      An operational record, not customer data. actorUserId is the operator id
+      of the administrator who judged and intentionally has no User foreign
+      key. The row stores closed codes (the kind, the accuracy and its items,
+      a snapshot state, an option id), keyed digests and identifiers -- never
+      the answer, which is a body row of amuxDecisionMakerBody. Rows are never
+      changed or removed by the application; the database refuses both.
+
+  - domain: amuxDecisionMakerDeliveryEvent
+    prismaModel: AmuxDecisionMakerDeliveryEvent
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: retain
+    retentionPolicy: statutory
+    implementationStatus: implemented
+    retention:
+      retentionPolicyRef: "TBD-security-retention-schedule"
+      legalBasis: >-
+        Operator evidence for the delivery of one confirmed AMUX Decision
+        Maker answer -- the system's delivery decision and its receipt or
+        unknown outcome, and a person's resolution of an unknown outcome
+        (docs/policy/amux-decision-maker.md sections 9 and 10, the append-only
+        decision ledger). A resolution names the administrator who checked it
+        and is retained for security investigation and audit. The retention
+        period is not a legal determination; it stays TBD until security and
+        legal approval, and a legal hold outranks any later purge.
+      retentionStartsFrom: "createdAt"
+      retentionPeriod: "TBD-pending-security-and-legal-approval"
+      owner: security-privacy
+      legalHoldOverridesPurge: true
+      nextReviewAt: "2026-12-24"
+    subjectReference:
+      kind: none
+    inUnifiedExport: excluded
+    note: >-
+      actorUserId is the operator id of the administrator who resolved an
+      unknown delivery and intentionally has no User foreign key; it is null on
+      the system's events. The row stores a closed kind and outcome and
+      identifiers, not the answer or any free text. Rows are never changed or
+      removed by the application; the database refuses both.
+
   # AMUX v4 tables are inert schema only. The operational content clocks in
   # amux-intake v5-v7 do not answer account deletion or unified export. Keep
   # both axes unverified until those paths are implemented and reviewed.
@@ -1443,6 +1636,43 @@ domains:
       than prompts or user ideas. One-way revocation and audit references do
       not settle account deletion, retention, or unified export; no approval
       writer or live CLI call is enabled.
+
+  - domain: amuxIdeaAnalysisPriceVersion
+    prismaModel: AmuxIdeaAnalysisPriceVersion
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, AMUX v4 price-approval account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId identifies the approving operator without a User
+      foreign key. The row stores versioned price evidence and canonical audit
+      references, not an idea body or provider response. Revocation is
+      one-way; account deletion, retention and unified export are not yet
+      resolved. A price approval alone never enables a live model call.
+
+  - domain: amuxTaskCostCatalogApproval
+    prismaModel: AmuxV4TaskCostCatalogApproval
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, AMUX v4 Task cost-catalog account deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      approvedByUserId identifies the operator without a User foreign key.
+      The versioned catalog contains worker/model ceiling inputs and audit
+      references, not idea text. Approval and revocation do not yet settle
+      account deletion, retention, or unified export.
 
   - domain: amuxIdeaSubmission
     prismaModel: AmuxIdeaSubmission
@@ -1534,6 +1764,26 @@ domains:
       keys require a child-first account-deletion decision. Live draft writes
       remain disabled until those gates pass.
 
+  - domain: amuxIdeaDerivationGroup
+    prismaModel: AmuxIdeaDerivationGroup
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, AMUX v4 split/merge account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      An operator-approved split or merge keeps actorUserId, keyed reason and
+      confirmation digests, and an audit reference without proposal text.
+      Restrictive parent and audit references mean neither account deletion
+      nor unified export follows automatically from the idea purge clock.
+
   - domain: amuxIdeaUnitDecision
     prismaModel: AmuxIdeaUnitDecision
     userLinkageRole: actor
@@ -1614,6 +1864,146 @@ domains:
       may derive from private idea text. Its operational retention and the
       account-deletion/export treatment are still open; live node writes stay
       disabled.
+
+  - domain: amuxIdeaRetentionHold
+    prismaModel: AmuxIdeaRetentionHold
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, legal-hold account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      An operator-approved hold records actor, reason code and audit references.
+      Its restrictive idea reference and hold precedence require a separate
+      account-deletion and export decision.
+
+  - domain: amuxIdeaContentKeyRetirement
+    prismaModel: AmuxIdeaContentKeyRetirement
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4-v7, key-retirement account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The row holds an idea identifier through a restrictive parent relation
+      and retains purge and key-deletion audit references. It has no content
+      body, but its account-deletion and export treatment is unverified.
+
+  - domain: amuxTaskResult
+    prismaModel: AmuxV22TaskResult
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task result account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      Encrypted Task result text is linked to an operator idea without a direct
+      User relation. The approved 90-day body clock does not settle account
+      deletion or unified export; public PR publication is a separate gate.
+
+  - domain: amuxTaskPatch
+    prismaModel: AmuxV22TaskPatch
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/engineering-agent.md v4, v22 Task patch account deletion and export gate
+    subjectReference:
+      kind: parent_row
+      parentColumn: ideaId
+      parentModel: AmuxIdeaSubmission
+    inUnifiedExport: unverified
+    note: >-
+      The private patch is encrypted and tied to an operator idea by ideaId.
+      Its expiry and key retirement do not by themselves decide account
+      deletion or unified export; a public develop PR needs separate consent.
+
+  - domain: amuxPortfolioAssessment
+    prismaModel: AmuxPortfolioAssessment
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, portfolio-assessment deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      Operator approval and evidence references can derive from private ideas.
+      Neither account-deletion nor unified-export treatment is verified.
+
+  - domain: amuxPortfolioScoreSnapshot
+    prismaModel: AmuxPortfolioScoreSnapshot
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v4, portfolio-score deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The immutable snapshot links operator-approved assessments and a task.
+      Its account-deletion and export paths remain unverified.
+
+  - domain: amuxPromotionControl
+    prismaModel: AmuxV22PromotionControl
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v22, promotion-control deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The control records the approving operator and audit reference, without
+      idea text. Account-deletion and export handling are not yet verified.
+
+  - domain: amuxWorkerLaneDecision
+    prismaModel: AmuxV22LaneDecision
+    userLinkageRole: actor
+    owner: security-privacy
+    deletionAction: unverified
+    retentionPolicy: unverified
+    implementationStatus: planned
+    plannedWorkRef: >-
+      docs/policy/amux-intake.md v22, lane-decision deletion and export gate
+    subjectReference:
+      kind: none
+    inUnifiedExport: unverified
+    note: >-
+      The append-only decision links a task to an approving operator and audit
+      entry. Account-deletion and export treatment remain unverified.
 
   - domain: amuxIntakeDraft
     prismaModel: AmuxIntakeDraft

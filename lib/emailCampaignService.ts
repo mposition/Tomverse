@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import {
   emailTemplateDefinition,
+  POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
   POLICY_CHANGE_NOTICE_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { isPolicyChangeNoticeWordingApproved } from "@/lib/policyChangeNoticeEmail";
@@ -19,12 +20,14 @@ import {
   type CampaignEmailPreview,
 } from "@/lib/emailCampaignContent";
 import {
+  CampaignContentError,
   deliveryContentForLanguage,
   localizedCampaignEventPayload,
   type CampaignContentByLocale,
 } from "@/lib/emailCampaignContentCore";
 import {
   expandEmailEvent,
+  policyChangeNoticeAudienceWhere,
   type ExpansionOutcome,
 } from "@/lib/emailAudienceExpansion";
 import { prisma } from "@/lib/prisma";
@@ -41,7 +44,10 @@ import { automaticTransitionClaim } from "@/lib/automaticTransitionClaim";
 import { AUDIENCE_DEFINITION_VERSION } from "@/lib/modelRetirementAudienceCore";
 import { isEmailCampaignsEnabled } from "@/lib/appSettings";
 import { CAMPAIGNS_DISABLED_MESSAGE } from "@/lib/emailFeatureFlags";
-import { readExpansionSpec } from "@/lib/emailAudienceExpansionCore";
+import {
+  policyChangeNoticePairingProblem,
+  readExpansionSpec,
+} from "@/lib/emailAudienceExpansionCore";
 import {
   summariseRetirementAudience,
   type AudienceSummary,
@@ -157,6 +163,14 @@ export const createCampaignDraft = async (input: CampaignDraft) => {
     contentByLocale: submittedContent,
   }).contentByLocale;
   const expansion = readExpansionSpec(input.audienceSpec);
+  const pairing = policyChangeNoticePairingProblem({
+    templateKey: definition.key,
+    noticeTemplateKey: POLICY_CHANGE_NOTICE_TEMPLATE,
+    noticeEffectiveDate: POLICY_CHANGE_NOTICE_EFFECTIVE_DATE,
+    spec: expansion,
+  });
+  // A content error so the route answers 400 with the reason, not a bare 500.
+  if (pairing) throw new CampaignContentError(pairing);
   if (
     expansion.cohort?.kind === "marketing_consent" &&
     definition.purpose !== expansion.cohort.purpose
@@ -298,9 +312,18 @@ export const campaignSendRefusal = async (
       contentByLocale: true,
       templateVersionIds: true,
       claimsAutomaticTransition: true,
+      audienceSpec: true,
     },
   });
   const locales = readLocales(campaign.locales);
+  // Asked only for the amendment notice: it is the one planned send that goes
+  // out without a footer rather than being held (campaignRunRefusal).
+  const activePolicyProfileCount =
+    readExpansionSpec(campaign.audienceSpec).cohort?.kind === "policy_change_notice"
+      ? await prisma.jurisdictionProfile.count({
+          where: { policyVersion: { status: "active" } },
+        })
+      : undefined;
   // Read only when the campaign makes the promise. The twelve conditions cost
   // half a dozen queries, and a campaign that promises nothing owes none of
   // them.
@@ -320,6 +343,7 @@ export const campaignSendRefusal = async (
       claimed: campaign.claimsAutomaticTransition,
       unmet: transition?.unmet ?? [],
     },
+    ...(activePolicyProfileCount === undefined ? {} : { activePolicyProfileCount }),
   });
 };
 
@@ -981,9 +1005,37 @@ export type MarketingConsentAudienceSummary = {
   verdict?: ReleaseNotesAudiencePreview;
 };
 
+/**
+ * The amendment notice's audience, counted with the wave's own condition.
+ *
+ * Shaped like the other summaries (headline, cohort, exclusions) so the
+ * console's generic rows still read correctly; the notice-specific sentence
+ * reads the three counts by name.
+ */
+export type PolicyChangeNoticeAudienceSummary = {
+  kind: "policy_change_notice";
+  effectiveDate: string;
+  /** Accounts the notice is owed to, whether or not they have it already. */
+  owed: number;
+  /** Owed accounts holding an approved notice that arrived or is on its way. */
+  alreadyReached: number;
+  /** Owed, not reached, and with no address: the gate counts them unreachable. */
+  noAddress: number;
+  cohortRows: Record<string, number>;
+  cohortUsers: Record<string, number>;
+  distinctUsers: number;
+  excluded: Record<string, number>;
+  /** What the next wave writes. Suppression is decided per row at send. */
+  noticeAudience: number;
+  autoMigratable: number;
+  malformed: number;
+  truncated: boolean;
+};
+
 export type CampaignAudienceSummary =
   | AudienceSummary
-  | MarketingConsentAudienceSummary;
+  | MarketingConsentAudienceSummary
+  | PolicyChangeNoticeAudienceSummary;
 
 /**
  * Measures the audience and stores the result on the campaign.
@@ -1045,6 +1097,57 @@ export const estimateCampaignAudience = async (input: {
   const spec = readExpansionSpec(campaign.audienceSpec);
   if (!spec.cohort) {
     return { refused: "no_cohort", message: ESTIMATE_REFUSAL_MESSAGE.no_cohort };
+  }
+
+  if (spec.cohort.kind === "policy_change_notice") {
+    const effectiveDate = spec.cohort.effectiveDate;
+    const owedWhere: Prisma.UserWhereInput = {
+      OR: [
+        { createdAt: null },
+        { createdAt: { lt: new Date(`${effectiveDate}T00:00:00.000Z`) } },
+      ],
+    };
+    const audience = policyChangeNoticeAudienceWhere(effectiveDate, input.now ?? new Date());
+    // One snapshot, so the two differences below cannot go negative when an
+    // account or a notice row lands between the counts.
+    const [owed, pending, withEmail] = await prisma.$transaction(
+      [
+        prisma.user.count({ where: owedWhere }),
+        prisma.user.count({ where: audience }),
+        prisma.user.count({ where: { AND: [audience, { email: { not: null } }] } }),
+      ],
+      { isolationLevel: "RepeatableRead" }
+    );
+    const summary: PolicyChangeNoticeAudienceSummary = {
+      kind: "policy_change_notice",
+      effectiveDate,
+      owed,
+      alreadyReached: owed - pending,
+      noAddress: pending - withEmail,
+      cohortRows: { policy_change_notice: owed },
+      cohortUsers: { policy_change_notice: owed },
+      distinctUsers: owed,
+      excluded: {
+        already_reached: owed - pending,
+        no_email: pending - withEmail,
+      },
+      noticeAudience: withEmail,
+      autoMigratable: 0,
+      malformed: 0,
+      truncated: false,
+    };
+    const estimatedAt = input.now ?? new Date();
+    await prisma.emailCampaign.update({
+      where: { id: input.campaignId },
+      data: {
+        estimatedRecipients: withEmail,
+        audienceVersion: 1,
+        estimatedAt,
+        estimatedByEmail: input.byEmail,
+        audienceEstimate: summary,
+      },
+    });
+    return { estimatedRecipients: withEmail, audienceVersion: 1, estimatedAt, summary };
   }
 
   if (spec.cohort.kind === "marketing_consent") {

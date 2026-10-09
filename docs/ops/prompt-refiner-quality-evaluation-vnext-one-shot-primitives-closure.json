@@ -1,0 +1,14 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-primitives-closure-v1",
+  "scope": "development_only",
+  "providerDispatchAuthorized": false,
+  "operationalSuccessorClosure": false,
+  "files": {
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-v2-approval.md": "ce863627405817608dea6aeedbd93f7167550021e11b0f4f390ec2545f94777e",
+    "lib/promptRefinerQualityEvaluationVnextOneShotRoot.ts": "56157dc043a912c28c6b11c7b1cb61d399f4196d1a53e06191d8609ac5f63bd1",
+    "lib/promptRefinerQualityEvaluationVnextOneShotSource.ts": "f7dd6d730dd600cc39d9fe61c8ed9db73d106f35ee525769356003b7c5fcc28e",
+    "tests/promptRefinerQualityEvaluationVnextOneShotRoot.test.mjs": "6d61ba6adba281a1379e9ba071556fe4e7b36cce3f0eb1c99e8cf8be6766c570",
+    "tests/promptRefinerQualityEvaluationVnextOneShotSource.test.mjs": "8d19c3979fa6780f24a27183b0646f59ec6ed9e1859b70d3c8929060305e5536",
+    "tests/promptRefinerQualityEvaluationVnextOneShotClosure.test.mjs": "49f7679819fa4d43f9d1ed08107d83434f664354303d53148553b950547ead42"
+  }
+}

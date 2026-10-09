@@ -174,13 +174,21 @@ const admits = async () => ({ publish: true });
 // The adapter contract
 // ---------------------------------------------------------------------------
 
-test("there is no adapter in this build, and saying so is the answer", () => {
+test("an adapter needs a credential, and saying so is the answer", () => {
   // Not a throw. The publisher asks on its ordinary path, and "there is no
-  // adapter" is the expected answer until S2d2 -- an exception would make
-  // every caller handle it as a failure.
+  // credential" is the expected answer until an operator sets one -- an exception
+  // would make every caller handle it as a failure.
+  //
+  // S2d2 replaced "no adapter is implemented" with this: the implementation
+  // exists now, and what it still lacks is a key, which this module may not hold.
   assert.deepEqual(resolveMarketingPublishAdapter("zernio"), {
     available: false,
-    reason: "no_adapter_implemented",
+    reason: "no_credential",
+  });
+  // A builder that has nothing to build with answers the same way.
+  assert.deepEqual(resolveMarketingPublishAdapter("zernio", () => null), {
+    available: false,
+    reason: "no_credential",
   });
   assert.deepEqual(resolveMarketingPublishAdapter("something-else"), {
     available: false,

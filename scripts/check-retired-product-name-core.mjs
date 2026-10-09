@@ -135,9 +135,26 @@ export const HISTORICAL_ALLOWLIST = [
     },
 ];
 
-export const allowlistEntryFor = (path) =>
-    HISTORICAL_ALLOWLIST.find((entry) => path === entry.prefix || path.startsWith(entry.prefix)) ??
-    null;
+/**
+ * Repo-relative with `/`, whatever separator the caller's platform used.
+ *
+ * Every prefix above is written with `/`, and `node:path` hands a caller `\`
+ * on Windows -- so a `\`-separated path matched no entry at all and the check
+ * failed on the very records the allowlist exists to exempt. Normalising at
+ * the one place a path is compared keeps this module a pure function over
+ * repo-relative POSIX paths without making the match depend on the caller
+ * having spelled one.
+ */
+export const toPosixPath = (path) => path.replaceAll("\\", "/");
+
+export const allowlistEntryFor = (path) => {
+    const posix = toPosixPath(path);
+    return (
+        HISTORICAL_ALLOWLIST.find(
+            (entry) => posix === entry.prefix || posix.startsWith(entry.prefix)
+        ) ?? null
+    );
+};
 
 /**
  * Every occurrence of the retired name outside the allowlist.

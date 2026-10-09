@@ -1,0 +1,170 @@
+#!/bin/sh
+# amux-commit-report — attach each commit to the session's in-flight board card
+# (AMUX-2015: a card should carry its code history). No-op outside amux; always
+# exits 0 — reporting must never wedge a commit. Fail-open by design.
+#
+# TRACKED AND INSTALLED SINCE 2026-08-11 (AMUX-2941). It was the fourth amux
+# hook and the last unmanaged one: present in a single checkout, in no repo, and
+# installed by nothing. Fail-open makes that especially quiet — the curl is
+# redirected to /dev/null and the hook exits 0 either way, so a checkout with no
+# post-commit and a checkout whose endpoint 404s look exactly like a checkout
+# where everything works. Verified live before tracking: POST
+# /api/sessions/<n>/commit-report answers 200.
+#
+# Its fallback URL named the RETIRED port (the one CLAUDE.md says not to
+# re-teach) rather than the canonical 8824, so copying this hook to a new
+# checkout carried the dead address forward. The literal is deliberately not
+# repeated here: tests/legacy_port_guard.rs greps for it, and a comment
+# containing it is exactly how it spreads.
+# ── AN EMPTY COMMIT SAYS SO, OUT LOUD (AMUX-3872) ────────────────────────────
+#
+# git reports a commit containing ZERO FILES with exactly the same `[main
+# <sha>]` line as a full one, and nothing in this repo's hooks ever looked at
+# what a commit actually CONTAINED. Every other guard asks whether the commit
+# should PROCEED.
+#
+# Three of them landed in a single session, from three unrelated causes: an
+# index emptied during the pre-commit window, a peer's `git reset` inside it,
+# and the staged-recheck writing the pending commit's own temporary index. Each
+# time the message shipped, the work did not, and each was found later by
+# accident. One card was closed citing a sha that contained nothing.
+#
+# So this runs BEFORE the `AMUX_SESSION` guard below: an empty commit is a bug
+# in every checkout, not only inside amux.
+#
+# `--root` is load-bearing. `diff-tree` prints nothing at all for a parentless
+# commit, so without it the very first commit in a repo always reads as empty.
+# A merge legitimately carries no changes of its own against its first parent,
+# so merges are exempted by parent count rather than by guessing from the diff.
+_ec_parents=$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w | tr -d ' ')
+_ec_files=$(git diff-tree --no-commit-id --name-only -r --root HEAD 2>/dev/null | wc -l | tr -d ' ')
+if [ "$_ec_files" = "0" ] && [ "${_ec_parents:-0}" -lt 3 ]; then
+  echo "" >&2
+  echo "amux: ⚠ THIS COMMIT CONTAINS ZERO FILES — $(git rev-parse --short HEAD 2>/dev/null)" >&2
+  echo "      The message shipped and the work did not. git prints the same line for" >&2
+  echo "      an empty commit as a full one, which is why this needs saying." >&2
+  echo "      Your changes are most likely still sitting unstaged: check \`git status\`" >&2
+  echo "      before recording this sha anywhere. Do NOT close a card citing it." >&2
+  echo "      Known causes: something emptied the index during the pre-commit window" >&2
+  echo "      (a peer's reset on a shared checkout), or a hook wrote GIT_INDEX_FILE" >&2
+  echo "      while a pathspec commit was pending (AMUX-3872)." >&2
+  echo "" >&2
+fi
+
+# ── THE COMMIT CONTAINS FILES NOBODY STAGED (AF-565) ─────────────────────────
+#
+# The inverse of the zero-files check above, and strictly worse. That one costs a
+# re-run; this one puts a PEER'S work under YOUR message and leaves a
+# bisect-hostile subject on main.
+#
+# Measured 2026-09-07: `git commit -F - -- e2e/settings.spec.ts`, naming ONE file,
+# printed "fatal: cannot lock ref 'HEAD': is at 19dc0ecc but expected d2546616"
+# and then EXITED 0. The commit carried that message over a peer's five files and
+# 236 lines; the change actually named was not in it and was still unstaged. Two
+# contradictory signals in one run, and the exit status -- the thing every hook
+# keys on -- was the wrong one.
+#
+# `git diff` before committing cannot catch this: the divergence happens BETWEEN
+# the check and the commit, which is what makes it a race rather than the scoping
+# mistake AF-541 records. So the check has to be on the OUTCOME.
+#
+# pre-commit wrote the intended set to $AMUX_HOME/commit-intent while holding the
+# pathspec's own temporary index. Compare it with what landed.
+_ci_f="${AMUX_HOME:-$HOME/.amux}/commit-intent/$(git rev-parse --show-toplevel 2>/dev/null | tr '/' '_').txt"
+if [ -f "$_ci_f" ]; then
+  _ci_head=$(sed -n '1s/^head //p' "$_ci_f" 2>/dev/null)
+  _ci_parent=$(git rev-parse HEAD^ 2>/dev/null || echo none)
+  _ci_parents=$(git rev-list --parents -n 1 HEAD 2>/dev/null | wc -w | tr -d ' ')
+  # Only compare when this commit sits directly on the HEAD pre-commit saw. An
+  # amend or a rebase replay leaves a stale manifest, and comparing it would
+  # manufacture an alarm -- a false positive trains people to ignore the guard,
+  # which is how one stops being read.
+  if [ "$_ci_head" = "$_ci_parent" ] && [ "${_ci_parents:-0}" -lt 3 ]; then
+    # TEMP FILES, not `comm <(...) <(...)`: this hook is #!/bin/sh and process
+    # substitution is a bashism that happens to work where /bin/sh is bash in
+    # POSIX mode -- exactly the accident that ships and breaks on a real dash.
+    _ci_w=$(mktemp "${TMPDIR:-/tmp}/amux-ci-w-XXXXXX" 2>/dev/null) || _ci_w=""
+    _ci_g=$(mktemp "${TMPDIR:-/tmp}/amux-ci-g-XXXXXX" 2>/dev/null) || _ci_g=""
+    _ci_extra=""
+    if [ -n "$_ci_w" ] && [ -n "$_ci_g" ]; then
+      sed '1d' "$_ci_f" 2>/dev/null | sort -u > "$_ci_w"
+      git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | sort -u > "$_ci_g"
+      _ci_extra=$(comm -13 "$_ci_w" "$_ci_g" 2>/dev/null)
+      rm -f "$_ci_w" "$_ci_g" 2>/dev/null || true
+    fi
+    _ci_n=$(printf '%s' "$_ci_extra" | grep -c . || true)
+    if [ "${_ci_n:-0}" -gt 0 ]; then
+      echo "" >&2
+      echo "amux: THIS COMMIT CONTAINS $_ci_n FILE(S) YOU DID NOT STAGE -- $(git rev-parse --short HEAD 2>/dev/null)" >&2
+      echo "      pre-commit saw a different set from what landed. On a shared checkout" >&2
+      echo "      that usually means a concurrent commit won a race and your message is" >&2
+      echo "      now sitting on somebody else tree (AF-565). git can print a FATAL ref" >&2
+      echo "      lock error and still exit 0, so nothing upstream of here noticed." >&2
+      printf '%s\n' "$_ci_extra" | sed 's/^/        + /' >&2
+      echo "      Check whose they are before you push:  git show --stat HEAD" >&2
+      echo "      If they are a peer's, do NOT reset -- the commit may be the only copy" >&2
+      echo "      of their work. Record it in a follow-up and tell them." >&2
+      echo "" >&2
+    fi
+  fi
+  rm -f "$_ci_f" 2>/dev/null || true
+fi
+
+# ── A COMMITTED HOOK IS NOT AN INSTALLED HOOK (AF-375) ───────────────────────
+#
+# The hooks in scripts/git-hooks/ ship by COPY: install-hooks.sh cp's them into
+# .git/hooks/. So editing one and committing it changes NOTHING for any lane
+# until someone re-installs, and nothing anywhere said so.
+#
+# It cost two closes in one session. Both of that day's staged-guard changes were
+# in the repo and reaching nobody, and one card was marked `done` with evidence
+# reading "ALL PASS" that was true of the repo copy and silent about the
+# installed one:
+#     grep -c 'COMMIT ONLY YOUR OWN PATHS'  installed=0  repo=1
+#
+# WHY POST-COMMIT AND NOT PRE-COMMIT. 88 of the last 500 commits touch
+# scripts/git-hooks/, so warning on every one of those is a warning on the normal
+# path, which is the noise that trained people to scroll past the last one
+# (AF-342). Here the condition is compared, not assumed: it fires only while the
+# installed copy actually differs, and it stops firing the moment you install.
+# Editing a hook and not installing it IS the defect, so this reports a real
+# state rather than an activity.
+#
+# The comparison is `cmp`, the same one install-hooks.sh already runs at the end
+# of its own run. Moved to where it gets read.
+if git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -q '^scripts/git-hooks/'; then
+  _root=$(git rev-parse --show-toplevel 2>/dev/null)
+  _drift=""
+  for _h in pre-commit amux-staged-guard prepare-commit-msg pre-push post-commit append-only-push-guard; do
+    if [ -f "$_root/scripts/git-hooks/$_h" ] && [ -f "$_root/.git/hooks/$_h" ]; then
+      cmp -s "$_root/scripts/git-hooks/$_h" "$_root/.git/hooks/$_h" || _drift="$_drift $_h"
+    fi
+  done
+  if [ -n "$_drift" ]; then
+    echo "" >&2
+    echo "amux post-commit: HOOK COMMITTED BUT NOT INSTALLED —$_drift" >&2
+    echo "  These ship by COPY, so this commit changed the repo and nothing else." >&2
+    echo "  No lane runs your change, including you, until:" >&2
+    echo "      ./scripts/install-hooks.sh" >&2
+    echo "  Verify the INSTALLED copy afterwards, not the repo one: that distinction" >&2
+    echo "  is what let a fix be closed as done while it was inert (AF-375)." >&2
+    echo "" >&2
+  fi
+fi
+
+[ -n "$AMUX_SESSION" ] || exit 0
+sha=$(git rev-parse --short HEAD 2>/dev/null)
+# tr strips the two JSON-hostile characters instead of escaping them — a
+# quote-less subject in a log line beats a sed pipeline that broke on its own
+# escaping and posted empty subjects (first live test of this hook).
+subj=$(git log -1 --format=%s 2>/dev/null | tr -d '"\' | cut -c1-120)
+[ -n "$sha" ] || exit 0
+# Send the repo dir so the server can tell whose in-flight work this commit
+# just carried (AMUX-2332). On a shared single-file checkout a commit routinely
+# includes another session's uncommitted hunks, and that session's own `git
+# commit` then reports "nothing to commit, working tree clean" — it can report
+# work as shipped under a sha it never created unless someone tells it.
+top=$(git rev-parse --show-toplevel 2>/dev/null)
+payload=$(printf '{"sha":"%s","subject":"%s","dir":"%s"}' "$sha" "$subj" "$top")
+curl -sk -m 3 -X POST -H 'Content-Type: application/json'   -H "X-Amux-Session: $AMUX_SESSION" -d "$payload"   "${AMUX_URL:-https://localhost:8824}/api/sessions/$AMUX_SESSION/commit-report" >/dev/null 2>&1
+exit 0

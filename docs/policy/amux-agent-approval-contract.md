@@ -1,8 +1,9 @@
 # AMUX Agent 승인 계약
 
-상태: **v1.3 정책 승인됨; 구현·staging 검증·활성화는 별도.**
+상태: **v1.4 정책 승인됨; 구현·staging 검증·활성화는 별도.**
 작성·원안 승인 2026-09-21.
 approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 1.3
+approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 1.4
 
 | 버전 | 승인 | 변경 |
 |---|---|---|
@@ -10,6 +11,7 @@ approvedBy: mposition · approvedAt: 2026-09-21 · 정책 버전: 1.3
 | 1.1 | 2026-09-21 mposition (v1.3에 포함) | Claude 독립 검토의 escalation lifecycle·감사·노출·CAS 보강. |
 | 1.2 | 2026-09-21 mposition (v1.3에 포함) | GitHub PR base SHA·head SHA·diff를 `review → done` 검토 원문으로 결속. |
 | 1.3 | 2026-09-21 mposition | 모호한 결정 응답은 ID·대상 digest 조회 전 재시도 금지, 복구 가능한 block 후 명시적 후속 escalation, PR base SHA 추가 결속. |
+| 1.4 | 2026-10-07 mposition | v4 비코드 Task의 검증된 암호화 결과물에 한해 PR 없는 운영자 완료 판정을 허용한다. 구현 Task와 기존 카드의 PR 필수 계약은 유지한다. |
 
 이 문서는 `docs/policy/development-agent-orchestration.md` §Approval의 작업 검토
 계약과 검토 보강안을 확정한다. **정책 승인만으로 실행 승인이 생기지 않는다.**
@@ -69,16 +71,33 @@ PR 번호·40자리 base SHA·40자리 head SHA·원시 diff 바이트의 SHA-25
 조회·검증이 실패하거나, base·head 또는 diff digest가 제안 이후 달라지면
 `approve`는 거절한다. task 설명의 50,000자 입력 상한은 UTF-8 바이트 상한이
 아니다. 보호 화면은 그 전체가 보이는 한도를 사용하며, 과거 초과 행을 잘라
-표시한 경우 `approve`·`retry`를 금지하고 잘림을 명시한다. `block`은 안전한 중지
-결정으로 남긴다. GitHub 조회와 DB 트랜잭션은 분리돼 있으므로 마지막 조회
+표시한 경우 `approve`·`retry`를 금지하고 잘림을 명시한다. 기존 카드도 제목·설명의
+제어·방향 문자 제거 또는 Unicode 정규화 때문에 원문과 표시 문구가 달라지면
+`approve`·`retry`를 닫고 사유를 표시한다. 원문을 교정해 다시 검토하거나 `block`할 수 있으며,
+숨은 문자가 있는 표시 문구를 원문 동의로 간주하지 않는다. GitHub 조회와 DB 트랜잭션은 분리돼 있으므로 마지막 조회
 직후부터 결정 commit까지 짧은 TOCTOU 창은 남는다. 승인 증거는 그때 읽은 **특정**
 base/head/diff에 결속하며, 이후 움직인 PR의 최신 상태나 병합·배포를 승인하지
 않는다. `block`·`retry`는 이 결과물 출처가 없어도 별도 상태 조건으로
 허용할 수 있다. 검토 PR을 task에 잘못 결속하는 입력은 자동으로 증명할 수 없으므로,
 작업 계획의 PR 번호 지정과 화면의 PR 식별자 확인을 운영 책임으로 남긴다.
 
-검토 원문 조회도 `ops:write`와 최근 step-up이 필요하다. 기존 routing·escalation
-일반 GET에서는 자유 텍스트 `reason`·description·prompt·결과물 원문을 반환하지
+v1.4의 **좁은 예외**는 `sourceSystem=admin-idea-v4`, `cardType=task`,
+`taskRole=design|test|review|verify|investigate|operate`인 비코드 완료 단위에만
+적용한다. 해당 단위의 `approve`는 PR 대신 현재 카드 revision에 묶인 암호화
+제목·범위·실행 brief의 검증된 digest와 마지막 성공 attempt의 보존된 결과 본문
+SHA-256을 운영자에게 보여 주고 검토 대상 digest에 포함한다. 결과가 삭제됐거나
+복호화·digest 검증에 실패하거나 마지막 attempt/assignment와 다르면 `approve`를
+닫는다. 화면의 제어·방향 문자 제거 또는 Unicode 정규화 때문에 원문과 표시 문구가
+달라지는 경우에도 `approve`·`retry`를 닫아, 보이지 않는 원문에 동의한 것으로 처리하지
+않는다. DB의 제안 INSERT guard도 PR 없는 승인에 대해 이 출처·역할·결과 존재·
+attempt 결속을 확인한다. 기존 카드와 v4 `implement` Task의 PR 필수 계약은 그대로다.
+PR 없는 완료 판정은 외부 게시·병합·배포 승인이 아니며, 운영자가 작업별 완료
+조건과 독립 검증 근거를 직접 판단한다.
+
+검토 원문 조회도 `ops:write`와 최근 step-up이 필요하다. v4 비공개 제목·범위·
+결과 원문의 검토 조회와 결정·결정 상태 조회는 owner와 최근 step-up으로 더
+좁힌다. 일반 운영자에게는 v4 대상의 존재도 반환하지 않는다. 기존 routing·
+escalation 일반 GET에서는 자유 텍스트 `reason`·description·prompt·결과물 원문을 반환하지
 않고 enum·ID·길이 제한된 안전한 제목과 상태만 돌려준다. 기존 행도 이 규칙으로
 가린다. worker가 쓴 사유는 신뢰하지 않는 데이터다. 새 worker 자유 텍스트 사유는
 실행 제어 평면에 저장하거나 새 prompt에 재주입하지 않고 고정 코드로 치환한다.
@@ -93,7 +112,7 @@ settle API의 기존 `reason` 입력은 하위 호환을 위해 받을 수 있�
 
 승인 의도는 서버가 만든 불변 제안으로 저장한다. 최소 결속 필드는
 `escalationId`, `taskId`, task `revision`, 제안 결과(`approve`·`retry`·`block`),
-검토 대상 SHA-256 digest(소문자 hex), approve의 PR 번호·base SHA·head SHA·diff SHA-256,
+검토 대상 SHA-256 digest(소문자 hex), PR이 있는 approve의 PR 번호·base SHA·head SHA·diff SHA-256,
 제안된 상태 전이, 생성 시각, 만료 시각이다. 제안값은 **24시간
 유효**하다. 대상 필드·결과·revision 중 하나라도 바뀌면 기존 제안은
 무효다. 요청이 전송되기 전에 만료되어도 거절한다.
@@ -206,8 +225,11 @@ staging에서 사람이 판정·서명한 증거로만 켠다. 필수 반례는 
 요청 Agent의 자체 승인, 재인증 만료, 다른 task/revision/digest, 두 관리자 동시
 클릭, 같은 key 재전송·다른 내용, 만료 직전/후, 트랜잭션 rollback, incident
 동결, 유효 attempt/receipt, 재시도 상한, 미수정 기한, 비용/WIP/quota 게이트다.
-GitHub PR이 없거나 닫힘·병합·다른 저장소·다른 base·변경된 base SHA/head/diff·초과 크기·
+v1.4 비코드 예외를 제외하고 GitHub PR이 없거나 닫힘·병합·다른 저장소·다른 base·변경된 base SHA/head/diff·초과 크기·
 잘못된 인코딩인 경우에도 `approve`가 닫히는지 확인한다.
+v4 비코드 Task의 PR 없는 예외는 현재 revision·암호화 제목/범위/brief digest·
+마지막 성공 attempt·보존 결과 SHA가 모두 맞을 때만 열리는지 검사하고,
+`implement`·기존 카드·본문 삭제/잠금·결과 교체·잘린 표시·비-owner 반례를 포함한다.
 승인·거절의 감사 해시 체인을 검증하고, 검토 화면·로그·증거 파일이 prompt나
 비밀값을 노출하지 않는지도 확인한다. 운영값·staging 관측을 합성하지 않는다.
 활성화 스위치는 `TOMVERSE_AMUX_AGENT_APPROVAL_ENABLED=true`만 켜짐이며

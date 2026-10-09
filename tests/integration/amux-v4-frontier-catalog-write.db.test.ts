@@ -4,7 +4,10 @@ import { after, test } from "node:test";
 
 import type { Session } from "next-auth";
 
-import { readCurrentAmuxIdeaFrontierSelection } from "@/lib/amux/ideaFrontierCatalogRead";
+import {
+  listApprovedAmuxIdeaFrontierModels,
+  readCurrentAmuxIdeaFrontierSelection,
+} from "@/lib/amux/ideaFrontierCatalogRead";
 import {
   commitFrontierCatalogDecision,
   FrontierCatalogWriteError,
@@ -29,7 +32,8 @@ const syntheticModelIds = new Set<string>();
 process.env.ADMIN_USER_IDS = ownerId;
 process.env.ADMIN_EMAILS = ownerEmail;
 process.env.ADMIN_OWNER_EMAILS = ownerEmail;
-process.env.ADMIN_AUDIT_INTEGRITY_KEY = `synthetic-frontier-audit-${randomUUID()}`;
+process.env.ADMIN_AUDIT_INTEGRITY_KEY =
+  "synthetic-amux-v4-frontier-catalog-audit-key-2026";
 const session = {
   user: { id: ownerId, email: ownerEmail, authenticatedAt: new Date().toISOString() },
   expires: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -93,6 +97,14 @@ test("owner Frontier approval, revocation and reapproval are atomically audited"
   assert.deepEqual(await readCurrentAmuxIdeaFrontierSelection({
     provider: "openai", modelId, reasoningEffort: "xhigh",
   }), { decision: "selection_current", approvalId: firstId, approvalVersion: 1 });
+  const listed = await listApprovedAmuxIdeaFrontierModels();
+  assert.equal(listed.decision, "catalog_current");
+  if (listed.decision === "catalog_current") {
+    assert.deepEqual(listed.models.filter((model) => model.modelId === modelId), [{
+      approvalId: firstId, approvalVersion: 1, provider: "openai", modelId,
+      allowedEfforts: ["high", "xhigh"],
+    }]);
+  }
 
   const staleId = randomUUID();
   await assert.rejects(prisma.$transaction((tx) =>
@@ -130,6 +142,11 @@ test("owner Frontier approval, revocation and reapproval are atomically audited"
   assert.deepEqual(await readCurrentAmuxIdeaFrontierSelection({
     provider: "openai", modelId, reasoningEffort: "xhigh",
   }), { decision: "reject", reason: "model_not_approved" });
+  const afterRevocation = await listApprovedAmuxIdeaFrontierModels();
+  assert.equal(afterRevocation.decision, "catalog_current");
+  if (afterRevocation.decision === "catalog_current") {
+    assert.equal(afterRevocation.models.some((model) => model.modelId === modelId), false);
+  }
 
   const reapprove = decision({ schemaVersion: 1, action: "approve",
     approvalId: secondId, provider: "openai", modelId,
@@ -141,6 +158,14 @@ test("owner Frontier approval, revocation and reapproval are atomically audited"
   assert.deepEqual(await readCurrentAmuxIdeaFrontierSelection({
     provider: "openai", modelId, reasoningEffort: "high",
   }), { decision: "selection_current", approvalId: secondId, approvalVersion: 2 });
+  const relisted = await listApprovedAmuxIdeaFrontierModels();
+  assert.equal(relisted.decision, "catalog_current");
+  if (relisted.decision === "catalog_current") {
+    assert.deepEqual(relisted.models.filter((model) => model.modelId === modelId), [{
+      approvalId: secondId, approvalVersion: 2, provider: "openai", modelId,
+      allowedEfforts: ["high"],
+    }]);
+  }
   assert.equal(await prisma.amuxWorkItem.count(), beforeCards);
 });
 

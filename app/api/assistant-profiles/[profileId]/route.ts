@@ -28,7 +28,7 @@ import {
     readAssistantProfile,
     updateAssistantProfileIdentity,
 } from "@/lib/assistantProfileService";
-import { assistantProfileErrorResponse } from "@/app/api/assistant-profiles/route";
+import { assistantProfileErrorResponse } from "@/lib/assistantProfileErrorResponse";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { authOptions } from "@/lib/auth";
 

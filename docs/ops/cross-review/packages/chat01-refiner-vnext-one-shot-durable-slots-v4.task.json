@@ -1,0 +1,30 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v4",
+  "requirement": "Owner-authorized one-task continuation of the preserved durable-slots v3 on_hold exchange. Keep the dark N80 reservation schema content-free and fail-closed. Address the remaining reproducible TRUNCATE finding without reopening or reclassifying v1, v2, or v3. No stage approval, holdout content, provider call, flag, or product traffic is introduced. Claude Code Max first-party subscription CLI independently reviews the changed source and test evidence; Anthropic API is not used.",
+  "completionCriteria": [
+    "The one-shot stage remains a singleton with immutable exact source, root, runtime deployment, price, and cost pins; all 80 fixed-price slots must be present in the same transaction before a stage insert commits.",
+    "Stage and slot tables reject TRUNCATE, including CASCADE from the stage, so row-level guards cannot be bypassed to erase an approval or a consumed-slot tombstone.",
+    "Synthetic PostgreSQL integration tests exercise both TRUNCATE refusals plus the existing stage/run audit binding and irreversible slot state transitions; no actual holdout or provider call is used.",
+    "Prisma validation, focused integration test, typecheck, lint, protected-writer, dark-table, enum, and whitespace checks pass. Prior on_hold evidence remains unchanged, the final Claude verdict has no reproducible findings, and the specifically authorized continuation passes the bounded controller."
+  ],
+  "baseCommit": "da75d6184d7d7d91fcd3029122e31e7e250935d2",
+  "writableScope": [
+    "prisma/schema.prisma",
+    "prisma/migrations/20261002093000_prompt_refiner_vnext_one_shot_slots/migration.sql",
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
+    "scripts/run-db-integration-tests.mjs",
+    "scripts/db-integration-groups.mjs",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/check-protected-table-writers-core.mjs",
+    "scripts/check-dark-tables.mjs",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v2.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v3.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-durable-slots-v4.task.json"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "chat01-refiner-vnext-one-shot-durable-slots-v3",
+    "exchange": "artifacts/cross-review/chat01-refiner-vnext-one-shot-durable-slots-v3/exchange.json"
+  }
+}

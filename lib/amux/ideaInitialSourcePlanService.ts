@@ -113,6 +113,7 @@ export async function createInitialIdeaOnlySourcePlan(
         submittedAuditId: submittedAudit.id,
         revisionNumber: 1,
         sourceUnitCount: manifest.sourceUnitCount,
+        initialChunkIndex: 0,
         manifestDigest: manifest.manifestDigest,
         manifestDigestKeyId: manifest.manifestDigestKeyId,
         transferAuthorized: false,
@@ -131,6 +132,14 @@ export async function createInitialIdeaOnlySourcePlan(
     });
     await tx.amuxIdeaSourcePlanRevision.update({
       where: { id: revisionId }, data: { state: "active" },
+    });
+    await tx.amuxIdeaAnalysisChunk.create({
+      data: {
+        ideaId: input.ideaId, actorUserId: input.actorUserId,
+        chunkIndex: 0, state: "pending", attempt: 0, leaseGeneration: 0,
+        sourcePlanRevisionId: revisionId, planStartChunkIndex: 0,
+        revisionChunkIndex: 0,
+      },
     });
     const updated = await tx.amuxIdeaSubmission.updateMany({
       where: { id: input.ideaId, actorUserId: input.actorUserId,

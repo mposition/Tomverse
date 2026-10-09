@@ -48,16 +48,28 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   // moved. The previous plan digest was 9f948dd5…6946e5. The substitution
   // below is recomputed on this catalogue and still has to match the pair
   // those two older version strings produce.
+  // D03 adds separate, offline per-model coverage to the diagnostic report.
+  // The development plan records its version but does not consume those new
+  // rows. Substituting v4 for v5 in this exact current body must reproduce
+  // the previous plan and serialized digests, proving that no plan row,
+  // selection, catalogue entry, or price changed in this re-baseline.
   assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
   assert.equal(legacy.versions.router.selection, "router-selection-v3");
-  assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v4");
-  assert.equal(legacy.planDigest, "4e6f769a31a7fcdcf7db0f2b4f4d627a86f1b6bb913ebec9be2774f9d5892784");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "839c980f0ecde4a064ca2d42472f3ab2c010529e627fc75af8ab4478acf1912f");
+  assert.equal(legacy.versions.diagnostic, "router-full-catalog-diagnostic-v5");
+  assert.equal(legacy.planDigest, "3386b70bc907bb141fbdf38894f65eadca7ed1debce1930a13849aab7b22a1bc");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "01df3389bbf182335197e0851081e1124244cc3e990d59051000a34fe2d32d0e");
 
   // The digest covers the body without itself, and it is written last, so
   // dropping it leaves the remaining keys in the order they were built in.
   const body = { ...legacy };
   delete body.planDigest;
+  const asV4 = { ...body, versions: { ...body.versions, diagnostic: "router-full-catalog-diagnostic-v4" } };
+  const v4Digest = benchmarkDigest(canonicalBenchmarkJson(asV4));
+  assert.equal(v4Digest, "4e6f769a31a7fcdcf7db0f2b4f4d627a86f1b6bb913ebec9be2774f9d5892784");
+  assert.equal(
+    benchmarkDigest(JSON.stringify({ ...asV4, planDigest: v4Digest })),
+    "839c980f0ecde4a064ca2d42472f3ab2c010529e627fc75af8ab4478acf1912f"
+  );
   const asBefore = {
     ...body,
     versions: {

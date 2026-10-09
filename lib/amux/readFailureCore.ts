@@ -86,6 +86,25 @@ const TRANSIENT_SOCKET_CODES = new Set([
 /** Enough for every wrapper Prisma and the pg adapter put around one error. */
 const MAX_ERROR_NODES = 16;
 
+/** A short nested database/driver code, without reading error text. */
+export const amuxDatabaseDiagnosticCode = (error: unknown): string | null => {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0 && seen.size < MAX_ERROR_NODES) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const code of [record.code, record.originalCode]) {
+      if (typeof code === "string" && /^(?!P\d{4}$)[0-9A-Z]{5}$/.test(code)) {
+        return code;
+      }
+    }
+    queue.push(record.cause, record.meta, record.driverAdapterError);
+  }
+  return null;
+};
+
 const isTransientCode = (value: unknown): value is string =>
   typeof value === "string" &&
   (TRANSIENT_PRISMA_CODES.has(value) ||

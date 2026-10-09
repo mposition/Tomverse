@@ -43,6 +43,30 @@ export const adminEmailCampaignsMessages = defineAdminMessages({
       createFailed: "The campaign draft could not be created.",
       created: "Campaign draft created.",
     },
+    noticeComposer: {
+      badge: "Legal notice",
+      title: "Privacy Policy and Terms change notice",
+      intro:
+        "The notice existing accounts must receive before the amendment takes effect. Its wording is fixed and approved; this panel only drafts the campaign. Approve and send it from the campaign's own page.",
+      audience: (date: string) =>
+        `Audience: every account created before ${date} (or with no creation time) that does not already hold a notice that arrived or is on its way. It is a legal message, so it reaches accounts that turned email off. The draft holds a launch wave and two follow-up waves, each started by hand; each wave counts again, so a follow-up reaches accounts created since and notices that did not arrive.`,
+      noDate: "The notice has no effective date yet, so it has no audience.",
+      notApproved:
+        "The notice's wording on this deployment does not match the approved wording, so it cannot be drafted.",
+      readOnly: "Your admin role can review campaigns but cannot create one.",
+      disabled:
+        "Campaign actions are switched off. You can preview the notice; drafting, approving and sending stay unavailable until the campaigns feature flag is enabled.",
+      preview: "Preview the notice",
+      previewing: "Rendering…",
+      previewFirst: "Preview the notice before drafting it.",
+      create: "Draft the notice campaign",
+      creating: "Creating…",
+      previewTitle: "Notice preview",
+      digest: "Copy digest",
+      previewFailed: "The notice preview could not be rendered.",
+      createFailed: "The notice campaign could not be drafted.",
+      created: "Notice campaign drafted.",
+    },
     list: {
       title: "Campaigns",
       intro:
@@ -128,6 +152,30 @@ export const adminEmailCampaignsMessages = defineAdminMessages({
       previewFailed: "이메일 미리보기를 만들지 못했습니다.",
       createFailed: "캠페인 초안을 만들지 못했습니다.",
       created: "캠페인 초안을 만들었습니다.",
+    },
+    noticeComposer: {
+      badge: "법정 고지",
+      title: "개인정보 처리방침·이용약관 변경 고지",
+      intro:
+        "변경 효력일 전에 기존 계정이 받아야 하는 고지입니다. 문구는 고정되어 있고 승인된 문구만 보냅니다. 이 패널은 캠페인 초안만 만들며, 승인과 발송은 캠페인 상세 화면에서 합니다.",
+      audience: (date: string) =>
+        `대상: ${date} 이전에 가입했거나 가입 시각이 없는 계정 중, 도착했거나 발송 중인 고지가 아직 없는 모든 계정. 법정 고지이므로 이메일 수신을 끈 계정에도 갑니다. 초안에는 첫 발송 wave와 후속 wave 2개가 있고 모두 수동으로 시작합니다. wave마다 대상을 다시 계산하므로 후속 wave는 그 사이 가입한 계정과 고지가 도착하지 않은 계정에 보냅니다.`,
+      noDate: "고지에 효력일이 아직 없어 대상이 없습니다.",
+      notApproved:
+        "이 배포의 고지 문구가 승인된 문구와 일치하지 않아 초안을 만들 수 없습니다.",
+      readOnly: "현재 관리자 역할은 캠페인을 검토할 수 있지만 새로 만들 수는 없습니다.",
+      disabled:
+        "캠페인 작업이 비활성화되어 있습니다. 고지 미리보기는 가능하지만, 캠페인 feature flag를 켜기 전에는 작성·승인·발송할 수 없습니다.",
+      preview: "고지 미리보기",
+      previewing: "렌더링 중…",
+      previewFirst: "초안을 만들기 전에 고지를 미리 보세요.",
+      create: "고지 캠페인 초안 만들기",
+      creating: "작성 중…",
+      previewTitle: "고지 미리보기",
+      digest: "문안 다이제스트",
+      previewFailed: "고지 미리보기를 만들지 못했습니다.",
+      createFailed: "고지 캠페인 초안을 만들지 못했습니다.",
+      created: "고지 캠페인 초안을 만들었습니다.",
     },
     list: {
       title: "캠페인",

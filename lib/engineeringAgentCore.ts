@@ -414,6 +414,7 @@ export const RUN_TRANSITIONS: readonly Transition<RunStatus>[] = [
 export const RUN_OUTCOMES = [
   "t1_queued",
   "t2_draft",
+  "private_result",
   "no_change",
   "agent_failed",
   "schema_invalid",
@@ -423,12 +424,36 @@ export const RUN_OUTCOMES = [
 ] as const;
 export type RunOutcome = (typeof RUN_OUTCOMES)[number];
 
+/** v22 settlement alone records private_result; the legacy runner cannot
+ * assert that an encrypted Task result exists. */
+export const RUNNER_REPORTABLE_OUTCOMES = RUN_OUTCOMES.filter(
+  (outcome) => outcome !== "abandoned" && outcome !== "private_result",
+) as [Exclude<RunOutcome, "abandoned" | "private_result">,
+  ...Exclude<RunOutcome, "abandoned" | "private_result">[]];
+
+/** A v22 Task has at most one publication product. A private result is not
+ * misreported as a draft, and an owner draft is not misreported as a PR. */
+export const v22RunOutcomeForProduct = (input: {
+  taskOutcome: "succeeded" | "failed" | "blocked";
+  productKind: string | null;
+}): RunOutcome => {
+  if (input.productKind !== null && input.productKind !== "publish" &&
+      input.productKind !== "t2_draft")
+    throw new Error("v22 publication product kind invalid");
+  if (input.productKind && input.taskOutcome !== "succeeded")
+    throw new Error("v22 publication product without successful result");
+  if (input.productKind === "publish") return "t1_queued";
+  if (input.productKind === "t2_draft") return "t2_draft";
+  return input.taskOutcome === "succeeded" ? "private_result" : "agent_failed";
+};
+
 /** How a run's outcome settles the AMUX attempt it is bound to. */
 export const AMUX_SETTLEMENT_FOR_OUTCOME: Readonly<
   Record<RunOutcome, "review" | "retry" | "blocked" | null>
 > = {
   t1_queued: "review",
   t2_draft: "review",
+  private_result: "review",
   no_change: "blocked",
   agent_failed: "retry",
   schema_invalid: "blocked",
@@ -504,7 +529,7 @@ export const REGISTRATION_TRANSITIONS: readonly Transition<RegistrationResult>[]
  * is still current; tests/engineeringAgentStore.test.mjs compares it with the
  * policy header, so a new policy version cannot go unnoticed.
  */
-export const ENGINEERING_AGENT_POLICY_VERSION = 1;
+export const ENGINEERING_AGENT_POLICY_VERSION = 4;
 
 /**
  * Why an approval observation is not an approval (§9-10). The binding's JSON

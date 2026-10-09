@@ -1,0 +1,26 @@
+{
+  "taskId": "chat01-refiner-vnext-one-shot-primitives-v1",
+  "requirement": "Codex implements only the operator-approved free CHAT-01 vNext one-shot evaluation primitives. The exact policy commit 4f215bfcc3b9d3b0098303d333d1dd7fea19f30e and file SHA-256 dacdaab3360b7d848ea622bf83cc6a49c519c8a2f50ed1bc2d8b34a9a5b5ef7b were approved by mposition. The owner-runner primitive rehashes the complete restricted manifest before a future dispatch, and the server-side read-only primitive rechecks the unchanged development source, policy and numeric spec. Neither primitive is a full holdout validator, durable approval writer, reservation authority or provider adapter. Both must remain fail-closed and never authorize dispatch. Codex must not create or inspect actual holdout content. Claude Code Max first-party subscription CLI independently reviews the diff read-only; Anthropic API is forbidden. No provider call, holdout seal, stage/run approval, flag, product activation, PR merge or deployment is authorized.",
+  "completionCriteria": [
+    "Read the exact requirement and complete scoped diff before test records or author explanation; bind verdict to package digest.",
+    "Confirm approval record binds the exact policy commit/hash without changing frozen v1 policy, candidate closure, numeric spec, or prior v6 13/16 FAIL.",
+    "Confirm manifest rehash uses strict JSON and canonicalBenchmarkJson over the entire versioned object excluding rootDigest, checks preregistration digest and 80 unique ko/en case IDs, and never returns raw content or dispatch authority. Full corpus/predicate validation remains explicitly unimplemented and fail-closed.",
+    "Confirm read-only server source check uses pinned hashes and safe checkout reading, never trusts caller-supplied path/hash, and machine-readably denies price, deployment, DB reservation and run authorization. The checkout root is an explicit development snapshot parameter, not a production deployment attestation.",
+    "Confirm the new source and tests are byte-pinned in a separate development-only primitives closure; that closure is not an operational successor approval or dispatch authority.",
+    "Require focused synthetic tests, TypeScript, lint, policy-reference and whitespace checks. Distinguish controller-recorded checks from reviewer-observed checks.",
+    "Return one raw JSON verdict with reproduced findings. Approval with actionable findings is not a controller pass; do not request actual holdout, credentials or provider execution."
+  ],
+  "baseCommit": "4f215bfcc3b9d3b0098303d333d1dd7fea19f30e",
+  "writableScope": [
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-primitives-v1.task.json",
+    "docs/ops/cross-review/packages/chat01-refiner-vnext-one-shot-primitives-v1.authorization.md",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-v2-approval.md",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-primitives-closure.json",
+    "lib/promptRefinerQualityEvaluationVnextOneShotRoot.ts",
+    "lib/promptRefinerQualityEvaluationVnextOneShotSource.ts",
+    "tests/promptRefinerQualityEvaluationVnextOneShotRoot.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotSource.test.mjs",
+    "tests/promptRefinerQualityEvaluationVnextOneShotClosure.test.mjs"
+  ],
+  "generatedPaths": []
+}

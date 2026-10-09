@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { resetTestFixture } from "./resetTestFixture";
 
 // The feedback lifecycle notifications, driven end to end against a real
 // PostgreSQL.
@@ -118,7 +119,7 @@ before(async () => {
 });
 
 const resetData = () =>
-  prisma.$executeRawUnsafe(`
+  resetTestFixture(prisma, `
     TRUNCATE TABLE
       "AdminAuditLog",
       "NotificationDelivery",

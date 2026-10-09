@@ -7,7 +7,7 @@ import { scanAmuxV4Input } from "./localIntakeCore.ts";
  * The trusted caller supplies the source-ref allowlist from the confirmed
  * transfer preview; the model cannot grant itself another source.
  */
-export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 2 as const;
+export const AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION = 3 as const;
 export const AMUX_ANALYSIS_CHUNK_MAX_BYTES = 65_536;
 export const AMUX_ANALYSIS_CHUNK_CARD_CAP = 8;
 export const AMUX_ANALYSIS_CHUNK_NODE_CAP = 16;
@@ -105,6 +105,7 @@ export type AmuxAnalysisNode = {
   title: string;
   description: string;
   sourceRefIds: string[];
+  portfolioSignal?: AmuxPortfolioModelSignal;
 };
 
 export type AmuxAnalysisCard = {
@@ -125,6 +126,15 @@ export type AmuxAnalysisCard = {
   executionGrade: (typeof AMUX_EXECUTION_GRADE_PROPOSALS)[number] | null;
   executionBrief: string | null;
   sourceRefIds: string[];
+  portfolioSignal?: AmuxPortfolioModelSignal;
+};
+
+/** Untrusted model suggestion; approval and score calculation happen later. */
+export type AmuxPortfolioModelSignal = {
+  metrics: Record<string, number>;
+  uncertainty: "low" | "medium" | "high";
+  rationale: string;
+  evidenceRefIds: string[];
 };
 
 export type AmuxAnalysisEvidence = {
@@ -137,7 +147,7 @@ export type AmuxAnalysisEvidence = {
 };
 
 export type AmuxAnalysisChunk = {
-  schemaVersion: typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
+  schemaVersion: 2 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION;
   previewId: string;
   chunkIndex: number;
   outcome: "propose" | "needs_information" | "reject";
@@ -269,11 +279,34 @@ const localId = (value: unknown, kind: "node" | "card" | "evidence", chunkIndex:
   return value;
 };
 
+const modelSignal = (value: unknown, metricNames: readonly string[],
+  permittedUnitRefs: readonly string[]): AmuxPortfolioModelSignal => {
+  const signal = object(value, ["metrics", "uncertainty", "rationale", "evidenceRefIds"]);
+  const metricValues = object(signal.metrics, metricNames);
+  const metrics: Record<string, number> = {};
+  for (const name of metricNames) {
+    const rating = metricValues[name];
+    if (!Number.isInteger(rating) || typeof rating !== "number" ||
+        rating < 0 || rating > 5) reject("schema_rejected");
+    metrics[name] = rating as number;
+  }
+  return { metrics,
+    uncertainty: oneOf(signal.uncertainty, ["low", "medium", "high"] as const),
+    rationale: text(signal.rationale, 500),
+    evidenceRefIds: sourceRefs(signal.evidenceRefIds,
+      new Set(permittedUnitRefs)),
+  };
+};
+
 const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisNode => {
-  const data = object(value, ["kind", "localId", "level", "parentRef", "title", "description", "sourceRefIds"]);
+  const hasSignal = value !== null && typeof value === "object" &&
+    Object.hasOwn(value, "portfolioSignal");
+  const data = object(value, ["kind", "localId", "level", "parentRef", "title", "description", "sourceRefIds",
+    ...(hasSignal ? ["portfolioSignal"] : [])]);
   const level = oneOf(data.level, ["initiative", "epic", "feature"] as const);
   const parentRef = nullableRef(data.parentRef);
   if ((level === "initiative") !== (parentRef === null)) reject("schema_rejected");
+  const unitSources = sourceRefs(data.sourceRefIds, permitted);
   return {
     kind: "node",
     localId: localId(data.localId, "node", chunkIndex),
@@ -281,15 +314,20 @@ const parseNode = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
     parentRef,
     title: singleLineText(data.title, 200),
     description: text(data.description, 2_000),
-    sourceRefIds: sourceRefs(data.sourceRefIds, permitted),
+    sourceRefIds: unitSources,
+    ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
+      ["value"], unitSources) } : {}),
   };
 };
 
 const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: number): AmuxAnalysisCard => {
+  const hasSignal = value !== null && typeof value === "object" &&
+    Object.hasOwn(value, "portfolioSignal");
   const data = object(value, [
     "kind", "localId", "cardType", "storyKind", "title", "problem", "scopeIn", "scopeOut",
     "completionCriteria", "featureRef", "parentStoryRef", "dependencyRefs", "duplicateCandidateRefs",
     "taskRole", "executionGrade", "executionBrief", "sourceRefIds",
+    ...(hasSignal ? ["portfolioSignal"] : []),
   ]);
   const cardType = oneOf(data.cardType, ["story", "task"] as const);
   const storyKind = data.storyKind === null ? null : oneOf(data.storyKind, ["general", "bug"] as const);
@@ -303,6 +341,7 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   } else if (storyKind !== null || taskRole === null || executionGrade === null || executionBrief === null) {
     reject("schema_rejected");
   }
+  const unitSources = sourceRefs(data.sourceRefIds, permitted);
   return {
     kind: "card",
     localId: localId(data.localId, "card", chunkIndex),
@@ -320,7 +359,11 @@ const parseCard = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
     taskRole,
     executionGrade,
     executionBrief,
-    sourceRefIds: sourceRefs(data.sourceRefIds, permitted),
+    sourceRefIds: unitSources,
+    ...(hasSignal ? { portfolioSignal: modelSignal(data.portfolioSignal,
+      cardType === "story" ? ["impact"] : ["contribution", "urgency",
+        "dependencyUnlock", "workerCoverage", "effort", "deliveryRisk"],
+      unitSources) } : {}),
   };
 };
 
@@ -344,6 +387,25 @@ const parseUnit = (value: unknown, permitted: ReadonlySet<string>, chunkIndex: n
   if (kind === "evidence") return parseEvidence(value, permitted, chunkIndex);
   return reject("schema_rejected");
 };
+
+/** Re-check one digest-verified, stored unit after other units or the 24-hour
+ * freeform have been purged. This does not resolve cross-unit references or
+ * admit new model output; the full chunk guard must run before storage. */
+export function inspectAmuxStoredAnalysisUnit(input: {
+  raw: string; chunkIndex: number; permittedSourceRefIds: readonly string[];
+}): { ok: true; unit: AmuxAnalysisChunk["units"][number] } |
+  { ok: false } {
+  if (typeof input?.raw !== "string" || byteLength(input.raw) > AMUX_ANALYSIS_CHUNK_MAX_BYTES ||
+      !Number.isSafeInteger(input.chunkIndex) || input.chunkIndex < 0 ||
+      !Array.isArray(input.permittedSourceRefIds) ||
+      input.permittedSourceRefIds.some((refId) => !amuxAnalysisRefSafe(refId))) {
+    return { ok: false };
+  }
+  try {
+    return { ok: true, unit: parseUnit(JSON.parse(input.raw),
+      new Set(input.permittedSourceRefIds), input.chunkIndex) };
+  } catch { return { ok: false }; }
+}
 
 type TargetRef = AmuxPermittedTargetRef | AmuxAnalysisNode | AmuxAnalysisCard;
 
@@ -482,13 +544,18 @@ export function inspectAmuxAnalysisChunk(
       "schemaVersion", "previewId", "chunkIndex", "outcome", "coverageStatus", "continuationKind", "ownerQuestion",
       "coveredScope", "remainingScope", "units",
     ]);
-    if (data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION ||
+    if ((data.schemaVersion !== 2 &&
+         data.schemaVersion !== AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION) ||
         data.previewId !== expectedPreviewId || data.chunkIndex !== expectedChunkIndex) {
       reject("schema_rejected");
     }
     const permitted = new Set(sourceRefs);
     const units = list(data.units, AMUX_ANALYSIS_CHUNK_CARD_CAP + AMUX_ANALYSIS_CHUNK_NODE_CAP +
       AMUX_ANALYSIS_CHUNK_EVIDENCE_CAP, 0, (unit) => parseUnit(unit, permitted, expectedChunkIndex));
+    if (data.schemaVersion === AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION &&
+        units.some((unit) => unit.kind !== "evidence" && !unit.portfolioSignal)) {
+      reject("schema_rejected");
+    }
     const counts = {
       nodes: units.filter((unit) => unit.kind === "node").length,
       cards: units.filter((unit) => unit.kind === "card").length,
@@ -519,7 +586,7 @@ export function inspectAmuxAnalysisChunk(
         (outcome === "propose" && units.length === 0) ||
         (outcome === "reject" && units.length !== 0)) reject("schema_rejected");
     const chunk: AmuxAnalysisChunk = {
-      schemaVersion: AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
+      schemaVersion: data.schemaVersion as 2 | typeof AMUX_ANALYSIS_CHUNK_SCHEMA_VERSION,
       previewId: expectedPreviewId,
       chunkIndex: expectedChunkIndex,
       outcome,

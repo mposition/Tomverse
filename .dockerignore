@@ -1,0 +1,12 @@
+# Test sources are checked before deployment. The two pinned vNext source
+# closure files below are re-read by the running app for stage admission.
+# The Playwright admin config imports tests/e2e-admin; remove that config from
+# the image as well so Next's broad TypeScript include cannot resolve it.
+# Operator-only scripts that import tests/ run from a source checkout, not
+# from the Railway service shell.
+# Keep docs in the image: the marketing webhook verification route reads
+# committed records under docs/ops at runtime.
+tests/*
+!tests/promptRefinerQualityEvaluationVnextCandidate.test.mjs
+!tests/promptRefinerQualityEvaluationVnextDevelopment.test.mjs
+playwright.admin.config.ts

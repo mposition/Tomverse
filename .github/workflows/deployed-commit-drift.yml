@@ -1,4 +1,11 @@
 name: Deployed Commit Drift
+
+# The token-level cache control, which a restore-only action is not: it narrows
+# one declared step while the job keeps a key anything running in it can reserve
+# an entry with. This workflow can run on develop or main, whose entries every
+# run can restore, so its token gets none of that capability.
+# .github/audits/actions-cache-poisoning-audit-2026-10-03.md P1a.
+cache-mode: read
 #
 # Asks each environment which commit it is actually serving, and compares that
 # against the branch it deploys from.
@@ -101,8 +108,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Both branches are compared, and the deployed commit may be well
-          # behind either. A shallow clone answers "the deployed commit is not
+          # Every deployed branch is compared (main, test, develop), and the
+          # deployed commit may be well behind any of them. `--fetch` needs
+          # each to exist on origin, `test` included. A shallow clone answers "the deployed commit is not
           # in this checkout" -- true, and useless.
           fetch-depth: 0
 
@@ -110,6 +118,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          # This step caches nothing, and saying so is not redundant: v6 defaults
+          # `package-manager-cache` to true and starts caching the moment
+          # package.json declares a package manager, without this file changing.
+          # This job holds a credential, so that would quietly put a cache next
+          # to it (.github/audits/actions-cache-poisoning-audit-2026-10-03.md 4.2).
+          package-manager-cache: false
 
       # No `npm ci`: the report reads `/api/build-info` with fetch and shells
       # out to git. Installing the dependency tree to run it would make an
@@ -122,6 +136,7 @@ jobs:
           # public addresses, which is what these environments actually are.
           PRODUCTION_APP_URL: ${{ vars.PRODUCTION_APP_URL }}
           STAGING_APP_URL: ${{ vars.STAGING_APP_URL }}
+          DEV_APP_URL: ${{ vars.DEV_APP_URL }}
         run: |
           node scripts/report-deployed-commit-drift.mjs \
             --gate \

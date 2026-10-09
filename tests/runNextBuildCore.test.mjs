@@ -5,7 +5,46 @@ import test from "node:test";
 import {
   TURBOPACK_CACHE_DIR,
   isRecoverableTurbopackCacheFailure,
+  nodeOptionsForBuild,
+  LARGE_HEAP_FLAG,
 } from "../scripts/run-next-build-core.mjs";
+
+test("GitHub build has a bounded larger heap without overriding an explicit operator limit", () => {
+  assert.equal(nodeOptionsForBuild({}), "");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "1" }), "");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true" }),
+    "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true",
+    NODE_OPTIONS: "--trace-warnings" }),
+  "--trace-warnings --max-old-space-size=6144");
+  for (const explicit of ["--max-old-space-size=5120", "--max_old_space_size=5120"]) {
+    assert.equal(nodeOptionsForBuild({ GITHUB_ACTIONS: "true", NODE_OPTIONS: explicit }),
+      explicit);
+  }
+});
+
+test("a caller can ask for the same heap off CI without a deploy build getting it", () => {
+  // What `npm run build:local` passes: a local build has died in Mark-Compact
+  // at the default heap, and the remedy was an environment variable the
+  // developer had to know about. It does not reproduce on an idle machine, so
+  // this borrows CI's ceiling rather than fixing a deterministic failure.
+  assert.equal(nodeOptionsForBuild({}, { largeHeap: true }),
+    "--max-old-space-size=6144");
+  assert.equal(nodeOptionsForBuild({ NODE_OPTIONS: "--trace-warnings" }, { largeHeap: true }),
+    "--trace-warnings --max-old-space-size=6144");
+  // An operator's own limit still wins, exactly as it does on CI.
+  assert.equal(
+    nodeOptionsForBuild({ NODE_OPTIONS: "--max-old-space-size=5120" }, { largeHeap: true }),
+    "--max-old-space-size=5120");
+  // The reason this is a request rather than "not CI": Railway declares no
+  // build command, so it runs this same script. Raising its ceiling would
+  // change how a deploy build fails, which a local convenience does not decide.
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }), "");
+  assert.equal(nodeOptionsForBuild({ RAILWAY_ENVIRONMENT: "production" }, { largeHeap: false }),
+    "");
+  // Stripped before the rest are forwarded, so it has to look like a flag.
+  assert.match(LARGE_HEAP_FLAG, /^--[a-z-]+$/);
+});
 
 /**
  * The failure this guard exists for, copied from Railway deployment 0d227e99
@@ -37,6 +76,38 @@ Error [TurbopackInternalError]: Failed to restore data for task TaskId 1
 
 test("the production cache-restore failure is recognised", () => {
   assert.equal(isRecoverableTurbopackCacheFailure(CACHE_RESTORE_FAILURE), true);
+});
+
+/**
+ * The same corrupt cache in another form, from Railway deployment 4a96f1cc
+ * (staging, develop 1c02353, 2026-10-07T11:41:55Z): a panic in the task
+ * backend while reading the persisted store, reported as "Panic in async
+ * function" with none of the earlier internal-error markers. The same commit
+ * built and deployed on the other services that build it.
+ */
+const TASK_ID_PANIC = `
+▲ Next.js 16.3.8 (Turbopack)
+  Creating an optimized production build ...
+
+thread 'tokio-rt-worker' (84) panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:249:14:
+Failed to get task id: Unable to read next free task id from database
+
+Caused by:
+    0: Unable to open static sorted file
+
+> Build error occurred
+[Error: Panic in async function]
+`;
+
+test("a task-backend panic reading the persisted cache is recognised", () => {
+  assert.equal(isRecoverableTurbopackCacheFailure(TASK_ID_PANIC), true);
+  // The panic site alone, without a cache-read line, is not enough.
+  assert.equal(
+    isRecoverableTurbopackCacheFailure(
+      "thread 'tokio-rt-worker' panicked at turbopack/crates/turbo-tasks-backend/src/backend/mod.rs:10:1:\nindex out of bounds"
+    ),
+    false
+  );
 });
 
 // A wrapper that retried on anything would hide real breakage and take twice

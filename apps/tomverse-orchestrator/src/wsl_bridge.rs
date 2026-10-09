@@ -11,6 +11,8 @@
  * the local board (`GET` only), links the card whose own message carries the
  * attempt marker, and settles the attempt from that card's terminal status:
  * review or blocked, never done and never back to todo.
+ * v22 assignment-bound deliveries instead use the local one-shot sidecar;
+ * without an exact A14 usage receipt their result is only blocked.
  */
 
 use std::collections::{BTreeMap, HashSet};
@@ -124,7 +126,7 @@ pub struct SessionPresence {
     pub generation: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct LocalDispatchBody {
     pub text: String,
     pub no_board: bool,
@@ -266,12 +268,91 @@ impl LocalExchange {
 #[allow(async_fn_in_trait)]
 pub trait AttemptPrompts {
     async fn prompt_for(&mut self, worker: &str, attempt_id: &str) -> Result<Option<String>>;
+
+    fn v22_delivery(&self, _attempt_id: &str) -> Option<&PulledDelivery> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum V22SidecarState {
+    InProgress,
+    Succeeded,
+    Failed,
+    OutcomeUnknown,
+    Busy,
+    NotFound,
+    Confirmed,
+}
+
+#[derive(Debug, Clone)]
+pub struct V22SidecarResult {
+    pub state: V22SidecarState,
+    pub usage_receipt: Option<serde_json::Value>,
+    pub usage_receipt_digest: Option<String>,
+    pub result_text: Option<String>,
+    pub result_sha256: Option<String>,
+    pub patch_body: Option<String>,
+    pub patch_base_sha: Option<String>,
+    pub patch_digest: Option<String>,
+    pub publish_files: Option<serde_json::Value>,
+    pub publish_files_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum V22ResultTransfer {
+    Write,
+    ReadBack,
+    Reject,
+}
+
+fn v22_result_transfer(result: &V22SidecarResult) -> V22ResultTransfer {
+    if result.result_sha256.is_none() ||
+        result.patch_digest.is_some() != result.patch_base_sha.is_some() ||
+        result.patch_body.is_some() && result.patch_digest.is_none() ||
+        result.publish_files.is_some() && result.publish_files_digest.is_none() ||
+        result.publish_files_digest.is_some() && result.patch_digest.is_none() {
+        return V22ResultTransfer::Reject;
+    }
+    if result.result_text.is_some() &&
+        (result.patch_digest.is_none() || result.patch_body.is_some()) &&
+        (result.publish_files_digest.is_none() || result.publish_files.is_some()) {
+        V22ResultTransfer::Write
+    } else {
+        // A confirmed sidecar has already erased volatile patch/file bytes.
+        // The durable digests still permit exact server read-back on retry.
+        V22ResultTransfer::ReadBack
+    }
 }
 
 #[allow(async_fn_in_trait)]
 pub trait LocalAmux {
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply>;
     async fn read_back(&mut self, session_name: &str, attempt_id: &str) -> Result<ReadBack>;
+
+    async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22(&mut self, _attempt_id: &str) -> Result<V22SidecarState> {
+        bail!("v22 one-shot sidecar is unavailable")
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
+        Ok(V22SidecarResult { state: self.readback_v22(attempt_id).await?,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: None, result_sha256: None,
+            patch_body: None, patch_base_sha: None, patch_digest: None,
+            publish_files: None, publish_files_digest: None })
+    }
+
+    async fn confirm_v22_result(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn confirm_v22_patch(&mut self, _attempt_id: &str, _sha256: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl AttemptPrompts for BTreeMap<String, String> {
@@ -363,6 +444,26 @@ pub fn plan_worker_heartbeat(
     WorkerHeartbeatPlan {
         status: "idle",
         dispatch_ready: true,
+    }
+}
+
+fn plan_bridge_heartbeat(
+    halted: bool,
+    roster_ok: bool,
+    running: bool,
+    at_boundary: bool,
+    has_pending: bool,
+) -> WorkerHeartbeatPlan {
+    if !roster_ok {
+        // An unreadable roster cannot prove the worker stopped.
+        plan_worker_heartbeat(true, false, true)
+    } else if halted {
+        // An ambiguous attempt may have been dropped from local pending while
+        // the server still owns it. Never advertise dispatch readiness until
+        // operator read-back and a fresh process registration.
+        plan_worker_heartbeat(running, false, true)
+    } else {
+        plan_worker_heartbeat(running, at_boundary, has_pending)
     }
 }
 
@@ -482,14 +583,15 @@ pub fn completion_from_card(detail: &serde_json::Value) -> LocalCompletion {
     }
 }
 
-/// A settle whose response was lost may be sent again: the server fences a
-/// replay on the ended attempt and task revision, so a committed first send
-/// answers the second with not-settled. Only an explicit not-settled drops it.
+/// An unknown settle outcome must stop the bridge for human read-back.
+/// A replay is fenced by the server, but it is still a write request and can
+/// hide whether the first request committed. Only a definite busy response
+/// proves no write happened and permits a later attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettleResult {
     Settled,
     DropAndHalt,
-    KeepAndHalt,
+    HaltForReadBack,
     /// Tomverse answered busy: the settle did not happen. Keep, no halt.
     RetryNextTick,
 }
@@ -498,7 +600,7 @@ pub fn plan_settle_result(settled: Option<bool>) -> SettleResult {
     match settled {
         Some(true) => SettleResult::Settled,
         Some(false) => SettleResult::DropAndHalt,
-        None => SettleResult::KeepAndHalt,
+        None => SettleResult::HaltForReadBack,
     }
 }
 
@@ -511,6 +613,54 @@ pub fn plan_settle_answer(answer: &Result<bool>) -> SettleResult {
         Err(error) if is_database_busy(error) => SettleResult::RetryNextTick,
         Err(_) => plan_settle_result(None),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SettleFollowup {
+    halt: bool,
+    keep_pending: bool,
+}
+
+/// Only an explicit database-busy answer proves that settlement wrote nothing.
+/// An unknown result stops the bridge for human read-back, not another write.
+fn plan_settle_followup(result: SettleResult) -> SettleFollowup {
+    match result {
+        SettleResult::Settled => SettleFollowup {
+            halt: false,
+            keep_pending: false,
+        },
+        SettleResult::DropAndHalt => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+        },
+        SettleResult::HaltForReadBack => SettleFollowup {
+            halt: true,
+            keep_pending: false,
+        },
+        SettleResult::RetryNextTick => SettleFollowup {
+            halt: false,
+            keep_pending: true,
+        },
+    }
+}
+
+/// Discard an ambiguous settlement without replaying it. A halted bridge
+/// still retains other attempts until their heartbeats and settlements finish.
+fn apply_settle_followup<T>(
+    entry: T,
+    result: SettleResult,
+    halted: &mut bool,
+    still_running: &mut Vec<T>,
+) {
+    let followup = plan_settle_followup(result);
+    *halted |= followup.halt;
+    if followup.keep_pending {
+        still_running.push(entry);
+    }
+}
+
+fn should_exit_halted_bridge(halted: bool, pending_count: usize) -> bool {
+    halted && pending_count == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -646,7 +796,7 @@ pub fn plan_local_dispatch(
         path: format!("/api/sessions/{}/send", encode_session_name(name)),
         body: LocalDispatchBody {
             text: prompt.to_owned(),
-            no_board: true,
+            no_board: false,
             record_history: true,
             msg_id: attempt_id.to_owned(),
         },
@@ -987,6 +1137,14 @@ where
         Err(error) => return Err(error),
     };
     let presence = snapshot.presence(worker);
+    if let Some(delivery) = prompts.v22_delivery(attempt_id) {
+        if !presence.is_some_and(|session| session.running) {
+            return Ok(BridgeTickResult::Halted {
+                attempt_id: attempt_id.to_owned(),
+            });
+        }
+        return Ok(dispatch_v22(delivery, local).await);
+    }
     Ok(dispatch_started(
         input,
         presence.map(|_| worker),
@@ -996,6 +1154,26 @@ where
         local,
     )
     .await)
+}
+
+async fn dispatch_v22<L: LocalAmux>(delivery: &PulledDelivery, local: &mut L) -> BridgeTickResult {
+    let reply = match local.send_v22(delivery).await {
+        Ok(reply) => reply,
+        Err(_) => match local.readback_v22(&delivery.attempt_id).await {
+            Ok(reply) => reply,
+            Err(_) => return BridgeTickResult::Halted {
+                attempt_id: delivery.attempt_id.clone(),
+            },
+        },
+    };
+    match reply {
+        V22SidecarState::InProgress | V22SidecarState::Succeeded |
+        V22SidecarState::Failed | V22SidecarState::OutcomeUnknown =>
+            BridgeTickResult::Pending { attempt_id: delivery.attempt_id.clone() },
+        V22SidecarState::Busy | V22SidecarState::NotFound |
+        V22SidecarState::Confirmed =>
+            BridgeTickResult::Halted { attempt_id: delivery.attempt_id.clone() },
+    }
 }
 
 async fn dispatch_started<L>(
@@ -1181,9 +1359,181 @@ pub fn interpret_read_back_body(status: u16, body: &serde_json::Value) -> ReadBa
 struct HttpLocal {
     client: reqwest::Client,
     base: String,
+    v22_socket: Option<String>,
+}
+
+#[cfg(unix)]
+async fn v22_sidecar_call(
+    socket_path: &str,
+    payload: serde_json::Value,
+    attempt_id: &str,
+) -> Result<V22SidecarResult> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UnixStream;
+
+    if !std::path::Path::new(socket_path).is_absolute() || !valid_attempt_id(attempt_id) {
+        bail!("invalid v22 sidecar endpoint");
+    }
+    let mut request = serde_json::to_vec(&payload)?;
+    request.push(b'\n');
+    if request.len() > 64 * 1024 {
+        bail!("v22 sidecar request exceeds limit");
+    }
+    let operation = async {
+        let mut stream = UnixStream::connect(socket_path).await?;
+        stream.write_all(&request).await?;
+        stream.shutdown().await?;
+        let mut response = Vec::new();
+        stream.take(327681).read_to_end(&mut response).await?;
+        if response.len() > 327680 {
+            bail!("v22 sidecar response exceeds limit");
+        }
+        let value: serde_json::Value = serde_json::from_slice(&response)?;
+        if value.get("attemptId").and_then(|item| item.as_str()) != Some(attempt_id) {
+            bail!("v22 sidecar attempt mismatch");
+        }
+        let state = match value.get("kind").and_then(|item| item.as_str()) {
+            Some("in_progress") => V22SidecarState::InProgress,
+            Some("succeeded") => V22SidecarState::Succeeded,
+            Some("failed") => V22SidecarState::Failed,
+            Some("outcome_unknown") => V22SidecarState::OutcomeUnknown,
+            Some("busy") => V22SidecarState::Busy,
+            Some("not_found") => V22SidecarState::NotFound,
+            Some("confirmed") => V22SidecarState::Confirmed,
+            _ => bail!("invalid v22 sidecar result"),
+        };
+        let receipt = value.get("usageReceipt").filter(|v| !v.is_null()).cloned();
+        let digest = value.get("usageReceiptDigest").and_then(|v| v.as_str());
+        let result_text = value.get("resultText").and_then(|v| v.as_str());
+        let result_sha256 = value.get("resultSha256").and_then(|v| v.as_str());
+        let patch_body = value.get("patchBody").and_then(|v| v.as_str());
+        let patch_base_sha = value.get("patchBaseSha").and_then(|v| v.as_str());
+        let patch_digest = value.get("patchDigest").and_then(|v| v.as_str());
+        let publish_files = value.get("publishFiles").filter(|v| !v.is_null());
+        let publish_files_digest = value.get("publishFilesDigest")
+            .and_then(|v| v.as_str());
+        if receipt.is_some() != digest.is_some() ||
+            digest.is_some_and(|v| v.len() != 64 || !v.bytes().all(|b|
+                b.is_ascii_hexdigit())) ||
+            receipt.is_some() && !matches!(state,
+                V22SidecarState::Succeeded | V22SidecarState::Failed) {
+            bail!("invalid v22 sidecar usage receipt envelope");
+        }
+        if result_text.is_some_and(|text| text.is_empty() ||
+            text.len() > 65_536 || text.contains('\0')) ||
+            result_sha256.is_some_and(|digest| digest.len() != 64 ||
+                !digest.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            result_text.is_some() && result_sha256.is_none() ||
+            result_text.is_some() && state != V22SidecarState::Succeeded {
+            bail!("invalid v22 sidecar result envelope");
+        }
+        if patch_body.is_some_and(|body| body.is_empty() ||
+            body.len() > 65_536 || body.contains('\0') ||
+            !body.starts_with("diff --git ")) ||
+            patch_base_sha.is_some_and(|sha| sha.len() != 40 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            patch_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) ||
+            patch_base_sha.is_some() != patch_digest.is_some() ||
+            patch_body.is_some() && patch_digest.is_none() ||
+            patch_digest.is_some() && state != V22SidecarState::Succeeded ||
+            publish_files.is_some_and(|files| patch_body.is_none() ||
+                files.as_array().is_none_or(|rows| rows.is_empty() ||
+                    rows.len() > 5)) ||
+            publish_files.is_some() && publish_files_digest.is_none() ||
+            publish_files_digest.is_some() && patch_digest.is_none() ||
+            publish_files_digest.is_some_and(|sha| sha.len() != 64 ||
+                !sha.bytes().all(|byte| byte.is_ascii_hexdigit())) {
+            bail!("invalid v22 sidecar patch envelope");
+        }
+        Ok(V22SidecarResult { state, usage_receipt: receipt,
+            usage_receipt_digest: digest.map(str::to_owned),
+            result_text: result_text.map(str::to_owned),
+            result_sha256: result_sha256.map(str::to_owned),
+            patch_body: patch_body.map(str::to_owned),
+            patch_base_sha: patch_base_sha.map(str::to_owned),
+            patch_digest: patch_digest.map(str::to_owned),
+            publish_files: publish_files.cloned(),
+            publish_files_digest: publish_files_digest.map(str::to_owned) })
+    };
+    tokio::time::timeout(Duration::from_secs(5), operation)
+        .await.context("v22 sidecar transport timed out")?
+}
+
+#[cfg(not(unix))]
+async fn v22_sidecar_call(
+    _socket_path: &str,
+    _payload: serde_json::Value,
+    _attempt_id: &str,
+) -> Result<V22SidecarResult> {
+    bail!("v22 sidecar requires Ubuntu")
 }
 
 impl LocalAmux for HttpLocal {
+    async fn confirm_v22_result(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid v22 result digest");
+        }
+        let answer = v22_sidecar_call(socket, serde_json::json!({
+            "op": "confirm_result", "attemptId": attempt_id,
+            "sourceSha256": sha256,
+        }), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar result not confirmed");
+        }
+        Ok(())
+    }
+
+    async fn confirm_v22_patch(&mut self, attempt_id: &str, sha256: &str) -> Result<()> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+            bail!("invalid v22 patch digest");
+        }
+        let answer = v22_sidecar_call(socket, serde_json::json!({
+            "op": "confirm_patch", "attemptId": attempt_id,
+            "patchDigest": sha256,
+        }), attempt_id).await?;
+        if answer.state != V22SidecarState::Confirmed {
+            bail!("v22 sidecar patch not confirmed");
+        }
+        Ok(())
+    }
+
+    async fn send_v22(&mut self, delivery: &PulledDelivery) -> Result<V22SidecarState> {
+        let profile = delivery.v22_execution.as_ref().context("v22 profile missing")?;
+        if delivery.assignment_id.is_none() ||
+            !profile.model_id.starts_with("claude-") ||
+            profile.budget_microusd < 1 || profile.budget_microusd > 5_000_000 ||
+            delivery.prompt.len() > 32 * 1024 {
+            bail!("invalid v22 one-shot delivery");
+        }
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        Ok(v22_sidecar_call(socket, serde_json::json!({
+            "op": "execute", "version": 1,
+            "attemptId": delivery.attempt_id,
+            "worker": delivery.worker,
+            "modelId": profile.model_id,
+            "role": profile.role,
+            "budgetMicrousd": profile.budget_microusd,
+            "prompt": delivery.prompt,
+        }), &delivery.attempt_id).await?.state)
+    }
+
+    async fn readback_v22(&mut self, attempt_id: &str) -> Result<V22SidecarState> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        Ok(v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await?.state)
+    }
+
+    async fn readback_v22_result(&mut self, attempt_id: &str) -> Result<V22SidecarResult> {
+        let socket = self.v22_socket.as_deref().context("v22 sidecar is disabled")?;
+        v22_sidecar_call(socket, serde_json::json!({
+            "op": "readback", "attemptId": attempt_id,
+        }), attempt_id).await
+    }
+
     async fn send(&mut self, path: &str, body: &LocalDispatchBody) -> Result<SendReply> {
         if !path.starts_with("/api/sessions/") || !path.ends_with("/send") || path.contains("/api/board") {
             bail!("wsl bridge refused a non-session send");
@@ -1191,12 +1541,7 @@ impl LocalAmux for HttpLocal {
         let response = self
             .client
             .post(format!("{}{path}", self.base))
-            .json(&serde_json::json!({
-                "text": body.text,
-                "no_board": true,
-                "record_history": body.record_history,
-                "msg_id": body.msg_id,
-            }))
+            .json(body)
             .send()
             .await
             .context("local session send failed")?;
@@ -1270,6 +1615,11 @@ impl AttemptPrompts for DeliveryPrompts<'_> {
         let prompt = delivery.prompt.clone();
         self.deliveries.push(delivery);
         Ok(Some(prompt))
+    }
+
+    fn v22_delivery(&self, attempt_id: &str) -> Option<&PulledDelivery> {
+        self.deliveries.iter().find(|delivery| delivery.attempt_id == attempt_id
+            && delivery.assignment_id.is_some())
     }
 }
 
@@ -1377,6 +1727,7 @@ pub async fn run_from_env() -> i32 {
     let mut local = HttpLocal {
         client: client.clone(),
         base: base.clone(),
+        v22_socket: std::env::var("TOMVERSE_AMUX_V22_SIDECAR_SOCKET").ok(),
     };
     let mut reserved = Vec::new();
     let mut pending: Vec<PendingExecution> = Vec::new();
@@ -1401,11 +1752,13 @@ pub async fn run_from_env() -> i32 {
                 continue;
             };
             let has_pending = pending_workers.contains(&name);
-            let plan = if roster_ok {
-                plan_worker_heartbeat(session.running, session.at_boundary, has_pending)
-            } else {
-                plan_worker_heartbeat(true, false, true)
-            };
+            let plan = plan_bridge_heartbeat(
+                halted,
+                roster_ok,
+                session.running,
+                session.at_boundary,
+                has_pending,
+            );
             let published = api
                 .worker_heartbeat(
                     &name,
@@ -1570,7 +1923,30 @@ pub async fn run_from_env() -> i32 {
             let mut board: Option<Vec<LocalCardSummary>> = None;
             let mut still_running = Vec::new();
             for mut entry in pending.drain(..) {
-                match local_completion(&client, &base, &mut board, &mut entry, now).await {
+                let v22_result = if entry.delivery.assignment_id.is_some() {
+                    local.readback_v22_result(&entry.delivery.attempt_id).await.ok()
+                } else { None };
+                let completion = if entry.delivery.assignment_id.is_some() {
+                    match v22_result.as_ref().map(|result| result.state) {
+                        Some(V22SidecarState::InProgress) => LocalCompletion::Running,
+                        Some(V22SidecarState::Succeeded | V22SidecarState::Failed |
+                            V22SidecarState::OutcomeUnknown) => LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_usage_receipt_missing",
+                                review_pr_number: None,
+                            },
+                        _ if now.saturating_sub(entry.sent_at) >= 15 * 60 =>
+                            LocalCompletion::Settle {
+                                outcome: "blocked", to_status: "blocked",
+                                reason: "v22_sidecar_outcome_unknown",
+                                review_pr_number: None,
+                            },
+                        _ => LocalCompletion::LookupFailed,
+                    }
+                } else {
+                    local_completion(&client, &base, &mut board, &mut entry, now).await
+                };
+                match completion {
                     LocalCompletion::Running | LocalCompletion::LookupFailed => {
                         still_running.push(entry)
                     }
@@ -1585,8 +1961,131 @@ pub async fn run_from_env() -> i32 {
                             still_running.push(entry);
                             continue;
                         };
-                        let settled = api
-                            .execution_settle_with_review_pr(
+                        let settled = if entry.delivery.assignment_id.is_some() {
+                            let verified = v22_result.as_ref().and_then(|result| {
+                                let outcome = match result.state {
+                                    V22SidecarState::Succeeded => "succeeded",
+                                    V22SidecarState::Failed => "failed",
+                                    _ => return None,
+                                };
+                                Some((result.usage_receipt.as_ref()?,
+                                    result.usage_receipt_digest.as_deref()?, outcome))
+                            });
+                            if let Some((receipt, digest, outcome)) = verified {
+                                let result_record = if outcome == "succeeded" {
+                                    match v22_result.as_ref() {
+                                        Some(result) => {
+                                            let sha256 = result.result_sha256.as_deref();
+                                            let patch_binding = result.patch_digest.as_deref().zip(
+                                                result.patch_base_sha.as_deref());
+                                            match (v22_result_transfer(result), sha256,
+                                                result.result_text.as_deref()) {
+                                                (V22ResultTransfer::Write, Some(sha256), Some(text)) =>
+                                                    api.v22_task_result_record_once(
+                                                        &entry.delivery.attempt_id,
+                                                        &entry.delivery.worker,
+                                                        text,
+                                                        sha256,
+                                                        result.patch_body.as_deref().zip(
+                                                            result.patch_digest.as_deref()).zip(
+                                                            result.patch_base_sha.as_deref()).map(
+                                                                |((body, digest), base)|
+                                                                    (body, digest, base)),
+                                                        result.publish_files.as_ref(),
+                                                        result.publish_files_digest.as_deref(),
+                                                    ).await,
+                                                (V22ResultTransfer::ReadBack, Some(sha256), _) =>
+                                                    api.v22_task_result_readback(
+                                                        &entry.delivery.attempt_id, sha256,
+                                                        patch_binding,
+                                                        result.publish_files_digest.as_deref(),
+                                                    ).await,
+                                                _ => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                            }
+                                        },
+                                        None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                    }
+                                } else {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                };
+                                // A write acknowledgement is not proof that the patch is
+                                // durably stored with the expected base and file digest.
+                                // Read it back before deleting the sidecar's only copy.
+                                let result_record = match result_record {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded)
+                                        if outcome == "succeeded" => {
+                                        match v22_result.as_ref().and_then(|result|
+                                            result.result_sha256.as_deref()) {
+                                            Some(sha256) => api.v22_task_result_readback(
+                                                &entry.delivery.attempt_id, sha256,
+                                                v22_result.as_ref().and_then(|result|
+                                                    result.patch_digest.as_deref().zip(
+                                                        result.patch_base_sha.as_deref())),
+                                                v22_result.as_ref().and_then(|result|
+                                                    result.publish_files_digest.as_deref()),
+                                            ).await,
+                                            None => Ok(crate::tomverse_api::V22UsageRecord::Rejected),
+                                        }
+                                    },
+                                    other => other,
+                                };
+                                match result_record {
+                                    Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                        if outcome == "succeeded" {
+                                            if let Some(sha256) = v22_result.as_ref().and_then(
+                                                |result| result.result_sha256.as_deref()) {
+                                                let _ = local.confirm_v22_result(
+                                                    &entry.delivery.attempt_id, sha256).await;
+                                            }
+                                            if let Some(digest) = v22_result.as_ref().and_then(
+                                                |result| result.patch_digest.as_deref()) {
+                                                let _ = local.confirm_v22_patch(
+                                                    &entry.delivery.attempt_id, digest).await;
+                                            }
+                                        }
+                                        match api.v22_cli_usage_record_once(
+                                            &entry.delivery.attempt_id, receipt, digest).await {
+                                            Ok(crate::tomverse_api::V22UsageRecord::Recorded) => {
+                                                let answer = api.v22_execution_settle_verified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation, outcome).await;
+                                                match answer {
+                                                    Ok(ref refused) if !refused.settled &&
+                                                        matches!(refused.reason.as_deref(),
+                                                            Some("usage_unverified" | "result_unverified")) =>
+                                                        api.v22_execution_settle_unverified(
+                                                            &entry.delivery, &session.instance_id,
+                                                            session.generation).await,
+                                                    other => other,
+                                                }
+                                            }
+                                            Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                                api.v22_execution_settle_unverified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation).await,
+                                            Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
+                                                api.v22_execution_settle_unverified(
+                                                    &entry.delivery, &session.instance_id,
+                                                    session.generation).await,
+                                            Err(error) => Err(error),
+                                        }
+                                    },
+                                    Ok(crate::tomverse_api::V22UsageRecord::Rejected) =>
+                                        api.v22_execution_settle_unverified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation).await,
+                                    Ok(crate::tomverse_api::V22UsageRecord::PrivateOnly) =>
+                                        api.v22_execution_settle_unverified(
+                                            &entry.delivery, &session.instance_id,
+                                            session.generation).await,
+                                    Err(error) => Err(error),
+                                }
+                            } else {
+                                api.v22_execution_settle_unverified(&entry.delivery,
+                                    &session.instance_id, session.generation).await
+                            }
+                        } else {
+                            api.execution_settle_with_review_pr(
                                 &entry.delivery.attempt_id,
                                 &entry.delivery.worker,
                                 &session.instance_id,
@@ -1598,24 +2097,24 @@ pub async fn run_from_env() -> i32 {
                                 // A review always names the field, null when the
                                 // card cites no PR, so an earlier PR is cleared.
                                 (to_status == "review").then_some(review_pr_number),
-                            )
-                            .await
-                            .map(|response| response.settled);
-                        match plan_settle_answer(&settled) {
-                            SettleResult::Settled => {}
-                            SettleResult::DropAndHalt => halted = true,
-                            SettleResult::KeepAndHalt => {
-                                halted = true;
-                                still_running.push(entry);
-                            }
-                            SettleResult::RetryNextTick => {
-                                eprintln!(
-                                    "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
-                                    entry.delivery.attempt_id
-                                );
-                                still_running.push(entry);
-                            }
+                            ).await
+                        }.map(|response| response.settled);
+                        let result = plan_settle_answer(&settled);
+                        if result == SettleResult::HaltForReadBack {
+                            eprintln!(
+                                "amux wsl bridge halt: settle outcome unknown for attempt {}; read back before restart",
+                                entry.delivery.attempt_id
+                            );
+                        } else if result == SettleResult::RetryNextTick {
+                            eprintln!(
+                                "amux wsl bridge warn: settle for attempt {} answered 503 {DATABASE_BUSY}; settling again next tick, not halted",
+                                entry.delivery.attempt_id
+                            );
                         }
+                        // Drop only the ambiguous attempt. Other attempts
+                        // still need heartbeats and settlement before the
+                        // halted bridge exits for operator read-back.
+                        apply_settle_followup(entry, result, &mut halted, &mut still_running);
                     }
                 }
             }
@@ -1625,7 +2124,7 @@ pub async fn run_from_env() -> i32 {
             eprintln!("amux wsl bridge halted: no new assignments; restart only after checking Tomverse and the local AMUX");
             halt_reported = true;
         }
-        if halted && pending.is_empty() {
+        if should_exit_halted_bridge(halted, pending.len()) {
             return BRIDGE_HALT_EXIT_CODE;
         }
 
@@ -1897,6 +2396,27 @@ mod tests {
     const ATTEMPT_ID_2: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e70";
     const ATTEMPT_ID_3: &str = "4f3b1c0a-6d2e-4a18-9c0b-1a2b3c4d5e71";
 
+    #[test]
+    fn confirmed_patch_retries_by_exact_readback_without_volatile_bytes() {
+        let mut result = V22SidecarResult {
+            state: V22SidecarState::Succeeded,
+            usage_receipt: None, usage_receipt_digest: None,
+            result_text: Some("private result".into()), result_sha256: Some("a".repeat(64)),
+            patch_body: Some("diff --git a/a b/a\n".into()),
+            patch_base_sha: Some("b".repeat(40)), patch_digest: Some("c".repeat(64)),
+            publish_files: Some(serde_json::json!([{"path":"a"}])),
+            publish_files_digest: Some("d".repeat(64)),
+        };
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Write);
+        result.patch_body = None;
+        result.publish_files = None;
+        result.result_text = None;
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::ReadBack);
+        result.publish_files = Some(serde_json::json!([{"path":"a"}]));
+        result.publish_files_digest = None;
+        assert_eq!(v22_result_transfer(&result), V22ResultTransfer::Reject);
+    }
+
     fn task() -> OwnedTodoTask {
         OwnedTodoTask {
             id: "TASK-1".into(),
@@ -2006,6 +2526,38 @@ mod tests {
             WorkerHeartbeatPlan {
                 status: "stopped",
                 dispatch_ready: false,
+            }
+        );
+    }
+
+    #[test]
+    fn halted_bridge_never_advertises_a_worker_as_dispatch_ready() {
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, true, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "stopped",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(true, false, false, true, false),
+            WorkerHeartbeatPlan {
+                status: "busy",
+                dispatch_ready: false,
+            }
+        );
+        assert_eq!(
+            plan_bridge_heartbeat(false, true, true, true, false),
+            WorkerHeartbeatPlan {
+                status: "idle",
+                dispatch_ready: true,
             }
         );
     }
@@ -2151,7 +2703,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn running_session_send_stays_pending_and_does_not_open_a_board() {
+    async fn running_session_send_requests_board_receipt_and_stays_pending() {
         let calls = Arc::new(AtomicUsize::new(0));
         let mut prompts = BTreeMap::new();
         prompts.insert(ATTEMPT_ID.into(), brief_prompt());
@@ -2171,7 +2723,11 @@ mod tests {
 
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(local.sends.len(), 1);
-        assert!(local.sends[0].no_board);
+        assert!(!local.sends[0].no_board);
+        assert_eq!(
+            serde_json::to_value(&local.sends[0]).unwrap()["no_board"],
+            serde_json::json!(false)
+        );
         assert!(local.sends[0].record_history);
         assert_eq!(local.sends[0].msg_id, ATTEMPT_ID);
         assert_eq!(local.paths, vec!["/api/sessions/claude-impl/send".to_owned()]);
@@ -2458,10 +3014,65 @@ mod tests {
     }
 
     #[test]
-    fn a_lost_settle_response_keeps_the_attempt_and_only_a_refusal_drops_it() {
+    fn a_lost_settle_response_halts_for_read_back_without_replaying_the_write() {
         assert_eq!(plan_settle_result(Some(true)), SettleResult::Settled);
         assert_eq!(plan_settle_result(Some(false)), SettleResult::DropAndHalt);
-        assert_eq!(plan_settle_result(None), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_result(None), SettleResult::HaltForReadBack);
+        assert_eq!(
+            plan_settle_followup(SettleResult::Settled),
+            SettleFollowup { halt: false, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::DropAndHalt),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::HaltForReadBack),
+            SettleFollowup { halt: true, keep_pending: false }
+        );
+        assert_eq!(
+            plan_settle_followup(SettleResult::RetryNextTick),
+            SettleFollowup { halt: false, keep_pending: true }
+        );
+    }
+
+    #[test]
+    fn an_unknown_settle_keeps_other_attempts_alive_until_they_finish() {
+        let mut halted = false;
+        let mut pending = vec![
+            ("unknown", SettleResult::HaltForReadBack),
+            ("busy", SettleResult::RetryNextTick),
+            ("settled", SettleResult::Settled),
+        ];
+        let mut still_running = Vec::new();
+        for (attempt, result) in pending.drain(..) {
+            apply_settle_followup(attempt, result, &mut halted, &mut still_running);
+        }
+        assert_eq!(still_running, vec!["busy"]);
+        assert!(halted);
+        assert!(!should_exit_halted_bridge(halted, still_running.len()));
+        // The next tick heartbeats the retained attempt and settles it; only
+        // then may the halted process exit with the non-restarting status.
+        let mut final_pending = Vec::new();
+        apply_settle_followup(
+            still_running.remove(0),
+            SettleResult::Settled,
+            &mut halted,
+            &mut final_pending,
+        );
+        assert!(final_pending.is_empty());
+        assert!(should_exit_halted_bridge(halted, final_pending.len()));
+    }
+
+    #[test]
+    fn the_run_loop_restores_other_pending_attempts_before_exiting() {
+        let source = include_str!("wsl_bridge.rs");
+        let loop_start = source.find("for mut entry in pending.drain(..)").unwrap();
+        let loop_end = source[loop_start..].find("pending = still_running;").unwrap() + loop_start;
+        let settle_loop = &source[loop_start..loop_end];
+        assert!(settle_loop.contains("apply_settle_followup(entry, result"));
+        assert!(!settle_loop.contains("return BRIDGE_HALT_EXIT_CODE"));
+        assert!(source[loop_end..].contains("should_exit_halted_bridge(halted, pending.len())"));
     }
 
     #[test]
@@ -2653,6 +3264,8 @@ mod tests {
     fn pulled_delivery() -> PulledDelivery {
         PulledDelivery {
             attempt_id: ATTEMPT_ID.into(),
+            assignment_id: None,
+            v22_execution: None,
             task_id: "TASK-1".into(),
             worker: "claude-impl".into(),
             task_revision: 3,
@@ -2660,6 +3273,97 @@ mod tests {
             receipt_id: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d".into(),
             lease_expires_at: "2026-09-30T00:01:30.000Z".into(),
         }
+    }
+
+    struct SidecarOnlyLocal {
+        sidecar_sends: usize,
+    }
+
+    impl LocalAmux for SidecarOnlyLocal {
+        async fn send(&mut self, _path: &str, _body: &LocalDispatchBody) -> Result<SendReply> {
+            bail!("v22 must never reach the interactive session")
+        }
+
+        async fn read_back(&mut self, _session_name: &str, _attempt_id: &str) -> Result<ReadBack> {
+            bail!("v22 must never read an interactive card")
+        }
+
+        async fn send_v22(&mut self, _delivery: &PulledDelivery) -> Result<V22SidecarState> {
+            self.sidecar_sends += 1;
+            Ok(V22SidecarState::InProgress)
+        }
+    }
+
+    #[tokio::test]
+    async fn v22_dispatch_uses_only_the_one_shot_sidecar() {
+        let mut local = SidecarOnlyLocal { sidecar_sends: 0 };
+        let mut delivery = pulled_delivery();
+        delivery.assignment_id = Some(Uuid::new_v4().to_string());
+        delivery.v22_execution = Some(crate::tomverse_api::V22ExecutionProfile {
+            model_id: "claude-opus-5-5".into(), role: "design".into(),
+            budget_microusd: 1_000_000,
+        });
+        assert!(matches!(dispatch_v22(&delivery, &mut local).await,
+            BridgeTickResult::Pending { .. }));
+        assert_eq!(local.sidecar_sends, 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn v22_socket_exchanges_one_bounded_request_and_result() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let socket_path = root.path().join("worker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let response_attempt = ATTEMPT_ID.to_owned();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            socket.read_to_end(&mut request).await.unwrap();
+            let wire: serde_json::Value = serde_json::from_slice(&request).unwrap();
+            assert_eq!(wire["op"], "readback");
+            assert_eq!(wire["attemptId"], response_attempt);
+            let response = serde_json::json!({
+                "kind": "succeeded", "attemptId": response_attempt,
+                "usageReceipt": {"invocationId": response_attempt},
+                "usageReceiptDigest": "a".repeat(64),
+            });
+            socket.write_all(format!("{response}\n").as_bytes()).await.unwrap();
+        });
+        let result = v22_sidecar_call(socket_path.to_str().unwrap(),
+            serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
+            ATTEMPT_ID).await.unwrap();
+        assert_eq!(result.state, V22SidecarState::Succeeded);
+        assert_eq!(result.usage_receipt.unwrap()["invocationId"], ATTEMPT_ID);
+        assert_eq!(result.usage_receipt_digest.as_deref(), Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        server.await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn v22_readback_accepts_durable_files_digest_without_volatile_bytes() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let root = tempfile::tempdir().unwrap();
+        let socket_path = root.path().join("worker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            socket.read_to_end(&mut request).await.unwrap();
+            let response = serde_json::json!({
+                "kind": "succeeded", "attemptId": ATTEMPT_ID,
+                "patchBaseSha": "a".repeat(40),
+                "patchDigest": "b".repeat(64),
+                "publishFilesDigest": "c".repeat(64),
+            });
+            socket.write_all(format!("{response}\n").as_bytes()).await.unwrap();
+        });
+        let result = v22_sidecar_call(socket_path.to_str().unwrap(),
+            serde_json::json!({"op": "readback", "attemptId": ATTEMPT_ID}),
+            ATTEMPT_ID).await.unwrap();
+        assert_eq!(result.publish_files, None);
+        assert_eq!(result.publish_files_digest.as_deref(), Some("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"));
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -2706,7 +3410,7 @@ mod tests {
         let busy = settle(tomverse_answering("503 Service Unavailable", LIFECYCLE_DATABASE_BUSY_BODY)).await;
         assert_eq!(plan_settle_answer(&busy), SettleResult::RetryNextTick);
         let unknown = settle(tomverse_answering("503 Service Unavailable", OUTCOME_UNKNOWN_BODY)).await;
-        assert_eq!(plan_settle_answer(&unknown), SettleResult::KeepAndHalt);
+        assert_eq!(plan_settle_answer(&unknown), SettleResult::HaltForReadBack);
         assert_eq!(plan_settle_answer(&Ok(true)), SettleResult::Settled);
         assert_eq!(plan_settle_answer(&Ok(false)), SettleResult::DropAndHalt);
     }

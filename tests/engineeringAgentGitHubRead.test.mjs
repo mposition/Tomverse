@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -8,6 +9,9 @@ import {
   readEngineeringAgentCheckRunsAt,
   readEngineeringAgentDependabotFailures,
   readEngineeringAgentDevelopChecks,
+  readEngineeringAgentDevelopHead,
+  readEngineeringAgentGitBlob,
+  readEngineeringAgentPinnedBaseTree,
 } from "../lib/engineeringAgentGitHubRead.ts";
 
 // The app's read-only GitHub view for registration (docs/policy/engineering-
@@ -37,6 +41,77 @@ const fakeFetch = (routes) => {
 };
 
 const runs = (list) => ({ total_count: list.length, check_runs: list });
+
+test("v22 publication pins a read-only develop head, never a caller URL", async () => {
+  const { fetchImpl, seen } = fakeFetch({
+    "/commits/develop": () => ({ sha: PIN }),
+  });
+  assert.equal(await readEngineeringAgentDevelopHead({ env, fetchImpl }), PIN);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].init.method, "GET");
+  assert.equal(seen[0].init.redirect, "error");
+  assert.match(seen[0].url, /\/repos\/mposition\/Tomverse\/commits\/develop$/);
+  await assert.rejects(readEngineeringAgentDevelopHead({ env, fetchImpl:
+    fakeFetch({ "/commits/develop": () => ({ sha: "not-a-commit" }) }).fetchImpl }),
+  /invalid_response/);
+});
+
+test("v22 base tree is complete, self-consistent and read from the fixed repo", async () => {
+  const blob = Buffer.from("hello\n");
+  const blobId = createHash("sha1").update(`blob ${blob.length}\0`)
+    .update(blob).digest("hex");
+  const treeBody = Buffer.concat([Buffer.from("100644 safe.txt\0"),
+    Buffer.from(blobId, "hex")]);
+  const treeId = createHash("sha1").update(`tree ${treeBody.length}\0`)
+    .update(treeBody).digest("hex");
+  const routes = {
+    "/commits/develop": () => ({ sha: PIN }),
+    [`/git/commits/${PIN}`]: () => ({ sha: PIN, tree: { sha: treeId },
+      verification: { verified: true, payload:
+        `tree ${treeId}\ncommitter GitHub <noreply@github.com> 1791336934 +1000\n\nmessage\n` },
+    }),
+    [`/git/trees/${treeId}`]: () => ({ sha: treeId, truncated: false,
+      tree: [{ path: "safe.txt", type: "blob", mode: "100644",
+        sha: blobId }] }),
+  };
+  const { fetchImpl, seen } = fakeFetch(routes);
+  assert.deepEqual(await readEngineeringAgentPinnedBaseTree(PIN, { env, fetchImpl }),
+    { base: [{ path: "safe.txt", type: "blob", mode: "100644",
+      oid: blobId }], rootTreeId: treeId, baseGitattributes: null,
+      baseCommitterDate: "1791336934 +1000" });
+  assert.ok(seen.every((call) => call.init.method === "GET"));
+  const unsigned = await readEngineeringAgentPinnedBaseTree(PIN, { env,
+    fetchImpl: fakeFetch({ ...routes,
+      [`/git/commits/${PIN}`]: () => ({ sha: PIN,
+        tree: { sha: treeId }, verification: { verified: false,
+          payload: null } }),
+    }).fetchImpl });
+  assert.equal(unsigned.baseCommitterDate, null);
+  const messageSpoof = await readEngineeringAgentPinnedBaseTree(PIN, { env,
+    fetchImpl: fakeFetch({ ...routes,
+      [`/git/commits/${PIN}`]: () => ({ sha: PIN,
+        tree: { sha: treeId }, verification: { verified: true,
+          payload: `tree ${treeId}\nauthor A <a@example.com> 1791336934 +1000\n\ncommitter Spoof <s@example.com> 1791336934 +1000\n` } }),
+    }).fetchImpl });
+  assert.equal(messageSpoof.baseCommitterDate, null);
+  await assert.rejects(readEngineeringAgentPinnedBaseTree(PIN, { env,
+    fetchImpl: fakeFetch({ ...routes,
+      [`/git/trees/${treeId}`]: () => ({ sha: treeId, truncated: true,
+        tree: [] }) }).fetchImpl }), /invalid_response/);
+  await assert.rejects(readEngineeringAgentPinnedBaseTree("b".repeat(40),
+    { env, fetchImpl }), /invalid_input/);
+  const blobFetch = fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
+    sha: blobId, encoding: "base64", size: blob.length,
+    content: blob.toString("base64"),
+  }) }).fetchImpl;
+  assert.deepEqual(Buffer.from(await readEngineeringAgentGitBlob(blobId,
+    { env, fetchImpl: blobFetch })), blob);
+  await assert.rejects(readEngineeringAgentGitBlob(blobId, { env,
+    fetchImpl: fakeFetch({ [`/git/blobs/${blobId}`]: () => ({
+      sha: blobId, encoding: "base64", size: blob.length,
+      content: Buffer.from("wrong").toString("base64"),
+    }) }).fetchImpl }), /invalid_response/);
+});
 
 test("the backlog is read at the pin only when the pin is on the backlog branch", async () => {
   const text = "| ID | 상태·분류 | 다음 완료 단위 |\n|---|---|---|\n| ENG-1 | P2 진행 | 다음 |\n";
