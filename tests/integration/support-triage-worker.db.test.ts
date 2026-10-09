@@ -120,8 +120,9 @@ test("a result whose claim was lost is not written and is counted stale", async 
   } finally {
     await prisma.$executeRawUnsafe(`ALTER TABLE "SupportTriageSuggestion" ENABLE TRIGGER "SupportTriageSuggestion_guard"`);
   }
-  const result = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
-  assert.deepEqual(result, { ready: 0, stale: 1 });
+  const { ready, stale, groups } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
+  assert.equal(groups.groupsCreated, 0);
   assert.equal((await suggestions())[0].state, "claimed");
 });
 
@@ -130,8 +131,8 @@ test("a report closed between claim and result is not written", async () => {
   const run = await startSupportTriageRun("worker");
   const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { status: "closed" } });
-  const result = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
-  assert.deepEqual(result, { ready: 0, stale: 1 });
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
 });
 
 test("expired claims return to pending and are claimed again; after the last attempt they fail", async () => {
@@ -215,7 +216,8 @@ test("a result for an input changed after the claim is not written; the next pas
   const batch = await claimSupportTriageBatch(run, ["fb-w-a"]);
   assert.equal(batch.claimed[0].lane, "bug_unverified");
   await prisma.feedback.update({ where: { id: "fb-w-a" }, data: { message: "Please delete my account." } });
-  assert.deepEqual(await writeSupportTriageResults(run, batch.token as string, batch.claimed), { ready: 0, stale: 1 });
+  const { ready, stale } = await writeSupportTriageResults(run, batch.token as string, batch.claimed);
+  assert.deepEqual({ ready, stale }, { ready: 0, stale: 1 });
   await runSupportTriageWorker();
   const live = (await suggestions()).filter((s) => s.state === "ready");
   assert.deepEqual(live.map((s) => s.lane), ["trust_safety_human"]);

@@ -220,3 +220,114 @@ export const serverEvidenceSignalExpiresAt = (members: readonly GroupFacts[]): D
   if (earliest === null) throw new RangeError("a group has at least two members");
   return new Date(earliest + SERVER_EVIDENCE_SIGNAL_DAYS * 24 * 60 * 60 * 1000);
 };
+
+/**
+ * A signal whose value is not evidence (an account, a fingerprint) has no
+ * clock of its own: it lives while its group is open, and the group's own
+ * lifecycle ends it. The column is NOT NULL, so this far bound stands for
+ * "no snapshot expiry"; retention never reaches it.
+ */
+export const OPEN_GROUP_SIGNAL_EXPIRES_AT = new Date("9999-12-31T00:00:00.000Z");
+
+/** New memberships one pass may create for new groups (policy section 8: the pass share of 50). */
+export const GROUP_NEW_MEMBERSHIPS_PER_PASS_MAX = 50;
+
+/** The open group a report is a member of now. */
+export type OpenMembership = { readonly kind: GroupKind; readonly snapshotDigest: string };
+
+export type PlannedGroup = {
+  readonly kind: GroupKind;
+  readonly snapshotDigest: string;
+  readonly memberIds: readonly string[];
+  readonly groupCandidateKey: string;
+  readonly groupInputDigest: string;
+  readonly signals: readonly { readonly kind: GroupKind; readonly snapshotDigest: string; readonly expiresAt: Date }[];
+};
+
+export type NewGroupPlan = {
+  readonly planned: PlannedGroup[];
+  /** A class over the member cap: never written (policy section 6, loss (2)). */
+  readonly memberCapReached: number;
+  /** A class that already has an open group of its kind and value; joining it comes later. */
+  readonly joinDeferred: number;
+  /** A class some of whose members sit in a lower-kind group; moving them comes later. */
+  readonly moveDeferred: number;
+  /** A class left out because the pass's membership budget ran out. */
+  readonly budgetDeferred: number;
+  readonly membershipsUsed: number;
+};
+
+/**
+ * New groups only. Every class with an arriving report (one just made ready
+ * in this batch) is considered in priority order; a report already in an
+ * open group, or given to a higher-priority class in this plan, is left out
+ * of a new one, and what remains must still be two or more and within the
+ * cap. Classes are admitted as a prefix while their memberships fit the
+ * remaining budget.
+ */
+export const planNewGroups = (input: {
+  readonly reports: readonly GroupFacts[];
+  readonly arriving: readonly string[];
+  readonly memberships: ReadonlyMap<string, OpenMembership>;
+  readonly membershipBudget: number;
+}): NewGroupPlan => {
+  if (!Number.isSafeInteger(input.membershipBudget) || input.membershipBudget < 0) {
+    throw new RangeError("membershipBudget must be a non-negative integer");
+  }
+  const byId = new Map(input.reports.map((report) => [report.feedbackId, report]));
+  const arriving = new Set(input.arriving);
+  for (const id of arriving) if (!byId.has(id)) throw new RangeError("an arriving report has no facts");
+  const assigned = new Set<string>();
+  const planned: PlannedGroup[] = [];
+  let memberCapReached = 0;
+  let joinDeferred = 0;
+  let moveDeferred = 0;
+  let budgetDeferred = 0;
+  let used = 0;
+  for (const candidate of groupCandidatesFrom(input.reports)) {
+    if (!candidate.memberIds.some((id) => arriving.has(id))) continue;
+    const current = candidate.memberIds.map((id) => input.memberships.get(id) ?? null);
+    if (current.some((m) => m !== null && m.kind === candidate.kind && m.snapshotDigest === candidate.snapshotDigest)) {
+      joinDeferred += 1;
+      continue;
+    }
+    if (current.some((m) => m !== null && membershipAction(m.kind, candidate.kind) === "move")) moveDeferred += 1;
+    const memberIds = candidate.memberIds.filter((id) => !input.memberships.has(id) && !assigned.has(id));
+    if (memberIds.length < 2 || !memberIds.some((id) => arriving.has(id))) continue;
+    if (memberIds.length > GROUP_MEMBER_CAP) {
+      memberCapReached += 1;
+      continue;
+    }
+    // A prefix only: once one class is left out for budget, every later one is too.
+    if (budgetDeferred > 0 || used + memberIds.length > input.membershipBudget) {
+      budgetDeferred += 1;
+      continue;
+    }
+    const members = memberIds.map((id) => byId.get(id) as GroupFacts);
+    const signals = sharedGroupSignals(candidate.kind, members).map((signal) => ({
+      ...signal,
+      expiresAt:
+        signal.kind === "server_evidence_match" ? serverEvidenceSignalExpiresAt(members) : OPEN_GROUP_SIGNAL_EXPIRES_AT,
+    }));
+    const key = groupCandidateKey({
+      primaryKind: candidate.kind,
+      primarySnapshotDigest: candidate.snapshotDigest,
+      memberIds,
+    });
+    planned.push({
+      kind: candidate.kind,
+      snapshotDigest: candidate.snapshotDigest,
+      memberIds,
+      groupCandidateKey: key,
+      groupInputDigest: groupInputDigest({
+        groupCandidateKey: key,
+        members: members.map((member) => ({ feedbackId: member.feedbackId, status: member.status })),
+        signals,
+      }),
+      signals,
+    });
+    for (const id of memberIds) assigned.add(id);
+    used += memberIds.length;
+  }
+  return { planned, memberCapReached, joinDeferred, moveDeferred, budgetDeferred, membershipsUsed: used };
+};
