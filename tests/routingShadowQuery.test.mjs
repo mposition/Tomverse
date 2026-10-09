@@ -23,7 +23,9 @@ test("an unfiltered report never claims deployment binding", () => {
 test("partial identities and future/reversed windows cannot produce a bound report", () => {
   for (const args of [identityArgs.slice(0, 2), ["--commit="],
     ["--until=2026-10-11T00:00:00Z"], ["--since=2026-10-10T00:00:00Z"],
-    ["--since=invalid"], ["--limit=Infinity"]]) {
+    ["--since=invalid"], ["--limit=Infinity"], ["--days=abc"], ["--days=0"],
+    ["--limit=-1"], ["--limit=1.5"], ["--commit", "a".repeat(40)],
+    ["--commit " + "a".repeat(40)], ["--limit=1", "--limit=2"]]) {
     assert.throws(() => routingShadowQuery(args, now));
   }
 });

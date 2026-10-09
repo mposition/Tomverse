@@ -2,10 +2,18 @@ import { routingApplicationIdentity } from "@/lib/routingApplicationIdentity";
 
 /** Read-only report scope. A deployment filter must supply the whole identity. */
 export function routingShadowQuery(args: readonly string[], now = new Date()) {
-  const flag = (name: string) => args.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  const days = Math.max(1, Number(flag("days")) || 30);
-  const limit = Math.max(1, Math.floor(Number(flag("limit")) || 200_000));
-  if (!Number.isFinite(days) || !Number.isSafeInteger(limit) || !Number.isSafeInteger(limit + 1)) {
+  const flag = (name: string) => {
+    if (args.some((arg) => arg === `--${name}` || arg.startsWith(`--${name} `))) {
+      throw new Error(`Use --${name}=<value>`);
+    }
+    const matches = args.filter((arg) => arg.startsWith(`--${name}=`));
+    if (matches.length > 1) throw new Error(`Duplicate --${name} flag`);
+    return matches[0]?.slice(name.length + 3);
+  };
+  const days = Number(flag("days") ?? 30);
+  const limit = Number(flag("limit") ?? 200_000);
+  if (!Number.isFinite(days) || days <= 0 || limit <= 0 ||
+      !Number.isSafeInteger(limit) || !Number.isSafeInteger(limit + 1)) {
     throw new Error("Invalid report window or limit");
   }
   const until = new Date(flag("until") ?? now);
