@@ -34,10 +34,41 @@ export const QA_RELEASE_SERVICE_VARIABLES = Object.freeze({
 export type QaReleaseService = keyof typeof QA_RELEASE_SERVICE_VARIABLES;
 
 /**
- * Names the platform and the Node runtime set on their own. Provisional until
- * operational check O-10 records the exact list from a live Railway service;
- * kept narrow on purpose -- a missing entry stops the service, an extra one
- * could let a credential through.
+ * Names the Railpack-built Agents image puts in every process environment, by
+ * exact name. Measured in a live Railway container on 2026-10-09 (names only)
+ * and matching the 2026-10-03 measurement that
+ * tests/productResearchObservationRunnerCore.test.mjs records; the two __MISE_
+ * names are only in that earlier one, set by the mise shim a `node` start goes
+ * through. Without these every service built from this repository refused to
+ * start on Railway: the builder, the mise toolchain and npm's configuration
+ * each add names no list written from a developer machine contains. A builder
+ * change that adds another name stops the services again; the fix is to
+ * measure again, not to admit a prefix.
+ */
+export const QA_RELEASE_IMAGE_VARIABLES: readonly string[] = Object.freeze([
+  "CI",
+  "NEXT_TELEMETRY_DISABLED",
+  "NPM_CONFIG_FETCH_RETRIES",
+  "NPM_CONFIG_FUND",
+  "NPM_CONFIG_PRODUCTION",
+  "NPM_CONFIG_UPDATE_NOTIFIER",
+  "RAILPACK_BUILT_AT",
+  "RAILPACK_VERSION",
+  "MISE_CACHE_DIR",
+  "MISE_CONFIG_DIR",
+  "MISE_DATA_DIR",
+  "MISE_INSTALLS_DIR",
+  "MISE_SHIMS_DIR",
+  "__MISE_DIFF",
+  "__MISE_SHIM",
+]);
+
+/**
+ * Names the platform and the Node runtime set on their own, the image's
+ * included. The first group is provisional until operational check O-10
+ * records the exact list from a live Railway service; kept narrow on purpose
+ * -- a missing entry stops the service, an extra one could let a credential
+ * through.
  */
 export const QA_RELEASE_RUNTIME_VARIABLES: readonly string[] = Object.freeze([
   "HOME",
@@ -52,6 +83,7 @@ export const QA_RELEASE_RUNTIME_VARIABLES: readonly string[] = Object.freeze([
   "TZ",
   "YARN_VERSION",
   "_",
+  ...QA_RELEASE_IMAGE_VARIABLES,
 ]);
 
 /**
@@ -59,9 +91,12 @@ export const QA_RELEASE_RUNTIME_VARIABLES: readonly string[] = Object.freeze([
  * which would also admit a credential someone named RAILWAY_TOKEN or
  * RAILWAY_DATABASE_URL. Taken from Railway's variables reference (identity,
  * networking, volume and git-source variables); provisional until O-10
- * records a live service, like the list above.
+ * records a live service, like the list above. RAILWAY_BETA_ENABLE_RUNTIME_V2
+ * is measured: Railway sets it on services that run on its V2 runtime, and the
+ * Support Triage service named it when it refused to start on 2026-10-09.
  */
 export const QA_RELEASE_RAILWAY_VARIABLES: readonly string[] = Object.freeze([
+  "RAILWAY_BETA_ENABLE_RUNTIME_V2",
   "RAILWAY_DEPLOYMENT_ID",
   "RAILWAY_ENVIRONMENT",
   "RAILWAY_ENVIRONMENT_ID",

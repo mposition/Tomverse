@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  QA_RELEASE_IMAGE_VARIABLES,
   QA_RELEASE_SERVICE_VARIABLES,
   checkQaReleaseServiceEnv,
   decideQaReleaseServiceStart,
@@ -85,6 +86,54 @@ test("Railway variables are admitted by exact name only, never by prefix", () =>
     assert.deepEqual(checkQaReleaseServiceEnv("digest", [...Object.keys(runtime), name]), { ok: false, unexpectedCount: 1 }, name);
   }
   assert.deepEqual(checkQaReleaseServiceEnv("digest", ["RAILWAY_GIT_COMMIT_SHA", "RAILWAY_SERVICE_ID", "PORT"]), { ok: true });
+});
+
+/**
+ * Every name a live Railway container built by Railpack from this repository
+ * had beyond the runtime list above, read on 2026-10-09 (names only), plus
+ * the two mise shim names the 2026-10-03 measurement recorded. Copied from
+ * those measurements, not from the module.
+ */
+const MEASURED_IMAGE_NAMES = [
+  "CI",
+  "NEXT_TELEMETRY_DISABLED",
+  "NPM_CONFIG_FETCH_RETRIES",
+  "NPM_CONFIG_FUND",
+  "NPM_CONFIG_PRODUCTION",
+  "NPM_CONFIG_UPDATE_NOTIFIER",
+  "RAILPACK_BUILT_AT",
+  "RAILPACK_VERSION",
+  "MISE_CACHE_DIR",
+  "MISE_CONFIG_DIR",
+  "MISE_DATA_DIR",
+  "MISE_INSTALLS_DIR",
+  "MISE_SHIMS_DIR",
+  "__MISE_DIFF",
+  "__MISE_SHIM",
+  "RAILWAY_BETA_ENABLE_RUNTIME_V2",
+];
+
+test("the names the deployed image provides do not stop a service", () => {
+  // Until 2026-10-09 every one of these refused the start, so the Monitor and
+  // the Digest exited 1 on every scheduled run without doing anything.
+  const image = Object.fromEntries(MEASURED_IMAGE_NAMES.map((name) => [name, "x"]));
+  assert.equal(decideQaReleaseServiceStart("digest", digestEnv(image)), "run");
+  assert.equal(decideQaReleaseServiceStart("mergeLane", laneEnv(image)), "run");
+  assert.equal(
+    decideQaReleaseServiceStart("monitor", { ...runtime, ...image, QA_RELEASE_MONITOR_SECRET: "m", QA_RELEASE_CONTROL_REVISION: "2" }),
+    "run",
+  );
+});
+
+test("the image list is exactly the measurement, so a name cannot be added without measuring", () => {
+  const imageOnly = MEASURED_IMAGE_NAMES.filter((name) => name !== "RAILWAY_BETA_ENABLE_RUNTIME_V2");
+  assert.deepEqual([...QA_RELEASE_IMAGE_VARIABLES].sort(), [...imageOnly].sort());
+});
+
+test("the image's families are admitted by exact name only, never by prefix", () => {
+  for (const name of ["NPM_CONFIG__AUTH", "NPM_CONFIG_TOKEN", "MISE_GITHUB_TOKEN", "RAILPACK_SECRET", "__MISE_", "RAILWAY_BETA_TOKEN"]) {
+    assert.deepEqual(checkQaReleaseServiceEnv("digest", [...Object.keys(digestEnv()), name]), { ok: false, unexpectedCount: 1 }, name);
+  }
 });
 
 test("the merge lane runs only on a declared, empty kill switch; unset is unreadable and stops it", () => {
