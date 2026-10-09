@@ -67,6 +67,13 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
 
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.digestReserved}</h3>
+            {/* An older digest recorded only one mode's reservations, so even an
+                empty list does not say the date had no messages. */}
+            {!view.countsComplete ? (
+              <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-counts-partial">
+                {m.digestCountsFromList}
+              </p>
+            ) : null}
             {total === 0 ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestNoReserved}</p>
             ) : (
@@ -81,11 +88,6 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                     </li>
                   ))}
                 </ul>
-                {!view.countsComplete ? (
-                  <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-counts-partial">
-                    {m.digestCountsFromList}
-                  </p>
-                ) : null}
                 {total > payload.items.length ? (
                   <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-truncated">
                     {m.digestListCapped
