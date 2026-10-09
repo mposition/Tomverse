@@ -18,7 +18,7 @@ const tx = {
     }
     assert.match(sql, /INSERT INTO "PromptRefinerAutoBudgetWindow"/);
     const key = `${values[0]}:${(values[1] as Date).toISOString()}`;
-    const current = buckets.get(key) ?? 0n;
+    const current = buckets.get(key) ?? BigInt(0);
     const amount = values[2] as bigint;
     const limitMinusAmount = values[4] as bigint;
     events.push(`book:${values[0]}`);
@@ -84,14 +84,14 @@ test("the product hold books day and month with its audit in one transaction", a
   const budget = await load();
   clear(); dbNow = new Date("2026-10-08T13:59:59.999Z");
   const result = await budget.reservePromptRefinerAutoBudget(binding(key(1)) as never);
-  assert.equal(result.reservedMicroUsd, 29_918n);
+  assert.equal(result.reservedMicroUsd, BigInt(29_918));
   assert.equal(result.dispatchAuthorized, false);
   assert.deepEqual(events, ["book:brisbane_day",
     "book:brisbane_month", "audit_write", "hold"]);
-  assert.deepEqual([...buckets.values()], [29_918n, 29_918n]);
+  assert.deepEqual([...buckets.values()], [BigInt(29_918), BigInt(29_918)]);
   await assert.rejects(budget.reservePromptRefinerAutoBudget(binding(key(1)) as never),
     /duplicate_request_key/);
-  assert.deepEqual([...buckets.values()], [29_918n, 29_918n],
+  assert.deepEqual([...buckets.values()], [BigInt(29_918), BigInt(29_918)],
     "duplicate request cannot spend both windows twice");
 });
 

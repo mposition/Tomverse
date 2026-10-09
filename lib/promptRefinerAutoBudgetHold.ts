@@ -7,9 +7,9 @@ import { writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
 
 /** Product spending only; never the one-shot evaluation or user-credit budget. */
-export const PROMPT_REFINER_AUTO_DAY_LIMIT_MICRO_USD = 100_000_000n;
-export const PROMPT_REFINER_AUTO_MONTH_LIMIT_MICRO_USD = 3_000_000_000n;
-export const PROMPT_REFINER_AUTO_REQUEST_HOLD_MICRO_USD = 29_918n;
+export const PROMPT_REFINER_AUTO_DAY_LIMIT_MICRO_USD = BigInt(100_000_000);
+export const PROMPT_REFINER_AUTO_MONTH_LIMIT_MICRO_USD = BigInt(3_000_000_000);
+export const PROMPT_REFINER_AUTO_REQUEST_HOLD_MICRO_USD = BigInt(29_918);
 
 const BRISBANE_UTC_OFFSET_MS = 10 * 60 * 60 * 1000;
 const HEX_64 = /^[0-9a-f]{64}$/;
