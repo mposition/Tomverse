@@ -1105,9 +1105,9 @@ export const RAW_SQL_ALLOWLIST = [
     path: "lib/supportTriageWorker.ts",
     table: "SupportTriageRun",
     tableMentions: 1,
-    writeVerbs: 8,
+    writeVerbs: 13,
     reason:
-      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: reclaim and retry_exhausted UPDATEs, supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE, plus the words in comments describing them. None names a protected table.",
+      "SupportTriageRun appears once, as the audit entry's targetType string, never in SQL; the run row is written only through lib/supportTriageRunStore.ts. The write verbs are the worker's SupportTriageSuggestion statements: reclaim and retry_exhausted UPDATEs, supersede UPDATE, pending INSERT, claim UPDATE and ready UPDATE; its group statements: SupportTriageGroup INSERT, SupportTriageGroupMember INSERT and DELETE, the lost group's invalidating UPDATE and the SupportTriageGroupSignal INSERT; plus the words in comments describing them. None names a protected table.",
   },
   {
     path: "lib/supportTriageRetention.ts",

@@ -378,6 +378,10 @@ run(
     // Support-triage worker pass: claim, fencing, lane and flags, reclaim,
     // supersede on a changed input, nothing for a closed or deleted report.
     "tests/integration/support-triage-worker.db.test.ts",
+    // Support-triage new groups: one kind per group, the higher kind first, a
+    // tombstoned key stops a second group, a member lost to a concurrent pass
+    // empties and invalidates the group, and the pass membership budget.
+    "tests/integration/support-triage-group-formation.db.test.ts",
     // Support-triage data in a real account deletion: the derived rows go in
     // that transaction, the reports stay anonymised, nothing is derived again.
     "tests/integration/support-triage-account-deletion.db.test.ts",
