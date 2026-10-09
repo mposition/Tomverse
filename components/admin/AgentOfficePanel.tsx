@@ -271,8 +271,12 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     const link = document.createElement("a");
     link.href = url;
     link.download = `tomverse-agent-office-${live.readAt.slice(0, 16).replace(/[:T]/g, "-")}.md`;
+    // In the document while it is clicked, and the URL kept a moment after:
+    // some browsers abort a download whose object URL is revoked at once.
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   };
   const selected = selectedId ? engine.agentById.get(selectedId) ?? null : null;
   // The operator's to-do is the real queues an agent waits on (OPERATOR_QUEUE_KEYS).

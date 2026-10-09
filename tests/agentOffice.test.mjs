@@ -1690,14 +1690,27 @@ test("live leads answer a greeting or a thank-you in their own voice, and never 
   demo.command("Thank you, everyone");
   assert.notEqual(demo.chat.at(-1).text, adminAgentOfficeMessages.en.real.noLiveRoom);
 
-  // No voice line states a fact about a team's work: no numbers, no times, no states.
+  // No voice line states a fact about a team's work: no numbers, no times, no
+  // states, and no activity or promise -- the same words have to be true when
+  // the room's record is silent, its switch is off or it could not be read.
+  const activity = {
+    en: /\b(watch\w*|gather\w*|open|polish\w*|check\w*|runs?|signals?|ledgers?|inbox|keep|I'll|won't|will)\b/i,
+    ko: /지켜|모으|당번|열어|펼쳐|다듬|점검|볼게|할게|지킬|찾아|울리/,
+  };
   for (const locale of ["en", "ko"]) {
-    const voices = adminAgentOfficeMessages[locale].real.voices;
-    for (const [dept, voice] of Object.entries(voices)) {
+    const real = adminAgentOfficeMessages[locale].real;
+    for (const [dept, voice] of Object.entries({ ...real.voices, default: real.voiceDefault })) {
       for (const line of [voice.hello, voice.thanks, voice.answer]) {
         assert.doesNotMatch(line, /\d|UTC|\bdone\b|\bfailed\b|\bok\b|완료|실패|정상|없음/i, `${locale}.${dept}: ${line}`);
+        assert.doesNotMatch(line, activity[locale], `${locale}.${dept} claims activity: ${line}`);
       }
     }
+  }
+  // A room that could not be read, or whose switch is off, is greeted the same way.
+  for (const [badge, status] of [["읽지 못함", "attention"], ["스위치 꺼짐", "waiting"]]) {
+    const quiet = new AgentOffice(copy, { research: { status, badge, line: "기록을 읽지 못함", detail: "" } });
+    quiet.command("안녕");
+    assert.equal(quiet.chat.at(-1).text, copy.real.voices.research.hello, badge);
   }
 });
 
