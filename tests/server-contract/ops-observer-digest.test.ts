@@ -162,6 +162,7 @@ test("the app builds the digest from its own reads and keeps it under the date's
     // Only the checks that are not page keys, from the app's own readiness.
     readiness: { emailUnsubscribeKeyring: true, imageProviderBudget: false },
     reserved,
+    reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 0 },
     channelCheckTaken: true,
   });
   // Armed first, the shared writes, then this agent's guard row last.
@@ -184,6 +185,8 @@ test("the digest lists the date's reservations in its mode, not only the head ge
   assert.deepEqual(world.dateArgs, [DAY, "shadow", runDeadline]);
   const payload = world.submissions[0].payload as { reserved: unknown; channelCheckTaken: unknown };
   assert.deepEqual(payload.reserved, [earlier, ...reserved]);
+  assert.deepEqual((payload as unknown as { reservedCounts: unknown }).reservedCounts,
+    { new_open: 1, worsening: 0, reopen: 0, recovery: 1 });
   assert.equal(payload.channelCheckTaken, false);
 });
 

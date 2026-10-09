@@ -134,7 +134,12 @@ test("an unknown section makes only its keys unknown; a missing job or check is 
   assert.equal(obs["P1a#database"], "unknown");
   assert.equal(obs["P3#credit_reservation_reconciliation"], "unknown");
   assert.equal(obs["P-D#standard_email_drain"], "ok");
-  assert.equal(obs["P1u#snapshot"], "ok");
+  // Readiness that could not be computed is P1u's failure, not a quiet unknown.
+  assert.equal(obs["P1u#snapshot"], "failed");
+  // Another section's unknown leaves P1u ok: it is about readiness only.
+  const jobsUnknown = observationsFromSnapshot({ healthOk: true, snapshot: snapshot({ scheduledJobs: "unknown" }) });
+  assert.equal(jobsUnknown["P1u#snapshot"], "ok");
+  assert.equal(jobsUnknown["P3#credit_reservation_reconciliation"], "unknown");
 
   const noCheck = { ...READINESS };
   delete noCheck.providerBudgets;
