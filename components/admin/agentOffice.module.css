@@ -1055,6 +1055,20 @@ a.integration-row:hover { border-color: var(--accent); }
 .score.blink { color: var(--accent-text); animation: blinkDot 1s steps(2) infinite; }
 .rail-card .approval-body h3 { margin: 8px 0; font-size: 16px; }
 .rail-card .approval-body p { margin: 0 0 10px; color: var(--text-soft); font-size: 13px; }
+.auto-list { display: grid; gap: 6px; margin: 6px 0 10px; padding: 0; list-style: none; }
+.auto-list li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.auto-list li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auto-list li small { grid-column: 2 / -1; color: var(--text-soft); font-size: 11px; line-height: 1.45; }
 .queue-list { display: grid; gap: 6px; margin: 0 0 10px; padding: 0; list-style: none; }
 .queue-list li {
   display: grid;

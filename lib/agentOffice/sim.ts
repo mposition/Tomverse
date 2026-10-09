@@ -915,7 +915,9 @@ export class AgentOffice {
 
   // ── The operator console ───────────────────────────────────
   pushChat(from: "operator" | "staff", name: string, text: string) {
-    this.chat.push({ id: this.logSeq++, time: this.clockText(), from, name, text });
+    // The real view has no simulated clock: a line is stamped with the time it was said.
+    const time = this.demo ? this.clockText() : `${new Date().toISOString().slice(11, 16)} UTC`;
+    this.chat.push({ id: this.logSeq++, time, from, name, text });
     if (this.chat.length > 60) this.chat.shift();
   }
 
@@ -1306,12 +1308,20 @@ export class AgentOffice {
    * no other room moves.
    */
   setLive(live: Readonly<Record<string, AgentOfficeLiveDept>>) {
+    const previous = this.live;
     this.live = live;
     for (const [deptId, room] of Object.entries(live)) {
       if (deptId in this.deptStatus) this.deptStatus[deptId] = room.status;
       // A fresh reading replaces what the room's lead is saying.
       const lead = this.agentById.get(this.deptLead[deptId]?.id ?? "");
       if (lead) this.showRecordLine(lead, room.line);
+      // A room whose record changed since the last reading says so in the
+      // console, in its lead's name. The first reading is not a change, and a
+      // reading that only moved the read time (it lives in `detail`) is not one.
+      const before = previous[deptId];
+      if (lead && before && (before.status !== room.status || before.badge !== room.badge || before.line !== room.line)) {
+        this.pushChat("staff", lead.name, this.copy.real.changed(this.roomName(deptId), room.line));
+      }
     }
   }
 

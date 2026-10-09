@@ -855,3 +855,39 @@ export function operatorQueueTotal(queue: AgentOfficeOperatorQueue): { total: nu
   }
   return { total, unknown };
 }
+
+/**
+ * One automation the office reads for real, as the dashboard lists it: a team
+ * room with a live record, the AMUX execution room or the review server.
+ */
+export type AgentOfficeLiveRow = {
+  id: string;
+  name: string;
+  status: DeptStatus;
+  /** The state in a word or two. */
+  badge: string;
+  /** What the room says, from its record. */
+  line: string;
+  /** The console screen that holds its record, when there is one. */
+  href: string | null;
+};
+
+export type AgentOfficeBrief = {
+  /** Rows that need a look, in the order given. */
+  attention: AgentOfficeLiveRow[];
+  /** Rows at work right now. */
+  working: AgentOfficeLiveRow[];
+  /** How many rows are fine or waiting on their next run. */
+  quiet: number;
+};
+
+/**
+ * The digest desk's brief over the live rows: what needs a look first, then
+ * what is at work, then how many are quiet. It reads only the rows' states;
+ * nothing here is a demo figure.
+ */
+export function agentOfficeBrief(rows: readonly AgentOfficeLiveRow[]): AgentOfficeBrief {
+  const attention = rows.filter((row) => row.status === "attention" || row.status === "blocked");
+  const working = rows.filter((row) => row.status === "working");
+  return { attention, working, quiet: rows.length - attention.length - working.length };
+}
