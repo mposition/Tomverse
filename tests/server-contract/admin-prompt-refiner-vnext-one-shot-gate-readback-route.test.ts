@@ -31,7 +31,9 @@ mock.module(mod("lib/promptRefinerVnextOneShotGateEvidence.ts"), {
   namedExports: {
     readPromptRefinerVnextOneShotGateEvidence: async (_tx: unknown,
       stage: { id: string } | null, requestedStageId: string) =>
-      ({ valid: stage?.id === requestedStageId }),
+      ({ valid: stage?.id === requestedStageId,
+        reasonCodes: stage?.id === v5StageId ? ["latency_ceiling_exceeded"] : null,
+        latencyOnlyFailure: stage?.id === v5StageId ? true : null }),
     readPromptRefinerVnextOneShotDisposition: async (_tx: unknown,
       stage: { id: string } | null, requestedStageId: string) =>
       ({ valid: stage?.id === requestedStageId }),
@@ -127,7 +129,10 @@ test("explicit v5 readback selects v5 and rejects unknown stage IDs", async () =
     "app/api/admin/prompt-refiner/vnext-one-shot-disposition/route.ts"));
   const request = new Request("https://example.test/api/admin/prompt-refiner/vnext-one-shot-gate?stageId=" +
     v5StageId);
-  assert.equal((await (await gate.GET(request)).json()).readback.valid, true);
+  const gateReadback = (await (await gate.GET(request)).json()).readback;
+  assert.equal(gateReadback.valid, true);
+  assert.deepEqual(gateReadback.reasonCodes, ["latency_ceiling_exceeded"]);
+  assert.equal(gateReadback.latencyOnlyFailure, true);
   assert.equal((await (await disposition.GET(request)).json()).readback.valid, true);
   assert.deepEqual(stageReadIds, [v5StageId, v5StageId]);
   const invalid = new Request("https://example.test/api/admin/prompt-refiner/vnext-one-shot-gate?stageId=invalid");

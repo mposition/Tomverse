@@ -166,7 +166,7 @@ export async function readPromptRefinerVnextOneShotGateEvidence(
           canonicalBenchmarkJson(gateMetadata(stage, attestation, evaluated, signer)) &&
         await promptRefinerVnextOneShotAuditReceiptIsValid(tx, entry)) {
       outcome = evaluated.outcome;
-      reasonCodes = evaluated.reasonCodes;
+      reasonCodes = Object.freeze([...evaluated.reasonCodes]);
       latencyOnlyFailure = outcome === "fail" && reasonCodes.length === 1 &&
         reasonCodes[0] === "latency_ceiling_exceeded";
     }
