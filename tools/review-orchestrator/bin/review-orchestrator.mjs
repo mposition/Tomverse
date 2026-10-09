@@ -175,7 +175,14 @@ async function daemon(config) {
     snapshot: () => {
       const jobs = orchestrator.store.listJobs();
       const now = Date.now();
-      return buildStatusSnapshot({ jobs, providers: config.providers, load: computeLoad(jobs, now), draining: isDraining(config), now });
+      return buildStatusSnapshot({
+        jobs,
+        providers: config.providers,
+        load: computeLoad(jobs, now),
+        quotas: readQuotaStatus(config, now),
+        draining: isDraining(config),
+        now,
+      });
     },
   });
   if (snapshotWriter) log("status snapshot on");

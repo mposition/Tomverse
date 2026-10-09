@@ -38,8 +38,23 @@ const MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const MAX_PROVIDERS = 16;
 const MAX_SLOTS = 64;
 const MAX_COUNT = 100_000;
+const QUOTA_STATES = ["available", "exhausted", "unknown", "disabled"];
+const QUOTA_UNITS = ["percent", "credits", "usd"];
+const MAX_QUOTA_AMOUNT = 1_000_000_000;
 
 const isCount = (value) => Number.isInteger(value) && value >= 0;
+
+/** A provider's quota rebuilt, or undefined when the file holds none, or null when it holds a bad one. */
+function normaliseQuota(quota) {
+  if (quota === undefined) return undefined;
+  if (quota === null || typeof quota !== "object" || !QUOTA_STATES.includes(quota.state)) return null;
+  const { state, remaining, unit } = quota;
+  if (remaining === null && unit === null) return { state, remaining: null, unit: null };
+  if (state === "unknown" || state === "disabled") return null;
+  if (!QUOTA_UNITS.includes(unit) || typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0) return null;
+  if (remaining > (unit === "percent" ? 100 : MAX_QUOTA_AMOUNT)) return null;
+  return { state, remaining, unit };
+}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -63,8 +78,10 @@ export function normaliseStatusSnapshot(value) {
     if (!MACHINE_NAME.test(id ?? "") || !MACHINE_NAME.test(vendor ?? "") || ids.has(id)) return null;
     if (typeof enabled !== "boolean" || !isCount(running) || !isCount(maxConcurrent) || maxConcurrent < 1) return null;
     if (running > MAX_SLOTS || maxConcurrent > MAX_SLOTS) return null;
+    const quota = normaliseQuota(provider.quota);
+    if (quota === null) return null;
     ids.add(id);
-    rebuilt.push({ id, vendor, enabled, running, maxConcurrent });
+    rebuilt.push(quota === undefined ? { id, vendor, enabled, running, maxConcurrent } : { id, vendor, enabled, running, maxConcurrent, quota });
   }
   return {
     schemaVersion: 1,

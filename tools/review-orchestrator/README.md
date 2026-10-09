@@ -370,9 +370,11 @@ Agent office "독립 검토실"에서 그것을 봅니다.
   (`/usr/local/lib/review-status-sender/`)로 직접 받습니다. `review` 계정의 checkout을 실행하거나
   그곳에서 복사하지 않습니다 — 그 계정이 고친 코드가 재시작 때 secret을 가진 채 실행되기
   때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
-- **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, reviewer를
-  기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
-  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문. daemon이 그런
+- **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
+  (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
+  USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  계정 정보. daemon이 그런
   값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
   필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
 - **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을

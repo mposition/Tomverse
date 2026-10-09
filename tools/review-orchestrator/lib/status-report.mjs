@@ -15,7 +15,9 @@
  * nor its environment, and cannot change the code it runs.
  *
  * The snapshot is content-free by construction: per reviewer its id, vendor,
- * whether it is enabled and how many reviews it runs out of how many it may;
+ * whether it is enabled, how many reviews it runs out of how many it may, and
+ * its account quota as the daemon's own probe last read it (a state and one
+ * number);
  * how many jobs wait for a reviewer; whether the server is draining; and the
  * last 24 hours' verdict counts. No job id, author, branch, scope, diff,
  * finding or reviewer text is read into it.
@@ -48,8 +50,34 @@ const MAX_COUNT = 100_000;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
-/** The snapshot for one moment. `jobs` is `Store.listJobs()`, `load` is `computeLoad(jobs, now)`. */
-export function buildStatusSnapshot({ jobs, providers, load, draining, now }) {
+export const QUOTA_STATES = ["available", "exhausted", "unknown", "disabled"];
+export const QUOTA_UNITS = ["percent", "credits", "usd"];
+const MAX_QUOTA_AMOUNT = 1_000_000_000;
+
+/**
+ * One provider's quota as lib/quota.mjs reports it, reduced to a state and
+ * one amount: a percentage when the probe gives one, otherwise an amount in
+ * credits or USD, otherwise none. Anything the probe did not say is unknown.
+ */
+export function quotaForSnapshot(quota) {
+  const state = QUOTA_STATES.includes(quota?.state) ? quota.state : "unknown";
+  if (state === "unknown" || state === "disabled") return { state, remaining: null, unit: null };
+  if (Number.isFinite(quota.remainingPercent)) {
+    return { state, remaining: Math.round(clamp(quota.remainingPercent, 0, 100) * 10) / 10, unit: "percent" };
+  }
+  if (Number.isFinite(quota.remaining) && QUOTA_UNITS.includes(quota.unit)) {
+    const max = quota.unit === "percent" ? 100 : MAX_QUOTA_AMOUNT;
+    return { state, remaining: Math.round(clamp(quota.remaining, 0, max) * 100) / 100, unit: quota.unit };
+  }
+  return { state, remaining: null, unit: null };
+}
+
+/**
+ * The snapshot for one moment. `jobs` is `Store.listJobs()`, `load` is
+ * `computeLoad(jobs, now)`, `quotas` is `readQuotaStatus(config)` (absent
+ * entries read as unknown).
+ */
+export function buildStatusSnapshot({ jobs, providers, load, quotas = {}, draining, now }) {
   const last24h = { accept: 0, reject: 0, unknown: 0 };
   let pendingJobs = 0;
   for (const { slots } of jobs) {
@@ -73,6 +101,7 @@ export function buildStatusSnapshot({ jobs, providers, load, draining, now }) {
         enabled: provider.enabled === true,
         running: clamp(load[provider.id]?.running ?? 0, 0, MAX_SLOTS),
         maxConcurrent: clamp(Number.isInteger(provider.maxConcurrent) ? provider.maxConcurrent : 1, 1, MAX_SLOTS),
+        quota: quotaForSnapshot(quotas[provider.id]),
       })),
     last24h: {
       accept: Math.min(last24h.accept, MAX_COUNT),

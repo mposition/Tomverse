@@ -56,23 +56,60 @@ test("the snapshot carries counts and reviewer names, nothing from a job", () =>
     { id: "codex", vendor: "openai", enabled: true, command: "codex", args: [], passEnv: ["CODEX_HOME"] },
     { id: "devin", enabled: false },
   ];
-  const snapshot = buildStatusSnapshot({ jobs, providers, load: { claude: { running: 1, recent24h: 4 } }, draining: false, now: NOW });
+  const quotas = {
+    claude: { state: "available", remainingPercent: 37.46 },
+    // A probe's own fields beyond the state and the amount are not carried.
+    codex: { state: "exhausted", remainingPercent: 0, reason: "rate_limited", account: "someone@example.com" },
+    devin: { state: "disabled" },
+  };
+  const snapshot = buildStatusSnapshot({ jobs, providers, load: { claude: { running: 1, recent24h: 4 } }, quotas, draining: false, now: NOW });
   assert.deepEqual(snapshot, {
     schemaVersion: 1,
     draining: false,
     pendingJobs: 2,
     providers: [
-      { id: "claude", vendor: "anthropic", enabled: true, running: 1, maxConcurrent: 2 },
-      { id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 1 },
-      { id: "devin", vendor: "unknown", enabled: false, running: 0, maxConcurrent: 1 },
+      { id: "claude", vendor: "anthropic", enabled: true, running: 1, maxConcurrent: 2, quota: { state: "available", remaining: 37.5, unit: "percent" } },
+      { id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 1, quota: { state: "exhausted", remaining: 0, unit: "percent" } },
+      { id: "devin", vendor: "unknown", enabled: false, running: 0, maxConcurrent: 1, quota: { state: "disabled", remaining: null, unit: null } },
     ],
     last24h: { accept: 1, reject: 1, unknown: 1 },
   });
+  assert.ok(!JSON.stringify(snapshot).includes("someone@example.com"));
   const text = JSON.stringify(snapshot);
   for (const leak of ["r-2026", "secret scope", "finding text", "CODEX_HOME", "abc", "def"]) {
     assert.ok(!text.includes(leak), `the snapshot carries ${leak}`);
   }
   assert.deepEqual(normaliseStatusSnapshot(snapshot), snapshot, "what the daemon writes, the sender forwards unchanged");
+});
+
+test("a quota is a state and one amount, whatever the probe reported", () => {
+  const quota = (value) => buildStatusSnapshot({ jobs: [], providers: [{ id: "x", vendor: "openai", enabled: true }], load: {}, quotas: { x: value }, now: NOW }).providers[0].quota;
+  assert.deepEqual(quota({ state: "available", remainingPercent: 100, unlimited: true }), { state: "available", remaining: 100, unit: "percent" });
+  assert.deepEqual(quota({ state: "available", remainingPercent: 140 }), { state: "available", remaining: 100, unit: "percent" });
+  assert.deepEqual(quota({ state: "available", remaining: 12.345, unit: "usd" }), { state: "available", remaining: 12.35, unit: "usd" });
+  assert.deepEqual(quota({ state: "available", remaining: 340, unit: "credits" }), { state: "available", remaining: 340, unit: "credits" });
+  assert.deepEqual(quota({ state: "available" }), { state: "available", remaining: null, unit: null });
+  for (const unknown of [undefined, null, { state: "unknown" }, { state: "broken", remainingPercent: 5 }, { state: "available", remaining: 5, unit: "tokens" }]) {
+    const read = quota(unknown);
+    assert.deepEqual(read, unknown?.state === "available" ? { state: "available", remaining: null, unit: null } : { state: "unknown", remaining: null, unit: null }, JSON.stringify(unknown));
+  }
+  // The sender takes the same shapes and refuses a quota no probe could produce.
+  const withQuota = (value) => normaliseStatusSnapshot({ ...SNAPSHOT, providers: [{ ...SNAPSHOT.providers[0], quota: value }] });
+  assert.deepEqual(withQuota({ state: "available", remaining: 37.5, unit: "percent", owner: "x" }).providers[0].quota, { state: "available", remaining: 37.5, unit: "percent" });
+  assert.deepEqual(withQuota({ state: "unknown", remaining: null, unit: null }).providers[0].quota, { state: "unknown", remaining: null, unit: null });
+  for (const bad of [
+    null,
+    { state: "broken", remaining: null, unit: null },
+    { state: "available", remaining: 150, unit: "percent" },
+    { state: "available", remaining: -1, unit: "usd" },
+    { state: "available", remaining: 5, unit: "tokens" },
+    { state: "disabled", remaining: 5, unit: "percent" },
+    { state: "available", remaining: "5", unit: "percent" },
+  ]) {
+    assert.equal(withQuota(bad), null, JSON.stringify(bad));
+  }
+  // An older daemon writes no quota; the sender forwards the snapshot without one.
+  assert.deepEqual(normaliseStatusSnapshot(SNAPSHOT), SNAPSHOT);
 });
 
 test("the snapshot stays inside the app's limits", () => {
