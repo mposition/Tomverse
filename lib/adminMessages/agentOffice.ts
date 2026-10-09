@@ -386,6 +386,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quick: [
         { label: "Status", command: "Status report" },
         { label: "Why so slow?", command: "Why is it slow?" },
+        { label: "👋 Thanks, team", command: "Thank you, everyone" },
       ],
       placeholder: "e.g. What is engineering doing? / Why is it slow?",
       inputLabel: "Operator order",
@@ -497,6 +498,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     real: {
       chip: "LIVE",
       changed: (room: string, line: string) => `🔔 ${room} · ${line}`,
+      voices: {
+        engineering: { hello: "Hi, operator! I'm keeping an eye on our runs.", thanks: "Thank you! I'll keep the next one tidy too.", answer: "Here's where we are." },
+        qa: { hello: "Hello! Reading every line carefully today.", thanks: "Thanks! I won't let anything slip past.", answer: "Here's what our record says." },
+        sre: { hello: "Morning! I'm on watch.", thanks: "Thank you. I'll shout the moment something rings.", answer: "Here's our watch." },
+        support: { hello: "Hi there! The inbox is open.", thanks: "Thank you! Kindness first, always.", answer: "Here's the inbox side." },
+        marketing: { hello: "Hey! Polishing words today.", thanks: "Thanks! Nothing goes out without your approval.", answer: "Here's where marketing stands." },
+        finance: { hello: "Hello. Ledgers open.", thanks: "Thank you. Every cent gets a second look.", answer: "Here's the ledger view." },
+        trust: { hello: "Hello. Safety checks are mine.", thanks: "Thank you. I'll hold the line.", answer: "Here's the safety view." },
+        research: { hello: "Hi! Out gathering signals.", thanks: "Thanks! I'll bring back better ones.", answer: "Here's today's research." },
+      },
+      voiceDefault: { hello: "Hello, operator!", thanks: "Thank you!", answer: "Here's our record." },
+      reactions: { hello: "👋", thanks: "😊" },
+      noLiveRoom: "No room reads a real record yet, so nobody is here to answer.",
       boxLabel: "Real record",
       contentElsewhere: "What it records is shown only in its own section.",
       research: {
@@ -1174,6 +1188,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quick: [
         { label: "현황 보고", command: "현황 보고해줘" },
         { label: "왜 늦어져?", command: "왜 늦어지고 있어?" },
+        { label: "👋 수고했어요", command: "다들 수고했어요" },
       ],
       placeholder: "예: 엔지니어링팀 지금 뭐해? / 왜 늦어져?",
       inputLabel: "운영자 지시 입력",
@@ -1281,6 +1296,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     real: {
       chip: "실제",
       changed: (room: string, line: string) => `🔔 ${room} · ${line}`,
+      voices: {
+        engineering: { hello: "안녕하세요, 운영자님! 실행은 제가 지켜보고 있어요.", thanks: "감사합니다! 다음 실행도 깔끔하게 해 볼게요.", answer: "네, 지금 저희는 이래요." },
+        qa: { hello: "안녕하세요! 오늘도 한 줄 한 줄 꼼꼼히 볼게요.", thanks: "고마워요! 놓치는 게 없게 볼게요.", answer: "네, 저희 기록은 이래요." },
+        sre: { hello: "좋은 아침이에요! 지금 당번이에요.", thanks: "감사합니다. 뭔가 울리면 바로 알려 드릴게요.", answer: "네, 저희 당번 상황이에요." },
+        support: { hello: "안녕하세요! 문의함 열어 뒀어요.", thanks: "감사합니다! 늘 친절하게 할게요.", answer: "네, 문의함 쪽 얘기예요." },
+        marketing: { hello: "하이! 오늘은 문장을 다듬어요.", thanks: "고마워요! 승인 없이는 아무것도 안 나가요.", answer: "네, 마케팅 쪽은 이래요." },
+        finance: { hello: "안녕하세요. 장부 펼쳐 놨어요.", thanks: "감사합니다. 동전 하나도 두 번 볼게요.", answer: "네, 장부 쪽은 이래요." },
+        trust: { hello: "안녕하세요. 안전 점검은 제 몫이에요.", thanks: "감사합니다. 선은 제가 지킬게요.", answer: "네, 안전 쪽은 이래요." },
+        research: { hello: "안녕하세요! 새 신호 모으러 나와 있어요.", thanks: "고마워요! 더 좋은 신호 찾아올게요.", answer: "네, 오늘 리서치는 이래요." },
+      },
+      voiceDefault: { hello: "안녕하세요, 운영자님!", thanks: "감사합니다!", answer: "네, 저희 기록은 이래요." },
+      reactions: { hello: "👋", thanks: "😊" },
+      noLiveRoom: "아직 실제 기록을 읽는 방이 없어서 답할 사람이 없어요.",
       boxLabel: "실제 기록",
       contentElsewhere: "기록 내용은 그 팀의 섹션에서만 보여요.",
       research: {
