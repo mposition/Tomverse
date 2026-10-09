@@ -79,7 +79,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           "executionReceiptId" TEXT PRIMARY KEY, "mode" TEXT NOT NULL
         );
         CREATE TABLE "PromptRefinerProductDispositionReceipt" (
-          "id" TEXT PRIMARY KEY,
+          "id" TEXT PRIMARY KEY, "executionReceiptId" TEXT NOT NULL,
+          "outcome" TEXT NOT NULL,
           "observedAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
         );
       `);
@@ -131,6 +132,18 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
             ($1,'prompt_refiner.product_execution_recorded',
               'PromptRefinerProductExecutionReceipt',$2)`, [randomUUID(), id]);
         }
+        return id;
+      };
+      const insertDisposition = async (executionReceiptId: string,
+        outcome: "accepted" | "kept_original") => {
+        const id = randomUUID();
+        await client.query(`INSERT INTO "PromptRefinerProductDispositionReceipt"
+          ("id","executionReceiptId","outcome") VALUES ($1,$2,$3)`,
+        [id, executionReceiptId, outcome]);
+        await client.query(`INSERT INTO "AdminAuditLog"
+          ("id","action","targetType","targetId") VALUES
+          ($1,'prompt_refiner.product_disposition_recorded',
+            'PromptRefinerProductDispositionReceipt',$2)`, [randomUUID(), id]);
       };
       type GuardState = { active: boolean; generation: number | null;
         reasonCode: string | null; transitionAuditLogId?: string | null };
@@ -164,17 +177,27 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         // trigger is restored before any product code runs.
         await backdateActiveBaseline();
         const zonedAttemptId = randomUUID();
-        await client.query(`INSERT INTO "PromptRefinerProductAttempt"
-          ("id","mode","state","createdAt","expiresAt") VALUES
-          ($1,'auto','preparing',clock_timestamp() AT TIME ZONE 'UTC',
-            (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`,
-        [zonedAttemptId]);
+        await transactionAtTimeZone("Australia/Brisbane", async tx => {
+          await tx.$executeRaw`INSERT INTO "PromptRefinerProductAttempt"
+            ("id","mode","state","expiresAt") VALUES
+            (${zonedAttemptId},'auto','preparing',
+              (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`;
+        });
+        const utcAgeMs = Number((await client.query(`SELECT
+          EXTRACT(EPOCH FROM ((clock_timestamp() AT TIME ZONE 'UTC') -
+            "createdAt")) * 1000 AS age
+          FROM "PromptRefinerProductAttempt" WHERE "id"=$1`,
+        [zonedAttemptId])).rows[0].age);
+        assert.ok(utcAgeMs >= 0 && utcAgeMs < 2_000,
+        `non-UTC writer stored a non-UTC attempt timestamp: ${utcAgeMs}`);
         assert.equal((await evaluateAtTimeZone(
           "Australia/Brisbane", true)).active, true,
         "a fresh UTC-naive attempt must not pause in a positive-offset session");
-        await client.query(`UPDATE "PromptRefinerProductAttempt"
-          SET "createdAt" = (clock_timestamp() AT TIME ZONE 'UTC') -
-            interval '14 seconds' WHERE "id" = $1`, [zonedAttemptId]);
+        await transactionAtTimeZone("America/Los_Angeles", async tx => {
+          await tx.$executeRaw`UPDATE "PromptRefinerProductAttempt"
+            SET "createdAt" = (clock_timestamp() AT TIME ZONE 'UTC') -
+              interval '14 seconds' WHERE "id" = ${zonedAttemptId}`;
+        });
         assert.equal((await evaluateAtTimeZone(
           "America/Los_Angeles", true)).reasonCode, "audit_failure",
         "a stale UTC-naive attempt must pause in a negative-offset session");
@@ -234,7 +257,13 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         assert.equal((await evaluate()).active, true);
       });
 
-      await t.test("six fallbacks in the next exact 100 pause Auto again", async () => {
+      await t.test("system fallbacks pause while manual kept-original choices do not", async () => {
+        for (let index = 0; index < 100; index += 1) {
+          const receiptId = await insertReceipt({ outcome: "suggested" });
+          if (index < 6) await insertDisposition(receiptId, "kept_original");
+        }
+        assert.equal((await evaluate()).active, true,
+        "manual kept-original choices are dispositions, not system fallbacks");
         for (let index = 0; index < 100; index += 1) {
           await insertReceipt({ outcome: index < 6 ? "failed" : "suggested" });
         }
@@ -308,6 +337,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         for (let index = 0; index < 99; index += 1) {
           await insertReceipt({ latency: 6_001 });
         }
+        assert.equal((await evaluate()).active, true,
+        "the literal latest-100 policy must not infer a smaller denominator");
         const completeReceipt = () => transaction(async tx => {
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(
             hashtext('tomverse-admin-audit-chain'))`;

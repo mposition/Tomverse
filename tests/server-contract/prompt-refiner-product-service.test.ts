@@ -17,6 +17,7 @@ let dispatches = 0;
 let settlements = 0;
 let unknowns = 0;
 let releases = 0;
+let releasedFacts: Array<Record<string, unknown>> = [];
 let holds = 0;
 let receiptStates: string[] = [];
 let settlementDelayMs = 0;
@@ -61,8 +62,9 @@ mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
       await verifiers.verifyBillingUnknown(raw); unknowns += 1;
     },
     releaseConfirmedUndispatched: async (raw: unknown) => {
-      await verifiers.verifyUndispatched(raw);
+      const fact = await verifiers.verifyUndispatched(raw);
       if (releaseError) throw new Error("synthetic release outcome unknown");
+      releasedFacts.push(fact as Record<string, unknown>);
       releases += 1;
     },
   }),
@@ -136,8 +138,8 @@ mock.module(mod("lib/promptRefinerProductAdapter.ts"), { namedExports: {
         adapterConfigDigest: "a".repeat(64) });
         intents.add(intent);
         await dependencies.authorizeDispatch(intent);
-        providerCalls += 1;
         const outcome = Object.freeze({ ...adapterOutcome });
+        if (outcome.status !== "undispatched") providerCalls += 1;
         if (outcome.status === "billing_unknown") unknown.add(outcome);
         else if (outcome.status === "undispatched") undispatched.add(outcome);
         else billed.add(outcome);
@@ -170,7 +172,7 @@ beforeEach(() => {
   adapterOutcome = { ...timing(), ...telemetry, status: "suggested",
     refinedPrompt: "server suggestion" };
   reserveError = null; providerCalls = 0; reserves = 0; dispatches = 0;
-  settlements = 0; unknowns = 0; releases = 0; holds = 0;
+  settlements = 0; unknowns = 0; releases = 0; releasedFacts = []; holds = 0;
   receiptStates = []; settlementDelayMs = 0;
   autoGuardAvailable = true; guardAdmissions = 0; auditLatches = 0;
   receiptError = false;
@@ -267,6 +269,23 @@ test("unknown pre-authorization release stays held and fails closed", async () =
   assert.equal(providerCalls, 0); assert.equal(releases, 0);
   assert.deepEqual(receiptStates, ["terminal"]);
   assert.equal(auditLatches, 1);
+});
+
+test("post-authorization deadline releases the exact dispatching hold once", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  adapterOutcome = { ...timing(), status: "undispatched", reason: "timeout",
+    inputTokens: null, cachedInputTokens: null, outputTokens: null,
+    reasoningTokens: null, actualCostMicroUsd: null };
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback", reason: "timeout" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 1);
+  assert.equal(providerCalls, 0); assert.equal(releases, 1);
+  assert.equal(settlements, 0); assert.equal(unknowns, 0); assert.equal(holds, 0);
+  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.equal(releasedFacts.length, 1);
+  assert.equal(releasedFacts[0]?.intentId,
+    "44444444-4444-4444-8444-444444444444");
+  assert.equal(releasedFacts[0]?.adapterConfigDigest, "a".repeat(64));
 });
 
 test("billing unknown is retained terminal-unknown and never publishes", async () => {

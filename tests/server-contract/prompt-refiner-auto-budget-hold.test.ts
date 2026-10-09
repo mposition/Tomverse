@@ -49,7 +49,17 @@ const tx = {
       const [id, requestKey, dayStart, monthStart, reservedMicroUsd,
         candidateDigest, pricePinDigest, runtimeDeploymentId, reservationAuditLogId] = values;
       if ([...holds.values()].some((hold) => hold.requestKey === requestKey)) {
-        throw new Error("duplicate_request_key");
+        throw Object.assign(new Error("Raw query failed."), {
+          code: "P2010",
+          meta: { driverAdapterError: { cause: {
+            originalCode: "23505",
+            originalMessage: "duplicate key value violates unique constraint " +
+              '"PromptRefinerAutoBudgetHold_requestKey_key"',
+            kind: "UniqueConstraintViolation",
+            constraint: { index: "PromptRefinerAutoBudgetHold_requestKey_key" },
+            table: "PromptRefinerAutoBudgetHold",
+          } } },
+        });
       }
       const hold = { id, requestKey, dayStart, monthStart, reservedMicroUsd,
         settledMicroUsd: null, status: "reserved", candidateDigest, pricePinDigest,
@@ -156,9 +166,16 @@ test("reservation is audited, exact-window booked, and never dispatch authority"
   assert.deepEqual([...windows.values()], [BigInt(29_918), BigInt(29_918)]);
   assert.deepEqual(events, ["audit_lock", "audit:prompt_refiner.auto_budget_reserved",
     "hold:reserved"]);
+  const beforeDuplicate = { events: [...events], auditSequence,
+    holds: structuredClone(holds), windows: structuredClone(windows) };
   await assert.rejects(budget.reservePromptRefinerAutoBudget(base(key(1))),
-    /duplicate_request_key/);
-  assert.deepEqual([...windows.values()], [BigInt(29_918), BigInt(29_918)]);
+    (error: unknown) => error instanceof Error &&
+      error.name === "PromptRefinerAutoBudgetError" && "code" in error &&
+      error.code === "duplicate_request");
+  assert.deepEqual(events, beforeDuplicate.events);
+  assert.equal(auditSequence, beforeDuplicate.auditSequence);
+  assert.deepEqual(holds, beforeDuplicate.holds);
+  assert.deepEqual(windows, beforeDuplicate.windows);
 });
 
 test("trusted dispatch and verified billing settle actual cost and refund both windows", async () => {

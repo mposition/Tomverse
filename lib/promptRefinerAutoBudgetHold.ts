@@ -15,6 +15,30 @@ const BRISBANE_UTC_OFFSET_MS = 10 * 60 * 60 * 1000;
 const HEX_64 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const REQUEST_KEY = UUID;
+const REQUEST_KEY_UNIQUE_CONSTRAINT = "PromptRefinerAutoBudgetHold_requestKey_key";
+
+const errorRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object"
+    ? value as Record<string, unknown>
+    : null;
+
+const isDuplicateRequestKeyError = (error: unknown): boolean => {
+  const outer = errorRecord(error);
+  if (!outer) return false;
+  const meta = errorRecord(outer.meta);
+  if (outer.code === "P2002" && meta?.modelName === "PromptRefinerAutoBudgetHold" &&
+      Array.isArray(meta.target) && meta.target.length === 1 &&
+      meta.target[0] === "requestKey") return true;
+
+  const adapterError = errorRecord(meta?.driverAdapterError);
+  const cause = errorRecord(adapterError?.cause);
+  const constraint = errorRecord(cause?.constraint);
+  return outer.code === "P2010" &&
+    cause?.originalCode === "23505" &&
+    cause.kind === "UniqueConstraintViolation" &&
+    cause.table === "PromptRefinerAutoBudgetHold" &&
+    constraint?.index === REQUEST_KEY_UNIQUE_CONSTRAINT;
+};
 
 export type PromptRefinerAutoBudgetBinding = Readonly<{
   holdId: string;
@@ -71,7 +95,8 @@ export type PromptRefinerAutoBudgetTransitionVerifiers<
 export class PromptRefinerAutoBudgetError extends Error {
   constructor(readonly code:
     "budget_exhausted" | "budget_unavailable" | "binding_invalid" |
-    "evidence_invalid" | "transition_invalid" | "integrity_unavailable") {
+    "duplicate_request" | "evidence_invalid" | "transition_invalid" |
+    "integrity_unavailable") {
     super(code);
     this.name = "PromptRefinerAutoBudgetError";
   }
@@ -248,6 +273,9 @@ export async function reservePromptRefinerAutoBudget(input: {
     } catch (error) {
       if (error instanceof Error && error.message.includes("prompt_refiner_auto_budget_exhausted")) {
         throw new PromptRefinerAutoBudgetError("budget_exhausted");
+      }
+      if (isDuplicateRequestKeyError(error)) {
+        throw new PromptRefinerAutoBudgetError("duplicate_request");
       }
       throw error;
     }

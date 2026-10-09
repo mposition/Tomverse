@@ -177,9 +177,11 @@ async function observe(tx: Tx, guard: GuardRow): Promise<Observation | null> {
   // docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md §3
   // says the latest completed Refiner requests, not Auto-only requests.
   // Explicit and Auto share this operational quality denominator;
-  // only Auto admission is stopped. Manual kept-original dispositions are a
-  // user choice, so the fallback numerator is the non-suggested execution
-  // receipts that caused the composer to retain the authored prompt.
+  // only Auto admission is stopped. docs/policy/prompt-refiner-observability.md
+  // §§1, 4 and 5 define kept_original as a distinct explicit-choice
+  // disposition. It is not an execution fallback. The fallback numerator is
+  // the non-suggested execution receipts that caused the product service to
+  // retain the authored prompt.
   const recent = await tx.$queryRaw<Array<{
     outcome: string; preparationLatencyMs: number;
   }>>`

@@ -131,6 +131,43 @@ PostgreSQL 제품·예산·운영 latch 33/33이다. 이전 head의 전체 unit�
 수정 commit 이후의 focused round로 계속하며, source/price pin·출시 승인·권한·
 kill switch와 기본 비활성 상태는 유지한다.
 
+## 지정 공급사 전체 재검토의 후속 검증
+
+운영자가 두 번째 공급사를 Claude로 지정해 `b269bf563` 전체 75개 파일을
+Copilot와 Claude에 요청했다(`r-20261009-233101-ecc539`). Copilot 판정은
+major 2건·minor 4건·nit 3건으로 **reject**다. 앞선 focused accept로 이번
+reject를 대체하지 않는다. Claude 슬롯은 지정이 확인됐으나 quota unknown으로
+대기 중이며, 지정 또는 대기 상태를 검토 완료로 처리하지 않는다.
+
+- 정산 상한 major는 별도 validated `amount_check`를 status constraint와
+  혼동한 오탐이다. 기존 `20261009044000` migration의 amount constraint는
+  settlement migration에서 삭제되지 않는다. 직접 SQL의 초과 정산뿐 아니라
+  음수 정산도 `23514`와 정확한 amount constraint 이름으로 거부되는 회귀를
+  보강한다. 적용된 migration byte는 변경하지 않는다.
+- Fallback major는 실행 실패와 사용자 선택의 분모를 혼동했다.
+  `docs/policy/prompt-refiner-observability.md` §1·§4·§5는 execution fallback과
+  `kept_original` disposition을 분리한다. 서비스의 `failed` 또는
+  `refused_before_dispatch`는 실제 `original_fallback` 반환이고,
+  `kept_original`은 successful suggestion 뒤 명시적 사용자 선택이다.
+  PostgreSQL에서 suggested 100건 중 kept-original 6건은 active를 유지하고,
+  다음 정확한 100건 중 execution fallback 6건은 pause함을 검증했다.
+- 표본 99건은 active, 100번째는 승인된 p90/fallback 판정을 수행한다.
+  소표본 규칙을 새로 추가하지 않는다. critical·unknown·감사 실패의 즉시 중단은
+  이 표본 수와 무관하게 유지한다. 유일한 attempt INSERT의 UTC default와
+  UTC expiry expression을 실제 non-UTC PostgreSQL session에서 검증했다.
+- scope 인증은 durable-attempt admission 전에, admission은 single-use consume
+  전에 수행하도록 보강한다. rate 제한에 막힌 요청이 유효한 결정을 먼저 소비하지
+  않으며, 인증된 stale/replay consume 시도는 계속 rate 제한을 받는다.
+- 중복 예약은 typed `duplicate_request` 거부로 정규화한다. 기존 예약을 새
+  dispatch 권한으로 반환하거나 다시 예약·호출하는 idempotent retry를 만들지 않는다.
+- authorize 성공 뒤 deadline 만료는 provider 0회이며, captured intent/config에
+  결속된 dispatching hold를 정확히 한 번 해제한다. adapter와 service 양쪽의
+  회귀로 이 연결을 관측했다.
+
+이 보강은 코드 및 관련 회귀 단계다. 최종 통합 lint·typecheck·필수 정적 검사,
+수정 commit의 독립 재검토, PR·병합·정확한 staging 배포·제품 활성화는 별도로
+확인해야 한다. quota 조회를 우회하거나 검토 서버 설정·권한을 변경하지 않았다.
+
 ## 초기 서버 경계 검증 기록
 
 아래는 제품 caller를 붙이기 전 단계의 기록이다. 위 확장이 구현 범위와 현재 상태를

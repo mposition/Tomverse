@@ -1161,11 +1161,15 @@ async function handleChatPost(
             if (!release.explicitEnabled && !release.autoEnabled) {
                 throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
             }
-            await consumeApiRateLimit(req, session.user.id, "chat-durable-attempt", { minute: 60, day: 5_000 });
-            durableAttemptAdmissionConsumed = true;
             const scopeAccess = await authorizeChatRecoveryScope({ request: req,
                 userId: session.user.id, scopeKey: conversationId });
             if (!scopeAccess.ok) return scopeAccess.response;
+            // Cross-scope probes must not spend this account's admission, but
+            // authenticated stale/replay probes remain rate-protected. Keep
+            // admission before the one-time consume so a 429 cannot burn a
+            // still-valid decision.
+            await consumeApiRateLimit(req, session.user.id, "chat-durable-attempt", { minute: 60, day: 5_000 });
+            durableAttemptAdmissionConsumed = true;
             try {
                 const view = await consumePromptRefinerChatExecution({
                     userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,

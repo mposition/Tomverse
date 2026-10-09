@@ -88,12 +88,16 @@ test("product adapter makes one retry-free Responses call with the remaining dea
 test("product adapter never starts a provider call after an earlier route deadline", async () => {
   let elapsed = 9_000;
   let generated = 0;
+  let authorizedIntent;
   const adapter = createPromptRefinerProductAdapter({
     languageModel,
     now: () => elapsed,
     wallClock: () => new Date(1_000 + elapsed),
     deadlineAtMonotonicMs: 10_000,
-    authorizeDispatch: async () => { elapsed = 10_000; },
+    authorizeDispatch: async (intent) => {
+      authorizedIntent = intent;
+      elapsed = 10_000;
+    },
     generate: async () => { generated += 1; return {}; },
   });
   const outcome = await adapter.execute({
@@ -102,6 +106,10 @@ test("product adapter never starts a provider call after an earlier route deadli
   });
   assert.equal(outcome.status, "undispatched");
   assert.equal(generated, 0);
+  assert.match(authorizedIntent.intentId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(authorizedIntent.adapterConfigDigest,
+    PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST);
   assert.equal(adapter.isTrustedUndispatched(outcome), true);
 });
 

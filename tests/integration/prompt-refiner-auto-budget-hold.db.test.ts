@@ -61,8 +61,25 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       const tx = {
         $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) =>
           (await query(strings, values)).rows,
-        $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) =>
-          (await query(strings, values)).rowCount ?? 0,
+        $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          try {
+            return (await query(strings, values)).rowCount ?? 0;
+          } catch (error) {
+            if (error instanceof pg.DatabaseError && error.code === "23505") {
+              throw Object.assign(new Error("Raw query failed."), {
+                code: "P2010",
+                meta: { driverAdapterError: { cause: {
+                  originalCode: error.code,
+                  originalMessage: error.message,
+                  kind: "UniqueConstraintViolation",
+                  constraint: { index: error.constraint },
+                  table: error.table,
+                } } },
+              });
+            }
+            throw error;
+          }
+        },
       };
       mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
         $transaction: async (work: (transaction: typeof tx) => Promise<unknown>) => {
@@ -111,6 +128,22 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       });
 
       const settledHold = await reserve(key(1));
+      const beforeDuplicate = await client.query(`SELECT
+        (SELECT count(*)::integer FROM "PromptRefinerAutoBudgetHold") AS holds,
+        (SELECT count(*)::integer FROM "AdminAuditLog") AS audits,
+        (SELECT jsonb_agg(jsonb_build_array("period", "committedMicroUsd"::text)
+          ORDER BY "period") FROM "PromptRefinerAutoBudgetWindow") AS windows`);
+      await assert.rejects(reserve(key(1)),
+        (error: unknown) => error instanceof Error &&
+          error.name === "PromptRefinerAutoBudgetError" && "code" in error &&
+          error.code === "duplicate_request");
+      const afterDuplicate = await client.query(`SELECT
+        (SELECT count(*)::integer FROM "PromptRefinerAutoBudgetHold") AS holds,
+        (SELECT count(*)::integer FROM "AdminAuditLog") AS audits,
+        (SELECT jsonb_agg(jsonb_build_array("period", "committedMicroUsd"::text)
+          ORDER BY "period") FROM "PromptRefinerAutoBudgetWindow") AS windows`);
+      assert.deepEqual(afterDuplicate.rows, beforeDuplicate.rows,
+        "duplicate request rolls its audit back and cannot book either window again");
       const settledBinding = binding(settledHold.id, key(1));
       await authority.recordDispatchIntent(raw({ binding: settledBinding,
         intentId: key(101), adapterConfigDigest }));
@@ -183,7 +216,7 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       await authority.recordDispatchIntent(raw({ binding: cappedBinding,
         intentId: key(106), adapterConfigDigest }));
       await client.query(`INSERT INTO "AdminAuditLog"("id") VALUES
-        ('audit-over-cap'), ('audit-equal-cap')`);
+        ('audit-over-cap'), ('audit-negative-cap'), ('audit-equal-cap')`);
       const beforeOverCap = await client.query(`SELECT "period",
         "committedMicroUsd"::text AS cost
         FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
@@ -210,6 +243,25 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
         "committedMicroUsd"::text AS cost
         FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
       assert.deepEqual(afterOverCap.rows, beforeOverCap.rows);
+
+      await assert.rejects(client.query(`UPDATE "PromptRefinerAutoBudgetHold"
+        SET "status" = 'settled', "settledMicroUsd" = -1,
+            "settlementObservationId" = $1,
+            "settlementAuditLogId" = 'audit-negative-cap'
+        WHERE "id" = $2 AND "status" = 'dispatching'`,
+      [key(208), cappedHold.id]), (error: unknown) => {
+        assert.ok(error instanceof pg.DatabaseError);
+        assert.equal(error.code, "23514");
+        assert.equal(error.constraint, "PromptRefinerAutoBudgetHold_amount_check");
+        return true;
+      });
+      const afterNegativeCap = await client.query(`SELECT "period",
+        "committedMicroUsd"::text AS cost
+        FROM "PromptRefinerAutoBudgetWindow" ORDER BY "period"`);
+      assert.deepEqual(afterNegativeCap.rows, beforeOverCap.rows);
+      assert.equal((await client.query(`SELECT "status" FROM
+        "PromptRefinerAutoBudgetHold" WHERE "id" = $1`, [cappedHold.id]))
+        .rows[0].status, "dispatching");
 
       // Equality is valid. A full-cost settlement applies a zero aggregate
       // delta, while the prior unknown row remains NULL and fully held.

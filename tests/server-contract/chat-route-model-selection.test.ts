@@ -52,8 +52,11 @@ let activeSpies: Spies = {
 };
 let mocksInstalled = false;
 let explicitRefinerAuthority = false;
+let refinerScopeAuthorized = true;
 let consumedRefinerDecisions = 0;
 let refinerAdmissions = 0;
+let refinerAdmissionRefused = false;
+let refinerAdmissionEvents: string[] = [];
 
 async function loadRouteWithSpies(): Promise<{
   POST: (req: Request) => Promise<Response>;
@@ -85,6 +88,7 @@ async function loadRouteWithSpies(): Promise<{
   } });
   mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
     consumePromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+      refinerAdmissionEvents.push("consume");
       if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
       consumedRefinerDecisions += 1;
       return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
@@ -93,11 +97,33 @@ async function loadRouteWithSpies(): Promise<{
     },
   } });
   mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
-    authorizeChatRecoveryScope: async () => ({ ok: true, conversationId: CONVERSATION_ID }),
+    authorizeChatRecoveryScope: async () => {
+      refinerAdmissionEvents.push("scope");
+      return refinerScopeAuthorized
+        ? { ok: true, conversationId: CONVERSATION_ID }
+        : { ok: false, response: Response.json(
+          { error: "Conversation not found.", code: "CONVERSATION_NOT_FOUND" },
+          { status: 404 }
+        ) };
+    },
   } });
   const realApiSecurity = original("lib/apiSecurity.ts");
   mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
-    ...realApiSecurity, consumeApiRateLimit: async () => { refinerAdmissions += 1; },
+    ...realApiSecurity,
+    consumeApiRateLimit: async (_request: Request, _userId: string, scope: string) => {
+      if (scope !== "chat-durable-attempt") return;
+      refinerAdmissionEvents.push("admission");
+      refinerAdmissions += 1;
+      if (refinerAdmissionRefused) {
+        const ApiSecurityError = realApiSecurity.ApiSecurityError as new (
+          status: number,
+          code: string,
+          message: string,
+          retryAfter?: number
+        ) => Error;
+        throw new ApiSecurityError(429, "API_RATE_LIMITED", "Too many requests.", 30);
+      }
+    },
   } });
 
   // --- session: an authenticated account, so the conversation branch runs.
@@ -194,6 +220,16 @@ const chatRequest = (modelId: string) =>
     }),
   });
 
+const refinerRequest = () =>
+  new Request("http://127.0.0.1:3100/api/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source" }],
+      modelId: STORED_SELECTED_MODELS[0], conversationId: CONVERSATION_ID,
+      assistantMessageId: "11111111-1111-4111-8111-111111111111", sourceUserMessageId: "22222222-2222-4222-8222-222222222222",
+      promptRefinerDecision: { suggestionId: "33333333-3333-4333-8333-333333333333",
+        scopeId: "44444444-4444-4444-8444-444444444444", epoch: 1, decision: "accepted" } }),
+  });
+
 test("a model outside the conversation's stored selection is refused with 403 MODEL_NOT_SELECTED", async () => {
   const { POST, spies } = await loadRouteWithSpies();
 
@@ -261,28 +297,62 @@ test("a Refiner decision on the default-off deployment refuses before model, cre
   assert.equal(spies.conversationReads, 0);
 });
 
-test("a downstream failure after Refiner consumption cannot replay the decision or reach a provider", async () => {
+test("a cross-scope Refiner decision refuses before durable admission or one-time consume", async () => {
   const { POST, spies } = await loadRouteWithSpies();
-  const request = () => new Request("http://127.0.0.1:3100/api/chat", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source" }],
-      modelId: STORED_SELECTED_MODELS[0], conversationId: CONVERSATION_ID,
-      assistantMessageId: "11111111-1111-4111-8111-111111111111", sourceUserMessageId: "22222222-2222-4222-8222-222222222222",
-      promptRefinerDecision: { suggestionId: "33333333-3333-4333-8333-333333333333",
-        scopeId: "44444444-4444-4444-8444-444444444444", epoch: 1, decision: "accepted" } }),
-  });
-  explicitRefinerAuthority = true; consumedRefinerDecisions = 0; refinerAdmissions = 0;
+  explicitRefinerAuthority = true; refinerScopeAuthorized = false;
+  consumedRefinerDecisions = 0; refinerAdmissions = 0; refinerAdmissionEvents = [];
+  try {
+    const response = await POST(refinerRequest());
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).code, "CONVERSATION_NOT_FOUND");
+    assert.deepEqual(refinerAdmissionEvents, ["scope"]);
+    assert.equal(refinerAdmissions, 0);
+    assert.equal(consumedRefinerDecisions, 0);
+    assert.equal(spies.creditReservations, 0);
+    assert.equal(spies.streamTextCalls, 0);
+  } finally {
+    explicitRefinerAuthority = false; refinerScopeAuthorized = true;
+  }
+});
+
+test("a rate-limited Refiner decision is not consumed", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  explicitRefinerAuthority = true; refinerAdmissionRefused = true;
+  consumedRefinerDecisions = 0; refinerAdmissions = 0; refinerAdmissionEvents = [];
+  try {
+    const response = await POST(refinerRequest());
+    assert.equal(response.status, 429);
+    assert.equal((await response.json()).code, "API_RATE_LIMITED");
+    assert.deepEqual(refinerAdmissionEvents, ["scope", "admission"]);
+    assert.equal(refinerAdmissions, 1);
+    assert.equal(consumedRefinerDecisions, 0);
+    assert.equal(spies.creditReservations, 0);
+    assert.equal(spies.streamTextCalls, 0);
+  } finally {
+    explicitRefinerAuthority = false; refinerAdmissionRefused = false;
+  }
+});
+
+test("an admitted valid Refiner decision consumes once and a stale replay remains rate-protected", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  explicitRefinerAuthority = true; consumedRefinerDecisions = 0;
+  refinerAdmissions = 0; refinerAdmissionEvents = [];
   try {
     // The existing access spy throws before any actual reservation or provider.
-    assert.equal((await POST(request())).status, 500);
+    assert.equal((await POST(refinerRequest())).status, 500);
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
-    const repeated = await POST(request());
+    assert.deepEqual(refinerAdmissionEvents, ["scope", "admission", "consume"]);
+    const repeated = await POST(refinerRequest());
     assert.equal(repeated.status, 409);
     assert.equal((await repeated.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
     assert.equal(spies.streamTextCalls, 0);
     assert.equal(refinerAdmissions, 2, "each POST probe is admitted once, including a refused replay");
+    assert.deepEqual(refinerAdmissionEvents, [
+      "scope", "admission", "consume",
+      "scope", "admission", "consume",
+    ]);
   } finally { explicitRefinerAuthority = false; }
 });
