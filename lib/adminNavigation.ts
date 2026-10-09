@@ -86,6 +86,13 @@ export type AdminNavItem = {
   viewRoles?: readonly AdminRole[];
   badge?: AdminNavBadgeKey;
   tabs?: readonly AdminNavTab[];
+  /**
+   * The page uses the main column's full width instead of the console's
+   * reading width. Only for a page whose content is a canvas that grows with
+   * the space it gets (the Agent office floor); tables and forms keep the
+   * reading width.
+   */
+  wide?: true;
 };
 
 export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
@@ -645,6 +652,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "office",
     label: "Agent office",
     href: "/admin/office",
+    // The office floor scales to the space it is given.
+    wide: true,
     description: "A pixel office shell for the eight agent teams, with a link to each team's record",
     group: "Operations",
     aliases: ["office", "agent teams", "pixel office", "live office", "team board"],
@@ -654,7 +663,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       {
         id: "live",
         label: "Live office",
-        description: "The office floor, the operator console, the demo approval and the feed",
+        description: "The office floor, the operator console and the demo approval",
       },
       {
         id: "dashboard",

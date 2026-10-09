@@ -351,13 +351,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       approvedButton: "Approved (demo) · handed to the publisher",
       noneButton: "Nothing waiting",
     },
-    feed: {
-      windowTitle: "📡 live.feed",
-      meetingNow: (title: string) => `💬 Meeting in progress — ${title}`,
-    },
-    roster: {
-      windowTitle: "👥 staff.roster",
-    },
     console: {
       windowTitle: "🎤 operator.console — orders",
       focusOn: "Focus mode ON",
@@ -1099,13 +1092,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         "초안이 공개 PR이 되기 전에 운영자가 결정하는 단계예요. 병합은 이 결정과 별개로 사람이 합니다.",
       approvedButton: "승인 완료(데모) · 퍼블리셔에 전달됨",
       noneButton: "대기 중인 안건 없음",
-    },
-    feed: {
-      windowTitle: "📡 live.feed",
-      meetingNow: (title: string) => `💬 회의 진행 중 — ${title}`,
-    },
-    roster: {
-      windowTitle: "👥 staff.roster",
     },
     console: {
       windowTitle: "🎤 operator.console — 운영자 지시창",

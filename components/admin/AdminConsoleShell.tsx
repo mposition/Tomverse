@@ -404,7 +404,7 @@ function AdminConsoleChrome({
         </header>
 
         <main className="min-h-[calc(100dvh-7.5rem)] px-4 py-5 sm:px-6">
-          <div className="mx-auto w-full max-w-[104rem]">
+          <div className={`mx-auto w-full ${activeItem?.wide ? "max-w-none" : "max-w-[104rem]"}`}>
             <div className="mb-5 flex flex-col gap-4 border-b border-zinc-800 pb-5 xl:flex-row xl:items-end xl:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-500">
