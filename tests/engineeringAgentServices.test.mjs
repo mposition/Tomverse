@@ -4,6 +4,7 @@ import { dirname, join, normalize } from "node:path";
 import test from "node:test";
 
 import {
+  AGENT_ENVIRONMENT_BRANCHES,
   AGENT_RAILWAY_REGION,
   ENGINEERING_AGENT_IMAGE,
   ENGINEERING_AGENT_SERVICES,
@@ -103,7 +104,7 @@ test("a service with no recorded digest is not declared; a recorded one runs by 
     assert.equal(entry.image.reference, ENGINEERING_AGENT_IMAGE);
   }
   const names = (environment) => buildAgentRunnerResources(environment, dsl).map((resource) => resource.name);
-  for (const environment of ["staging", "dev"]) {
+  for (const environment of Object.keys(AGENT_ENVIRONMENT_BRANCHES).filter((name) => name !== "production")) {
     for (const entry of ENGINEERING_AGENT_SERVICES) {
       assert.ok(!names(environment).includes(entry.service), `${environment} never runs ${entry.service}`);
     }
