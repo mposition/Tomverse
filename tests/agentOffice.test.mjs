@@ -1476,6 +1476,20 @@ test("the status route records the latest report only with the secret, and stamp
     (await recordReviewOrchestratorStatus(statusRequest(reviewSnapshot(), `Bearer ${SECRET}`, { "content-length": "99999" }), env, db, now)).status,
     413
   );
+  // No Content-Length at all: the read itself stops at the limit.
+  const flood = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode(" ".repeat(4096)));
+    },
+  });
+  const unsized = new Request("https://tomverse.test/api/internal/review-orchestrator/status", {
+    method: "POST",
+    headers: { authorization: `Bearer ${SECRET}` },
+    body: flood,
+    duplex: "half",
+  });
+  assert.equal(unsized.headers.get("content-length"), null);
+  assert.equal((await recordReviewOrchestratorStatus(unsized, env, db, now)).status, 413);
   assert.equal(db.writes.length, 0, "a refused report was written");
 
   db = fakeDb();
@@ -1533,6 +1547,23 @@ test("the review room shows each reviewer's real state, and a silent server as l
   assert.equal(silent.note, "10-09 00:58 UTC 이후 보고 없음");
   // Exactly at the threshold it is still fresh.
   assert.equal(state(reviewSnapshot(), "2026-10-09T01:00:00.000Z").stale, false);
+
+  // More reviewers than desks: the room still speaks for all of them, and says how many are not drawn.
+  const crowd = Array.from({ length: 8 }, (_, i) => ({
+    id: `r${i}`,
+    vendor: "openai",
+    enabled: true,
+    running: i === 7 ? 1 : 0,
+    maxConcurrent: 1,
+  }));
+  const crowded = reviewRoomView(state(reviewSnapshot({ providers: crowd })), readAt, 6, copy);
+  assert.equal(crowded.reviewers.length, 6);
+  assert.equal(crowded.status, "working", "the one reviewing is past the desks, and still counts");
+  assert.equal(crowded.note, "여기 그리지 못한 검토자 2명");
+  assert.equal(
+    reviewRoomView(state(reviewSnapshot({ providers: crowd.slice(0, 7) })), readAt, 6, adminAgentOfficeMessages.en.real.review).note,
+    "1 more reviewer not drawn here"
+  );
 
   const draining = reviewRoomView(state(reviewSnapshot({ draining: true })), readAt, 6, copy);
   assert.equal(draining.status, "waiting");

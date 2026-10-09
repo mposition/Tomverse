@@ -40,10 +40,10 @@ export async function recordReviewOrchestratorStatus(
   if (Number.isFinite(declared) && declared > REVIEW_ORCHESTRATOR_STATUS_MAX_BYTES) {
     return { status: 413, body: { result: "too_large" } };
   }
-  const text = await request.text();
-  if (Buffer.byteLength(text, "utf8") > REVIEW_ORCHESTRATOR_STATUS_MAX_BYTES) {
-    return { status: 413, body: { result: "too_large" } };
-  }
+  // A missing or false Content-Length must not let the body run unbounded: the
+  // read itself stops at the limit.
+  const text = await readCapped(request, REVIEW_ORCHESTRATOR_STATUS_MAX_BYTES);
+  if (text === null) return { status: 413, body: { result: "too_large" } };
   let decoded: unknown;
   try {
     decoded = JSON.parse(text);
@@ -60,4 +60,23 @@ export async function recordReviewOrchestratorStatus(
     update: { value },
   });
   return { status: 200, body: { result: "recorded" } };
+}
+
+/** The body as UTF-8 text, or null once it passes `limit` bytes. */
+async function readCapped(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
