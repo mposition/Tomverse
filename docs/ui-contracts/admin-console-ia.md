@@ -101,16 +101,16 @@ its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
 **Agent office** is a shell: a pixel office for the eight agent teams and the
-digest desk, after the original AI OFFICE UI by godseng.mom. It opens on the
-real view: every team's staff at their desks, every room at its real or link
-status, nobody moving or speaking a scripted line, and the console declining
-orders that would move staff. A demo day plays in the browser only when the
-operator asks for it ("Watch demo"), and while it plays, under rule 8,
-everything on it that could be read as a fact says it is a demo -- a notice
-above the office, a chip on the approval card, "SIMULATION" and "SIM CLOCK"
-where the original said real-time; "Back to the real view" ends it. The
-demo's approve button advances the demo and nothing else; there is no publish
-link.
+digest desk, after the original AI OFFICE UI by godseng.mom. It is live only
+(operator decision, 2026-10-09): every team's staff at their desks, every
+room at its real or link status, nobody moving or speaking a scripted line,
+and the console declining orders that would move staff. The demo day the
+original played is no longer reachable from the page -- no "Watch demo", no
+speed or pause control, no demo approval -- and the office approves nothing.
+If a demo ever plays again, rule 8 still applies: everything on it that could
+be read as a fact says it is a demo. It is the one entry marked `wide` in the
+route table: the console drops its reading width there, because the floor is
+a canvas that grows with the screen.
 The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record while the route table has that
 page and section, and a team without one -- including on a branch that does
@@ -165,15 +165,36 @@ counts) posted about once a minute to
 `POST /api/internal/review-orchestrator/status` with its own secret, kept as
 the latest report in one AppSetting row stamped with the app's receipt time.
 Each reviewer is drawn seated as reviewing, idle or off, and a report older
-than five minutes draws them all as without a report.
+than five minutes draws them all as without a report. The same report carries
+each reviewer's account quota as the review server's own check last read it
+(a state and one amount: percent, credits or USD); a quota card in the live
+rail shows it, greyed and dated when the report is old, and says so when a
+server too old to send it reports.
+The operator's to-do -- the tab, the dashboard's operator metric and both
+operator windows -- is the queues where an agent waits on a person: marketing
+posts pending approval, AMUX escalations, AMUX halts nobody has cleared and
+auto-fix cases waiting on an operator. They are read with the sidebar badges'
+own count functions (`lib/adminNavigationCounts.ts`), each links to the
+screen where it is acted on, and a count that fails to read is drawn as
+unread and left out of the total, which then says "+?".
+The dashboard's automation, brief and record windows list the live rows --
+each live team room, the AMUX execution room and the review server -- with
+their states, what needs a look first, and each team's record screen; what an
+agent produced stays on that screen. The status report copies or downloads
+that view as Markdown and is sent nowhere. While the tab is visible the page
+reads again every minute, and a live room whose record changed says so in the
+console in its lead's name. Live leads answer a greeting or a thank-you in
+their own voice with social lines only -- no figure, time or state, which a
+test holds -- react on the floor with an emoji for a moment, and otherwise
+keep the record line.
 Those reads are read-only (the silence anchor is looked up rather than
 created), and a read that fails is drawn as unread, never as a state
 (`lib/agentOfficeLiveRead.ts`, `lib/agentOffice/roster.ts`,
 `tests/agentOffice.test.mjs`). The page writes nothing and carries no badge
 and no `writeRoles`. Its two sections are `?tab=` addresses (rule 2); it
 draws its own tab strip, as the original did, and those tabs are links, so
-moving between them keeps the panel and its demo day mounted and brings a
-fresh reading of the LIVE rooms. The console shell owns the page's `h1`, so
+moving between them keeps the panel mounted and brings a fresh reading of
+the LIVE rooms. The console shell owns the page's `h1`, so
 the office's own titles are `h2`s. It wears the console's colours rather than
 the original's pink: role tokens for text, line, surface, the primary blue and
 the room states, set for light and for dark so it follows the console's
