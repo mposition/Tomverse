@@ -71,6 +71,7 @@ export const adminSreOpsMessages = defineAdminMessages({
     digestWouldHavePaged: "In shadow these were not sent: the would-have-paged list.",
     digestNoReserved: "Nothing was reserved that day.",
     digestCounts: "By kind",
+    digestListCapped: "The list shows the first {shown} of {total}; the counts above include them all.",
     digestBodyGone: "The body is past its 90 days and was deleted; the record of it remains.",
   },
   ko: {
@@ -141,6 +142,7 @@ export const adminSreOpsMessages = defineAdminMessages({
     digestWouldHavePaged: "shadow에서는 보내지 않았습니다: 보냈을 page 목록입니다.",
     digestNoReserved: "그날 예약된 것이 없습니다.",
     digestCounts: "종류별",
+    digestListCapped: "목록은 {total}개 중 앞의 {shown}개만 보여 줍니다. 위의 종류별 수는 전부를 셉니다.",
     digestBodyGone: "본문은 90일이 지나 삭제되었고, 기록만 남아 있습니다.",
   },
 });

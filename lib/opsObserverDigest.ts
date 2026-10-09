@@ -181,7 +181,10 @@ export type OpsObserverDigestView = {
     ownerDate: string;
     mode: string;
     readiness: "unknown" | Record<string, boolean>;
+    /** The first DIGEST_MAX_ENTRIES of the date's items. */
     reserved: { key: string; kind: string; capped: boolean }[];
+    /** Every item of the date, by kind, including any past the list's cap. */
+    reservedCounts: Record<string, number>;
     channelCheckTaken: boolean;
   } | null;
 };

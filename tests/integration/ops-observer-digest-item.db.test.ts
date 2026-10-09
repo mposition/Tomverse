@@ -36,6 +36,7 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
     mode: "shadow",
     readiness: { imageProviderBudget: false },
     reserved: [{ key: "P3#credit_reservation_reconciliation", kind: "new_open", capped: false }],
+    reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 0 },
     channelCheckTaken: false,
   };
   const insert = async (agentKey: string, kind: string, body: unknown) => {

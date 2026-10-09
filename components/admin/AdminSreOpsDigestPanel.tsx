@@ -15,12 +15,9 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
   const m = useAdminMessages(adminSreOpsMessages);
   const label = (prefix: string, value: string) => (m as Record<string, string>)[`${prefix}_${value}`] ?? value;
   const payload = view.payload;
-  const counts = payload
-    ? payload.reserved.reduce<Record<string, number>>((byKind, item) => {
-        byKind[item.kind] = (byKind[item.kind] ?? 0) + 1;
-        return byKind;
-      }, {})
-    : {};
+  // The counts cover every item of the date; the list may stop at its cap.
+  const counts = payload ? Object.entries(payload.reservedCounts).filter(([, count]) => count > 0) : [];
+  const total = counts.reduce((sum, [, count]) => sum + count, 0);
 
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="sre-ops-digest">
@@ -68,7 +65,7 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
 
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{m.digestReserved}</h3>
-            {payload.reserved.length === 0 ? (
+            {total === 0 ? (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestNoReserved}</p>
             ) : (
               <>
@@ -77,10 +74,15 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                 ) : null}
                 <p className="text-sm" data-testid="sre-ops-digest-counts">
                   {m.digestCounts}:{" "}
-                  {Object.entries(counts)
-                    .map(([kind, count]) => `${label("kind", kind)} ${count}`)
-                    .join(", ")}
+                  {counts.map(([kind, count]) => `${label("kind", kind)} ${count}`).join(", ")}
                 </p>
+                {total > payload.reserved.length ? (
+                  <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-truncated">
+                    {m.digestListCapped
+                      .replace("{shown}", String(payload.reserved.length))
+                      .replace("{total}", String(total))}
+                  </p>
+                ) : null}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
                     <thead className="text-zinc-600 dark:text-zinc-400">
