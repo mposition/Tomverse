@@ -2294,6 +2294,8 @@ model AdminAuditLog {
   amuxDecisionMakerResultDetail AmuxDecisionMakerResultDetail?
   amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
   amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
+  promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
+  promptRefinerAutoBudgetSettlements PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetSettlementAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -5982,6 +5984,42 @@ model PromptRefinerVnextOneShotSlot {
 
   @@unique([stageId, slotIndex])
   @@index([stageId, status])
+}
+
+/// Dark product-Auto spend hold. This is separate from user credits, Chat
+/// provider budgets, and the 80-slot evaluation ledger. A held/unknown request
+/// keeps its worst-case micro-USD booked until a separately audited settlement.
+model PromptRefinerAutoBudgetWindow {
+  period            String
+  periodStart       DateTime @db.Timestamptz(3)
+  committedMicroUsd BigInt   @default(0)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+
+  @@id([period, periodStart])
+}
+
+model PromptRefinerAutoBudgetHold {
+  id                    String    @id
+  requestKey            String    @unique
+  dayStart              DateTime  @db.Timestamptz(3)
+  monthStart            DateTime  @db.Timestamptz(3)
+  reservedMicroUsd      BigInt
+  settledMicroUsd       BigInt?
+  status                String
+  candidateDigest       String
+  pricePinDigest        String
+  runtimeDeploymentId   String
+  reservationAuditLogId String    @unique
+  settlementAuditLogId  String?   @unique
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  closedAt              DateTime? @db.Timestamptz(3)
+
+  reservationAudit AdminAuditLog @relation("PromptRefinerAutoBudgetReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  settlementAudit  AdminAuditLog? @relation("PromptRefinerAutoBudgetSettlementAudit", fields: [settlementAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([status, createdAt])
+  @@index([dayStart])
+  @@index([monthStart])
 }
 
 /// Where a provider actually serves a request from.

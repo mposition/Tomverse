@@ -468,12 +468,15 @@ const compilerOptions = parsedConfig.options;
 // gains a note for the judgment's and the delivery event's back relations,
 // which moves those seven accesses again. Count 228 and the position-free
 // inventory are unchanged.
+// 2026-10-09, product-Auto budget hold: the shared audit actor and the
+// marketing fingerprint note move reviewed access positions only. Count 228
+// and the position-free inventory remain unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "af0ab859351cf7b5242acadf6570c35c",
-  "f7dbafe839c28c3a1d285bd3e5455c7f",
+  "808ae51c072aa92bf4f3c3a6ed1be23",
+  "aff1fce03de69bea61f61f3d4643b6872",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

@@ -209,6 +209,18 @@ export const PROTECTED_TABLES = [
     contract: "docs/policy/marketing-automation.md §6",
   },
   {
+    table: "PromptRefinerAutoBudgetWindow",
+    delegate: "promptRefinerAutoBudgetWindow",
+    writers: ["lib/promptRefinerAutoBudgetHold.ts"],
+    contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
+  },
+  {
+    table: "PromptRefinerAutoBudgetHold",
+    delegate: "promptRefinerAutoBudgetHold",
+    writers: ["lib/promptRefinerAutoBudgetHold.ts"],
+    contract: "docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md",
+  },
+  {
     table: "MarketingChannel",
     delegate: "marketingChannel",
     writers: ["lib/marketingStore.ts"],
@@ -1644,6 +1656,54 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 6,
     reason:
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
+  },
+  {
+    path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 12,
+    reason:
+      "The product Auto budget migration only creates its own windows/holds, constraints, and delete guards. Both AdminAuditLog mentions are restrictive foreign-key references to the existing sole audit writer; no audit row is inserted, updated, or deleted here.",
+  },
+  {
+    path: "lib/adminAuditSystemActors.ts",
+    table: "PromptRefinerAutoBudgetHold",
+    tableMentions: 1,
+    writeVerbs: 2,
+    reason:
+      "This names the exact target in the system-actor permission predicate; it runs no SQL and grants only the budget reservation audit action.",
+  },
+  {
+    path: "lib/promptRefinerAutoBudgetHold.ts",
+    table: "PromptRefinerAutoBudgetWindow",
+    tableMentions: 3,
+    writeVerbs: 3,
+    reason:
+      "The sole registered product-budget writer books the exact Brisbane day/month rows with conditional bounded upserts in one transaction. Exact counts prevent an unreviewed additional statement.",
+  },
+  {
+    path: "lib/promptRefinerAutoBudgetHold.ts",
+    table: "PromptRefinerAutoBudgetHold",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason:
+      "The sole registered product-budget writer inserts one content-free immutable hold after both windows and the same-transaction system audit. Exact counts prevent an unreviewed additional statement.",
+  },
+  {
+    path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
+    table: "PromptRefinerAutoBudgetWindow",
+    tableMentions: 5,
+    writeVerbs: 12,
+    reason:
+      "The additive migration creates only this new budget window and its bounded-update/delete/truncate guards. It seeds no window row; exact counts require new review for changed DDL.",
+  },
+  {
+    path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
+    table: "PromptRefinerAutoBudgetHold",
+    tableMentions: 13,
+    writeVerbs: 12,
+    reason:
+      "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
 ];
 

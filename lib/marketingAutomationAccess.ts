@@ -568,9 +568,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * models and their back relations to `AdminAuditLog`, the request and the
  * request event in the watched schema. No actor, descriptor, webhook writer or
  * admission decision changes; the bytes moved, so evidence is stale.
+ * 2026-10-09: the separate Prompt Refiner product-Auto budget hold adds a
+ * narrowly scoped audit actor to the shared helper and two back relations to
+ * `AdminAuditLog`. The marketing receiver's decisions are unchanged, but its
+ * watched source and schema bytes moved, so prior evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "3be3c4a626b9937a6af26001f9e7439055028e525615844039c54ab888b2fe7f";
+  "b75a4effd8f593f3b7460f2b3fc1c96dabdae9d7f3b15e4135c918754284fd6d";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

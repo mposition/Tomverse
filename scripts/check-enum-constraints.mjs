@@ -635,6 +635,11 @@ const REGISTRY = {
     reason:
       "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
   },
+  PromptRefinerAutoBudgetWindow_period_check: {
+    owner: "database",
+    reason:
+      "The default-off product Auto budget books exactly the Brisbane day and month windows. An unknown period cannot acquire a bounded reservation or authorize a provider call.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",
