@@ -259,7 +259,14 @@ Admin Console → Operations → Engineering agent → **Product research** tab.
 | `issue_backlog_failed` | `report:issue-backlog` 자식 프로세스가 비정상 종료 | 배포 로그의 그 줄. 대개 `lib/modelPricing.ts` 해석이 실제 module과 어긋난 경우입니다 |
 | `schema_invalid` | report가 이 표가 모르는 모양을 냄 | report와 payload builder 중 한쪽만 바뀐 것입니다. 코드 변경입니다 |
 | `set_mismatch`·`count_mismatch` | 같은 이슈 번호가 둘, 또는 재계산한 수가 다름 | 코드 변경입니다 |
-| `timeout` | 자식 프로세스가 자기 deadline에 죽음 | clone 시간. S0에서 재어 둔 값과 비교합니다 |
+| `timeout` | 자식 프로세스가 자기 deadline에 죽었거나, 회차 전체가 준비 시한(14분)을 넘김 | 배포 로그가 어느 쪽인지 말합니다. 자식이면 clone 시간을 S0 측정값과 비교하고, 준비 시한이면 `preparation deadline reached`가 찍혀 있습니다 |
+
+**멈춘 회차는 멈춘 채로 두지 않습니다.** 자식 프로세스는 자기 deadline에
+`SIGTERM`을 받고, 5초 안에 나가지 않으면 `SIGKILL`을 받습니다. 그 kill은 프로세스
+**그룹**에 가므로 `git clone`이 띄운 `git-remote-https`도 함께 끝납니다. 15분 강제
+종료와 14분 준비 시한도 각각 살아 있는 자식을 먼저 끝낸 뒤 진행하며, 준비 시한은
+`timeout` 행을 제출합니다 — 멈춘 회차가 침묵으로 보이면 Railway cron이 이후 회차를
+건너뛰는 것과 구분되지 않기 때문입니다.
 
 **재시도하지 않습니다.** 같은 회차에 두 번째 답을 보내는 것이 한 회차가 서로 다른
 두 답을 갖는 경로이고, 서비스의 restart policy가 `NEVER`인 이유입니다. 실패한

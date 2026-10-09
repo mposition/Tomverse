@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -477,3 +477,66 @@ test("the report's own output is what the payload builder accepts", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test(
+  "a child that ignores SIGTERM is killed, and its slot is answered as a timeout",
+  { skip: process.platform === "win32" },
+  async () => {
+    // The defect both reviewers of the main release found. Under `spawnSync`
+    // the process cannot run a timer while a child runs, so the fifteen-minute
+    // deadline -- the one that exists precisely for a child that hangs -- could
+    // not fire; and `spawnSync`'s own timeout sends SIGTERM and then waits, so
+    // a child that ignores SIGTERM is waited for forever. Railway skips the
+    // next scheduled run while one is still going, so that is not one lost slot
+    // but every slot after it.
+    //
+    // The shim is both halves at once: it blocks, and it refuses to leave when
+    // asked. It fakes the clone so the hang lands on a call with a 30-second
+    // deadline rather than the clone's five minutes -- what is being measured
+    // is the kill, not the length of a constant.
+    const shim = mkdtempSync(join(tmpdir(), "product-research-git-hang-"));
+    const marker = join(shim, "hung");
+    writeFileSync(
+      join(shim, "git"),
+      [
+        "#!/bin/sh",
+        "case \"$1\" in",
+        "  clone) mkdir -p \"$6\" && exit 0 ;;",
+        "esac",
+        "trap '' TERM",
+        `touch ${JSON.stringify(marker)}`,
+        "sleep 600",
+      ].join("\n") + "\n",
+      { mode: 0o755 },
+    );
+    const ingest = await ingestServer();
+    try {
+      const started = Date.now();
+      const { status, output } = await runThroughNpmToEnd({
+        PATH: `${shim}${delimiter}${process.env.PATH}`,
+        HOME: process.env.HOME,
+        ...SERVICE_ENV,
+        PRODUCT_RESEARCH_INGEST_URL: ingest.url,
+      });
+      const elapsed = Date.now() - started;
+
+      assert.ok(existsSync(marker), "the shim never hung, so nothing was exercised");
+      // It ended on its own, nowhere near the ten minutes the shim wanted and
+      // inside the harness deadline that would otherwise have killed it.
+      assert.ok(elapsed < 110_000, `the run took ${elapsed}ms`);
+      assert.equal(status, 1, output);
+      assert.match(output, /timeout/, output);
+
+      // And the slot is answered. A hung run that wrote nothing would be
+      // indistinguishable from a night nobody ran.
+      assert.equal(ingest.received.length, 1, "the slot got one answer");
+      const sent = JSON.parse(ingest.received[0].body);
+      assert.equal(sent.outcome, "failed");
+      assert.equal(sent.failureStage, "timeout");
+      assert.equal("payload" in sent, false);
+    } finally {
+      await ingest.close();
+      rmSync(shim, { recursive: true, force: true });
+    }
+  },
+);

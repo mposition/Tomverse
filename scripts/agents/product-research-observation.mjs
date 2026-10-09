@@ -17,7 +17,6 @@
 //              nothing, and the probe service has no submission variables to
 //              submit with.
 
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +39,7 @@ import {
   OBSERVED_BRANCHES,
   buildObservationPayload,
 } from "../../lib/productResearchObservationCore.mjs";
+import { endChild, runChild } from "../../lib/productResearchObservationChild.mjs";
 import {
   ISSUE_FETCH_MAX_REQUESTS,
   ISSUE_RECEIVED_MAX_BYTES,
@@ -76,15 +76,10 @@ const say = (line) => {
  * reports the fact rather than asserting it: an image that cannot clone is a
  * reason to hold the phase, not to fail silently at 21:30.
  */
-const probeImage = () => {
-  const version = spawnSync("git", ["--version"], {
-    encoding: "utf8",
-    timeout: 10_000,
-    // Not the whole environment. `git --version` has no reason to see the
-    // service's token, and a child that inherits everything is a child that
-    // can print anything.
-    env: childEnvironment(process.env, { platform: process.platform }),
-  });
+const probeImage = async () => {
+  // `runChild` gives it the same narrowed environment every other child gets:
+  // `git --version` has no reason to see the service's token.
+  const version = await run("git", ["--version"], { timeoutMs: 10_000 });
   const gitAvailable = version.status === 0;
   say(`git available: ${gitAvailable}`);
   if (gitAvailable) say(`git version: ${version.stdout.trim()}`);
@@ -103,19 +98,30 @@ const probeImage = () => {
 };
 
 /**
- * One git call, with nothing of the service's environment it does not need.
+ * The child this run is waiting on, so a watchdog can end it.
  *
- * `childEnvironment()` is what keeps the submission secret and the read token
- * out of a child that has no use for them: git clones a public repository here,
- * and a child that inherits everything is a child that can print anything.
+ * A deadline that cannot reach the thing it is waiting for is not a deadline.
  */
-const runGit = (argv, { cwd, timeout } = {}) =>
-  spawnSync("git", argv, {
-    cwd,
-    encoding: "utf8",
-    timeout: timeout ?? STEP_TIMINGS.gitMs,
+let liveChild = null;
+
+/** Every child of this run: narrowed environment, tracked, and endable. */
+const run = (command, argv, options = {}) =>
+  runChild(command, argv, {
+    ...options,
+    // Not the whole environment. A child that inherits everything is a child
+    // that can print anything, and git clones a public repository here.
     env: childEnvironment(process.env, { platform: process.platform }),
+    onStart: (child) => {
+      liveChild = child;
+    },
+  }).then((result) => {
+    liveChild = null;
+    return result;
   });
+
+/** One git call. */
+const runGit = (argv, { cwd, timeout } = {}) =>
+  run("git", argv, { cwd, timeoutMs: timeout ?? STEP_TIMINGS.gitMs });
 
 /**
  * The commits the run will read, pinned before anything reads them.
@@ -124,15 +130,24 @@ const runGit = (argv, { cwd, timeout } = {}) =>
  * sha rather than the branch name, so a push landing mid-run cannot move what
  * the row describes.
  */
-const resolveBranches = (directory) => {
+const resolveBranches = async (directory) => {
   const pinned = {};
   for (const branch of OBSERVED_BRANCHES) {
-    const tip = runGit(branchTipArgv(branch), { cwd: directory });
+    const tip = await runGit(branchTipArgv(branch), { cwd: directory });
+    // A call ended at its own deadline is a timeout, and saying
+    // `release_branch_unavailable` instead would send an operator to look at
+    // the repository's branches for something that was a hung process.
+    if (tip.timedOut) {
+      return { stage: "timeout", detail: `reading ${branch}'s tip passed its deadline` };
+    }
     const read = readBranchTip(branch, tip.status === 0 ? tip.stdout : "");
     if (read.problem) {
       return { stage: "release_branch_unavailable", detail: read.problem };
     }
-    const present = runGit(commitPresentArgv(read.sha), { cwd: directory });
+    const present = await runGit(commitPresentArgv(read.sha), { cwd: directory });
+    if (present.timedOut) {
+      return { stage: "timeout", detail: `checking ${branch}'s tip passed its deadline` };
+    }
     if (present.status !== 0) {
       // A tip the clone names but does not have is the partial clone having
       // fetched less than it said. The report would fail on it later with a
@@ -215,7 +230,7 @@ const readIssues = async (token) => {
 const observe = async (config) => {
   const directory = mkdtempSync(join(tmpdir(), "product-research-"));
   try {
-    const clone = runGit(cloneArgv(OBSERVED_REPOSITORY, directory), {
+    const clone = await runGit(cloneArgv(OBSERVED_REPOSITORY, directory), {
       timeout: STEP_TIMINGS.cloneMs,
     });
     if (clone.status !== 0) {
@@ -226,7 +241,7 @@ const observe = async (config) => {
       return { failureStage: stage };
     }
 
-    const branches = resolveBranches(directory);
+    const branches = await resolveBranches(directory);
     if (branches.stage) {
       say(`${branches.stage}: ${branches.detail}`);
       return { failureStage: branches.stage };
@@ -245,7 +260,7 @@ const observe = async (config) => {
     const issuesFile = join(directory, "open-issues.json");
     writeFileSync(issuesFile, JSON.stringify(issues.issues), "utf8");
 
-    const child = spawnSync(
+    const child = await run(
       process.execPath,
       reportArgv({
         cli: fileURLToPath(new URL("../report-issue-backlog.mjs", import.meta.url)),
@@ -256,10 +271,8 @@ const observe = async (config) => {
       }),
       {
         cwd: fileURLToPath(new URL("../..", import.meta.url)),
-        encoding: "utf8",
-        timeout: STEP_TIMINGS.reportMs,
-        maxBuffer: REPORT_MAX_BUFFER_BYTES,
-        env: childEnvironment(process.env, { platform: process.platform }),
+        timeoutMs: STEP_TIMINGS.reportMs,
+        maxBytes: REPORT_MAX_BUFFER_BYTES,
       },
     );
     const read = readReport(child);
@@ -347,7 +360,7 @@ const main = async () => {
       for (const problem of plan.problems) say(`config: ${problem}`);
       return 1;
     }
-    return probeImage();
+    return await probeImage();
   }
 
   const plan = planRun(process.env, {
@@ -365,6 +378,11 @@ const main = async () => {
     for (const problem of plan.problems) say(`config: ${problem}`);
     return 1;
   }
+
+  // Read once, before the deadlines below capture it: both of them answer for
+  // this slot, and a second clock read could straddle a boundary.
+  const slot = slotForInstant(Date.now());
+  say(`answering for slot ${slot}`);
 
   const state = createRunState();
   let hardTimer;
@@ -389,6 +407,10 @@ const main = async () => {
     say("hard deadline reached; ending the run");
     clearTimeout(hardTimer);
     clearTimeout(prepareTimer);
+    // Whatever is still running goes with the process. `process.exit` does not
+    // wait for a child and does not end one: without this the container would
+    // keep the clone alive after the run that started it had gone.
+    endChild(liveChild, "SIGKILL");
     process.exitCode = state.exitCode ?? 1;
     // Nothing in flight can be waited for: whatever the run was doing, its
     // outcome is unknown and a second answer for this slot is worse than none.
@@ -397,13 +419,30 @@ const main = async () => {
   prepareTimer = setTimeout(() => {
     if (state.watchdogAction("prepare") !== "submit-timeout") return;
     say("preparation deadline reached");
-    // The timeout envelope is the next slice's work; until it exists the run
-    // ends rather than reporting a success it did not have.
-    finish(1);
+    // It takes the one submission permission, so the observation below cannot
+    // also answer for this slot -- and it has to answer for it, because a slot
+    // with no row is indistinguishable from a slot nobody ran. `timeout` is
+    // what that row says.
+    //
+    // The work still running is ended first. It cannot contribute to this
+    // answer any more, and a clone left running would outlive the submission.
+    endChild(liveChild, "SIGKILL");
+    void submit(plan.config, submissionBody({
+      schemaVersion: OBSERVATION_SCHEMA_VERSION,
+      slot,
+      failureStage: "timeout",
+    })).then((sent) => {
+      if (sent.problem) say(`submission: ${sent.problem}`);
+      else say(`recorded ${sent.recorded?.observationId ?? "a row"}: failed at timeout`);
+      finish(1);
+      // And then the process goes, rather than being left to drain. `finish`
+      // clears the hard deadline, so after this there is nothing left that
+      // could end a run something is still holding open -- and a run that does
+      // not end is one Railway skips every later slot behind.
+      process.exit(process.exitCode ?? 1);
+    });
   }, DEFAULT_RUN_TIMINGS.prepareMs);
 
-  const slot = slotForInstant(Date.now());
-  say(`answering for slot ${slot}`);
 
   let outcome;
   try {
