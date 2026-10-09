@@ -191,6 +191,7 @@ export async function runPage({ env, fetchImpl = globalThis.fetch, now = Date.no
       runId,
       baseGenesisId: state.json.genesisId,
       baseGeneration: state.json.generation,
+      ownerDate,
       keys: plan.keys,
       reservation: plan.reservation,
     },

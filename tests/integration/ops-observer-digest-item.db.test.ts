@@ -31,15 +31,28 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
   const q = (sql: string, params?: unknown[]) => (params ? admin.query(sql, params) : admin.query(sql));
   const pool = new pg.Pool({ connectionString: rawUrl, options: `-c search_path="${schema}"` });
   const client = new PrismaClient({ adapter: new PrismaPg(pool, { schema }) });
+  const KEY = "P3#credit_reservation_reconciliation";
   const payload = {
     ownerDate: "2026-10-07",
-    mode: "shadow",
+    mode: "live",
     readiness: { imageProviderBudget: false },
-    reserved: [{ key: "P3#credit_reservation_reconciliation", kind: "new_open", capped: false }],
-    reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 0 },
+    items: [
+      { key: KEY, kind: "new_open", capped: false, mode: "shadow", status: "reserved" },
+      { key: KEY, kind: "recovery", capped: true, mode: "shadow", status: "deferred" },
+    ],
+    counts: [
+      { mode: "shadow", status: "reserved", kind: "new_open", count: 1 },
+      { mode: "shadow", status: "deferred", kind: "recovery", count: 1 },
+    ],
     channelCheckTaken: false,
   };
-  const insert = async (agentKey: string, kind: string, body: unknown, schemaVersion = 2) => {
+  // The version 1 and 2 shapes: one mode's reservations, without and with counts.
+  const v1 = {
+    ownerDate: "2026-10-07", mode: "shadow", readiness: { imageProviderBudget: false },
+    reserved: [{ key: KEY, kind: "new_open", capped: false }], channelCheckTaken: false,
+  };
+  const v2 = { ...v1, reservedCounts: { new_open: 3, worsening: 0, reopen: 0, recovery: 0 } };
+  const insert = async (agentKey: string, kind: string, body: unknown, schemaVersion = 3) => {
     const id = randomUUID();
     await q(`INSERT INTO "AgentDigestItem" (id, "agentKey", kind, "schemaVersion", payload) VALUES ($1, $2, $3, $4, $5)`,
       [id, agentKey, kind, schemaVersion, body === null ? null : JSON.stringify(body)]);
@@ -63,13 +76,19 @@ test("the ops-observer digest item read", { skip: !rawUrl }, async (t) => {
       assert.ok(view && Number.isFinite(Date.parse(view.createdAt)));
     });
 
-    await t.test("a body kept under schema version 1 is still shown, its counts marked as from the list", async () => {
-      const { reservedCounts, ...v1 } = payload;
-      const view = await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v1, 1), client);
-      assert.deepEqual(view?.payload, { ...v1, reservedCounts });
-      assert.equal(view?.countsComplete, false);
-      // A version-2 body without its counts is not a version-1 body.
+    await t.test("bodies kept under schema versions 1 and 2 are still shown, their counts marked incomplete", async () => {
+      const item = { key: KEY, kind: "new_open", capped: false, mode: "shadow", status: "reserved" };
+      const base = { ownerDate: "2026-10-07", mode: "shadow", readiness: { imageProviderBudget: false }, items: [item],
+        channelCheckTaken: false };
+      const one = await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v1, 1), client);
+      assert.deepEqual(one?.payload, { ...base, counts: [{ mode: "shadow", status: "reserved", kind: "new_open", count: 1 }] });
+      assert.equal(one?.countsComplete, false);
+      const two = await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v2, 2), client);
+      assert.deepEqual(two?.payload, { ...base, counts: [{ mode: "shadow", status: "reserved", kind: "new_open", count: 3 }] });
+      assert.equal(two?.countsComplete, false);
+      // Each version holds its own shape: a body under another version's number is absent.
       assert.equal((await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v1, 2), client))?.payload, null);
+      assert.equal((await readOpsObserverDigestItem(await insert("sre-ops", "daily_digest", v2, 3), client))?.payload, null);
     });
 
     await t.test("another agent's item, an unknown id or a non-UUID is no digest", async () => {

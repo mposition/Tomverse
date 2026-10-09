@@ -29,6 +29,7 @@ function body(overrides = {}) {
     runId: "run-1",
     baseGenesisId: GENESIS,
     baseGeneration: 7,
+    ownerDate: OWNER_DATE,
     keys: keysWithP3Open(),
     reservation: {
       ownerDate: OWNER_DATE,
@@ -207,8 +208,24 @@ test("a reservation names today's owner date, or yesterday's only within a run d
   assert.equal(ownerDateIsFinal("2026-10-04", midnight + 389_999), false);
   assert.equal(ownerDateIsFinal("2026-10-04", midnight + 390_000), true);
   const channelCheck = (ownerDate, nowMs) =>
-    parseAdvanceRequest(JSON.stringify(body({ runDeadline: new Date(nowMs + 60_000).toISOString(), reservation: { ownerDate, channelCheck: true, items: [] } })), nowMs);
+    parseAdvanceRequest(JSON.stringify(body({ runDeadline: new Date(nowMs + 60_000).toISOString(), ownerDate,
+      reservation: { ownerDate, channelCheck: true, items: [] } })), nowMs);
   assert.equal(channelCheck("2026-10-04", midnight + 60_000).ok, true);
   assert.deepEqual(channelCheck("2026-10-04", midnight + 200_000), { ok: false, error: "owner_date_refused" });
   assert.deepEqual(channelCheck("2026-10-06", midnight + 60_000), { ok: false, error: "owner_date_refused" });
+});
+
+test("every advance names its owner date, the one its reservation names", () => {
+  // Present with no reservation too: the store derives what the move owes
+  // for it, and records what the cap holds back.
+  assert.equal(parse(body({ reservation: null })).value.ownerDate, OWNER_DATE);
+  const { ownerDate, ...missing } = body();
+  assert.equal(ownerDate, OWNER_DATE);
+  assert.deepEqual(parse(missing), { ok: false, error: "shape" });
+  assert.deepEqual(parse(body({ ownerDate: "2026-02-30" })), { ok: false, error: "shape" });
+  assert.deepEqual(parse(body({ ownerDate: "2026-09-01", reservation: null })), { ok: false, error: "owner_date_refused" });
+  // A reservation for another date than the run's is refused.
+  const other = body();
+  other.reservation.ownerDate = "2026-09-01";
+  assert.equal(parse(other).ok, false);
 });

@@ -26,6 +26,7 @@ const migrations = [
   "20261004030000_ops_observer_transition",
   "20261005030000_ops_observer_retention_deadline",
   "20261008020000_ops_observer_run_guard",
+  "20261009120000_ops_observer_deferred_item",
 ].map((name) => path.resolve(here, `../../prisma/migrations/${name}/migration.sql`));
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_advance_${randomUUID().replaceAll("-", "")}`;
@@ -53,7 +54,7 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
   const withStreak = (n: number) => ({ ...initial, [S2_PAGE_KEYS[0]]: { ...initialKeyState(), streak: n } });
   const advance = (baseGeneration: number, keys: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
     advanceOpsObserverState(
-      { runDeadline: inSeconds(150), runId: `run-${randomUUID().slice(0, 8)}`, baseGenesisId: genesisId, baseGeneration, keys, reservation: null, ...extra },
+      { runDeadline: inSeconds(150), runId: `run-${randomUUID().slice(0, 8)}`, baseGenesisId: genesisId, baseGeneration, ownerDate: "2026-10-05", keys, reservation: null, ...extra },
       client,
     );
   const counts = async () => {
@@ -118,7 +119,7 @@ test("the ops-observer advance", { skip: !rawUrl }, async (t) => {
       const before = await counts();
       assert.deepEqual(await advance(3, withStreak(1)), { result: "conflict", sendPermitted: false });
       assert.deepEqual(await advanceOpsObserverState(
-        { runDeadline: inSeconds(150), runId: "run-x", baseGenesisId: randomUUID(), baseGeneration: before.generation, keys: initial, reservation: null },
+        { runDeadline: inSeconds(150), runId: "run-x", baseGenesisId: randomUUID(), baseGeneration: before.generation, ownerDate: "2026-10-05", keys: initial, reservation: null },
         client,
       ), { result: "conflict", sendPermitted: false });
       process.env.ADMIN_AUDIT_INTEGRITY_KEY = "another-integrity-key-0123456789abcdef";

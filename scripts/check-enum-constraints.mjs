@@ -1251,6 +1251,27 @@ const REGISTRY = {
     reason:
       "new, reopen. How the incident began, recorded for the digest and the transition review; it does not decide the daily cap, which exempts the first worsening of a key per owner date whatever began the incident (docs/policy/sre-ops.md §5).",
   },
+  OpsObserverDeferredItem_mode_check: {
+    owner: "list",
+    module: "scripts/ops-observer/genesis-core.mjs",
+    list: "GENESIS_MODES",
+    reason:
+      "shadow, live. Copied from the genesis by the trigger, so the digest can tell a shadow day's held-back messages from a live one's.",
+  },
+  OpsObserverDeferredItem_kind_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "MESSAGE_KINDS",
+    reason:
+      "new_open, worsening, reopen, recovery. The kinds a reservation item takes; the cap only ever defers the capped ones, and each is deferred once per incident within a mode (the unique on mode, signal, scope, kind, openedAt).",
+  },
+  OpsObserverDeferredItem_origin_check: {
+    owner: "list",
+    module: "scripts/ops-observer/delivery-core.mjs",
+    list: "ITEM_ORIGINS",
+    reason:
+      "new, reopen. How the incident began, read from the key's open state as for a reservation item (docs/policy/sre-ops.md §5).",
+  },
   OpsObserverRunGuard_kind_check: {
     owner: "list",
     module: "scripts/ops-observer/delivery-core.mjs",

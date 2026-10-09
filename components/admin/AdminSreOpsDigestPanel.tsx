@@ -8,16 +8,18 @@ import type { OpsObserverDigestView } from "@/lib/opsObserverDigest";
 
 /**
  * One kept ops-observer daily digest (docs/policy/sre-ops.md §1 item 3, §8
- * S1b): the digest notice links here. In shadow its reservation list is the
- * would-have-paged list, with the expected count per message kind. Read-only.
+ * S1b): the digest notice links here. In shadow its reservations are the
+ * would-have-paged list, with the expected count per message kind; what the
+ * daily cap held back (§5) is listed and counted separately, and each line
+ * names its own mode. Read-only.
  */
 export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }) {
   const m = useAdminMessages(adminSreOpsMessages);
   const label = (prefix: string, value: string) => (m as Record<string, string>)[`${prefix}_${value}`] ?? value;
   const payload = view.payload;
-  // The counts cover every item of the date; the list may stop at its cap.
-  const counts = payload ? Object.entries(payload.reservedCounts).filter(([, count]) => count > 0) : [];
-  const total = counts.reduce((sum, [, count]) => sum + count, 0);
+  // The counts cover every message of the date; the list may stop at its cap.
+  const counts = payload ? payload.counts : [];
+  const total = counts.reduce((sum, row) => sum + row.count, 0);
 
   return (
     <section className="flex min-w-0 flex-col gap-5" data-testid="sre-ops-digest">
@@ -72,19 +74,22 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                 {payload.mode === "shadow" ? (
                   <p className="text-sm text-zinc-600 dark:text-zinc-400">{m.digestWouldHavePaged}</p>
                 ) : null}
-                <p className="text-sm" data-testid="sre-ops-digest-counts">
-                  {m.digestCounts}:{" "}
-                  {counts.map(([kind, count]) => `${label("kind", kind)} ${count}`).join(", ")}
-                </p>
+                <ul className="flex flex-col gap-1 text-sm" data-testid="sre-ops-digest-counts">
+                  {counts.map((row) => (
+                    <li key={`${row.mode}-${row.status}-${row.kind}`}>
+                      {row.mode} · {label("itemStatus", row.status)} · {label("kind", row.kind)} {row.count}
+                    </li>
+                  ))}
+                </ul>
                 {!view.countsComplete ? (
                   <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-counts-partial">
                     {m.digestCountsFromList}
                   </p>
                 ) : null}
-                {total > payload.reserved.length ? (
+                {total > payload.items.length ? (
                   <p className="text-sm text-amber-800 dark:text-amber-300" data-testid="sre-ops-digest-truncated">
                     {m.digestListCapped
-                      .replace("{shown}", String(payload.reserved.length))
+                      .replace("{shown}", String(payload.items.length))
                       .replace("{total}", String(total))}
                   </p>
                 ) : null}
@@ -94,14 +99,18 @@ export function AdminSreOpsDigestPanel({ view }: { view: OpsObserverDigestView }
                       <tr>
                         <th className="py-1 pr-4 font-medium">{m.itemSignal}</th>
                         <th className="py-1 pr-4 font-medium">{m.itemKind}</th>
+                        <th className="py-1 pr-4 font-medium">{m.mode}</th>
+                        <th className="py-1 pr-4 font-medium">{m.digestItemStatus}</th>
                         <th className="py-1 pr-4 font-medium">{m.itemCapped}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {payload.reserved.map((item, index) => (
+                      {payload.items.map((item, index) => (
                         <tr key={`${item.key}-${item.kind}-${index}`} className="border-t border-zinc-200 dark:border-zinc-800">
                           <td className="py-1 pr-4 font-mono text-xs">{item.key}</td>
                           <td className="py-1 pr-4">{label("kind", item.kind)}</td>
+                          <td className="py-1 pr-4">{item.mode}</td>
+                          <td className="py-1 pr-4">{label("itemStatus", item.status)}</td>
                           <td className="py-1 pr-4">{item.capped ? m.yes : m.no}</td>
                         </tr>
                       ))}

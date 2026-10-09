@@ -39,7 +39,7 @@ import {
 } from "@/scripts/ops-observer/catalog-core.mjs";
 import { keysAreValid } from "@/scripts/ops-observer/keys-schema-core.mjs";
 import { transitionVerdict } from "@/scripts/ops-observer/transition-verdict-core.mjs";
-import { owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
+import { incidentOrigin, owedMessages, reservationIsOwed } from "@/scripts/ops-observer/advance-request-core.mjs";
 import { admitOwedItems } from "@/scripts/ops-observer/notification-budget-core.mjs";
 import { DELIVERY_RETENTION_DAYS, confirmStatusForMode } from "@/scripts/ops-observer/delivery-core.mjs";
 import { GENESIS_MIN_INTERVAL_MS, deliveryStampReason, judgeTrust } from "@/scripts/ops-observer/trust-check-core.mjs";
@@ -324,30 +324,46 @@ export async function readOpsObserverState(
   return result;
 }
 
+/** One message of an owner date as the daily digest reports it. */
+export type OpsObserverDateItem = {
+  key: string;
+  kind: string;
+  capped: boolean;
+  mode: string;
+  /** "reserved" (a reservation) or "deferred" (the daily cap held it back, §5). */
+  status: string;
+};
+
 /**
- * Every item reserved on one owner date in one mode, whichever genesis
- * reserved it -- what the daily digest reports (policy §1 item 3). The run
- * budget above is per genesis (§5), but a digest kept under the date's key
- * must not lose the reservations made before a recovery or activation
- * replaced the head that day. A mode's items only: a live digest does not
- * present shadow reservations as sent, and a shadow one shows no live sends.
+ * Every message of one owner date -- reserved or held back by the cap, in
+ * either mode, whichever genesis made it -- what the daily digest reports
+ * (policy §1 item 3). The run budget above is per genesis (§5), but a digest
+ * kept under the date's key must not lose what came before a recovery or an
+ * activation that day, nor a shadow day's list because the head is live by
+ * the time the digest runs. Each item names its own mode, so a live digest
+ * never presents a shadow reservation as sent. Reserved first.
  */
-export async function readOpsObserverDateReservations(
+export async function readOpsObserverDateItems(
   ownerDate: string,
-  mode: string,
   runDeadline: Date,
   client: PrismaClient = prisma,
-): Promise<OpsObserverDailyBudget["reservedToday"]> {
+): Promise<OpsObserverDateItem[]> {
   const { result } = await withOpsObserverTransaction(
     "state_read",
     runDeadline,
     async (tx) => {
-      const [row] = await tx.$queryRaw<{ items: OpsObserverDailyBudget["reservedToday"] }[]>`
-        SELECT coalesce((SELECT json_agg(json_build_object('key', i.signal || '#' || i.scope, 'kind', i.kind, 'capped', i.capped)
-                                ORDER BY i.signal, i.scope, i.kind, i."openedAt")
-                           FROM "OpsObserverDeliveryItem" i
-                           JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
-                          WHERE d."ownerDate" = ${ownerDate}::date AND d.mode = ${mode}), '[]'::json) AS items`;
+      const [row] = await tx.$queryRaw<{ items: OpsObserverDateItem[] }[]>`
+        SELECT coalesce(json_agg(json_build_object('key', x.signal || '#' || x.scope, 'kind', x.kind,
+                                                   'capped', x.capped, 'mode', x.mode, 'status', x.status)
+                                 ORDER BY x.status DESC, x.mode DESC, x.signal, x.scope, x.kind, x."openedAt"), '[]'::json) AS items
+          FROM (SELECT i.signal, i.scope, i.kind, i.capped, i.mode, 'reserved' AS status, i."openedAt"
+                  FROM "OpsObserverDeliveryItem" i
+                  JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
+                 WHERE d."ownerDate" = ${ownerDate}::date
+                UNION ALL
+                SELECT f.signal, f.scope, f.kind, true AS capped, f.mode, 'deferred' AS status, f."openedAt"
+                  FROM "OpsObserverDeferredItem" f
+                 WHERE f."ownerDate" = ${ownerDate}::date) x`;
       return row.items;
     },
     client,
@@ -415,6 +431,8 @@ export type OpsObserverAdvanceInput = {
   runId: string;
   baseGenesisId: string;
   baseGeneration: number;
+  /** The run's owner date: what the move owes is derived for it, reserved or not. */
+  ownerDate: string;
   keys: Record<string, unknown>;
   reservation: OpsObserverReservationInput | null;
 };
@@ -475,8 +493,12 @@ async function heartbeatWithheld(tx: OpsObserverClient): Promise<boolean> {
  * items must be messages the key move actually owes (owedMessages), the same
  * run must not have reserved already (replayed), the day's channel check must
  * be free, and the daily cap is counted over this genesis's reservations for
- * the owner date (§5) -- a reservation over it rejects the whole advance.
- * Whether an item is capped is derived here, never taken from the request.
+ * the run's owner date (§5). The store derives everything the move owes and
+ * splits it by the cap itself: the reservation must carry exactly what the cap
+ * admits -- an item it holds back rejects the whole advance, and leaving out
+ * one it admits is not owed -- and what it holds back is written, in the same
+ * transaction, as a deferred item the daily digest reports. Whether an item is
+ * capped is derived here, never taken from the request.
  *
  * Success is reported only after a separate short transaction confirms the
  * run is not past its deadline (policy §6 item 5).
@@ -502,9 +524,16 @@ export async function advanceOpsObserverState(
       }
       if (!keysAreValid(input.keys)) return { result: "conflict", sendPermitted: false };
 
-      // Decided from what was read, before anything is locked or written.
+      // Decided from what was read, before anything is locked or written. What
+      // the move owes for the run's owner date is derived here, never claimed:
+      // owedMessages() in the order the run's own split used.
       const reservation = input.reservation;
-      if (reservation && !reservationIsOwed(reservation.items, owedMessages(head.keys, input.keys, reservation.ownerDate))) {
+      const owed = (
+        owedMessages(head.keys, input.keys, input.ownerDate) as {
+          signal: string; scope: string; kind: string; openedAt: number;
+        }[]
+      ).map((item) => ({ ...item, key: `${item.signal}#${item.scope}` }));
+      if (reservation && !reservationIsOwed(reservation.items, owed)) {
         return { result: "reservation_not_owed", sendPermitted: false };
       }
       // The checkpoint moves to the generation before this one, whose ledger
@@ -526,7 +555,6 @@ export async function advanceOpsObserverState(
 
       // With the base held no other advance can reserve, so these reads stay
       // true until commit.
-      let admitted: { capped: boolean }[] = [];
       if (reservation) {
         const [taken] = await tx.$queryRaw<{ replayed: boolean; channelCheckTaken: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM "OpsObserverDelivery" WHERE "runId" = ${input.runId}) AS replayed,
@@ -536,16 +564,31 @@ export async function advanceOpsObserverState(
         if (reservation.channelCheck && taken.channelCheckTaken) {
           return { result: "channel_check_taken", sendPermitted: false };
         }
+      }
+      // The cap splits everything owed (§5), counted over this genesis's
+      // reservations for the date. The reservation must carry exactly what it
+      // admits: an item it holds back is refused, and one it admits may not be
+      // left out. What it holds back is recorded below rather than lost.
+      type Split = { key: string; kind: string; capped: boolean; signal: string; scope: string; openedAt: number };
+      let admitted: Split[] = [];
+      let deferred: Split[] = [];
+      if (owed.length > 0) {
         const reservedToday = await tx.$queryRaw<{ key: string; kind: string; capped: boolean }[]>`
           SELECT i.signal || '#' || i.scope AS key, i.kind, i.capped
             FROM "OpsObserverDeliveryItem" i
             JOIN "OpsObserverDelivery" d ON d.id = i."deliveryId"
-           WHERE d."genesisId" = ${head.id}::uuid AND d."ownerDate" = ${reservation.ownerDate}::date`;
-        const owed = reservation.items.map((item) => ({ key: `${item.signal}#${item.scope}`, kind: item.kind }));
-        const budget = admitOwedItems({ reservedToday, owed });
-        if (budget.deferred.length > 0) return { result: "rejected", sendPermitted: false };
-        admitted = budget.admitted;
+           WHERE d."genesisId" = ${head.id}::uuid AND d."ownerDate" = ${input.ownerDate}::date`;
+        ({ admitted, deferred } = admitOwedItems({ reservedToday, owed }) as { admitted: Split[]; deferred: Split[] });
       }
+      const itemId = (item: { key: string; kind: string }) => `${item.key}:${item.kind}`;
+      const reservedIds = (reservation?.items ?? []).map((item) => itemId({ key: `${item.signal}#${item.scope}`, kind: item.kind }));
+      if (reservedIds.some((id) => deferred.some((item) => itemId(item) === id))) {
+        return { result: "rejected", sendPermitted: false };
+      }
+      if (stableJson([...reservedIds].sort()) !== stableJson(admitted.map(itemId).sort())) {
+        return { result: "reservation_not_owed", sendPermitted: false };
+      }
+      const cappedById = new Map(admitted.map((item) => [itemId(item), item.capped]));
 
       // Every reservation still open is closed, whichever genesis made it: one
       // left by a genesis since replaced is just as unknown, and the marker that
@@ -590,7 +633,10 @@ export async function advanceOpsObserverState(
             ${reservation.ownerDate}::date, ${reservation.channelCheck ? reservation.ownerDate : null}::date,
             NULL, 0, 'reserved', ${input.runDeadline.toISOString()}::timestamptz)`;
         if (reservation.items.length > 0) {
-          const items = reservation.items.map((item, index) => ({ ...item, capped: admitted[index].capped }));
+          const items = reservation.items.map((item) => ({
+            ...item,
+            capped: cappedById.get(itemId({ key: `${item.signal}#${item.scope}`, kind: item.kind })) === true,
+          }));
           await tx.$executeRaw`
             INSERT INTO "OpsObserverDeliveryItem" (id, "deliveryId", mode, signal, scope, kind, origin, "openedAt", capped)
             SELECT gen_random_uuid(), ${deliveryId}::uuid, ${head.mode}, x.signal, x.scope, x.kind, x.origin, x.opened, x.capped
@@ -600,6 +646,23 @@ export async function advanceOpsObserverState(
                           ${items.map((i) => i.capped)}::boolean[])
                 AS x(signal, scope, kind, origin, opened, capped)`;
         }
+      }
+      // What the cap held back, so the digest still reports it (§1 item 3).
+      // The guard copies the genesis mode; origin is read from the key's open
+      // state the way the run reads it.
+      if (deferred.length > 0) {
+        const origins = deferred.map((item) =>
+          incidentOrigin(item.kind === "recovery" ? head.keys[item.key] : input.keys[item.key]),
+        );
+        await tx.$executeRaw`
+          INSERT INTO "OpsObserverDeferredItem" (id, "genesisId", mode, "ownerDate", signal, scope, kind, origin, "openedAt",
+            "invariantVersion", "runDeadlineAt")
+          SELECT gen_random_uuid(), ${head.id}::uuid, ${head.mode}, ${input.ownerDate}::date, x.signal, x.scope, x.kind,
+                 x.origin, x.opened, 0, ${input.runDeadline.toISOString()}::timestamptz
+            FROM unnest(${deferred.map((i) => i.signal)}::text[], ${deferred.map((i) => i.scope)}::text[],
+                        ${deferred.map((i) => i.kind)}::text[], ${origins}::text[],
+                        ${deferred.map((i) => new Date(i.openedAt).toISOString())}::timestamptz[])
+              AS x(signal, scope, kind, origin, opened)`;
       }
 
       const entry = await tx.$appendSystemAudit({
@@ -922,16 +985,27 @@ export async function purgeOpsObserverDeliveries(
             LIMIT ${limit}
             FOR UPDATE SKIP LOCKED)
         RETURNING id`;
-      if (deleted.length > 0) {
+      // What the daily cap held back keeps the same retention, from when it
+      // was written, under the same named deadline and the same audit entry.
+      const deferred = await tx.$queryRaw<{ id: string }[]>`
+        DELETE FROM "OpsObserverDeferredItem"
+         WHERE id IN (
+           SELECT id FROM "OpsObserverDeferredItem"
+            WHERE "deferredAt" <= clock_timestamp() - make_interval(days => ${DELIVERY_RETENTION_DAYS})
+            ORDER BY "deferredAt", id
+            LIMIT ${limit}
+            FOR UPDATE SKIP LOCKED)
+        RETURNING id`;
+      if (deleted.length > 0 || deferred.length > 0) {
         await tx.$appendSystemAudit({
           action: "ops_observer.deliveries_purged",
           targetType: "OpsObserverDelivery",
           targetId: null,
           summary: "Deleted closed ops-observer reservations past their retention.",
-          metadata: { count: deleted.length, retentionDays: DELIVERY_RETENTION_DAYS },
+          metadata: { count: deleted.length, deferredCount: deferred.length, retentionDays: DELIVERY_RETENTION_DAYS },
         });
       }
-      return { deleted: deleted.length };
+      return { deleted: deleted.length + deferred.length };
     },
     client,
   );
