@@ -126,6 +126,11 @@ and release it is the agent's own digest freshness verdict
 length), when the newest digest was stored, the operator control revision and
 whether the merge lane is latched -- never what a digest says, which
 `docs/policy/qa-release-agent.md §4` keeps to the common digest area. For
+billing and finance it is the app switch row as the agent reads it (unreadable
+is never off), the agent's own silence verdict for today's price-deadline
+digest and when the newest digest was stored -- never the verdict, models or
+deadlines inside it, which `docs/policy/billing-finance-ops.md §1.4` keeps to
+its digest tab. For
 engineering it is the mode the agent acts on (its own switch resolution, the
 kill switch seen only as engaged or not), the halt it tells its services, how
 many decisions wait for a person, how many runs are in progress and since
