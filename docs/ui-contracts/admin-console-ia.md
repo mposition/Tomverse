@@ -101,11 +101,16 @@ its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
 **Agent office** is a shell: a pixel office for the eight agent teams and the
-digest desk, after the original AI OFFICE UI by godseng.mom. It plays a demo
-day in the browser, so under rule 8 everything on it that could be read as a
-fact says it is a demo -- a notice above the office, a chip on the approval
-card, "SIMULATION" and "SIM CLOCK" where the original said real-time. Its
-approve button advances the demo and nothing else; there is no publish link.
+digest desk, after the original AI OFFICE UI by godseng.mom. It opens on the
+real view: every team's staff at their desks, every room at its real or link
+status, nobody moving or speaking a scripted line, and the console declining
+orders that would move staff. A demo day plays in the browser only when the
+operator asks for it ("Watch demo"), and while it plays, under rule 8,
+everything on it that could be read as a fact says it is a demo -- a notice
+above the office, a chip on the approval card, "SIMULATION" and "SIM CLOCK"
+where the original said real-time; "Back to the real view" ends it. The
+demo's approve button advances the demo and nothing else; there is no publish
+link.
 The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record while the route table has that
 page and section, and a team without one -- including on a branch that does
@@ -115,7 +120,8 @@ branch, and a test holds that); a linked team
 the demo day has no script for stays waiting rather than being reported as
 done. A LIVE room reads that team's operating state on the server and the
 demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
-one the operator calls), and its staff say only the record's line. For product research that is the app
+one the operator calls), and its staff say only the record's line -- which
+its lead keeps on screen in a speech bubble, demo or not. For product research that is the app
 switch, the latest scheduled slot (recorded, failed, or not yet, and whether
 its window is open), the newest success and the agent's own silence verdict,
 all in UTC -- never its observations, which
