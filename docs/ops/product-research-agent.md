@@ -12,7 +12,7 @@
 | 서비스 | project | 환경 | 진입점 | 일정 | 강제 종료 |
 |---|---|---|---|---|---|
 | Product Research Observation | Tomverse Agents | production·staging | `npm run agent:product-research-observation` | 매일 21:30 UTC | 15분 |
-| Product Research Probe | Tomverse Agents | production·staging·dev | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
+| Product Research Probe | Tomverse Agents | production·staging | 같은 script `--probe` | 없음(손으로 실행) | 15분 |
 
 - 두 서비스는 **별도 Railway project**(`Tomverse Agents`)에 있습니다. reference
   변수는 자기 project 안에서만 해석되므로, DB 서비스와 공유 변수가 없는 project는
@@ -23,7 +23,9 @@
 - 기존 `Tomverse` project의 cron은 `.railway/railway.ts`가 named partial로
   소유합니다. **두 파일을 섞지 않습니다** — `railway:iac:*` script는 공유
   project를, `railway:agents:*`는 Agent project를 대상으로 합니다.
-- **probe는 환경마다 하나씩 있습니다.** 그것이 재는 것은 *이미지*이고 환경마다
+- **probe는 환경마다 하나씩 있습니다**(이 트리에서는 production과 staging. `dev`는
+  그 lane을 가져오는 release와 함께 들어옵니다 — 여기서는 `RailwayEnvironment`가
+  두 환경뿐이라 세 번째 key는 계획할 수도 적용할 수도 없습니다). 그것이 재는 것은 *이미지*이고 환경마다
   이미지를 따로 빌드하므로, 한 환경의 측정은 다른 환경에 대해 아무 말도 하지
   않습니다. production에 없던 동안 production 이미지는 아무도 잴 수 없는 유일한
   이미지였고, 그 답이 필요한 단계가 P2입니다(정책 §9의 첫 조건이 production
@@ -94,7 +96,13 @@ IaC는 값을 만들지 않고 **보존만** 합니다. apply 전에 대시보�
 
 ### 5. S0 — 이미지가 무엇을 할 수 있는지 재기
 
-staging에서 Product Research Probe를 **손으로 실행**합니다. 출력에 적힙니다.
+Product Research Probe를 **손으로 실행**합니다. 출력에 적힙니다.
+
+**환경마다 따로 재야 합니다.** probe가 말하는 것은 그 환경의 이미지이고 환경마다
+이미지를 따로 빌드하므로, staging에서 잰 값은 production에 대해 아무 말도 하지
+않습니다. S0은 staging에서 하지만, **P2 전에는 production에서도 한 번 돌립니다** —
+정책 §9의 P2 첫 조건이 production 실행이고, git 없는 이미지는 그 실행을
+`clone_failed`로 끝냅니다.
 
 ```
 git available: true|false
