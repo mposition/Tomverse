@@ -24,7 +24,7 @@ process.stdin.on("data", (chunk) => {
       send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 3 } });
     } else if (message.method === "account.getQuota") {
       writeFileSync(process.env.FAKE_QUOTA_LOG, JSON.stringify({ methods,
-        tokenPassed: message.params.gitHubToken === process.env.COPILOT_GITHUB_TOKEN }));
+        tokenPassed: Boolean(message.params.gitHubToken) && message.params.gitHubToken === process.env.COPILOT_GITHUB_TOKEN }));
       if (process.env.FAKE_QUOTA_OVERSIZE === "true") {
         process.stdout.write("Content-Length: 128001\r\n\r\n");
       } else {

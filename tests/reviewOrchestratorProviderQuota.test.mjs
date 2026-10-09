@@ -108,3 +108,27 @@ test("Copilot missing credentials and oversized frames fail closed", async () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("Copilot saved CLI login stays enabled when no explicit account token is configured", async () => {
+  const root = mkdtempSync(join(tmpdir(), "review-copilot-saved-login-"));
+  const log = join(root, "requests.json");
+  try {
+    const result = await copilotQuota({ command: "copilot" }, {
+      sourceEnv: { HOME: root },
+      spawnChild: (_command, args, opts) => {
+        assert.equal(args.includes("--no-auto-login"), false);
+        assert.equal(args.includes("--auth-token-env"), false);
+        assert.equal(args.includes("--headless") && args.includes("--stdio"), true);
+        return spawn(process.execPath, [resolve("tests/fixtures/review-orchestrator/fake-quota-server.mjs")], {
+          ...opts, env: { ...opts.env, FAKE_QUOTA_LOG: log, FAKE_QUOTA_RESULT: JSON.stringify(snapshot(65.8)) },
+        });
+      },
+    });
+    assert.deepEqual(result, { state: "available", remainingPercent: 65.8 });
+    assert.deepEqual(JSON.parse(readFileSync(log, "utf8")), {
+      methods: ["connect", "account.getQuota"], tokenPassed: false,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
