@@ -40,6 +40,22 @@ export type AgentRunnerService = {
    * in any environment. Absent for a service built from the repository.
    */
   readonly image?: { readonly reference: string; readonly digest: string | null };
+  /**
+   * A long-running service Railway restarts after a non-zero exit, up to
+   * `maxRetries` times. Absent: the service is never restarted (every cron
+   * here runs one cycle and stops).
+   */
+  readonly restart?: { readonly type: "ON_FAILURE"; readonly maxRetries: number };
+  /**
+   * Built from this Dockerfile, with the build context at the repository root,
+   * and rebuilt only when a watched path changes. Absent: Railpack.
+   */
+  readonly dockerfile?: { readonly path: string; readonly watchPatterns: readonly string[] };
+  /**
+   * `false`: deploy on a merge without waiting for the commit's checks.
+   * Absent: Railway's default.
+   */
+  readonly checkSuites?: false;
 };
 
 export const AGENT_RAILWAY_PROJECT = "Tomverse Agents";
@@ -142,6 +158,23 @@ const BILLING_FINANCE_OPS_VARIABLES = [
   "BILLING_FINANCE_OPS_AGENT_ENABLED",
   "BILLING_FINANCE_OPS_RUN_SECRET",
   "BILLING_FINANCE_OPS_DEADMAN_URL",
+] as const;
+
+/**
+ * The AMUX orchestrator's variables (development-agent-orchestration.md,
+ * version 26): the four it had in production when it moved here, and
+ * TOMVERSE_AMUX_CLAIM, which the claim-only mode reads (version 15). The names
+ * that make it run commands -- TOMVERSE_AMUX_EXECUTE,
+ * TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON and the TOMVERSE_AMUX_WSL_* names -- are
+ * absent, so an apply deletes any of them set here: commands run on the
+ * dedicated runner (version 23), never in this service.
+ */
+const AMUX_ORCHESTRATOR_VARIABLES = [
+  "TOMVERSE_AMUX_ENABLED",
+  "TOMVERSE_AMUX_SYNC_SECRET",
+  "TOMVERSE_INTERNAL_URL",
+  "TOMVERSE_AMUX_WORKER_CATALOG_JSON",
+  "TOMVERSE_AMUX_CLAIM",
 ] as const;
 
 /**
@@ -406,10 +439,38 @@ export const AGENT_RUNNER_SERVICES: readonly AgentRunnerService[] = [
     },
   },
   ...ENGINEERING_AGENT_SERVICES,
+  {
+    // The AMUX orchestrator (docs/policy/development-agent-orchestration.md,
+    // version 26): the long-running claim and recovery loop. It holds no
+    // product database credential and reaches the app at its public URL, so it
+    // belongs in this project. Built from its Dockerfile, which runs the
+    // binary as `nobody`; the start command is that binary.
+    //
+    // Restarted after a non-zero exit, at most ten times (version 26 replaces
+    // version 20 item 9's dashboard setting with this declaration).
+    // `checkSuites: false` keeps the deployment it had (version 20 item 10):
+    // a merge deploys at once, and an orchestrator that comes up before the
+    // web waits on `halt_unreadable` without writing.
+    //
+    // Production only: staging has no orchestrator service.
+    key: "amux_orchestrator",
+    service: "AMUX Orchestrator",
+    startCommand: "/usr/local/bin/tomverse-orchestrator",
+    cronSchedule: null,
+    restart: { type: "ON_FAILURE", maxRetries: 10 },
+    dockerfile: {
+      path: "apps/tomverse-orchestrator/Dockerfile",
+      watchPatterns: ["apps/tomverse-orchestrator/**", "crates/amux-core/**", "Cargo.toml", "Cargo.lock"],
+    },
+    checkSuites: false,
+    environments: {
+      production: AMUX_ORCHESTRATOR_VARIABLES,
+    },
+  },
 ];
 
 type AgentRailwayDsl<Source, Preserved, Resource> = {
-  readonly github: (repo: string, options: { branch: string }) => Source;
+  readonly github: (repo: string, options: { branch: string; checkSuites?: false }) => Source;
   readonly image: (reference: string, options: { autoUpdates: { type: "disabled" } }) => Source;
   readonly preserve: () => Preserved;
   readonly service: (
@@ -417,7 +478,12 @@ type AgentRailwayDsl<Source, Preserved, Resource> = {
     config: {
       source: Source;
       start: string;
-      deploy: { cronSchedule?: string; restartPolicyType: "NEVER" };
+      build?: { builder: "DOCKERFILE"; dockerfilePath: string; watchPatterns: string[] };
+      deploy: {
+        cronSchedule?: string;
+        restartPolicyType: "NEVER" | "ON_FAILURE";
+        restartPolicyMaxRetries?: number;
+      };
       replicas: Record<string, number>;
       env: Record<string, Preserved>;
     }
@@ -455,11 +521,23 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
             })
           : dsl.github(AGENT_RAILWAY_REPOSITORY, {
               branch: AGENT_ENVIRONMENT_BRANCHES[environment],
+              ...(runner.checkSuites === false ? { checkSuites: false as const } : {}),
             }),
+        ...(runner.dockerfile
+          ? {
+              build: {
+                builder: "DOCKERFILE" as const,
+                dockerfilePath: runner.dockerfile.path,
+                watchPatterns: [...runner.dockerfile.watchPatterns],
+              },
+            }
+          : {}),
         start: runner.startCommand,
         deploy: {
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
-          restartPolicyType: "NEVER",
+          ...(runner.restart
+            ? { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }
+            : { restartPolicyType: "NEVER" as const }),
         },
         // One replica, placed. A cron that runs once a day needs no more, and
         // the region is the record's, not Railway's default.

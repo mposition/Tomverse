@@ -6,6 +6,7 @@
 상태(v24 이력): **v24 Ubuntu AMUX invariant 관측 게이트 정정 승인.** 2026-10-02 운영자 `mposition`이 아래 v24 절을 승인했다(그 절의 승인 기록). v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장은 v24 절의 계약으로 대체됐다. 이전 v23 상태 줄은 이력이다.
 상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
 상태(최신): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
+제안(미승인): **v28 AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로.** 아래 v28 절이 승인되기 전에는 버전 20 9·10항대로 `Tomverse` project의 대시보드가 이 서비스의 설정을 정한다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -61,6 +62,7 @@ approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 | 24 | 2026-10-02 mposition | v23의 AMUX invariant confidence 일괄 `healthy` 요구를 실패 0건·unknown 사유별 증거 계약으로 정정한다. 다른 활성화 게이트와 권한은 바꾸지 않는다. 이 승인 자체로 bridge·claim·제품 실행을 켜지 않는다. |
 | 25 | 2026-10-07 mposition | engineering adapter의 코드 래치 `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`를 켠다. adapter의 모든 AMUX writer 호출은 이 래치, 버전 18의 실행 API 게이트, `off`가 아닌 engineering 운영 mode가 모두 참일 때만 열린다(Authority 절). 버전 12의 허용 동작 목록, 환경 변수, worker catalog, 용량 행, 자동 승격, Railway 서비스, 게시 App, engineering mode는 바꾸지 않는다. |
 | 27 | 2026-10-09 mposition | 전용 Ubuntu runner의 worker 목록 변경. 2026-10-09 운영자 지시로 제거한 `devin-worker`를 기록하고 `cursor-chore`·`cursor-impl`·`cursor-worker`·`copilot-chore`·`copilot-impl`·`copilot-worker`를 더해 13개로 한다. 새 로그인 둘의 권한 목록, 실행마다의 실제 모델·공급사 기록, v22의 사용량 사건이 확인되고 운영자가 따로 활성화하기 전에는 여섯이 제품 claim·dispatch 대상이 아니며, v16 교차 검토와 Decision Maker 라우팅에는 별도 버전 전까지 들지 않는다. Decision Maker 실행 주체 둘을 docs/policy/amux-decision-maker.md §5의 격리 조건 그대로 더한다. 이 버전 자체로 bridge·claim·실행 API·DM 스위치를 켜지 않는다. |
+| 28 | (승인 대기) | Railway 서비스 `AMUX Orchestrator`를 `Tomverse` project의 대시보드 관리에서 `Tomverse Agents` project의 IaC 선언(`.railway/agent-runners.ts`)으로 옮긴다. 버전 20 9항의 재시작 정책(`On Failure`, 최대 10회)과 10항의 `checkSuites: false`를 그 선언이 정한다. 변수 목록은 다섯 이름이며 명령 실행을 여는 이름은 없다. orchestrator 코드, 정지·재시작 동작, claim·실행 API·worker catalog 값은 바꾸지 않는다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1299,3 +1301,32 @@ DM 정책(docs/policy/amux-decision-maker.md §5, §7, §12)의 두 인스턴스
 ### 이 버전이 하지 않는 것
 
 환경 변수, bridge·claim·실행 API, worker catalog, `AMUX_VERIFIED_PROVIDERS`, 동시 실행·대기열 상한, 용량 행, 자동 승격, Publisher, 병합, 배포, DM 스위치와 DM 정책, CLI 사용량의 보존·집계를 바꾸지 않는다. 위 검증 script를 포함해 어떤 코드도 바꾸지 않는다.
+
+## 버전 28 — AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로 (초안, 승인 대기)
+
+승인 기록: 승인 전이다. 운영자가 승인하면 `approvedBy`·`approvedAt`과 위 표의 승인 칸, 머리말의 승인 문장을 함께 채운다. 작성자는 Claude이고, 독립 검토는 작성자와 다른 provider가 한다. **이 절이 승인되기 전에는 이 선언을 병합하지 않는다.** 번호: `develop`의 다음 빈 번호는 26이지만 버전 27의 번호 기록대로 draft PR #1888이 v26까지 쓰므로 28을 쓴다.
+
+이 버전은 Railway 서비스 `AMUX Orchestrator`를 `Tomverse` project의 대시보드 관리에서 `Tomverse Agents` project의 IaC 선언(`.railway/agent-runners.ts`, `.railway/agents-railway.ts`)으로 옮긴다.
+
+- **왜.** orchestrator는 제품 DB 자격증명을 갖지 않고(버전 16), 앱의 내부 route를 공개 URL로 부른다. `Tomverse Agents`에는 DB 서비스도 공유 변수도 없어서 DB 참조 변수가 해석될 대상이 없고, 그 project의 IaC는 project 전체를 소유하므로 손으로 추가한 것은 apply가 지운다. 다른 Agent 서비스와 같은 자리다.
+- **버전 20 9항을 이렇게 바꾼다.** 재시작 정책은 IaC가 선언한다. `On Failure`, 최대 10회다(운영자 결정, 2026-10-09). 대시보드에서 바꾼 값은 다음 apply가 되돌리므로, 바꾸는 것은 그 파일을 고치는 PR과 운영자의 apply다. 9항의 "staging도 같다"는 staging에 orchestrator 서비스가 없으므로 해당이 없다. staging에 orchestrator를 두는 것은 별도 결정이다.
+- **버전 20 10항의 운영 기록을 저장소로 옮긴다.** `checkSuites: false`(병합 즉시 배포)는 그대로이고 이제 선언에 있다. CI 대기 배포로 바꾸는 것은 여전히 운영자의 별도 결정이며, 그 변경도 같은 파일을 고치는 PR이다.
+- **변수 목록이 계약이다.** `TOMVERSE_AMUX_ENABLED`, `TOMVERSE_AMUX_SYNC_SECRET`, `TOMVERSE_INTERNAL_URL`, `TOMVERSE_AMUX_WORKER_CATALOG_JSON`, `TOMVERSE_AMUX_CLAIM`(버전 15의 claim 전용 모드). 목록 밖의 이름은 apply가 지운다. 명령 실행을 여는 이름(`TOMVERSE_AMUX_EXECUTE`, `TOMVERSE_AMUX_EXECUTOR_COMMANDS_JSON`, `TOMVERSE_AMUX_WSL_*`)은 선언하지 않으며, 이 문서의 개정 없이 더하지 않는다. 명령 실행 위치는 버전 23·27의 전용 Ubuntu runner다.
+- **빌드와 배치는 그대로다.** `apps/tomverse-orchestrator/Dockerfile`, watch pattern 넷(`apps/tomverse-orchestrator/**`, `crates/amux-core/**`, `Cargo.toml`, `Cargo.lock`), 시작 명령 `/usr/local/bin/tomverse-orchestrator`, production 전용, `main` 브랜치, 지역 `asia-southeast1-eqsg3a`에 복제 1.
+
+### 이전 절차 (한 번)
+
+두 orchestrator가 함께 claim하지 않는 것이 이 절차의 요점이다. 운영자가 로컬 PC의 PowerShell, 이 선언이 들어간 `main` clone 폴더 안에서 한다.
+
+1. `npm run railway:agents:use-production` → `npm run railway:agents:plan`. `AMUX Orchestrator` 추가만 있어야 한다. 맞으면 `npm run railway:agents:apply`. 새 서비스에는 `TOMVERSE_AMUX_ENABLED`가 없으므로 시작하자마자 종료 코드 0으로 끝나고(`docs/ops/amux/recovery.md`의 재시작 정책 절), `On Failure`는 0을 다시 시작하지 않는다.
+2. 옛 서비스(`Tomverse` project)의 변수 값을 새 서비스에 옮긴다. `TOMVERSE_AMUX_ENABLED`만 아직 넣지 않는다.
+3. 옛 서비스에서 `TOMVERSE_AMUX_ENABLED`를 지우고 Deploy해 멈춘다. 로그에서 프로세스가 끝났음을 본다.
+4. 새 서비스에 `TOMVERSE_AMUX_ENABLED`를 넣고 Deploy한다. 로그에서 인스턴스 id 줄과 `verdict = "scheduling"`(또는 정지·대기 줄)을 본다. 3과 4 사이에는 claim과 recover가 멈추고, 진행 중인 attempt의 heartbeat와 정산은 계속된다(버전 20 11항과 같다).
+5. 옛 서비스를 `Tomverse` project의 대시보드에서 지운다. 어떤 IaC 파일도 그 서비스를 소유하지 않으므로 apply는 지우지 않는다.
+6. `npm run railway:agents:plan`이 변경 없음을 보이는지 보고, `npm run railway:iac:use-staging`으로 CLI 연결을 되돌려 둔다.
+
+되돌리기는 5 전이면 3·4를 거꾸로 한다(새 서비스에서 지우고 옛 서비스에 넣는다). 5 뒤면 이 선언을 되돌리는 PR이 `main`에 들어간 뒤 `Tomverse` project에 대시보드로 서비스를 다시 만들고, `npm run railway:agents:plan`이 `AMUX Orchestrator` 삭제만 보일 때 apply한다.
+
+### 이 버전이 하지 않는 것
+
+orchestrator 코드, 버전 20의 정지·재시작 동작(1~8항, 11항), claim·실행 API·worker catalog의 값, 자동 승격, 역할 판정, 웹 서비스, 다른 Agent 서비스를 바꾸지 않는다.

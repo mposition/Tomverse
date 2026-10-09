@@ -324,11 +324,16 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 4. 같은 화면에서 값을 다시 읽고, 날짜와 값을 incident 기록에 적는다.
 
 이 저장소는 이 서비스의 재시작 정책을 선언하지 않는다(아래 "재시작 정책" 첫 항목). 대시보드가
-유일한 자리다.
+유일한 자리다. **버전 28이 승인되고 그 이전 절차를 마친 뒤에는** 위 3·4가 아니라 아래 첫
+항목의 선언이 정한다.
 
 ### 재시작 정책
 
-- 이 저장소에는 AMUX Orchestrator 서비스의 선언이 없다. `.railway/railway.ts`는 named
+- **버전 28 이후:** 서비스는 `Tomverse Agents` project에 있고 `.railway/agent-runners.ts`의
+  `amux_orchestrator` 항목이 선언한다. 재시작 정책은 `On Failure`, 최대 10회이며 대시보드에서
+  바꾼 값은 다음 `railway:agents:apply`가 되돌린다. 바꾸는 것은 그 파일을 고치는 PR과
+  운영자의 apply다. 이전 절차는 `docs/policy/development-agent-orchestration.md` 버전 28이다.
+- 버전 28 전: 이 저장소에는 AMUX Orchestrator 서비스의 선언이 없다. `.railway/railway.ts`는 named
   partial `scheduled-jobs`로 cron 서비스 다섯만 소유하고, 이 서비스에는
   `apps/tomverse-orchestrator/Dockerfile`만 있을 뿐 `railway.json`이나 `railway.toml`이
   없다. 이 서비스를 partial에 넣으면 apply가 선언하지 않은 변수를 지우므로, 재시작 정책
