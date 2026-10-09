@@ -35,6 +35,8 @@ const world = {
   wrapped: [] as unknown[],
   assertThrows: false,
   kept: null as string | null,
+  dateReserved: reserved as unknown,
+  dateArgs: [] as unknown[],
 };
 let POST: (request: Request) => Promise<Response>;
 
@@ -44,6 +46,10 @@ before(async () => {
       readOpsObserverState: async (...args: unknown[]) => {
         world.stateArgs = args;
         return world.state;
+      },
+      readOpsObserverDateReservations: async (ownerDate: string, mode: string, deadline: Date) => {
+        world.dateArgs = [ownerDate, mode, deadline instanceof Date ? deadline.toISOString() : null];
+        return world.dateReserved;
       },
     },
   });
@@ -121,6 +127,8 @@ beforeEach(() => {
   world.kept = null;
   world.prismaTimeouts = [];
   world.wrapped = [];
+  world.dateReserved = reserved;
+  world.dateArgs = [];
 });
 
 const body = (overrides: Record<string, unknown> = {}) => ({
@@ -164,6 +172,19 @@ test("the app builds the digest from its own reads and keeps it under the date's
   // digest_submit's Prisma timeout, not the shared default.
   assert.deepEqual(world.prismaTimeouts, [55_000]);
   assert.equal(world.asserted, 1);
+});
+
+test("the digest lists the date's reservations in its mode, not only the head genesis's run budget", async () => {
+  // A recovery that day: the head's own budget holds one item, the date two.
+  const earlier = { key: "P3#credit_reservation_reconciliation", kind: "recovery", capped: true };
+  world.state = { ...trusted(), budget: { ownerDate: DAY, reservedToday: reserved, channelCheckTaken: false } };
+  world.dateReserved = [earlier, ...reserved];
+  const runDeadline = new Date(Date.now() + 120_000).toISOString();
+  await call(DIGEST, body({ runDeadline }));
+  assert.deepEqual(world.dateArgs, [DAY, "shadow", runDeadline]);
+  const payload = world.submissions[0].payload as { reserved: unknown; channelCheckTaken: unknown };
+  assert.deepEqual(payload.reserved, [earlier, ...reserved]);
+  assert.equal(payload.channelCheckTaken, false);
 });
 
 test("a readiness read that fails is reported unknown, not as all clear", async () => {

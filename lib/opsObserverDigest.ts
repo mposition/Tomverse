@@ -7,10 +7,12 @@
  * anything in it:
  *
  *   1. The chain is trusted, read for that date (§3 rule 7); anything else
- *      stores nothing and answers the reason. The read carries the date's
- *      reserved items, final because the date is closed (the advance parser
- *      admits a reservation only for today, or yesterday within a run
- *      deadline of midnight).
+ *      stores nothing and answers the reason. The date's reserved items in
+ *      the head's mode are read separately, by every genesis and not only
+ *      the head, so a recovery or activation that day drops nothing; they
+ *      are final because the date is closed (the advance parser admits a
+ *      reservation only for today, or yesterday within a run deadline of
+ *      midnight).
  *   2. The readiness checks that are not page keys come from the same
  *      function /api/ready runs, at submission time.
  *   3. The shared store writes the row and its system audit entry in one
@@ -33,7 +35,11 @@ import type { PrismaClient } from "@prisma/client";
 
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { prisma } from "@/lib/prisma";
-import { readOpsObserverState, type OpsObserverDailyBudget } from "@/lib/opsObserverStore";
+import {
+  readOpsObserverDateReservations,
+  readOpsObserverState,
+  type OpsObserverDailyBudget,
+} from "@/lib/opsObserverStore";
 import {
   OpsObserverLateError,
   armOpsObserverTransaction,
@@ -110,12 +116,16 @@ export async function submitOpsObserverDigest(
     | { status: "fulfilled"; value: { checks?: Record<string, unknown> } | null }
     | { status: "rejected"; reason: unknown };
   const checks = readiness.status === "fulfilled" ? (readiness.value?.checks ?? null) : null;
+  // The date's reservations in this mode by every genesis, not only the head's
+  // run budget: a recovery or activation that day must not drop what came
+  // before it from the digest kept under the date's key.
+  const reservedOnDate = await readOpsObserverDateReservations(input.ownerDate, state.mode, input.runDeadline, client);
   const payload = buildDigestPayload({
     ownerDate: input.ownerDate,
     mode: state.mode,
     readiness: checks ?? "unknown",
     digestNames: checks ? digestReadinessNames({ readiness: checks }) : [],
-    budget,
+    budget: { ...budget, reservedToday: reservedOnDate },
   });
   // The app's own shape: what it would refuse from anyone, it refuses from itself.
   if (!parseDigestPayload(payload).ok) return { result: "refused" };

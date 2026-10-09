@@ -40,7 +40,14 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     "only a dedicated test database is accepted");
   process.env.DATABASE_URL ||= rawUrl;
   process.env.ADMIN_AUDIT_INTEGRITY_KEY = KEY;
-  const { advanceOpsObserverState, confirmOpsObserverDelivery, purgeOpsObserverDeliveries, readOpsObserverDelivery, readOpsObserverState } = await import("@/lib/opsObserverStore");
+  const {
+    advanceOpsObserverState,
+    confirmOpsObserverDelivery,
+    purgeOpsObserverDeliveries,
+    readOpsObserverDateReservations,
+    readOpsObserverDelivery,
+    readOpsObserverState,
+  } = await import("@/lib/opsObserverStore");
 
   const admin = new pg.Client({ connectionString: rawUrl });
   await admin.connect();
@@ -146,7 +153,21 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     const recent = await advance(shadowGenesis, "2026-10-03", "ok"); // recovery
     assert.equal(recent.items, 1);
     await confirm(recent.deliveryId, recent.runId);
-    const open = await advance(shadowGenesis, "2026-10-04", null);
+    // A recovery later the same date: the new head starts from initial keys, so
+    // the same delay owes a new_open again, now under the second genesis.
+    // Fixture only: the first genesis is dated eight days back, so the
+    // seven-day rule (T5) does not hold the recovery silent.
+    await q(`ALTER TABLE "OpsObserverGenesis" DISABLE TRIGGER USER`);
+    try {
+      await q(`UPDATE "OpsObserverGenesis" SET "createdAt" = "createdAt" - interval '8 days' WHERE id = $1`, [shadowGenesis]);
+    } finally {
+      await q(`ALTER TABLE "OpsObserverGenesis" ENABLE TRIGGER USER`);
+    }
+    const recovery = await approvedGenesis("recovery", "shadow", shadowGenesis);
+    const later = await advance(recovery, "2026-10-03", "delayed");
+    assert.equal(later.items, 1);
+    await confirm(later.deliveryId, later.runId);
+    const open = await advance(recovery, "2026-10-04", null);
     const itemsOf = async (id: string) =>
       (await q(`SELECT count(*)::int AS n FROM "OpsObserverDeliveryItem" WHERE "deliveryId" = $1`, [id])).rows[0].n;
 
@@ -193,6 +214,19 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       assert.deepEqual(kinds, ["read", "check"]);
     });
 
+    await t.test("the digest's date read spans every genesis of the mode; the run budget stays the head's", async () => {
+      const date = await readOpsObserverDateReservations("2026-10-03", "shadow", inSeconds(120), client);
+      assert.deepEqual(date.map((i) => `${i.key}:${i.kind}`).sort(), [`${P3_KEY}:new_open`, `${P3_KEY}:recovery`].sort());
+      const head = (await readOpsObserverState(inSeconds(120), client, "2026-10-03")) as {
+        budget: { reservedToday: { kind: string }[] };
+      };
+      assert.deepEqual(head.budget.reservedToday.map((i) => i.kind), ["new_open"]);
+      // Another mode's reservations, or another date's, are not this digest's.
+      assert.deepEqual(await readOpsObserverDateReservations("2026-10-03", "live", inSeconds(120), client), []);
+      assert.deepEqual(await readOpsObserverDateReservations("2026-09-30", "shadow", inSeconds(120), client), []);
+      await assert.rejects(readOpsObserverDateReservations("2026-10-03", "shadow", inSeconds(5), client));
+    });
+
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
       assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 0 });
       assert.deepEqual(await purgeAudits(), []);
@@ -203,6 +237,12 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       await age(old2.deliveryId, 100);
       await age(recent.deliveryId, 89);
       assert.deepEqual([await itemsOf(old1.deliveryId), await itemsOf(recent.deliveryId)], [1, 1]);
+      // Past retention the item screen shows nothing, before any batch has run;
+      // a close inside it, and a reservation still open, are shown.
+      assert.equal(await readOpsObserverDelivery(old1.deliveryId, client), null);
+      assert.equal(await readOpsObserverDelivery(old2.deliveryId, client), null);
+      assert.equal((await readOpsObserverDelivery(recent.deliveryId, client))?.id, recent.deliveryId);
+      assert.equal((await readOpsObserverDelivery(open.deliveryId, client))?.id, open.deliveryId);
       assert.deepEqual(await purgeOpsObserverDeliveries(1, client), { deleted: 1 });
       assert.deepEqual([await exists(old1.deliveryId), await exists(old2.deliveryId)], [false, true]);
       assert.deepEqual(await purgeOpsObserverDeliveries(500, client), { deleted: 1 });
