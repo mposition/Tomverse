@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateChatPayload } from "../lib/chatSecurity.ts";
 import { isWebSearchMode, WEB_SEARCH_MODES } from "../lib/appDefaults.ts";
+import { profileTextFor } from "../lib/autoDispatchPreflight.ts";
 
 const basePayload = () => ({
   messages: [{ role: "user", content: "hi" }],
@@ -50,4 +51,12 @@ test("Refiner payload cannot supply suggestion bytes or an accepted boolean", ()
   }
   assert.throws(() => validateChatPayload({ ...basePayload(), promptRefinerDecision: decision }),
     error => error.code === "INVALID_PROMPT_REFINER_DECISION");
+});
+
+test("attachment turns retain their nonempty authored profile text; array content is not a valid Chat payload", () => {
+  const payload = { ...basePayload(), messages: [{ role: "user", content: "Read the attached file",
+    attachments: [{ attachmentId: "document" }, { uploadId: "image" }] }] };
+  assert.equal(profileTextFor(validateChatPayload(payload).messages), "Read the attached file");
+  assert.throws(() => validateChatPayload({ ...payload,
+    messages: [{ role: "user", content: [{ type: "text", text: "Read the attached file" }] }] }));
 });

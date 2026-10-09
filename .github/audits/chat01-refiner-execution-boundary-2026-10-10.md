@@ -23,9 +23,13 @@
 
 ## 로컬 검증
 
-- `test:prompt-refiner-chat-execution`: 47 unit/API 사례 통과. 기존 제안형 계약,
+- `test:prompt-refiner-chat-execution`: 49 unit/API 사례 통과. 기존 제안형 계약,
   원문/실행 projection, 수동 채택/자동 authority 구분, 원문 유지, epoch/replay,
   Unicode·음성 전사형 text·첨부 reference 보존과 default-off HTTP 거부 포함.
+  추가 HTTP 회귀는 소비 뒤 access 실패가 나도 재소비/추가 provider로 진행하지
+  않음을 확인한다. source validation이 content string을 요구하므로 첨부가 있어도
+  authored profile text는 비지 않는다. 실패 시 소비한 제안을 되살리거나 원문을
+  자동 재전송하지 않으며, attempt가 이미 존재할 때의 exact reattach는 별도다.
 - 격리 loopback PostgreSQL 17: 14 store/DDL 시나리오 통과. 동시 1회 소비,
   audit 실패 rollback, draft 첨부/동일 text 변경, scope ABA, kill, 만료, 계정 cascade.
 - 별도 loopback DB에 267개 실제 migration 적용. 실제 draft consume → 원문

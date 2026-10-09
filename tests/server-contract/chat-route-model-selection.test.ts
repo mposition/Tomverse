@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
 
 // Server-side contract for MODEL_NOT_SELECTED on POST /api/chat.
 //
@@ -50,6 +51,9 @@ let activeSpies: Spies = {
   conversationReads: 0,
 };
 let mocksInstalled = false;
+let explicitRefinerAuthority = false;
+let consumedRefinerDecisions = 0;
+let refinerAdmissions = 0;
 
 async function loadRouteWithSpies(): Promise<{
   POST: (req: Request) => Promise<Response>;
@@ -72,6 +76,28 @@ async function loadRouteWithSpies(): Promise<{
 
   const original = (path: string) =>
     require(resolve(ROOT, path)) as Record<string, unknown>;
+
+  const realRefinerRelease = original("lib/promptRefinerChatExecutionRelease.ts");
+  mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+    promptRefinerChatExecutionRelease: () => explicitRefinerAuthority
+      ? { explicitEnabled: true, autoEnabled: false }
+      : (realRefinerRelease.promptRefinerChatExecutionRelease as () => unknown)(),
+  } });
+  mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
+    consumePromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
+      consumedRefinerDecisions += 1;
+      return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
+        ? { ...message, content: "Synthetic held execution prompt" } : message) };
+    },
+  } });
+  mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
+    authorizeChatRecoveryScope: async () => ({ ok: true, conversationId: CONVERSATION_ID }),
+  } });
+  const realApiSecurity = original("lib/apiSecurity.ts");
+  mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
+    ...realApiSecurity, consumeApiRateLimit: async () => { refinerAdmissions += 1; },
+  } });
 
   // --- session: an authenticated account, so the conversation branch runs.
   mock.module("next-auth/next", {
@@ -232,4 +258,30 @@ test("a Refiner decision on the default-off deployment refuses before model, cre
   assert.equal(spies.creditReservations, 0);
   assert.equal(spies.streamTextCalls, 0);
   assert.equal(spies.conversationReads, 0);
+});
+
+test("a downstream failure after Refiner consumption cannot replay the decision or reach a provider", async () => {
+  const { POST, spies } = await loadRouteWithSpies();
+  const request = () => new Request("http://127.0.0.1:3100/api/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: [{ id: "22222222-2222-4222-8222-222222222222", role: "user", content: "authored source" }],
+      modelId: STORED_SELECTED_MODELS[0], conversationId: CONVERSATION_ID,
+      assistantMessageId: "11111111-1111-4111-8111-111111111111", sourceUserMessageId: "22222222-2222-4222-8222-222222222222",
+      promptRefinerDecision: { suggestionId: "33333333-3333-4333-8333-333333333333",
+        scopeId: "44444444-4444-4444-8444-444444444444", epoch: 1, decision: "accepted" } }),
+  });
+  explicitRefinerAuthority = true; consumedRefinerDecisions = 0; refinerAdmissions = 0;
+  try {
+    // The existing access spy throws before any actual reservation or provider.
+    assert.equal((await POST(request())).status, 500);
+    assert.equal(consumedRefinerDecisions, 1);
+    assert.equal(spies.creditReservations, 1);
+    const repeated = await POST(request());
+    assert.equal(repeated.status, 409);
+    assert.equal((await repeated.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(consumedRefinerDecisions, 1);
+    assert.equal(spies.creditReservations, 1);
+    assert.equal(spies.streamTextCalls, 0);
+    assert.equal(refinerAdmissions, 2, "each POST probe is admitted once, including a refused replay");
+  } finally { explicitRefinerAuthority = false; }
 });
