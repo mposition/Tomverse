@@ -10,8 +10,8 @@ import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
 import type { AgentOfficeAmuxView, AgentOfficeReviewView, AgentOfficeSeatedView } from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
-  AGENT_OFFICE_WORKER_COLORS,
-  AGENT_OFFICE_WORKER_SKINS,
+  agentOfficeSeatedClothes,
+  type AgentOfficeSeatedRoom,
 } from "@/lib/agentOffice/roster";
 import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
 import {
@@ -40,6 +40,8 @@ type Props = {
   selectedId: string | null;
   follow: boolean;
   onSelect: (agent: Agent) => void;
+  /** A seated figure was clicked: its profile is read from the room's record by name. */
+  onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
 };
 
 type Cam = { x: number; y: number; scale: number };
@@ -109,38 +111,50 @@ const AgentLayer = memo(function AgentLayer({
 /**
  * Figures seated at a room's desks from a real record: the AMUX workers and
  * the reviewers. Not engine agents: they never walk, meet or take a demo task,
- * and what each says is its real state.
+ * and what each says is its real state. A click opens that record as a profile.
  */
 const SeatedLayer = memo(function SeatedLayer({
   room,
+  kind,
   people,
-  palette = 0,
+  onPick,
 }: {
   room: Room;
+  /** Which seated room: its clothes and whose profile a click opens. */
+  kind: AgentOfficeSeatedRoom;
   people: AgentOfficeSeatedView[];
-  /** Where in the palette this room's clothes start, so two rooms do not dress alike. */
-  palette?: number;
+  onPick: (kind: AgentOfficeSeatedRoom, name: string) => void;
 }) {
   return (
     <>
       {people.slice(0, room.desks.length).map((worker, i) => {
         const seat = room.desks[i].seat;
-        const [hair, shirt, accent] = AGENT_OFFICE_WORKER_COLORS[(i + palette) % AGENT_OFFICE_WORKER_COLORS.length];
+        const clothes = agentOfficeSeatedClothes(kind, i);
         return (
           <div
             key={worker.name}
             className={cx("ag", "f-up", "a-sit", "r-member", "wk", worker.dim && "wk-off")}
             title={worker.title}
+            role="button"
+            tabIndex={0}
+            aria-haspopup="dialog"
+            aria-label={worker.title}
+            onPointerUp={() => onPick(kind, worker.name)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onPick(kind, worker.name);
+            }}
             data-testid={`agent-office-${room.id}-person`}
             data-worker-state={worker.state}
             style={
               {
                 transform: `translate3d(${(seat.x + 0.5) * TILE}px, ${(seat.y + 0.9) * TILE}px, 0)`,
                 zIndex: 200 + seat.y,
-                "--cloth-hair": hair,
-                "--cloth-shirt": shirt,
-                "--cloth-accent": accent,
-                "--cloth-skin": AGENT_OFFICE_WORKER_SKINS[i % AGENT_OFFICE_WORKER_SKINS.length],
+                "--cloth-hair": clothes.hair,
+                "--cloth-shirt": clothes.shirt,
+                "--cloth-accent": clothes.accent,
+                "--cloth-skin": clothes.skin,
               } as CSSProperties
             }
           >
@@ -214,7 +228,16 @@ const PropLayer = memo(function PropLayer({
  * follows whatever is happening. Ported from the original AI OFFICE
  * OfficeWorld; a demo of the agent teams, not a reading of them.
  */
-export default function AgentOfficeWorld({ engine, amux, review, snap, selectedId, follow, onSelect }: Props) {
+export default function AgentOfficeWorld({
+  engine,
+  amux,
+  review,
+  snap,
+  selectedId,
+  follow,
+  onSelect,
+  onSelectSeated,
+}: Props) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -257,6 +280,12 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
       if (!dragRef.current.moved) onSelect(agent);
     },
     [onSelect]
+  );
+  const onPickSeated = useCallback(
+    (kind: AgentOfficeSeatedRoom, name: string) => {
+      if (!dragRef.current.moved) onSelectSeated(kind, name);
+    },
+    [onSelectSeated]
   );
 
   // Camera target
@@ -444,8 +473,8 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
           })}
 
           <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
-          <SeatedLayer room={AMUX_ROOM} people={amux.workers} />
-          <SeatedLayer room={REVIEW_ROOM} people={review.reviewers} palette={3} />
+          <SeatedLayer room={AMUX_ROOM} kind="amux" people={amux.workers} onPick={onPickSeated} />
+          <SeatedLayer room={REVIEW_ROOM} kind="review" people={review.reviewers} onPick={onPickSeated} />
           <AgentLayer
             agents={engine.agents}
             register={register}

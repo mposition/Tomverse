@@ -403,6 +403,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       ask: "🎤 Ask what they're doing",
       record: "Open its record →",
       noRecord: "This team has no record screen yet.",
+      seatedQuota: "Account quota",
+      seatedGone: "Not in the latest record any more.",
       policy: "Policy",
     },
     briefing: {
@@ -655,6 +657,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         more: (count: number) =>
           count === 1 ? "1 more reviewer not drawn here" : `${count} more reviewers not drawn here`,
         readAt: (time: string) => `read ${time}`,
+        facts: { vendor: "Vendor", state: "State", load: "Running / limit", lastReport: "Last report" },
       },
       amux: {
         states: {
@@ -680,6 +683,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         heartbeat: (time: string) => `last heartbeat ${time}`,
         noHeartbeat: "no heartbeat recorded",
         readAt: (time: string) => `read ${time}`,
+        facts: { provider: "Provider", state: "State", heartbeat: "Last heartbeat" },
       },
       log: (room: string, line: string) => `${room} (real record): ${line}`,
       console: (line: string) => `This room shows its real record. ${line}.`,
@@ -1207,6 +1211,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       ask: "🎤 지금 뭐 하는지 물어보기",
       record: "기록 화면 열기 →",
       noRecord: "이 팀의 기록 화면은 아직 없어요.",
+      seatedQuota: "계정 남은 사용량",
+      seatedGone: "최신 기록에는 더 이상 없어요.",
       policy: "정책 문서",
     },
     briefing: {
@@ -1453,6 +1459,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         load: (running: number, max: number) => `실행 ${running}/${max}`,
         more: (count: number) => `여기 그리지 못한 검토자 ${count}명`,
         readAt: (time: string) => `읽은 시각 ${time}`,
+        facts: { vendor: "공급사", state: "상태", load: "실행 중/상한", lastReport: "마지막 보고" },
       },
       amux: {
         states: {
@@ -1477,6 +1484,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         heartbeat: (time: string) => `마지막 heartbeat ${time}`,
         noHeartbeat: "heartbeat 기록 없음",
         readAt: (time: string) => `읽은 시각 ${time}`,
+        facts: { provider: "공급사", state: "상태", heartbeat: "마지막 heartbeat" },
       },
       log: (room: string, line: string) => `${room}(실제 기록): ${line}`,
       console: (line: string) => `이 방은 실제 기록을 보여 드려요. ${line}.`,
