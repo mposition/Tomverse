@@ -2118,8 +2118,13 @@ test("a room's name opens what its team does, written from its code and policy",
       assert.equal(en.teamInfo.teams[id][list].length, ko.teamInfo.teams[id][list].length, `${id}.${list}`);
     }
   }
-  // Every document the window names is in this repository.
-  for (const dept of AGENT_OFFICE_DEPTS) if (dept.policy) assert.ok(existsSync(dept.policy), dept.policy);
+  // A team with a record screen on this branch names a policy that is in this
+  // tree. A team not built here (no record screen) may name a policy that has
+  // not reached this branch yet: main lags develop by design.
+  for (const dept of AGENT_OFFICE_DEPTS) {
+    if (dept.policy) assert.match(dept.policy, /^docs\/policy\/[a-z0-9-]+\.md$/, dept.id);
+    if (dept.policy && dept.recordHref) assert.ok(existsSync(dept.policy), dept.policy);
+  }
   for (const path of Object.values(AGENT_OFFICE_ROOM_POLICIES)) assert.ok(existsSync(path), path);
   // The team lines no longer promise what the code does not do.
   assert.doesNotMatch(en.depts.support.task, /reply draft/);
