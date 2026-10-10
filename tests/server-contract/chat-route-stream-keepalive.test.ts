@@ -47,6 +47,8 @@ process.env.DIRECT_URL ||= process.env.DATABASE_URL;
 process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
 process.env.ANTHROPIC_API_KEY ||= "server-contract-test-key";
+// Always replace an inherited key so this no-provider fixture cannot make a paid call.
+process.env.OPENAI_API_KEY = "server-contract-test-key";
 
 const MODEL_ID = "claude-haiku-4-5";
 const USER_ID = "keepalive-user-1";
@@ -112,57 +114,82 @@ type Script = {
   emptyThenStall?: boolean;
   /** CHAT-LATENCY-01: the provider call itself throws, before any stream exists. */
   throwOnDispatch?: boolean;
+  /** One visible chunk, then an open provider stream for request-abort coverage. */
+  textThenStall?: boolean;
+  /** Abort after the provider stream exists but before the route resumes dispatch setup. */
+  abortAfterStreamCreation?: boolean;
 };
 
 let script: Script = { text: "The answer." };
 
 /** Set by the fake stream's own `cancel`, which is what the route must call. */
 let sourceCancelReason: unknown = null;
+let providerAbortReason: unknown = null;
+// Callback order only; signal state at reader cancellation is tracked separately below.
+const cancellationLifecycle: string[] = [];
+let providerCalls = 0;
+let providerAbortedBeforeReaderCancel = false;
+let abortRequestAfterStreamCreation = () => {};
 
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: () => {
+    streamText: (options: { abortSignal?: AbortSignal }) => {
+      providerCalls += 1;
       if (script.throwOnDispatch) {
         throw new Error("provider call refused before a stream existed");
       }
-      return {
-      textStream: new ReadableStream<string>({
-        start(controller) {
-          if (script.emptyThenStall) {
-            controller.enqueue("");
-            return; // and then nothing, ever
-          }
-          if (script.errorBeforeChunk) {
-            controller.error(new Error("provider stream broke before its first chunk"));
-            return;
-          }
-          if (script.text === null) return; // never resolves on its own
-          controller.enqueue(script.text);
-          controller.close();
-        },
-        cancel(reason) {
-          sourceCancelReason = reason ?? "cancelled";
-        },
-      }),
-      response: Promise.resolve({
-        id: "resp-keepalive-1",
-        modelId: MODEL_ID,
-        headers: {},
-        messages: [],
-      }),
-      usage: Promise.resolve({
-        inputTokens: 100,
-        outputTokens: 10,
-        cachedInputTokens: 0,
-        inputTokenDetails: { cacheReadTokens: 0 },
-        outputTokenDetails: { reasoningTokens: 0 },
-      }),
-      finishReason: Promise.resolve("stop"),
-      rawFinishReason: Promise.resolve("end_turn"),
-      content: Promise.resolve([]),
-      providerMetadata: Promise.resolve({}),
+      const observeProviderAbort = () => {
+        providerAbortReason = options.abortSignal?.reason ?? "aborted";
+        cancellationLifecycle.push("provider_abort");
       };
+      if (options.abortSignal?.aborted) observeProviderAbort();
+      else options.abortSignal?.addEventListener("abort", observeProviderAbort, {
+        once: true,
+      });
+      const result = {
+        textStream: new ReadableStream<string>({
+          start(controller) {
+            if (script.emptyThenStall) {
+              controller.enqueue("");
+              return; // and then nothing, ever
+            }
+            if (script.errorBeforeChunk) {
+              controller.error(new Error("provider stream broke before its first chunk"));
+              return;
+            }
+            if (script.text === null) return; // never resolves on its own
+            controller.enqueue(script.text);
+            if (!script.textThenStall) controller.close();
+          },
+          cancel(reason) {
+            providerAbortedBeforeReaderCancel = options.abortSignal?.aborted === true;
+            sourceCancelReason = reason ?? "cancelled";
+            cancellationLifecycle.push("reader_cancel");
+          },
+        }),
+        response: Promise.resolve({
+          id: "resp-keepalive-1",
+          modelId: MODEL_ID,
+          headers: {},
+          messages: [],
+        }),
+        usage: Promise.resolve({
+          inputTokens: 100,
+          outputTokens: 10,
+          cachedInputTokens: 0,
+          inputTokenDetails: { cacheReadTokens: 0 },
+          outputTokenDetails: { reasoningTokens: 0 },
+        }),
+        finishReason: Promise.resolve("stop"),
+        rawFinishReason: Promise.resolve("end_turn"),
+        content: Promise.resolve([]),
+        providerMetadata: Promise.resolve({}),
+      };
+      if (script.abortAfterStreamCreation) {
+        queueMicrotask(abortRequestAfterStreamCreation);
+      }
+      return result;
     },
   },
 });
@@ -398,6 +425,9 @@ const ask = async (next: Script) => {
   script = next;
   timingLines.length = 0;
   sourceCancelReason = null;
+  providerAbortReason = null;
+  cancellationLifecycle.length = 0;
+  providerAbortedBeforeReaderCancel = false;
   world.messages = [];
   ledger.settlements = [];
   ledger.releases = [];
@@ -598,6 +628,9 @@ test("a client that walks away stops the keepalive writer", async () => {
   // the request it belonged to and writes into a closed controller forever.
   script = { text: null };
   sourceCancelReason = null;
+  providerAbortReason = null;
+  cancellationLifecycle.length = 0;
+  providerAbortedBeforeReaderCancel = false;
   ledger.settlements = [];
   ledger.releases = [];
   timingLines.length = 0;
@@ -633,4 +666,138 @@ test("a client that walks away stops the keepalive writer", async () => {
   assert.equal(timingLines.length, 1);
   assert.equal(timingLines[0].outcome, "cancelled");
   assert.equal(timingLines[0].firstVisibleChunkSent, false);
+});
+
+test("request abort reaches the provider before cancelling its reader", async () => {
+  script = { text: "Partial answer.", textThenStall: true };
+  sourceCancelReason = null;
+  providerAbortReason = null;
+  cancellationLifecycle.length = 0;
+  providerAbortedBeforeReaderCancel = false;
+  world.messages = [];
+  ledger.settlements = [];
+  ledger.releases = [];
+  timingLines.length = 0;
+
+  const requestAbortController = new AbortController();
+  const { POST } = await loadRoute();
+  const response = await POST(
+    new Request("http://127.0.0.1:3100/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "분석해 줘" }],
+        modelId: MODEL_ID,
+        conversationId: CONVERSATION_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
+      }),
+      signal: requestAbortController.signal,
+    })
+  );
+  assert.equal(response.status, 200);
+
+  const reader = response.body!.getReader();
+  const first = await whileWaiting(() => reader.read());
+  assert.equal(new TextDecoder().decode(first.value), "Partial answer.");
+  requestAbortController.abort("client pressed stop");
+  await until("the aborted turn to settle", () => ledger.settlements.length > 0);
+
+  assert.equal(providerAbortReason, "client pressed stop");
+  assert.ok(sourceCancelReason);
+  assert.equal(providerAbortedBeforeReaderCancel, true);
+  // The composite signal state flips before reader.cancel, but its callback runs
+  // after the re-entrant request abort listener returns.
+  assert.deepEqual(cancellationLifecycle, ["reader_cancel", "provider_abort"]);
+  assert.equal(ledger.settlements.length, 1);
+  assert.equal(ledger.settlements[0].outcome, "cancelled");
+  assert.equal(ledger.releases.length, 1);
+  assert.equal(ledger.releases[0].reason, "stream_cancelled");
+  assert.deepEqual(world.messages, []);
+});
+
+test("request abort after provider stream creation closes before the first pull", async () => {
+  script = { text: null, abortAfterStreamCreation: true };
+  sourceCancelReason = null;
+  providerAbortReason = null;
+  cancellationLifecycle.length = 0;
+  providerAbortedBeforeReaderCancel = false;
+  world.messages = [];
+  ledger.settlements = [];
+  ledger.releases = [];
+  timingLines.length = 0;
+
+  const callsBefore = providerCalls;
+  const requestAbortController = new AbortController();
+  abortRequestAfterStreamCreation = () =>
+    requestAbortController.abort("client left after provider stream creation");
+  const { POST } = await loadRoute();
+  let response!: Response;
+  try {
+    response = await POST(
+      new Request("http://127.0.0.1:3100/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "분석해 줘" }],
+          modelId: MODEL_ID,
+          conversationId: CONVERSATION_ID,
+          assistantMessageId: ASSISTANT_MESSAGE_ID,
+        }),
+        signal: requestAbortController.signal,
+      })
+    );
+  } finally {
+    abortRequestAfterStreamCreation = () => {};
+  }
+  assert.equal(response.status, 200);
+
+  let bodyResult:
+    | { status: "pending" }
+    | { status: "resolved"; value: string }
+    | { status: "rejected"; reason: unknown } = { status: "pending" };
+  void response.text().then(
+    (value) => {
+      bodyResult = { status: "resolved", value };
+    },
+    (reason) => {
+      bodyResult = { status: "rejected", reason };
+    }
+  );
+  await until("the pre-pull aborted response to close", () => bodyResult.status !== "pending");
+  await until("the pre-pull aborted turn to settle", () => ledger.settlements.length > 0);
+
+  assert.deepEqual(bodyResult, { status: "resolved", value: "" });
+  assert.equal(providerCalls, callsBefore + 1);
+  assert.equal(providerAbortReason, "client left after provider stream creation");
+  assert.ok(sourceCancelReason);
+  assert.equal(providerAbortedBeforeReaderCancel, true);
+  assert.deepEqual(cancellationLifecycle, ["provider_abort", "reader_cancel"]);
+  assert.equal(ledger.settlements.length, 1);
+  assert.equal(ledger.settlements[0].outcome, "cancelled");
+  assert.equal(ledger.releases.length, 1);
+  assert.equal(ledger.releases[0].reason, "stream_cancelled");
+  assert.deepEqual(world.messages, []);
+});
+
+test("an already-aborted request never crosses the provider boundary", async () => {
+  const callsBefore = providerCalls;
+  const requestAbortController = new AbortController();
+  requestAbortController.abort("client left before dispatch");
+  const { POST } = await loadRoute();
+  const response = await POST(
+    new Request("http://127.0.0.1:3100/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: [{ role: "user", content: "분석해 줘" }],
+        modelId: MODEL_ID,
+        conversationId: CONVERSATION_ID,
+        assistantMessageId: ASSISTANT_MESSAGE_ID,
+      }),
+      signal: requestAbortController.signal,
+    })
+  );
+
+  assert.ok(response.status >= 400);
+  assert.equal(providerCalls, callsBefore);
 });
