@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { release, tryAcquire, writeJsonAtomic } from "./fsutil.mjs";
 import { reviewerEnv } from "./env.mjs";
+import { amuxQuota } from "./amux-usage.mjs";
 import { cursorQuota } from "./cursor-quota.mjs";
 import { copilotQuota } from "./copilot-quota.mjs";
 
@@ -222,8 +223,11 @@ function codexQuota(provider) {
   });
 }
 
-export async function probeProviderQuota(provider, stateDir, now = Date.now()) {
+export async function probeProviderQuota(provider, stateDir, now = Date.now(), { amuxUsageUrl } = {}) {
   if (provider.enabled !== true) return { state: "disabled" };
+  // AMUX's own reading of the shared account: one read a minute for every
+  // provider that names it (amux-usage.mjs), and no call to the vendor here.
+  if (provider.quotaProbe === "amux") return amuxQuota(provider, amuxUsageUrl, { now });
   if (provider.quotaProbe === "manual") {
     try {
       const snapshot = JSON.parse(readFileSync(join(stateDir, "quotas", `${provider.id}.json`), "utf8"));
@@ -246,7 +250,7 @@ export async function probeProviderQuota(provider, stateDir, now = Date.now()) {
 
 export async function probeProviderQuotas(config, now = Date.now()) {
   const rows = await Promise.all(config.providers.map(async (provider) =>
-    [provider.id, await probeProviderQuota(provider, config.stateDir, now)]));
+    [provider.id, await probeProviderQuota(provider, config.stateDir, now, { amuxUsageUrl: config.amuxUsageUrl })]));
   return Object.fromEntries(rows);
 }
 

@@ -17,6 +17,10 @@ const STREAM_LIMIT: usize = 256_000;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(12);
 const CURSOR_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
+/// Credit grants Cursor spends after the included pool (review-orchestrator's
+/// cursor-quota.mjs reads the same balance).
+const CURSOR_CREDIT_URL: &str =
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCreditGrantsBalance";
 
 fn unavailable(provider: &'static str, cause: &'static str) -> ProviderProbe {
     provider_probe_unavailable(
@@ -134,8 +138,36 @@ pub(super) async fn probe_cursor_usage() -> ProviderProbe {
         Ok(client) => client,
         Err(_) => return unavailable("cursor", "probe_failed"),
     };
+    // The two reads run together, each within PROBE_TIMEOUT, so the probe
+    // never takes longer than one read: a cache miss in usage.rs waits for
+    // every probe before it answers, and its readers stop at a deadline.
+    let (usage, balance) = tokio::join!(
+        cursor_dashboard_call(&client, CURSOR_URL, token),
+        cursor_dashboard_call(&client, CURSOR_CREDIT_URL, token),
+    );
+    let mut body = match usage {
+        Ok(body) => body,
+        Err(cause) => return unavailable("cursor", cause),
+    };
+    // A balance that cannot be read is simply absent: it never fails the
+    // usage reading, and an absent balance proves no credit either way.
+    if let Ok(balance) = balance {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("creditGrantsBalance".into(), balance);
+        }
+    }
+    ProviderProbe::Ok(body)
+}
+
+/// One Connect JSON call to Cursor's dashboard service with the CLI's own
+/// token: the body within BODY_LIMIT, or the cause it could not be read.
+async fn cursor_dashboard_call(
+    client: &reqwest::Client,
+    url: &str,
+    token: &str,
+) -> Result<Value, &'static str> {
     let mut response = match client
-        .post(CURSOR_URL)
+        .post(url)
         .bearer_auth(token)
         .header("Connect-Protocol-Version", "1")
         .json(&json!({}))
@@ -143,10 +175,8 @@ pub(super) async fn probe_cursor_usage() -> ProviderProbe {
         .await
     {
         Ok(response) if response.status().is_success() => response,
-        Ok(response) if response.status().as_u16() == 401 => {
-            return unavailable("cursor", "credential_unavailable")
-        }
-        Ok(_) | Err(_) => return unavailable("cursor", "probe_failed"),
+        Ok(response) if response.status().as_u16() == 401 => return Err("credential_unavailable"),
+        Ok(_) | Err(_) => return Err("probe_failed"),
     };
     let mut bytes = Vec::new();
     loop {
@@ -155,13 +185,26 @@ pub(super) async fn probe_cursor_usage() -> ProviderProbe {
                 bytes.extend_from_slice(&chunk)
             }
             Ok(None) => break,
-            _ => return unavailable("cursor", "unexpected_shape"),
+            _ => return Err("unexpected_shape"),
         }
     }
-    match serde_json::from_slice(&bytes) {
-        Ok(body) => ProviderProbe::Ok(body),
-        Err(_) => unavailable("cursor", "unexpected_shape"),
-    }
+    serde_json::from_slice(&bytes).map_err(|_| "unexpected_shape")
+}
+
+/// The credit balance in USD from GetCreditGrantsBalance: `creditBalanceCents`
+/// is an int64, sent as a decimal string. No grants at all is zero; anything
+/// unreadable is unknown (None), never zero.
+fn cursor_credit_usd(body: &Value) -> Option<f64> {
+    let balance = body.get("creditGrantsBalance")?;
+    let cents = match balance.get("creditBalanceCents") {
+        None | Some(Value::Null) => {
+            return (balance.get("hasCreditGrants") == Some(&json!(false))).then_some(0.0)
+        }
+        Some(Value::String(text)) => text.trim().parse::<i64>().ok()?,
+        Some(Value::Number(number)) => number.as_i64()?,
+        Some(_) => return None,
+    };
+    Some(cents.max(0) as f64 / 100.0)
 }
 
 fn copilot_probe_process(token: Option<&str>) -> tokio::process::Command {
@@ -422,9 +465,12 @@ pub(super) fn shape_cursor_provider(probe: ProviderProbe) -> Value {
     }
     // Monetary amounts are cents, not an invented percentage. Routing consumes
     // only measured percentages (or a proven zero); on-demand spending is not capacity.
+    // `credit_usd` is reported beside the windows and changes none of them:
+    // whether credit makes an exhausted pool usable is each reader's rule.
     json!({"id":"cursor","label":"Cursor","available":true,"measured":true,"metered":true,
         "n_considered":windows.len(),"source":"Cursor CLI current-period usage",
-        "remaining_usd":remaining.map(|n| n.max(0.0)/100.0),"windows":windows})
+        "remaining_usd":remaining.map(|n| n.max(0.0)/100.0),
+        "credit_usd":cursor_credit_usd(&body),"windows":windows})
 }
 
 pub(super) fn shape_copilot_provider(probe: ProviderProbe) -> Value {
@@ -522,6 +568,29 @@ mod tests {
             0.0
         );
         assert_eq!(cursor(json!({"remaining":400}))["windows"], json!([]));
+    }
+
+    #[test]
+    fn cursor_credit_is_reported_beside_the_windows_and_changes_none_of_them() {
+        let with = |balance: Value| {
+            shape_cursor_provider(ProviderProbe::Ok(json!({
+                "planUsage":{"remaining":0,"totalPercentUsed":100},
+                "creditGrantsBalance":balance,
+            })))
+        };
+        let row = with(json!({"hasCreditGrants":true,"creditBalanceCents":"10000","totalCents":"10000"}));
+        assert_eq!(row["credit_usd"], 100.0);
+        assert_eq!(row["windows"][0]["remaining_percent"], 0.0);
+        assert_eq!(with(json!({"creditBalanceCents":1234}))["credit_usd"], 12.34);
+        assert_eq!(with(json!({"creditBalanceCents":"-5"}))["credit_usd"], 0.0);
+        assert_eq!(with(json!({"hasCreditGrants":false}))["credit_usd"], 0.0);
+        for unknown in [json!({}), json!({"creditBalanceCents":"ten"}), json!({"creditBalanceCents":1.5}), json!(null)] {
+            assert_eq!(with(unknown)["credit_usd"], Value::Null);
+        }
+        // No balance read at all: unknown, and the windows are as before.
+        let none = cursor(json!({"remaining":0,"totalPercentUsed":100}));
+        assert_eq!(none["credit_usd"], Value::Null);
+        assert_eq!(none["windows"][0]["remaining_percent"], 0.0);
     }
 
     #[test]

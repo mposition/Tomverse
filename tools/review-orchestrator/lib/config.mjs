@@ -1,3 +1,4 @@
+import { amuxUsageEndpoint } from "./amux-usage.mjs";
 import { readJson } from "./fsutil.mjs";
 import { isName } from "./assign.mjs";
 import { STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
@@ -92,6 +93,9 @@ export function validateConfig(raw) {
     if (problem) errors.push(`statusSnapshot: ${problem}`);
     else config.statusSnapshot = { dir: config.statusSnapshot.dir };
   }
+  if (config.amuxUsageUrl !== undefined && !amuxUsageEndpoint(config.amuxUsageUrl)) {
+    errors.push("amuxUsageUrl: an http(s) URL on a loopback host");
+  }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();
   for (const provider of config.providers ?? []) {
@@ -113,8 +117,14 @@ export function validateConfig(raw) {
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
     }
-    if (provider.quotaProbe !== undefined && !["claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
-      errors.push(`${label}: quotaProbe must be claude, codex, cursor, copilot or manual`);
+    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot or manual`);
+    }
+    if (provider.quotaProbe === "amux" && !amuxUsageEndpoint(config.amuxUsageUrl)) {
+      errors.push(`${label}: quotaProbe amux needs amuxUsageUrl, an http(s) URL on this machine`);
+    }
+    if (provider.amuxProvider !== undefined && (provider.quotaProbe !== "amux" || !isName(provider.amuxProvider))) {
+      errors.push(`${label}: amuxProvider names an AMUX usage provider, with quotaProbe amux`);
     }
     if (provider.quotaKey !== undefined && (provider.quotaProbe !== "copilot" ||
         typeof provider.quotaKey !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(provider.quotaKey))) {

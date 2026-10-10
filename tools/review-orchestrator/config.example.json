@@ -19,11 +19,12 @@
     "docs/policy/**",
     "docs/ui-contracts/**"
   ],
+  "amuxUsageUrl": "https://127.0.0.1:8824/api/usage",
   "providers": [
     {
       "id": "claude",
       "vendor": "anthropic",
-      "quotaProbe": "claude",
+      "quotaProbe": "amux",
       "enabled": true,
       "maxConcurrent": 2,
       "command": "claude",
@@ -38,7 +39,7 @@
     {
       "id": "codex",
       "vendor": "openai",
-      "quotaProbe": "codex",
+      "quotaProbe": "amux",
       "enabled": true,
       "maxConcurrent": 2,
       "command": "codex",
@@ -75,8 +76,7 @@
     {
       "id": "copilot",
       "vendor": "moonshot",
-      "quotaProbe": "copilot",
-      "quotaKey": "premium_interactions",
+      "quotaProbe": "amux",
       "enabled": true,
       "priority": 1,
       "maxConcurrent": 2,

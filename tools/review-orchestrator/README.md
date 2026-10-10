@@ -157,6 +157,31 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 
 ### 계정 잔액 확인과 배정 재개
 
+**AMUX와 같은 구독 계정을 쓰면 `quotaProbe: "amux"`를 씁니다.** AMUX는 같은 기계에서
+모든 구독 계정의 사용량을 이미 속도를 지켜 조회·캐시하고 `GET /api/usage`로 내놓습니다
+(`crates/amux-server/src/api/usage.rs`). 검토 서버가 같은 계정을 공급사에 따로 물으면
+조회자가 둘이 되고, Claude 사용량 API는 그때 HTTP 429로 막힙니다. `amux`는 그 응답을
+읽기만 합니다.
+
+- 설정 최상위의 `amuxUsageUrl`(예: `https://127.0.0.1:8824/api/usage`)을 읽습니다.
+  **이 기계의 loopback 주소만** 받고, AMUX의 자체 서명 인증서는 loopback에서만 검증 없이
+  받습니다. 다른 주소는 설정 오류입니다.
+- 이 URL을 쓰는 모든 provider가 **1분에 한 번 읽은 한 응답**을 함께 씁니다(AMUX 자체 캐시와
+  같은 주기). 동시에 묻는 provider는 진행 중인 한 요청을 함께 기다립니다.
+- provider id(다르면 `amuxProvider`)와 같은 AMUX provider의 창들 중 **가장 적게 남은
+  비율**이 잔액입니다. Claude는 5시간·주간·모델별 주간 창, Codex는 7일 창, Copilot은
+  account entitlement 창입니다. 0이면 배정을 보류합니다.
+- AMUX가 측정하지 않았거나(`measured`가 아님), 사용할 수 없거나, stale이거나, 읽을 수 없는
+  창이 하나라도 있거나, 응답이 없으면 `unknown`으로 보류합니다.
+- AMUX가 공급사 항목에 `credit_usd`를 보고하면(Cursor의 크레딧 grant 잔액) Cursor probe와 같은
+  규칙을 씁니다: 포함 사용량이 소진돼도 크레딧이 남아 있으면 배정하고, 크레딧 0이면 보류하며,
+  크레딧을 못 읽었으면 소진으로 봅니다. `status`와 Agent office에 크레딧 금액도 함께 보입니다.
+- **Cursor는 AMUX가 `credit_usd`를 보고하는 빌드로 바뀐 뒤에 `amux`로 옮깁니다.** 그 전 빌드는
+  크레딧을 읽지 않아, 포함 사용량이 소진되면 크레딧이 남아도 소진으로 보입니다. 그때까지는
+  `quotaProbe: "cursor"`에 둡니다.
+
+아래의 공급사별 probe는 AMUX가 없는 기계나 AMUX가 보지 않는 계정을 위한 것입니다.
+
 `quotaProbe: "claude"`는 reviewer가 쓰는 OAuth 토큰으로 Claude 사용량의 5시간·7일
 창을 조회합니다. `CLAUDE_CODE_OAUTH_TOKEN`을 `passEnv`로 전달하는 설정이면 그 토큰을
 우선하고, 그렇지 않으면 `~review/.claude/.credentials.json`을 읽습니다.
