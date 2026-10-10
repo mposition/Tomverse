@@ -103,7 +103,7 @@ const LEGACY_ROUTES = [
     heading: "Work queue",
   },
   // The eight owner-only AMUX screens, now sections of the AMUX group.
-  { from: "/admin/amux-intake", to: "/admin/amux-backlog?tab=intake", heading: "Backlog" },
+  { from: "/admin/amux-intake", to: "/admin/amux-backlog?tab=ideas", heading: "Backlog" },
   {
     from: "/admin/amux-board-import",
     to: "/admin/amux-backlog?tab=import",
@@ -653,6 +653,24 @@ test.describe("admin console shell", () => {
 });
 
 test.describe("the AMUX group by role", () => {
+  for (const url of ["/admin/amux-backlog", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a"]) {
+    test(`Backlog replaces legacy JSON intake with Ideas at ${url}`, async ({ page, signInAs }) => {
+      await signInAs("owner");
+      await page.goto(url);
+      await expect(consoleHeading(page)).toHaveText("Backlog");
+      const strip = page.getByRole("navigation", { name: "Backlog sections" });
+      await expect(strip.getByRole("link")).toHaveCount(4);
+      await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
+      await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
+      await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();
+      await expect(page.getByTestId("amux-intake-panel")).toHaveCount(0);
+      await expect(page.getByTestId("amux-local-intake-panel")).toHaveCount(0);
+      if (url.includes("tab=intake")) {
+        await expect(page).toHaveURL(/\/admin\/amux-backlog\?tab=ideas&sourceKey=legacy-a$/);
+      }
+    });
+  }
+
   test("another role sees Execution alone, opening on Assignment", async ({
     page,
     signInAs,
@@ -728,6 +746,8 @@ test.describe("the AMUX group by role", () => {
 
   for (const url of [
     "/admin/amux-backlog",
+    "/admin/amux-backlog?tab=intake",
+    "/admin/amux-intake",
     "/admin/amux-promotion?tab=promotion",
     "/admin/amux-execution?tab=cards",
     // A retired address redirects first and is refused where it lands.

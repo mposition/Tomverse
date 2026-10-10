@@ -169,7 +169,7 @@ test("an open switch is drawn for attention and a closed one is not", () => {
 
 test("the pages ask the switches rather than writing the state", () => {
   for (const [segment, tabs] of [
-    ["amux-backlog", ["intake", "import", "reconciliation", "metadata"]],
+    ["amux-backlog", ["import", "reconciliation", "metadata"]],
     ["amux-promotion", ["recommendation", "promotion", "auto-promotion"]],
   ]) {
     const page = read(`app/(site)/(application)/admin/${segment}/page.tsx`);
