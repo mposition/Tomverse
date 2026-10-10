@@ -70,6 +70,7 @@ process.env.DATABASE_URL ||=
 process.env.DIRECT_URL ||= process.env.DATABASE_URL;
 process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
+process.env.OPENAI_API_KEY = "server-contract-test-key";
 process.env.ANTHROPIC_API_KEY ||= "server-contract-test-key";
 
 // Lock 1 of the drill override: not production. `resolveDeploymentEnvironment`
@@ -195,9 +196,14 @@ type Attempt = {
   modelId: string | null;
   /** Whether its stream was cancelled, and with what. */
   cancelledWith: unknown;
+  /** What reached the provider-facing abort signal. */
+  providerAbortedWith: unknown;
+  /** The provider signal state at the exact reader-cancel boundary. */
+  providerAbortedBeforeReaderCancel: boolean;
 };
 
 const attempts: Attempt[] = [];
+const attemptLifecycle: string[] = [];
 
 /**
  * What the second attempt does.
@@ -206,8 +212,14 @@ const attempts: Attempt[] = [];
  * never writes, which is how the absolute first-token deadline is observed
  * spanning the swap.
  */
-let fallbackBehaviour: "answers" | "silent" = "answers";
+let fallbackBehaviour:
+  | "answers"
+  | "silent"
+  | "partial"
+  | "completion_wait" = "answers";
 let injectPrimaryFault = true;
+let completionUsageRead = false;
+let releasePendingCompletionUsage: () => void = () => {};
 
 mock.module("ai", {
   namedExports: {
@@ -217,6 +229,8 @@ mock.module("ai", {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
         cancelledWith: null,
+        providerAbortedWith: null,
+        providerAbortedBeforeReaderCancel: false,
       };
       attempts.push(attempt);
       const index = attempts.length - 1;
@@ -224,16 +238,41 @@ mock.module("ai", {
       // route wraps the reader in `faultedReader`, which is the drill's own
       // mechanism rather than a shape invented here.
       const silent = index > 0 && fallbackBehaviour === "silent";
+      const partial = index > 0 && fallbackBehaviour === "partial";
+      const completionWait =
+        index > 0 && fallbackBehaviour === "completion_wait";
+      const abortSignal = options.abortSignal as AbortSignal | undefined;
+      const observeProviderAbort = () => {
+        attempt.providerAbortedWith = abortSignal?.reason ?? "aborted";
+        attemptLifecycle.push(`${index}:provider_abort`);
+      };
+      if (abortSignal?.aborted) observeProviderAbort();
+      else abortSignal?.addEventListener("abort", observeProviderAbort, { once: true });
+
+      const usage = {
+        inputTokens: 100,
+        outputTokens: 20,
+        cachedInputTokens: 0,
+        inputTokenDetails: { cacheReadTokens: 0 },
+        outputTokenDetails: { reasoningTokens: 0 },
+      };
+      const usagePromise = completionWait
+        ? new Promise<typeof usage>((resolve) => {
+            releasePendingCompletionUsage = () => resolve(usage);
+          })
+        : Promise.resolve(usage);
 
       return {
         textStream: new ReadableStream<string>({
           start(controller) {
             if ((index === 0 && injectPrimaryFault) || silent) return;
             controller.enqueue(ANSWER);
-            controller.close();
+            if (!partial) controller.close();
           },
           cancel(reason) {
+            attempt.providerAbortedBeforeReaderCancel = abortSignal?.aborted === true;
             attempt.cancelledWith = reason ?? "cancelled";
+            attemptLifecycle.push(`${index}:reader_cancel`);
           },
         }),
         response: Promise.resolve({
@@ -242,13 +281,10 @@ mock.module("ai", {
           headers: {},
           messages: [],
         }),
-        usage: Promise.resolve({
-          inputTokens: 100,
-          outputTokens: 20,
-          cachedInputTokens: 0,
-          inputTokenDetails: { cacheReadTokens: 0 },
-          outputTokenDetails: { reasoningTokens: 0 },
-        }),
+        get usage() {
+          if (completionWait) completionUsageRead = true;
+          return usagePromise;
+        },
         finishReason: Promise.resolve("stop"),
         rawFinishReason: Promise.resolve("end_turn"),
         content: Promise.resolve([]),
@@ -719,8 +755,16 @@ const whileWaiting = async <T,>(read: () => Promise<T>): Promise<T> => {
   }
 };
 
+const until = async (what: string, ready: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 10_000;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((settle) => setTimeout(settle, 10));
+  }
+};
+
 const ask = async (
-  behaviour: "answers" | "silent",
+  behaviour: "answers" | "silent" | "partial" | "completion_wait",
   claimMode: "claimed" | "reattach" | "reattach-completed" | "conflict" = "claimed",
   expectedStatus = 200,
   withContextBundle = false,
@@ -728,12 +772,16 @@ const ask = async (
     { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
   ],
   includeSourceUserMessageId = true,
-  withInjectedPrimaryFault = true
+  withInjectedPrimaryFault = true,
+  abortFallbackAt: "none" | "after_token" | "during_completion" = "none"
 ) => {
   fallbackBehaviour = behaviour;
   injectPrimaryFault = withInjectedPrimaryFault;
   durableClaimMode = claimMode;
   attempts.length = 0;
+  attemptLifecycle.length = 0;
+  completionUsageRead = false;
+  releasePendingCompletionUsage = () => {};
   dispatchCloses.length = 0;
   timingLines.length = 0;
   world.messages = [];
@@ -751,6 +799,7 @@ const ask = async (
   messageFindFirstArgs = [];
 
   const { POST } = await loadRoute();
+  const requestAbortController = new AbortController();
   const response = await POST(
     new Request("http://127.0.0.1:3100/api/chat", {
       method: "POST",
@@ -772,6 +821,7 @@ const ask = async (
           : {}),
         ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
       }),
+      signal: requestAbortController.signal,
     })
   );
   if (response.status !== expectedStatus) {
@@ -786,12 +836,44 @@ const ask = async (
     asserting about the record the route wrote rather than about how the
     stream ended.
   */
-  const read = await whileWaiting(() =>
-    response.text().then(
-      (body) => ({ body, streamError: null as unknown }),
-      (streamError: unknown) => ({ body: "", streamError })
-    )
-  );
+  const read =
+    abortFallbackAt !== "none"
+      ? await whileWaiting(async () => {
+          const reader = response.body!.getReader();
+          const decoder = new TextDecoder();
+          let body = "";
+          while (!body.includes(ANSWER)) {
+            const { done, value } = await reader.read();
+            if (done) {
+              throw new Error("fallback stream ended before its partial token");
+            }
+            body += decoder.decode(value, { stream: true });
+          }
+          const completionRead =
+            abortFallbackAt === "during_completion" ? reader.read() : null;
+          if (completionRead) {
+            await until("fallback completion metadata wait", () => completionUsageRead);
+          }
+          requestAbortController.abort("client stopped the fallback");
+          releasePendingCompletionUsage();
+          let streamError: unknown = null;
+          try {
+            if (completionRead) await completionRead;
+            while (!(await reader.read()).done) {}
+          } catch (error) {
+            streamError = error;
+          }
+          return { body, streamError };
+        })
+      : await whileWaiting(() =>
+          response.text().then(
+            (body) => ({ body, streamError: null as unknown }),
+            (streamError: unknown) => ({ body: "", streamError })
+          )
+        );
+  if (abortFallbackAt !== "none") {
+    await until("the aborted fallback to settle", () => ledger.settlements.length > 0);
+  }
   return { response, ...read };
 };
 
@@ -829,6 +911,61 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   // The primary's stream is cancelled at the swap, so it is not left open and
   // billing after another model took the turn over.
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
+  assert.ok(attempts[0].providerAbortedWith, "the primary provider was not aborted");
+  assert.equal(attempts[1].providerAbortedWith, null);
+  assert.deepEqual(attemptLifecycle.slice(0, 2), [
+    "0:provider_abort",
+    "0:reader_cancel",
+  ]);
+});
+
+test("request abort during fallback terminalizes the partial turn once", async () => {
+  await ask(
+    "partial",
+    "claimed",
+    200,
+    false,
+    [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }],
+    true,
+    true,
+    "after_token"
+  );
+
+  assert.equal(attempts.length, 2);
+  assert.ok(attempts[0].providerAbortedWith);
+  assert.ok(attempts[1].providerAbortedWith);
+  assert.ok(attempts[1].cancelledWith);
+  assert.equal(attempts[1].providerAbortedBeforeReaderCancel, true);
+  assert.equal(ledger.settlements.length, 1);
+  assert.equal(ledger.settlements[0].outcome, "cancelled");
+  assert.equal(ledger.releases.length, 1);
+  assert.deepEqual(world.messages, []);
+  assert.equal(world.terminals.length, 1);
+  assert.equal(world.terminals[0]?.status, "cancelled");
+  assert.equal(world.terminals[0]?.finishReason, "cancelled");
+  assert.equal(world.terminals[0]?.finalContent, ANSWER);
+});
+
+test("request abort wins while completed provider metadata is still pending", async () => {
+  await ask(
+    "completion_wait",
+    "claimed",
+    200,
+    false,
+    [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }],
+    true,
+    true,
+    "during_completion"
+  );
+
+  assert.equal(completionUsageRead, true);
+  assert.equal(ledger.settlements.length, 1);
+  assert.equal(ledger.settlements[0].outcome, "cancelled");
+  assert.equal(ledger.releases.length, 1);
+  assert.deepEqual(world.messages, []);
+  assert.equal(world.terminals.length, 1);
+  assert.equal(world.terminals[0]?.status, "cancelled");
+  assert.equal(world.terminals[0]?.finalContent, ANSWER);
 });
 
 test("the first visible token belongs to the attempt that answered, not the one that died", async () => {
