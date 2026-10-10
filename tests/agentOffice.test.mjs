@@ -1999,6 +1999,8 @@ test("a reviewer on credit says so, with the credit beside the spent pool", () =
   assert.equal(view({ state: "available", remaining: 4, unit: "usd" }).label, "사용 가능");
   // Judged on what the card shows: $0.004 reads "$0.00 left", so it is low, not plenty.
   assert.equal(view({ state: "available", remaining: 0.004, unit: "usd" }).label, "얼마 안 남음");
+  assert.equal(view({ state: "available", remaining: 0.4, unit: "credits" }).label, "얼마 안 남음", "shown as 0 credits");
+  assert.equal(view({ state: "available", remaining: 0.6, unit: "credits" }).label, "사용 가능", "shown as 1 credit");
   // Credit with no pool amount stands on its own, without a dangling separator.
   assert.equal(view({ state: "available", remaining: null, unit: null, credit: 50 }).amount, "크레딧 $50.00");
   assert.equal(adminAgentOfficeMessages.en.real.quota.creditOnly("50.00"), "$50.00 credit");
