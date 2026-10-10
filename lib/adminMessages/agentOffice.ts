@@ -627,8 +627,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       quota: {
         windowTitle: "🔋 cli.quota — reviewer CLI quota",
-        states: { available: "Available", low: "Running low", exhausted: "Used up", unknown: "Cannot tell", disabled: "Off" },
+        states: { available: "Available", low: "Running low", onCredit: "On credit", exhausted: "Used up", unknown: "Cannot tell", disabled: "Off" },
         percent: (value: string) => `${value}% left`,
+        credit: (value: string) => ` · $${value} credit`,
         credits: (value: string) => `${value} credits left`,
         usd: (value: string) => `$${value} left`,
         noAmount: "—",
@@ -1424,8 +1425,9 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       quota: {
         windowTitle: "🔋 cli.quota — 검토 CLI 사용량",
-        states: { available: "사용 가능", low: "얼마 안 남음", exhausted: "소진", unknown: "확인 불가", disabled: "꺼짐" },
+        states: { available: "사용 가능", low: "얼마 안 남음", onCredit: "크레딧 사용", exhausted: "소진", unknown: "확인 불가", disabled: "꺼짐" },
         percent: (value: string) => `${value}% 남음`,
+        credit: (value: string) => ` · 크레딧 $${value}`,
         credits: (value: string) => `${value} credits 남음`,
         usd: (value: string) => `$${value} 남음`,
         noAmount: "—",
