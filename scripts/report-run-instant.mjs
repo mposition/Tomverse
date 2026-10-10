@@ -1,12 +1,19 @@
 // The instant a read-only invariant report was taken, for the release record.
 //
-// Why this exists: on 2026-10-09 the §7.7 and §7.7a rows of
-// `.github/audits/release-2026-10-09__570f9e1b.md` were closed with one piece
-// of evidence missing -- *when* the reading happened. The output carried no
-// timestamp, so the record could name only the date, and the only other
-// instant on the page was the deployment's. Borrowing that one would have
-// stated a time nobody observed, so the row says the run time was not
+// Why this exists: on 2026-10-09 the constraint-investigation rows (7.7 and
+// 7.7a) of `.github/audits/release-2026-10-09__570f9e1b.md` were closed with
+// one piece of evidence missing -- *when* the reading happened. The output
+// carried no timestamp, so the record could name only the date, and the only
+// other instant on the page was the deployment's. Borrowing that one would
+// have stated a time nobody observed, so the row says the run time was not
 // captured. This module is what makes the next reading carry its own.
+//
+// The section symbol is left off those two row numbers deliberately:
+// check:policy-section-references resolves a cited section against
+// docs/policy/*.md, and a citation pointing outside that set needs an entry in
+// its NON_POLICY_REFERENCES list. The row lives in a release record, its path
+// is written right beside the numbers, and an exception whose only reason was
+// the symbol would not be a reason.
 //
 // Two decisions are deliberate.
 //
