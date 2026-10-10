@@ -12,7 +12,8 @@ const UNKNOWN = { state: "unknown" };
 export const AMUX_USAGE_CACHE_MS = 60_000;
 export const AMUX_USAGE_TIMEOUT_MS = 12_000;
 export const AMUX_USAGE_MAX_BYTES = 1024 * 1024;
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+// URL.hostname keeps IPv6 brackets, so "[::1]" is the loopback's spelling here.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 /**
  * The usage URL, if it names AMUX on this machine: http or https on a
@@ -37,6 +38,10 @@ export function amuxUsageEndpoint(value) {
  * One provider's quota from AMUX's usage body: the smallest remaining share of
  * its windows, as AMUX measured them. Anything AMUX did not measure, marks
  * stale, or does not list is unknown -- assignment needs evidence.
+ *
+ * Where AMUX reports credit beside the windows (Cursor's `credit_usd`, from
+ * its credit grants), the rule is cursor-quota.mjs's: a spent pool stays
+ * usable while credit is left, and credit that was not read proves nothing.
  */
 export function amuxQuotaFromUsage(body, providerId) {
   if (!body || typeof body !== "object" || body.available !== true || body.stale === true) return UNKNOWN;
@@ -49,20 +54,33 @@ export function amuxQuotaFromUsage(body, providerId) {
     .filter((value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100);
   if (remaining.length === 0 || remaining.length !== windows.length) return UNKNOWN;
   const remainingPercent = Math.min(...remaining);
-  return { state: remainingPercent === 0 ? "exhausted" : "available", remainingPercent };
+  const credit = typeof entry.credit_usd === "number" && Number.isFinite(entry.credit_usd) && entry.credit_usd >= 0
+    ? entry.credit_usd : null;
+  const state = remainingPercent > 0 || (credit !== null && credit > 0) ? "available" : "exhausted";
+  return credit === null ? { state, remainingPercent } : { state, remainingPercent, creditUsd: credit };
 }
 
-/** GET the usage body: JSON within the size limit, or null for any failure. */
+/**
+ * GET the usage body: JSON within the size limit and the time limit, or null
+ * for any failure. The limit is a deadline for the whole read, not the
+ * socket's idle timeout: every provider's probe waits on this one read, so a
+ * response that trickles in must not hold them past it.
+ */
 export function readAmuxUsage(url, { request, timeoutMs = AMUX_USAGE_TIMEOUT_MS } = {}) {
   const send = request ?? (url.protocol === "https:" ? https.request : http.request);
   return new Promise((resolve) => {
     let settled = false;
+    let req;
+    const deadline = setTimeout(() => {
+      req?.destroy();
+      finish(null);
+    }, timeoutMs);
     const finish = (value) => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
       resolve(value);
     };
-    let req;
     try {
       req = send(url, {
         method: "GET",

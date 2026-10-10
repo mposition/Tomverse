@@ -173,9 +173,12 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
   account entitlement 창입니다. 0이면 배정을 보류합니다.
 - AMUX가 측정하지 않았거나(`measured`가 아님), 사용할 수 없거나, stale이거나, 읽을 수 없는
   창이 하나라도 있거나, 응답이 없으면 `unknown`으로 보류합니다.
-- **Cursor는 아직 `quotaProbe: "cursor"`에 둡니다.** AMUX는 Cursor 크레딧 잔액을 아직 읽지
-  않아, 포함 사용량이 소진되면 크레딧이 남아도 소진으로 보입니다. AMUX가 크레딧을 보고하면
-  옮깁니다.
+- AMUX가 공급사 항목에 `credit_usd`를 보고하면(Cursor의 크레딧 grant 잔액) Cursor probe와 같은
+  규칙을 씁니다: 포함 사용량이 소진돼도 크레딧이 남아 있으면 배정하고, 크레딧 0이면 보류하며,
+  크레딧을 못 읽었으면 소진으로 봅니다. `status`와 Agent office에 크레딧 금액도 함께 보입니다.
+- **Cursor는 AMUX가 `credit_usd`를 보고하는 빌드로 바뀐 뒤에 `amux`로 옮깁니다.** 그 전 빌드는
+  크레딧을 읽지 않아, 포함 사용량이 소진되면 크레딧이 남아도 소진으로 보입니다. 그때까지는
+  `quotaProbe: "cursor"`에 둡니다.
 
 아래의 공급사별 probe는 AMUX가 없는 기계나 AMUX가 보지 않는 계정을 위한 것입니다.
 

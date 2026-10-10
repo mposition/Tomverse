@@ -62,29 +62,49 @@ test("a provider's quota is the smallest share AMUX measured across its windows"
   const partial = usage();
   partial.providers[1] = { ...partial.providers[1], windows: [...partial.providers[1].windows, { kind: "secondary", remaining_percent: null }] };
   assert.deepEqual(amuxQuotaFromUsage(partial, "codex"), { state: "unknown" });
+  // Cursor's credit, once AMUX reports it: a spent pool stays usable while
+  // credit is left, as with cursor-quota.mjs; no credit pauses it.
+  const credit = (credit_usd) => {
+    const body = usage();
+    body.providers[3] = { ...body.providers[3], credit_usd };
+    return amuxQuotaFromUsage(body, "cursor");
+  };
+  assert.deepEqual(credit(100), { state: "available", remainingPercent: 0, creditUsd: 100 });
+  assert.deepEqual(credit(0), { state: "exhausted", remainingPercent: 0, creditUsd: 0 });
+  assert.deepEqual(credit(null), { state: "exhausted", remainingPercent: 0 });
+  assert.deepEqual(credit(-1), { state: "exhausted", remainingPercent: 0 });
+  assert.deepEqual(credit("100"), { state: "exhausted", remainingPercent: 0 });
+  const roomy = usage();
+  roomy.providers[1] = { ...roomy.providers[1], credit_usd: 12.5 };
+  assert.deepEqual(amuxQuotaFromUsage(roomy, "codex"), { state: "available", remainingPercent: 46, creditUsd: 12.5 });
   const odd = usage();
   odd.providers[2] = { ...odd.providers[2], windows: [{ remaining_percent: 140 }] };
   assert.deepEqual(amuxQuotaFromUsage(odd, "copilot"), { state: "unknown" });
 });
 
-test("only AMUX on this machine is read, and its self-signed certificate only there", () => {
+test("only AMUX on this machine is read, and its self-signed certificate only there", async () => {
   assert.equal(amuxUsageEndpoint("https://127.0.0.1:8824/api/usage")?.href, "https://127.0.0.1:8824/api/usage");
   assert.ok(amuxUsageEndpoint("http://localhost:8824/api/usage"));
   assert.ok(amuxUsageEndpoint("https://[::1]:8824/api/usage"));
+  assert.equal(new URL("https://[::1]:8824/").hostname, "[::1]", "the loopback set matches URL.hostname's spelling");
   for (const bad of ["https://amux.example.com/api/usage", "https://192.168.0.7:8824/api/usage", "file:///etc/passwd",
     "https://user:pw@127.0.0.1:8824/api/usage", "not a url", 8824, undefined]) {
     assert.equal(amuxUsageEndpoint(bad), null, String(bad));
   }
   // The TLS check is relaxed for https on loopback, and nowhere else.
   let seen;
+  let destroyed = 0;
   const fake = (url, options) => {
     seen = options;
-    return { on() {}, end() {} };
+    return { on() {}, end() {}, destroy() { destroyed += 1; } };
   };
-  readAmuxUsage(new URL("https://127.0.0.1:8824/api/usage"), { request: fake });
+  const tls = readAmuxUsage(new URL("https://127.0.0.1:8824/api/usage"), { request: fake, timeoutMs: 10 });
   assert.equal(seen.rejectUnauthorized, false);
-  readAmuxUsage(new URL("http://127.0.0.1:8824/api/usage"), { request: fake });
+  const plain = readAmuxUsage(new URL("http://127.0.0.1:8824/api/usage"), { request: fake, timeoutMs: 10 });
   assert.equal("rejectUnauthorized" in seen, false);
+  // Neither fake ever answers: the deadline ends both reads and tears down the request.
+  assert.deepEqual(await Promise.all([tls, plain]), [null, null]);
+  assert.equal(destroyed, 2);
 });
 
 const serve = async (handler) => {
@@ -113,6 +133,18 @@ test("reading the usage body: JSON within the size limit, anything else is no an
   const silent = await serve(() => {});
   assert.equal(await readAmuxUsage(new URL(silent.url), { timeoutMs: 100 }), null);
   await silent.close();
+  // A body that trickles in, a byte at a time inside the idle timeout, still
+  // ends at the deadline: the limit is for the whole read.
+  const timers = [];
+  const trickle = await serve((req, res) => {
+    res.write("{");
+    timers.push(setInterval(() => res.write(" "), 20));
+  });
+  const started = Date.now();
+  assert.equal(await readAmuxUsage(new URL(trickle.url), { timeoutMs: 300 }), null);
+  assert.ok(Date.now() - started < 2_000, "a trickling body held the read past its deadline");
+  for (const timer of timers) clearInterval(timer);
+  trickle.close();
 });
 
 test("every provider on one URL shares one read a minute", async () => {
