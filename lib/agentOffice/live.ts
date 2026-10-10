@@ -766,6 +766,7 @@ type QuotaCopy = {
   states: Record<"available" | "low" | "onCredit" | "exhausted" | "unknown" | "disabled", string>;
   percent: (value: string) => string;
   credit: (value: string) => string;
+  creditOnly: (value: string) => string;
   credits: (value: string) => string;
   usd: (value: string) => string;
   noAmount: string;
@@ -793,7 +794,9 @@ export type AgentOfficeQuotaView = {
 
 const quotaAmount = (quota: AgentOfficeReviewerQuota, copy: QuotaCopy) => {
   const credit = quota.credit !== undefined ? copy.credit(quota.credit.toFixed(2)) : "";
-  if (quota.remaining === null || quota.unit === null) return credit ? credit.replace(/^ · /, "") : copy.noAmount;
+  if (quota.remaining === null || quota.unit === null) {
+    return quota.credit !== undefined ? copy.creditOnly(quota.credit.toFixed(2)) : copy.noAmount;
+  }
   if (quota.unit === "percent") return copy.percent(String(Math.round(quota.remaining))) + credit;
   if (quota.unit === "usd") return copy.usd(quota.remaining.toFixed(2)) + credit;
   return copy.credits(String(Math.round(quota.remaining))) + credit;
@@ -812,8 +815,11 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
   if (withQuota.length === 0) return { rows: [], note: copy.notSent };
   const rows = withQuota.map((reviewer): AgentOfficeQuotaRow => {
     const quota = reviewer.quota as AgentOfficeReviewerQuota;
+    // The included pool is low: under 20% when it is a share, or empty when it is an amount.
     const low =
-      quota.state === "available" && quota.unit === "percent" && (quota.remaining ?? 100) < REVIEW_QUOTA_LOW_PERCENT;
+      quota.state === "available" &&
+      quota.remaining !== null &&
+      (quota.unit === "percent" ? quota.remaining < REVIEW_QUOTA_LOW_PERCENT : quota.remaining <= 0);
     // The included pool is (nearly) spent but credit keeps the account
     // working: say so rather than "running low".
     const onCredit = low && (quota.credit ?? 0) > 0;
