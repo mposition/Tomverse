@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import Module, { createRequire } from "node:module";
 import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
+const cjsRequire = createRequire(import.meta.url);
 const authStarts: number[] = [];
 const observations: Array<{ requestedAt: number; remainingMs: number }> = [];
 const admissionEvents: string[] = [];
+const caughtErrors: unknown[] = [];
 let authenticated = true;
 let validOrigin = true;
 let releaseReads = 0;
@@ -20,15 +23,13 @@ mock.module("next-auth/next", { namedExports: {
     return authenticated ? { user: { id: "owner" } } : null;
   },
 } });
-// The proposal route loads these modules dynamically by their alias. Mock the
-// same specifier so Linux and Windows exercise the same admission boundary.
-mock.module("@/lib/auth", { namedExports: { authOptions: {} } });
-mock.module("@/lib/requestOrigin", { namedExports: {
+const authExports = { authOptions: {} };
+const requestOriginExports = {
   hasValidMutationOrigin: () => {
     admissionEvents.push("origin");
     return validOrigin;
   },
-} });
+};
 mock.module(mod("lib/e2eTestMode.ts"), { namedExports: {
   isE2EFixtureMode: () => false,
 } });
@@ -38,7 +39,7 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
     return { explicitEnabled: true, autoEnabled: true };
   },
 } });
-mock.module("@/lib/promptRefinerProductApi", { namedExports: {
+const productApiExports = {
   handlePromptRefinerProductPrepare: async (_request: Request, _userId: string,
     deadline: { requestedAt: Date; deadlineAtMonotonicMs: number }) => {
     admissionEvents.push("prepare-handler");
@@ -53,8 +54,24 @@ mock.module("@/lib/promptRefinerProductApi", { namedExports: {
       remainingMs: deadline.deadlineAtMonotonicMs - performance.now() });
     return Response.json({ ok: true });
   },
-  promptRefinerProductApiErrorResponse: () => null,
-} });
+  promptRefinerProductApiErrorResponse: (error: unknown) => {
+    caughtErrors.push(error);
+    return null;
+  },
+};
+// tsx loads .ts files as CommonJS in this package. Install an ES-module-shaped
+// CommonJS fixture so both static and dynamic imports receive the same exports.
+const installCommonJsFixture = (specifier: string, exports: object) => {
+  const filename = cjsRequire.resolve(specifier);
+  const fixture = new Module(filename);
+  fixture.filename = filename;
+  fixture.loaded = true;
+  fixture.exports = { __esModule: true, ...exports };
+  cjsRequire.cache[filename] = fixture;
+};
+installCommonJsFixture("@/lib/auth", authExports);
+installCommonJsFixture("@/lib/requestOrigin", requestOriginExports);
+installCommonJsFixture("@/lib/promptRefinerProductApi", productApiExports);
 
 const prepareRoute = import(mod("app/api/chat/prompt-refiner/prepare/route.ts"));
 const proposalRoute = import(mod("app/api/chat/prompt-refiner/proposal/route.ts"));
@@ -62,14 +79,22 @@ const request = (path: string) => new Request(`https://tomverse.test${path}`, {
   method: "POST", headers: { origin: "https://tomverse.test",
     "content-type": "application/json" }, body: "{}",
 });
+const failureSummary = () => JSON.stringify({ admissionEvents,
+  observationCount: observations.length,
+  caughtErrors: caughtErrors.map((error) =>
+    error instanceof Error ? `${error.name}: ${error.message}` : String(error)),
+});
 
 test("product route deadline starts before authentication", async () => {
-  const prepare = await prepareRoute; const proposal = await proposalRoute;
+  const prepare = await prepareRoute;
+  const proposal = await proposalRoute;
   admissionEvents.length = 0;
   assert.equal((await prepare.POST(request(
-    "/api/chat/prompt-refiner/prepare"))).status, 200);
+    "/api/chat/prompt-refiner/prepare"))).status, 200,
+  failureSummary());
   assert.equal((await proposal.POST(request(
-    "/api/chat/prompt-refiner/proposal"))).status, 200);
+    "/api/chat/prompt-refiner/proposal"))).status, 200,
+  failureSummary());
   assert.equal(observations.length, 2);
   assert.deepEqual(admissionEvents, [
     "auth", "origin", "prepare-handler",
@@ -84,7 +109,8 @@ test("product route deadline starts before authentication", async () => {
 });
 
 test("unauthenticated requests do not enter product admission or read release evidence", async () => {
-  const prepare = await prepareRoute; const proposal = await proposalRoute;
+  const prepare = await prepareRoute;
+  const proposal = await proposalRoute;
   const authCount = authStarts.length;
   const handlerCount = observations.length;
   const releaseCount = releaseReads;
@@ -100,12 +126,14 @@ test("unauthenticated requests do not enter product admission or read release ev
 });
 
 test("invalid mutation origins do not enter product admission or read release evidence", async () => {
-  const prepare = await prepareRoute; const proposal = await proposalRoute;
+  const prepare = await prepareRoute;
+  const proposal = await proposalRoute;
   const handlerCount = observations.length;
   const releaseCount = releaseReads;
   validOrigin = false;
   assert.equal((await proposal.POST(request(
-    "/api/chat/prompt-refiner/proposal"))).status, 403);
+    "/api/chat/prompt-refiner/proposal"))).status, 403,
+  failureSummary());
   assert.equal((await prepare.POST(request(
     "/api/chat/prompt-refiner/prepare"))).status, 403);
   validOrigin = true;
