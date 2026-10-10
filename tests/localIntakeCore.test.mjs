@@ -354,5 +354,5 @@ test("the child environment is an allowlist and the server files do not import a
   assert.equal(ko.registerPermitted, "등록은 backlog 카드 한 건을 만듭니다. 카드를 승격하거나 워커를 시작하지 않습니다.");
   assert.match(en.backlogMeaning, /does not promote it to todo/);
   assert.match(read("components/admin/AmuxLocalIntakePanel.tsx"), /ADMIN_REAUTHENTICATION_REQUIRED/);
-  assert.match(read("components/admin/AmuxLocalIntakePanel.tsx"), /adminRecentAuthenticationHref\("\/admin\/amux-backlog\?tab=intake"\)/);
+  assert.match(read("components/admin/AmuxLocalIntakePanel.tsx"), /adminRecentAuthenticationHref\("\/admin\/amux-backlog\?tab=ideas"\)/);
 });

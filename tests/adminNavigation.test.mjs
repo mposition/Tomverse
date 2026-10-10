@@ -314,7 +314,7 @@ test("the AMUX group holds Backlog, Promotion and Execution, with their sections
   );
   assert.deepEqual(
     adminNavItemTabs("amux-backlog").map((tab) => tab.id),
-    ["intake", "ideas", "import", "reconciliation", "metadata"]
+    ["ideas", "import", "reconciliation", "metadata"]
   );
   assert.deepEqual(
     adminNavItemTabs("amux-promotion").map((tab) => tab.id),
@@ -334,11 +334,11 @@ test("the AMUX group holds Backlog, Promotion and Execution, with their sections
   );
 });
 
-test("each of the eight AMUX screens redirects to its own section", () => {
+test("each of the eight AMUX screens redirects to its current section", () => {
   // Written out rather than read back from the table: these are the addresses
   // policy documents, runbooks and audit summaries already name.
   const expected = {
-    "/admin/amux-intake": "/admin/amux-backlog?tab=intake",
+    "/admin/amux-intake": "/admin/amux-backlog?tab=ideas",
     "/admin/amux-board-import": "/admin/amux-backlog?tab=import",
     "/admin/amux-reconciliation": "/admin/amux-backlog?tab=reconciliation",
     "/admin/amux-backlog-metadata": "/admin/amux-backlog?tab=metadata",
