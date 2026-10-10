@@ -26,6 +26,7 @@ async function pageFixture(role, tab) {
             "export const jsx = (type, props, key) => ({type, props, key}); export const jsxs = jsx;" };
           const bodies = {
             notFound: "throw new Error('not_found');",
+            redirect: "throw new Error('redirect');",
             getServerSession: "return {user: {id: 'synthetic-owner'}};",
             getAdminRole: `return ${JSON.stringify(role)};`,
             getAdminMessages: "return {status: {}};",
@@ -58,8 +59,8 @@ test("actual owner page renders exact hold recovery without a transfer preview",
     assert.equal(panels[0].props.holdId, id);
     assert.equal(panels[0].key, id);
     assert.equal(panels[0].props.onResolved, undefined);
-    const otherTab = await pageFixture("owner", "intake");
-    const hidden = await otherTab({ searchParams: Promise.resolve({ tab: "intake", analysisHoldId: id }) });
+    const otherTab = await pageFixture("owner", "metadata");
+    const hidden = await otherTab({ searchParams: Promise.resolve({ tab: "metadata", analysisHoldId: id }) });
     assert.equal(descendants(hidden).filter(node => node.type?.name === "AmuxAnalysisClaimResolutionPanel").length, 0);
   } finally {
     if (previous === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
