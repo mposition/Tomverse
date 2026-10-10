@@ -717,11 +717,6 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
     tabs: [
       {
-        id: "intake",
-        label: "Intake",
-        description: "Preview one explicit card registration, then register it",
-      },
-      {
         id: "ideas",
         label: "Ideas",
         description: "Check an operator idea before any external transfer",
@@ -1098,10 +1093,10 @@ export const ADMIN_LEGACY_ROUTES: Readonly<Record<string, string>> = {
   "/admin/approvals": "/admin/work-queue",
   // The eight owner-only AMUX screens, gathered under the AMUX group. Policy
   // documents and runbooks name these addresses, so each lands on its own
-  // section. A role the destination refuses is redirected and then answers
-  // 404 there, exactly as it did here: the redirect confirms nothing the
-  // destination would not.
-  "/admin/amux-intake": "/admin/amux-backlog?tab=intake",
+  // section, except retired JSON intake now opens Ideas. A role the destination
+  // refuses is redirected and then answers 404 there, exactly as it did here:
+  // the redirect confirms nothing the destination would not.
+  "/admin/amux-intake": "/admin/amux-backlog?tab=ideas",
   "/admin/amux-board-import": "/admin/amux-backlog?tab=import",
   "/admin/amux-reconciliation": "/admin/amux-backlog?tab=reconciliation",
   "/admin/amux-backlog-metadata": "/admin/amux-backlog?tab=metadata",

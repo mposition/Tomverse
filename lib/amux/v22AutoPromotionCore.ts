@@ -1,8 +1,8 @@
-/** V22 is a separate, dark path. A v8 grant is never a v22 receipt. */
+/** V22 has its own explicit environment gate. A v8 grant is never a v22 receipt. */
 
 export const AMUX_V22_AUTO_PROMOTION_POLICY_VERSION = 22;
 export const AMUX_V22_AUTO_PROMOTION_ENV = "TOMVERSE_AMUX_V22_AUTO_PROMOTE";
-export const AMUX_V22_AUTO_PROMOTION_CODE_LATCH = false;
+export const AMUX_V22_AUTO_PROMOTION_CODE_LATCH = true;
 export const AMUX_V22_WORKER_QUEUE_MULTIPLIER = 3;
 export const AMUX_V22_PARALLEL_RESERVED = 1;
 export const AMUX_V22_SEV1_RESERVED = 1;

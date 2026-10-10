@@ -289,7 +289,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     description: "아이디어 입력 확인, 카드 등록, 카탈로그 이관, 소스 재조정, 카드 메타데이터",
     aliases: ["백로그", "아이디어", "아이디어 분석", "등록", "카드 등록", "카탈로그 이관", "이관", "재조정", "소스 개정", "메타데이터", "우선순위", "비용 추정"],
     tabs: {
-      intake: { label: "등록", description: "명시적 카드 등록 한 건을 미리 보고 등록" },
       ideas: { label: "아이디어", description: "외부 전송 전에 운영자 아이디어 입력을 확인" },
       import: { label: "카탈로그 이관", description: "현황판 카탈로그를 미리 보고 승인한 뒤 이관" },
       reconciliation: { label: "소스 재조정", description: "카드별 새 소스 개정을 수락하거나 거절" },

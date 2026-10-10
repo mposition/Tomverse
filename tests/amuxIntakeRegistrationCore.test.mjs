@@ -213,15 +213,14 @@ test("the public apply path checks the shipped latch before the commit", () => {
   assert.equal(panel.slice(panel.indexOf("outcome_unknown")).includes('send("register")'), false);
   assert.match(panel, /ADMIN_REAUTHENTICATION_REQUIRED/);
   assert.match(panel, /adminRecentAuthenticationHref/);
-  // The screen moved into Backlog's Intake section; its old address
-  // still resolves there.
-  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=intake");
+  // The legacy JSON screen is retired; its old address opens Ideas.
+  assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=ideas");
   const movedTo = resolveAdminPageMeta("/admin/amux-backlog");
   assert.equal(movedTo.label, "Backlog");
   assert.equal(movedTo.isKnown, true);
   assert.equal(
-    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "intake")?.label,
-    "Intake",
+    adminNavItemTabs("amux-backlog").find((tab) => tab.id === "intake"),
+    undefined,
   );
   // Listed to the owner only: every other role would receive a 404.
   for (const role of ["billing", "support", "ops", "readonly"]) {

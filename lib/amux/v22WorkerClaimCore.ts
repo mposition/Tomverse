@@ -1,6 +1,6 @@
 /** Assignment is deliberately distinct from execution start. The role/grade
  * and route facts come from owner-approved receipts, never model prose. */
-export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = false;
+export const AMUX_V22_WORKER_CLAIM_CODE_LATCH = true;
 export const AMUX_V22_WORKER_CLAIM_ENV = "TOMVERSE_AMUX_V22_WORKER_CLAIM";
 export const AMUX_V22_GLOBAL_ACTIVE_LIMIT = 3;
 export const AMUX_V22_PER_WORKER_ACTIVE_LIMIT = 1;
@@ -13,7 +13,7 @@ const ROLE_TOOL: Record<string, string> = {
 };
 export const amuxV22RequiredTool = (role: string) => ROLE_TOOL[role] ?? null;
 
-/** The default-off A15 one-shot path only has these Claude capabilities.
+/** The environment-gated A15 one-shot path only has these Claude capabilities.
  * Do not claim a Task that the local sidecar will refuse after execution
  * start; test/verify need a separately approved isolated test runner. */
 const ONE_SHOT_ROLES = new Set(["design", "implement", "review", "investigate"]);
