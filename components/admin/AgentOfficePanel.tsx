@@ -847,7 +847,9 @@ function SeatedProfileModal({
   const roomName = { amux: m.rooms.amux, review: m.rooms.review, decision: m.rooms.decision }[seated.room];
   const desk = people.findIndex((person) => person.name === seated.name);
   const person = desk >= 0 ? people[desk] : null;
-  const clothes = agentOfficeSeatedClothes(seated.room, Math.max(desk, 0));
+  // Someone who has left the record keeps the clothes they wore when opened.
+  const [openedDesk] = useState(desk);
+  const clothes = agentOfficeSeatedClothes(seated.room, desk >= 0 ? desk : Math.max(openedDesk, 0));
   const quota = seated.room === "review" ? quotaView.rows.find((row) => row.id === seated.name) : undefined;
   return (
     <div className={cx("modal-backdrop")} onClick={onClose}>

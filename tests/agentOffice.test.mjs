@@ -1956,7 +1956,8 @@ test("a seated figure opens a profile read from its room's record, dressed as it
     /seated\.room === "amux" \? amuxView\.workers : seated\.room === "review" \? reviewView\.reviewers : decisionView\.members/
   );
   assert.match(modal, /findIndex\(\(person\) => person\.name === seated\.name\)/);
-  assert.match(modal, /agentOfficeSeatedClothes\(seated\.room, /);
+  assert.match(modal, /agentOfficeSeatedClothes\(seated\.room, desk >= 0 \? desk : Math\.max\(openedDesk, 0\)\)/);
+  assert.match(modal, /const \[openedDesk\] = useState\(desk\);/);
   assert.match(modal, /quotaView\.rows\.find\(\(row\) => row\.id === seated\.name\)/);
   assert.match(modal, /m\.profile\.seatedGone/);
   assert.match(modal, /useOfficeDialog\(onClose, closeRef\)/);
@@ -2382,6 +2383,23 @@ test("the digest desk counts each agent's digests and names the newest, never th
   );
   office.setLive({ digest: next });
   assert.deepEqual(said(), [`🔔 ${office.roomName("digest")} · 최근 digest · ${names["sre-ops"]} · 10-10 11:10 AEST`]);
+  // A second digest from the same sender in the same minute draws the same
+  // line, status and badge; its revision still tells it apart.
+  const sameMinute = digestLiveDept(
+    agentOfficeDigestState({
+      recent: [{ agentKey: "sre-ops", count: 2 }],
+      latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:40Z") }],
+    }),
+    readAt,
+    copy,
+    names
+  );
+  assert.equal(sameMinute.line, next.line);
+  assert.notEqual(sameMinute.revision, next.revision);
+  office.setLive({ digest: sameMinute });
+  assert.equal(said().length, 2, "the same-minute digest is announced");
+  office.setLive({ digest: { ...sameMinute, detail: "읽은 시각 10-10 11:12 AEST" } });
+  assert.equal(said().length, 2, "a re-read of the same digests is not");
 
   // The read selects counts and times only.
   const digest = readFunction("readDigest");
