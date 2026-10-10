@@ -510,13 +510,32 @@ type AgentRailwayDsl<Source, Preserved, Resource> = {
       build?: { builder: "DOCKERFILE"; dockerfilePath: string; watchPatterns: string[] };
       deploy: {
         cronSchedule?: string;
-        restartPolicyType: "NEVER" | "ON_FAILURE";
-        restartPolicyMaxRetries?: number;
+        restartPolicyType: "NEVER" | "ON_FAILURE" | null;
+        restartPolicyMaxRetries?: number | null;
       };
       replicas: Record<string, number>;
       env: Record<string, Preserved>;
     }
   ) => Resource;
+};
+
+/**
+ * Railway's own restart policy: On Failure, at most ten restarts
+ * (docs.railway.com/deployments/restart-policy). Railway stores that default
+ * as null rather than as the two values, so declaring the values themselves
+ * left a plan that never settled -- `null -> 10` after every apply. A runner
+ * whose policy is exactly the default declares null, which Railway reads as
+ * that same default; a dashboard change away from it still shows in the plan
+ * and the next apply puts it back.
+ */
+export const RAILWAY_DEFAULT_RESTART = { type: "ON_FAILURE", maxRetries: 10 } as const;
+
+const restartPolicyFields = (restart: AgentRunnerService["restart"]) => {
+  if (!restart) return { restartPolicyType: "NEVER" as const };
+  if (restart.type === RAILWAY_DEFAULT_RESTART.type && restart.maxRetries === RAILWAY_DEFAULT_RESTART.maxRetries) {
+    return { restartPolicyType: null, restartPolicyMaxRetries: null };
+  }
+  return { restartPolicyType: restart.type, restartPolicyMaxRetries: restart.maxRetries };
 };
 
 export const buildAgentRunnerResources = <Source, Preserved, Resource>(
@@ -564,9 +583,7 @@ export const buildAgentRunnerResources = <Source, Preserved, Resource>(
         start: runner.startCommand,
         deploy: {
           ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
-          ...(runner.restart
-            ? { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }
-            : { restartPolicyType: "NEVER" as const }),
+          ...restartPolicyFields(runner.restart),
         },
         // One replica, placed. A cron that runs once a day needs no more, and
         // the region is the record's, not Railway's default.
