@@ -18,6 +18,8 @@
  */
 
 import { cookies } from "next/headers";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
@@ -51,6 +53,8 @@ import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime"
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
 import { PromptRefinerFixtureRefreshLoader } from "@/components/chat/PromptRefinerFixtureRefreshLoader";
+import { promptRefinerChatExecutionRelease } from
+  "@/lib/promptRefinerChatExecutionRelease";
 import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
 import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
@@ -107,6 +111,10 @@ export async function ReviewWorkspaceShell({
   let promptRefinerAvailableToDeployment = false;
   let promptRefinerFixtureAdapterEnabled = false;
   let promptRefinerFixtureModeRefreshEnabled = false;
+  let promptRefinerProductRelease = {
+    explicitEnabled: false,
+    autoEnabled: false,
+  };
   /*
     Whether the welcome screen offers the starter catalogue at all
     (docs/ui-contracts/chat-starter-catalog.md section 5).
@@ -180,7 +188,8 @@ export async function ReviewWorkspaceShell({
   // fixture mode (loopback origin + both E2E env vars), and production
   // readiness fails outright if those vars are ever set there
   // (lib/securityEnvironment.ts e2eBypassDisabled).
-  if (isE2EFixtureMode()) {
+  const fixtureMode = isE2EFixtureMode();
+  if (fixtureMode) {
     const jar = await cookies();
     if (!imageGenerationEnabled) {
       imageGenerationEnabled =
@@ -247,6 +256,25 @@ export async function ReviewWorkspaceShell({
     });
   }
 
+  if (mountedSurface === "chat" && !fixtureMode) {
+    try {
+      const session = await getServerSession(authOptions);
+      if (session?.user?.id) {
+        const release = await promptRefinerChatExecutionRelease();
+        // This read-only view exposes capabilities, never execution authority.
+        // The authenticated API revalidates the exact release at admission.
+        promptRefinerProductRelease = {
+          explicitEnabled: release.explicitEnabled,
+          autoEnabled: release.autoEnabled,
+        };
+      }
+    } catch (error) {
+      console.error("Failed to load prompt refiner capabilities for chat:", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+
   const promptRefinerOffered = promptRefinerOfferDecision({
     available: promptRefinerAvailableToDeployment,
     adapterReady: promptRefinerFixtureAdapterEnabled,
@@ -294,6 +322,7 @@ export async function ReviewWorkspaceShell({
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
         promptRefinerMode={promptRefinerMode}
+        promptRefinerProductRelease={promptRefinerProductRelease}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This

@@ -101,6 +101,8 @@ import {
   X,
 } from "lucide-react";
 import { lockBodyScroll } from "@/components/useBodyScrollLock";
+import type { PromptRefinerProductChatDecision } from
+  "@/lib/promptRefinerProductApiContract";
 
 type PromptPayload = {
   id: string;
@@ -117,6 +119,7 @@ type PromptPayload = {
   admissionToken?: string | null;
   contextBundle?: string | null;
   contextLayout?: "single" | "comparison";
+  promptRefinerDecision?: PromptRefinerProductChatDecision;
 };
 
 /**
@@ -167,9 +170,15 @@ type MobileChatShellProps = {
   /** Server-owned final offer, passed unchanged to the composer. */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
+  promptRefinerProductMode?: boolean;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   onPromptRefinerDismiss?: (requestId: string) => boolean;
+  onPromptRefinerExecution?: (input: {
+    promptId: string | null;
+    execution: "applied" | "original";
+    mode: "explicit" | "auto";
+  }) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -450,9 +459,11 @@ export function MobileChatShell({
   voiceInputEnabled = false,
   promptRefinerOffered = false,
   promptRefinerState,
+  promptRefinerProductMode = false,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
+  onPromptRefinerExecution,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1653,6 +1664,7 @@ export function MobileChatShell({
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
                   onResponseComplete={onResponseComplete}
+                  onPromptRefinerExecution={onPromptRefinerExecution}
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
@@ -1833,6 +1845,7 @@ export function MobileChatShell({
             onVoiceTranscript={onVoiceTranscript}
             promptRefinerOffered={promptRefinerOffered}
             promptRefinerState={promptRefinerState}
+            promptRefinerProductMode={promptRefinerProductMode}
             onPromptRefinerRequest={onPromptRefinerRequest}
             onPromptRefinerDecision={onPromptRefinerDecision}
             onPromptRefinerDismiss={onPromptRefinerDismiss}

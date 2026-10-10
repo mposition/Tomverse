@@ -572,9 +572,13 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * narrowly scoped audit actor to the shared helper and two back relations to
  * `AdminAuditLog`. The marketing receiver's decisions are unchanged, but its
  * watched source and schema bytes moved, so prior evidence is stale.
+ * 2026-10-10: the Prompt Refiner product operational guard adds one closed
+ * system-audit action and its `AdminAuditLog` back relation. The webhook
+ * receiver's calls, descriptor and admission decisions are unchanged; the
+ * watched closure bytes moved, so existing signed staging evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "b75a4effd8f593f3b7460f2b3fc1c96dabdae9d7f3b15e4135c918754284fd6d";
+  "b9fef04f561d94087802d02e42bcc708374988fa8d3f5fef190fc852acc62087";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");

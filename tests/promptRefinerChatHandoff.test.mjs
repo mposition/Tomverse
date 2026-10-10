@@ -375,11 +375,11 @@ test("Auto rebuilds execution from pinned bytes and refuses post-projection tran
   }
 });
 
-test("Chat Auto and shadow call sites use the default-off routing view", () => {
+test("Chat Auto and shadow call sites share the consumed execution view", () => {
   const route = readFileSync("app/api/chat/route.ts", "utf8");
   assert.match(
     route,
-    /const autoRoutingMessages = promptRefinerAutoMessageView\(\{\s*authoredMessages: messages,\s*\}\)/
+    /const autoRoutingMessages = executionMessages/
   );
   assert.match(route, /text: profileTextFor\(autoRoutingMessages\)/);
   assert.match(
@@ -388,7 +388,7 @@ test("Chat Auto and shadow call sites use the default-off routing view", () => {
   );
   assert.match(
     route,
-    /text: autoRoutingMessages === messages\s*\? profileText\s*: profileTextFor\(autoRoutingMessages\)/
+    /text: profileTextFor\(autoRoutingMessages\)/
   );
 });
 

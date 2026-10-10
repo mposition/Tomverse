@@ -1,13 +1,12 @@
 # Prompt Refiner 제안형 UI 계약
 
-- 상태: **실제 composer 무과금 검증 연결, 제품 미제공**. 서버는 default-off
-  rollout과 환경 kill switch, adapter readiness를 합쳐 최종 offer를 정한다.
-  공개 `/chat`에 offer를 내릴 수 있는 adapter는 loopback Playwright fixture뿐이어서
-  실제 `ChatInput`의 상태 전이는 검증되지만 제품 환경은 항상 `off`다. 아래의 E04
-  관리자 staging 합성 QA 예외도 이 제품 readiness를 바꾸지 않는다. provider 호출,
-  과금, Router 입력 변경, Message schema 변경은 아직 연결하지 않았다. 아래의 순수
-  Chat projection은 구현됐지만 제품 route/runtime caller가 없고 이 상태나
-  readiness를 바꾸지 않는다.
+- 상태: **제품 코드 연결 완료, 활성 배포 default-off**. 서버가 보관한 exact draft와
+  검증된 adapter 결과만 1회 소비해 Router/provider 공통 execution view를 만들고,
+  저장 Message에는 저작 원문을 유지한다. explicit proposal과 Auto prepare, 공통 운영
+  예산·정산, immutable receipt와 exact-deployment activation authority가 연결됐다.
+  그러나 현재 staging에는 activation이 요구하는 signed B03G/limited-audit 기록이 없어
+  product release readback은 explicit/auto 모두 false다. loopback Playwright fixture와
+  아래 E04 합성 QA 예외도 이 release를 바꾸지 않는다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - Chat 원문/실행 projection: `lib/promptRefinerChatHandoff.ts`
@@ -45,8 +44,11 @@ adapter가 준비됐다는 뜻이 아니다. 전체 allowlist, 종료 규칙, �
 ## 1. 제안이지 자동 전송이 아니다
 
 Refiner는 답을 만들지 않고 현재 composer 문장을 다시 쓰는 제안을 만든다. 결과는
-전송 전에 별도 행에 표시된다. 최종 제품 계약의 선택은 `이 문장 사용` 또는
-`원문 유지`이지만, 현재 fixture 버튼은 `제안 미리보기 확인`이다. fixture 확인은
+전송 전에 별도 행에 표시된다. 수동 모드의 선택은 `이 문장 사용` 또는 `원문 유지`다.
+승인된 자동 적용 예외 v1은 Chat 대화가 이미 Auto mode이고 exact-deployment release가
+auto를 허용할 때 사용자의 통상 Send 준비 과정에서만 서버가 `accepted` 결정을 만든다.
+브라우저의 boolean이나 제안문은 이 결정을 만들 수 없다. 현재 fixture 버튼은
+`제안 미리보기 확인`이다. fixture 확인은
 원문을 바꾸거나 제안문을 실행 입력으로 채택하지 않는다. 어느 선택도 자체적으로
 전송을 시작하지 않는다. 전송 버튼과 IME 규칙은 기존 composer가 계속 소유한다.
 
@@ -66,7 +68,7 @@ Router와 최종 답변 모델이 읽을 `executionPrompt`일 뿐, 사용자의 
 | 제안 채택 | 사용자가 작성한 원문 | 화면에서 확인한 제안문 |
 | 원문 유지 | 사용자가 작성한 원문 | 같은 원문 |
 
-후속 server 연결은 이 결과를 Message 저장과 Router 입력에 각각 연결해야 한다.
+Chat server는 이 결과를 Message 저장과 Router/provider 입력에 각각 연결한다.
 제안문을 user Message 본문으로 저장하거나, 원문을 Router에 보내면서 `accepted`로
 기록하는 구현은 계약 위반이다.
 
@@ -88,19 +90,68 @@ refinerVersion, inputScope와 decision뿐이며 prompt·digest·scope identity�
 이는 receipt가 아니다.
 
 이 함수 이름의 `serverSuggestion`은 browser가 보낸 suggestion을 신뢰하라는 뜻이 아니다.
-미래 caller가 suggestion을 server-held state에서 읽고 authentication·authorization과
-one-time decision consumption을 별도로 강제해야 한다. 이 순수 함수는 그 저장 출처를
+제품 caller인 `lib/promptRefinerChatExecutionStore.ts`가 suggestion을 server-held state에서
+읽고 authentication·authorization과 one-time decision consumption을 강제한다. 이 순수 함수는 그 저장 출처를
 증명하거나 소비 상태를 기록하지 않고, Message를 저장하거나 Router/provider를 호출하지
 않는다. 현재 projection의 `PromptRefinerChatScope`는
 identityKey·mountedSurface·conversationId만
 가지므로 값이 다른 scope로 갔다가 똑같은 세 값으로 돌아오는 same-value ABA를 이 함수
-혼자 알아낼 수 없다. future server caller는 server-held suggestion의 수명·scope epoch 또는
-동등한 단조 identity를 함께 소유해 그 재사용을 막아야 하며, 이 exact-value 비교를 ABA
+혼자 알아낼 수 없다. 제품 store는 server-held suggestion의 수명·scope epoch와 exact
+draft id/revision 및 authored Message 결속을 소유해 재사용을 막는다. 이 exact-value 비교만을 ABA
 방지나 authorization으로 설명하면 안 된다.
 
 ## 3. 한 요청은 한 draft snapshot에만 속한다
 
-request에는 exact `prompt`와 opaque `requestId`만 들어간다. 응답의 requestId가
+### Default-off 서버 소비 경계
+
+`lib/promptRefinerChatExecutionStore.ts`는 server-only capture/hold seam에서 정확한
+DB draft id·revision·bytes와 owner·conversation·surface·mount epoch·recovery epoch를
+결속한다. 제품 scope/proposal/prepare API는 prompt·제안문·mode·결정 boolean을 받지
+않고 이 snapshot만 product service에 넘긴다. product service는 budget/provider 전에
+`owner + scope epoch + draft id/revision + mode` unique attempt를 선점한다. 동시 재전송은
+두 번째 provider 호출을 만들지 않으며 ready 결과가 있으면 같은 suggestionId와
+clientRequestId를 readback한다. preparing/terminal/unknown은 재시도 없이 원문 fallback이다.
+scope 전환은 동일 값으로 돌아와도 epoch를 증가시키며 draft UPDATE는 내용이
+동일해도 ready 제안을 무효화한다. draft DELETE는 Message 저장의 같은 transaction
+COMMIT 때 정확한 source Message가 생겼는지를 각 제안별로 확인한다.
+
+Chat POST의 `promptRefinerDecision`은 suggestionId·scopeId·epoch와 `accepted` 또는
+`kept_original`만 받는다. browser의 제안문·boolean·mode는 거부한다. release와 kill
+switch가 허용할 때만 서버 행과 저장된 source를 다시 읽고, row lock·DB clock·CAS로
+소비와 canonical content-free audit를 한 transaction에서 처리한다. 기본 배포는
+이 decision을 409로 거부하며 provider/credit 경로에 진입하지 않는다. decision이
+없는 일반 Chat는 기존 원문 경로를 사용한다. 오류·stale·replay·결속 실패는 자동
+전송이나 원문 재전송을 시작하지 않는다.
+
+성공한 execution view 하나가 Auto profiling·예약 token 추정·shadow와 provider
+formatting에 쓰인다. source 검증과 저장된 사용자 Message는 authored view다.
+Memory/profile context의 기존 signed preflight는 authored query로 검증한다.
+terminal tombstone에서는 원문·제안문을 즉시 지우며 5분 만료는 DB clock으로
+검사하고 maintenance가 최대 100개씩 만료 본문을 지운다. 수명 종료 후 maintenance
+실행 전까지 본문이 물리적으로 남을 수 있으므로 5분을 실제 삭제 완료 시간으로
+주장하지 않는다. account/conversation 삭제는 두 새 table에 cascade한다.
+
+자동 모드는 별도 서버 release authority와 Auto conversation을 요구한다. 자동 적용
+예외 v1의 policy commit은 `75fbeade2a54a863bf94292a75935edf2df59418`, 문서 digest는
+`6080eada4a66d5e9f45b07d6ae9314252119e68d0eb0269e1513a7bfd776c8a3`이다. 이 예외는
+수동 제안의 명시적 두 버튼을 없애지 않고 Auto prepare만 좁게 허용한다. 테스트의 합성
+authority나 checked-in empty registry는 출시 승인이 아니다. 실제 activation은 signed
+B03G latency-only disposition, content-free limited audit, exact candidate/price/config와
+현재 runtime commit/deployment를 canonical audit chain에서 함께 검증해야 한다.
+
+제품 Auto에는 영속적인 운영 중지 latch가 있다. 전체 제품 Refiner의 최근 완료
+100건에서 준비 지연 p90이 6,000ms를 넘거나 원문 fallback이 5건을 넘으면 Auto만
+중지한다. 중대한 safety 실패, dispatch·비용 unknown, 감사 실패는 즉시 중지한다.
+새 성공, rolling window 이동, 재배포 또는 새 activation은 이를 자동 해제하지 않는다.
+재개는 운영자가 확인한 정확한 pause generation·원인·canonical audit id를 CAS로
+결속한 owner action만 허용한다. pause가 먼저 commit된 뒤의 Auto decision consume은
+거부하고 원문 경로를 유지한다. 수동 제안의 명시적 채택은 별도 모드이며 Auto
+권한을 빌리지 않는다. 이 latch는 기존 품질 판정·Router gate·rollout flag 권한을
+대체하거나 통과시키지 않는다.
+
+fixture request에는 exact `prompt`와 opaque `requestId`만 들어간다. 제품 request는
+conversationId·scopeId·epoch·draftRevision만 보내고 서버가 exact prompt와 requestId를
+만든다. 응답의 requestId가
 다르거나, 응답을 기다리는 동안 사용자가 한 글자라도 바꾸면 그 응답은 stale이다.
 stale 제안은 적용 버튼을 남기지 않고 일반 요청 상태로 돌아간다. 음성 입력과 붙여
 넣기는 같은 exact-string 검사를 통과해야 한다. 이 문자열 binding과 별도로
@@ -196,7 +247,7 @@ accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 c
 이 UI 계약은 PLANNER-02, ROUTE-03 또는 품질 증거를 통과시킨 것이 아니다. 실제
 provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필요하다.
 
-1. 비용이 고정된 Refiner 모델·출력 cap·timeout·재시도 0 계약
+1. 비용이 고정된 Refiner 모델·출력 cap·13,000ms 이하 제품 deadline·재시도 0 계약
    (provider-independent 사전등록과 server-only 원자 예약 authority는 구현됨. 단,
    stage seed/admin writer·제품 caller가 없고 v1 admission은 변경하지 않아 항상
    `reservation_authority_unavailable`로 dispatch 전에 거절하며 실제 adapter·dispatch
@@ -216,28 +267,25 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
    critical path 안에서 이 gate를 다시 통과함. 미래 dispatch는 consume 결과의 exact
    digest와 checked-in execution/reservation contract constants를 사용하고 registry를 다시
    읽어 재해석하지 않음)
-2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (provider-independent
-   schema와 오프라인 집계는 구현됨; writer·저장소·제품 수집은 미구현)
+2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (content-free execution과
+   disposition은 분리된 immutable table과 canonical audit writer로 구현됨. mode는 닫힌
+   receipt schema 밖의 immutable companion row에 저장함)
 3. 원문 대비 제안문 주입·의미 보존 평가 (동결 16건의 provider-independent
    content-free anchor gate는 구현됨. 이는 일반 의미 동등성·주입 저항 인증이 아니며,
    과거 v3 output이 보존되지 않아 새 confirmatory 계약과 별도 실행 승인이 필요함)
 4. 승인된 품질 증거와 release gate disposition
-5. server-owned offered 결정과 kill switch
+5. server-owned offered 결정, exact-deployment release readback과 kill switch
 
-5번의 구조는 현재 구현됐다. `feature.promptRefinerEnabled`는 literal `"true"`만
+1·2·5번의 제품 경계는 구현됐다. `feature.promptRefinerEnabled`는 literal `"true"`만
 허용하는 default-off AppSetting이며, `PROMPT_REFINER_KILL_SWITCH`에 공백이 아닌
 값이 하나라도 있으면 rollout보다 먼저 꺼진다. 그러나 rollout 허용만으로는 UI가
 나오지 않는다. 같은 서버 요청에서 실제 adapter readiness까지 참이어야 하며,
-현재 그 조건을 만족하는 것은 `isE2EFixtureMode()` 안의 무과금 fixture뿐이다.
-애플리케이션에는 rollout writer를 두지 않았다. 따라서 이 구조가 생겼다는 사실은
-활성화 승인이나 유료 adapter 승인이 아니다.
-제품 adapter가 하나도 없는 현재는 AppSetting을 매 화면마다 조회하지 않는다.
-`isPromptRefinerEnabled()`는 model-facing adapter가 준비된 뒤 그 readiness 경계
-안에서만 호출할 rollout reader다. `promptRefinerProductAdapterReady()`가 현재 false를
-답하므로 이 reader는 실행되지 않고 DB 왕복도 없다. 이는 등록을 만족시키기 위한
-가짜 활성 경로가 아니라, 제품 adapter가 생길 때 readiness 구현과 함께 바꿀 단일
-서버 seam이다. fixture는 같은 strict default-off·kill switch 해석을 고정된 opt-in
-값에 적용한다.
+adapter code가 존재해도 exact release readback이 false면 UI와 dispatch는 닫힌다.
+`promptRefinerProductAdapterReady()`는 release 결과 없이 false이며 AppSetting만으로
+제품 mode를 만들 수 없다. kill switch, DB-disabled fixture, invalid/missing Railway
+commit/deployment는 release DB를 읽기 전 닫히고, stored flag false·DB read 오류·서명
+또는 pin 불일치도 안전하게 false다. 활성화 API는 운영자 owner의 최근 인증과 exact
+serving deployment를 요구하며, evidence id나 request boolean 존재만으로 통과하지 않는다.
 
 과거 Router benchmark의 비용 승인은 이 호출에 상속되지 않는다.
 
@@ -267,6 +315,13 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   보존, input 무변조, accepted execution view를 읽는 `profileTextFor()`·
   `preflightInputEstimate()`, authored durable-source view, 실제 attempt digest/fingerprint의
   accepted-content 결속과 exact replay, `kept_original` 동일 view
+- `tests/integration/prompt-refiner-chat-execution.db.test.ts`: 원문 저장과 execution view,
+  explicit/auto 분리, replay·cross-account·scope ABA·draft/attachment revision invalidation,
+  동시 product attempt 1회 선점, 응답 유실 held readback, receipt 불변성과 account cascade
+- `tests/promptRefinerProductAdapter.test.mjs`: retry 0, Responses pin, admission을 포함한
+  total 13초 deadline, deadline 뒤 provider 시작 금지와 late provider 결과 비게시
+- `tests/server-contract/prompt-refiner-product-api.test.ts`: strict identifier-only 요청,
+  브라우저 prompt/boolean 거부, 서버 선택 explicit/auto와 Auto 응답의 제안문 비노출
 - `tests/client/promptRefinerSuggestionRender.test.tsx`: 미제공 시 null, 7개 언어,
   두 결정, 44px target, disabled reason, ready live status, 실패 문구,
   내부 모델/우월성 표현 부재

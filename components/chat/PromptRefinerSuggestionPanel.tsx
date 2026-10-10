@@ -22,6 +22,7 @@ export function PromptRefinerSuggestionPanel({
   language,
   currentPrompt,
   state,
+  productMode = false,
   interactionBlockReason = null,
   onRequest,
   onUseSuggestion,
@@ -33,6 +34,8 @@ export function PromptRefinerSuggestionPanel({
   language: Language;
   currentPrompt: string;
   state: PromptRefinerUiState;
+  /** Product mode selects a held execution decision; fixture mode only previews. */
+  productMode?: boolean;
   interactionBlockReason?: PromptRefinerInteractionBlockReason | null;
   onRequest: (sourcePrompt: string) => void;
   onUseSuggestion: (suggestion: BoundPromptRefinerSuggestion) => void;
@@ -273,7 +276,7 @@ export function PromptRefinerSuggestionPanel({
           {previewDiff.commonSuffix}
         </p>
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          {copy.previewOnly}
+          {productMode ? copy.selectedForSend : copy.previewOnly}
         </p>
         <div className="mt-2 flex justify-end">
           <button
@@ -285,7 +288,9 @@ export function PromptRefinerSuggestionPanel({
                 ? `${copy.keepOriginal}. ${interactionProblemCopy}`
                 : copy.keepOriginal
             }
-            onClick={() => onDismiss(visible.suggestion.requestId)}
+            onClick={() => productMode
+              ? onKeepOriginal(visible.suggestion)
+              : onDismiss(visible.suggestion.requestId)}
             className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
           >
             {copy.keepOriginal}
@@ -348,20 +353,22 @@ export function PromptRefinerSuggestionPanel({
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          data-testid="prompt-refiner-dismiss-ready"
-          disabled={interactionBlocked}
-          aria-label={
-            interactionProblemCopy
-              ? `${copy.close}. ${interactionProblemCopy}`
-              : copy.close
-          }
-          onClick={() => onDismiss(visible.suggestion.requestId)}
-          className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
-        >
-          {copy.close}
-        </button>
+        {!productMode ? (
+          <button
+            type="button"
+            data-testid="prompt-refiner-dismiss-ready"
+            disabled={interactionBlocked}
+            aria-label={
+              interactionProblemCopy
+                ? `${copy.close}. ${interactionProblemCopy}`
+                : copy.close
+            }
+            onClick={() => onDismiss(visible.suggestion.requestId)}
+            className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {copy.close}
+          </button>
+        ) : null}
         <button
           type="button"
           data-testid="prompt-refiner-keep-original"
@@ -382,13 +389,15 @@ export function PromptRefinerSuggestionPanel({
           disabled={interactionBlocked}
           aria-label={
             interactionProblemCopy
-              ? `${copy.previewAction}. ${interactionProblemCopy}`
-              : copy.previewAction
+              ? `${productMode ? copy.useSuggestion : copy.previewAction}. ${interactionProblemCopy}`
+              : productMode
+                ? copy.useSuggestion
+                : copy.previewAction
           }
           onClick={() => onUseSuggestion(visible.suggestion)}
           className="min-h-11 rounded-full bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
-          {copy.previewAction}
+          {productMode ? copy.useSuggestion : copy.previewAction}
         </button>
       </div>
     </section>

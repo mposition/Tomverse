@@ -132,6 +132,19 @@ test("accepted fixture is a read-only preview bound to the authored source", () 
   assert.equal(hasTestId(edited, "prompt-refiner-request"), true);
 });
 
+test("accepted product selection explains execution use and original Message preservation", () => {
+  const state = { status: "accepted_preview" as const, suggestion };
+  const rendered = render({ state, productMode: true });
+  assert.ok(rendered.includes(promptRefinerCopy.ko.selectedForSend));
+  assert.equal(rendered.includes(promptRefinerCopy.ko.previewOnly), false);
+
+  const ready = render({ productMode: true });
+  assert.ok(ready.includes(promptRefinerCopy.ko.useSuggestion));
+  assert.equal(ready.includes(promptRefinerCopy.ko.previewAction), false);
+  assert.equal(hasTestId(ready, "prompt-refiner-dismiss-ready"), false);
+  assert.equal((ready.match(/min-h-11/g) ?? []).length, 2);
+});
+
 test("requesting and failure copy promise that the original remains unchanged", () => {
   const request = {
     requestId: suggestion.requestId,

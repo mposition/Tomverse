@@ -6,7 +6,8 @@ import { pathToFileURL } from "node:url";
 import { ZodError } from "zod";
 
 const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "../..", path)).href;
-let state, copied, readKeys, storageFailure, failDb, capacityFailure, capacityChecks;
+let state, copied, readKeys, storageFailure, failDb, capacityFailure, capacityChecks,
+  sourceBindingAudits;
 const matches = (row, where = {}) => Object.entries(where).every(([key, value]) => {
   if (value && typeof value === "object" && "in" in value) {
     return value.in.includes(row[key]);
@@ -59,7 +60,20 @@ const db = {
     kind: state.conversationKind,
     productKey: state.conversationProductKey,
   } : null },
-  $executeRaw: async () => 1,
+  $queryRaw: async (strings) => {
+    const query = strings.join("?");
+    assert.match(query, /FROM "PromptRefinerProductAttempt" a/);
+    assert.match(query, /FOR UPDATE OF a/);
+    return state.productAttempt ? [state.productAttempt] : [];
+  },
+  $executeRaw: async (strings, ...values) => {
+    const query = strings.join("?");
+    if (state.productAttempt && /UPDATE "PromptRefinerProductAttempt"/.test(query)) {
+      assert.equal(values[1], state.productAttempt.id);
+      state.productAttempt.sourceMessageId = values[0];
+    }
+    return 1;
+  },
 };
 const prisma = { ...db, $transaction: async (callback) => {
   const snapshot = structuredClone(state);
@@ -87,7 +101,12 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   readLimitedJson: async (req, _limit, schema) => schema.parse(await req.json()),
   apiSecurityResponse: (error) => error instanceof ZodError ? Response.json({ code: "INVALID_REQUEST" }, { status: 400 }) : null,
 } });
+mock.module(mod("lib/adminAudit.ts"), { namedExports: {
+  writeSystemAuditLog: async (input) => { sourceBindingAudits.push(input); },
+} });
 const { accountAttachmentPrefix } = await import(mod("lib/messageAttachmentStorage.ts"));
+const { scopedMessageId } = await import(mod("lib/messageRequestIdentity.ts"));
+const { chatDraftMessageReceiptSchema } = await import(mod("lib/chatDraftMessageConsume.ts"));
 const { POST } = await import(mod("app/api/conversations/[conversationId]/messages/route.ts"));
 const prefix = accountAttachmentPrefix("owner@example.invalid");
 const message = (overrides = {}) => ({ clientRequestId: randomUUID(), role: "user", content: "", attachmentReferences: [{ attachmentId: "source" }], ...overrides });
@@ -100,7 +119,89 @@ test.beforeEach(() => {
     id: "source", userId: "owner", conversationId: "conversation", messageId: "old-question", ordinal: 0,
     objectKey: `${prefix}original.txt`, name: "original.txt", mediaType: "text/plain", size: 4, kind: "text", unavailableAt: null,
   }] };
-  copied = []; readKeys = []; storageFailure = null; failDb = false; capacityFailure = false; capacityChecks = 0;
+  copied = []; readKeys = []; storageFailure = null; failDb = false; capacityFailure = false;
+  capacityChecks = 0; sourceBindingAudits = [];
+});
+
+test("product draft save preserves authored whitespace through source binding and Message creation", async () => {
+  const authored = "  authored Cafe\u0301 🙂\r\nunchanged  ";
+  const prompt = message({ content: authored, attachmentReferences: undefined });
+  const messageId = scopedMessageId("conversation", prompt.clientRequestId);
+  state.drafts.push({ id: "product-draft", userId: "owner",
+    scopeKey: "conversation", revision: 7, text: authored,
+    attachmentReferences: [] });
+  state.productAttempt = { id: "product-attempt", state: "held",
+    mode: "explicit", draftId: "product-draft", draftRevision: 7,
+    sourceMessageId: null, suggestionSourceMessageId: messageId,
+    currentDraftId: "product-draft" };
+
+  const response = await save([prompt], "conversation", {
+    scopeKey: "conversation", expectedRevision: 7,
+    requestId: prompt.clientRequestId,
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).draftConsumed, true);
+  assert.equal(state.messages.find((row) => row.id === messageId)?.content,
+    authored);
+  assert.equal(state.productAttempt.sourceMessageId, messageId);
+  assert.deepEqual(sourceBindingAudits.map((entry) => entry.action),
+    ["prompt_refiner.product_source_bound"]);
+  assert.equal(state.drafts.length, 0);
+});
+
+test("invalid product draft bytes bind no source and create no Message", async () => {
+  const authored = "  exact source\n";
+  const prompt = message({ content: `${authored}changed`,
+    attachmentReferences: undefined });
+  const messageId = scopedMessageId("conversation", prompt.clientRequestId);
+  state.drafts.push({ id: "product-draft", userId: "owner",
+    scopeKey: "conversation", revision: 3, text: authored,
+    attachmentReferences: [] });
+  state.productAttempt = { id: "product-attempt", state: "held",
+    mode: "explicit", draftId: "product-draft", draftRevision: 3,
+    sourceMessageId: null, suggestionSourceMessageId: messageId,
+    currentDraftId: "product-draft" };
+
+  const response = await save([prompt], "conversation", {
+    scopeKey: "conversation", expectedRevision: 3,
+    requestId: prompt.clientRequestId,
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "MESSAGE_SAVE_CONFLICT");
+  assert.equal(state.productAttempt.sourceMessageId, null);
+  assert.equal(state.messages.length, 0);
+  assert.equal(sourceBindingAudits.length, 0);
+  assert.equal(state.drafts.length, 1);
+});
+
+test("draft receipt validation preserves exact bytes and keeps whitespace-only attachment policy", () => {
+  const requestId = randomUUID();
+  const authored = "  authored receipt\r\n  ";
+  const base = { draftConsume: { scopeKey: "conversation",
+    expectedRevision: 1, requestId } };
+  assert.equal(chatDraftMessageReceiptSchema.parse({ ...base,
+    message: { clientRequestId: requestId, content: authored } }).message.content,
+  authored);
+  assert.throws(() => chatDraftMessageReceiptSchema.parse({ ...base,
+    message: { clientRequestId: requestId, content: " \r\n " } }), ZodError);
+  assert.equal(chatDraftMessageReceiptSchema.parse({ ...base,
+    message: { clientRequestId: requestId, content: " \r\n ",
+      attachmentReferences: [{ attachmentId: "source" }] } }).message.content,
+  " \r\n ");
+});
+
+test("ordinary Message saves retain legacy trim and length behavior", async () => {
+  const ordinary = message({ content: "  ordinary authored text\r\n  ",
+    attachmentReferences: undefined });
+  assert.equal((await save([ordinary])).status, 200);
+  assert.equal(state.messages[0].content, "ordinary authored text");
+  assert.equal((await save([message({ content: " \r\n ",
+    attachmentReferences: undefined })])).status, 400);
+
+  const boundary = message({ content: ` ${"x".repeat(50_000)} `,
+    attachmentReferences: undefined });
+  assert.equal((await save([boundary])).status, 200);
+  assert.equal(state.messages.at(-1).content.length, 50_000);
 });
 
 test("actual route and helper persist a restored attachment-only question and return public new IDs", async () => {

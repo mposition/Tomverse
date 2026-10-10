@@ -75,7 +75,9 @@ const userMessageSchema = z
       attachments is a complete message; the refinement below is what keeps a
       genuinely empty one out.
     */
-    content: z.string().trim().max(50_000),
+    // Parse authored bytes without changing them. The parent schema applies
+    // the legacy trim only when no exact draft is being consumed.
+    content: z.string(),
     status: z.literal("normal").optional().default("normal"),
     modelId: modelIdSchema.optional(),
     attachmentUploadIds: z.array(attachmentUploadIdSchema).max(5).optional(),
@@ -90,7 +92,7 @@ const userMessageSchema = z
     { message: "Use one attachment reference format per message." })
   .refine(
     (message) =>
-      message.content.length > 0 ||
+      message.content.trim().length > 0 ||
       (message.attachmentUploadIds?.length ?? 0) > 0 ||
       (message.attachmentReferences?.length ?? 0) > 0,
     { message: "A message must have text or at least one attachment." }
@@ -113,7 +115,22 @@ const saveMessagesSchema = z
       (body.messages.length === 1 &&
         body.messages[0]?.clientRequestId === body.draftConsume.requestId),
     { message: "A draft consumption must name the one message being saved." }
-  );
+  )
+  .refine(
+    (body) => body.messages.every((message) =>
+      (body.draftConsume ? message.content : message.content.trim()).length <= 50_000
+    ),
+    { message: "Message content is too long.", path: ["messages"] }
+  )
+  .transform((body) => body.draftConsume
+    ? body
+    : {
+        ...body,
+        messages: body.messages.map((message) => ({
+          ...message,
+          content: message.content.trim(),
+        })),
+      });
 
 export async function POST(
   req: Request,

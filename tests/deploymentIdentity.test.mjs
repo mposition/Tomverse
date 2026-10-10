@@ -259,3 +259,26 @@ test("darkness is checked by a gate, not by this test", () => {
     );
     assert.equal(packageJson.scripts["check:dark-tables"], "node scripts/check-dark-tables.mjs");
 });
+
+test("the product release reader has one stage-only dark-table exception", () => {
+    const checker = readFileSync(
+        new URL("../scripts/check-dark-tables.mjs", import.meta.url),
+        "utf8"
+    );
+    const releaseStorePath = "lib/promptRefinerProductReleaseStore.ts";
+    const stage = /PromptRefinerVnextOneShotStage:\s*\[([\s\S]*?)\n\s*\],/.exec(checker);
+    const slot = /PromptRefinerVnextOneShotSlot:\s*\[([\s\S]*?)\n\s*\],/.exec(checker);
+    assert.ok(stage, "stage limited-access block exists");
+    assert.ok(slot, "slot limited-access block exists");
+    assert.match(stage[1], new RegExp(`"${releaseStorePath.replaceAll("/", "\\/")}"`));
+    assert.doesNotMatch(slot[1], new RegExp(releaseStorePath.replaceAll("/", "\\/")));
+    assert.equal(checker.split(`"${releaseStorePath}"`).length - 1, 1);
+
+    const releaseStore = readFileSync(
+        new URL("../lib/promptRefinerProductReleaseStore.ts", import.meta.url),
+        "utf8"
+    );
+    assert.match(releaseStore,
+        /promptRefinerVnextOneShotStage\.findUnique\(\{\s*where: \{ id: target\.stageId \}/);
+    assert.doesNotMatch(releaseStore, /promptRefinerVnextOneShotSlot|PromptRefinerVnextOneShotSlot/);
+});

@@ -24,6 +24,7 @@ import {
 } from "@/lib/routingAttemptSweep";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { sweepPromptRefinerShadowUnknowns } from "@/lib/promptRefinerShadowRunStore";
+import { expirePromptRefinerChatSuggestions } from "@/lib/promptRefinerChatExecutionStore";
 
 /**
  * How long an unapplied cost correction may sit before it is an incident.
@@ -441,6 +442,9 @@ export async function cleanupExpiredData() {
 
   const creditReservations = await step("chat_credit_reservations", () =>
     reconcileExpiredChatCreditReservations()
+  );
+  const promptRefinerChatSuggestions = await step("prompt_refiner_chat_suggestions", () =>
+    expirePromptRefinerChatSuggestions()
   );
 
   // The provider-cost ledger's two recovery passes.
@@ -1093,6 +1097,7 @@ export async function cleanupExpiredData() {
     oauthTokensEncrypted,
     creditLotsExpired,
     creditReservations,
+    promptRefinerChatSuggestions,
     staleRoutingAttempts,
     costAdjustments,
     promptRefinerShadowUnknowns,

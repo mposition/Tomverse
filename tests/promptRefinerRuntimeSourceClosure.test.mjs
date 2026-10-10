@@ -471,12 +471,19 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-09, product-Auto budget hold: the shared audit actor and the
 // marketing fingerprint note move reviewed access positions only. Count 228
 // and the position-free inventory remain unchanged.
+// 2026-10-10, CHAT-01 product connection: release readiness, the product audit
+// scope and the reviewed marketing fingerprint provenance move only existing
+// accesses in promptRefinerAccess.ts, adminAuditSystemActors.ts and
+// marketingAutomationAccess.ts. The strict decision schema stays in the
+// existing promptRefinerSuggestion.ts closure, so the runtime remains 178/190
+// files. Count 228 and the position-free inventory remain unchanged; only
+// positions in the reviewed closure move.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "808ae51c072aa92bf4f3c3a6ed1be23",
-  "aff1fce03de69bea61f61f3d4643b6872",
+  "8e5a039576f4fc975a32056ebb70c4ea",
+  "bf85c1b5848955e74b2a4b99e279b0b2",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

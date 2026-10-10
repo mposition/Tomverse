@@ -73,6 +73,9 @@ model User {
   messageAttachments                   MessageAttachment[]
   messageAttachmentUploads             MessageAttachmentUpload[]
   chatComposerDrafts                   ChatComposerDraft[]
+  promptRefinerChatScopes               PromptRefinerChatScope[]
+  promptRefinerChatSuggestions          PromptRefinerChatSuggestion[]
+  promptRefinerProductAttempts           PromptRefinerProductAttempt[]
   chatResponseAttempts                 ChatResponseAttempt[]
   imageGenerationGroups                ImageGenerationGroup[]
   imageCreditReservations              ImageCreditReservation[]
@@ -385,6 +388,9 @@ model Conversation {
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
   composerDrafts        ChatComposerDraft[]
+  promptRefinerScopes   PromptRefinerChatScope[]
+  promptRefinerSuggestions PromptRefinerChatSuggestion[]
+  promptRefinerProductAttempts PromptRefinerProductAttempt[]
   responseAttempts      ChatResponseAttempt[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
@@ -1132,6 +1138,155 @@ model ChatComposerDraft {
 
   @@unique([userId, scopeKey])
   @@index([conversationId])
+}
+
+// Default-off server bindings. DB triggers own epochs, draft invalidation and
+// terminal body purge; these rows grant no provider dispatch authority.
+model PromptRefinerChatScope {
+  id String @id
+  userId String
+  mountId String
+  conversationId String
+  surface String
+  epoch Int
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  suggestions PromptRefinerChatSuggestion[]
+  productAttempts PromptRefinerProductAttempt[]
+  @@unique([userId, mountId])
+}
+
+model PromptRefinerChatSuggestion {
+  id String @id
+  userId String
+  conversationId String
+  surface String
+  scopeId String
+  scopeEpoch Int
+  recoveryEpoch Int
+  draftId String
+  draftRevision Int
+  sourceMessageId String
+  sourcePrompt String?
+  refinedPrompt String?
+  requestId String @unique
+  refinerVersion String
+  mode String
+  state String
+  decision String?
+  createdAt DateTime @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
+  expiresAt DateTime @db.Timestamp(3)
+  consumedAt DateTime? @db.Timestamp(3)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  scope PromptRefinerChatScope @relation(fields: [scopeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  productAttempts PromptRefinerProductAttempt[]
+  @@index([scopeId, state])
+  @@index([draftId, state])
+  @@index([expiresAt, state])
+}
+
+/// Private, ephemeral product admission tombstone. It contains no prompt,
+/// attachment or digest and prevents a repeated HTTP body from buying another
+/// attempt for the same exact server-owned draft epoch.
+model PromptRefinerProductAttempt {
+  id String @id
+  userId String
+  conversationId String
+  scopeId String
+  scopeEpoch Int
+  draftId String
+  draftRevision Int
+  mode String
+  clientRequestId String
+  state String
+  suggestionId String?
+  sourceMessageId String?
+  createdAt DateTime @default(dbgenerated("(clock_timestamp() AT TIME ZONE 'UTC'::text)")) @db.Timestamp(3)
+  expiresAt DateTime @db.Timestamp(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  scope PromptRefinerChatScope @relation(fields: [scopeId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  suggestion PromptRefinerChatSuggestion? @relation(fields: [suggestionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([userId, scopeId, scopeEpoch, draftId, draftRevision, mode])
+  @@unique([clientRequestId])
+  @@index([scopeId, state])
+  @@index([expiresAt, state])
+  @@index([state, createdAt])
+}
+
+/// Content-free immutable product execution fact. It deliberately has no
+/// user, conversation, session, attachment, prompt or digest column.
+model PromptRefinerProductExecutionReceipt {
+  id String @id
+  receiptVersion String
+  requestId String @unique
+  suggestionId String? @unique
+  refinerVersion String
+  provider String?
+  modelId String?
+  adapterVersion String?
+  outcome String
+  failureLayer String
+  failureCode String?
+  requestedAt DateTime @db.Timestamptz(3)
+  dispatchedAt DateTime? @db.Timestamptz(3)
+  completedAt DateTime @db.Timestamptz(3)
+  preparationLatencyMs Int
+  inputTokens BigInt?
+  cachedInputTokens BigInt?
+  outputTokens BigInt?
+  reasoningTokens BigInt?
+  actualCostMicroUsd BigInt?
+  retryCount Int
+  dispositions PromptRefinerProductDispositionReceipt[]
+  productContext PromptRefinerProductExecutionContext?
+
+  @@index([completedAt])
+  @@index([outcome, completedAt])
+}
+
+/// Product mode is kept beside, rather than added to, the closed v1 receipt.
+model PromptRefinerProductExecutionContext {
+  executionReceiptId String @id
+  mode String
+  execution PromptRefinerProductExecutionReceipt @relation(fields: [executionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// A separate immutable product disposition. The execution receipt remains
+/// unchanged when a user or server-owned Auto decision is later consumed.
+model PromptRefinerProductDispositionReceipt {
+  id String @id
+  receiptVersion String
+  executionReceiptId String @unique
+  requestId String @unique
+  suggestionId String? @unique
+  outcome String
+  staleReason String?
+  observedAt DateTime @db.Timestamptz(3)
+  execution PromptRefinerProductExecutionReceipt @relation(fields: [executionReceiptId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([observedAt])
+  @@index([outcome, observedAt])
+}
+
+/// Singleton Auto stop latch. It stores closed operational aggregates only.
+model PromptRefinerProductOperationalGuard {
+  id String @id
+  state String
+  generation Int
+  baselineAt DateTime @db.Timestamptz(3)
+  pausedAt DateTime? @db.Timestamptz(3)
+  reasonCode String?
+  sampleSize Int
+  p90LatencyMs Int?
+  fallbackCount Int?
+  lastTransitionAuditLogId String @unique(map: "PromptRefinerProductOperationalGua_lastTransitionAuditLogId_key")
+  transitionedAt DateTime @db.Timestamptz(3)
+
+  lastTransitionAudit AdminAuditLog @relation("PromptRefinerProductOperationalGuardTransitionAudit", fields: [lastTransitionAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "PromptRefinerProductOperationalGu_lastTransitionAuditLogId_fkey")
 }
 
 // One durable execution identity for an authenticated Chat answer. The
@@ -2295,7 +2450,10 @@ model AdminAuditLog {
   amuxDecisionMakerJudgment AmuxDecisionMakerJudgment?
   amuxDecisionMakerDeliveryEvent AmuxDecisionMakerDeliveryEvent?
   promptRefinerAutoBudgetReservations PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetReservationAudit")
+  promptRefinerAutoBudgetDispatches PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetDispatchAudit")
+  promptRefinerAutoBudgetUnknowns PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetUnknownAudit")
   promptRefinerAutoBudgetSettlements PromptRefinerAutoBudgetHold[] @relation("PromptRefinerAutoBudgetSettlementAudit")
+  promptRefinerProductOperationalGuard PromptRefinerProductOperationalGuard? @relation("PromptRefinerProductOperationalGuardTransitionAudit")
 
   /// No actor relation on purpose: see
   /// migrations/20260826070000_admin_audit_actor_not_a_foreign_key.
@@ -5994,7 +6152,8 @@ model PromptRefinerVnextOneShotSlot {
 
 /// Dark product-Auto spend hold. This is separate from user credits, Chat
 /// provider budgets, and the 80-slot evaluation ledger. A held/unknown request
-/// keeps its worst-case micro-USD booked until a separately audited settlement.
+/// keeps its worst-case micro-USD booked. Unknown is terminal here; changing it
+/// requires a separately reviewed reconciliation contract.
 model PromptRefinerAutoBudgetWindow {
   period            String
   periodStart       DateTime @db.Timestamptz(3)
@@ -6016,11 +6175,22 @@ model PromptRefinerAutoBudgetHold {
   pricePinDigest        String
   runtimeDeploymentId   String
   reservationAuditLogId String    @unique
+  dispatchIntentId      String?   @unique
+  adapterConfigDigest   String?
+  dispatchAuditLogId    String?   @unique
+  dispatchedAt          DateTime? @db.Timestamptz(3)
+  unknownObservationId  String?   @unique
+  unknownAuditLogId     String?   @unique
+  unknownAt             DateTime? @db.Timestamptz(3)
+  settlementObservationId String? @unique
+  releaseProofId        String?   @unique
   settlementAuditLogId  String?   @unique
   createdAt             DateTime  @default(now()) @db.Timestamptz(3)
   closedAt              DateTime? @db.Timestamptz(3)
 
   reservationAudit AdminAuditLog @relation("PromptRefinerAutoBudgetReservationAudit", fields: [reservationAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  dispatchAudit    AdminAuditLog? @relation("PromptRefinerAutoBudgetDispatchAudit", fields: [dispatchAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  unknownAudit     AdminAuditLog? @relation("PromptRefinerAutoBudgetUnknownAudit", fields: [unknownAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   settlementAudit  AdminAuditLog? @relation("PromptRefinerAutoBudgetSettlementAudit", fields: [settlementAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
   @@index([status, createdAt])
