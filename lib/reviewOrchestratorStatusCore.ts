@@ -39,11 +39,14 @@ const quotaSchema = z
     state: z.enum(REVIEW_QUOTA_STATES),
     remaining: z.number().min(0).max(1_000_000_000).nullable(),
     unit: z.enum(REVIEW_QUOTA_UNITS).nullable(),
+    /** Credit left after the included pool, in USD (Cursor's credit grants); only when read. */
+    credit: z.number().min(0).max(1_000_000_000).optional(),
   })
   .strict()
   .refine((quota) => (quota.remaining === null) === (quota.unit === null))
   .refine((quota) => quota.unit !== "percent" || (quota.remaining ?? 0) <= 100)
-  .refine((quota) => quota.remaining === null || quota.state === "available" || quota.state === "exhausted");
+  .refine((quota) => quota.remaining === null || quota.state === "available" || quota.state === "exhausted")
+  .refine((quota) => quota.credit === undefined || quota.state === "available" || quota.state === "exhausted");
 const id = z.string().regex(/^[a-z0-9][a-z0-9-]{0,31}$/);
 const count = z.number().int().min(0).max(100_000);
 

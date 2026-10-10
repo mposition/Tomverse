@@ -7,21 +7,27 @@ import Link from "next/link";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
-import type { AgentOfficeAmuxView, AgentOfficeReviewView, AgentOfficeSeatedView } from "@/lib/agentOffice/live";
+import type {
+  AgentOfficeAmuxView,
+  AgentOfficeDecisionView,
+  AgentOfficeReviewView,
+  AgentOfficeSeatedView,
+} from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
-  AGENT_OFFICE_WORKER_COLORS,
-  AGENT_OFFICE_WORKER_SKINS,
+  AGENT_OFFICE_DECISION_RECORD_HREF,
+  agentOfficeDept,
+  agentOfficeSeatedClothes,
+  type AgentOfficeSeatedRoom,
+  type AgentOfficeTeamId,
 } from "@/lib/agentOffice/roster";
-import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
+import type { Agent, AgentOffice, Snapshot } from "@/lib/agentOffice/sim";
 import {
   AMUX_ROOM,
+  DECISION_ROOM,
   REVIEW_ROOM,
   type Room,
-  ENTRANCE,
   ENTRANCE_MAT,
-  MEETING_ROOM,
-  OPERATOR_ROOM,
   PROPS,
   ROOMS,
   TILE,
@@ -36,10 +42,16 @@ type Props = {
   amux: AgentOfficeAmuxView;
   /** The independent review room, read from the review server's latest report. */
   review: AgentOfficeReviewView;
+  /** The Decision Maker room, read from its switches and its ledger's counts. */
+  decision: AgentOfficeDecisionView;
   snap: Snapshot;
   selectedId: string | null;
   follow: boolean;
   onSelect: (agent: Agent) => void;
+  /** A seated figure was clicked: its profile is read from the room's record by name. */
+  onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
+  /** A room's name was clicked: what its team does. */
+  onSelectTeam: (team: AgentOfficeTeamId) => void;
 };
 
 type Cam = { x: number; y: number; scale: number };
@@ -79,9 +91,6 @@ const AgentLayer = memo(function AgentLayer({
           }
         >
           <span className={cx("ag-bubble")} />
-          <span className={cx("ag-bar")}>
-            <i />
-          </span>
           <span className={cx("ag-body")}>
             <i className={cx("p-shadow")} />
             <i className={cx("p-leg l")} />
@@ -107,40 +116,53 @@ const AgentLayer = memo(function AgentLayer({
 });
 
 /**
- * Figures seated at a room's desks from a real record: the AMUX workers and
- * the reviewers. Not engine agents: they never walk, meet or take a demo task,
- * and what each says is its real state.
+ * Figures seated at a room's desks from a real record: the AMUX workers, the
+ * reviewers and the Decision Maker instances. Not the floor's staff: each is
+ * one row of its record, what it says is its real state, and a click opens
+ * that record as a profile.
  */
 const SeatedLayer = memo(function SeatedLayer({
   room,
+  kind,
   people,
-  palette = 0,
+  onPick,
 }: {
   room: Room;
+  /** Which seated room: its clothes and whose profile a click opens. */
+  kind: AgentOfficeSeatedRoom;
   people: AgentOfficeSeatedView[];
-  /** Where in the palette this room's clothes start, so two rooms do not dress alike. */
-  palette?: number;
+  onPick: (kind: AgentOfficeSeatedRoom, name: string) => void;
 }) {
   return (
     <>
       {people.slice(0, room.desks.length).map((worker, i) => {
         const seat = room.desks[i].seat;
-        const [hair, shirt, accent] = AGENT_OFFICE_WORKER_COLORS[(i + palette) % AGENT_OFFICE_WORKER_COLORS.length];
+        const clothes = agentOfficeSeatedClothes(kind, i);
         return (
           <div
             key={worker.name}
             className={cx("ag", "f-up", "a-sit", "r-member", "wk", worker.dim && "wk-off")}
             title={worker.title}
+            role="button"
+            tabIndex={0}
+            aria-haspopup="dialog"
+            aria-label={worker.title}
+            onPointerUp={() => onPick(kind, worker.name)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              onPick(kind, worker.name);
+            }}
             data-testid={`agent-office-${room.id}-person`}
             data-worker-state={worker.state}
             style={
               {
                 transform: `translate3d(${(seat.x + 0.5) * TILE}px, ${(seat.y + 0.9) * TILE}px, 0)`,
                 zIndex: 200 + seat.y,
-                "--cloth-hair": hair,
-                "--cloth-shirt": shirt,
-                "--cloth-accent": accent,
-                "--cloth-skin": AGENT_OFFICE_WORKER_SKINS[i % AGENT_OFFICE_WORKER_SKINS.length],
+                "--cloth-hair": clothes.hair,
+                "--cloth-shirt": clothes.shirt,
+                "--cloth-accent": clothes.accent,
+                "--cloth-skin": clothes.skin,
               } as CSSProperties
             }
           >
@@ -191,7 +213,6 @@ const PropLayer = memo(function PropLayer({
         >
           {prop.kind === "desk" ? <i className={cx("pr-monitor")} /> : null}
           {prop.label === "screen" ? <span>{screenLabel}</span> : null}
-          {prop.label === "coffee" ? <span aria-hidden="true">☕</span> : null}
         </div>
       ))}
       <div
@@ -211,10 +232,21 @@ const PropLayer = memo(function PropLayer({
 
 /**
  * The live office floor: rooms, furniture and staff, with a camera that
- * follows whatever is happening. Ported from the original AI OFFICE
- * OfficeWorld; a demo of the agent teams, not a reading of them.
+ * turns to the room the console was asked about. Ported from the original
+ * AI OFFICE OfficeWorld; every colour and line on it is a record's.
  */
-export default function AgentOfficeWorld({ engine, amux, review, snap, selectedId, follow, onSelect }: Props) {
+export default function AgentOfficeWorld({
+  engine,
+  amux,
+  review,
+  decision,
+  snap,
+  selectedId,
+  follow,
+  onSelect,
+  onSelectSeated,
+  onSelectTeam,
+}: Props) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const viewportRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -231,21 +263,16 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
 
   const hotRoom = useMemo(() => {
     if (snap.spotlight) return snap.spotlight; // a room the operator asked about wins
-    if (snap.meetingTitle) return MEETING_ROOM.id;
-    if (snap.phaseIndex >= PHASE.briefing) return OPERATOR_ROOM.id;
     const working = Object.entries(snap.deptStatus).find(([, status]) => status === "working");
     return working?.[0] ?? null;
-  }, [snap.spotlight, snap.meetingTitle, snap.phaseIndex, snap.deptStatus]);
+  }, [snap.spotlight, snap.deptStatus]);
 
-  /** Where the camera looks: meeting > operator > a working room > the entrance at arrival. */
+  /** Where the camera looks when zoomed in: the room asked about, else a room at work. */
   const focus = useMemo(() => {
-    if (hotRoom) {
-      const room = roomOf(hotRoom);
-      return { x: (room.x + room.w / 2) * TILE, y: (room.y + room.h / 2) * TILE };
-    }
-    if (snap.phaseIndex <= PHASE.arrival) return { x: ENTRANCE.x * TILE, y: (ENTRANCE.y - 6) * TILE };
-    return null;
-  }, [hotRoom, snap.phaseIndex]);
+    if (!hotRoom) return null;
+    const room = roomOf(hotRoom);
+    return { x: (room.x + room.w / 2) * TILE, y: (room.y + room.h / 2) * TILE };
+  }, [hotRoom]);
 
   const register = useCallback((id: string, el: HTMLDivElement | null) => {
     if (el) agentRefs.current.set(id, el);
@@ -257,6 +284,12 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
       if (!dragRef.current.moved) onSelect(agent);
     },
     [onSelect]
+  );
+  const onPickSeated = useCallback(
+    (kind: AgentOfficeSeatedRoom, name: string) => {
+      if (!dragRef.current.moved) onSelectSeated(kind, name);
+    },
+    [onSelectSeated]
   );
 
   // Camera target
@@ -313,14 +346,7 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
           }px, 0)`;
           el.style.zIndex = String(200 + Math.round(agent.y));
 
-          const cls = cx(
-            "ag",
-            `f-${agent.facing}`,
-            `a-${agent.anim}`,
-            `r-${agent.rank}`,
-            agent.id === picked && "selected",
-            agent.status === "offDuty" && "offstage"
-          );
+          const cls = cx("ag", `f-${agent.facing}`, "a-sit", `r-${agent.rank}`, agent.id === picked && "selected");
           if (el.className !== cls) el.className = cls;
 
           const bubble = el.firstElementChild as HTMLElement;
@@ -328,14 +354,8 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
           if (bubble.dataset.text !== text) {
             bubble.dataset.text = text;
             bubble.textContent = text;
-            bubble.className = cx("ag-bubble", agent.speechKind, text && "on");
+            bubble.className = cx("ag-bubble", text && "on");
           }
-
-          const bar = el.children[1] as HTMLElement;
-          const fill = bar.firstElementChild as HTMLElement;
-          const show = agent.anim === "type" ? "1" : "0";
-          if (bar.style.opacity !== show) bar.style.opacity = show;
-          if (show === "1") fill.style.width = `${Math.round(agent.progress * 100)}%`;
         }
       }
       raf = requestAnimationFrame(paint);
@@ -390,7 +410,20 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
           {ROOMS.map((room) => {
             const isAmux = room.kind === "amux";
             const isReview = room.kind === "review";
-            const real = isAmux ? amux : isReview ? review : null;
+            const isDecision = room.kind === "decision";
+            const real = isAmux ? amux : isReview ? review : isDecision ? decision : null;
+            const liveDept = real ? null : engine.liveDept(room.id);
+            // Every room that reads a record links it: a team room while it is live.
+            const recordHref = isAmux
+              ? AGENT_OFFICE_AMUX_RECORD_HREF
+              : isDecision
+                ? AGENT_OFFICE_DECISION_RECORD_HREF
+                : liveDept
+                  ? (agentOfficeDept(room.id)?.recordHref ?? null)
+                  : null;
+            const name = isAmux ? m.rooms.amux : isReview ? m.rooms.review : isDecision ? m.rooms.decision : roomName(room.id);
+            const recordLabel = isAmux ? m.rooms.amuxRecord : isDecision ? m.rooms.decisionRecord : m.rooms.recordOf(name);
+            const recordTitle = real ? real.summary : (liveDept?.line ?? "");
             const status = real ? real.status : snap.deptStatus[room.id];
             return (
               <div
@@ -404,9 +437,24 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
                 }}
               >
                 <span className={cx("rm-head")}>
-                  <b>
-                    {room.icon} {isAmux ? m.rooms.amux : isReview ? m.rooms.review : roomName(room.id)}
-                  </b>
+                  {room.kind === "operator" ? (
+                    <b>
+                      {room.icon} {m.rooms.operator}
+                    </b>
+                  ) : (
+                    <button
+                      type="button"
+                      className={cx("rm-name")}
+                      onClick={() => {
+                        if (!dragRef.current.moved) onSelectTeam(room.id as AgentOfficeTeamId);
+                      }}
+                      aria-haspopup="dialog"
+                      aria-label={m.teamInfo.open(name)}
+                      data-testid={`agent-office-${room.id}-name`}
+                    >
+                      {room.icon} {name}
+                    </button>
+                  )}
                   {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
                     <i
@@ -414,13 +462,13 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
                       title={real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
                     />
                   ) : null}
-                  {isAmux && AGENT_OFFICE_AMUX_RECORD_HREF ? (
+                  {recordHref ? (
                     <Link
-                      href={AGENT_OFFICE_AMUX_RECORD_HREF}
+                      href={recordHref}
                       className={cx("rm-link")}
-                      aria-label={m.rooms.amuxRecord}
-                      title={amux.summary}
-                      data-testid="agent-office-amux-record"
+                      aria-label={recordLabel}
+                      title={recordTitle}
+                      data-testid={`agent-office-${room.id}-record`}
                     >
                       ↗
                     </Link>
@@ -444,8 +492,9 @@ export default function AgentOfficeWorld({ engine, amux, review, snap, selectedI
           })}
 
           <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
-          <SeatedLayer room={AMUX_ROOM} people={amux.workers} />
-          <SeatedLayer room={REVIEW_ROOM} people={review.reviewers} palette={3} />
+          <SeatedLayer room={AMUX_ROOM} kind="amux" people={amux.workers} onPick={onPickSeated} />
+          <SeatedLayer room={REVIEW_ROOM} kind="review" people={review.reviewers} onPick={onPickSeated} />
+          <SeatedLayer room={DECISION_ROOM} kind="decision" people={decision.members} onPick={onPickSeated} />
           <AgentLayer
             agents={engine.agents}
             register={register}
