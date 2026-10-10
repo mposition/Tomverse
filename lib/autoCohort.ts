@@ -39,9 +39,13 @@ import { createHash } from "node:crypto";
 
 import { autoRolloutReadiness, type AutoReadinessGateId } from "@/lib/autoRolloutReadiness";
 import { DRILL_OVERRIDE_REASON } from "@/lib/autoDrillOverride";
+import {
+  resolveAutoRouterLimitedRelease,
+  type AutoRouterLimitedReleaseAdmission,
+} from "@/lib/autoRouterLimitedRelease";
 
 /** Bump when bucketing, salt handling or the refusal set changes. */
-export const AUTO_COHORT_VERSION = "auto-cohort-v1";
+export const AUTO_COHORT_VERSION = "auto-cohort-v2";
 
 /** Buckets per cohort. 10,000 makes a 0.01% cohort expressible. */
 const BUCKETS = 10_000;
@@ -64,6 +68,12 @@ export type AutoCohortDecision =
        * readable as one that qualified on its own.
        */
       drillOverride?: typeof DRILL_OVERRIDE_REASON;
+      /** The separately approved, still-gate-pending release path. */
+      limitedReleaseException?: Readonly<{
+        exceptionId: string;
+        evidenceRef: string;
+        outstandingGates: readonly AutoReadinessGateId[];
+      }>;
       version: string;
       salt: string;
     }
@@ -92,6 +102,8 @@ export type AutoCohortConfig = {
   salt: string;
   /** Plans Auto may route. Empty means none, never "all". */
   eligiblePlans: readonly string[];
+  /** Separate product authority; never inferred from the rollout fields. */
+  limitedRelease?: AutoRouterLimitedReleaseAdmission;
 };
 
 const parsePercent = (raw: string | undefined): number => {
@@ -109,7 +121,8 @@ const parsePercent = (raw: string | undefined): number => {
  * deliberate rollout.
  */
 export const autoCohortConfig = (
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  now: () => number = Date.now,
 ): AutoCohortConfig => ({
   killSwitch: env.AUTO_ROUTER_KILL_SWITCH === "on",
   rolloutPercent: parsePercent(env.AUTO_ROUTER_ROLLOUT_PERCENT),
@@ -118,6 +131,7 @@ export const autoCohortConfig = (
     .split(",")
     .map((plan) => plan.trim())
     .filter(Boolean),
+  limitedRelease: resolveAutoRouterLimitedRelease({ environment: env, now }),
 });
 
 /**
@@ -175,6 +189,14 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
 
   const readiness = input.readiness ?? autoRolloutReadiness();
+  const limitedRelease = config.limitedRelease;
+  // A product exception may bypass only honest pending gates. A malformed
+  // register or an expired ordinary attestation is a defect, not a risk the
+  // limited-release approval accepted.
+  const limitedReleaseOverride =
+    !readiness.ready &&
+    readiness.problems.length === 0 &&
+    limitedRelease?.admitted === true;
   // The staging fallback drill is the one thing that may pass an outstanding
   // gate, and only because the alternative was worse: the register is static
   // code with no environment dimension, so attesting a gate to make staging
@@ -184,7 +206,7 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   //
   // Below the kill switch, deliberately. An operator turning Auto off during a
   // drill must not have to also remember to withdraw a credential.
-  if (!readiness.ready && !input.drillOverride) {
+  if (!readiness.ready && !input.drillOverride && !limitedReleaseOverride) {
     return {
       eligible: false,
       reason: "readiness_incomplete",
@@ -195,7 +217,8 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
   // Recorded on the decision, so a routed turn that took this path is never
   // mistaken for one that qualified.
-  const overridden = !readiness.ready && input.drillOverride === true;
+  const overridden =
+    !readiness.ready && !limitedReleaseOverride && input.drillOverride === true;
 
   if (config.rolloutPercent <= 0 || config.eligiblePlans.length === 0) {
     return { eligible: false, reason: "rollout_disabled", bucket: null, ...shared };
@@ -224,6 +247,15 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     eligible: true,
     bucket,
     ...(overridden ? { drillOverride: DRILL_OVERRIDE_REASON } : {}),
+    ...(limitedReleaseOverride
+      ? {
+          limitedReleaseException: {
+            exceptionId: limitedRelease.exceptionId,
+            evidenceRef: limitedRelease.evidenceRef,
+            outstandingGates: Object.freeze([...readiness.outstanding]),
+          },
+        }
+      : {}),
     ...shared,
   };
 };
@@ -246,7 +278,7 @@ export const describeAutoCohortRefusal = (
       return (
         "Auto rollout readiness is incomplete: " +
         `${(decision.outstandingGates ?? []).join(", ") || "the register does not validate"}. ` +
-        "Until every gate is attested, Auto stays in shadow."
+        "Auto stays in shadow unless the separately approved limited-release boundary admits it."
       );
     case "rollout_disabled":
       return "The rollout is off: no percentage, no eligible plans, or no cohort salt set.";
