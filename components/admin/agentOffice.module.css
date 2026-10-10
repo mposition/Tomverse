@@ -560,6 +560,7 @@ a.integration-row:hover { border-color: var(--accent); }
 .live-clock b { font-family: var(--font-ui); font-size: 28px; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .live-clock small { font-size: 11px; color: #6ee7b7; }
 .live-clock small.stale { color: #fcd34d; font-weight: 800; }
+.stale-note { margin-left: 8px; padding: 1px 7px; border-radius: 99px; background: var(--attention-bg); color: var(--text); font-weight: 800; letter-spacing: 0; }
 
 .live-bar {
   display: flex;

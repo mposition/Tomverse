@@ -1163,6 +1163,8 @@ function DashboardView({
   const engineeringLive = engine.liveDept("engineering") !== null;
   const todo = operatorQueueTotal(queue);
   const liveRows = liveRowsFor(teams, amuxView, reviewView, decisionView, m);
+  // The dashboard is a view of the same reading, so it says the same when the reading stops.
+  const stale = useStaleReading(readAt);
   const notConnected = teams.filter((team) => !team.live);
   const notConnectedNames = notConnected.map((team) => team.name).join(" · ");
   const brief = agentOfficeBrief(liveRows);
@@ -1182,6 +1184,11 @@ function DashboardView({
           <div className={cx("hero-copy")}>
             <p className={cx("eyebrow")}>
               {m.dashboard.eyebrowReal(aestStamp(readAt))}
+              {stale ? (
+                <span className={cx("stale-note")} role="status" data-testid="agent-office-dashboard-stale">
+                  {m.live.stale}
+                </span>
+              ) : null}
             </p>
             <h2 className={cx("office-title")}>
               {m.dashboard.titleBefore}
