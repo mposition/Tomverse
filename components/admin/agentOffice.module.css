@@ -77,8 +77,7 @@
   --floor-grid: rgba(255, 255, 255, .55);
   --room: #ffffff;
   --room-operator: #eff6ff;
-  --room-meeting: #f4f4f5;
-  --room-lounge: #ecfdf5;
+  --room-decision: #f4f4f5;
   --room-inset: rgba(255, 255, 255, .8);
   --room-shadow: rgba(24, 24, 27, .16);
   --door: #93c5fd;
@@ -143,8 +142,7 @@
   --floor-grid: rgba(255, 255, 255, .05);
   --room: #18181b;
   --room-operator: #172036;
-  --room-meeting: #1f1f23;
-  --room-lounge: #10241d;
+  --room-decision: #1f1f23;
   --room-inset: rgba(255, 255, 255, .04);
   --room-shadow: rgba(0, 0, 0, .5);
   --door: #3b82f6;
@@ -205,8 +203,7 @@
     --floor-grid: rgba(255, 255, 255, .05);
     --room: #18181b;
     --room-operator: #172036;
-    --room-meeting: #1f1f23;
-    --room-lounge: #10241d;
+    --room-decision: #1f1f23;
     --room-inset: rgba(255, 255, 255, .04);
     --room-shadow: rgba(0, 0, 0, .5);
     --door: #3b82f6;
@@ -550,6 +547,10 @@ a.integration-row:hover { border-color: var(--accent); }
 .profile-top p { margin: 3px 0 0; color: var(--text-soft); font-size: 12px; }
 .profile-task { margin-bottom: 10px; padding: 12px; border: 1px solid var(--accent-soft-2); border-radius: 9px; background: var(--accent-soft); }
 .profile-task strong { display: block; font-size: 13px; }
+.profile-facts { display: grid; gap: 5px; margin: 2px 0 0; }
+.profile-facts div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.profile-facts dt { color: var(--text-soft); }
+.profile-facts dd { margin: 0; font-weight: 800; text-align: right; overflow-wrap: anywhere; }
 .profile-record { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; margin-bottom: 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); font-size: 12px; }
 .profile-record a { color: var(--accent-text); font-weight: 800; text-decoration: none; }
 .profile-record code { color: var(--text-soft); font-family: var(--font-code); font-size: 11px; }
@@ -700,8 +701,7 @@ a.integration-row:hover { border-color: var(--accent); }
   box-shadow: inset 0 0 0 2px var(--room-inset), 4px 5px 0 var(--room-shadow);
 }
 .rm-operator { background: var(--room-operator); }
-.rm-meeting { background: var(--room-meeting); }
-.rm-lounge { background: var(--room-lounge); }
+.rm-decision { background: var(--room-decision); }
 .rm-link { flex: none; color: var(--accent); font-weight: 900; text-decoration: none; }
 .rm-link:hover, .rm-link:focus-visible { text-decoration: underline; }
 .rm-note {
@@ -777,8 +777,7 @@ a.integration-row:hover { border-color: var(--accent); }
 }
 .pr-operator-desk { border: 2px solid var(--outline); border-radius: 6px; background: linear-gradient(#bfdbfe, #93c5fd); box-shadow: 0 3px 0 rgba(9, 9, 11, .25); }
 .pr-table { border: 2px solid var(--outline); border-radius: 8px; background: linear-gradient(var(--desk-top), var(--desk-bottom)); box-shadow: 0 3px 0 rgba(9, 9, 11, .22); }
-.pr-sofa { border: 2px solid var(--outline); border-radius: 8px 8px 4px 4px; background: linear-gradient(#cbd5e1, #94a3b8); }
-.pr-coffee, .pr-screen, .pr-whiteboard, .pr-shelf, .pr-cabinet {
+.pr-screen, .pr-whiteboard, .pr-shelf, .pr-cabinet {
   display: grid;
   place-items: center;
   border: 2px solid var(--outline);
@@ -786,7 +785,6 @@ a.integration-row:hover { border-color: var(--accent); }
   font-size: 9px;
   font-weight: 800;
 }
-.pr-coffee { background: #e4e4e7; }
 .pr-screen { background: #18181b; color: #93c5fd; }
 .pr-whiteboard { background: #ffffff; }
 .pr-shelf { background: #d6c4ae; }
@@ -810,7 +808,9 @@ a.integration-row:hover { border-color: var(--accent); }
 .ag { position: absolute; left: 0; top: 0; width: 0; height: 0; cursor: pointer; }
 .ag.offstage { opacity: 0; pointer-events: none; }
 /* AMUX workers: drawn from the record, not picked like staff. */
-.ag.wk { cursor: default; }
+/* A seated figure is a button: the element itself has no size, so focus shows on its name tag. */
+.ag.wk:focus { outline: none; }
+.ag.wk:focus-visible .ag-tag { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ag.wk-off { opacity: .45; }
 .ag-body {
   position: absolute;

@@ -9,6 +9,7 @@ import type { AdminMessageShape } from "@/lib/adminLocale";
 import type { AgentOfficeCopy } from "@/lib/adminMessages/agentOffice";
 import type { AgentOfficeLiveDept } from "@/lib/agentOffice/live";
 import { findPath } from "@/lib/agentOffice/pathfinding";
+import { aestClock } from "@/lib/agentOffice/time";
 import {
   AGENT_OFFICE_BLOCKED_DEPTS,
   AGENT_OFFICE_DEPT_KEYWORDS,
@@ -21,7 +22,6 @@ import {
   COLS,
   DEPT_ROOMS,
   ENTRANCE,
-  LOUNGE_ROOM,
   MEETING_SEATS,
   OPERATOR_REPORT_SPOT,
   OPERATOR_SEAT,
@@ -47,7 +47,6 @@ export type AgentStatus =
   | "working"
   | "meeting"
   | "reporting"
-  | "onBreak"
   | "blocked";
 export type Anim = "idle" | "walk" | "type" | "talk" | "sit";
 export type Facing = "up" | "down" | "left" | "right";
@@ -281,7 +280,7 @@ export class AgentOffice {
   private seatBook = new Map<string, Pt>();
   /** Who in each team still has to finish the work it was given. */
   private pendingWork = new Map<string, Set<string>>();
-  /** Agents in a scene: their own idle behaviour (coffee, chat) cannot cut in. */
+  /** Agents in a scene: their own idle behaviour (a thought, a chat) cannot cut in. */
   private locked = new Set<string>();
   /**
    * Rooms that show a real record. The demo never simulates them: their
@@ -393,8 +392,7 @@ export class AgentOffice {
 
   roomName(roomId: string) {
     if (roomId === "operator") return this.copy.rooms.operator;
-    if (roomId === "meeting") return this.copy.rooms.meeting;
-    if (roomId === "lounge") return this.copy.rooms.lounge;
+    if (roomId === "decision") return this.copy.rooms.decision;
     return this.deptCopy(roomId).name;
   }
 
@@ -564,7 +562,6 @@ export class AgentOffice {
       const first = this.leadOf(blocked[0].id);
       this.stand(first);
       this.say(first, s.blockedSay, 3);
-      this.goto(first, rand(LOUNGE_ROOM.loiter), "onBreak");
       this.enqueue(first, { k: "wait", dur: 4 }, { k: "fn", fn: () => this.say(first, s.blockedLater, 2.4) });
       this.sitAtDesk(first);
       this.pushLog("🔌", s.blockedLog(blocked.map((room) => this.roomName(room.id)).join(" · ")), "lav");
@@ -637,15 +634,6 @@ export class AgentOffice {
     this.dayComplete = true;
     this.running = false;
     this.pushLog("🎀", s.dayOver, "yellow");
-
-    for (const agent of workers) {
-      // A live room's staff stay at their desks; the demo's day is not theirs.
-      if (this.live[agent.deptId]) continue;
-      if (Math.random() < 0.45) {
-        this.stand(agent);
-        this.goto(agent, rand(LOUNGE_ROOM.loiter), "onBreak");
-      }
-    }
   }
 
   /** ⑥–⑧: the draft summary, the operator's approval meeting and the PR preparation. */
@@ -800,7 +788,7 @@ export class AgentOffice {
   }
 
   private finishDept(deptId: string) {
-    // Not "nobody is typing": a teammate still walking back from the lounge
+    // Not "nobody is typing": a teammate still walking back to a desk
     // has not started yet, and the team is not done until they have finished.
     if ((this.pendingWork.get(deptId)?.size ?? 0) > 0) return;
     if (this.deptStatus[deptId] === "done") return;
@@ -917,7 +905,7 @@ export class AgentOffice {
   // ── The operator console ───────────────────────────────────
   pushChat(from: "operator" | "staff", name: string, text: string) {
     // The real view has no simulated clock: a line is stamped with the time it was said.
-    const time = this.demo ? this.clockText() : `${new Date().toISOString().slice(11, 16)} UTC`;
+    const time = this.demo ? this.clockText() : aestClock(new Date().toISOString());
     this.chat.push({ id: this.logSeq++, time, from, name, text });
     if (this.chat.length > 60) this.chat.shift();
   }
@@ -1075,9 +1063,6 @@ export class AgentOffice {
       }
     }
 
-    const away = this.agents.filter((a) => a.status === "onBreak").length;
-    if (away) lines.push(s.delayAway(away));
-
     if (!lines.length) lines.push(this.running || !this.demo ? s.delayNone : s.delayNotStarted);
     this.pushChat("staff", this.narratorName(), lines.join("\n"));
     this.speakNarrator(s.reportedDelay);
@@ -1229,7 +1214,7 @@ export class AgentOffice {
     }
     this.pushChat("staff", this.narratorName(), s.convened(ids.length));
     this.pushLog("🎤", s.convenedLog(ids.length), "yellow");
-    this.spotlightRoom("meeting", 24);
+    this.spotlightRoom("decision", 24);
     this.side.gen = this.conveneScene(ids);
   }
 
@@ -1354,9 +1339,18 @@ export class AgentOffice {
       if (lead) this.showRecordLine(lead, room.line);
       // A room whose record changed since the last reading says so in the
       // console, in its lead's name. The first reading is not a change, and a
-      // reading that only moved the read time (it lives in `detail`) is not one.
+      // reading that only moved the read time (it lives in `detail`) is not
+      // one; a room whose line cannot tell two readings apart says so with
+      // its revision.
       const before = previous[deptId];
-      if (lead && before && (before.status !== room.status || before.badge !== room.badge || before.line !== room.line)) {
+      if (
+        lead &&
+        before &&
+        (before.status !== room.status ||
+          before.badge !== room.badge ||
+          before.line !== room.line ||
+          before.revision !== room.revision)
+      ) {
         this.pushChat("staff", lead.name, this.copy.real.changed(this.roomName(deptId), room.line));
       }
     }
@@ -1511,7 +1505,7 @@ export class AgentOffice {
         agent.path = path;
         agent.pathIdx = 0;
         agent.anim = path.length ? "walk" : "idle";
-        if (agent.status === "idle" || agent.status === "onBreak") agent.status = "moving";
+        if (agent.status === "idle") agent.status = "moving";
         break;
       }
       case "say":
@@ -1561,10 +1555,10 @@ export class AgentOffice {
     agent.anim = "walk";
   }
 
-  /** Idle behaviour: a passing thought, a coffee, a word with a teammate. */
+  /** Idle behaviour: a passing thought or a word with a teammate. */
   private idleBrain(agent: Agent, dt: number) {
     if (agent.rank === "operator" || this.locked.has(agent.id)) return;
-    // The real view is still: a passing thought or a coffee run is the demo's.
+    // The real view is still: a passing thought or a chat is the demo's.
     if (!this.demo) return;
     // A live room's staff keep to their desks and say nothing of their own:
     // beside a LIVE chip, a passing thought would read as the agent's finding.
@@ -1577,24 +1571,10 @@ export class AgentOffice {
 
     const s = this.copy.sim;
     const roll = Math.random();
-    const blocked = this.deptStatus[agent.deptId] === "blocked";
 
     if (roll < 0.5 || this.focusMode) {
-      // In focus mode a thought is all there is: no coffee, no chat.
+      // In focus mode a thought is all there is: no chat.
       this.say(agent, rand(agent.thoughts), 3.4, "think");
-      return;
-    }
-    if (roll < 0.68 || blocked) {
-      // Coffee in the lounge.
-      this.stand(agent);
-      this.enqueue(
-        agent,
-        { k: "status", s: "onBreak" },
-        { k: "walk", to: rand(LOUNGE_ROOM.loiter) },
-        { k: "say", text: rand(s.coffee), dur: 2.6, kind: "talk" },
-        { k: "wait", dur: 3 + Math.random() * 4 }
-      );
-      this.sitAtDesk(agent);
       return;
     }
     if (roll < 0.82) {

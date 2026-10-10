@@ -18,14 +18,17 @@ import {
   agentOfficeBrief,
   agentOfficeReport,
   operatorQueueTotal,
+  decisionRoomView,
+  digestLiveDept,
   reviewQuotaView,
   reviewRoomView,
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
-  utcStamp,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
+  type AgentOfficeDecisionView,
+  type AgentOfficeSeatedView,
   type AgentOfficeQuotaView,
   type AgentOfficeOperatorQueue,
   type AgentOfficeLiveRow,
@@ -34,9 +37,13 @@ import {
 } from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DEPTS,
+  AGENT_OFFICE_DIGEST_SENDERS,
   AGENT_OFFICE_TEAM_IDS,
   agentOfficeDept,
+  agentOfficeSeatedClothes,
+  type AgentOfficeSeatedRoom,
 } from "@/lib/agentOffice/roster";
 import {
   AgentOffice,
@@ -47,7 +54,8 @@ import {
   type Snapshot,
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
-import { AMUX_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
+import { aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
+import { AMUX_ROOM, DECISION_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -64,7 +72,6 @@ const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
   meeting: "approval",
   reporting: "approval",
   blocked: "blocked",
-  onBreak: "done",
   offDuty: "waiting",
   commuting: "waiting",
   idle: "waiting",
@@ -114,6 +121,14 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
       qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
       finance: financeLiveDept(live.finance, live.readAt, m.real.finance),
       engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
+      digest: digestLiveDept(
+        live.digest,
+        live.readAt,
+        m.real.digest,
+        Object.fromEntries(
+          Object.entries(AGENT_OFFICE_DIGEST_SENDERS).map(([agentKey, deptId]) => [agentKey, m.depts[deptId].name])
+        )
+      ),
     }),
     [live, m]
   );
@@ -126,6 +141,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
     [live, m]
   );
+  const decisionView = useMemo(() => decisionRoomView(live.decision, live.readAt, m.real.decision), [live, m]);
   const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
@@ -185,6 +201,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   }, []);
 
   const onSelect = useCallback((agent: Agent) => setSelectedId(agent.id), []);
+  // A seated figure is not an engine agent: it is named by its room and the
+  // name its record gives it, and its profile is re-read from that record.
+  const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
+  const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
 
   /** To the live office, by address; the panel stays mounted and the day goes on. */
   const goLive = useCallback(() => {
@@ -250,7 +270,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     agentOfficeReport(
       {
         readAt: live.readAt,
-        rows: liveRowsFor(teams, amuxView, reviewView, m),
+        rows: liveRowsFor(teams, amuxView, reviewView, decisionView, m),
         notConnected: teams.filter((team) => !team.live).map((team) => `${team.icon} ${team.name}`),
         queue: OPERATOR_QUEUE_KEYS.map((key) => ({ label: m.queue.labels[key], count: live.queue[key] })),
         quota: quotaView,
@@ -270,7 +290,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     const url = URL.createObjectURL(new Blob([reportText()], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `tomverse-agent-office-${live.readAt.slice(0, 16).replace(/[:T]/g, "-")}.md`;
+    const stamp = (brisbaneIso(live.readAt) ?? live.readAt).slice(0, 16).replace(/[:T]/g, "-");
+    link.download = `tomverse-agent-office-${stamp}-aest.md`;
     // In the document while it is clicked, and the URL kept a moment after:
     // some browsers abort a download whose object URL is revoked at once.
     document.body.appendChild(link);
@@ -334,6 +355,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               engine={engine}
               amuxView={amuxView}
               reviewView={reviewView}
+              decisionView={decisionView}
               quotaView={quotaView}
               queue={live.queue}
               readAt={live.readAt}
@@ -341,6 +363,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               follow={follow}
               selectedId={selectedId}
               onSelect={onSelect}
+              onSelectSeated={onSelectSeated}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
             />
@@ -357,6 +380,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               queue={live.queue}
               amuxView={amuxView}
               reviewView={reviewView}
+              decisionView={decisionView}
               onSelect={(id) => setSelectedId(id)}
             />
           )}
@@ -370,6 +394,17 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           agent={selected}
           onClose={() => setSelectedId(null)}
           onAsk={askAgent}
+        />
+      ) : null}
+      {seated ? (
+        <SeatedProfileModal
+          m={m}
+          seated={seated}
+          amuxView={amuxView}
+          reviewView={reviewView}
+          decisionView={decisionView}
+          quotaView={quotaView}
+          onClose={() => setSeated(null)}
         />
       ) : null}
       {briefing ? (
@@ -422,6 +457,7 @@ function LiveView({
   engine,
   amuxView,
   reviewView,
+  decisionView,
   quotaView,
   queue,
   readAt,
@@ -429,6 +465,7 @@ function LiveView({
   follow,
   selectedId,
   onSelect,
+  onSelectSeated,
   onCopyReport,
   onDownloadReport,
 }: {
@@ -436,6 +473,7 @@ function LiveView({
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
   quotaView: AgentOfficeQuotaView;
   queue: AgentOfficeOperatorQueue;
   /** When the server read the live rooms (UTC ISO). */
@@ -444,6 +482,7 @@ function LiveView({
   follow: boolean;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
+  onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
   onCopyReport: () => void;
   onDownloadReport: () => void;
 }) {
@@ -470,7 +509,7 @@ function LiveView({
         ) : (
           <div className={cx("live-clock")}>
             <span>{m.live.clockReal}</span>
-            <b data-testid="agent-office-clock">{utcStamp(readAt)}</b>
+            <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
             <small>{m.live.realPhase}</small>
           </div>
         )}
@@ -508,10 +547,12 @@ function LiveView({
           engine={engine}
           amux={amuxView}
           review={reviewView}
+          decision={decisionView}
           snap={snap}
           selectedId={selectedId}
           follow={follow}
           onSelect={onSelect}
+          onSelectSeated={onSelectSeated}
         />
 
         <aside className={cx("live-rail")}>
@@ -774,6 +815,110 @@ function ProfileModal({
   );
 }
 
+/**
+ * A seated figure's profile: an AMUX worker or a reviewer, read from its
+ * room's record by name. It has no task, no word and no "ask" as an engine
+ * agent does: it shows the record, and follows it when the room is re-read.
+ */
+function SeatedProfileModal({
+  m,
+  seated,
+  amuxView,
+  reviewView,
+  decisionView,
+  quotaView,
+  onClose,
+}: {
+  m: OfficeCopy;
+  seated: { room: AgentOfficeSeatedRoom; name: string };
+  amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
+  quotaView: AgentOfficeQuotaView;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useOfficeDialog(onClose, closeRef);
+  const people: AgentOfficeSeatedView[] =
+    seated.room === "amux" ? amuxView.workers : seated.room === "review" ? reviewView.reviewers : decisionView.members;
+  // Only the AMUX room and the Decision Maker have a record screen; a reviewer's lives on the review server.
+  const recordHref =
+    seated.room === "amux" ? AGENT_OFFICE_AMUX_RECORD_HREF : seated.room === "decision" ? AGENT_OFFICE_DECISION_RECORD_HREF : null;
+  const roomName = { amux: m.rooms.amux, review: m.rooms.review, decision: m.rooms.decision }[seated.room];
+  const desk = people.findIndex((person) => person.name === seated.name);
+  const person = desk >= 0 ? people[desk] : null;
+  // Someone who has left the record keeps the clothes they wore when opened.
+  const [openedDesk] = useState(desk);
+  const clothes = agentOfficeSeatedClothes(seated.room, desk >= 0 ? desk : Math.max(openedDesk, 0));
+  const quota = seated.room === "review" ? quotaView.rows.find((row) => row.id === seated.name) : undefined;
+  return (
+    <div className={cx("modal-backdrop")} onClick={onClose}>
+      <section
+        ref={dialogRef}
+        className={cx("win team-modal")}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={m.profile.dialogLabel(seated.name)}
+        data-testid="agent-office-seated-profile"
+        data-seated-room={seated.room}
+      >
+        <div className={cx("win-bar")}>
+          <span>{m.profile.windowTitle}</span>
+          <button ref={closeRef} type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon}>
+            ✕
+          </button>
+        </div>
+        <div className={cx("win-body employee-profile")}>
+          <div className={cx("profile-top")}>
+            <PixelEmployee hair={clothes.hair} shirt={clothes.shirt} accent={clothes.accent} />
+            <div>
+              {person ? <span className={cx("status-pill", person.status)}>{person.label}</span> : null}
+              <h2>{seated.name}</h2>
+              <p>{roomName}</p>
+            </div>
+          </div>
+          <div className={cx("live-box")} data-testid="agent-office-seated-profile-facts">
+            <span className={cx("tiny-label")}>
+              <em className={cx("live-chip")}>{m.real.chip}</em> {m.real.boxLabel}
+            </span>
+            {person ? (
+              <dl className={cx("profile-facts")}>
+                {person.facts.map((fact) => (
+                  <div key={fact.label}>
+                    <dt>{fact.label}</dt>
+                    <dd>{fact.value}</dd>
+                  </div>
+                ))}
+                {quota ? (
+                  <div>
+                    <dt>{m.profile.seatedQuota}</dt>
+                    <dd>
+                      {quota.label} · {quota.amount}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : (
+              <strong>{m.profile.seatedGone}</strong>
+            )}
+          </div>
+          {recordHref ? (
+            <div className={cx("profile-record")} data-testid="agent-office-seated-profile-record">
+              <Link href={recordHref}>{m.profile.record}</Link>
+            </div>
+          ) : null}
+          <div className={cx("profile-actions")}>
+            <button type="button" className={cx("btn btn-primary")} onClick={onClose}>
+              {m.profile.close}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function BriefingModal({
   m,
   narrator,
@@ -858,6 +1003,7 @@ function liveRowsFor(
   teams: readonly TeamRow[],
   amuxView: AgentOfficeAmuxView,
   reviewView: AgentOfficeReviewView,
+  decisionView: AgentOfficeDecisionView,
   m: OfficeCopy
 ): AgentOfficeLiveRow[] {
   return [
@@ -891,6 +1037,14 @@ function liveRowsFor(
       line: reviewView.summary,
       href: null,
     },
+    {
+      id: "decision",
+      name: `${DECISION_ROOM.icon} ${m.rooms.decision}`,
+      status: decisionView.status,
+      badge: m.deptStatus[decisionView.status],
+      line: decisionView.summary,
+      href: AGENT_OFFICE_DECISION_RECORD_HREF,
+    },
   ];
 }
 
@@ -917,6 +1071,7 @@ function DashboardView({
   queue,
   amuxView,
   reviewView,
+  decisionView,
   onSelect,
 }: {
   m: OfficeCopy;
@@ -931,13 +1086,14 @@ function DashboardView({
   queue: AgentOfficeOperatorQueue;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
   onSelect: (id: string) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
   const engineeringLive = engine.liveDept("engineering") !== null;
   const todo = operatorQueueTotal(queue);
-  const liveRows = liveRowsFor(teams, amuxView, reviewView, m);
+  const liveRows = liveRowsFor(teams, amuxView, reviewView, decisionView, m);
   const notConnected = teams.filter((team) => !team.live);
   const notConnectedNames = notConnected.map((team) => team.name).join(" · ");
   const brief = agentOfficeBrief(liveRows);
@@ -956,7 +1112,7 @@ function DashboardView({
         <div className={cx("hero-body")}>
           <div className={cx("hero-copy")}>
             <p className={cx("eyebrow")}>
-              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(utcStamp(readAt))}
+              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(aestStamp(readAt))}
             </p>
             <h2 className={cx("office-title")}>
               {m.dashboard.titleBefore}
@@ -1146,7 +1302,7 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body")}>
-                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(utcStamp(readAt))}</p>
+                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(aestStamp(readAt))}</p>
                 <h3>
                   {brief.attention.length > 0
                     ? m.dashboard.briefNeedsLook(brief.attention.length)
