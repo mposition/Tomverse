@@ -253,7 +253,36 @@ export type AgentOfficeLiveRooms = {
   amux: AgentOfficeAmuxState;
 };
 
-/** What a live room hands the demo engine: its colour and its lines, already in the console's language. */
+/**
+ * Everyone the office draws: the teams' staff, and one figure per record row in
+ * the AMUX, review and Decision Maker rooms -- including the ones a full room
+ * cannot draw. A room whose record could not be read has an unknown count, and
+ * the total says so rather than counting it as nobody.
+ */
+export type AgentOfficeStaffCount = {
+  total: number;
+  /** Some room's count is unknown: the total is a floor. */
+  unknown: boolean;
+  parts: { teams: number; amux: number | null; review: number | null; decision: number | null };
+};
+
+export function agentOfficeStaffCount(
+  teams: number,
+  rooms: Pick<AgentOfficeLiveRooms, "amux" | "review" | "decision">
+): AgentOfficeStaffCount {
+  const amux = rooms.amux.kind === "observed" ? rooms.amux.workers.length : rooms.amux.kind === "no_catalog" ? 0 : null;
+  const review = rooms.review.kind === "observed" ? rooms.review.reviewers.length : null;
+  const decision = rooms.decision.kind === "observed" ? rooms.decision.instances.length : null;
+  const parts = { teams, amux, review, decision };
+  const known = [amux, review, decision];
+  return {
+    total: teams + known.reduce<number>((sum, part) => sum + (part ?? 0), 0),
+    unknown: known.some((part) => part === null),
+    parts,
+  };
+}
+
+/** What a live room hands the office floor: its colour and its lines, already in the console's language. */
 export type AgentOfficeLiveDept = {
   status: DeptStatus;
   /** A word or two for the room's badge, in place of the demo status word. */
@@ -307,22 +336,19 @@ type ResearchCopy = {
   noSuccess: string;
   silent: (hours: number) => string;
   anchorMissing: string;
-  readAt: (time: string) => string;
 };
 
 /** The research room's line and detail, from its state and the console's copy. */
 export function researchLiveDept(
   state: AgentOfficeResearchState,
-  readAt: string,
   copy: ResearchCopy
 ): AgentOfficeLiveDept {
-  const read = copy.readAt(aestStamp(readAt));
   const status = researchTone(state);
   if (state.kind === "unread") {
-    return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+    return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
   }
   if (state.kind === "disabled") {
-    return { status, badge: copy.badges.disabled, line: copy.disabled, detail: read };
+    return { status, badge: copy.badges.disabled, line: copy.disabled, detail: "" };
   }
 
   // "Latest", never "today": before 21:30 UTC the slot that has passed is
@@ -346,7 +372,6 @@ export function researchLiveDept(
     facts.push(copy.silent(Math.floor(state.silenceHours)));
   }
   if (state.silence === "anchor_missing") facts.push(copy.anchorMissing);
-  facts.push(read);
 
   const badge =
     state.slotState === "ok"
@@ -399,14 +424,12 @@ type QaCopy = {
   noRevision: string;
   latched: string;
   lastReceived: (time: string) => string;
-  readAt: (time: string) => string;
 };
 
 /** The QA room's line and detail, from its state and the console's copy. */
-export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCopy): AgentOfficeLiveDept {
-  const read = copy.readAt(aestStamp(readAt));
+export function qaLiveDept(state: AgentOfficeQaState, copy: QaCopy): AgentOfficeLiveDept {
   const status = qaTone(state);
-  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
 
   const line =
     state.verdict === "fresh" && state.latestDigestAt
@@ -439,7 +462,6 @@ export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCo
     facts.push(copy.lastReceived(aestStamp(state.latestDigestAt)));
   }
   if (state.mergeLaneLatched) facts.push(copy.latched);
-  facts.push(read);
   return { status, badge, line, detail: facts.join(" · ") };
 }
 
@@ -491,18 +513,15 @@ type EngineeringCopy = {
   runnerNever: string;
   publisherFinish: (time: string) => string;
   publisherNever: string;
-  readAt: (time: string) => string;
 };
 
 /** The engineering room's line and detail, from its state and the console's copy. */
 export function engineeringLiveDept(
   state: AgentOfficeEngineeringState,
-  readAt: string,
   copy: EngineeringCopy
 ): AgentOfficeLiveDept {
-  const read = copy.readAt(aestStamp(readAt));
   const status = engineeringTone(state);
-  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
 
   const waiting = pendingTotal(state.pending);
   const last = state.lastRun;
@@ -540,8 +559,7 @@ export function engineeringLiveDept(
   if (state.activeRuns > 0 && line !== runningLine) facts.push(runningLine);
   facts.push(
     state.runnerLastFinishAt ? copy.runnerFinish(aestStamp(state.runnerLastFinishAt)) : copy.runnerNever,
-    state.publisherLastFinishAt ? copy.publisherFinish(aestStamp(state.publisherLastFinishAt)) : copy.publisherNever,
-    read
+    state.publisherLastFinishAt ? copy.publisherFinish(aestStamp(state.publisherLastFinishAt)) : copy.publisherNever
   );
   return { status, badge, line, detail: facts.join(" · ") };
 }
@@ -568,7 +586,6 @@ type AmuxCopy = {
   more: (count: number) => string;
   heartbeat: (time: string) => string;
   noHeartbeat: string;
-  readAt: (time: string) => string;
   facts: { provider: string; state: string; heartbeat: string };
 };
 
@@ -615,16 +632,14 @@ const DRAW_ORDER: readonly DeptStatus[] = ["attention", "working", "done", "wait
 /** The AMUX room: its colour, its one-line summary and each worker's sprite. */
 export function amuxRoomView(
   state: AgentOfficeAmuxState,
-  readAt: string,
   desks: number,
   copy: AmuxCopy
 ): AgentOfficeAmuxView {
-  const read = copy.readAt(aestStamp(readAt));
   if (state.kind === "unread") {
-    return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, workers: [] };
+    return { status: "attention", summary: copy.unread, note: copy.unread, workers: [] };
   }
   if (state.kind === "no_catalog") {
-    return { status: "waiting", summary: `${copy.noCatalog} · ${read}`, note: copy.noCatalog, workers: [] };
+    return { status: "waiting", summary: copy.noCatalog, note: copy.noCatalog, workers: [] };
   }
 
   const workers = state.workers.map((worker): AgentOfficeAmuxWorkerView => {
@@ -652,7 +667,6 @@ export function amuxRoomView(
   const overflow = Math.max(0, workers.length - desks);
   const parts = [copy.summary(connected, workers.length, count("working"), count("attention"))];
   if (overflow > 0) parts.push(copy.more(overflow));
-  parts.push(read);
   return {
     status,
     summary: parts.join(" · "),
@@ -695,14 +709,12 @@ type FinanceCopy = {
   noRevision: string;
   enabledAt: (time: string) => string;
   lastDigest: (time: string) => string;
-  readAt: (time: string) => string;
 };
 
 /** The billing and finance room's line and detail, from its state and the console's copy. */
-export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, copy: FinanceCopy): AgentOfficeLiveDept {
-  const read = copy.readAt(aestStamp(readAt));
+export function financeLiveDept(state: AgentOfficeFinanceState, copy: FinanceCopy): AgentOfficeLiveDept {
   const status = financeTone(state);
-  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
+  if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: "" };
 
   const last = state.latestDigestAt ? aestStamp(state.latestDigestAt) : null;
   const line =
@@ -726,7 +738,6 @@ export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, 
   if (state.enabledAt) facts.push(copy.enabledAt(aestStamp(state.enabledAt)));
   // The recorded and silent lines already carry the newest digest's time.
   if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
-  facts.push(read);
   return { status, badge: copy.badges[state.verdict], line, detail: facts.join(" · ") };
 }
 
@@ -749,7 +760,6 @@ type ReviewCopy = {
   lastReport: (time: string) => string;
   load: (running: number, max: number) => string;
   more: (count: number) => string;
-  readAt: (time: string) => string;
   facts: { vendor: string; state: string; load: string; lastReport: string };
 };
 
@@ -764,17 +774,15 @@ export type AgentOfficeReviewView = {
 /** The independent review room: its colour, its summary and each reviewer's sprite. */
 export function reviewRoomView(
   state: AgentOfficeReviewState,
-  readAt: string,
   desks: number,
   copy: ReviewCopy
 ): AgentOfficeReviewView {
-  const read = copy.readAt(aestStamp(readAt));
-  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, reviewers: [] };
+  if (state.kind === "unread") return { status: "attention", summary: copy.unread, note: copy.unread, reviewers: [] };
   if (state.kind === "unreadable") {
-    return { status: "attention", summary: `${copy.unreadable} · ${read}`, note: copy.unreadable, reviewers: [] };
+    return { status: "attention", summary: copy.unreadable, note: copy.unreadable, reviewers: [] };
   }
   if (state.kind === "not_reporting") {
-    return { status: "waiting", summary: `${copy.notReporting} · ${read}`, note: copy.notReporting, reviewers: [] };
+    return { status: "waiting", summary: copy.notReporting, note: copy.notReporting, reviewers: [] };
   }
 
   const last = aestStamp(state.receivedAt);
@@ -811,7 +819,6 @@ export function reviewRoomView(
   const summary = [
     copy.summary(state.pendingJobs, state.last24h.accept, state.last24h.reject, state.last24h.unknown),
     copy.lastReport(last),
-    read,
   ].join(" · ");
   const undrawn = Math.max(0, everyone.length - desks);
   const note =
@@ -827,7 +834,6 @@ type DigestCopy = {
   latest: (agent: string, time: string) => string;
   none: string;
   count: (agent: string, count: number) => string;
-  readAt: (time: string) => string;
 };
 
 /**
@@ -838,13 +844,11 @@ type DigestCopy = {
  */
 export function digestLiveDept(
   state: AgentOfficeDigestState,
-  readAt: string,
   copy: DigestCopy,
   /** Each agent's room name, by its digest key. */
   names: Readonly<Record<string, string>>
 ): AgentOfficeLiveDept {
-  const read = copy.readAt(aestStamp(readAt));
-  if (state.kind === "unread") return { status: "attention", badge: copy.badges.unread, line: copy.unread, detail: read };
+  if (state.kind === "unread") return { status: "attention", badge: copy.badges.unread, line: copy.unread, detail: "" };
   const name = (agentKey: string) => names[agentKey] ?? agentKey;
   const newest = state.agents.reduce<(typeof state.agents)[number] | null>(
     (best, agent) => (agent.lastAt && (!best?.lastAt || agent.lastAt > best.lastAt) ? agent : best),
@@ -855,7 +859,7 @@ export function digestLiveDept(
     status: recent > 0 ? "done" : "waiting",
     badge: recent > 0 ? copy.badges.received : copy.badges.quiet,
     line: newest?.lastAt ? copy.latest(name(newest.agentKey), aestStamp(newest.lastAt)) : copy.none,
-    detail: [...state.agents.map((agent) => copy.count(name(agent.agentKey), agent.recent)), read].join(" · "),
+    detail: [...state.agents.map((agent) => copy.count(name(agent.agentKey), agent.recent))].join(" · "),
     // Every sender's newest arrival to the millisecond: any new digest moves it.
     revision: state.agents.map((agent) => `${agent.agentKey}@${agent.lastAt ?? ""}`).join(","),
   };
@@ -870,7 +874,6 @@ type DecisionCopy = {
   killed: string;
   allOff: string;
   summary: (proposal: number, total: number) => string;
-  readAt: (time: string) => string;
   facts: { vendor: string; mode: string };
 };
 
@@ -887,9 +890,8 @@ export type AgentOfficeDecisionView = {
  * instance only while the kill switch is off and its own switch is
  * `proposal`; otherwise it goes to the operator, and the room says so.
  */
-export function decisionRoomView(state: AgentOfficeDecisionState, readAt: string, copy: DecisionCopy): AgentOfficeDecisionView {
-  const read = copy.readAt(aestStamp(readAt));
-  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, members: [] };
+export function decisionRoomView(state: AgentOfficeDecisionState, copy: DecisionCopy): AgentOfficeDecisionView {
+  if (state.kind === "unread") return { status: "attention", summary: copy.unread, note: copy.unread, members: [] };
 
   const unreadable = state.killSwitch === null || state.instances.some((instance) => instance.mode === null);
   const members = state.instances.map((instance): AgentOfficeSeatedView => {
@@ -918,7 +920,7 @@ export function decisionRoomView(state: AgentOfficeDecisionState, readAt: string
   const proposing = members.filter((member) => member.state === "proposal").length;
   const note = unreadable ? copy.unreadable : state.killSwitch ? copy.killed : proposing === 0 ? copy.allOff : null;
   const status: DeptStatus = unreadable ? "attention" : proposing > 0 && !state.killSwitch ? "done" : "waiting";
-  const summary = [note, copy.summary(proposing, members.length), read]
+  const summary = [note, copy.summary(proposing, members.length)]
     .filter((part): part is string => part !== null)
     .join(" · ");
   return { status, summary, note, members };

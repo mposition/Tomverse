@@ -91,8 +91,8 @@ const DECLARED_DEPTS: readonly AgentOfficeDeptMeta[] = [
     policy: "docs/policy/billing-finance-ops.md",
     recordHref: "/admin/agent-digests?tab=billing-finance-ops",
   },
-  // Its policy is not on develop yet, so there is no path to name.
-  { id: "trust", icon: "🛡️", policy: null, recordHref: null },
+  // Approved but not built: a policy and no record screen yet.
+  { id: "trust", icon: "🛡️", policy: "docs/policy/trust-safety-compliance-agent.md", recordHref: null },
   {
     id: "research",
     icon: "🔭",
@@ -205,6 +205,16 @@ export const AGENT_OFFICE_DIGEST_SENDERS: Readonly<Record<string, AgentOfficeDep
   "qa-release": "qa",
   "billing-finance-ops": "finance",
   "sre-ops": "sre",
+};
+
+/** Everything on the floor that has a team window: the nine desk rooms and the three record rooms. */
+export type AgentOfficeTeamId = AgentOfficeDeptId | "amux" | "review" | "decision";
+
+/** The document each record room is governed by, as the team window names it. */
+export const AGENT_OFFICE_ROOM_POLICIES: Readonly<Record<"amux" | "review" | "decision", string>> = {
+  amux: "docs/policy/development-agent-orchestration.md",
+  review: "tools/review-orchestrator/README.md",
+  decision: "docs/policy/amux-decision-maker.md",
 };
 
 /** The Decision Maker's record: its section of the AMUX execution screen, while the console has it. */
