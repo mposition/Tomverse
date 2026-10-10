@@ -150,11 +150,18 @@ test("reading the usage body: JSON within the size limit, anything else is no an
 });
 
 test("the read waits longer than AMUX's own probes, and AMUX's Cursor reads run together", () => {
-  // A cache miss in AMUX answers after its slowest probe; each has PROBE_TIMEOUT.
-  const rust = readFileSync("vendor/amux/crates/amux-server/src/api/usage/agent_quota.rs", "utf8");
-  const probeSeconds = Number(rust.match(/const PROBE_TIMEOUT: Duration = Duration::from_secs\((\d+)\);/)?.[1]);
-  assert.ok(probeSeconds > 0, "AMUX's PROBE_TIMEOUT is no longer where this test reads it");
-  assert.ok(AMUX_USAGE_TIMEOUT_MS >= probeSeconds * 1000 + 5_000, "a cold but healthy AMUX would read as unknown");
+  // A cache miss in AMUX answers after its slowest probe. Every probe's
+  // timeout, wherever it is written: Claude's and the Cursor/Copilot
+  // PROBE_TIMEOUT constants, and the timeouts usage.rs wraps around Codex and Gemini.
+  const amux = "vendor/amux/crates/amux-server/src/";
+  const rust = readFileSync(`${amux}api/usage/agent_quota.rs`, "utf8");
+  const sources = [rust, readFileSync(`${amux}api/usage.rs`, "utf8"), readFileSync(`${amux}provider/claude.rs`, "utf8")];
+  const seconds = sources.flatMap((source) => [
+    ...source.matchAll(/const PROBE_TIMEOUT: Duration = Duration::from_secs\((\d+)\);/g),
+    ...source.matchAll(/tokio::time::timeout\(Duration::from_secs\((\d+)\)/g),
+  ]).map((match) => Number(match[1]));
+  assert.ok(seconds.length >= 4, "AMUX's probe timeouts are no longer where this test reads them");
+  assert.ok(AMUX_USAGE_TIMEOUT_MS >= Math.max(...seconds) * 1000 + 5_000, "a cold but healthy AMUX would read as unknown");
   // The credit read never lengthens the Cursor probe: both go together.
   assert.match(rust, /tokio::join!\(\s*cursor_dashboard_call\(&client, CURSOR_URL, token\),\s*cursor_dashboard_call\(&client, CURSOR_CREDIT_URL, token\),\s*\)/);
 });

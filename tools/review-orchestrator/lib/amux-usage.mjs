@@ -12,11 +12,11 @@ const UNKNOWN = { state: "unknown" };
 export const AMUX_USAGE_CACHE_MS = 60_000;
 /**
  * The whole read's deadline. On a cache miss AMUX answers only after every
- * account probe has finished, each within its own PROBE_TIMEOUT (12 s,
- * crates/amux-server/src/api/usage/agent_quota.rs), so the deadline is that
- * budget plus a margin -- a cold but healthy AMUX must not read as unknown.
+ * account probe has finished, each within its own timeout (the longest today
+ * is Gemini's 15 s in crates/amux-server/src/api/usage.rs), so the deadline is
+ * the longest plus a margin -- a cold but healthy AMUX must not read as unknown.
  */
-export const AMUX_USAGE_TIMEOUT_MS = 20_000;
+export const AMUX_USAGE_TIMEOUT_MS = 25_000;
 export const AMUX_USAGE_MAX_BYTES = 1024 * 1024;
 // URL.hostname keeps IPv6 brackets, so "[::1]" is the loopback's spelling here.
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
