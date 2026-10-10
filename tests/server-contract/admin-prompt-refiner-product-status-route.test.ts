@@ -6,9 +6,11 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 let authenticated = true;
+let administrator = true;
 let owner = true;
 let statusReads = 0;
 let rateReads = 0;
+let roleReads = 0;
 
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => authenticated
@@ -17,7 +19,11 @@ mock.module("next-auth/next", { namedExports: {
 } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
-  getAdminRole: () => owner ? "owner" : "ops",
+  isAdminSession: () => administrator,
+  getAdminRole: () => {
+    roleReads += 1;
+    return owner ? "owner" : "ops";
+  },
 } });
 mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
   apiSecurityResponse: () => null,
@@ -42,9 +48,15 @@ test("product status authenticates an owner before heavy reads", async () => {
   authenticated = false;
   assert.equal((await handler.GET(request())).status, 404);
   authenticated = true;
+  administrator = false;
+  owner = true;
+  assert.equal((await handler.GET(request())).status, 404);
+  assert.equal(roleReads, 0);
+  administrator = true;
   owner = false;
   assert.equal((await handler.GET(request())).status, 404);
   owner = true;
+  assert.equal(roleReads, 1);
   assert.equal(statusReads, 0);
   assert.equal(rateReads, 0);
 });

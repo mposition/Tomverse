@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
 
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { readPromptRefinerProductStatus } from
@@ -13,7 +13,8 @@ const headers = { "Cache-Control": "private, no-store, max-age=0" };
 export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id || getAdminRole(session) !== "owner") {
+    if (!session?.user?.id || !isAdminSession(session) ||
+        getAdminRole(session) !== "owner") {
       return Response.json({ error: "Not found." }, { status: 404, headers });
     }
     await consumeApiRateLimit(request, session.user.id,
