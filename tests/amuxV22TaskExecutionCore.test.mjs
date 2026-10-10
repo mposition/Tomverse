@@ -8,8 +8,12 @@ import { amuxV22EngineeringPublicationEnabled,
   v22SettlementPatchMatches } from
   "../lib/amux/v22TaskExecutionCore.ts";
 
-test("v22 execution stays dark even with an enabled environment value", () => {
-  assert.equal(amuxV22TaskExecutionEnabled("enabled"), false);
+test("v22 execution needs its own switch and never opens publication", () => {
+  assert.equal(amuxV22TaskExecutionEnabled("enabled"), true);
+  for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
+    assert.equal(amuxV22TaskExecutionEnabled(flag), false);
+    assert.equal(amuxV22EngineeringPublicationEnabled(flag), false);
+  }
   assert.equal(amuxV22EngineeringPublicationEnabled("enabled"), false);
 });
 

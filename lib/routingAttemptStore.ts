@@ -65,7 +65,7 @@ export const ROUTING_ATTEMPT_ERROR_CLASSES = [
   "first_token_deadline_exceeded",
   /** The request failed before any classification was reached. */
   "request_failed",
-  /** The process stopped after dispatching. Written only by the sweep. */
+  /** The process stopped after entering the dispatch boundary. Sweep-only. */
   "process_stopped_after_dispatch",
   /** The person's connection was gone, or the turn was aborted. */
   "client_gone",
@@ -102,13 +102,13 @@ export type RoutingAttemptOutcome =
   | "cancelled"
   | "succeeded"
   /**
-   * The process stopped reporting after the dispatch was recorded.
+   * The process stopped reporting after the dispatch boundary was entered.
    *
-   * Written only by the stale-attempt sweep, and only about an attempt that
-   * reached a provider. It is deliberately not `failed_pre_token`: nobody
-   * observed the provider call, so recording a failure would be a claim about
-   * an outcome that was never seen. What is known is that a dispatch happened
-   * and the turn never came back to say how it ended.
+   * Written only by the stale-attempt sweep. It is deliberately not
+   * `failed_pre_token`: nobody observed the provider result, and a process may
+   * have stopped between the durable start intent and the SDK invocation.
+   * What is known is that the boundary was entered and the turn never came
+   * back to say how it ended.
    */
   | "unknown_after_dispatch";
 
@@ -307,11 +307,50 @@ export const finalizeManifest = async (input: {
 };
 
 /**
- * §5 step 5. Records the dispatch, and the CHECK behind it is what actually
- * prohibits one without a finalized manifest.
+ * Persists the last local fact before a provider invocation.
  *
- * `dispatchedAt` defaults to now and must not precede the finalization; the
- * caller normally passes the value `finalizeManifest` returned or a later one.
+ * This is deliberately separate from `dispatchedAt`. The provider call and a
+ * database update cannot share a transaction, so a process may stop after the
+ * SDK invocation starts but before its completion timestamp is recorded. A
+ * stale-attempt sweep can recover that window only from a fact written first.
+ */
+export const markDispatchStarted = async (input: {
+  attemptId: string;
+  dispatchStartedAt?: Date;
+}): Promise<Date> => {
+  const dispatchStartedAt = input.dispatchStartedAt ?? new Date();
+  try {
+    const started = await prisma.routingAttempt.updateMany({
+      where: {
+        id: input.attemptId,
+        outcome: "pending",
+        manifestFinalizedAt: { not: null },
+        dispatchStartedAt: null,
+        dispatchedAt: null,
+      },
+      data: { dispatchStartedAt },
+    });
+    if (started.count !== 1) {
+      throw new DispatchBoundaryError(
+        `Attempt ${input.attemptId} has no finalized, unstarted dispatch to begin.`
+      );
+    }
+  } catch (error) {
+    if (error instanceof DispatchBoundaryError) throw error;
+    throw new DispatchBoundaryError(
+      `Attempt ${input.attemptId} could not persist its dispatch start; the provider must not be invoked.`,
+      error
+    );
+  }
+  return dispatchStartedAt;
+};
+
+/**
+ * §5 step 5. Records the completed dispatch handoff.
+ *
+ * `markDispatchStarted` must have committed first. Existing database rows may
+ * predate that boundary and keep a NULL start timestamp, but new application
+ * writes cannot use this function to create another such row.
  */
 export const markDispatched = async (input: {
   attemptId: string;
@@ -319,16 +358,27 @@ export const markDispatched = async (input: {
   providerRequestId?: string | null;
 }) => {
   try {
-    await prisma.routingAttempt.update({
-      where: { id: input.attemptId },
+    const dispatched = await prisma.routingAttempt.updateMany({
+      where: {
+        id: input.attemptId,
+        outcome: "pending",
+        dispatchStartedAt: { not: null },
+        dispatchedAt: null,
+      },
       data: {
         dispatchedAt: input.dispatchedAt ?? new Date(),
         providerRequestId: input.providerRequestId ?? null,
       },
     });
+    if (dispatched.count !== 1) {
+      throw new DispatchBoundaryError(
+        `Attempt ${input.attemptId} has no durable dispatch start to complete.`
+      );
+    }
   } catch (error) {
+    if (error instanceof DispatchBoundaryError) throw error;
     throw new DispatchBoundaryError(
-      `Attempt ${input.attemptId} could not be marked dispatched; it has no finalized manifest.`,
+      `Attempt ${input.attemptId} could not be marked dispatched.`,
       error
     );
   }

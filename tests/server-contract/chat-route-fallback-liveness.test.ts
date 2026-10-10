@@ -6,9 +6,13 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
 import * as aiModule from "ai";
-import { validatePromptRefinerChatExecution } from "@/lib/promptRefinerChatExecutionCore";
+import {
+  PromptRefinerChatExecutionError,
+  validatePromptRefinerChatExecution,
+} from "@/lib/promptRefinerChatExecutionCore";
 import { preflightInputEstimate } from "@/lib/autoDispatchPreflight";
 import { buildTaskProfile } from "@/lib/taskProfileCore";
+import { DispatchBoundaryError } from "@/lib/routingAttemptStore";
 
 /**
  * §7's automatic fallback, executed through the route that performs it.
@@ -66,7 +70,9 @@ const REFINER_PROMPT = "이 질문에 답해 줘. 사용자가 작성한 질문�
 const REFINER_SCOPE_ID = "44444444-4444-4444-8444-444444444444";
 const REFINER_SUGGESTION_ID = "55555555-5555-4555-8555-555555555555";
 let refinerMode: "explicit" | "auto" | null = null;
+let refinerPreviews = 0;
 let refinerConsumes = 0;
+let invalidateRefinerAfterPreview = false;
 let pinnedResponse: Response | null = null;
 let pinnedInputs: readonly object[] | null = null;
 const routerInputs: Array<Parameters<typeof import("../../lib/autoModelSelection").selectAutoModel>[0]> = [];
@@ -91,10 +97,9 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
   }),
 } });
 mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
-  consumePromptRefinerChatExecution: async (
-    input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").consumePromptRefinerChatExecution>[0]
+  previewPromptRefinerChatExecution: async (
+    input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").previewPromptRefinerChatExecution>[0]
   ) => {
-    assert.equal(refinerConsumes, 0);
     assert.ok(refinerMode);
     const view = validatePromptRefinerChatExecution({ ...input,
       held: { id: REFINER_SUGGESTION_ID, userId: USER_ID, conversationId: CONVERSATION_ID,
@@ -109,8 +114,17 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
         dbNow: new Date("2026-10-10T00:00:00Z"), explicitEnabled: refinerMode === "explicit",
         autoEnabled: refinerMode === "auto", autoConversation: conversationSelectionMode === "auto", killSwitch: false },
     });
-    refinerConsumes += 1;
+    refinerPreviews += 1;
     return view;
+  },
+  consumePreviewedPromptRefinerChatExecution: async (
+    _input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").consumePreviewedPromptRefinerChatExecution>[0],
+    preview: Awaited<ReturnType<typeof import("../../lib/promptRefinerChatExecutionStore").previewPromptRefinerChatExecution>>,
+  ) => {
+    assert.equal(refinerConsumes, 0);
+    if (invalidateRefinerAfterPreview) throw new PromptRefinerChatExecutionError();
+    refinerConsumes += 1;
+    return preview;
   },
 } });
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
@@ -225,6 +239,7 @@ mock.module(mod("lib/apiSecurity.ts"), {
 });
 
 let contextConsumeSucceeds = true;
+let contextVerification: "ok" | "stale" = "ok";
 mock.module(mod("lib/chatTurnContext.ts"), {
   namedExports: {
     buildChatTurnContext: async () => ({
@@ -243,15 +258,17 @@ mock.module(mod("lib/chatTurnContext.ts"), {
 });
 mock.module(mod("lib/chatContextBundleService.ts"), {
   namedExports: {
-    verifyChatContextBundle: () => ({
-      ok: true,
-      payload: {
-        bundleId: "context-bundle-one",
-        expiresAtMs: Date.now() + 60_000,
-        memoryTokens: 0,
-        profileTokens: 0,
-      },
-    }),
+    verifyChatContextBundle: () => contextVerification === "stale"
+      ? { ok: false, reason: "stale" as const }
+      : ({
+          ok: true,
+          payload: {
+            bundleId: "context-bundle-one",
+            expiresAtMs: Date.now() + 60_000,
+            memoryTokens: 0,
+            profileTokens: 0,
+          },
+        }),
     consumeContextBundle: async () =>
       contextConsumeSucceeds
         ? { consumed: true }
@@ -300,11 +317,18 @@ let fallbackTransitionAbortAt:
   | "during_primary_reader_cancel" = "none";
 let abortActiveRequest: () => void = () => {};
 let recordDispatchedCalls = 0;
+let recordDispatchStartedCalls = 0;
+let failDispatchStart = false;
+let throwBeforeFallbackStreamReturn = false;
 
 mock.module("ai", {
   namedExports: {
     ...aiModule,
     streamText: (options: Record<string, unknown>) => {
+      const index = attempts.length;
+      if (index > 0 && throwBeforeFallbackStreamReturn) {
+        throw new Error("FALLBACK_STREAM_CONSTRUCTOR_TEST_FAILURE");
+      }
       const attempt: Attempt = {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
@@ -314,7 +338,7 @@ mock.module("ai", {
         providerAbortedBeforeReaderCancel: false,
       };
       attempts.push(attempt);
-      const index = attempts.length - 1;
+      attemptLifecycle.push(`${index}:provider_start`);
       // Attempt 0 is failed by the injected fault, not by this stream: the
       // route wraps the reader in `faultedReader`, which is the drill's own
       // mechanism rather than a shape invented here.
@@ -419,6 +443,8 @@ const DEFAULTS: Record<string, () => unknown> = {
   ever consulted.
 */
 let conversationSelectionMode: "auto" | "manual" = "auto";
+let selectedConversationModels = [REQUESTED_MODEL_ID];
+let planModelLimit = 4;
 const attachmentObjectPrefix = `attachments/${createHash("sha256")
   .update("fallback-qa@tomverse.app")
   .digest("hex")
@@ -455,7 +481,7 @@ type InstrumentationAttemptRow = {
   id: string;
   attemptIndex: number;
   modelId: string;
-  state: "draft" | "finalized" | "dispatched" | "terminal";
+  state: "draft" | "finalized" | "dispatch_started" | "dispatched" | "terminal";
 };
 const instrumentationAttemptRows = new Map<string, InstrumentationAttemptRow>();
 const closedInstrumentationAttempts: Array<
@@ -466,7 +492,7 @@ const conversationRow = () => ({
   id: CONVERSATION_ID,
   userId: USER_ID,
   password: null,
-  selectedModels: JSON.stringify([REQUESTED_MODEL_ID]),
+  selectedModels: JSON.stringify(selectedConversationModels),
   kind: "chat",
   productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
@@ -763,6 +789,7 @@ mock.module(mod("lib/billingEntitlements.ts"), {
       tier: "Pro",
       status: "active",
       allowAttachments: true,
+      maxModels: planModelLimit,
     }),
   },
 });
@@ -844,6 +871,22 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       row.state = "finalized";
       return record;
     },
+    recordDispatchStarted: async (record: unknown) => {
+      recordDispatchStartedCalls += 1;
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.equal(row.state, "finalized");
+      if (failDispatchStart) {
+        throw new DispatchBoundaryError("FORCED_DISPATCH_START_WRITE_FAILURE");
+      }
+      row.state = "dispatch_started";
+      attemptLifecycle.push(`${row.attemptIndex}:dispatch_start`);
+    },
     recordDispatched: async (record: unknown) => {
       recordDispatchedCalls += 1;
       const instrumentation = record as {
@@ -853,7 +896,7 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       const row = instrumentationAttemptRows.get(instrumentation.attemptId);
       assert.ok(row);
       assert.equal(row.modelId, instrumentation.modelId);
-      assert.equal(row.state, "finalized");
+      assert.equal(row.state, "dispatch_started");
       row.state = "dispatched";
       if (
         recordDispatchedCalls === 2 &&
@@ -861,6 +904,27 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       ) {
         abortActiveRequest();
       }
+    },
+    recordNotDispatched: async (record: unknown) => {
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.ok(
+        row.state === "draft" ||
+          row.state === "finalized" ||
+          row.state === "dispatch_started"
+      );
+      closedInstrumentationAttempts.push({
+        id: row.id,
+        attemptIndex: row.attemptIndex,
+        modelId: row.modelId,
+        outcome: "not_dispatched",
+      });
+      row.state = "terminal";
     },
     completeInstrumentedDispatch: async (
       record: unknown,
@@ -873,7 +937,10 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       const row = instrumentationAttemptRows.get(instrumentation.attemptId);
       assert.ok(row);
       assert.equal(row.modelId, instrumentation.modelId);
-      assert.equal(row.state, "dispatched");
+      assert.equal(
+        row.state,
+        failDispatchStart ? "finalized" : "dispatched"
+      );
       dispatchCloses.push({
         attemptId: instrumentation.attemptId,
         modelId: instrumentation.modelId,
@@ -990,6 +1057,7 @@ const ask = async (
   completionUsageRead = false;
   releasePendingCompletionUsage = () => {};
   recordDispatchedCalls = 0;
+  recordDispatchStartedCalls = 0;
   fallbackTransitionAbortAt =
     abortFallbackAt === "after_stream_created" ||
     abortFallbackAt === "during_record_dispatched" ||
@@ -1013,6 +1081,7 @@ const ask = async (
   durableClaimCalls = 0;
   lastDurableClaimInput = null;
   messageFindFirstArgs = [];
+  refinerPreviews = 0;
   routerInputs.length = 0;
   shadowInputs.length = 0;
 
@@ -1136,10 +1205,9 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
   assert.ok(attempts[0].providerAbortedWith, "the primary provider was not aborted");
   assert.equal(attempts[1].providerAbortedWith, null);
-  assert.deepEqual(attemptLifecycle.slice(0, 2), [
-    "0:provider_abort",
-    "0:reader_cancel",
-  ]);
+  const primaryAbort = attemptLifecycle.indexOf("0:provider_abort");
+  assert.ok(primaryAbort >= 0);
+  assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
 });
 
 for (const [mode, decision] of [
@@ -1636,9 +1704,49 @@ test("a fallback settles once, releases once, and holds once more", async () => 
   assert.equal(ledger.attemptBudgetReservations, 1);
   assert.equal(ledger.attemptBudgetReleases, 0);
 
+  for (const index of [0, 1]) {
+    assert.ok(
+      attemptLifecycle.indexOf(`${index}:dispatch_start`) <
+        attemptLifecycle.indexOf(`${index}:provider_start`),
+      `attempt ${index} reached its provider before the durable start record`
+    );
+  }
+
   // Both provider streams are accounted for: the primary cancelled at the
   // swap, the fallback closed by finishing.
   assert.ok(attempts[0].cancelledWith);
+});
+
+test("a fallback constructor failure releases its unspent hold without a third dispatch", async () => {
+  throwBeforeFallbackStreamReturn = true;
+  try {
+    await ask("answers");
+
+    assert.equal(attempts.length, 1, "a constructor failure reached the fallback provider");
+    assert.equal(recordDispatchedCalls, 1);
+    assert.equal(ledger.attemptBudgetReservations, 1);
+    assert.equal(ledger.attemptBudgetReleases, 1);
+    assert.equal(ledger.settlements.length, 1);
+    assert.equal(ledger.settlements[0].outcome, "failed");
+    assert.equal(ledger.releases.length, 1);
+    assert.ok(attemptLifecycle.includes("1:dispatch_start"));
+    assert.equal(attemptLifecycle.includes("1:provider_start"), false);
+    assert.deepEqual(
+      closedInstrumentationAttempts
+        .map(({ attemptIndex, modelId, outcome }) => ({
+          attemptIndex,
+          modelId,
+          outcome,
+        }))
+        .sort((left, right) => left.attemptIndex - right.attemptIndex),
+      [
+        { attemptIndex: 0, modelId: attempts[0].modelId, outcome: "failed_pre_token" },
+        { attemptIndex: 1, modelId: "deepseek-v4-pro", outcome: "not_dispatched" },
+      ]
+    );
+  } finally {
+    throwBeforeFallbackStreamReturn = false;
+  }
 });
 
 test("assistant Message transaction failure settles once and terminalizes immediately", async () => {
@@ -1722,31 +1830,156 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 
 for (const [mode, decision] of [
   ["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"],
-] as const) test(`${mode} Refiner ${decision} preserves pinned response and execution notice`, async () => {
+] as const) test(`${mode} Refiner ${decision} refuses pinned entry without consuming`, async () => {
   refinerMode = mode;
   refinerConsumes = 0;
   conversationSelectionMode = mode === "auto" ? "auto" : "manual";
+  process.env.PINNED_DEPLOYMENT_EXECUTION = "on";
+  process.env.PINNED_DEPLOYMENT_ACCOUNT_ID = USER_ID;
   pinnedResponse = new Response("Pinned synthetic answer.", { status: 202,
     headers: { "X-Pinned-Receipt": "synthetic", "Set-Cookie": "synthetic=1; Path=/; HttpOnly" } });
   const messages = [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }];
   const authored = structuredClone(messages);
   try {
-    const { response, body, streamError } = await ask("answers", "claimed", 202, false, messages, true, false, decision);
+    const { response, body, streamError } = await ask("answers", "claimed", 409, false, messages, true, false, decision);
     assert.equal(streamError, null);
-    assert.equal(body, "Pinned synthetic answer.");
-    assert.equal(response.headers.get("X-Pinned-Receipt"), "synthetic");
-    assert.ok(response.headers.get("Set-Cookie")?.includes("synthetic=1"));
-    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), decision === "accepted" ? "applied" : "original");
-    assert.equal(response.headers.get("X-Prompt-Refiner-Mode"), mode);
-    assert.equal(refinerConsumes, 1);
-    assert.deepEqual(pinnedInputs, [{ ...messages[0], content: decision === "accepted" ? REFINER_PROMPT : messages[0].content }]);
+    assert.equal((JSON.parse(body) as { code?: string }).code,
+      "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(response.headers.get("X-Pinned-Receipt"), null);
+    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), null);
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(pinnedInputs, null);
     assert.deepEqual(messages, authored);
-    assert.equal(attempts.length, 0, "the successful pinned dispatch does not fall through to another provider");
+    assert.equal(attempts.length, 0);
   } finally {
     pinnedResponse = null;
     pinnedInputs = null;
+    delete process.env.PINNED_DEPLOYMENT_EXECUTION;
+    delete process.env.PINNED_DEPLOYMENT_ACCOUNT_ID;
     refinerMode = null;
     conversationSelectionMode = "auto";
+  }
+});
+
+test("a decision-free pinned turn preserves the existing dispatch path", async () => {
+  process.env.PINNED_DEPLOYMENT_EXECUTION = "on";
+  process.env.PINNED_DEPLOYMENT_ACCOUNT_ID = USER_ID;
+  pinnedResponse = new Response("Pinned synthetic answer.", { status: 202,
+    headers: { "X-Pinned-Receipt": "synthetic" } });
+  const messages = [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  try {
+    const { response, body } = await ask("answers", "claimed", 202, false,
+      messages, true, false);
+    assert.equal(body, "Pinned synthetic answer.");
+    assert.equal(response.headers.get("X-Pinned-Receipt"), "synthetic");
+    assert.equal(refinerPreviews, 0);
+    assert.equal(refinerConsumes, 0);
+    assert.deepEqual(pinnedInputs, messages);
+    assert.equal(attempts.length, 0);
+  } finally {
+    pinnedResponse = null;
+    pinnedInputs = null;
+    delete process.env.PINNED_DEPLOYMENT_EXECUTION;
+    delete process.env.PINNED_DEPLOYMENT_ACCOUNT_ID;
+  }
+});
+
+test("a Refiner preview survives plan-limit refusal without consuming or dispatching", async () => {
+  refinerMode = "explicit";
+  refinerConsumes = 0;
+  conversationSelectionMode = "manual";
+  selectedConversationModels = [REQUESTED_MODEL_ID, "gpt-5-6-luna"];
+  planModelLimit = 1;
+  const messages = [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  const authored = structuredClone(messages);
+  try {
+    const { body } = await ask("answers", "claimed", 403, false, messages,
+      true, false, "accepted");
+    assert.equal((JSON.parse(body) as { code?: string }).code,
+      "PLAN_MODEL_LIMIT_EXCEEDED");
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(shadowInputs.length, 0);
+    assert.deepEqual(messages, authored);
+  } finally {
+    selectedConversationModels = [REQUESTED_MODEL_ID];
+    planModelLimit = 4;
+    conversationSelectionMode = "auto";
+    refinerMode = null;
+  }
+});
+
+test("a Refiner preview survives manual model-selection refusal without consuming or dispatching", async () => {
+  refinerMode = "explicit";
+  refinerConsumes = 0;
+  conversationSelectionMode = "manual";
+  selectedConversationModels = ["gpt-5-6-luna"];
+  try {
+    const { body } = await ask("answers", "claimed", 403, false, undefined,
+      true, false, "accepted");
+    assert.equal((JSON.parse(body) as { code?: string }).code,
+      "MODEL_NOT_SELECTED");
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(shadowInputs.length, 0);
+  } finally {
+    selectedConversationModels = [REQUESTED_MODEL_ID];
+    conversationSelectionMode = "auto";
+    refinerMode = null;
+  }
+});
+
+test("a Refiner preview survives recoverable context drift without consuming or dispatching", async () => {
+  refinerMode = "explicit";
+  refinerConsumes = 0;
+  conversationSelectionMode = "manual";
+  contextVerification = "stale";
+  try {
+    const { body } = await ask("answers", "claimed", 409, true, undefined,
+      true, false, "accepted");
+    const payload = JSON.parse(body) as { code?: string; details?: unknown };
+    assert.equal(payload.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.deepEqual(payload.details, { requiresPreflight: true });
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(shadowInputs.length, 0);
+  } finally {
+    contextVerification = "ok";
+    conversationSelectionMode = "auto";
+    refinerMode = null;
+  }
+});
+
+test("a Refiner preview invalidated before atomic consume is dispatch-free", async () => {
+  refinerMode = "explicit";
+  refinerConsumes = 0;
+  conversationSelectionMode = "manual";
+  invalidateRefinerAfterPreview = true;
+  try {
+    const { body } = await ask("answers", "claimed", 409, false, undefined,
+      true, false, "accepted");
+    assert.equal((JSON.parse(body) as { code?: string }).code,
+      "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(attempts.length, 0);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(shadowInputs.length, 0);
+  } finally {
+    invalidateRefinerAfterPreview = false;
+    conversationSelectionMode = "auto";
+    refinerMode = null;
   }
 });
 
@@ -1806,6 +2039,12 @@ for (const [mode, decision] of [
     assert.equal(response.headers.get("X-Prompt-Refiner-Mode"), mode);
     assert.equal(ledger.accessAcquisitions, 1);
     assert.equal(attempts.length, 1, "Refiner admission does not send another turn or enable provider retry");
+    assert.equal(recordDispatchStartedCalls, 1);
+    assert.ok(
+      attemptLifecycle.indexOf("0:dispatch_start") <
+        attemptLifecycle.indexOf("0:provider_start"),
+      "the accepted execution reached its provider without a prior durable dispatch start"
+    );
     assert.equal(durableAttemptAdmissionCalls, 1);
     assert.equal(routerInputs.length, 1);
     assert.equal(routerInputs[0].text, expectedPrompt);
@@ -1825,6 +2064,66 @@ for (const [mode, decision] of [
       "durable source verification still checks the original stored Message");
     assert.equal(warningEvents("chat_auto_readiness_overridden").length, 0);
   } finally {
+    refinerMode = null;
+    conversationSelectionMode = "auto";
+  }
+});
+
+test("an accepted Refiner decision stops safely when durable dispatch-start recording fails", async () => {
+  refinerMode = "explicit";
+  refinerConsumes = 0;
+  conversationSelectionMode = "manual";
+  failDispatchStart = true;
+  const messages = [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  const authored = structuredClone(messages);
+  try {
+    const { streamError } = await ask(
+      "answers",
+      "claimed",
+      500,
+      false,
+      messages,
+      true,
+      false,
+      "accepted"
+    );
+
+    assert.equal(streamError, null);
+    assert.equal(refinerConsumes, 1, "the server decision is consumed exactly once");
+    assert.equal(routerInputs[0]?.text, REFINER_PROMPT);
+    assert.deepEqual(
+      shadowInputs[0]?.profile,
+      buildTaskProfile({
+        text: REFINER_PROMPT,
+        attachments: [],
+        webSearchRequested: false,
+      })
+    );
+    assert.equal(recordDispatchStartedCalls, 1);
+    assert.equal(recordDispatchedCalls, 0);
+    assert.equal(attempts.length, 0, "no provider starts after the durable write fails");
+    assert.equal(durableClaimCalls, 1, "the failed request does not create an implicit retry");
+    assert.deepEqual(messages, authored, "the authored Message bytes remain unchanged");
+    assert.ok(
+      messageFindFirstArgs.some(
+        (args) => (args.where as { id?: string }).id === SOURCE_USER_MESSAGE_ID
+      ),
+      "the already-persisted authored Message remains the durable source"
+    );
+    assert.deepEqual(
+      closedInstrumentationAttempts.map(({ attemptIndex, outcome }) => ({
+        attemptIndex,
+        outcome,
+      })),
+      [{ attemptIndex: 0, outcome: "failed_pre_token" }]
+    );
+    assert.equal(world.messages.length, 0);
+    assert.equal(world.terminals.length, 1);
+    assert.equal(world.terminals[0]?.status, "failed");
+  } finally {
+    failDispatchStart = false;
     refinerMode = null;
     conversationSelectionMode = "auto";
   }

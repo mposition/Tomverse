@@ -25,9 +25,9 @@ import {
 } from "@/lib/routingAttemptSweep";
 
 /**
- * A dispatch is recorded before the provider's stream is read and the outcome
- * after it. Between those two the process can die, and the attempt stays
- * `pending` for ever — polluting the reliability numbers and ROUTE-06's
+ * A dispatch start is recorded before the provider SDK is invoked and the
+ * outcome after it. Between those two the process can die, and the attempt
+ * stays `pending` for ever — polluting the reliability numbers and ROUTE-06's
  * evidence long after the incident.
  *
  * These are about what the sweep may conclude (very little), what it must not
@@ -162,12 +162,15 @@ const makeAttempt = async (
   runId: string,
   overrides: {
     outcome?: string;
+    dispatchStartedAt?: Date | null;
     dispatchedAt?: Date | null;
     createdAt?: Date;
   } = {}
 ) => {
   const dispatchedAt =
     overrides.dispatchedAt === undefined ? ancient() : overrides.dispatchedAt;
+  const dispatchStartedAt = overrides.dispatchStartedAt ?? null;
+  const boundaryAt = dispatchStartedAt ?? dispatchedAt;
   // Created undispatched, then marked dispatched once its manifest is
   // finalized: ROUTE-06's constraint refuses a dispatch that has no finalized
   // manifest, which is the boundary the whole feature rests on.
@@ -182,7 +185,7 @@ const makeAttempt = async (
     },
     select: { id: true },
   });
-  if (dispatchedAt) {
+  if (boundaryAt) {
     await prisma.contextManifest.create({
       data: {
         attemptId: attempt.id,
@@ -199,7 +202,7 @@ const makeAttempt = async (
         contentHashVersion: "sweep-test",
         hashAlgorithm: "hmac-sha256",
         hashKeyId: "test-key",
-        finalizedAt: dispatchedAt,
+        finalizedAt: boundaryAt,
       },
     });
     await prisma.routingAttempt.update({
@@ -207,7 +210,7 @@ const makeAttempt = async (
       // The attempt carries its own copy of the finalization time, and the
       // constraint requires it to be at or before the dispatch: a manifest
       // finalized afterwards would describe a request that had already gone.
-      data: { manifestFinalizedAt: dispatchedAt, dispatchedAt },
+      data: { manifestFinalizedAt: boundaryAt, dispatchStartedAt, dispatchedAt },
     });
   }
   if (overrides.createdAt !== undefined) {
@@ -240,6 +243,35 @@ test("a dispatched attempt whose process stopped is closed, honestly", async () 
   assert.equal(row.failureLayer, "process");
   // The record of what reached a provider is still true and is left alone.
   assert.ok(row.dispatchedAt);
+});
+
+test("a started dispatch with no completion timestamp is crash-reconciled", async () => {
+  const reservation = await makeCrashedReservation();
+  const { runId } = await makeRun({ reservationId: reservation.reservationId });
+  const id = await makeAttempt(runId, {
+    dispatchStartedAt: ancient(),
+    dispatchedAt: null,
+    createdAt: ancient(),
+  });
+
+  const result = await sweepStaleRoutingAttempts();
+  assert.equal(result.closedCostInserted, 1);
+  assert.equal(result.closedWithoutCostIntent, 0);
+
+  const attempt = await prisma.routingAttempt.findUniqueOrThrow({
+    where: { id },
+  });
+  assert.equal(attempt.outcome, "unknown_after_dispatch");
+  assert.equal(attempt.failureLayer, "process");
+  assert.ok(attempt.dispatchStartedAt);
+  assert.equal(attempt.dispatchedAt, null);
+
+  const cost = await attemptCostRow(reservation.reservationId);
+  assert.ok(cost);
+  assert.equal(cost.costSource, "reserved_upper_bound");
+  assert.equal(cost.usageSource, "crash_reconciliation");
+  assert.equal(cost.inputTokens, null);
+  assert.equal(cost.outputTokens, null);
 });
 
 test("an attempt that never dispatched is left alone", async () => {

@@ -3,8 +3,10 @@
 ## Release identity
 
 - Production base: `cf18bf4e71c341603410540177d3ac4cf4f2be6a`
+- Prior cancellation checkpoint:
+  `dd98e0fb261b44c573bddde792441a3b27a11fac`
 - Latest main preserved before final validation:
-  `dd98e0fb261b44c573bddde792441a3b27a11fac` (Chat cancellation release)
+  `666f7b164f7d3d101d1145a480324e6239773114`
 - Integrated checkpoint before scope reduction:
   `332037d80fa816ce07590b266798e99cf0c09f6e`
 - Work item: `CHAT-01`
@@ -29,6 +31,9 @@ receipt or approval.
 The latest main cancellation changes are merged into the candidate. The shared
 fallback fixture retains both execution-message assertions and provider-abort
 assertions, including cancellation after an accepted Refiner decision.
+The merge also preserves PR #2327's `dispatchStartedAt` and
+marker-before-provider boundary with its upstream SQL bytes unchanged, together
+with PR #2326's normal release behaviour.
 
 ## Lifecycle functionality excluded from this release
 
@@ -57,18 +62,40 @@ This is the intended fail-closed result of the selective release.
 
 ## Limited read authority
 
-Product release admission needs three content-free evidence readers. Their five
-Stage/Slot source pairs are specified in
-[Prompt Refiner product limited dark read v1](../policy/prompt-refiner-product-limited-dark-read-v1.md).
-The operator's continuing 2026-10-10 product-connection approval is recorded in
-that policy for those exact source hashes and pairs. The generic static guard
-rejects a source byte change or any additional file/table pair. The release
-harness must also run
+Version 1 recorded three evidence sources and five lexical Stage/Slot pairs.
+Independent review found that the product release store also performed an
+unhashed full-Stage lookup, which was outside that grant. A follow-up source
+audit found that v1 also misdescribed the frozen gate read: it does execute its
+Slot audit query and reaches Stage/Slot through StageReadback, and the v5 branch
+also reaches the consumed-request verifier through TerminalReceipt. Version 1
+remains the historical record of those errors.
+
+[Prompt Refiner product limited dark read v2](../policy/prompt-refiner-product-limited-dark-read-v2.md)
+applies the operator's continuing 2026-10-10 product-connection approval to the
+corrected boundary: one new server-only Stage snapshot reader, the three v1
+sources, and the two byte-identical transitive pure-read sources. The exact
+scope is six source hashes, ten lexical source/table pairs and seven static
+named read edges. The snapshot selects only the fields required by the frozen
+gate, disposition, approval-audit, owner and candidate-source checks. The
+product release store no longer has a Stage or Slot exception and may only
+import the snapshot reader's named read export. GateEvidence's historical
+StageReadback lock-helper import and OutcomeRecovery's emergency stop path
+remain under their separate legacy authorities; v2 does not grant them to
+product admission. This permission takes effect only after required CI and
+independent review pass and
+the exact change is merged and deployed; it does not activate Refiner or
+authorise a paid call.
+
+The generic static guard rejects a seventh source, source-byte drift and any
+additional or changed file/table pair. The release harness must also run
 `npm run verify:prompt-refiner-product-selective-release`; that verifier checks
 the actual candidate tree for all fifteen omissions and rejects any retained
-runtime caller of the mixed evidence modules that imports a record export. Its
-fixture test covers positive and negative inventories without making source
-absence a universal repository rule.
+runtime caller of the reviewed modules that imports a record export, imports
+the snapshot through a non-named form, or calls it from a path other than the
+product release store. It also proves the seven product read edges without
+forbidding the separate frozen Gate lock import or retained emergency stop
+caller. Its fixture test covers positive and negative inventories without
+making source absence a universal repository rule.
 
 The remaining blockers are unchanged: the available quality result is not a
 qualifying pass, unresolved limited-audit findings are nonzero, all three Router

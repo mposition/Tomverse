@@ -6,7 +6,8 @@
 상태(v24 이력): **v24 Ubuntu AMUX invariant 관측 게이트 정정 승인.** 2026-10-02 운영자 `mposition`이 아래 v24 절을 승인했다(그 절의 승인 기록). v23 활성화 게이트 2의 “AMUX invariant confidence가 healthy” 문장은 v24 절의 계약으로 대체됐다. 이전 v23 상태 줄은 이력이다.
 상태(v25 이력): **v25 engineering adapter 코드 래치 승인.** 2026-10-07 운영자 `mposition`이 아래 v25 절을 승인했다. `ENGINEERING_AGENT_AMUX_ADAPTER_CODE_LATCH`는 true가 된다. engineering 운영 mode는 `off`로 남으므로 이 승인 자체로 어떤 adapter 호출도 AMUX에 닿지 않는다. 이전 v24 상태 줄은 이력이다.
 상태(v27 이력): **v27 전용 Ubuntu runner worker 목록·Decision Maker 실행 주체 승인, 운영 활성화 별도.** 2026-10-09 운영자 `mposition`이 아래 v27 절을 승인했다. 이전 v25 상태 줄은 이력이다. 아래 v27 절은 전용 Ubuntu runner의 worker 목록을 바꾸고(Devin 제거, Cursor·GitHub Copilot worker 여섯 추가) Decision Maker 실행 주체 둘을 더하는 후보다. 운영자가 승인을 기록하기 전에는 효력이 없고 `상태(최신)`은 v25로 남는다. 이 후보는 코드, 래치, 환경 변수를 바꾸지 않는다.
-상태(최신): **v28 AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로 승인, 이전은 운영자 단계.** 2026-10-09 운영자 `mposition`이 아래 v28 절을 승인했다. 그 절의 이전 절차를 마치기 전에는 버전 20 9·10항대로 `Tomverse` project의 대시보드가 이 서비스의 설정을 정한다. 이전 v27 상태 줄은 이력이다.
+상태(v28 이력): **v28 AMUX Orchestrator의 Railway 선언을 `Tomverse Agents` project의 IaC로 승인, 이전은 운영자 단계.** 2026-10-09 운영자 `mposition`이 아래 v28 절을 승인했다. 그 절의 이전 절차를 마치기 전에는 버전 20 9·10항대로 `Tomverse` project의 대시보드가 이 서비스의 설정을 정한다. 이전 v27 상태 줄은 이력이다.
+상태(최신): **v29 v22 자동 편입·worker claim·Task 실행 활성화 범위 승인.** 운영자 `mposition`의 2026-10-10 요청을 아래 v29 절에 기록한다. 코드 래치 변경은 실제 운영 활성화나 완료 증거가 아니다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -32,6 +33,7 @@ approvedBy: mposition · approvedAt: 2026-10-01 · 정책 버전: 23
 approvedBy: mposition · approvedAt: 2026-10-02 · 정책 버전: 24
 approvedBy: mposition · approvedAt: 2026-10-07 · 정책 버전: 25
 approvedBy: mposition · approvedAt: 2026-10-09 · 정책 버전: 28
+approvedBy: mposition · approvedAt: 2026-10-10 · 정책 버전: 29
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -1338,6 +1340,16 @@ DM 정책(docs/policy/amux-decision-maker.md §5, §7, §12)의 두 인스턴스
 ### 이 버전이 하지 않는 것
 
 orchestrator 코드, 버전 20의 정지·재시작 동작(1~8항, 11항), claim·실행 API·worker catalog의 값, 자동 승격, 역할 판정, 웹 서비스, 다른 Agent 서비스를 바꾸지 않는다.
+
+## 버전 29 — v22 자동 편입·claim·Task 실행의 단계별 활성화
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-10`. 운영자는 자동 편입에 worker claim과 실제 Task 실행을 포함하고, 기존 Backlog 점수 정비보다 활성화를 먼저 진행하도록 요청했다. 기존 v22 계약과 wire `policyVersion: 22`는 바꾸지 않는다.
+
+- `AMUX_V22_AUTO_PROMOTION_CODE_LATCH`, `AMUX_V22_WORKER_CLAIM_CODE_LATCH`, `AMUX_V22_TASK_EXECUTION_CODE_LATCH`, `AMUX_V22_SIDECAR_CODE_LATCH`만 true로 출고한다. 앱의 `TOMVERSE_AMUX_V22_AUTO_PROMOTE`, `TOMVERSE_AMUX_V22_WORKER_CLAIM`, `TOMVERSE_AMUX_V22_TASK_EXECUTION`은 각각 정확히 `enabled`, Ubuntu의 `TOMVERSE_AMUX_V22_SIDECAR`는 정확히 `1`일 때만 해당 경로가 열린다. 빠진 값·다른 값은 닫힌다.
+- 실제 환경 값을 켜기 전 코드·독립 검토·CI·해당 배포 SHA, 졸업 20건/14일, owner 활성화 행, 현재 source·hierarchy·brief 승인, 점수·ready·의존성·worker 검증·용량·비용·감사·kill switch·결과 불명 부재를 확인한다. 어느 검사도 이 활성화 요청으로 면제하지 않는다. Ubuntu sidecar 설치와 실제 호출 결과는 앱 코드 래치와 별도로 관측한다.
+- 기존 카드의 R0·이력·상태·점수는 이 변경으로 변환하거나 덮어쓰지 않는다. 명시적 opt-in 없는 legacy 카드와 실행 자격이 없는 카드는 계속 보류한다. 사용자 credit과 Agent 비용의 분리, 호출별 사용량 검증, 결과 불명 정지·read-back·사람 해제를 유지한다.
+- `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`와 `AMUX_V22_OUTCOME_WRITE_CODE_LATCH`는 false로 유지한다. 자동 PR 게시·병합, 운영자 완료 판정의 자동화는 포함하지 않는다. main 병합은 운영자 전용이며 추가 배포는 기존 별도 승인 경계를 따른다.
+- 되돌리기는 해당 환경 값을 끄는 것이다. 새 편입·claim·실행 접수를 막되 이미 시작한 attempt와 결과·감사 기록을 지우지 않고 기존 정산·복구 계약으로 처리한다. 코드 구현, 검토, 병합, 배포, 런타임 활성화와 첫 Task 실행을 각각 구분해 보고한다.
 
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 

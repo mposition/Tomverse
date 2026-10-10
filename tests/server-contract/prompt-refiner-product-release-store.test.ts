@@ -17,6 +17,7 @@ let priceMatches = true;
 let sourceMatches = true;
 let queryFails = false;
 let sourceReadCount = 0;
+let stageReadCount = 0;
 let priceReadCount = 0;
 let auditValidationCount = 0;
 const stopReasons: string[] = [];
@@ -48,6 +49,20 @@ mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
     },
   },
 });
+mock.module(mod("lib/promptRefinerProductStageSnapshot.ts"), { namedExports: {
+  readPromptRefinerProductStageSnapshot: async () => {
+    stageReadCount += 1;
+    return { id: target.stageId, status: "closed", approvedBy: "owner",
+      approvedAt: new Date("2026-10-09T00:00:00.000Z"),
+      stageApprovalAuditLogId: "stage-audit",
+      runApprovalAuditLogId: "run-audit", sourceCommitSha: "b".repeat(40),
+      sourceManifestDigest: "c".repeat(64), runnerDigest: "d".repeat(64),
+      manifestRoot: "e".repeat(64), runtimeDeploymentId: target.runtimeDeploymentId,
+      runtimeCommitSha: target.runtimeCommitSha, pricePinDigest: "f".repeat(64),
+      perRequestCostMicroUsd: BigInt(1), slotCount: 80,
+      costCeilingMicroUsd: BigInt(80) };
+  },
+} });
 mock.module(mod("lib/promptRefinerVnextOneShotGateEvidence.ts"), { namedExports: {
   readPromptRefinerVnextOneShotGateEvidence: async () => ({ valid: true,
     gateAuditLogId: target.gateAuditLogId, gateOutcome: "fail",
@@ -86,17 +101,13 @@ const tx = async () => {
       return where.action === "prompt_refiner.product_release_activated"
         ? activationRows : [limited];
     } },
-    promptRefinerVnextOneShotStage: { findUnique: async () => ({
-      id: target.stageId, approvedBy: "owner", sourceCommitSha: "b".repeat(40),
-      sourceManifestDigest: "c".repeat(64),
-    }) },
   };
 };
 
 beforeEach(async () => {
   stopReasons.length = 0; priceMatches = true; sourceMatches = true;
   queryFails = false; sourceReadCount = 0; priceReadCount = 0;
-  auditValidationCount = 0;
+  auditValidationCount = 0; stageReadCount = 0;
   const store = await storePromise;
   activationRows = [{ id: "activation", actorUserId: "owner",
     createdAt: new Date("2026-10-10T00:00:00.000Z"),
@@ -123,6 +134,7 @@ test("an authenticated view reads no source, price or audit proof", async () => 
   assert.deepEqual(stopReasons, []);
   assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
     { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
+  assert.equal(stageReadCount, 0);
   assert.equal(result.explicitEnabled, true);
   assert.equal(result.autoEnabled, true);
   const admitted = await store.admitPromptRefinerProductRelease(
@@ -130,6 +142,7 @@ test("an authenticated view reads no source, price or audit proof", async () => 
   assert.equal(admitted.explicitEnabled, true);
   assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
     { sourceReadCount: 1, priceReadCount: 1, auditValidationCount: 2 });
+  assert.equal(stageReadCount, 1);
 });
 
 test("fresh dispatch admission latches source, price and approval drift", async () => {

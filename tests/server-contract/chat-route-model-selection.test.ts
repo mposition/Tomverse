@@ -87,13 +87,18 @@ async function loadRouteWithSpies(): Promise<{
       : (realRefinerRelease.promptRefinerChatExecutionRelease as () => unknown)(),
   } });
   mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
-    consumePromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+    previewPromptRefinerChatExecution: async (input: { messages: Array<{ role: string; content: string }> }) => {
+      refinerAdmissionEvents.push("preview");
+      if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
+      return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
+        ? { ...message, content: "Synthetic held execution prompt" } : message),
+        mode: "explicit" as const, provenance: { decision: "accepted" as const } };
+    },
+    consumePreviewedPromptRefinerChatExecution: async (_input: unknown, preview: unknown) => {
       refinerAdmissionEvents.push("consume");
       if (!explicitRefinerAuthority || consumedRefinerDecisions !== 0) throw new PromptRefinerChatExecutionError();
       consumedRefinerDecisions += 1;
-      return { executionMessages: input.messages.map((message, index) => index === input.messages.length - 1
-        ? { ...message, content: "Synthetic held execution prompt" } : message),
-        mode: "explicit", provenance: { decision: "accepted" } };
+      return preview;
     },
   } });
   mock.module(mod("lib/chatDurableRecoveryAccess.ts"), { namedExports: {
@@ -342,7 +347,7 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
     assert.equal((await POST(refinerRequest())).status, 500);
     assert.equal(consumedRefinerDecisions, 1);
     assert.equal(spies.creditReservations, 1);
-    assert.deepEqual(refinerAdmissionEvents, ["scope", "admission", "consume"]);
+    assert.deepEqual(refinerAdmissionEvents, ["scope", "admission", "preview", "consume"]);
     const repeated = await POST(refinerRequest());
     assert.equal(repeated.status, 409);
     assert.equal((await repeated.json()).code, "PROMPT_REFINER_DECISION_UNAVAILABLE");
@@ -351,8 +356,8 @@ test("an admitted valid Refiner decision consumes once and a stale replay remain
     assert.equal(spies.streamTextCalls, 0);
     assert.equal(refinerAdmissions, 2, "each POST probe is admitted once, including a refused replay");
     assert.deepEqual(refinerAdmissionEvents, [
-      "scope", "admission", "consume",
-      "scope", "admission", "consume",
+      "scope", "admission", "preview", "consume",
+      "scope", "admission", "preview",
     ]);
   } finally { explicitRefinerAuthority = false; }
 });

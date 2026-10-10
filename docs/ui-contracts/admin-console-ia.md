@@ -62,7 +62,7 @@ owner-only (rule 14).
 | Operations | Agent digests | `/admin/agent-digests` | `qa-release` |
 | Operations | Agent office | `/admin/office` | `live`, `dashboard` |
 | Operations | Platform settings | `/admin/platform` | — |
-| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `intake`, `import`, `reconciliation`, `metadata` |
+| AMUX | Backlog (owner only) | `/admin/amux-backlog` | `ideas`, `import`, `reconciliation`, `metadata` |
 | AMUX | Promotion (owner only) | `/admin/amux-promotion` | `recommendation`, `promotion`, `auto-promotion` |
 | AMUX | Execution | `/admin/amux-execution` | `cards` (owner only), `assignment`, `halts` |
 | Governance | Email policy | `/admin/email-policy` | `jurisdictions`, `domains` |
@@ -207,8 +207,12 @@ card reaches Todo) are owner-only; **Execution** opens to every admin role on
 person, which used to sit on Routing -- while its **Cards** section stays
 owner-only. The owner opens Execution on Cards, everyone else on Assignment,
 and a non-owner who names `?tab=cards` gets a 404 rather than another section.
-The panels are the same components and send what they sent; each page loads
-only its open section.
+Each page loads only its open section. On 2026-10-10 the operator retired the
+legacy JSON registration and local-analysis import UI in favour of v4 Ideas.
+Backlog opens on Ideas; `/admin/amux-intake` and Backlog's old `?tab=intake`
+redirect there while preserving the other query fields. The legacy server
+APIs, gates, cards and audit records are unchanged; retiring their panels
+neither deletes data nor grants execution.
 
 Its Assignment tab carries the count of AMUX escalations still `open` or
 `acknowledged`, from the same status list the section reads
@@ -240,8 +244,9 @@ results"), `/admin/users/[userId]` and `/admin/providers/[provider]`.
 ## Old route → new route
 
 Nothing was deleted. Every previously reachable URL still resolves, and it
-resolves to the *section* it named rather than to the first tab of whichever
-page absorbed it. `tests/adminNavigation.test.mjs` fails if a retired route
+resolves to the *section* it named, or its explicitly approved replacement,
+rather than to the first tab of whichever page absorbed it.
+`tests/adminNavigation.test.mjs` fails if a retired route
 loses its redirect route or points at a tab that does not exist, and
 `tests/e2e-admin/admin-shell-navigation.spec.ts` drives all sixteen in a browser.
 
@@ -255,7 +260,7 @@ loses its redirect route or points at a tab that does not exist, and
 | `/admin/jobs` | `/admin/automation?tab=jobs` | Scheduled work supervised, not performed, by an operator |
 | `/admin/webhooks` | `/admin/automation?tab=webhooks` | As above |
 | `/admin/approvals` | `/admin/work-queue` | Two-person approval was retired; the address still opens the queue |
-| `/admin/amux-intake` | `/admin/amux-backlog?tab=intake` | The AMUX screens became sections of the AMUX group |
+| `/admin/amux-intake` | `/admin/amux-backlog?tab=ideas` | v4 Ideas replaces the retired legacy JSON intake UI |
 | `/admin/amux-board-import` | `/admin/amux-backlog?tab=import` | As above |
 | `/admin/amux-reconciliation` | `/admin/amux-backlog?tab=reconciliation` | As above |
 | `/admin/amux-backlog-metadata` | `/admin/amux-backlog?tab=metadata` | As above |

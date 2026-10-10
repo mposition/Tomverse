@@ -7,7 +7,8 @@ import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxLocalIntakeMessages } from "@/lib/adminMessages/amuxLocalIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=intake");
+// Retained for legacy API contract coverage, not mounted in the Admin console.
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 
 type LocalCard = {
   localId?: string;

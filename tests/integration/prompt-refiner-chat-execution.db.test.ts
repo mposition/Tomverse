@@ -186,12 +186,19 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     });
     await t.test("accepted input is consumed with audit; raw source is unchanged and replay refuses", async () => {
       const f = await setup(); await f.save();
-      const view = await store.consumePromptRefinerChatExecution(f.input);
+      const preview = await store.previewPromptRefinerChatExecution(f.input);
+      assert.equal(preview.executionMessages.at(-1).content, "Refined execution text");
+      assert.equal((await row(f.held.suggestionId)).state, "ready");
+      const view = await store.consumePreviewedPromptRefinerChatExecution(f.input, preview);
       assert.equal(view.executionMessages.at(-1).content, "Refined execution text");
       assert.equal(view.authoredMessages.at(-1).content, f.snapshot.sourcePrompt);
       assert.equal((await client.query(`SELECT "content" FROM "Message" WHERE "id"=$1`, [f.snapshot.sourceMessageId])).rows[0].content, f.snapshot.sourcePrompt);
       assert.equal((await row(f.held.suggestionId)).sourcePrompt, null);
       assert.equal((await row(f.held.suggestionId)).refinedPrompt, null);
+      await assert.rejects(
+        store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
+        /no longer available/,
+      );
       await refuse(f.input);
     });
     await t.test("keep-original consumes once without modifying execution", async () => {
@@ -230,10 +237,41 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     });
     await t.test("scope ABA advances epoch even for identical values", async () => {
       const f = await setup(); await f.save();
+      const preview = await store.previewPromptRefinerChatExecution(f.input);
       const mount = (await client.query(`SELECT "mountId" FROM "PromptRefinerChatScope" WHERE "id"=$1`, [f.scope.id])).rows[0].mountId;
       const next = await store.advancePromptRefinerChatScope({ userId: "owner", conversationId: "conversation", surface: "chat", mountId: mount });
-      assert.equal(next.epoch, f.scope.epoch + 1); await refuse(f.input);
+      assert.equal(next.epoch, f.scope.epoch + 1);
+      await assert.rejects(
+        store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
+        /no longer available|persisted source message/,
+      );
       assert.equal((await row(f.held.suggestionId)).state, "stale");
+    });
+    await t.test("preview aliases and authored input cannot be changed before consume", async () => {
+      const f = await setup(); await f.save();
+      const preview = await store.previewPromptRefinerChatExecution(f.input);
+      assert.throws(() => {
+        (preview.executionMessages.at(-1) as { content: string }).content = "mutated preview";
+      }, TypeError);
+      Object.assign(f.input.messages[0], {
+        attachments: [{ id: "post-preview-mutation" }],
+      });
+      await assert.rejects(
+        store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
+        /no longer available/,
+      );
+      assert.equal((await row(f.held.suggestionId)).state, "ready");
+    });
+    await t.test("a source change after preview refuses without consuming", async () => {
+      const f = await setup(); await f.save();
+      const preview = await store.previewPromptRefinerChatExecution(f.input);
+      await client.query(`UPDATE "Message" SET "content"='changed after preview' WHERE "id"=$1`,
+        [f.snapshot.sourceMessageId]);
+      await assert.rejects(
+        store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
+        /no longer available|persisted source message/,
+      );
+      assert.equal((await row(f.held.suggestionId)).state, "ready");
     });
     await t.test("automatic result cannot borrow explicit authority", async () => {
       const f = await setup("auto"); await f.save(); await refuse(f.input);
@@ -353,12 +391,16 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     });
     await t.test("expiry sweep purges only its bounded batch and expired consume refuses", async () => {
       const f = await setup(); await f.save();
+      const preview = await store.previewPromptRefinerChatExecution(f.input);
       // Synthetic aged row in an isolated schema; product DDL remains unchanged.
       await client.query(`ALTER TABLE "PromptRefinerChatSuggestion" DISABLE TRIGGER "PromptRefinerChatSuggestion_guard"`);
       await client.query(`UPDATE "PromptRefinerChatSuggestion" SET "createdAt"=(clock_timestamp() AT TIME ZONE 'UTC')-INTERVAL '6 minutes',
         "expiresAt"=(clock_timestamp() AT TIME ZONE 'UTC')-INTERVAL '1 minute' WHERE "id"=$1`, [f.held.suggestionId]);
       await client.query(`ALTER TABLE "PromptRefinerChatSuggestion" ENABLE TRIGGER "PromptRefinerChatSuggestion_guard"`);
-      await refuse(f.input);
+      await assert.rejects(
+        store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
+        /no longer available|persisted source message/,
+      );
       assert.deepEqual(await store.expirePromptRefinerChatSuggestions(1), { expired: 1 });
       assert.equal((await row(f.held.suggestionId)).sourcePrompt, null);
       await assert.rejects(store.expirePromptRefinerChatSuggestions(101), /no longer available/);

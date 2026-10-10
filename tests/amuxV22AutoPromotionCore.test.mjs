@@ -10,9 +10,10 @@ import {
   amuxV22ScoreCurrent,
 } from "../lib/amux/v22AutoPromotionCore.ts";
 
-test("v22 stays dark even when its environment flag is set", () => {
-  assert.equal(AMUX_V22_AUTO_PROMOTION_CODE_LATCH, false);
-  for (const flag of [undefined, "", "enabled", "true"]) {
+test("v22 admission requires the exact explicit environment flag", () => {
+  assert.equal(AMUX_V22_AUTO_PROMOTION_CODE_LATCH, true);
+  assert.equal(amuxV22AutoPromotionEnabled("enabled"), true);
+  for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
     assert.equal(amuxV22AutoPromotionEnabled(flag), false);
   }
 });

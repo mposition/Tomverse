@@ -38,7 +38,11 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
-import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
+import {
+    classifyPinnedDeployment,
+    pinnedRefusalHttp,
+    readPinnedDeploymentConfig,
+} from "@/lib/pinnedDeploymentExecution";
 import {
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
@@ -50,7 +54,10 @@ import {
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
-import { consumePromptRefinerChatExecution } from "@/lib/promptRefinerChatExecutionStore";
+import {
+    consumePreviewedPromptRefinerChatExecution,
+    previewPromptRefinerChatExecution,
+} from "@/lib/promptRefinerChatExecutionStore";
 import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
 import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
@@ -71,7 +78,9 @@ import {
     beginRetryAttempt,
     recordFallbackRecovery,
     completeInstrumentedDispatch,
+    recordDispatchStarted,
     recordDispatched,
+    recordNotDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
@@ -1152,7 +1161,28 @@ async function handleChatPost(
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
         let executionMessages = messages;
-        let refinerExecution: { mode: "explicit" | "auto"; applied: boolean } | null = null;
+        type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
+        let refinerExecution: RefinerExecution | null = null;
+        let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
+        const consumeRefinerPreview = async (): Promise<RefinerExecution | null> => {
+            if (!refinerPreview || refinerExecution) return refinerExecution;
+            if (!session?.user?.id || !conversationId || !sourceUserMessageId) {
+                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+            try {
+                const view = await consumePreviewedPromptRefinerChatExecution({
+                    userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,
+                    messages, decision: promptRefinerDecision,
+                }, refinerPreview);
+                executionMessages = [...view.executionMessages];
+                const consumed = { mode: view.mode, applied: view.provenance.decision === "accepted" };
+                refinerExecution = consumed;
+                return consumed;
+            } catch (error) {
+                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
+                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+        };
         if (promptRefinerDecision !== undefined) {
             if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
                 throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
@@ -1171,16 +1201,33 @@ async function handleChatPost(
             await consumeApiRateLimit(req, session.user.id, "chat-durable-attempt", { minute: 60, day: 5_000 });
             durableAttemptAdmissionConsumed = true;
             try {
-                const view = await consumePromptRefinerChatExecution({
+                refinerPreview = await previewPromptRefinerChatExecution({
                     userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,
                     messages, decision: promptRefinerDecision,
                 });
-                executionMessages = [...view.executionMessages];
-                refinerExecution = { mode: view.mode, applied: view.provenance.decision === "accepted" };
+                executionMessages = [...refinerPreview.executionMessages];
             } catch (error) {
                 throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
                     "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
             }
+        }
+        const pinnedDeploymentEntered = classifyPinnedDeployment(
+            readPinnedDeploymentConfig({
+                PINNED_DEPLOYMENT_EXECUTION: process.env.PINNED_DEPLOYMENT_EXECUTION,
+                PINNED_DEPLOYMENT_ACCOUNT_ID: process.env.PINNED_DEPLOYMENT_ACCOUNT_ID,
+                PINNED_DEPLOYMENT_ID: process.env.PINNED_DEPLOYMENT_ID,
+                PINNED_DEPLOYMENT_EXPERIMENT_ID: process.env.PINNED_DEPLOYMENT_EXPERIMENT_ID,
+            }),
+            session?.user?.id ?? null,
+        ) === "entered";
+        // The pinned experiment owns a separate placement/budget refusal
+        // pipeline. It has no preview-before-reserve seam, so a Refiner
+        // decision cannot enter it without risking a consumed decision on a
+        // deterministic pinned refusal. Keep the held suggestion intact and
+        // require an ordinary Chat dispatch instead.
+        if (pinnedDeploymentEntered && refinerPreview) {
+            throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE",
+                "The Prompt Refiner decision is no longer available.");
         }
         // A pinned internal account either finishes on this path or, when the
         // flag is off or the account is not the configured one, falls through
@@ -1199,13 +1246,7 @@ async function handleChatPost(
         }
         if (pinnedDeployment.route === "dispatched") {
             if (pinnedDeployment.response instanceof Response) {
-                if (!refinerExecution) return pinnedDeployment.response;
-                const response = pinnedDeployment.response;
-                const headers = new Headers(response.headers);
-                headers.set("X-Prompt-Refiner-Execution", refinerExecution.applied ? "applied" : "original");
-                headers.set("X-Prompt-Refiner-Mode", refinerExecution.mode);
-                return new Response(response.body, { status: response.status,
-                    statusText: response.statusText, headers });
+                return pinnedDeployment.response;
             }
             const http = pinnedRefusalHttp("provider_error");
             return tracedJsonError(http.message, http.code, http.status, traceId);
@@ -1549,7 +1590,10 @@ async function handleChatPost(
         const effectiveModelId = autoSelection.routed
             ? autoSelection.modelId
             : requestedModelId;
-        if (autoSelection.routed) {
+        let autoSelectionRecorded = false;
+        const recordAutoSelection = () => {
+            if (autoSelectionRecorded || !autoSelection.routed) return;
+            autoSelectionRecorded = true;
             console.info(JSON.stringify({
                 event: "chat_auto_routed",
                 traceId,
@@ -1560,29 +1604,24 @@ async function handleChatPost(
                 routerVersion: autoSelection.versions.decision,
                 timestamp: new Date().toISOString(),
             }));
-        }
-        // Loud, and every time -- but only about a turn that was actually
-        // routed. A routed turn that only routed because a drill said so must
-        // be legible as one in the record it produces, not inferred later from
-        // the absence of an attestation.
-        //
-        // Recorded here rather than beside the cohort read, which is where it
-        // used to be. Passing the override does not make routing happen: the
-        // selection can still refuse for `product_not_chat`,
-        // `conversation_is_manual` or `no_candidate`, and logging on the
-        // cohort alone claimed an overridden routing decision for every turn
-        // that went on to be refused for a reason unrelated to readiness.
-        if (autoSelection.routed && autoSelection.cohort.drillOverride) {
-            console.warn(JSON.stringify({
-                event: "chat_auto_readiness_overridden",
-                traceId,
-                conversationId,
-                reason: autoSelection.cohort.drillOverride,
-                selectedModelId: effectiveModelId,
-                environment: resolveDeploymentEnvironment(),
-                timestamp: new Date().toISOString(),
-            }));
-        }
+            // Loud, and every time -- but only about a turn that was actually
+            // routed. A routed turn that only routed because a drill said so
+            // must be legible as one in the record it produces.
+            if (autoSelection.cohort.drillOverride) {
+                console.warn(JSON.stringify({
+                    event: "chat_auto_readiness_overridden",
+                    traceId,
+                    conversationId,
+                    reason: autoSelection.cohort.drillOverride,
+                    selectedModelId: effectiveModelId,
+                    environment: resolveDeploymentEnvironment(),
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+        };
+        // A Refiner preview is tentative until the same view is atomically
+        // revalidated and consumed after deterministic preflight refusals.
+        if (!refinerPreview) recordAutoSelection();
         const routedCatalogModel = autoSelection.routed
             ? runtimeModelMap.get(effectiveModelId)
             : requestedModelConfig;
@@ -2240,6 +2279,13 @@ async function handleChatPost(
                 },
             };
         }
+
+        // The preview may inform profiling and model-selection preflight, but
+        // it cannot authorize shadow work or a provider call. Revalidate the
+        // exact view and consume it only after deterministic plan, selection,
+        // and recoverable context-bundle refusals have all passed.
+        await consumeRefinerPreview();
+        recordAutoSelection();
 
         const isDurableStoredChat = Boolean(
             session?.user?.id &&
@@ -4155,6 +4201,7 @@ async function handleChatPost(
             );
         }
         const initialAttemptAbortController = new AbortController();
+        await recordDispatchStarted(dispatchRecord);
         const result = await beginProviderCall(
             modelConfig.provider,
             modelConfig.id,
@@ -5201,6 +5248,12 @@ async function handleChatPost(
                 ...usageReservation!,
                 entries: [...usageReservation!.entries, ...reserved.entries],
             };
+            // Kept before the dispatch because `beginRetryAttempt` opens the
+            // second attempt on this record's run. Closing it is deliberately
+            // *after* the dispatch succeeds -- see below.
+            const failing = dispatchRecord;
+            let nextRecord: DispatchInstrumentation = null;
+            let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
             /**
              * Gives the hold back when the dispatch it authorized never
              * happened.
@@ -5212,29 +5265,32 @@ async function handleChatPost(
              * exist until the reservation expires.
              */
             const abandonFallback = async (reason: string) => {
-                if (fallbackHoldTaken) {
-                    await releaseAttemptProviderBudget({
-                        reservationId: usageReservation!.reservationId,
-                        userId: usageReservation!.userId ?? null,
-                        attemptIndex: fallbackAttemptIndex,
-                    });
-                    usageReservation = {
-                        ...usageReservation!,
-                        entries: usageReservation!.entries.filter(
-                            (entry) => !reserved.entries.includes(entry)
-                        ),
-                    };
+                try {
+                    if (nextRecord) {
+                        await recordNotDispatched(
+                            nextRecord,
+                            reason,
+                            "application"
+                        );
+                    }
+                } finally {
+                    if (fallbackHoldTaken) {
+                        await releaseAttemptProviderBudget({
+                            reservationId: usageReservation!.reservationId,
+                            userId: usageReservation!.userId ?? null,
+                            attemptIndex: fallbackAttemptIndex,
+                        });
+                        usageReservation = {
+                            ...usageReservation!,
+                            entries: usageReservation!.entries.filter(
+                                (entry) => !reserved.entries.includes(entry)
+                            ),
+                        };
+                    }
                 }
                 reportFallbackRefusal(reason);
                 return false;
             };
-
-            // Kept before the dispatch because `beginRetryAttempt` opens the
-            // second attempt on this record's run. Closing it is deliberately
-            // *after* the dispatch succeeds -- see below.
-            const failing = dispatchRecord;
-            let nextRecord: DispatchInstrumentation;
-            let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
             try {
                 // A second attempt on the *same* run, not a second run. One
                 // logical response is one RoutingRun with its attempts hanging
@@ -5277,6 +5333,7 @@ async function handleChatPost(
                     // race a second, failed settlement against it.
                     return true;
                 }
+                await recordDispatchStarted(nextRecord);
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: sdkMessages,

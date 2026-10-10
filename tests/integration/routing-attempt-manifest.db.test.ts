@@ -10,6 +10,7 @@ import {
   createDraftManifest,
   dispatchedAttemptManifestCoverage,
   finalizeManifest,
+  markDispatchStarted,
   markDispatched,
   openAttempt,
   successfulFallbackCandidateManifestCoverage,
@@ -90,6 +91,15 @@ const finalize = (attemptId: string, now?: Date) =>
     now,
   });
 
+const startAndMark = async (
+  attemptId: string,
+  dispatchedAt: Date,
+  providerRequestId?: string
+) => {
+  await markDispatchStarted({ attemptId, dispatchStartedAt: dispatchedAt });
+  await markDispatched({ attemptId, dispatchedAt, providerRequestId });
+};
+
 // One logical response, three attempts, each with its own model, Planner mode
 // and manifest. This is the shape that cannot be flattened onto the run.
 test("one run carries several attempts, each with its own manifest", async () => {
@@ -98,7 +108,7 @@ test("one run carries several attempts, each with its own manifest", async () =>
   const primary = await openAttempt({ runId, attemptIndex: 0, modelId: "gpt-5-6-luna", provider: "openai" });
   await newDraft(primary, { tokenizerVersion: "o200k_base", contextWindowTokens: 128_000 });
   const primaryFinalized = await finalize(primary);
-  await markDispatched({ attemptId: primary, dispatchedAt: primaryFinalized, providerRequestId: "req_1" });
+  await startAndMark(primary, primaryFinalized, "req_1");
   await closeAttempt({ attemptId: primary, outcome: "failed_pre_token", failureLayer: "provider" });
 
   // Fallback: a different model, a different tokenizer, a different window --
@@ -117,7 +127,7 @@ test("one run carries several attempts, each with its own manifest", async () =>
   });
   await newDraft(passThrough, { tokenizerVersion: "deepseek-v3", contextWindowTokens: 64_000, tokenCount: 900 });
   const passFinalized = await finalize(passThrough);
-  await markDispatched({ attemptId: passThrough, dispatchedAt: passFinalized, providerRequestId: "req_3" });
+  await startAndMark(passThrough, passFinalized, "req_3");
   await closeAttempt({
     attemptId: passThrough,
     outcome: "succeeded",
@@ -158,22 +168,81 @@ test("an attempt cannot be dispatched without a finalized manifest", async () =>
   const attemptId = await newAttempt(runId);
 
   await assert.rejects(
-    markDispatched({ attemptId }),
+    markDispatchStarted({ attemptId }),
     (error: unknown) => error instanceof DispatchBoundaryError,
-    "dispatch was recorded with no manifest at all"
+    "dispatch start was recorded with no manifest at all"
   );
 
   await newDraft(attemptId);
   await assert.rejects(
-    markDispatched({ attemptId }),
+    markDispatchStarted({ attemptId }),
     (error: unknown) => error instanceof DispatchBoundaryError,
-    "dispatch was recorded against a draft manifest"
+    "dispatch start was recorded against a draft manifest"
   );
 
   const finalizedAt = await finalize(attemptId);
-  await markDispatched({ attemptId, dispatchedAt: finalizedAt });
+  await assert.rejects(
+    markDispatched({ attemptId, dispatchedAt: finalizedAt }),
+    (error: unknown) => error instanceof DispatchBoundaryError,
+    "the post-call timestamp bypassed the durable start boundary"
+  );
+  await startAndMark(attemptId, finalizedAt);
   const attempt = await prisma.routingAttempt.findUniqueOrThrow({ where: { id: attemptId } });
+  assert.notEqual(attempt.dispatchStartedAt, null);
   assert.notEqual(attempt.dispatchedAt, null);
+});
+
+test("historical dispatched rows remain valid without an invented start timestamp", async () => {
+  const runId = await newRun();
+  const attemptId = await newAttempt(runId);
+  await newDraft(attemptId);
+  const finalizedAt = await finalize(attemptId);
+
+  await prisma.routingAttempt.update({
+    where: { id: attemptId },
+    data: { dispatchedAt: finalizedAt },
+  });
+  const attempt = await prisma.routingAttempt.findUniqueOrThrow({
+    where: { id: attemptId },
+  });
+  assert.equal(attempt.dispatchStartedAt, null);
+  assert.equal(attempt.dispatchedAt?.getTime(), finalizedAt.getTime());
+  await assert.rejects(
+    prisma.routingAttempt.update({
+      where: { id: attemptId },
+      data: { dispatchStartedAt: finalizedAt },
+    }),
+    /backfill|immutable/i
+  );
+});
+
+test("a known constructor refusal closes without erasing its start intent", async () => {
+  const runId = await newRun();
+  const attemptId = await newAttempt(runId);
+  await newDraft(attemptId);
+  const finalizedAt = await finalize(attemptId);
+  await markDispatchStarted({ attemptId, dispatchStartedAt: finalizedAt });
+
+  await assert.rejects(
+    prisma.routingAttempt.update({
+      where: { id: attemptId },
+      data: { dispatchStartedAt: new Date(finalizedAt.getTime() + 1) },
+    }),
+    /immutable/i
+  );
+
+  await abandonDraft({
+    attemptId,
+    reason: "dispatch_constructor_failed",
+    failureLayer: "application",
+  });
+
+  const attempt = await prisma.routingAttempt.findUniqueOrThrow({
+    where: { id: attemptId },
+  });
+  assert.equal(attempt.outcome, "not_dispatched");
+  assert.equal(attempt.dispatchStartedAt?.getTime(), finalizedAt.getTime());
+  assert.equal(attempt.dispatchedAt, null);
 });
 
 // "Dispatch is prohibited unless manifest finalization ... succeed[s]" is an
@@ -184,6 +253,13 @@ test("a dispatch cannot predate the finalization that authorised it", async () =
   await newDraft(attemptId);
   const finalizedAt = await finalize(attemptId);
 
+  await assert.rejects(
+    prisma.routingAttempt.update({
+      where: { id: attemptId },
+      data: { dispatchStartedAt: new Date(finalizedAt.getTime() - 1_000) },
+    }),
+    /check|constraint/i
+  );
   await assert.rejects(
     prisma.routingAttempt.update({
       where: { id: attemptId },
@@ -353,7 +429,7 @@ test("dispatched-attempt manifest coverage is 100% by construction", async () =>
     });
     await newDraft(attemptId);
     const finalizedAt = await finalize(attemptId);
-    await markDispatched({ attemptId, dispatchedAt: finalizedAt });
+    await startAndMark(attemptId, finalizedAt);
   }
 
   // A never-dispatched attempt must not count against coverage.
@@ -379,7 +455,7 @@ test("the run points at the attempt that answered, and cannot point at two", asy
   const attemptId = await newAttempt(runId);
   await newDraft(attemptId);
   const finalizedAt = await finalize(attemptId);
-  await markDispatched({ attemptId, dispatchedAt: finalizedAt });
+  await startAndMark(attemptId, finalizedAt);
   await closeAttempt({ attemptId, outcome: "succeeded" });
 
   await prisma.routingRun.update({
@@ -458,7 +534,7 @@ test("a fallback whose manifest was rebuilt for its own model counts as covered"
   });
   await newDraft(first);
   const firstFinalized = await finalize(first);
-  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await startAndMark(first, firstFinalized);
   await closeAttempt({
     attemptId: first,
     outcome: "failed_pre_token",
@@ -473,7 +549,7 @@ test("a fallback whose manifest was rebuilt for its own model counts as covered"
   });
   await newDraft(fallback, { contextWindowTokens: TERRA_WINDOW });
   const finalized = await finalize(fallback);
-  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await startAndMark(fallback, finalized);
   await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
 
   const coverage = await successfulFallbackCandidateManifestCoverage();
@@ -496,7 +572,7 @@ test("a fallback carrying the failed model's window is reported, not counted", a
   });
   await newDraft(first, { contextWindowTokens: 128_000 });
   const firstFinalized = await finalize(first);
-  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await startAndMark(first, firstFinalized);
   await closeAttempt({
     attemptId: first,
     outcome: "failed_pre_token",
@@ -512,7 +588,7 @@ test("a fallback carrying the failed model's window is reported, not counted", a
   // Inherited: the first model's window, on the second model's attempt.
   await newDraft(fallback, { contextWindowTokens: 128_000 });
   const finalized = await finalize(fallback);
-  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await startAndMark(fallback, finalized);
   await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
 
   const coverage = await successfulFallbackCandidateManifestCoverage();
@@ -535,7 +611,7 @@ test("a model with no declared window is unverifiable, not covered", async () =>
   });
   await newDraft(first);
   const firstFinalized = await finalize(first);
-  await markDispatched({ attemptId: first, dispatchedAt: firstFinalized });
+  await startAndMark(first, firstFinalized);
   await closeAttempt({ attemptId: first, outcome: "failed_pre_token", failureLayer: "provider" });
 
   const fallback = await openAttempt({
@@ -546,7 +622,7 @@ test("a model with no declared window is unverifiable, not covered", async () =>
   });
   await newDraft(fallback);
   const finalized = await finalize(fallback);
-  await markDispatched({ attemptId: fallback, dispatchedAt: finalized });
+  await startAndMark(fallback, finalized);
   await closeAttempt({ attemptId: fallback, outcome: "succeeded" });
 
   const coverage = await successfulFallbackCandidateManifestCoverage();
@@ -572,7 +648,7 @@ test("the first attempt is never a fallback, however it ended", async () => {
   // cannot exist, and the CHECK refuses it.
   await newDraft(only, { contextWindowTokens: 128_000 });
   const finalized = await finalize(only);
-  await markDispatched({ attemptId: only, dispatchedAt: finalized });
+  await startAndMark(only, finalized);
   await closeAttempt({ attemptId: only, outcome: "succeeded" });
 
   const coverage = await successfulFallbackCandidateManifestCoverage();

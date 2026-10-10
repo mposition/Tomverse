@@ -1,6 +1,7 @@
 import "server-only";
 
-import type { AdminAuditLog, Prisma } from "@prisma/client";
+import type { AdminAuditLog, Prisma, PromptRefinerVnextOneShotStage } from
+  "@prisma/client";
 import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
@@ -18,6 +19,8 @@ import {
   PROMPT_REFINER_PRODUCT_CANDIDATE_DIGEST,
   PROMPT_REFINER_PRODUCT_PRICE_PIN_DIGEST,
 } from "@/lib/promptRefinerProductContract";
+import { readPromptRefinerProductStageSnapshot } from
+  "@/lib/promptRefinerProductStageSnapshot";
 import {
   PROMPT_REFINER_AUTO_EXCEPTION_POLICY_COMMIT,
   PROMPT_REFINER_AUTO_EXCEPTION_POLICY_SHA256,
@@ -113,13 +116,14 @@ export const promptRefinerProductActivationMetadata = (input: EvidenceTarget & {
 });
 
 async function exactStageEvidence(tx: Tx, target: EvidenceTarget) {
-  const stage = await tx.promptRefinerVnextOneShotStage.findUnique({
-    where: { id: target.stageId },
-  });
+  const stage = await readPromptRefinerProductStageSnapshot(tx, target.stageId);
+  // The reviewed historical readers accept Prisma's full Stage type, while
+  // this capability deliberately returns only the fields those readers use.
+  const reviewedStage = stage as PromptRefinerVnextOneShotStage | null;
   const gate = await readPromptRefinerVnextOneShotGateEvidence(
-    tx, stage, target.stageId);
+    tx, reviewedStage, target.stageId);
   const disposition = await readPromptRefinerVnextOneShotDisposition(
-    tx, stage, target.stageId);
+    tx, reviewedStage, target.stageId);
   if (!stage || !gate.valid || gate.gateAuditLogId !== target.gateAuditLogId ||
       gate.gateOutcome !== "fail" || gate.latencyOnlyFailure !== true ||
       gate.reasonCodes?.length !== 1 ||

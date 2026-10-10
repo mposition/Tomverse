@@ -1,12 +1,11 @@
 export const dynamic = "force-dynamic";
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
-import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
 import { AmuxUnusedAnalysisReservationPanel } from
   "@/components/admin/AmuxUnusedAnalysisReservationPanel";
@@ -17,7 +16,6 @@ import { amuxAnalysisClaimRecoveryHoldId } from
 import { AmuxTaskCostCatalogApprovalPanel } from
   "@/components/admin/AmuxTaskCostCatalogApprovalPanel";
 import { AmuxPortfolioPanel } from "@/components/admin/AmuxPortfolioPanel";
-import { AmuxLocalIntakePanel } from "@/components/admin/AmuxLocalIntakePanel";
 import { AmuxReconciliationPanel } from "@/components/admin/AmuxReconciliationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
 import {
@@ -61,7 +59,7 @@ import {
 import { getAdminRole } from "@/lib/adminAuth";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
-import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
 import { authOptions } from "@/lib/auth";
 import { AMUX_V4_TASK_CATALOG_WRITE_ENV,
   amuxV4TaskCatalogWriteEnabled } from
@@ -75,11 +73,9 @@ const TABS = adminNavItemTabs("amux-backlog");
 /**
  * The AMUX backlog: what enters it and what is recorded about each card.
  *
- * The original four owner-only sections used to be unlisted routes
- * (`/admin/amux-intake`, `/admin/amux-board-import`,
- * `/admin/amux-reconciliation`, `/admin/amux-backlog-metadata`), each now a
- * section. The separate Ideas section performs an input check and has an
- * independently gated submission path. Neither action collects GitHub
+ * Import, reconciliation and metadata used to be unlisted owner-only routes.
+ * The retired JSON intake UI now redirects to Ideas, which performs an input
+ * check and has an independently gated submission path. Neither action collects GitHub
  * content or authorizes external transfer.
  * Only the open section is rendered.
  *
@@ -94,6 +90,10 @@ export default async function AdminAmuxBacklogPage({
   if (!session?.user?.id || getAdminRole(session) !== "owner") notFound();
   const role = getAdminRole(session);
   const query = await searchParams;
+  const requestedTab = Array.isArray(query.tab) ? query.tab[0] : query.tab;
+  if (requestedTab === "intake") {
+    redirect(adminRedirectTarget("/admin/amux-backlog?tab=ideas", query));
+  }
   // Expiration of a transfer preview must not hide recovery of its paid claim.
   // This mounts the existing exact-ID GET/owner decision panel; it does not
   // reconstruct a preview, reserve a budget or dispatch an analysis.
@@ -119,7 +119,7 @@ export default async function AdminAmuxBacklogPage({
     transferConfirmWritePermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_WRITE_ENV]) &&
     transferConfirmReadPermitted(process.env[AMUX_V4_TRANSFER_CONFIRM_READ_ENV]);
   const chips = amuxTabChips(
-    { ...amuxSwitchedTabStatuses(["intake", "import", "reconciliation", "metadata"]),
+    { ...amuxSwitchedTabStatuses(["import", "reconciliation", "metadata"]),
       ideas: ideaSubmissionAvailable ? "server_switch_on" : "read_only" },
     m.status
   );
@@ -172,12 +172,7 @@ export default async function AdminAmuxBacklogPage({
         <AmuxReconciliationPanel />
       ) : tab.id === "metadata" ? (
         <AmuxBacklogMetadataPanel />
-      ) : (
-        <>
-          <AmuxIntakePanel />
-          <AmuxLocalIntakePanel />
-        </>
-      )}
+      ) : null}
     </div>
   );
 }

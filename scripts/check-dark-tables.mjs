@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 
 import {
     PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS,
+    promptRefinerProductLimitedDarkAccessConfigurationProblems,
     promptRefinerProductLimitedDarkAccessPermitted,
 } from "./prompt-refiner-product-limited-dark-access.mjs";
 
@@ -63,7 +64,6 @@ const LIMITED_DARK_ACCESS = {
     ModelDeployment: ["lib/pinnedDeploymentPlacement.ts"],
     ProviderEndpoint: ["lib/pinnedDeploymentPlacement.ts"],
     PromptRefinerVnextOneShotStage: [
-        "lib/promptRefinerProductReleaseStore.ts",
         "lib/promptRefinerVnextOneShotCandidateSourceReadback.ts",
         "lib/promptRefinerVnextOneShotDeploymentBinding.ts",
         "lib/promptRefinerVnextOneShotOutcomeRecovery.ts",
@@ -287,7 +287,11 @@ const files = ROOTS.flatMap((directory) => walk(directory)).filter((file) => {
     return !ALLOWED.some((allowed) => normalised.startsWith(allowed));
 });
 
-const problems = [];
+const problems = [
+    ...promptRefinerProductLimitedDarkAccessConfigurationProblems().map(
+        (problem) => `Prompt Refiner limited dark access: ${problem}`
+    ),
+];
 
 for (const file of files) {
     const source = readFileSync(join(root, file), "utf8");
