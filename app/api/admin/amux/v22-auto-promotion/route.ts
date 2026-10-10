@@ -10,6 +10,7 @@ import { apiSecurityResponse, consumeApiRateLimit,
   readLimitedJson } from "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
 import { BoardImportError } from "@/lib/amux/boardImportCore";
+import { AMUX_V22_GRADUATION_EXCEPTION_ID } from "@/lib/amux/v22AutoPromotionCore";
 import { configureV22AutoPromotion,
   readV22AutoPromotionControl } from "@/lib/amux/v22AutoPromotionService";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
@@ -17,6 +18,7 @@ import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 const noStore = { "Cache-Control": "private, no-store, max-age=0" };
 const bodySchema = z.object({ policyVersion: z.literal(22),
   active: z.boolean(), expectedAuditLogId: z.string().min(1).max(128).nullable(),
+  graduationExceptionId: z.literal(AMUX_V22_GRADUATION_EXCEPTION_ID).optional(),
 }).strict();
 
 async function requireOwner(stepUp: boolean) {
@@ -64,7 +66,8 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 1024, bodySchema);
     const result = await configureV22AutoPromotion({ session: auth.session,
       request, active: body.active,
-      expectedAuditLogId: body.expectedAuditLogId });
+      expectedAuditLogId: body.expectedAuditLogId,
+      graduationExceptionId: body.graduationExceptionId });
     return Response.json(result, { headers: noStore });
   } catch (error) {
     if (error instanceof BoardImportError) {

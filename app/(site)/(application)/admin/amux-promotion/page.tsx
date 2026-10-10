@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AmuxBoardAutoPromotionPanel } from "@/components/admin/AmuxBoardAutoPromotionPanel";
+import { AmuxV22PromotionControl } from "@/components/admin/AmuxV22PromotionControl";
 import { AmuxBoardPromotionPanel } from "@/components/admin/AmuxBoardPromotionPanel";
 import { AmuxBoardRecommendationPanel } from "@/components/admin/AmuxBoardRecommendationPanel";
 import { amuxSwitchedTabStatuses, amuxTabChips } from "@/lib/adminAmuxTabStatus";
@@ -60,7 +61,7 @@ export default async function AdminAmuxPromotionPage({
       {tab.id === "promotion" ? (
         <AmuxBoardPromotionPanel />
       ) : tab.id === "auto-promotion" ? (
-        <AmuxBoardAutoPromotionPanel />
+        <><AmuxV22PromotionControl /><AmuxBoardAutoPromotionPanel /></>
       ) : (
         <AmuxBoardRecommendationPanel />
       )}

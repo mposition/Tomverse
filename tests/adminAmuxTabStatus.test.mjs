@@ -30,6 +30,13 @@ import { RECOMMENDATION_APPLY_ENV, RECOMMENDATION_CODE_LATCH } from "../lib/amux
 
 const read = (path) => readFileSync(join(process.cwd(), path), "utf8");
 
+test("auto-promotion chip includes the independently enabled v22 writer", () => {
+  assert.equal(amuxSwitchedTabStatus("auto-promotion", {
+    TOMVERSE_AMUX_BOARD_AUTO_PROMOTE: "disabled",
+    TOMVERSE_AMUX_V22_AUTO_PROMOTE: "enabled",
+  }), "server_switch_on");
+});
+
 /**
  * For each gated tab: the variable, the shipped latch, and the file where the
  * section's own route reads that variable. The latch values are imported, not

@@ -4,11 +4,67 @@ import { test } from "node:test";
 
 import {
   AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
+  AMUX_V22_GRADUATION_EXCEPTION_ID,
+  AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
+  amuxV22GraduationExceptionEnabled,
+  amuxV22GraduationPermitted,
   amuxV22AssessmentIdsCurrent,
   amuxV22AutoPromotionEnabled,
   amuxV22Capacity,
   amuxV22ScoreCurrent,
 } from "../lib/amux/v22AutoPromotionCore.ts";
+import { autoGraduationAccepted } from "../lib/amux/autoPromotionCore.ts";
+
+test("initial exception needs the exact live flag and owner audit metadata", () => {
+  const authorization = {
+    graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
+    graduationExceptionPolicyVersion: AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
+  };
+  const valid = { graduated: false,
+    environmentValue: AMUX_V22_GRADUATION_EXCEPTION_ID, authorization };
+  assert.equal(amuxV22GraduationPermitted(valid), true);
+  for (const environmentValue of [undefined, "", "enabled", "true", "1",
+    "disabled", `${AMUX_V22_GRADUATION_EXCEPTION_ID} `]) {
+    assert.equal(amuxV22GraduationExceptionEnabled(environmentValue), false);
+    assert.equal(amuxV22GraduationPermitted({ ...valid, environmentValue }), false);
+  }
+  for (const metadata of [null, [], "approved", {},
+    { ...authorization, graduationExceptionId: "other" },
+    { ...authorization, graduationExceptionPolicyVersion: 29 }]) {
+    assert.equal(amuxV22GraduationPermitted({ ...valid, authorization: metadata }), false);
+  }
+  assert.equal(amuxV22GraduationPermitted({ ...valid, environmentValue: undefined }), false);
+  assert.equal(amuxV22GraduationPermitted({ graduated: true,
+    environmentValue: undefined, authorization: null }), true);
+  assert.deepEqual(autoGraduationAccepted([]), {
+    ok: false, code: "graduation_unmet", count: 0, spanMs: 0,
+  });
+});
+
+test("exception uses the owner audit writer and keeps the existing safety gates", () => {
+  const service = readFileSync("lib/amux/v22AutoPromotionService.ts", "utf8");
+  assert.match(service, /graduation_exception_unavailable/);
+  assert.match(service, /writeAdminAuditLog\(\{ tx/);
+  assert.match(service, /active: input\.active, \.\.\.exceptionMetadata/);
+  assert.match(service, /authorization: activationAudit\.metadata/);
+  assert.match(service, /activationAudit\.actorUserId !== control\.approvedByUserId/);
+  for (const guard of ["legacy_auto_promotion_enabled", "auto_halted",
+    "incident_blocked", "capacity_unconfigured", "score_changed", "task_not_ready"]) {
+    assert.match(service, new RegExp(guard));
+  }
+});
+
+test("owner control is separate from the read-only board and stops on unknown writes", () => {
+  const ui = readFileSync("components/admin/AmuxV22PromotionControl.tsx", "utf8");
+  const board = readFileSync("components/admin/AmuxExecutionWorkspace.tsx", "utf8");
+  assert.match(ui, /expectedAuditLogId: control\.authorizationAuditLogId/);
+  assert.match(ui, /graduationExceptionId: control\.graduationExceptionId/);
+  assert.match(ui, /active && !confirmed/);
+  assert.match(ui, /result\.error === "outcome_unknown"/);
+  assert.match(ui, /if \(!control \|\| busy \|\| unknown/);
+  assert.match(ui, /adminRecentAuthenticationHref\("\/admin\/amux-promotion\?tab=auto-promotion"\)/);
+  assert.doesNotMatch(board, /method: "POST"/);
+});
 
 test("v22 admission requires the exact explicit environment flag", () => {
   assert.equal(AMUX_V22_AUTO_PROMOTION_CODE_LATCH, true);
