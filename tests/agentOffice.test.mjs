@@ -16,6 +16,8 @@ import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
   AGENT_OFFICE_DECLARED_RECORD_HREFS,
   AGENT_OFFICE_WORKER_COLORS,
+  AGENT_OFFICE_WORKER_SKINS,
+  agentOfficeSeatedClothes,
   consoleHasRecord,
 } from "../lib/agentOffice/roster.ts";
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
@@ -324,8 +326,10 @@ test("the office's two sections are addresses, not component state", () => {
   assert.match(panel, /<Link\s+href=\{viewHref\("live"\)\}/);
   assert.match(panel, /<Link\s+href=\{viewHref\("dashboard"\)\}/);
   assert.doesNotMatch(panel, /useState<View>/);
-  // Both dialogs keep the shared focus contract.
-  assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, 2);
+  // Every dialog keeps the shared focus contract: profile, seated profile, briefing.
+  const dialogs = (panel.match(/role="dialog"/g) || []).length;
+  assert.equal(dialogs, 3);
+  assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, dialogs);
 });
 
 // ── Live rooms ────────────────────────────────────────────────────────────
@@ -1110,6 +1114,16 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
     ]
   );
   assert.equal(mixed.workers[0].title, "a · openai · 배정 가능 · 마지막 heartbeat 10-07 22:04 UTC");
+  // The profile a click opens says the same as the tooltip, a fact per line.
+  assert.deepEqual(mixed.workers[0].facts, [
+    { label: "공급사", value: "openai" },
+    { label: "상태", value: "배정 가능" },
+    { label: "마지막 heartbeat", value: "10-07 22:04 UTC" },
+  ]);
+  assert.equal(
+    view([{ name: "q", provider: "openai", state: "not_running", heartbeatAt: null }]).workers[0].facts[2].value,
+    copy.noHeartbeat
+  );
   assert.equal(view([worker("a", "busy"), worker("b", "ready")]).status, "working");
   assert.equal(view([worker("a", "ready")]).status, "done");
   assert.equal(view([worker("a", "paused"), worker("b", "not_running")]).status, "waiting");
@@ -1163,11 +1177,16 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   assert.match(amux, /read: "amux_workers"/);
 
   // Workers are drawn by their own layer: not engine agents, so the demo can
-  // neither move them nor give them a line.
+  // neither move them nor give them a line. A click names the room and the
+  // worker, and nothing else.
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
   const layer = world.slice(world.indexOf("const SeatedLayer"), world.indexOf("const PropLayer"));
-  assert.doesNotMatch(layer, /onPointerUp|onPick|engine/);
-  assert.match(world, /<SeatedLayer room=\{AMUX_ROOM\} people=\{amux\.workers\} \/>/);
+  assert.doesNotMatch(layer, /engine|onSelect\b/);
+  assert.equal(layer.match(/onPick\(/g)?.length, 2, "pointer and keyboard open the same profile");
+  assert.match(layer, /onPointerUp=\{\(\) => onPick\(kind, worker\.name\)\}/);
+  assert.match(layer, /role="button"/);
+  assert.match(layer, /tabIndex=\{0\}/);
+  assert.match(world, /<SeatedLayer room=\{AMUX_ROOM\} kind="amux" people=\{amux\.workers\} onPick=\{onPickSeated\} \/>/);
   assert.match(world, /\{real\?\.note \? \(/);
   assert.ok(!AGENT_OFFICE_STAFF.some((staff) => staff.dept === "amux"));
 });
@@ -1539,6 +1558,12 @@ test("the review room shows each reviewer's real state, and a silent server as l
     ]
   );
   assert.equal(live.reviewers[0].title, "claude · anthropic · 검토 중 · 실행 1/2 · 마지막 보고 10-09 01:04 UTC");
+  assert.deepEqual(live.reviewers[0].facts, [
+    { label: "공급사", value: "anthropic" },
+    { label: "상태", value: "검토 중" },
+    { label: "실행 중/상한", value: "1/2" },
+    { label: "마지막 보고", value: "10-09 01:04 UTC" },
+  ]);
   assert.equal(
     live.summary,
     "대기 2 · 최근 24시간 accept 9 · reject 3 · unknown 2 · 마지막 보고 10-09 01:04 UTC · 읽은 시각 10-09 01:05 UTC"
@@ -1878,7 +1903,51 @@ test("the review room has a desk for each reviewer and a way in, and the entranc
   assert.match(review, /select: \{ value: true \}/);
   assert.match(review, /read: "review_orchestrator"/);
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /<SeatedLayer room=\{REVIEW_ROOM\} people=\{review\.reviewers\}/);
+  assert.match(world, /<SeatedLayer room=\{REVIEW_ROOM\} kind="review" people=\{review\.reviewers\} onPick=\{onPickSeated\} \/>/);
+});
+
+test("a seated figure opens a profile read from its room's record, dressed as it is drawn", () => {
+  // The two rooms start at different places in the palette, and a figure's
+  // profile wears what its sprite wears.
+  assert.deepEqual(agentOfficeSeatedClothes("amux", 0), {
+    hair: AGENT_OFFICE_WORKER_COLORS[0][0],
+    shirt: AGENT_OFFICE_WORKER_COLORS[0][1],
+    accent: AGENT_OFFICE_WORKER_COLORS[0][2],
+    skin: AGENT_OFFICE_WORKER_SKINS[0],
+  });
+  assert.equal(agentOfficeSeatedClothes("review", 0).shirt, AGENT_OFFICE_WORKER_COLORS[3][1]);
+  assert.equal(
+    agentOfficeSeatedClothes("amux", AGENT_OFFICE_WORKER_COLORS.length).hair,
+    AGENT_OFFICE_WORKER_COLORS[0][0],
+    "the palette wraps"
+  );
+  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  assert.match(world, /agentOfficeSeatedClothes\(kind, i\)/);
+  assert.doesNotMatch(world, /AGENT_OFFICE_WORKER_COLORS|AGENT_OFFICE_WORKER_SKINS/);
+
+  // The profile is looked up by name in the room's current view, so it follows
+  // the minute refresh, and it offers nothing an engine agent's does: no task,
+  // no line, no "ask".
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  const modal = panel.slice(panel.indexOf("function SeatedProfileModal"), panel.indexOf("function BriefingModal"));
+  assert.match(modal, /seated\.room === "amux" \? amuxView\.workers : reviewView\.reviewers/);
+  assert.match(modal, /findIndex\(\(person\) => person\.name === seated\.name\)/);
+  assert.match(modal, /agentOfficeSeatedClothes\(seated\.room, /);
+  assert.match(modal, /quotaView\.rows\.find\(\(row\) => row\.id === seated\.name\)/);
+  assert.match(modal, /m\.profile\.seatedGone/);
+  assert.match(modal, /useOfficeDialog\(onClose, closeRef\)/);
+  assert.match(modal, /aria-modal="true"/);
+  assert.doesNotMatch(modal, /engine|onAsk|m\.profile\.ask|taskLabel|speech/);
+  // Only the AMUX room has a record screen; a reviewer's lives on the review server.
+  assert.match(modal, /seated\.room === "amux" && AGENT_OFFICE_AMUX_RECORD_HREF/);
+  assert.match(panel, /onSelectSeated=\{onSelectSeated\}/);
+
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.ok(copy.profile.seatedQuota && copy.profile.seatedGone);
+    assert.deepEqual(Object.keys(copy.real.amux.facts), ["provider", "state", "heartbeat"]);
+    assert.deepEqual(Object.keys(copy.real.review.facts), ["vendor", "state", "load", "lastReport"]);
+  }
 });
 
 test("a record that needs a look is counted on its own, never as a decision", () => {

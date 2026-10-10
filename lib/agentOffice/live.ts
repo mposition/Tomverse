@@ -526,7 +526,11 @@ type AmuxCopy = {
   heartbeat: (time: string) => string;
   noHeartbeat: string;
   readAt: (time: string) => string;
+  facts: { provider: string; state: string; heartbeat: string };
 };
+
+/** One line of a seated figure's profile: what it is, read from its record. */
+export type AgentOfficeSeatedFact = { label: string; value: string };
 
 /** A figure drawn seated at a desk from a real record: an AMUX worker or a reviewer. */
 export type AgentOfficeSeatedView = {
@@ -538,6 +542,8 @@ export type AgentOfficeSeatedView = {
   title: string;
   /** Not running at all: drawn faded. */
   dim: boolean;
+  /** The profile a click opens: the same facts as the tooltip, one per line. */
+  facts: AgentOfficeSeatedFact[];
 };
 
 export type AgentOfficeAmuxWorkerView = {
@@ -549,6 +555,7 @@ export type AgentOfficeAmuxWorkerView = {
   title: string;
   /** Not running at all: drawn faded. */
   dim: boolean;
+  facts: AgentOfficeSeatedFact[];
 };
 
 export type AgentOfficeAmuxView = {
@@ -588,6 +595,11 @@ export function amuxRoomView(
       label,
       title: [worker.name, worker.provider, label, heartbeat].join(" · "),
       dim: worker.state === "stopped" || worker.state === "not_running",
+      facts: [
+        { label: copy.facts.provider, value: worker.provider },
+        { label: copy.facts.state, value: label },
+        { label: copy.facts.heartbeat, value: worker.heartbeatAt ? utcStamp(worker.heartbeatAt) : copy.noHeartbeat },
+      ],
     };
   });
   const count = (tone: DeptStatus) => workers.filter((worker) => worker.status === tone).length;
@@ -695,6 +707,7 @@ type ReviewCopy = {
   load: (running: number, max: number) => string;
   more: (count: number) => string;
   readAt: (time: string) => string;
+  facts: { vendor: string; state: string; load: string; lastReport: string };
 };
 
 export type AgentOfficeReviewView = {
@@ -733,6 +746,12 @@ export function reviewRoomView(
         " · "
       ),
       dim: reviewer.state === "off",
+      facts: [
+        { label: copy.facts.vendor, value: reviewer.vendor },
+        { label: copy.facts.state, value: label },
+        { label: copy.facts.load, value: `${reviewer.running}/${reviewer.maxConcurrent}` },
+        { label: copy.facts.lastReport, value: last },
+      ],
     };
   });
   // The room speaks for every reviewer, drawn or not; only the people are cut to the desks.

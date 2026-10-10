@@ -217,3 +217,16 @@ export const AGENT_OFFICE_WORKER_COLORS: readonly (readonly [string, string, str
 
 /** Skin tones for the AMUX workers, by desk. */
 export const AGENT_OFFICE_WORKER_SKINS: readonly string[] = ["#ffdcc4", "#f7cdae", "#ffe3cf", "#eec39f"];
+
+/** Where each seated room's clothes start in the palette, so two rooms do not dress alike. */
+export const AGENT_OFFICE_SEATED_PALETTE = { amux: 0, review: 3 } as const;
+
+/** A room whose figures are seated from a real record rather than played by the engine. */
+export type AgentOfficeSeatedRoom = keyof typeof AGENT_OFFICE_SEATED_PALETTE;
+
+/** The clothes of the figure at a seated room's desk: the sprite and its profile wear the same. */
+export function agentOfficeSeatedClothes(room: AgentOfficeSeatedRoom, desk: number) {
+  const [hair, shirt, accent] =
+    AGENT_OFFICE_WORKER_COLORS[(desk + AGENT_OFFICE_SEATED_PALETTE[room]) % AGENT_OFFICE_WORKER_COLORS.length];
+  return { hair, shirt, accent, skin: AGENT_OFFICE_WORKER_SKINS[desk % AGENT_OFFICE_WORKER_SKINS.length] };
+}

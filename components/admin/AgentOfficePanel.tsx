@@ -26,6 +26,7 @@ import {
   utcStamp,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
+  type AgentOfficeSeatedView,
   type AgentOfficeQuotaView,
   type AgentOfficeOperatorQueue,
   type AgentOfficeLiveRow,
@@ -37,6 +38,8 @@ import {
   AGENT_OFFICE_DEPTS,
   AGENT_OFFICE_TEAM_IDS,
   agentOfficeDept,
+  agentOfficeSeatedClothes,
+  type AgentOfficeSeatedRoom,
 } from "@/lib/agentOffice/roster";
 import {
   AgentOffice,
@@ -185,6 +188,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   }, []);
 
   const onSelect = useCallback((agent: Agent) => setSelectedId(agent.id), []);
+  // A seated figure is not an engine agent: it is named by its room and the
+  // name its record gives it, and its profile is re-read from that record.
+  const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
+  const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
 
   /** To the live office, by address; the panel stays mounted and the day goes on. */
   const goLive = useCallback(() => {
@@ -341,6 +348,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               follow={follow}
               selectedId={selectedId}
               onSelect={onSelect}
+              onSelectSeated={onSelectSeated}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
             />
@@ -370,6 +378,16 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           agent={selected}
           onClose={() => setSelectedId(null)}
           onAsk={askAgent}
+        />
+      ) : null}
+      {seated ? (
+        <SeatedProfileModal
+          m={m}
+          seated={seated}
+          amuxView={amuxView}
+          reviewView={reviewView}
+          quotaView={quotaView}
+          onClose={() => setSeated(null)}
         />
       ) : null}
       {briefing ? (
@@ -429,6 +447,7 @@ function LiveView({
   follow,
   selectedId,
   onSelect,
+  onSelectSeated,
   onCopyReport,
   onDownloadReport,
 }: {
@@ -444,6 +463,7 @@ function LiveView({
   follow: boolean;
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
+  onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
   onCopyReport: () => void;
   onDownloadReport: () => void;
 }) {
@@ -512,6 +532,7 @@ function LiveView({
           selectedId={selectedId}
           follow={follow}
           onSelect={onSelect}
+          onSelectSeated={onSelectSeated}
         />
 
         <aside className={cx("live-rail")}>
@@ -765,6 +786,101 @@ function ProfileModal({
               {m.profile.ask}
             </button>
             <button type="button" className={cx("text-button")} onClick={onClose}>
+              {m.profile.close}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/**
+ * A seated figure's profile: an AMUX worker or a reviewer, read from its
+ * room's record by name. It has no task, no word and no "ask" as an engine
+ * agent does: it shows the record, and follows it when the room is re-read.
+ */
+function SeatedProfileModal({
+  m,
+  seated,
+  amuxView,
+  reviewView,
+  quotaView,
+  onClose,
+}: {
+  m: OfficeCopy;
+  seated: { room: AgentOfficeSeatedRoom; name: string };
+  amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
+  quotaView: AgentOfficeQuotaView;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useOfficeDialog(onClose, closeRef);
+  const people: AgentOfficeSeatedView[] = seated.room === "amux" ? amuxView.workers : reviewView.reviewers;
+  const desk = people.findIndex((person) => person.name === seated.name);
+  const person = desk >= 0 ? people[desk] : null;
+  const clothes = agentOfficeSeatedClothes(seated.room, Math.max(desk, 0));
+  const quota = seated.room === "review" ? quotaView.rows.find((row) => row.id === seated.name) : undefined;
+  return (
+    <div className={cx("modal-backdrop")} onClick={onClose}>
+      <section
+        ref={dialogRef}
+        className={cx("win team-modal")}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={m.profile.dialogLabel(seated.name)}
+        data-testid="agent-office-seated-profile"
+        data-seated-room={seated.room}
+      >
+        <div className={cx("win-bar")}>
+          <span>{m.profile.windowTitle}</span>
+          <button ref={closeRef} type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon}>
+            ✕
+          </button>
+        </div>
+        <div className={cx("win-body employee-profile")}>
+          <div className={cx("profile-top")}>
+            <PixelEmployee hair={clothes.hair} shirt={clothes.shirt} accent={clothes.accent} />
+            <div>
+              {person ? <span className={cx("status-pill", person.status)}>{person.label}</span> : null}
+              <h2>{seated.name}</h2>
+              <p>{seated.room === "amux" ? m.rooms.amux : m.rooms.review}</p>
+            </div>
+          </div>
+          <div className={cx("live-box")} data-testid="agent-office-seated-profile-facts">
+            <span className={cx("tiny-label")}>
+              <em className={cx("live-chip")}>{m.real.chip}</em> {m.real.boxLabel}
+            </span>
+            {person ? (
+              <dl className={cx("profile-facts")}>
+                {person.facts.map((fact) => (
+                  <div key={fact.label}>
+                    <dt>{fact.label}</dt>
+                    <dd>{fact.value}</dd>
+                  </div>
+                ))}
+                {quota ? (
+                  <div>
+                    <dt>{m.profile.seatedQuota}</dt>
+                    <dd>
+                      {quota.label} · {quota.amount}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : (
+              <strong>{m.profile.seatedGone}</strong>
+            )}
+          </div>
+          {seated.room === "amux" && AGENT_OFFICE_AMUX_RECORD_HREF ? (
+            <div className={cx("profile-record")} data-testid="agent-office-seated-profile-record">
+              <Link href={AGENT_OFFICE_AMUX_RECORD_HREF}>{m.profile.record}</Link>
+            </div>
+          ) : null}
+          <div className={cx("profile-actions")}>
+            <button type="button" className={cx("btn btn-primary")} onClick={onClose}>
               {m.profile.close}
             </button>
           </div>
