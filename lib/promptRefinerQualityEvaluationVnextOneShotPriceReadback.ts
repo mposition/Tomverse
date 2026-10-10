@@ -9,7 +9,7 @@ import {
     PROMPT_REFINER_VNEXT_PRICE_PIN,
 } from "./promptRefinerQualityEvaluationVnextExecutionContract";
 
-type PriceTransaction = Pick<Prisma.TransactionClient, "modelRegistryEntry">;
+type PriceTransaction = Pick<Prisma.TransactionClient, "$executeRaw" | "modelRegistryEntry">;
 
 /**
  * One small, read-only part of operational admission. The caller supplies the
@@ -19,6 +19,10 @@ type PriceTransaction = Pick<Prisma.TransactionClient, "modelRegistryEntry">;
 export async function readPromptRefinerVnextOneShotPrice(transaction: PriceTransaction) {
     let row: Awaited<ReturnType<PriceTransaction["modelRegistryEntry"]["findUnique"]>>;
     try {
+        // Keep the price row (including an absent row) stable until the
+        // caller's transaction commits. A future admission caller must lock
+        // its stage before invoking this read, then lock reservation rows.
+        await transaction.$executeRaw`LOCK TABLE "ModelRegistryEntry" IN SHARE MODE`;
         row = await transaction.modelRegistryEntry.findUnique({
             where: { id: PROMPT_REFINER_VNEXT_PRICE_PIN.modelId },
         });

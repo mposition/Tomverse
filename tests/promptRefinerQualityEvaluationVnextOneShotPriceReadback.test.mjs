@@ -8,6 +8,10 @@ const pinnedRow = () => ({
 });
 
 const read = (row) => readPromptRefinerVnextOneShotPrice({
+    $executeRaw: async (query) => {
+        assert.deepEqual([...query], ['LOCK TABLE "ModelRegistryEntry" IN SHARE MODE']);
+        return 0;
+    },
     modelRegistryEntry: {
         findUnique: async ({ where }) => {
             assert.equal(where.id, "gpt-5-6-luna");
@@ -23,6 +27,24 @@ test("server reads the exact registry row and current pricing without granting d
         dispatchAuthorized: false,
         problems: [],
     });
+});
+
+test("registry lock is acquired before read and held by the caller transaction", async () => {
+    const order = [];
+    const result = await readPromptRefinerVnextOneShotPrice({
+        $executeRaw: async (query) => {
+            assert.deepEqual([...query], ['LOCK TABLE "ModelRegistryEntry" IN SHARE MODE']);
+            order.push("lock");
+            return 0;
+        },
+        modelRegistryEntry: { findUnique: async () => {
+            order.push("read");
+            return pinnedRow();
+        } },
+    });
+    assert.deepEqual(order, ["lock", "read"]);
+    assert.equal(result.pricePinMatchesRegistry, true);
+    assert.equal(result.dispatchAuthorized, false);
 });
 
 test("missing, disabled, remapped and price-overridden rows fail closed", async () => {
@@ -62,7 +84,17 @@ test("read-back reports remapping and a lowered output cap accurately", async ()
 test("database read failure is not replaced with a static catalogue fallback", async () => {
     await assert.rejects(
         readPromptRefinerVnextOneShotPrice({
+            $executeRaw: async () => 0,
             modelRegistryEntry: { findUnique: async () => { throw new Error("db down"); } },
+        }),
+        /vnext_one_shot_price_read_failed/,
+    );
+    await assert.rejects(
+        readPromptRefinerVnextOneShotPrice({
+            $executeRaw: async () => { throw new Error("lock unavailable"); },
+            modelRegistryEntry: { findUnique: async () => {
+                assert.fail("read must not run after lock failure");
+            } },
         }),
         /vnext_one_shot_price_read_failed/,
     );
