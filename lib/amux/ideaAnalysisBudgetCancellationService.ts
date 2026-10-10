@@ -14,7 +14,7 @@ import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
 export class AmuxIdeaAnalysisCancellationError extends Error {
-  constructor(readonly code: "forbidden" | "not_cancellable" | "integrity_unavailable") {
+  constructor(readonly code: "forbidden" | "not_found" | "not_cancellable" | "integrity_unavailable") {
     super(code);
     this.name = "AmuxIdeaAnalysisCancellationError";
   }

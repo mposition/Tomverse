@@ -54,7 +54,7 @@ function failure(error: unknown): Response {
   }
   if (error instanceof AmuxIdeaAnalysisCancellationError) {
     return NextResponse.json({ error: error.code, retryWrite: false,
-      modelCallStarted: false }, { status: error.code === "forbidden" ? 403 :
+      modelCallStarted: false }, { status: error.code === "not_found" ? 404 : error.code === "forbidden" ? 403 :
         error.code === "integrity_unavailable" ? 503 : 409, headers: noStore });
   }
   const security = apiSecurityResponse(error);
@@ -185,7 +185,7 @@ export async function GET(request: Request): Promise<Response> {
       reservedMicroUsd: hold.reservedMicroUsd.toString(),
       expiresAt: preview.expiresAt.toISOString(),
       canCancel: hold.namespace === AMUX_V4_ANALYSIS_NAMESPACE &&
-        hold.reservedMicroUsd > 0n && hold.status === "reserved" && hold.dispatchedAt === null &&
+        hold.reservedMicroUsd > BigInt(0) && hold.status === "reserved" && hold.dispatchedAt === null &&
         hold.closedAt === null && hold.settledMicroUsd === null &&
         hold._count.cliUsageEvents === 0 && preview.consumedAt === null &&
         preview.outcomeUnknownAt === null &&
@@ -223,7 +223,7 @@ export async function DELETE(request: Request): Promise<Response> {
       });
       if (!preview || preview.confirmedByUserId !== session.user!.id! ||
           preview.idea.actorUserId !== session.user!.id!) {
-        throw new AmuxIdeaAnalysisCancellationError("forbidden");
+        throw new AmuxIdeaAnalysisCancellationError("not_found");
       }
       return commitAmuxIdeaAnalysisUnusedReservationCancellation(tx, {
         session, request, holdId: body.holdId, expectedPreviewId: body.previewId,
