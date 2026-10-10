@@ -8,9 +8,8 @@ import { getAdminRole, isAdminSession } from "@/lib/adminAuth";
 import { assertRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import { AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
 
-/** Dark transaction body. A reserved hold may be cancelled before dispatch;
- * in-flight or unknown outcomes must retain their full reservation. There is
- * no route to this writer and it cannot authorize an Agent call. Dispatch
+/** A reserved hold may be cancelled before dispatch; in-flight or unknown
+ * outcomes must retain their full reservation. This cannot authorize an Agent call. Dispatch
  * must require a reserved hold, never only an unconsumed confirmed preview. */
 const ID = /^[A-Za-z0-9:_-]{1,128}$/;
 
@@ -23,7 +22,7 @@ export class AmuxIdeaAnalysisCancellationError extends Error {
 
 export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
   tx: Prisma.TransactionClient,
-  input: { session: Session; request: Request; holdId: string },
+  input: { session: Session; request: Request; holdId: string; expectedPreviewId?: string },
 ): Promise<{ holdId: string; releasedMicroUsd: string; auditId: string }> {
   const actorUserId = input.session.user?.id;
   if (!actorUserId || !isAdminSession(input.session) ||
@@ -43,7 +42,8 @@ export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
     where: { id: input.holdId },
     select: { previewId: true, namespace: true, monthStart: true },
   });
-  if (!identity || identity.namespace !== AMUX_V4_ANALYSIS_NAMESPACE) {
+  if (!identity || identity.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
+      (input.expectedPreviewId !== undefined && input.expectedPreviewId !== identity.previewId)) {
     throw new AmuxIdeaAnalysisCancellationError("not_cancellable");
   }
   // Preserve the reservation/dispatch lock order: preview, budget window,
@@ -69,6 +69,7 @@ export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
   }
   const hold = await tx.amuxIdeaAnalysisBudgetHold.findUnique({
     where: { id: input.holdId },
+    include: { _count: { select: { cliUsageEvents: true } } },
   });
   const preview = await tx.amuxIdeaTransferPreview.findUnique({
     where: { id: identity.previewId },
@@ -79,6 +80,7 @@ export async function commitAmuxIdeaAnalysisUnusedReservationCancellation(
       hold.monthStart.getTime() !== identity.monthStart.getTime() ||
       hold.status !== "reserved" || hold.dispatchedAt !== null ||
       hold.closedAt !== null || hold.settledMicroUsd !== null ||
+      hold._count.cliUsageEvents !== 0 ||
       !preview || !["confirmed", "expired", "owner_rejected"].includes(preview.state) ||
       preview.consumedAt !== null || preview.outcomeUnknownAt !== null) {
     throw new AmuxIdeaAnalysisCancellationError("not_cancellable");
