@@ -64,18 +64,12 @@ const OFFICE_PATH = "/admin/office";
 /** A section is an address (docs/ui-contracts/admin-console-ia.md, rule 2). */
 const viewHref = (view: View) => `${OFFICE_PATH}?tab=${view}`;
 
-const FILTERS: readonly Filter[] = ["all", "working", "done", "approval", "attention", "blocked"];
+const FILTERS: readonly Filter[] = ["all", "working", "done", "attention", "blocked"];
 
-/** The colour a person's status pill takes, from the same five tones as a room. */
+/** The colour a person's status pill takes, from the same tones as a room. */
 const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
   working: "working",
-  meeting: "approval",
-  reporting: "approval",
-  blocked: "blocked",
-  offDuty: "waiting",
-  commuting: "waiting",
   idle: "waiting",
-  moving: "waiting",
 };
 
 function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; accent: string }) {
@@ -104,11 +98,10 @@ function PixelEmployee({ hair, shirt, accent }: { hair: string; shirt: string; a
  * The Agent office: a pixel office for the eight agent teams, after the
  * original AI OFFICE UI by godseng.mom.
  *
- * A shell. The day it plays is a demo scenario run in this browser tab, and
- * its approve button advances the demo and nothing else. The facts on the
- * screen are the record links, which point at the console pages each team
- * already has, and the rooms marked LIVE, whose state the server read and
- * the demo leaves alone.
+ * It shows records and decides nothing. A room marked LIVE is what the
+ * server read for it; any other room says whether the console has a record
+ * screen for it, and links it when it does. Nothing here plays a scenario,
+ * approves or sends anything.
  */
 export function AgentOfficePanel({ view, live }: { view: View; live: AgentOfficeLiveRooms }) {
   const m = useAdminMessages(adminAgentOfficeMessages);
@@ -131,7 +124,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     }),
     [live, m]
   );
-  // The AMUX room is not a team: its workers are drawn from the record and never enter the demo.
+  // The AMUX room is not a team: its workers are drawn from the record, one per desk.
   const amuxView = useMemo(
     () => amuxRoomView(live.amux, AMUX_ROOM.desks.length, m.real.amux),
     [live, m]
@@ -147,7 +140,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The camera keeps the selected person in view when zoomed in.
   const follow = true;
-  const [briefing, setBriefing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
@@ -193,11 +185,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [router]);
-
-  useEffect(() => {
-    engine.setBriefingHandler(() => setBriefing(true));
-    return () => engine.setBriefingHandler(null);
-  }, [engine]);
 
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
@@ -347,15 +334,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
             </div>
           </nav>
 
-          {/* The real view needs no banner: what it shows is real or says it
-              is waiting on a link. The demo says it is a demo while it plays. */}
-          {snap.demo ? (
-            <div className={cx("shell-notice")} role="note" data-testid="agent-office-shell-notice">
-              <span className={cx("mini-badge demo")}>{m.shell.chip}</span>
-              <p>{m.shell.notice}</p>
-            </div>
-          ) : null}
-
           {view === "live" ? (
             <LiveView
               m={m}
@@ -414,15 +392,6 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           onClose={() => setSeated(null)}
         />
       ) : null}
-      {briefing ? (
-        <BriefingModal
-          m={m}
-          narrator={engine.deptLead.digest}
-          snap={snap}
-          engineeringLive={engine.liveDept("engineering") !== null}
-          onClose={() => setBriefing(false)}
-        />
-      ) : null}
       <div className={cx("toast", toast && "show")} role="status">
         {toast}
       </div>
@@ -455,9 +424,8 @@ function useStaleReading(readAt: string): boolean {
 }
 
 /**
- * The approval card while the engineering room reads its real record: the
- * demo plays no draft and no approval, and real decisions are made on the
- * engineering agent's own screen, never here.
+ * The approval card while the engineering room reads its real record: its
+ * decisions are made on the engineering agent's own screen, never here.
  */
 function LiveDecisionNote({ m }: { m: OfficeCopy }) {
   return (
@@ -519,35 +487,25 @@ function LiveView({
     <>
       <header className={cx("live-hero")}>
         <div>
-          <p className={cx("eyebrow")}>
-            {snap.demo ? m.live.eyebrow(engine.staff.length) : m.live.eyebrowReal(engine.staff.length)}
-          </p>
+          <p className={cx("eyebrow")}>{m.live.eyebrowReal(engine.staff.length)}</p>
           <h2 className={cx("office-title")}>
             {m.company.titlePrefix} <em className={cx("highlight")}>{m.company.titleAccent}</em>
           </h2>
-          <p>{snap.demo ? m.live.lead : m.live.leadReal}</p>
+          <p>{m.live.leadReal}</p>
         </div>
-        {snap.demo ? (
-          <div className={cx("live-clock")}>
-            <span>{m.live.clockLabel}</span>
-            <b data-testid="agent-office-clock">{snap.clock}</b>
-            <small>{snap.phase}</small>
-          </div>
-        ) : (
-          <div className={cx("live-clock")}>
-            <span>{m.live.clockReal}</span>
-            <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
-            {/* The one place the screen says how fresh it is: every room line
-                was read at this same moment, so none repeats it. */}
-            {stale ? (
-              <small className={cx("stale")} role="status" data-testid="agent-office-stale">
-                {m.live.stale}
-              </small>
-            ) : (
-              <small>{m.live.realPhase}</small>
-            )}
-          </div>
-        )}
+        <div className={cx("live-clock")}>
+          <span>{m.live.clockReal}</span>
+          <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
+          {/* The one place the screen says how fresh it is: every room line
+              was read at this same moment, so none repeats it. */}
+          {stale ? (
+            <small className={cx("stale")} role="status" data-testid="agent-office-stale">
+              {m.live.stale}
+            </small>
+          ) : (
+            <small>{m.live.realPhase}</small>
+          )}
+        </div>
       </header>
 
       <section className={cx("live-bar")}>
@@ -802,11 +760,6 @@ function ProfileModal({
           <div className={cx("profile-task")}>
             <span className={cx("tiny-label")}>{m.profile.doingNow}</span>
             <strong>{agent.taskLabel}</strong>
-            {agent.anim === "type" ? (
-              <span className={cx("profile-progress")}>
-                <i style={{ width: `${Math.round(agent.progress * 100)}%` }} />
-              </span>
-            ) : null}
           </div>
           <div className={cx("report-box")}>
             <span className={cx("tiny-label")}>{m.profile.lastWord}</span>
@@ -954,81 +907,6 @@ function SeatedProfileModal({
   );
 }
 
-function BriefingModal({
-  m,
-  narrator,
-  snap,
-  engineeringLive,
-  onClose,
-}: {
-  m: OfficeCopy;
-  narrator: StaffSeed | undefined;
-  snap: Snapshot;
-  /** Engineering reads its real record: its decisions are made on its own screen. */
-  engineeringLive: boolean;
-  onClose: () => void;
-}) {
-  const okRef = useRef<HTMLButtonElement | null>(null);
-  const dialogRef = useOfficeDialog(onClose, okRef);
-  return (
-    <div className={cx("modal-backdrop")} onClick={onClose}>
-      <section
-        ref={dialogRef}
-        className={cx("win team-modal secretary")}
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={m.briefing.dialogLabel}
-      >
-        <div className={cx("win-bar")}>
-          <span>{m.briefing.windowTitle}</span>
-          <button type="button" className={cx("window-close")} onClick={onClose} aria-label={m.profile.closeIcon}>
-            ✕
-          </button>
-        </div>
-        <div className={cx("win-body")}>
-          <p className={cx("brief-date")}>{m.briefing.dateLine(snap.clock, narrator?.name ?? "")}</p>
-          <h3>{m.briefing.title}</h3>
-          <ul>
-            <li>
-              <span className={cx("dot green")} />
-              {m.briefing.done(snap.stats.done)}
-            </li>
-            {snap.approved ? (
-              <li>
-                <span className={cx("dot green")} />
-                {m.briefing.approved}
-              </li>
-            ) : null}
-            {snap.stats.attention > 0 ? (
-              <li>
-                <span className={cx("dot yellow")} />
-                {m.briefing.attention(snap.stats.attention)}
-              </li>
-            ) : null}
-            <li>
-              <span className={cx("dot gray")} />
-              {m.briefing.blocked(snap.stats.blocked)}
-            </li>
-          </ul>
-          <div className={cx("decision-box")}>
-            <span className={cx("tiny-label")}>{m.briefing.decisionLabel}</span>
-            <strong>{engineeringLive ? m.dashboard.decisionLive : m.briefing.decisionNone}</strong>
-            {engineeringLive && ENGINEERING_RECORD_HREF ? (
-              <Link href={ENGINEERING_RECORD_HREF} onClick={onClose}>
-                {m.approval.liveLink}
-              </Link>
-            ) : null}
-          </div>
-          <button ref={okRef} type="button" className={cx("btn btn-primary")} onClick={onClose}>
-            {m.briefing.ok}
-          </button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 /**
  * Every automation the office reads for real: the live team rooms, then the
  * AMUX execution room and the review server. The dashboard lists them and the
@@ -1090,7 +968,7 @@ type TeamRow = {
   lead: StaffSeed;
   status: DeptStatus;
   task: string;
-  /** The room's real reading, or null for a demo room. */
+  /** The room's real reading, or null for a room without one. */
   live: AgentOfficeLiveDept | null;
 };
 
@@ -1147,7 +1025,7 @@ function DashboardView({
         <div className={cx("hero-body")}>
           <div className={cx("hero-copy")}>
             <p className={cx("eyebrow")}>
-              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(aestStamp(readAt))}
+              {m.dashboard.eyebrowReal(aestStamp(readAt))}
             </p>
             <h2 className={cx("office-title")}>
               {m.dashboard.titleBefore}
