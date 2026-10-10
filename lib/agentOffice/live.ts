@@ -30,6 +30,7 @@
  */
 
 import type { DeptStatus } from "@/lib/agentOffice/sim";
+import { aestStamp } from "@/lib/agentOffice/time";
 
 export type AgentOfficeSlotState = "ok" | "failed" | "missing" | "duplicate";
 
@@ -239,8 +240,6 @@ export function researchTone(state: AgentOfficeResearchState): DeptStatus {
   return state.silence === "silent" ? "attention" : "waiting";
 }
 
-/** A UTC instant as `MM-DD HH:mm UTC`: the same on the server and in any browser. */
-export const utcStamp = (iso: string) => `${iso.slice(5, 10)} ${iso.slice(11, 16)} UTC`;
 
 type ResearchCopy = {
   badges: {
@@ -273,7 +272,7 @@ export function researchLiveDept(
   readAt: string,
   copy: ResearchCopy
 ): AgentOfficeLiveDept {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   const status = researchTone(state);
   if (state.kind === "unread") {
     return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
@@ -284,7 +283,7 @@ export function researchLiveDept(
 
   // "Latest", never "today": before 21:30 UTC the slot that has passed is
   // yesterday's, so every line names the slot it is about.
-  const slot = utcStamp(state.slot);
+  const slot = aestStamp(state.slot);
   const line =
     state.slotState === "ok"
       ? copy.ok(slot)
@@ -297,7 +296,7 @@ export function researchLiveDept(
             : copy.missing(slot);
 
   const facts = [
-    state.lastSuccessAt ? copy.lastSuccess(utcStamp(state.lastSuccessAt)) : copy.noSuccess,
+    state.lastSuccessAt ? copy.lastSuccess(aestStamp(state.lastSuccessAt)) : copy.noSuccess,
   ];
   if (state.silence === "silent" && state.silenceHours !== null) {
     facts.push(copy.silent(Math.floor(state.silenceHours)));
@@ -361,16 +360,16 @@ type QaCopy = {
 
 /** The QA room's line and detail, from its state and the console's copy. */
 export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCopy): AgentOfficeLiveDept {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   const status = qaTone(state);
   if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
 
   const line =
     state.verdict === "fresh" && state.latestDigestAt
-      ? copy.fresh(utcStamp(state.latestDigestAt))
+      ? copy.fresh(aestStamp(state.latestDigestAt))
       : state.verdict === "stale"
         ? state.latestDigestAt
-          ? copy.stale(utcStamp(state.latestDigestAt))
+          ? copy.stale(aestStamp(state.latestDigestAt))
           : copy.staleNever
         : state.verdict === "operator_disabled"
           ? copy.disabled
@@ -393,7 +392,7 @@ export function qaLiveDept(state: AgentOfficeQaState, readAt: string, copy: QaCo
   const facts = [state.controlRevision === null ? copy.noRevision : copy.revision(state.controlRevision)];
   // The fresh and stale lines already carry the time; the others do not.
   if (state.latestDigestAt && state.verdict !== "fresh" && state.verdict !== "stale") {
-    facts.push(copy.lastReceived(utcStamp(state.latestDigestAt)));
+    facts.push(copy.lastReceived(aestStamp(state.latestDigestAt)));
   }
   if (state.mergeLaneLatched) facts.push(copy.latched);
   facts.push(read);
@@ -457,14 +456,14 @@ export function engineeringLiveDept(
   readAt: string,
   copy: EngineeringCopy
 ): AgentOfficeLiveDept {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   const status = engineeringTone(state);
   if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
 
   const waiting = pendingTotal(state.pending);
   const last = state.lastRun;
-  const lastLine = last ? copy.lastRun(last.outcome ?? last.status, utcStamp(last.endedAt)) : copy.noRun;
-  const since = state.activeSince ? utcStamp(state.activeSince) : "—";
+  const lastLine = last ? copy.lastRun(last.outcome ?? last.status, aestStamp(last.endedAt)) : copy.noRun;
+  const since = state.activeSince ? aestStamp(state.activeSince) : "—";
   const runningLine = state.activeRuns === 1 ? copy.running(since) : copy.runningMany(state.activeRuns, since);
 
   const [badge, line]: [string, string] =
@@ -496,8 +495,8 @@ export function engineeringLiveDept(
   // takes the line.
   if (state.activeRuns > 0 && line !== runningLine) facts.push(runningLine);
   facts.push(
-    state.runnerLastFinishAt ? copy.runnerFinish(utcStamp(state.runnerLastFinishAt)) : copy.runnerNever,
-    state.publisherLastFinishAt ? copy.publisherFinish(utcStamp(state.publisherLastFinishAt)) : copy.publisherNever,
+    state.runnerLastFinishAt ? copy.runnerFinish(aestStamp(state.runnerLastFinishAt)) : copy.runnerNever,
+    state.publisherLastFinishAt ? copy.publisherFinish(aestStamp(state.publisherLastFinishAt)) : copy.publisherNever,
     read
   );
   return { status, badge, line, detail: facts.join(" · ") };
@@ -576,7 +575,7 @@ export function amuxRoomView(
   desks: number,
   copy: AmuxCopy
 ): AgentOfficeAmuxView {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   if (state.kind === "unread") {
     return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, workers: [] };
   }
@@ -587,7 +586,7 @@ export function amuxRoomView(
   const workers = state.workers.map((worker): AgentOfficeAmuxWorkerView => {
     const status = amuxWorkerTone(worker.state);
     const label = copy.states[worker.state];
-    const heartbeat = worker.heartbeatAt ? copy.heartbeat(utcStamp(worker.heartbeatAt)) : copy.noHeartbeat;
+    const heartbeat = worker.heartbeatAt ? copy.heartbeat(aestStamp(worker.heartbeatAt)) : copy.noHeartbeat;
     return {
       name: worker.name,
       state: worker.state,
@@ -598,7 +597,7 @@ export function amuxRoomView(
       facts: [
         { label: copy.facts.provider, value: worker.provider },
         { label: copy.facts.state, value: label },
-        { label: copy.facts.heartbeat, value: worker.heartbeatAt ? utcStamp(worker.heartbeatAt) : copy.noHeartbeat },
+        { label: copy.facts.heartbeat, value: worker.heartbeatAt ? aestStamp(worker.heartbeatAt) : copy.noHeartbeat },
       ],
     };
   });
@@ -657,11 +656,11 @@ type FinanceCopy = {
 
 /** The billing and finance room's line and detail, from its state and the console's copy. */
 export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, copy: FinanceCopy): AgentOfficeLiveDept {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   const status = financeTone(state);
   if (state.kind === "unread") return { status, badge: copy.badges.unread, line: copy.unread, detail: read };
 
-  const last = state.latestDigestAt ? utcStamp(state.latestDigestAt) : null;
+  const last = state.latestDigestAt ? aestStamp(state.latestDigestAt) : null;
   const line =
     state.verdict === "recorded"
       ? last
@@ -680,7 +679,7 @@ export function financeLiveDept(state: AgentOfficeFinanceState, readAt: string, 
               : copy.notApplicable;
 
   const facts = [state.controlRevision === null ? copy.noRevision : copy.revision(state.controlRevision)];
-  if (state.enabledAt) facts.push(copy.enabledAt(utcStamp(state.enabledAt)));
+  if (state.enabledAt) facts.push(copy.enabledAt(aestStamp(state.enabledAt)));
   // The recorded and silent lines already carry the newest digest's time.
   if (last && state.verdict !== "recorded" && state.verdict !== "silent") facts.push(copy.lastDigest(last));
   facts.push(read);
@@ -725,7 +724,7 @@ export function reviewRoomView(
   desks: number,
   copy: ReviewCopy
 ): AgentOfficeReviewView {
-  const read = copy.readAt(utcStamp(readAt));
+  const read = copy.readAt(aestStamp(readAt));
   if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, reviewers: [] };
   if (state.kind === "unreadable") {
     return { status: "attention", summary: `${copy.unreadable} · ${read}`, note: copy.unreadable, reviewers: [] };
@@ -734,7 +733,7 @@ export function reviewRoomView(
     return { status: "waiting", summary: `${copy.notReporting} · ${read}`, note: copy.notReporting, reviewers: [] };
   }
 
-  const last = utcStamp(state.receivedAt);
+  const last = aestStamp(state.receivedAt);
   const everyone = state.reviewers.map((reviewer): AgentOfficeSeatedView => {
     const label = copy.states[reviewer.state];
     return {
@@ -858,7 +857,7 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
             : "waiting";
     return { id: reviewer.id, vendor: reviewer.vendor, status, label: copy.states[key], amount: quotaAmount(quota, copy) };
   });
-  const time = utcStamp(state.receivedAt);
+  const time = aestStamp(state.receivedAt);
   return { rows, note: state.stale ? copy.stale(time) : copy.asOf(time) };
 }
 
@@ -965,7 +964,7 @@ export function agentOfficeReport(
   const total = known.reduce((sum, entry) => sum + (entry.count ?? 0), 0);
   const todoText = known.length < input.queue.length ? `${total}+?` : String(total);
   return [
-    copy.title(utcStamp(input.readAt)),
+    copy.title(aestStamp(input.readAt)),
     "",
     ...section(copy.attention(brief.attention.length), brief.attention.map(item)),
     ...section(copy.working(brief.working.length), brief.working.map(item)),

@@ -9,6 +9,7 @@ import type { AdminMessageShape } from "@/lib/adminLocale";
 import type { AgentOfficeCopy } from "@/lib/adminMessages/agentOffice";
 import type { AgentOfficeLiveDept } from "@/lib/agentOffice/live";
 import { findPath } from "@/lib/agentOffice/pathfinding";
+import { aestClock } from "@/lib/agentOffice/time";
 import {
   AGENT_OFFICE_BLOCKED_DEPTS,
   AGENT_OFFICE_DEPT_KEYWORDS,
@@ -917,7 +918,7 @@ export class AgentOffice {
   // ── The operator console ───────────────────────────────────
   pushChat(from: "operator" | "staff", name: string, text: string) {
     // The real view has no simulated clock: a line is stamped with the time it was said.
-    const time = this.demo ? this.clockText() : `${new Date().toISOString().slice(11, 16)} UTC`;
+    const time = this.demo ? this.clockText() : aestClock(new Date().toISOString());
     this.chat.push({ id: this.logSeq++, time, from, name, text });
     if (this.chat.length > 60) this.chat.shift();
   }
