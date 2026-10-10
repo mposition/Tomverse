@@ -1708,7 +1708,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/promptRefinerAutoBudgetHold.ts",
     table: "PromptRefinerAutoBudgetHold",
-    tableMentions: 11,
+    tableMentions: 13,
     writeVerbs: 6,
     reason:
       "The sole registered budget writer reserves, records one dispatch intent, settles verified usage, retains unknown outcomes or releases a proven undispatched hold through branded transition authority. Database triggers update both windows; canonical audit shares each transaction.",

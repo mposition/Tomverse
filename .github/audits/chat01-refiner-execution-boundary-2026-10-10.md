@@ -143,7 +143,7 @@ reject를 대체하지 않는다. Claude 슬롯은 지정이 확인됐으나 quo
   혼동한 오탐이다. 기존 `20261009044000` migration의 amount constraint는
   settlement migration에서 삭제되지 않는다. 직접 SQL의 초과 정산뿐 아니라
   음수 정산도 `23514`와 정확한 amount constraint 이름으로 거부되는 회귀를
-  보강한다. 적용된 migration byte는 변경하지 않는다.
+  보강했다. 적용된 migration byte는 변경하지 않았다.
 - Fallback major는 실행 실패와 사용자 선택의 분모를 혼동했다.
   `docs/policy/prompt-refiner-observability.md` §1·§4·§5는 execution fallback과
   `kept_original` disposition을 분리한다. 서비스의 `failed` 또는
@@ -156,7 +156,7 @@ reject를 대체하지 않는다. Claude 슬롯은 지정이 확인됐으나 quo
   이 표본 수와 무관하게 유지한다. 유일한 attempt INSERT의 UTC default와
   UTC expiry expression을 실제 non-UTC PostgreSQL session에서 검증했다.
 - scope 인증은 durable-attempt admission 전에, admission은 single-use consume
-  전에 수행하도록 보강한다. rate 제한에 막힌 요청이 유효한 결정을 먼저 소비하지
+  전에 수행하도록 보강했다. rate 제한에 막힌 요청이 유효한 결정을 먼저 소비하지
   않으며, 인증된 stale/replay consume 시도는 계속 rate 제한을 받는다.
 - 중복 예약은 typed `duplicate_request` 거부로 정규화한다. 기존 예약을 새
   dispatch 권한으로 반환하거나 다시 예약·호출하는 idempotent retry를 만들지 않는다.
@@ -164,9 +164,46 @@ reject를 대체하지 않는다. Claude 슬롯은 지정이 확인됐으나 quo
   결속된 dispatching hold를 정확히 한 번 해제한다. adapter와 service 양쪽의
   회귀로 이 연결을 관측했다.
 
-이 보강은 코드 및 관련 회귀 단계다. 최종 통합 lint·typecheck·필수 정적 검사,
+수정 commit `d51057b0f`를 최신 develop `c7166fc71446bb3dfb0fbc7e8016fa719febe089`에
+충돌 없이 통합했다(`4f4475a580a23ba61433e8b8aaf4c8a46ea407bc`). 이 트리에서
+Chat execution 80/80, 제품 server/admin 30/30와 client 23/23,
+실제 PostgreSQL 제품·예산·운영 latch 33/33, full lint, 8GB typecheck,
+production build와 security regression 196개가 통과했다. 이전 head의 전체
+unit·server suite 합계는 이번 트리의 전체 재실행으로 주장하지 않는다.
+기존 실제 ChatInput fixture의 desktop/mobile Chromium 회귀는 29개 통과,
+19개 project 조건 skip이다. 제품 provider 또는 staging 통합 증거는 아니다.
+
+실제 local PostgreSQL 17.10에 최신 upstream migration까지 271개를 적용했다.
+별도 빈 scratch DB에 같은 migration을 적용한 스키마 비교는 columns 3,964,
+indexes 1,139, constraints 1,704, routines 244, triggers 268, extensions 1개가
+모두 동일했다. 이번 제품 migration 4개의 적용 checksum도 소스 SHA-256과
+일치한다. 운영·staging DB migration 증거로 사용하지 않는다.
+
+필수 accent/pricing/enum/default/starter/shared/protected-writer/data-domain/
+policy-section/doc-reference/strict-encoding 검사 11개를 통과했다. 예산 writer의
+추가 두 table mention은 Prisma 오류의 modelName 및 cause.table 비교 문자열이다.
+검사 pin만 11에서 13으로 갱신했고 writer·경로·write verb 6개는 유지했다.
+정책 참조 주석도 각 문서 경로와 section을 명시했다. DB test inventory 218개와
+Auto rollout readiness 검사도 통과했지만, Router의 세 판정은 여전히 pending이다.
+
+보조 검사 실패는 보존했다. `check:marketing-admission-code`의 네 source manifest
+불일치는 깨끗한 develop `c7166fc`에서도 동일했다. `check:dark-tables`도 그 base의
+기존 16건이 실패한다. 이번 release store의 추가 한 파일은 exact signed release
+검증을 위해 stage를 읽는다. 예외 정책 §2와 UI 계약의 exact B03G 결속 요구를
+따르는 이 reader만 Stage의 제한 허용 목록에 추가했다. Slot·전역 해제나 다른
+파일 접근은 추가하지 않았다. deployment identity 15개와 protected writer 28개
+회귀가 통과하며 추가 지적이 사라져 기존 base의 16건과 일치한다. 기존 검사 실패를
+통과로 표시하지 않았고 source manifest를 새 승인으로 재생성하지 않았다.
+
 수정 commit의 독립 재검토, PR·병합·정확한 staging 배포·제품 활성화는 별도로
-확인해야 한다. quota 조회를 우회하거나 검토 서버 설정·권한을 변경하지 않았다.
+확인해야 한다. 최신 develop base는 이전 review head의 후손이 아니므로 그 head를
+focus로 쓰면 서버의 `focus_not_in_range`에 해당한다. 다음 검토는 자동 선택된
+최신 base부터 전체 제품 diff를 대상으로 하며 `--base`를 강제하지 않는다.
+quota 조회를 우회하거나 검토 서버 설정·권한을 변경하지 않았다. 운영자가 직접
+수행한 내용 없는 진단 결과는 Claude의 저장 인증 만료였고, 인증 갱신은 직접
+로그인을 수행해야 하는 별도 사용자 작업이었다. 운영자가 review 계정에서 로그인을
+완료한 뒤 실제 서버 readback은 quota available, 기존 Claude 검토 3건 running이었다.
+이 인증 복구를 검토 verdict나 제품 활성화 승인으로 처리하지 않는다.
 
 ## 초기 서버 경계 검증 기록
 
