@@ -34,7 +34,7 @@ import {
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
-import { AGENT_OFFICE_DECISION_WINDOW_MS, agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
+import { agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
 import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
@@ -277,31 +277,13 @@ async function readReview(): Promise<AgentOfficeReviewState> {
 }
 
 /**
- * The AMUX Decision Maker: its switches (through its own reader), and three
- * aggregates of its ledger -- questions per route and instance in the last 24
- * hours, the newest routing per route and instance, and the newest judgment
- * per instance. Counts and times only: no card, question, proposal, digest or
- * person's id is selected.
+ * The AMUX Decision Maker: its switches, through its own reader. Its ledgers
+ * belong to its store modules alone (docs/policy/amux-decision-maker.md §10),
+ * so nothing of them is read here.
  */
-async function readDecision(now: Date): Promise<AgentOfficeDecisionState> {
+async function readDecision(): Promise<AgentOfficeDecisionState> {
   try {
-    const since = new Date(now.getTime() - AGENT_OFFICE_DECISION_WINDOW_MS);
-    const [switches, recent, latest, judged] = await Promise.all([
-      readDecisionMakerSwitchesOrThrow(prisma),
-      prisma.amuxDecisionMakerRequest.groupBy({
-        by: ["route", "instance"],
-        where: { createdAt: { gte: since } },
-        _count: { _all: true },
-      }),
-      prisma.amuxDecisionMakerRequest.groupBy({ by: ["route", "instance"], _max: { createdAt: true } }),
-      prisma.amuxDecisionMakerJudgment.groupBy({ by: ["instance"], _max: { createdAt: true } }),
-    ]);
-    return agentOfficeDecisionState({
-      switches,
-      recent: recent.map((row) => ({ route: row.route, instance: row.instance, count: row._count._all })),
-      latest: latest.map((row) => ({ route: row.route, instance: row.instance, lastAt: row._max.createdAt })),
-      judgments: judged.map((row) => ({ instance: row.instance, lastAt: row._max.createdAt })),
-    });
+    return agentOfficeDecisionState({ switches: await readDecisionMakerSwitchesOrThrow(prisma) });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "decision_maker" });
     return { kind: "unread" };
@@ -361,7 +343,7 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
     readEngineering(),
     readAmuxWorkers(),
     readReview(),
-    readDecision(now),
+    readDecision(),
     readDigest(now),
     readOperatorQueue(),
   ]);
