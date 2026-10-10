@@ -211,20 +211,17 @@ export type AgentOfficeDecisionState =
       kind: "observed";
       /** Null when the switch rows did not read as a state: every question then goes to the operator. */
       killSwitch: boolean | null;
+      /**
+       * Each instance's switch. Its ledgers (questions, proposals, judgments)
+       * belong to its own store modules, which nothing else may read
+       * (docs/policy/amux-decision-maker.md §10), so the office shows none.
+       */
       instances: {
         instance: string;
         vendor: string;
         /** Null when its switch did not read. */
         mode: AgentOfficeDecisionMode | null;
-        /** Questions routed to it in the last 24 hours. */
-        recent: number;
-        /** When the newest question was routed to it (UTC ISO), ever. */
-        lastRoutedAt: string | null;
-        /** When a person last judged one of its results (UTC ISO), ever. */
-        lastJudgedAt: string | null;
       }[];
-      /** Questions routed to the operator in the last 24 hours. */
-      toOperator: number;
     };
 
 export type AgentOfficeDigestState =
@@ -872,10 +869,9 @@ type DecisionCopy = {
   unreadable: string;
   killed: string;
   allOff: string;
-  summary: (proposal: number, total: number, dm: number, operator: number) => string;
-  none: string;
+  summary: (proposal: number, total: number) => string;
   readAt: (time: string) => string;
-  facts: { vendor: string; mode: string; recent: string; lastRouted: string; lastJudged: string };
+  facts: { vendor: string; mode: string };
 };
 
 export type AgentOfficeDecisionView = {
@@ -906,8 +902,6 @@ export function decisionRoomView(state: AgentOfficeDecisionState, readAt: string
             ? "proposal"
             : "off";
     const label = copy.states[memberState];
-    const routed = instance.lastRoutedAt ? aestStamp(instance.lastRoutedAt) : copy.none;
-    const judged = instance.lastJudgedAt ? aestStamp(instance.lastJudgedAt) : copy.none;
     return {
       name: instance.instance,
       state: memberState,
@@ -918,17 +912,13 @@ export function decisionRoomView(state: AgentOfficeDecisionState, readAt: string
       facts: [
         { label: copy.facts.vendor, value: instance.vendor },
         { label: copy.facts.mode, value: label },
-        { label: copy.facts.recent, value: String(instance.recent) },
-        { label: copy.facts.lastRouted, value: routed },
-        { label: copy.facts.lastJudged, value: judged },
       ],
     };
   });
   const proposing = members.filter((member) => member.state === "proposal").length;
-  const dm = state.instances.reduce((sum, instance) => sum + instance.recent, 0);
   const note = unreadable ? copy.unreadable : state.killSwitch ? copy.killed : proposing === 0 ? copy.allOff : null;
   const status: DeptStatus = unreadable ? "attention" : proposing > 0 && !state.killSwitch ? "done" : "waiting";
-  const summary = [note, copy.summary(proposing, members.length, dm, state.toOperator), read]
+  const summary = [note, copy.summary(proposing, members.length), read]
     .filter((part): part is string => part !== null)
     .join(" · ");
   return { status, summary, note, members };
