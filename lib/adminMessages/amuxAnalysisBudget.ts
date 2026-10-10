@@ -2,6 +2,19 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 
 export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
   en: {
+    cancellation: {
+      title: "Release an unused analysis reservation", holdId: "Reservation ID",
+      hint: "Look up one exact reservation, including an expired preview. Only a never-claimed reservation with no usage can be released. This never calls a model or clears a halt.",
+      lookup: "Look up reservation", missing: "That reservation is not visible.",
+      status: "Reservation state", amount: "Reserved micro-USD", expiresAt: "Preview expires at",
+      confirm: "I reviewed this exact unused reservation and confirm releasing it",
+      cancel: "Release this unused reservation", ineligible: "This reservation cannot be released here. Claimed or unknown outcomes require their separate owner resolution.",
+      unknown: "The cancellation outcome is unknown. Do not resend it; read back this exact reservation.",
+      released: "This unused reservation was released. No model was called.",
+      audit: "Cancellation audit ID", readFailed: "The reservation read-back is unavailable.",
+      writeFailed: "The unused reservation could not be released.",
+      disabled: "Reservation cancellation is disabled by the analysis budget switches.",
+    },
     title: "Analysis cost approval",
     unavailable: "Analysis cost approval is disabled. No model will be called.",
     loading: "Checking the approved price and reservation…",
@@ -54,6 +67,19 @@ export const adminAmuxAnalysisBudgetMessages = defineAdminMessages({
     },
   },
   ko: {
+    cancellation: {
+      title: "미사용 분석 예약 해제", holdId: "예약 ID",
+      hint: "만료된 미리보기의 예약도 정확한 ID로 조회합니다. claim·사용량이 없는 예약만 해제할 수 있습니다. 모델 호출이나 정지 해제는 하지 않습니다.",
+      lookup: "예약 조회", missing: "해당 예약을 확인할 수 없습니다.",
+      status: "예약 상태", amount: "예약 micro-USD", expiresAt: "미리보기 만료 시각",
+      confirm: "이 정확한 미사용 예약을 확인했고 해제에 동의합니다",
+      cancel: "이 미사용 예약 해제", ineligible: "여기서 해제할 수 없는 예약입니다. claim됐거나 결과가 불명인 예약은 별도 운영자 정산이 필요합니다.",
+      unknown: "취소 결과를 알 수 없습니다. 다시 제출하지 말고 이 정확한 예약을 재조회하세요.",
+      released: "미사용 예약이 해제되었습니다. 모델은 호출되지 않았습니다.",
+      audit: "취소 감사 ID", readFailed: "예약 재조회 결과를 불러올 수 없습니다.",
+      writeFailed: "미사용 예약을 해제하지 못했습니다.",
+      disabled: "분석 예산 스위치가 꺼져 있어 예약 취소를 사용할 수 없습니다.",
+    },
     title: "분석 비용 승인",
     unavailable: "분석 비용 승인이 비활성화되어 있습니다. 모델은 호출되지 않습니다.",
     loading: "승인 가격과 예약 상태를 확인하는 중…",
