@@ -16,6 +16,8 @@ import {
   useAdminLocale,
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
+import { AdminPromptRefinerProductStatusPanel } from
+  "@/components/admin/AdminPromptRefinerProductStatusPanel";
 import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminPromptRefinerShadowMessages } from "@/lib/adminMessages/promptRefinerShadow";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -492,6 +494,8 @@ export function AdminPromptRefinerShadowPanel() {
           <p>{m.boundary}</p>
         </div>
       </section>
+
+      <AdminPromptRefinerProductStatusPanel />
 
       {error ? (
         <div role="alert" className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100">
