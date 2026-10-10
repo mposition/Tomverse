@@ -5287,7 +5287,6 @@ async function handleChatPost(
                     ]),
                     ...attemptDispatchOptions(plan),
                 });
-                await recordDispatched(nextRecord);
             } catch (dispatchError) {
                 nextAttemptAbortController.abort(dispatchError);
                 if (nextStream) {
@@ -5319,6 +5318,23 @@ async function handleChatPost(
             if (!nextStream) {
                 await abandonFallback("dispatch_failed");
                 return streamState !== "open" || req.signal.aborted;
+            }
+
+            try {
+                await recordDispatched(nextRecord);
+            } catch (recordError) {
+                // `streamText` has crossed the provider invocation boundary.
+                // Its SDK work is scheduled independently of reading the
+                // returned stream, so a recording error cannot prove that the
+                // provider was never called. Keep the hold and continue the
+                // actual fallback: its ordinary two-attempt settlement still
+                // accounts for the provider work and charges the user once.
+                logRequestError(
+                    "chat_fallback_dispatch_record_failed",
+                    traceId,
+                    recordError,
+                    plan.modelId
+                );
             }
 
             // From here the swap is committed, and only from here.
