@@ -103,15 +103,23 @@ export async function readClaudeUsage(provider, {
   }
 }
 
+/** The longest Retry-After honoured: a day. A larger value would park the probe until a restart. */
+export const RETRY_AFTER_MAX_SECONDS = 24 * 60 * 60;
+
 /** Retry-After as seconds: a delay in seconds or an HTTP date (RFC 9110); null when absent or past. */
 export function retryAfterSecondsFrom(header, now = Date.now()) {
   if (typeof header !== "string" || header.trim() === "") return null;
   const value = header.trim();
-  if (/^\d+$/.test(value)) return Number(value) > 0 ? Number(value) : null;
-  const at = Date.parse(value);
-  if (!Number.isFinite(at)) return null;
-  const seconds = Math.ceil((at - now) / 1000);
-  return seconds > 0 ? seconds : null;
+  let seconds;
+  if (/^\d+$/.test(value)) {
+    seconds = Number(value);
+  } else {
+    const at = Date.parse(value);
+    if (!Number.isFinite(at)) return null;
+    seconds = Math.ceil((at - now) / 1000);
+  }
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.min(seconds, RETRY_AFTER_MAX_SECONDS);
 }
 
 // The Claude usage endpoint rate-limits hard (HTTP 429), and AMUX reads the
@@ -135,27 +143,36 @@ export async function pacedClaudeQuota(provider, { now = Date.now(), read = read
   // Paced per credential, not per provider: two providers on the same login
   // share one account's rate limit, and must not each spend it.
   const key = provider.passEnv?.includes("CLAUDE_CODE_OAUTH_TOKEN") ? "claude:env-token" : "claude:credentials-file";
-  const entry = pacing.get(key) ?? { retryAt: 0, rateLimited: 0, lastGood: null };
+  const entry = pacing.get(key) ?? { retryAt: 0, rateLimited: 0, lastGood: null, inflight: null };
   pacing.set(key, entry);
   const lastKnown = () =>
     entry.lastGood && now - entry.lastGood.at <= CLAUDE_LAST_KNOWN_MAX_MS ? entry.lastGood.quota : unknown;
+  // probeProviderQuotas asks for every provider at once: a read already on
+  // its way answers every caller on the same credential, so one account is
+  // read once and no answer overwrites another's pacing.
+  if (entry.inflight) return entry.inflight;
   if (now < entry.retryAt) return lastKnown();
-  const { quota, status, retryAfterSeconds } = await read(provider, { now });
-  if (quota.state !== "unknown") {
-    entry.lastGood = { quota, at: now };
-    entry.rateLimited = 0;
-    entry.retryAt = now + CLAUDE_REFRESH_MS;
-    return quota;
-  }
-  // Only 429s climb the backoff; any other failure retries after a minute and
-  // leaves the 429 count where it was.
-  let delay = 60_000;
-  if (status === 429) {
-    entry.rateLimited += 1;
-    delay = Math.min(CLAUDE_BACKOFF_BASE_MS * 2 ** Math.min(entry.rateLimited - 1, 10), CLAUDE_BACKOFF_MAX_MS);
-  }
-  entry.retryAt = now + Math.max(delay, (retryAfterSeconds ?? 0) * 1000);
-  return lastKnown();
+  entry.inflight = (async () => {
+    const { quota, status, retryAfterSeconds } = await read(provider, { now });
+    if (quota.state !== "unknown") {
+      entry.lastGood = { quota, at: now };
+      entry.rateLimited = 0;
+      entry.retryAt = now + CLAUDE_REFRESH_MS;
+      return quota;
+    }
+    // Only 429s climb the backoff; any other failure retries after a minute
+    // and leaves the 429 count where it was.
+    let delay = 60_000;
+    if (status === 429) {
+      entry.rateLimited += 1;
+      delay = Math.min(CLAUDE_BACKOFF_BASE_MS * 2 ** Math.min(entry.rateLimited - 1, 10), CLAUDE_BACKOFF_MAX_MS);
+    }
+    entry.retryAt = now + Math.max(delay, (retryAfterSeconds ?? 0) * 1000);
+    return lastKnown();
+  })().finally(() => {
+    entry.inflight = null;
+  });
+  return entry.inflight;
 }
 
 function codexQuota(provider) {

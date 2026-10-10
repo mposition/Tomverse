@@ -251,3 +251,32 @@ test("Retry-After is read as seconds or as an HTTP date", async () => {
   assert.equal(retryAfterSecondsFrom("Sat, 10 Oct 2026 00:50:00 GMT", now), null, "a date in the past asks for no wait");
   for (const none of [null, undefined, "", "0", "soon", "-5"]) assert.equal(retryAfterSecondsFrom(none, now), null, String(none));
 });
+
+test("providers on one credential asked at once share one Claude read", async () => {
+  const { pacedClaudeQuota } = await import("../tools/review-orchestrator/lib/quota.mjs");
+  const pacing = new Map();
+  let reads = 0;
+  let release;
+  const gate = new Promise((resolve) => (release = resolve));
+  const read = async () => {
+    reads += 1;
+    await gate;
+    return { quota: { state: "available", remainingPercent: 50 }, status: 200, retryAfterSeconds: null };
+  };
+  const both = Promise.all([
+    pacedClaudeQuota({ id: "claude", quotaProbe: "claude" }, { now: 0, read, pacing }),
+    pacedClaudeQuota({ id: "claude-opus", quotaProbe: "claude" }, { now: 0, read, pacing }),
+  ]);
+  release();
+  assert.deepEqual(await both, [{ state: "available", remainingPercent: 50 }, { state: "available", remainingPercent: 50 }]);
+  assert.equal(reads, 1, "one account, one read, even when asked twice at once");
+  assert.equal(pacing.get("claude:credentials-file").inflight, null);
+});
+
+test("an absurd Retry-After is capped at a day instead of parking the probe", async () => {
+  const { retryAfterSecondsFrom, RETRY_AFTER_MAX_SECONDS } = await import("../tools/review-orchestrator/lib/quota.mjs");
+  // A number too long to be finite is garbage: ignored, so the ordinary backoff applies.
+  assert.equal(retryAfterSecondsFrom("9".repeat(400)), null);
+  assert.equal(retryAfterSecondsFrom("172800"), RETRY_AFTER_MAX_SECONDS);
+  assert.equal(retryAfterSecondsFrom("Fri, 31 Dec 9999 23:59:59 GMT", Date.parse("2026-10-10T00:00:00Z")), RETRY_AFTER_MAX_SECONDS);
+});
