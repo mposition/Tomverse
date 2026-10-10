@@ -2051,6 +2051,10 @@ test("the screen says how fresh it is in one place, and says so when it stops re
   assert.match(panel, /export const LIVE_STALE_MS = 2 \* LIVE_REFRESH_MS;/);
   assert.match(panel, /const \[now, setNow\] = useState\(readMs\);/);
   assert.match(panel, /data-testid="agent-office-stale"/);
+  // The dashboard reads the same moment, and says the same when it stops.
+  const dashboard = panel.slice(panel.indexOf("function DashboardView"));
+  assert.match(dashboard, /const stale = useStaleReading\(readAt\);/);
+  assert.match(dashboard, /data-testid="agent-office-dashboard-stale"/);
   // Coming back to the tab reads again at once instead of showing a stale screen.
   assert.match(panel, /addEventListener\("visibilitychange", onVisible\)/);
   const live = readFileSync("lib/agentOffice/live.ts", "utf8");
