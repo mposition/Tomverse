@@ -220,6 +220,13 @@ let fallbackBehaviour:
 let injectPrimaryFault = true;
 let completionUsageRead = false;
 let releasePendingCompletionUsage: () => void = () => {};
+let fallbackTransitionAbortAt:
+  | "none"
+  | "after_stream_created"
+  | "during_record_dispatched"
+  | "during_primary_reader_cancel" = "none";
+let abortActiveRequest: () => void = () => {};
+let recordDispatchedCalls = 0;
 
 mock.module("ai", {
   namedExports: {
@@ -262,6 +269,10 @@ mock.module("ai", {
           })
         : Promise.resolve(usage);
 
+      if (index > 0 && fallbackTransitionAbortAt === "after_stream_created") {
+        queueMicrotask(abortActiveRequest);
+      }
+
       return {
         textStream: new ReadableStream<string>({
           start(controller) {
@@ -270,6 +281,12 @@ mock.module("ai", {
             if (!partial) controller.close();
           },
           cancel(reason) {
+            if (
+              index === 0 &&
+              fallbackTransitionAbortAt === "during_primary_reader_cancel"
+            ) {
+              abortActiveRequest();
+            }
             attempt.providerAbortedBeforeReaderCancel = abortSignal?.aborted === true;
             attempt.cancelledWith = reason ?? "cancelled";
             attemptLifecycle.push(`${index}:reader_cancel`);
@@ -350,6 +367,16 @@ let resolvedAttachmentRows: MockStoredAttachment[] = [];
 let conversationProductKey: "chat" | "review" = "chat";
 let messageFindFirstArgs: Array<Record<string, unknown>> = [];
 let lastDurableClaimInput: Record<string, unknown> | null = null;
+type InstrumentationAttemptRow = {
+  id: string;
+  attemptIndex: number;
+  modelId: string;
+  state: "draft" | "finalized" | "dispatched" | "terminal";
+};
+const instrumentationAttemptRows = new Map<string, InstrumentationAttemptRow>();
+const closedInstrumentationAttempts: Array<
+  InstrumentationAttemptRow & { outcome: string }
+> = [];
 
 const conversationRow = () => ({
   id: CONVERSATION_ID,
@@ -667,29 +694,117 @@ mock.module(mod("lib/activeAiModel.ts"), {
 });
 
 /*
-  CHAT-LATENCY-01. What each attempt's close was told about its first visible
-  token, recorded by wrapping the real function rather than replacing its
-  module: every other export the route uses stays the real one.
+  The PostgreSQL suite owns the instrumentation schema and atomic-write
+  contract. This route fixture supplies two bounded synthetic attempt records
+  with distinct ids and models, then enforces their real lifecycle at the
+  orchestration boundary: draft -> finalized -> dispatched -> terminal. That
+  makes a duplicate primary close or a cancellation attached to the wrong
+  attempt fail here without turning this no-provider contract test into a
+  second database test.
 */
-const dispatchCloses: Array<{ outcome: string; firstVisibleTokenAt: unknown }> = [];
+const dispatchCloses: Array<{
+  attemptId: string | null;
+  modelId: string | null;
+  outcome: string;
+  firstVisibleTokenAt: unknown;
+}> = [];
 const realDispatchInstrumentation = require(
   resolve(ROOT, "lib/routingDispatchInstrumentation.ts")
-) as Record<string, unknown> & {
-  completeInstrumentedDispatch: (...args: unknown[]) => Promise<void>;
-};
+) as Record<string, unknown>;
 mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
   namedExports: {
     ...realDispatchInstrumentation,
+    beginInstrumentedDispatch: async (input: { modelId: string }) => {
+      const row: InstrumentationAttemptRow = {
+        id: `routing-attempt-0-${input.modelId}`,
+        attemptIndex: 0,
+        modelId: input.modelId,
+        state: "draft",
+      };
+      instrumentationAttemptRows.set(row.id, row);
+      return {
+        runId: "routing-run-fallback",
+        attemptId: row.id,
+        modelId: row.modelId,
+        startedAt: Date.now(),
+        overheadMs: 0,
+      };
+    },
+    beginRetryAttempt: async (
+      _previous: unknown,
+      input: { attemptIndex: number; modelId: string }
+    ) => {
+      const row: InstrumentationAttemptRow = {
+        id: `routing-attempt-${input.attemptIndex}-${input.modelId}`,
+        attemptIndex: input.attemptIndex,
+        modelId: input.modelId,
+        state: "draft",
+      };
+      instrumentationAttemptRows.set(row.id, row);
+      return {
+        runId: "routing-run-fallback",
+        attemptId: row.id,
+        modelId: row.modelId,
+        startedAt: Date.now(),
+        overheadMs: 0,
+      };
+    },
+    authoriseDispatch: async (record: {
+      attemptId: string;
+      modelId: string;
+    }) => {
+      const row = instrumentationAttemptRows.get(record.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, record.modelId);
+      assert.equal(row.state, "draft");
+      row.state = "finalized";
+      return record;
+    },
+    recordDispatched: async (record: unknown) => {
+      recordDispatchedCalls += 1;
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.equal(row.state, "finalized");
+      row.state = "dispatched";
+      if (
+        recordDispatchedCalls === 2 &&
+        fallbackTransitionAbortAt === "during_record_dispatched"
+      ) {
+        abortActiveRequest();
+      }
+    },
     completeInstrumentedDispatch: async (
       record: unknown,
       close: { outcome: string; firstVisibleTokenAt?: unknown }
     ) => {
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.equal(row.state, "dispatched");
       dispatchCloses.push({
+        attemptId: instrumentation.attemptId,
+        modelId: instrumentation.modelId,
         outcome: close.outcome,
         firstVisibleTokenAt: close.firstVisibleTokenAt,
       });
-      return realDispatchInstrumentation.completeInstrumentedDispatch(record, close);
+      closedInstrumentationAttempts.push({
+        id: row.id,
+        attemptIndex: row.attemptIndex,
+        modelId: row.modelId,
+        outcome: close.outcome,
+      });
+      row.state = "terminal";
     },
+    recordFallbackRecovery: async () => undefined,
   },
 });
 
@@ -773,7 +888,13 @@ const ask = async (
   ],
   includeSourceUserMessageId = true,
   withInjectedPrimaryFault = true,
-  abortFallbackAt: "none" | "after_token" | "during_completion" = "none"
+  abortFallbackAt:
+    | "none"
+    | "after_token"
+    | "during_completion"
+    | "after_stream_created"
+    | "during_record_dispatched"
+    | "during_primary_reader_cancel" = "none"
 ) => {
   fallbackBehaviour = behaviour;
   injectPrimaryFault = withInjectedPrimaryFault;
@@ -782,7 +903,16 @@ const ask = async (
   attemptLifecycle.length = 0;
   completionUsageRead = false;
   releasePendingCompletionUsage = () => {};
+  recordDispatchedCalls = 0;
+  fallbackTransitionAbortAt =
+    abortFallbackAt === "after_stream_created" ||
+    abortFallbackAt === "during_record_dispatched" ||
+    abortFallbackAt === "during_primary_reader_cancel"
+      ? abortFallbackAt
+      : "none";
   dispatchCloses.length = 0;
+  instrumentationAttemptRows.clear();
+  closedInstrumentationAttempts.length = 0;
   timingLines.length = 0;
   world.messages = [];
   world.terminals = [];
@@ -800,6 +930,8 @@ const ask = async (
 
   const { POST } = await loadRoute();
   const requestAbortController = new AbortController();
+  abortActiveRequest = () =>
+    requestAbortController.abort("client stopped during fallback transition");
   const response = await POST(
     new Request("http://127.0.0.1:3100/api/chat", {
       method: "POST",
@@ -836,41 +968,41 @@ const ask = async (
     asserting about the record the route wrote rather than about how the
     stream ended.
   */
-  const read =
-    abortFallbackAt !== "none"
-      ? await whileWaiting(async () => {
-          const reader = response.body!.getReader();
-          const decoder = new TextDecoder();
-          let body = "";
-          while (!body.includes(ANSWER)) {
-            const { done, value } = await reader.read();
-            if (done) {
-              throw new Error("fallback stream ended before its partial token");
-            }
-            body += decoder.decode(value, { stream: true });
-          }
-          const completionRead =
-            abortFallbackAt === "during_completion" ? reader.read() : null;
-          if (completionRead) {
-            await until("fallback completion metadata wait", () => completionUsageRead);
-          }
-          requestAbortController.abort("client stopped the fallback");
-          releasePendingCompletionUsage();
-          let streamError: unknown = null;
-          try {
-            if (completionRead) await completionRead;
-            while (!(await reader.read()).done) {}
-          } catch (error) {
-            streamError = error;
-          }
-          return { body, streamError };
-        })
-      : await whileWaiting(() =>
-          response.text().then(
-            (body) => ({ body, streamError: null as unknown }),
-            (streamError: unknown) => ({ body: "", streamError })
-          )
-        );
+  const bodyDrivenAbort =
+    abortFallbackAt === "after_token" ||
+    abortFallbackAt === "during_completion";
+  const read = bodyDrivenAbort
+    ? await whileWaiting(async () => {
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let body = "";
+        while (!body.includes(ANSWER)) {
+          const { done, value } = await reader.read();
+          if (done) throw new Error("fallback stream ended before its partial token");
+          body += decoder.decode(value, { stream: true });
+        }
+        const completionRead =
+          abortFallbackAt === "during_completion" ? reader.read() : null;
+        if (completionRead) {
+          await until("fallback completion metadata wait", () => completionUsageRead);
+        }
+        requestAbortController.abort("client stopped the fallback");
+        releasePendingCompletionUsage();
+        let streamError: unknown = null;
+        try {
+          if (completionRead) await completionRead;
+          while (!(await reader.read()).done) {}
+        } catch (error) {
+          streamError = error;
+        }
+        return { body, streamError };
+      })
+    : await whileWaiting(() =>
+        response.text().then(
+          (body) => ({ body, streamError: null as unknown }),
+          (streamError: unknown) => ({ body: "", streamError })
+        )
+      );
   if (abortFallbackAt !== "none") {
     await until("the aborted fallback to settle", () => ledger.settlements.length > 0);
   }
@@ -968,6 +1100,76 @@ test("request abort wins while completed provider metadata is still pending", as
   assert.equal(world.terminals[0]?.finalContent, ANSWER);
 });
 
+for (const abortAt of [
+  "after_stream_created",
+  "during_record_dispatched",
+  "during_primary_reader_cancel",
+] as const) {
+  test(`request abort ${abortAt} terminalizes the dispatched fallback once`, async () => {
+    await ask(
+      "partial",
+      "claimed",
+      200,
+      false,
+      [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }],
+      true,
+      true,
+      abortAt
+    );
+
+    assert.equal(attempts.length, 2);
+    assert.ok(attempts[0].providerAbortedWith);
+    assert.ok(attempts[1].providerAbortedWith);
+    assert.ok(attempts[1].cancelledWith);
+    assert.equal(attempts[1].providerAbortedBeforeReaderCancel, true);
+    assert.deepEqual(attempts.map(({ modelId }) => modelId), [
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+    ]);
+    assert.deepEqual(
+      dispatchCloses.map(({ attemptId, modelId, outcome }) => ({
+        attemptId,
+        modelId,
+        outcome,
+      })),
+      [
+        {
+          attemptId: "routing-attempt-0-deepseek-v4-flash",
+          modelId: "deepseek-v4-flash",
+          outcome: "failed_pre_token",
+        },
+        {
+          attemptId: "routing-attempt-1-deepseek-v4-pro",
+          modelId: "deepseek-v4-pro",
+          outcome: "cancelled",
+        },
+      ]
+    );
+    assert.deepEqual(closedInstrumentationAttempts, [
+      {
+        id: "routing-attempt-0-deepseek-v4-flash",
+        attemptIndex: 0,
+        modelId: "deepseek-v4-flash",
+        outcome: "failed_pre_token",
+      },
+      {
+        id: "routing-attempt-1-deepseek-v4-pro",
+        attemptIndex: 1,
+        modelId: "deepseek-v4-pro",
+        outcome: "cancelled",
+      },
+    ]);
+    assert.equal(ledger.settlements.length, 1);
+    assert.equal(ledger.settlements[0].outcome, "cancelled");
+    assert.equal(ledger.settlements[0].attempts, 2);
+    assert.equal(ledger.attemptBudgetReservations, 1);
+    assert.equal(ledger.attemptBudgetReleases, 0);
+    assert.equal(ledger.releases.length, 1);
+    assert.deepEqual(world.messages, []);
+    assert.equal(world.terminals.length, 1);
+    assert.equal(world.terminals[0]?.status, "cancelled");
+  });
+}
 test("the first visible token belongs to the attempt that answered, not the one that died", async () => {
   await ask("answers");
   assert.equal(attempts.length, 2);
