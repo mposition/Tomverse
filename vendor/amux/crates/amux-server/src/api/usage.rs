@@ -2131,14 +2131,16 @@ mod tests {
 
     #[tokio::test]
     async fn failures_are_cached_too_so_a_rate_limit_is_not_amplified() {
-        // Retrying a 429 on every render is what provokes the 429.
-        let calls = Arc::new(AtomicUsize::new(0));
-        let app = app(probe_fn(UsageProbe::Http(429), calls.clone()));
-        for _ in 0..5 {
-            let (_, v) = get(&app).await;
-            assert_eq!(v["cause"], json!("rate_limited"));
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        temp_env_ttl("60", || async {
+            // Retrying a 429 on every render is what provokes the 429.
+            let calls = Arc::new(AtomicUsize::new(0));
+            let app = app(probe_fn(UsageProbe::Http(429), calls.clone()));
+            for _ in 0..5 {
+                let (_, v) = get(&app).await;
+                assert_eq!(v["cause"], json!("rate_limited"));
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }).await;
     }
 
     /// A probe whose outcome changes between calls — the intermittent 429
