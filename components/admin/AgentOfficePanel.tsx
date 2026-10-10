@@ -44,8 +44,10 @@ import {
   AGENT_OFFICE_DIGEST_SENDERS,
   AGENT_OFFICE_TEAM_IDS,
   agentOfficeDept,
+  AGENT_OFFICE_ROOM_POLICIES,
   agentOfficeSeatedClothes,
   type AgentOfficeSeatedRoom,
+  type AgentOfficeTeamId,
 } from "@/lib/agentOffice/roster";
 import {
   AgentOffice,
@@ -208,6 +210,9 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   // name its record gives it, and its profile is re-read from that record.
   const [seated, setSeated] = useState<{ room: AgentOfficeSeatedRoom; name: string } | null>(null);
   const onSelectSeated = useCallback((room: AgentOfficeSeatedRoom, name: string) => setSeated({ room, name }), []);
+  // A room's name opens what its team does, written from its code and policy.
+  const [teamInfo, setTeamInfo] = useState<AgentOfficeTeamId | null>(null);
+  const onSelectTeam = useCallback((team: AgentOfficeTeamId) => setTeamInfo(team), []);
 
   /** To the live office, by address; the panel stays mounted and the day goes on. */
   const goLive = useCallback(() => {
@@ -359,6 +364,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               selectedId={selectedId}
               onSelect={onSelect}
               onSelectSeated={onSelectSeated}
+              onSelectTeam={onSelectTeam}
               onCopyReport={copyReport}
               onDownloadReport={downloadReport}
             />
@@ -378,7 +384,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               amuxView={amuxView}
               reviewView={reviewView}
               decisionView={decisionView}
-              onSelect={(id) => setSelectedId(id)}
+              onSelectTeam={onSelectTeam}
             />
           )}
         </div>
@@ -402,6 +408,17 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           decisionView={decisionView}
           quotaView={quotaView}
           onClose={() => setSeated(null)}
+        />
+      ) : null}
+      {teamInfo ? (
+        <TeamInfoModal
+          m={m}
+          team={teamInfo}
+          engine={engine}
+          amuxView={amuxView}
+          reviewView={reviewView}
+          decisionView={decisionView}
+          onClose={() => setTeamInfo(null)}
         />
       ) : null}
       <div className={cx("toast", toast && "show")} role="status">
@@ -473,6 +490,7 @@ function LiveView({
   selectedId,
   onSelect,
   onSelectSeated,
+  onSelectTeam,
   onCopyReport,
   onDownloadReport,
 }: {
@@ -492,6 +510,7 @@ function LiveView({
   selectedId: string | null;
   onSelect: (agent: Agent) => void;
   onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
+  onSelectTeam: (team: AgentOfficeTeamId) => void;
   onCopyReport: () => void;
   onDownloadReport: () => void;
 }) {
@@ -561,6 +580,7 @@ function LiveView({
           follow={follow}
           onSelect={onSelect}
           onSelectSeated={onSelectSeated}
+          onSelectTeam={onSelectTeam}
         />
 
         <aside className={cx("live-rail")}>
@@ -927,6 +947,123 @@ function SeatedProfileModal({
  * AMUX execution room and the review server. The dashboard lists them and the
  * status report is built from them.
  */
+/**
+ * What a team or record room does, written from its code and policy
+ * (lib/adminMessages/agentOffice.ts, `teamInfo`), beside what the office
+ * read for it now. Read only: it links the record and names the policy.
+ */
+function TeamInfoModal({
+  m,
+  team,
+  engine,
+  amuxView,
+  reviewView,
+  decisionView,
+  onClose,
+}: {
+  m: OfficeCopy;
+  team: AgentOfficeTeamId;
+  engine: AgentOffice;
+  amuxView: AgentOfficeAmuxView;
+  reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const dialogRef = useOfficeDialog(onClose, closeRef);
+  const info = m.teamInfo.teams[team];
+  const room = team === "amux" || team === "review" || team === "decision" ? team : null;
+  const dept = room ? null : agentOfficeDept(team);
+  const name = room ? m.rooms[room] : engine.roomName(team);
+  const icon = room ? { amux: AMUX_ROOM, review: REVIEW_ROOM, decision: DECISION_ROOM }[room].icon : dept?.icon ?? "";
+  const recordHref = room
+    ? room === "amux"
+      ? AGENT_OFFICE_AMUX_RECORD_HREF
+      : room === "decision"
+        ? AGENT_OFFICE_DECISION_RECORD_HREF
+        : null
+    : dept?.recordHref ?? null;
+  const policy = room ? AGENT_OFFICE_ROOM_POLICIES[room] : dept?.policy ?? null;
+  // Now: a record room's own reading, or a desk room's live line, or why it has none.
+  const view = room ? { amux: amuxView, review: reviewView, decision: decisionView }[room] : null;
+  const live = room ? null : engine.liveDept(team);
+  const status: DeptStatus = view ? view.status : live ? live.status : (engine.deptStatus[team] ?? "waiting");
+  const nowLine = view
+    ? view.summary
+    : live
+      ? live.line
+      : status === "blocked"
+        ? engine.deptCopy(team).blockReason
+        : m.teamInfo.notLive;
+  const sections = [
+    ["does", m.teamInfo.does, info.does],
+    ["never", m.teamInfo.never, info.never],
+    ["human", m.teamInfo.human, info.human],
+  ] as const;
+  return (
+    <div className={cx("modal-backdrop")} onClick={onClose}>
+      <section
+        ref={dialogRef}
+        className={cx("win team-modal team-info")}
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={m.teamInfo.dialogLabel(name)}
+        data-testid="agent-office-team-info"
+        data-team={team}
+      >
+        <div className={cx("win-bar")}>
+          <span>{m.teamInfo.windowTitle}</span>
+          <button ref={closeRef} type="button" className={cx("window-close")} onClick={onClose} aria-label={m.teamInfo.close}>
+            ✕
+          </button>
+        </div>
+        <div className={cx("win-body team-info-body")}>
+          <h2>
+            {icon} {name}
+          </h2>
+          <p className={cx("team-info-summary")}>{info.summary}</p>
+          <div className={cx("live-box")} data-testid="agent-office-team-info-now">
+            <span className={cx("tiny-label")}>
+              {view || live ? <em className={cx("live-chip")}>{m.real.chip}</em> : null} {m.teamInfo.now}
+            </span>
+            <span className={cx("status-pill", status)}>{m.deptStatus[status]}</span>
+            <strong>{nowLine}</strong>
+          </div>
+          {sections.map(([key, label, lines]) => (
+            <section key={key} className={cx("team-info-section")}>
+              <h3>{label}</h3>
+              <ul>
+                {lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          <section className={cx("team-info-section")}>
+            <h3>{m.teamInfo.switch}</h3>
+            <p>{info.switch}</p>
+          </section>
+          <div className={cx("profile-record")} data-testid="agent-office-team-info-record">
+            {recordHref ? <Link href={recordHref}>{m.teamInfo.record}</Link> : <span>{m.teamInfo.noRecord}</span>}
+            {policy ? (
+              <span>
+                {m.teamInfo.policy} <code>{policy}</code>
+              </span>
+            ) : null}
+          </div>
+          <p className={cx("team-info-basis")}>{m.teamInfo.basis}</p>
+          <div className={cx("profile-actions")}>
+            <button type="button" className={cx("btn btn-primary")} onClick={onClose}>
+              {m.teamInfo.close}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function liveRowsFor(
   teams: readonly TeamRow[],
   amuxView: AgentOfficeAmuxView,
@@ -1002,7 +1139,7 @@ function DashboardView({
   amuxView,
   reviewView,
   decisionView,
-  onSelect,
+  onSelectTeam,
 }: {
   m: OfficeCopy;
   engine: AgentOffice;
@@ -1019,7 +1156,7 @@ function DashboardView({
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
   decisionView: AgentOfficeDecisionView;
-  onSelect: (id: string) => void;
+  onSelectTeam: (team: AgentOfficeTeamId) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
@@ -1198,7 +1335,13 @@ function DashboardView({
               </div>
               <div className={cx("team-grid")}>
                 {filteredTeams.map((team) => (
-                  <button type="button" className={cx("team-card")} key={team.id} onClick={() => onSelect(team.lead.id)}>
+                  <button
+                    type="button"
+                    className={cx("team-card")}
+                    key={team.id}
+                    onClick={() => onSelectTeam(team.id as AgentOfficeTeamId)}
+                    aria-haspopup="dialog"
+                  >
                     <span className={cx("status-dot", team.status)} aria-hidden="true" />
                     <span className={cx("mini-pixel")}>
                       <PixelEmployee hair={team.lead.hair} shirt={team.lead.shirt} accent={team.lead.accent} />
