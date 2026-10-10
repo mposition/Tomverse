@@ -66,13 +66,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       support: {
         name: "Support triage",
-        task: "Order and lane for each report, reply drafts",
+        task: "A lane for each report, related reports grouped",
         blockReason:
           "Support triage has no record screen in the console yet, so the office has nothing of its to read. It waits rather than inventing a status.",
       },
       marketing: {
         name: "Marketing",
-        task: "Post drafts, the Guard's check, weekly KPI brief",
+        task: "Approved posts published, the Guard's check",
         blockReason: "Marketing is waiting on its record screen.",
       },
       finance: {
@@ -94,7 +94,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       digest: {
         name: "Digest desk",
-        task: "Collect every team's digest, brief the operator",
+        task: "Every team's digests, kept and counted",
         blockReason: "The digest desk is waiting on its record screen.",
       },
     },
@@ -308,6 +308,225 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       inputLabel: "Operator order",
       send: "Send",
       ask: (name: string) => `${name}, what are you doing now?`,
+    },
+    teamInfo: {
+      windowTitle: "🏢 team_info.md",
+      dialogLabel: (name: string) => `What ${name} does`,
+      open: (name: string) => `About ${name}`,
+      does: "What it does",
+      never: "What it never does",
+      human: "What a person does",
+      switch: "How it is switched on",
+      now: "Now",
+      notLive: "The office does not read this room live yet.",
+      record: "Open its record →",
+      noRecord: "No record screen in the console",
+      policy: "Policy",
+      basis: "Written from its code and policy. “Now” is what the office read for this room.",
+      close: "Close",
+      teams: {
+        engineering: {
+          summary: "Turns AMUX cards a person has promoted into code changes, and leaves every judgement to the operator.",
+          does: [
+            "A Runner (production, every 30 min) drafts a patch for one promoted card with an Anthropic model whose only tool reads tracked files.",
+            "The app, not the model, sets the tier from the list of changed files: a T2 result is a private draft in the app, a T1 result is opened as a pull request to develop by the Publisher (every 10 min).",
+            "It also adds cards to the AMUX backlog from the product backlog, failing develop CI and failing dependabot pull requests, within daily limits.",
+          ],
+          never: [
+            "Never merges or approves a pull request, or turns on auto-merge.",
+            "Never writes to main, deploys or opens a release.",
+            "Never promotes its own cards, and the app never applies or runs a patch.",
+          ],
+          human: [
+            "Promotes the card in AMUX, decides each T2 draft, and reviews and merges its pull requests on GitHub.",
+            "Acknowledges halts and sets the mode.",
+          ],
+          switch: "AppSetting feature.engineeringAgentMode (off · shadow · t1). Unset or unreadable is off, and ENGINEERING_AGENT_KILL_SWITCH forces it off.",
+        },
+        qa: {
+          summary: "A rule-based QA and release agent: a daily release-readiness digest, CI failure classes and a develop-only merge lane.",
+          does: [
+            "Every day at 07:00 AEST (21:00 UTC) it reads the release-gate evidence and issue-backlog reports, static checks and Actions job results, and stores one digest of numbers, codes, issue numbers and SHAs.",
+            "It sorts CI failures into infra, undetermined, flaky-suspected or consecutive-repro, with at most two rerun suggestions.",
+            "A monitor every 30 min calls the digest stale after 28 hours.",
+            "The merge lane (production, every 10 min) merges the oldest eligible develop pull request, one at a time, only on an instruction the app issues for its exact head; an unknown or failed outcome latches it.",
+          ],
+          never: [
+            "No LLM. Never merges to main, turns on auto-merge, or reruns or dispatches workflows.",
+            "Never writes GitHub issues, labels, comments or checks, and never says a release is ready.",
+          ],
+          human: [
+            "Records the control revision and releases a latched merge lane (owner or ops, recent sign-in).",
+            "Merges main and any excluded pull request on GitHub.",
+          ],
+          switch: "QA_RELEASE_DIGEST_ENABLED on its service, and an operator control revision with the digest on.",
+        },
+        sre: {
+          summary: "Watches production for silent breakage: pages the owner for what is urgent and gathers the rest into one daily digest. It alerts and never fixes.",
+          does: [
+            "Every 10 min it reads the app's own snapshot (readiness checks, scheduled jobs, provider budgets); a page key opens after 3 failed checks in a row and recovers after 2 clean ones.",
+            "Every day at 07:00 AEST (21:00 UTC) it submits a digest of the other readiness checks.",
+            "Every state change goes into the hash-chained audit log; an alert is a fixed sentence with one Admin link.",
+            "A separate dead-man monitor raises the alarm if its heartbeats stop.",
+          ],
+          never: [
+            "No LLM. No automatic repair: no restart, redeploy, environment, budget or flag change.",
+            "No GitHub writes and no product database credentials; an unknown outcome is never retried.",
+          ],
+          human: [
+            "Approves its stages (shadow, then live) and decides every fix.",
+          ],
+          switch: "OPS_OBSERVER_ENABLED on its services, and the owner's stage approval on its record screen.",
+        },
+        support: {
+          summary: "Suggests a lane for each incoming user report, and which reports belong together, by fixed rules, so a person knows what to look at first.",
+          does: [
+            "Every 30 min it reads up to 50 open or reviewing reports, skipping deleted accounts.",
+            "It suggests one of six lanes: verified bug, unverified bug, billing (a person), trust and safety (a person), feature request or other. Money goes to billing; privacy, security, legal and self-harm go to trust and safety.",
+            "It groups related reports, and stores its suggestions, groups and runs with an audit entry for each.",
+            "A retention job every 30 min deletes expired triage data.",
+          ],
+          never: [
+            "No LLM, and report text never leaves the app.",
+            "Never sends mail, changes a report's status or reply, creates an auto-fix case, or promises credits or refunds.",
+          ],
+          human: [
+            "Accepts or dismisses each suggestion, confirms groups and sends any reply.",
+          ],
+          switch: "SUPPORT_TRIAGE_ENABLED set to exactly \"true\"; without it a run writes nothing.",
+        },
+        marketing: {
+          summary: "Publishes approved social posts to the brand's accounts through a deterministic Guard, with a person in charge of what goes public.",
+          does: [
+            "The publisher (every 5 min) checks each publishing account's health, claims the next approved post that is due, makes exactly one publish call and records published, failed or outcome unknown.",
+            "The Guard checks input hygiene, facts (prices only from stored values) and approved links and assets; questionable wording is flagged for a person.",
+            "A published post is polled until it is confirmed live.",
+          ],
+          never: [
+            "No replies, DMs, follows, likes, ads, reposts or scraping.",
+            "Instagram and TikTok never go autonomous, and an unknown outcome is never retried: the account pauses instead.",
+            "The publisher holds no database, platform or LLM credential.",
+          ],
+          human: [
+            "Approves, edits, rejects and schedules posts, pauses and resumes accounts, and resolves unknown outcomes (owner or ops).",
+          ],
+          switch: "Its switches are off until set to \"true\", and autonomous publishing is off in code.",
+        },
+        finance: {
+          summary: "Each day it works out how many days remain before each pending model price must be verified, and records it for the operator.",
+          does: [
+            "Every day at 11:00 AEST (01:00 UTC), per environment, it reads the pending verified-price register from the app's own deployed code.",
+            "It records the days left, the marks (30, 14, 7 and 1 days, expired), problems in the register and a verdict as one digest.",
+            "A dead-man monitor and a maintenance check notice if it falls silent.",
+          ],
+          never: [
+            "Never edits prices, credits or the register, and never drafts a price change.",
+            "No LLM and no paid external API; it holds no database, GitHub or payment credentials.",
+          ],
+          human: [
+            "Turns its switch on or off (ops, recent sign-in, monitor confirmed within 7 days); the price owner resolves each entry.",
+          ],
+          switch: "The app switch row on its digest tab, off until a person turns it on.",
+        },
+        trust: {
+          summary: "Planned: a read-only observer of the legal deadlines on personal-data requests, showing how many are overdue or due soon.",
+          does: [
+            "As planned, a scheduled service counts overdue and imminent privacy requests from a handful of fields, with legal holds counted apart and nothing stored per request.",
+            "Its policy is approved; its code is not in this build yet.",
+          ],
+          never: [
+            "No LLM, and no message to anyone.",
+            "Never writes privacy requests or accounts, gives no legal verdict and does no moderation.",
+          ],
+          human: [
+            "Completing or rejecting a request, legal holds and due dates stay with people.",
+          ],
+          switch: "Not built yet, so there is nothing to switch on.",
+        },
+        research: {
+          summary: "Once a day it copies the issue-backlog report's verdicts on each open GitHub issue into a row the owner reads. It decides nothing.",
+          does: [
+            "Every day at 07:30 AEST (21:30 UTC) it reads the open issues read-only and runs the issue-backlog report for develop and main separately.",
+            "It stores one insert-only row per daily slot, kept 90 days.",
+            "An alarm is raised after 26 hours without a success.",
+          ],
+          never: [
+            "No LLM. Never writes to GitHub, and has no recommendation, ranking or priority.",
+            "Never stores issue bodies, authors or labels; too many issues fails the run rather than storing part of them.",
+          ],
+          human: [
+            "Turns it on or off and reads its screen; there is nothing to approve.",
+          ],
+          switch: "PRODUCT_RESEARCH_AGENT_ENABLED, on its service and in the app, both off by default.",
+        },
+        digest: {
+          summary: "The shared store and screen where the agents' digests land: a place digests are read, not an agent.",
+          does: [
+            "It takes digests from QA and release, billing and finance ops, and Ops and SRE, each through its sender's own route.",
+            "One writer checks the sender, kind and key, a size limit and a secret scan, and stores the digest with its audit entry in one transaction; a repeat is a replay, never a second row.",
+            "Maintenance clears bodies after 90 days and the rows after 365.",
+          ],
+          never: [
+            "Never edits a digest, and refuses anything that looks like a credential.",
+            "The office shows only counts and times, never a digest's content.",
+          ],
+          human: [
+            "Reads the digests, and records each sender's switch where it has one.",
+          ],
+          switch: "No switch of its own: each sender's switch decides whether anything arrives.",
+        },
+        amux: {
+          summary: "Coding-agent workers that take approved, promoted cards and work up to a pull request; the operator judges the result.",
+          does: [
+            "The orchestrator assigns an unowned card to a worker, and a worker holds one open card at a time.",
+            "The runner's bridge sends the approved brief to that worker's session; the worker opens a develop pull request, and the card settles to review or blocked.",
+            "Assignment reads the worker catalog and each worker's runtime lease and heartbeat.",
+            "Every CLI call is logged to a usage ledger, where a missing figure is unknown, never zero.",
+          ],
+          never: [
+            "Cannot mark a card done: only the operator moves review to done.",
+            "Workers hold no GitHub write, deploy or product database credentials; merging to main and deploying are the operator's.",
+            "An unknown result is never retried.",
+          ],
+          human: [
+            "Approves cards and their briefs, and judges each card in review: done, rework or stop. The owner clears halts.",
+          ],
+          switch: "The app's worker catalog: a worker the operator pauses, isolates or blocks gets no card.",
+        },
+        review: {
+          summary: "An independent review server: when a coding app finishes and asks for review, it runs a reviewer from a different model vendor and returns accept, reject or unknown.",
+          does: [
+            "A submitted change gets a reviewer whose vendor differs from the author's, picked by priority, load and quota, and two from different vendors when contract paths change.",
+            "Code decides the verdict from the reviewer's findings: a blocker or major finding rejects, and any reject wins.",
+            "Jobs and reviewer text stay on the server and are deleted after 30 days.",
+            "A separate sender posts a content-free status about once a minute, which is what this room shows.",
+          ],
+          never: [
+            "Never posts anywhere, comments on or merges a pull request, or writes the app's database.",
+            "Never resends a review that ended unknown, and its status names no job, author, branch, diff or finding.",
+          ],
+          human: [
+            "Decides what to do after an unknown, can name a reviewer, and looks after the server.",
+          ],
+          switch: "It runs on its own server; this room reads its status report.",
+        },
+        decision: {
+          summary: "Two model instances (OpenAI and Anthropic) that draft answers to AMUX workers' questions; in v1 the operator confirms, edits or rejects every draft.",
+          does: [
+            "Fixed code with no LLM routes each question either to the operator or to a Decision Maker for a proposal.",
+            "A question goes to the operator when a switch is off, its type is not allowed, it touches an irreversible action, secrets, permissions or contacting someone, the asking provider is unverified, a rate limit is exceeded, or the card fails its size or secret check.",
+            "Each instance answers the other vendor's workers; its output (a choice, free text or escalate) is schema-checked and kept in an append-only ledger.",
+          ],
+          never: [
+            "Nothing reaches a worker before the operator confirms it: there are no autonomous answers in v1.",
+            "Never counts as a person at an approval, merge or deploy gate, and cannot change its own rules.",
+          ],
+          human: [
+            "Confirms, edits or rejects proposals, sets the instance switches and the kill switch, and releases latches.",
+          ],
+          switch: "A switch per instance (off · proposal) and a kill switch, all off by default.",
+        },
+      },
     },
     profile: {
       windowTitle: "👤 agent_profile.exe",
@@ -665,13 +884,13 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       support: {
         name: "고객지원 분류팀",
-        task: "신고별 우선순위·lane 제안, 답변 초안",
+        task: "신고별 lane 제안, 관련 신고 묶기",
         blockReason:
           "고객지원 분류팀은 아직 콘솔에 기록 화면이 없어서 오피스가 읽을 게 없어요. 상태를 지어내지 않고 기다립니다.",
       },
       marketing: {
         name: "마케팅팀",
-        task: "게시 초안, Guard 검사, 주간 KPI 브리프",
+        task: "승인된 게시물 게시, Guard 검사",
         blockReason: "마케팅팀은 기록 화면 연결을 기다리고 있어요.",
       },
       finance: {
@@ -693,7 +912,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       },
       digest: {
         name: "다이제스트실",
-        task: "팀별 digest 취합, 운영자 브리핑",
+        task: "팀별 digest 보관·집계",
         blockReason: "다이제스트실은 기록 화면 연결을 기다리고 있어요.",
       },
     },
@@ -907,6 +1126,225 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       inputLabel: "운영자 지시 입력",
       send: "지시",
       ask: (name: string) => `${name} 지금 뭐해?`,
+    },
+    teamInfo: {
+      windowTitle: "🏢 team_info.md",
+      dialogLabel: (name: string) => `${name}이(가) 하는 일`,
+      open: (name: string) => `${name} 설명 열기`,
+      does: "하는 일",
+      never: "하지 않는 일",
+      human: "사람이 하는 일",
+      switch: "켜는 방법",
+      now: "지금 상태",
+      notLive: "오피스가 이 방을 아직 실시간으로 읽지 않아요.",
+      record: "기록 화면 열기 →",
+      noRecord: "콘솔에 기록 화면이 없어요",
+      policy: "정책 문서",
+      basis: "코드와 정책 문서를 바탕으로 썼어요. ‘지금 상태’는 오피스가 이 방에서 읽은 것이에요.",
+      close: "닫기",
+      teams: {
+        engineering: {
+          summary: "운영자가 승격한 AMUX 카드를 코드 변경으로 만들고, 판단은 모두 운영자에게 남깁니다.",
+          does: [
+            "Runner(production, 30분마다)가 승격된 카드 하나로 패치 초안을 만듭니다. Anthropic 모델을 쓰고, 모델이 쓸 수 있는 도구는 추적 중인 파일 읽기 하나뿐입니다.",
+            "tier는 모델이 아니라 앱이 바뀐 파일 목록으로 정합니다. T2 결과는 앱 안의 비공개 초안이 되고, T1 결과는 Publisher(10분마다)가 develop 대상 PR로 엽니다.",
+            "제품 backlog 문서, 실패한 develop CI, 실패한 dependabot PR에서 AMUX backlog 카드를 일일 한도 안에서 등록합니다.",
+          ],
+          never: [
+            "어떤 PR도 병합·승인하지 않고 auto-merge를 켜지 않습니다.",
+            "main에 쓰거나 배포하거나 release를 열지 않습니다.",
+            "자기 카드를 승격하지 않고, 앱은 패치를 적용하거나 실행하지 않습니다.",
+          ],
+          human: [
+            "AMUX에서 카드를 승격하고, T2 초안을 판단하고, PR을 GitHub에서 검토·병합합니다.",
+            "halt를 확인하고 모드를 정합니다.",
+          ],
+          switch: "AppSetting feature.engineeringAgentMode(off · shadow · t1). 없거나 못 읽으면 off이고, ENGINEERING_AGENT_KILL_SWITCH가 있으면 off로 고정됩니다.",
+        },
+        qa: {
+          summary: "규칙 기반 QA·릴리스 Agent입니다. 매일 릴리스 준비 digest를 쓰고, CI 실패를 분류하고, develop 전용 병합 lane을 돌립니다.",
+          does: [
+            "매일 07:00 AEST(21:00 UTC)에 릴리스 게이트 증거·이슈 backlog 보고서, 정적 검사, Actions job 결과를 읽어 digest 하나를 저장합니다. 숫자·코드·이슈 번호·SHA만 담습니다.",
+            "CI 실패를 infra·미결정·flaky 의심·연속 재현으로 나누고, 재실행 제안은 최대 두 개입니다.",
+            "모니터가 30분마다 확인해 28시간 넘게 새 digest가 없으면 stale로 봅니다.",
+            "병합 lane(production, 10분마다)은 앱이 head를 고정해 내린 지시로만 가장 오래된 develop PR을 하나씩 병합합니다. 결과를 모르거나 실패하면 latch로 멈춥니다.",
+          ],
+          never: [
+            "LLM을 쓰지 않습니다. main 병합, auto-merge, workflow 재실행·dispatch를 하지 않습니다.",
+            "GitHub 이슈·label·댓글·check를 쓰지 않고, release가 준비됐다고 말하지 않습니다.",
+          ],
+          human: [
+            "제어 revision을 기록하고, 걸린 병합 lane latch를 풉니다(owner·ops, 최근 로그인).",
+            "main과 제외된 PR은 GitHub에서 사람이 병합합니다.",
+          ],
+          switch: "서비스의 QA_RELEASE_DIGEST_ENABLED와, digest를 켠 운영자 제어 revision.",
+        },
+        sre: {
+          summary: "production의 조용한 고장을 지켜봅니다. 급한 것은 owner에게 page하고 나머지는 하루 한 번 digest로 모읍니다. 알리기만 하고 고치지 않습니다.",
+          does: [
+            "10분마다 앱의 snapshot(준비 상태 검사, 예약 작업, provider 예산)을 읽습니다. page key는 3번 연속 실패하면 열리고 2번 정상이면 회복합니다.",
+            "매일 07:00 AEST(21:00 UTC)에 나머지 준비 상태 검사를 digest로 제출합니다.",
+            "상태가 바뀔 때마다 해시 체인 감사 기록에 남고, 알림은 고정 문장과 Admin 링크 하나뿐입니다.",
+            "heartbeat가 끊기면 별도 dead-man 모니터가 알립니다.",
+          ],
+          never: [
+            "LLM을 쓰지 않습니다. 재시작·재배포·환경변수·예산·flag 변경 같은 자동 복구를 하지 않습니다.",
+            "GitHub에 쓰지 않고 제품 DB 자격증명도 없으며, 결과를 모르면 재시도하지 않습니다.",
+          ],
+          human: [
+            "단계(shadow, 그다음 live)를 승인하고, 모든 수리를 결정합니다.",
+          ],
+          switch: "서비스의 OPS_OBSERVER_ENABLED와, 기록 화면에서 owner가 승인한 단계.",
+        },
+        support: {
+          summary: "들어온 사용자 신고마다 lane과 함께 볼 신고 묶음을 고정 규칙으로 제안해, 무엇부터 볼지 알려 줍니다.",
+          does: [
+            "30분마다 open·reviewing 상태 신고를 최대 50건 읽습니다(삭제된 계정 제외).",
+            "lane 여섯 개 중 하나를 제안합니다: 확인된 버그, 미확인 버그, 결제(사람), 신뢰·안전(사람), 기능 요청, 기타. 돈 문제는 결제로, 개인정보·보안·법률·자해는 신뢰·안전으로 갑니다.",
+            "관련된 신고를 묶고, 제안·묶음·실행 기록을 각각 감사 기록과 함께 저장합니다.",
+            "보존 작업이 30분마다 기한이 지난 분류 데이터를 지웁니다.",
+          ],
+          never: [
+            "LLM을 쓰지 않고, 신고 내용은 앱 밖으로 나가지 않습니다.",
+            "메일을 보내거나, 신고 상태·답변을 바꾸거나, 자동 수정 사례를 만들거나, 크레딧·환불을 약속하지 않습니다.",
+          ],
+          human: [
+            "제안을 받아들이거나 버리고, 묶음을 확인하고, 답변은 사람이 보냅니다.",
+          ],
+          switch: "SUPPORT_TRIAGE_ENABLED가 정확히 \"true\"여야 합니다. 아니면 실행해도 아무것도 쓰지 않습니다.",
+        },
+        marketing: {
+          summary: "승인된 소셜 게시물을 결정적 Guard를 거쳐 브랜드 계정에 게시합니다. 무엇이 공개될지는 사람이 정합니다.",
+          does: [
+            "게시기(5분마다)가 게시 모드 계정마다 상태를 확인하고, 시간이 된 승인 게시물 하나를 잡아 게시 호출을 정확히 한 번 한 뒤 게시됨·실패·결과 불명을 기록합니다.",
+            "Guard는 입력 위생, 사실(가격은 저장된 값만), 승인된 링크·자산을 검사하고, 애매한 표현은 사람에게 표시합니다.",
+            "게시된 글은 실제로 올라갔는지 확인될 때까지 조회합니다.",
+          ],
+          never: [
+            "답글, DM, 팔로우, 좋아요, 광고, 공유, 스크래핑을 하지 않습니다.",
+            "Instagram·TikTok은 자율 모드가 되지 않고, 결과 불명은 재시도하지 않고 계정을 멈춥니다.",
+            "게시기는 DB·플랫폼·LLM 자격증명을 갖지 않습니다.",
+          ],
+          human: [
+            "게시물을 승인·수정·거절·예약하고, 계정을 멈추거나 재개하고, 결과 불명을 정리합니다(owner·ops).",
+          ],
+          switch: "스위치는 \"true\"로 켜기 전까지 꺼져 있고, 자율 게시는 코드에서 꺼져 있습니다.",
+        },
+        finance: {
+          summary: "매일 검증이 안 된 모델 가격마다 검증 기한까지 며칠 남았는지 계산해 운영자를 위해 기록합니다.",
+          does: [
+            "매일 11:00 AEST(01:00 UTC)에 환경마다, 앱이 배포한 코드의 가격 검증 대기 목록을 읽습니다.",
+            "남은 일수, 표시(30·14·7·1일, 만료), 목록의 문제, 판정을 digest 하나로 기록합니다.",
+            "dead-man 모니터와 유지보수 점검이 침묵을 알아챕니다.",
+          ],
+          never: [
+            "가격·크레딧·목록을 고치거나 가격 변경 초안을 만들지 않습니다.",
+            "LLM도 유료 외부 API도 쓰지 않고, DB·GitHub·결제 자격증명이 없습니다.",
+          ],
+          human: [
+            "스위치를 켜고 끕니다(ops, 최근 로그인, 7일 안에 모니터 확인). 가격 담당자가 각 항목을 해결합니다.",
+          ],
+          switch: "digest 탭의 앱 스위치 행. 사람이 켜기 전까지 꺼져 있습니다.",
+        },
+        trust: {
+          summary: "계획 단계입니다. 개인정보 요청의 법정 기한을 읽기만 하는 관측자로, 기한이 지났거나 임박한 요청 수를 보여 줍니다.",
+          does: [
+            "계획대로라면 예약 서비스가 몇 개 필드만 읽어 기한 초과·임박 요청을 세고, legal hold는 따로 세며, 요청별로는 아무것도 저장하지 않습니다.",
+            "정책은 승인됐지만, 이 빌드에는 아직 코드가 없습니다.",
+          ],
+          never: [
+            "LLM을 쓰지 않고, 누구에게도 메시지를 보내지 않습니다.",
+            "개인정보 요청이나 계정을 쓰지 않고, 법적 판정이나 moderation을 하지 않습니다.",
+          ],
+          human: [
+            "요청 완료·거절, legal hold, 기한 변경은 사람이 합니다.",
+          ],
+          switch: "아직 만들어지지 않아 켤 것이 없습니다.",
+        },
+        research: {
+          summary: "하루 한 번, 열린 GitHub 이슈마다 이슈 backlog 보고서의 판정을 owner가 읽을 행으로 옮겨 적습니다. 아무것도 결정하지 않습니다.",
+          does: [
+            "매일 07:30 AEST(21:30 UTC)에 열린 이슈를 읽기 전용으로 읽고, develop과 main 각각에 대해 이슈 backlog 보고서를 돌립니다.",
+            "하루 slot마다 추가만 되는 행 하나를 저장하고 90일 보관합니다.",
+            "26시간 동안 성공이 없으면 알림이 납니다.",
+          ],
+          never: [
+            "LLM을 쓰지 않습니다. GitHub에 쓰지 않고, 추천·순위·우선순위가 없습니다.",
+            "이슈 본문·작성자·label을 저장하지 않고, 이슈가 너무 많으면 일부만 저장하지 않고 실행을 실패시킵니다.",
+          ],
+          human: [
+            "켜고 끄고 화면을 읽습니다. 승인할 것은 없습니다.",
+          ],
+          switch: "서비스와 앱 양쪽의 PRODUCT_RESEARCH_AGENT_ENABLED. 둘 다 기본은 꺼짐입니다.",
+        },
+        digest: {
+          summary: "Agent들의 digest가 모이는 공용 저장소이자 화면입니다. Agent가 아니라 digest를 읽는 곳입니다.",
+          does: [
+            "QA·릴리스, 결제·재무 운영, 운영·SRE의 digest를 각 발신자의 route로 받습니다.",
+            "하나뿐인 writer가 발신자·종류·key, 크기 한도, 비밀값 검사를 확인하고 digest와 감사 기록을 한 트랜잭션에 저장합니다. 같은 것이 다시 오면 새 행이 아니라 재생입니다.",
+            "유지보수가 90일 뒤 본문을, 365일 뒤 행을 지웁니다.",
+          ],
+          never: [
+            "digest를 고치지 않고, 자격증명처럼 보이는 것은 받지 않습니다.",
+            "오피스에는 개수와 시각만 보이고 digest 내용은 보이지 않습니다.",
+          ],
+          human: [
+            "digest를 읽고, 스위치가 있는 발신자는 그 스위치를 기록합니다.",
+          ],
+          switch: "자기 스위치는 없습니다. 각 발신자의 스위치가 무엇이 들어올지 정합니다.",
+        },
+        amux: {
+          summary: "승인·승격된 카드를 받아 PR까지 작업하는 코딩 Agent worker들입니다. 결과 판단은 운영자가 합니다.",
+          does: [
+            "orchestrator가 주인 없는 카드를 worker에게 배정하고, worker는 한 번에 열린 카드 하나만 가집니다.",
+            "runner의 bridge가 승인된 brief를 그 worker의 세션에 보내고, worker가 develop PR을 열면 카드는 review 또는 blocked로 정리됩니다.",
+            "배정은 worker catalog와 각 worker의 runtime lease·heartbeat를 읽습니다.",
+            "CLI 호출은 모두 사용량 원장에 남고, 없는 값은 0이 아니라 '모름'으로 남습니다.",
+          ],
+          never: [
+            "카드를 done으로 바꿀 수 없습니다. review → done은 운영자만 합니다.",
+            "worker에게 GitHub 쓰기·배포·제품 DB 자격증명이 없습니다. main 병합과 배포는 운영자 몫입니다.",
+            "결과를 모르면 재시도하지 않습니다.",
+          ],
+          human: [
+            "카드와 brief를 승인하고, review 카드를 판단합니다(done·재작업·중단). halt는 owner가 풉니다.",
+          ],
+          switch: "앱의 worker catalog. 운영자가 멈추거나 격리하거나 막은 worker는 카드를 받지 않습니다.",
+        },
+        review: {
+          summary: "독립 검토 서버입니다. 코딩 앱이 작업을 마치고 검토를 요청하면, 작성자와 다른 모델 공급사의 reviewer를 돌려 accept·reject·unknown을 돌려줍니다.",
+          does: [
+            "제출된 변경에는 작성자와 공급사가 다른 reviewer를 우선순위·부하·남은 사용량으로 고르고, 계약 경로가 바뀌면 서로 다른 공급사 두 명을 붙입니다.",
+            "판정은 코드가 reviewer의 지적으로 정합니다. blocker·major가 있으면 reject이고, reject가 하나라도 있으면 reject입니다.",
+            "job과 reviewer 문장은 서버에만 남고 30일 뒤 지워집니다.",
+            "별도 sender가 약 1분마다 내용 없는 상태를 보내고, 이 방은 그것을 보여 줍니다.",
+          ],
+          never: [
+            "어디에도 게시하지 않고, PR에 댓글을 달거나 병합하지 않으며, 앱 DB에 쓰지 않습니다.",
+            "unknown으로 끝난 검토를 다시 보내지 않고, 상태 보고에는 job·작성자·브랜치·diff·지적이 없습니다.",
+          ],
+          human: [
+            "unknown 뒤에 무엇을 할지 정하고, reviewer를 지정할 수 있으며, 서버를 관리합니다.",
+          ],
+          switch: "자기 서버에서 돌고, 이 방은 그 상태 보고를 읽습니다.",
+        },
+        decision: {
+          summary: "AMUX worker의 질문에 답 초안을 쓰는 두 모델 인스턴스(OpenAI·Anthropic)입니다. v1에서는 모든 초안을 운영자가 확정·수정·거절합니다.",
+          does: [
+            "LLM 없는 고정 코드가 질문마다 운영자에게 보낼지, Decision Maker에게 제안을 받을지 정합니다.",
+            "스위치가 꺼졌거나, 허용되지 않은 질문 종류이거나, 되돌릴 수 없는 일·비밀값·권한·외부 연락이 걸렸거나, 묻는 공급사가 검증되지 않았거나, 한도를 넘었거나, 카드가 크기·비밀값 검사에 걸리면 운영자에게 갑니다.",
+            "각 인스턴스는 다른 공급사의 worker에게 답하고, 출력(선택·자유 답·이관)은 schema 검사를 거쳐 추가만 되는 원장에 남습니다.",
+          ],
+          never: [
+            "운영자가 확정하기 전에는 아무것도 worker에게 가지 않습니다. v1에 자율 답은 없습니다.",
+            "승인·병합·배포 게이트에서 사람으로 인정되지 않고, 자기 규칙을 바꿀 수 없습니다.",
+          ],
+          human: [
+            "제안을 확정·수정·거절하고, 인스턴스 스위치와 kill switch를 정하고, latch를 풉니다.",
+          ],
+          switch: "인스턴스별 스위치(off · proposal)와 kill switch. 모두 기본은 꺼짐입니다.",
+        },
+      },
     },
     profile: {
       windowTitle: "👤 agent_profile.exe",

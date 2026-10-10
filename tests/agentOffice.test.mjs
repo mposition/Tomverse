@@ -16,6 +16,7 @@ import {
   AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DECLARED_RECORD_HREFS,
   AGENT_OFFICE_DIGEST_SENDERS,
+  AGENT_OFFICE_ROOM_POLICIES,
   AGENT_OFFICE_WORKER_COLORS,
   AGENT_OFFICE_WORKER_SKINS,
   agentOfficeSeatedClothes,
@@ -212,9 +213,9 @@ test("the office's two sections are addresses, not component state", () => {
   assert.match(panel, /<Link\s+href=\{viewHref\("live"\)\}/);
   assert.match(panel, /<Link\s+href=\{viewHref\("dashboard"\)\}/);
   assert.doesNotMatch(panel, /useState<View>/);
-  // Every dialog keeps the shared focus contract: profile and seated profile.
+  // Every dialog keeps the shared focus contract: profile, seated profile and team.
   const dialogs = (panel.match(/role="dialog"/g) || []).length;
-  assert.equal(dialogs, 2);
+  assert.equal(dialogs, 3);
   assert.equal((panel.match(/useOfficeDialog\(onClose,/g) || []).length, dialogs);
 });
 
@@ -1583,7 +1584,7 @@ test("a seated figure opens a profile read from its room's record, dressed as it
   // the minute refresh, and it offers nothing an engine agent's does: no task,
   // no line, no "ask".
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
-  const modal = panel.slice(panel.indexOf("function SeatedProfileModal"), panel.indexOf("function liveRowsFor"));
+  const modal = panel.slice(panel.indexOf("function SeatedProfileModal"), panel.indexOf("function TeamInfoModal"));
   assert.match(
     modal,
     /seated\.room === "amux" \? amuxView\.workers : seated\.room === "review" \? reviewView\.reviewers : decisionView\.members/
@@ -2090,4 +2091,47 @@ test("the staff count is everyone the office draws, and says so when a room coul
   office.command("Status?");
   assert.match(office.chat.at(-1).text, /46 on duty/);
   assert.equal(adminAgentOfficeMessages.ko.dashboard.staffParts("26", "14", "?", "2"), "팀 26 · AMUX 14 · 검토 ? · DM 2");
+});
+
+test("a room's name opens what its team does, written from its code and policy", () => {
+  const ids = [...AGENT_OFFICE_DEPT_IDS, "amux", "review", "decision"].sort();
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale].teamInfo;
+    assert.deepEqual(Object.keys(copy.teams).sort(), ids, locale);
+    for (const [id, team] of Object.entries(copy.teams)) {
+      assert.ok(team.summary && team.switch, `${locale}.${id}`);
+      for (const list of ["does", "never", "human"]) assert.ok(team[list].length > 0, `${locale}.${id}.${list}`);
+      // Times are the operator's own: a UTC time is always given beside its AEST one.
+      for (const line of [team.summary, ...team.does, team.switch]) {
+        if (/UTC/.test(line)) assert.match(line, /\d\d:\d\d AEST ?\(\d\d:\d\d UTC\)/, `${locale}.${id}: ${line}`);
+      }
+    }
+  }
+  // Both languages say the same number of things about each team.
+  const { en, ko } = adminAgentOfficeMessages;
+  for (const id of ids) {
+    for (const list of ["does", "never", "human"]) {
+      assert.equal(en.teamInfo.teams[id][list].length, ko.teamInfo.teams[id][list].length, `${id}.${list}`);
+    }
+  }
+  // Every document the window names is in this repository.
+  for (const dept of AGENT_OFFICE_DEPTS) if (dept.policy) assert.ok(existsSync(dept.policy), dept.policy);
+  for (const path of Object.values(AGENT_OFFICE_ROOM_POLICIES)) assert.ok(existsSync(path), path);
+  // The team lines no longer promise what the code does not do.
+  assert.doesNotMatch(en.depts.support.task, /reply draft/);
+  assert.doesNotMatch(en.depts.marketing.task, /KPI/);
+
+  // The floor: every room but the operator's names itself with a button.
+  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  assert.match(world, /room\.kind === "operator" \? \(/);
+  assert.match(world, /if \(!dragRef\.current\.moved\) onSelectTeam\(room\.id as AgentOfficeTeamId\);/);
+  assert.match(world, /aria-label=\{m\.teamInfo\.open\(name\)\}/);
+  // The dashboard's team cards open the same window.
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /onClick=\{\(\) => onSelectTeam\(team\.id as AgentOfficeTeamId\)\}/);
+  const modal = panel.slice(panel.indexOf("function TeamInfoModal"), panel.indexOf("function liveRowsFor"));
+  assert.match(modal, /useOfficeDialog\(onClose, closeRef\)/);
+  assert.match(modal, /m\.teamInfo\.teams\[team\]/);
+  // Read only: it links and names, and decides nothing.
+  assert.doesNotMatch(modal, /fetch\(|method: "POST"|engine\.command|onApprove/);
 });

@@ -19,6 +19,7 @@ import {
   agentOfficeDept,
   agentOfficeSeatedClothes,
   type AgentOfficeSeatedRoom,
+  type AgentOfficeTeamId,
 } from "@/lib/agentOffice/roster";
 import type { Agent, AgentOffice, Snapshot } from "@/lib/agentOffice/sim";
 import {
@@ -49,6 +50,8 @@ type Props = {
   onSelect: (agent: Agent) => void;
   /** A seated figure was clicked: its profile is read from the room's record by name. */
   onSelectSeated: (room: AgentOfficeSeatedRoom, name: string) => void;
+  /** A room's name was clicked: what its team does. */
+  onSelectTeam: (team: AgentOfficeTeamId) => void;
 };
 
 type Cam = { x: number; y: number; scale: number };
@@ -242,6 +245,7 @@ export default function AgentOfficeWorld({
   follow,
   onSelect,
   onSelectSeated,
+  onSelectTeam,
 }: Props) {
   const m = useAdminMessages(adminAgentOfficeMessages);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -417,7 +421,8 @@ export default function AgentOfficeWorld({
                 : liveDept
                   ? (agentOfficeDept(room.id)?.recordHref ?? null)
                   : null;
-            const recordLabel = isAmux ? m.rooms.amuxRecord : isDecision ? m.rooms.decisionRecord : m.rooms.recordOf(roomName(room.id));
+            const name = isAmux ? m.rooms.amux : isReview ? m.rooms.review : isDecision ? m.rooms.decision : roomName(room.id);
+            const recordLabel = isAmux ? m.rooms.amuxRecord : isDecision ? m.rooms.decisionRecord : m.rooms.recordOf(name);
             const recordTitle = real ? real.summary : (liveDept?.line ?? "");
             const status = real ? real.status : snap.deptStatus[room.id];
             return (
@@ -432,10 +437,24 @@ export default function AgentOfficeWorld({
                 }}
               >
                 <span className={cx("rm-head")}>
-                  <b>
-                    {room.icon}{" "}
-                    {isAmux ? m.rooms.amux : isReview ? m.rooms.review : isDecision ? m.rooms.decision : roomName(room.id)}
-                  </b>
+                  {room.kind === "operator" ? (
+                    <b>
+                      {room.icon} {m.rooms.operator}
+                    </b>
+                  ) : (
+                    <button
+                      type="button"
+                      className={cx("rm-name")}
+                      onClick={() => {
+                        if (!dragRef.current.moved) onSelectTeam(room.id as AgentOfficeTeamId);
+                      }}
+                      aria-haspopup="dialog"
+                      aria-label={m.teamInfo.open(name)}
+                      data-testid={`agent-office-${room.id}-name`}
+                    >
+                      {room.icon} {name}
+                    </button>
+                  )}
                   {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
                     <i

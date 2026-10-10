@@ -637,6 +637,18 @@ a.integration-row:hover { border-color: var(--accent); }
 .rm-operator { background: var(--room-operator); }
 .rm-decision { background: var(--room-decision); }
 .rm-link { flex: none; color: var(--accent); font-weight: 900; text-decoration: none; }
+/* A room's name opens what its team does. */
+.rm-name { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.rm-name:hover, .rm-name:focus-visible { color: var(--accent-text); }
+.team-info { width: min(560px, 100%); }
+.team-info-body { max-height: min(78vh, 760px); overflow-y: auto; }
+.team-info-summary { margin: 6px 0 12px; color: var(--text-soft); font-size: 13px; line-height: 1.7; }
+.team-info-section { margin: 12px 0 0; }
+.team-info-section h3 { margin: 0 0 4px; font-size: 12px; font-weight: 800; color: var(--accent-text); }
+.team-info-section ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.65; }
+.team-info-section p { margin: 0; font-size: 12px; line-height: 1.6; }
+.team-info .profile-record { margin-top: 14px; }
+.team-info-basis { margin: 0 0 12px; color: var(--text-faint); font-size: 11px; line-height: 1.6; }
 .rm-link:hover, .rm-link:focus-visible { text-decoration: underline; }
 .rm-note {
   position: absolute;
