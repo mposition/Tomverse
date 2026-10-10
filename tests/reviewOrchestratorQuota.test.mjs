@@ -200,7 +200,28 @@ test("Claude usage is paced: a good reading lasts five minutes, a 429 backs off,
   const fresh = new Map();
   const failing = async () => ({ quota: { state: "unknown" }, status: 500, retryAfterSeconds: null });
   assert.deepEqual(await pacedClaudeQuota(provider, { now: 0, read: failing, pacing: fresh }), { state: "unknown" });
-  assert.equal(fresh.get("claude").retryAt, MIN);
+  assert.equal(fresh.get("claude:credentials-file").retryAt, MIN);
+
+  // Four other failures do not climb the 429 ladder: the first 429 still waits two minutes.
+  const mixed = new Map();
+  let status = 500;
+  const flaky = async () => ({ quota: { state: "unknown" }, status, retryAfterSeconds: null });
+  for (let i = 0; i < 4; i += 1) await pacedClaudeQuota(provider, { now: i * MIN, read: flaky, pacing: mixed });
+  status = 429;
+  await pacedClaudeQuota(provider, { now: 4 * MIN, read: flaky, pacing: mixed });
+  assert.equal(mixed.get("claude:credentials-file").retryAt, 4 * MIN + 2 * MIN);
+
+  // Two providers on the same login share one pacing record, so one account is read once.
+  const shared = new Map();
+  const counted = [];
+  const once = async (_p, { now }) => (counted.push(now), { quota: good, status: 200, retryAfterSeconds: null });
+  await pacedClaudeQuota({ id: "claude", quotaProbe: "claude" }, { now: 0, read: once, pacing: shared });
+  await pacedClaudeQuota({ id: "claude-opus", quotaProbe: "claude" }, { now: 1, read: once, pacing: shared });
+  assert.equal(counted.length, 1);
+  // A provider on its own env token is a different credential, read on its own.
+  await pacedClaudeQuota({ id: "claude-token", quotaProbe: "claude", passEnv: ["CLAUDE_CODE_OAUTH_TOKEN"] },
+    { now: 2, read: once, pacing: shared });
+  assert.equal(counted.length, 2);
 
   // One read: the status and Retry-After come back; no token, no request.
   const requests = [];
@@ -219,4 +240,14 @@ test("Claude usage is paced: a good reading lasts five minutes, a 429 backs off,
   const ok = async () => new Response(JSON.stringify({ five_hour: { utilization: 30 }, seven_day: { utilization: 55 } }));
   assert.deepEqual((await readClaudeUsage({}, { fetchUsage: ok, readCredentials: creds, now: 1 })).quota,
     { state: "available", remainingPercent: 45 });
+});
+
+test("Retry-After is read as seconds or as an HTTP date", async () => {
+  const { retryAfterSecondsFrom } = await import("../tools/review-orchestrator/lib/quota.mjs");
+  const now = Date.parse("2026-10-10T01:00:00Z");
+  assert.equal(retryAfterSecondsFrom("120", now), 120);
+  assert.equal(retryAfterSecondsFrom(" 600 ", now), 600);
+  assert.equal(retryAfterSecondsFrom("Sat, 10 Oct 2026 01:20:00 GMT", now), 1200);
+  assert.equal(retryAfterSecondsFrom("Sat, 10 Oct 2026 00:50:00 GMT", now), null, "a date in the past asks for no wait");
+  for (const none of [null, undefined, "", "0", "soon", "-5"]) assert.equal(retryAfterSecondsFrom(none, now), null, String(none));
 });

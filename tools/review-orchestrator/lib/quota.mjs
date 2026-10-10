@@ -92,8 +92,7 @@ export async function readClaudeUsage(provider, {
       },
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    const retryAfter = Number(response.headers?.get?.("retry-after"));
-    const retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
+    const retryAfterSeconds = retryAfterSecondsFrom(response.headers?.get?.("retry-after"), now);
     if (!response.ok) {
       await response.body?.cancel?.().catch(() => undefined);
       return { quota: unknown, status: response.status, retryAfterSeconds };
@@ -102,6 +101,17 @@ export async function readClaudeUsage(provider, {
   } catch {
     return { quota: unknown, status: null, retryAfterSeconds: null };
   }
+}
+
+/** Retry-After as seconds: a delay in seconds or an HTTP date (RFC 9110); null when absent or past. */
+export function retryAfterSecondsFrom(header, now = Date.now()) {
+  if (typeof header !== "string" || header.trim() === "") return null;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) > 0 ? Number(value) : null;
+  const at = Date.parse(value);
+  if (!Number.isFinite(at)) return null;
+  const seconds = Math.ceil((at - now) / 1000);
+  return seconds > 0 ? seconds : null;
 }
 
 // The Claude usage endpoint rate-limits hard (HTTP 429), and AMUX reads the
@@ -122,22 +132,28 @@ const claudePacing = new Map();
  * record, in memory for the daemon's lifetime.
  */
 export async function pacedClaudeQuota(provider, { now = Date.now(), read = readClaudeUsage, pacing = claudePacing } = {}) {
-  const entry = pacing.get(provider.id) ?? { retryAt: 0, failures: 0, lastGood: null };
-  pacing.set(provider.id, entry);
+  // Paced per credential, not per provider: two providers on the same login
+  // share one account's rate limit, and must not each spend it.
+  const key = provider.passEnv?.includes("CLAUDE_CODE_OAUTH_TOKEN") ? "claude:env-token" : "claude:credentials-file";
+  const entry = pacing.get(key) ?? { retryAt: 0, rateLimited: 0, lastGood: null };
+  pacing.set(key, entry);
   const lastKnown = () =>
     entry.lastGood && now - entry.lastGood.at <= CLAUDE_LAST_KNOWN_MAX_MS ? entry.lastGood.quota : unknown;
   if (now < entry.retryAt) return lastKnown();
   const { quota, status, retryAfterSeconds } = await read(provider, { now });
   if (quota.state !== "unknown") {
     entry.lastGood = { quota, at: now };
-    entry.failures = 0;
+    entry.rateLimited = 0;
     entry.retryAt = now + CLAUDE_REFRESH_MS;
     return quota;
   }
-  entry.failures += 1;
-  const delay = status === 429
-    ? Math.min(CLAUDE_BACKOFF_BASE_MS * 2 ** Math.min(entry.failures - 1, 10), CLAUDE_BACKOFF_MAX_MS)
-    : 60_000;
+  // Only 429s climb the backoff; any other failure retries after a minute and
+  // leaves the 429 count where it was.
+  let delay = 60_000;
+  if (status === 429) {
+    entry.rateLimited += 1;
+    delay = Math.min(CLAUDE_BACKOFF_BASE_MS * 2 ** Math.min(entry.rateLimited - 1, 10), CLAUDE_BACKOFF_MAX_MS);
+  }
   entry.retryAt = now + Math.max(delay, (retryAfterSeconds ?? 0) * 1000);
   return lastKnown();
 }
