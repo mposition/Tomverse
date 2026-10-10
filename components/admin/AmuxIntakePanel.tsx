@@ -7,7 +7,8 @@ import { adminAmuxIntakeMessages } from "@/lib/adminMessages/amuxIntake";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminFetch } from "@/lib/adminFetch";
 
-const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=intake");
+// Retained for legacy API contract coverage, not mounted in the Admin console.
+const STEP_UP_HREF = adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas");
 
 type IntakeBody = {
   outcome?: string;

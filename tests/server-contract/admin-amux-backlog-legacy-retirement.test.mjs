@@ -82,6 +82,32 @@ test("old intake tab redirects before panel reads and preserves recovery and fil
     "/admin/amux-backlog?tab=ideas&analysisHoldId=hold-a&sourceKey=source-a");
 });
 
+test("the redirected Ideas page still renders recovery for the exact preserved hold", async () => {
+  const prior = process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
+  process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = "enabled";
+  const holdId = "12345678-1234-4123-8123-123456789abc";
+  try {
+    let destination;
+    await assert.rejects(open(query({ tab: "intake", analysisHoldId: holdId })), (error) => {
+      assert.ok(error instanceof Redirect);
+      destination = error.destination;
+      return true;
+    });
+    const redirected = Object.fromEntries(new URL(destination, "https://fixture.invalid").searchParams);
+    assert.equal(redirected.tab, "ideas");
+    assert.equal(redirected.analysisHoldId, holdId);
+    const tree = elements(await open(query(redirected)));
+    const recovery = tree.filter((element) => element.type === panels.AmuxAnalysisClaimResolutionPanel);
+    assert.equal(recovery.length, 1);
+    assert.equal(recovery[0].props.holdId, holdId);
+    // React.Children.toArray prefixes explicit keys in the traversal helper.
+    assert.equal(recovery[0].key, `.$${holdId}`);
+  } finally {
+    if (prior === undefined) delete process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ;
+    else process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ = prior;
+  }
+});
+
 test("non-owners are refused before a legacy tab redirect or any panel read", async () => {
   for (const role of ["ops", "support", "billing", "readonly", null]) {
     session = role ? { user: { id: "admin-a", role } } : null;
