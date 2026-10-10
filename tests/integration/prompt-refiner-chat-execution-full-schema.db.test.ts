@@ -16,7 +16,9 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
   const root = resolve(import.meta.dirname, "..", "..");
   const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
   mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
-    promptRefinerChatExecutionRelease: () => ({ explicitEnabled: true, autoEnabled: false }),
+    promptRefinerChatExecutionAdmission: () => ({
+      explicitEnabled: true, autoEnabled: false,
+    }),
   } });
   const { prisma } = await import("@/lib/prisma");
   const store = await import("@/lib/promptRefinerChatExecutionStore");

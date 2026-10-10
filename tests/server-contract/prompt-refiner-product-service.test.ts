@@ -29,6 +29,7 @@ let adapterConstructionError = false;
 let executeErrorBeforeAuthorization = false;
 let dispatchIntentError = false;
 let releaseError = false;
+let executionEvents: string[] = [];
 
 class BudgetError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -41,6 +42,7 @@ mock.module(mod("lib/activeAiModel.ts"), { namedExports: {
 mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
   PromptRefinerAutoBudgetError: BudgetError,
   reservePromptRefinerAutoBudget: async () => {
+    executionEvents.push("reserve");
     reserves += 1;
     if (reserveError) throw reserveError;
     return { id: "33333333-3333-4333-8333-333333333333" };
@@ -71,7 +73,10 @@ mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
 } });
 mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
   isPromptRefinerCapturedChatDraft: () => true,
-  claimPromptRefinerProductAttempt: async () => ({ outcome: "claimed" }),
+  claimPromptRefinerProductAttempt: async () => {
+    executionEvents.push("claim");
+    return { outcome: "claimed" };
+  },
   holdPromptRefinerProductChatSuggestion: async (input: { snapshot: {
     requestId: string; clientRequestId: string; id: string; epoch: number;
   }; response: Record<string, unknown> }) => {
@@ -91,7 +96,10 @@ mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
   $transaction: async (work: (tx: object) => Promise<unknown>) => work({}),
 } } });
 mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
-  promptRefinerChatExecutionRelease: async () => release,
+  promptRefinerChatExecutionAdmission: async () => {
+    executionEvents.push("admission");
+    return release;
+  },
 } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
   namedExports: { readPromptRefinerVnextOneShotPrice: async () => ({
@@ -180,6 +188,7 @@ beforeEach(() => {
   executeErrorBeforeAuthorization = false;
   dispatchIntentError = false;
   releaseError = false;
+  executionEvents = [];
   delete process.env.PROMPT_REFINER_KILL_SWITCH;
 });
 
@@ -214,6 +223,8 @@ test("verified no-change settles once and falls back to authored text", async ()
   const result = await prepare({ snapshot, mode: "explicit" });
   assert.deepEqual(result, { outcome: "original_fallback", reason: "no_change" });
   assert.equal(reserves, 1); assert.equal(dispatches, 1);
+  assert.deepEqual(executionEvents.slice(0, 3),
+    ["admission", "claim", "reserve"]);
   assert.equal(settlements, 1); assert.equal(unknowns, 0);
   assert.equal(releases, 0);
   assert.equal(holds, 0); assert.deepEqual(receiptStates, ["terminal"]);

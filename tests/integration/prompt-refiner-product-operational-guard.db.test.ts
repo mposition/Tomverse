@@ -67,11 +67,14 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         );
         CREATE TABLE "PromptRefinerAutoBudgetHold" (
           "id" TEXT PRIMARY KEY, "requestKey" TEXT NOT NULL,
-          "status" TEXT NOT NULL,
+          "status" TEXT NOT NULL, "dispatchedAt" TIMESTAMPTZ,
           "createdAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
         );
+        CREATE INDEX "PromptRefinerAutoBudgetHold_status_createdAt_idx"
+          ON "PromptRefinerAutoBudgetHold" ("status", "createdAt");
         CREATE TABLE "PromptRefinerProductExecutionReceipt" (
-          "id" TEXT PRIMARY KEY, "outcome" TEXT NOT NULL,
+          "id" TEXT PRIMARY KEY, "requestId" TEXT,
+          "outcome" TEXT NOT NULL,
           "failureCode" TEXT, "preparationLatencyMs" INTEGER NOT NULL,
           "completedAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
         );
@@ -87,11 +90,13 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
       await client.query(await readFile(resolve(root,
         "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql"),
       "utf8"));
+      let auditLockCount = 0;
       mock.module(mod("lib/adminAudit.ts"), { namedExports: {
         takeAuditChainLock: async (tx: {
           $executeRaw: (strings: TemplateStringsArray,
             ...values: unknown[]) => Promise<number>;
         }) => {
+          auditLockCount += 1;
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(
             hashtext('tomverse-admin-audit-chain'))`;
         },
@@ -118,12 +123,20 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         return id;
       };
       const insertReceipt = async (input: { outcome?: string;
-        latency?: number; failureCode?: string | null; audited?: boolean }) => {
+        latency?: number; failureCode?: string | null; audited?: boolean;
+        requestId?: string; historical?: boolean }) => {
         const id = randomUUID();
         await client.query(`INSERT INTO "PromptRefinerProductExecutionReceipt"
-          ("id","outcome","failureCode","preparationLatencyMs")
-          VALUES ($1,$2,$3,$4)`, [id, input.outcome ?? "suggested",
-          input.failureCode ?? null, input.latency ?? 10]);
+          ("id","requestId","outcome","failureCode","preparationLatencyMs")
+          VALUES ($1,$2,$3,$4,$5)`, [id, input.requestId ?? null,
+          input.outcome ?? "suggested", input.failureCode ?? null,
+          input.latency ?? 10]);
+        if (input.historical) {
+          await client.query(`UPDATE "PromptRefinerProductExecutionReceipt"
+            SET "completedAt" = (SELECT "baselineAt" FROM
+              "PromptRefinerProductOperationalGuard" WHERE "id"='auto')
+            WHERE "id" = $1`, [id]);
+        }
         await client.query(`INSERT INTO "PromptRefinerProductExecutionContext"
           VALUES ($1,'explicit')`, [id]);
         if (input.audited !== false) {
@@ -147,8 +160,10 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
       };
       type GuardState = { active: boolean; generation: number | null;
         reasonCode: string | null; transitionAuditLogId?: string | null };
-      const evaluate = () => transaction(async tx => await
-        guard.evaluatePromptRefinerProductAutoGuardInTransaction(tx as never) as GuardState);
+      const evaluate = (current: { executionReceiptId?: string;
+        dispositionReceiptId?: string } = {}) => transaction(async tx => await
+        guard.evaluatePromptRefinerProductAutoGuardInTransaction(
+          tx as never, current) as GuardState);
       const evaluateAtTimeZone = (timeZone: TestTimeZone, rollback = false) =>
         transactionAtTimeZone(timeZone, async tx => await
           guard.evaluatePromptRefinerProductAutoGuardInTransaction(
@@ -172,9 +187,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         const activationAuditId = await transitionAudit("activation");
         await transaction(tx => guard.initializePromptRefinerProductAutoGuard(
           tx as never, activationAuditId));
-        // Age only the synthetic activation baseline so the 13-second stale
-        // boundary can be exercised without a wall-clock sleep. The protected
-        // trigger is restored before any product code runs.
+        // Age only the synthetic activation baseline. The protected trigger is
+        // restored before any product code runs.
         await backdateActiveBaseline();
         const zonedAttemptId = randomUUID();
         await transactionAtTimeZone("Australia/Brisbane", async tx => {
@@ -199,8 +213,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
               interval '14 seconds' WHERE "id" = ${zonedAttemptId}`;
         });
         assert.equal((await evaluateAtTimeZone(
-          "America/Los_Angeles", true)).reasonCode, "audit_failure",
-        "a stale UTC-naive attempt must pause in a negative-offset session");
+          "America/Los_Angeles", true)).active, true,
+        "an in-flight attempt has no invented audit deadline");
         await client.query(`DELETE FROM "PromptRefinerProductAttempt"
           WHERE "id" = $1`, [zonedAttemptId]);
         for (let index = 0; index < 100; index += 1) {
@@ -227,6 +241,12 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           await insertReceipt({ latency: 10 });
         }
         assert.equal((await evaluate()).active, false);
+        auditLockCount = 0;
+        assert.equal((await evaluate()).active, false);
+        await transaction(tx => guard.latchPromptRefinerProductAutoStopInTransaction(
+          tx as never, "audit_failure"));
+        assert.equal(auditLockCount, 0,
+        "a paused guard read must not reacquire the global audit lock");
         const secondActivation = await transitionAudit("activation");
         const initialized = await transaction(async tx => await
           guard.initializePromptRefinerProductAutoGuard(tx as never,
@@ -280,19 +300,30 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
+        for (let index = 0; index < 125; index += 1) {
+          await insertReceipt({});
+        }
         const attemptId = randomUUID();
         await client.query(`INSERT INTO "PromptRefinerProductAttempt"
           ("id","mode","state","expiresAt") VALUES ($1,'auto','unknown',
           clock_timestamp() + interval '5 minutes')`, [attemptId]);
-        assert.equal((await evaluate()).reasonCode, "unknown_dispatch_or_cost");
+        const unknownReceiptId = await insertReceipt({ requestId: attemptId,
+          historical: true });
+        assert.equal((await evaluate({ executionReceiptId: unknownReceiptId }))
+          .reasonCode, "unknown_dispatch_or_cost");
 
         current = await read();
         resumeAuditId = await transitionAudit("owner-resume");
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
-        await insertReceipt({ failureCode: "execution_contract_mismatch" });
-        assert.equal((await evaluate()).reasonCode, "critical_safety_failure");
+        for (let index = 0; index < 125; index += 1) {
+          await insertReceipt({});
+        }
+        const criticalReceiptId = await insertReceipt({
+          failureCode: "execution_contract_mismatch", historical: true });
+        assert.equal((await evaluate({ executionReceiptId: criticalReceiptId }))
+          .reasonCode, "critical_safety_failure");
 
         current = await read();
         resumeAuditId = await transitionAudit("owner-resume");
@@ -317,15 +348,28 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           SET "createdAt" = (clock_timestamp() AT TIME ZONE 'UTC') -
             interval '14 seconds'
           WHERE "id" = $1`, [strandedAttemptId]);
-        assert.equal((await evaluate()).reasonCode, "audit_failure");
+        assert.equal((await evaluate()).active, true,
+        "settlement may complete before receipt audit cleanup acquires its lock");
+        await client.query(`INSERT INTO "PromptRefinerAutoBudgetHold"
+          ("id","requestKey","status","dispatchedAt")
+          VALUES ($1,$2,'dispatching',clock_timestamp() - interval '14 seconds')`,
+        [randomUUID(), randomUUID()]);
+        assert.equal((await evaluate()).reasonCode, "unknown_dispatch_or_cost",
+        "a dispatch still unconfirmed after the execution deadline is unknown");
 
         current = await read();
         resumeAuditId = await transitionAudit("owner-resume");
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
-        await insertReceipt({ audited: false });
-        assert.equal((await evaluate()).reasonCode, "audit_failure");
+        for (let index = 0; index < 125; index += 1) {
+          await insertReceipt({});
+        }
+        const missingAuditReceiptId = await insertReceipt({ audited: false,
+          historical: true });
+        assert.equal((await evaluate({
+          executionReceiptId: missingAuditReceiptId,
+        })).reasonCode, "audit_failure");
       });
 
       await t.test("concurrent receipt completion and pause keep audit then guard lock order", async () => {
@@ -344,8 +388,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
             hashtext('tomverse-admin-audit-chain'))`;
           const receiptId = randomUUID();
           await tx.$executeRaw`INSERT INTO "PromptRefinerProductExecutionReceipt"
-            ("id","outcome","failureCode","preparationLatencyMs")
-            VALUES (${receiptId},'suggested',NULL,6001)`;
+            ("id","requestId","outcome","failureCode","preparationLatencyMs")
+            VALUES (${receiptId},NULL,'suggested',NULL,6001)`;
           await tx.$executeRaw`INSERT INTO "PromptRefinerProductExecutionContext"
             VALUES (${receiptId},'auto')`;
           await tx.$executeRaw`INSERT INTO "AdminAuditLog"

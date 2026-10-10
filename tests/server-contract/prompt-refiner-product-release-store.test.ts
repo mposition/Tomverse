@@ -16,6 +16,9 @@ let activationRows: Array<Record<string, unknown>> = [];
 let priceMatches = true;
 let sourceMatches = true;
 let queryFails = false;
+let sourceReadCount = 0;
+let priceReadCount = 0;
+let auditValidationCount = 0;
 const stopReasons: string[] = [];
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
@@ -39,6 +42,7 @@ mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: 
 mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
   namedExports: {
     verifyPromptRefinerVnextOneShotCandidateSourceAtRoot: async () => {
+      sourceReadCount += 1;
       if (!sourceMatches) throw new Error("synthetic_source_drift");
       return { candidateSourceVerified: true };
     },
@@ -53,13 +57,17 @@ mock.module(mod("lib/promptRefinerVnextOneShotGateEvidence.ts"), { namedExports:
     finalDisposition: "fail" }),
 } });
 mock.module(mod("lib/promptRefinerVnextOneShotAuditReadback.ts"), { namedExports: {
-  promptRefinerVnextOneShotAuditReceiptIsValid: async () => true,
+  promptRefinerVnextOneShotAuditReceiptIsValid: async () => {
+    auditValidationCount += 1;
+    return true;
+  },
 } });
 mock.module(mod("lib/promptRefinerQualityEvaluationVnextOneShotPriceReadback.ts"), {
-  namedExports: { readPromptRefinerVnextOneShotPrice: async () => ({
-    pricePinMatchesRegistry: priceMatches,
-    problems: priceMatches ? [] : ["price_pin_mismatch"],
-  }) },
+  namedExports: { readPromptRefinerVnextOneShotPrice: async () => {
+    priceReadCount += 1;
+    return { pricePinMatchesRegistry: priceMatches,
+      problems: priceMatches ? [] : ["price_pin_mismatch"] };
+  } },
 });
 
 const storePromise = import(mod("lib/promptRefinerProductReleaseStore.ts"));
@@ -87,7 +95,8 @@ const tx = async () => {
 
 beforeEach(async () => {
   stopReasons.length = 0; priceMatches = true; sourceMatches = true;
-  queryFails = false;
+  queryFails = false; sourceReadCount = 0; priceReadCount = 0;
+  auditValidationCount = 0;
   const store = await storePromise;
   activationRows = [{ id: "activation", actorUserId: "owner",
     createdAt: new Date("2026-10-10T00:00:00.000Z"),
@@ -107,30 +116,48 @@ test("release absence and database uncertainty close without inventing a stop", 
   assert.deepEqual(stopReasons, []);
 });
 
-test("an exactly bound activated release remains enabled", async () => {
+test("an authenticated view reads no source, price or audit proof", async () => {
   const store = await storePromise;
   const result = await store.readPromptRefinerProductRelease(
     await tx() as never, runtime);
   assert.deepEqual(stopReasons, []);
+  assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
+    { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
   assert.equal(result.explicitEnabled, true);
   assert.equal(result.autoEnabled, true);
+  const admitted = await store.admitPromptRefinerProductRelease(
+    await tx() as never, runtime);
+  assert.equal(admitted.explicitEnabled, true);
+  assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
+    { sourceReadCount: 1, priceReadCount: 1, auditValidationCount: 2 });
 });
 
-test("an activated release latches source, price and approval drift", async () => {
+test("fresh dispatch admission latches source, price and approval drift", async () => {
   const store = await storePromise;
   sourceMatches = false;
-  assert.equal((await store.readPromptRefinerProductRelease(
+  assert.equal((await store.admitPromptRefinerProductRelease(
     await tx() as never, runtime)).autoEnabled, false);
   assert.deepEqual(stopReasons, ["critical_safety_failure"]);
 
   stopReasons.length = 0; sourceMatches = true; priceMatches = false;
-  assert.equal((await store.readPromptRefinerProductRelease(
+  assert.equal((await store.admitPromptRefinerProductRelease(
     await tx() as never, runtime)).autoEnabled, false);
   assert.deepEqual(stopReasons, ["unknown_dispatch_or_cost"]);
 
   stopReasons.length = 0;
   activationRows[0] = { ...activationRows[0], summary: "tampered" };
-  assert.equal((await store.readPromptRefinerProductRelease(
+  assert.equal((await store.admitPromptRefinerProductRelease(
     await tx() as never, runtime)).autoEnabled, false);
   assert.deepEqual(stopReasons, ["audit_failure"]);
+});
+
+test("a malformed view closes without mutating the operational guard", async () => {
+  const store = await storePromise;
+  activationRows[0] = { ...activationRows[0], summary: "tampered" };
+  const result = await store.readPromptRefinerProductRelease(
+    await tx() as never, runtime);
+  assert.equal(result.explicitEnabled, false);
+  assert.deepEqual(stopReasons, []);
+  assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
+    { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
 });

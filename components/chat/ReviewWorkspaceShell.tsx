@@ -18,6 +18,8 @@
  */
 
 import { cookies } from "next/headers";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
@@ -255,13 +257,22 @@ export async function ReviewWorkspaceShell({
   }
 
   if (mountedSurface === "chat" && !fixtureMode) {
-    const release = await promptRefinerChatExecutionRelease();
-    // Content-free capabilities only. Deployment ids, approval receipts and
-    // policy evidence remain server-side and the Review surface stays off.
-    promptRefinerProductRelease = {
-      explicitEnabled: release.explicitEnabled,
-      autoEnabled: release.autoEnabled,
-    };
+    try {
+      const session = await getServerSession(authOptions);
+      if (session?.user?.id) {
+        const release = await promptRefinerChatExecutionRelease();
+        // This read-only view exposes capabilities, never execution authority.
+        // The authenticated API revalidates the exact release at admission.
+        promptRefinerProductRelease = {
+          explicitEnabled: release.explicitEnabled,
+          autoEnabled: release.autoEnabled,
+        };
+      }
+    } catch (error) {
+      console.error("Failed to load prompt refiner capabilities for chat:", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   }
 
   const promptRefinerOffered = promptRefinerOfferDecision({

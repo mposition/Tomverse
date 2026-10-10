@@ -78,6 +78,9 @@ export async function handlePromptRefinerProductProposal(request: Request,
     performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
   await consumeApiRateLimit(request, userId, "prompt-refiner-product-proposal",
     { minute: 30, day: 1_000 });
+  if (!(await promptRefinerChatExecutionRelease()).explicitEnabled) {
+    return unavailable();
+  }
   const body = await readLimitedJson(request, 4 * 1024,
     promptRefinerProductProposalRequestSchema);
   const snapshot = await capture(request, userId, body);
@@ -102,6 +105,10 @@ export async function handlePromptRefinerProductPrepare(request: Request,
     performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS;
   await consumeApiRateLimit(request, userId, "prompt-refiner-product-prepare",
     { minute: 30, day: 1_000 });
+  if (!(await promptRefinerChatExecutionRelease()).autoEnabled) {
+    return Response.json({ outcome: "original_fallback",
+      reason: "unavailable" }, { headers });
+  }
   const body = await readLimitedJson(request, 4 * 1024,
     promptRefinerProductPrepareRequestSchema);
   const snapshot = await capture(request, userId, body);

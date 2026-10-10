@@ -31,7 +31,7 @@ import {
   PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
   type PromptRefinerProductFallbackReason,
 } from "@/lib/promptRefinerProductContract";
-import { promptRefinerChatExecutionRelease } from
+import { promptRefinerChatExecutionAdmission } from
   "@/lib/promptRefinerChatExecutionRelease";
 import {
   recordPromptRefinerProductExecutionReceipt,
@@ -200,7 +200,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
   // The kill switch is the first product boundary. It performs no release,
   // price, budget or provider read and cannot leave a partial reservation.
   if (promptRefinerKillSwitchEngaged(process.env)) return fallback("unavailable");
-  const release = await promptRefinerChatExecutionRelease();
+  const release = await promptRefinerChatExecutionAdmission();
   if ((input.mode === "explicit" ? !release.explicitEnabled : !release.autoEnabled) ||
       !release.runtimeDeploymentId) return fallback("unavailable");
   if (input.mode === "auto") {

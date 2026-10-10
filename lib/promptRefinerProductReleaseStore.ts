@@ -240,7 +240,7 @@ export async function activatePromptRefinerProductRelease(input: {
       metadata: promptRefinerProductActivationMetadata(input.target),
     });
     await initializePromptRefinerProductAutoGuard(tx, approvalAuditLogId);
-    const release = await readPromptRefinerProductRelease(tx, process.env);
+    const release = await admitPromptRefinerProductRelease(tx, process.env);
     if (!release.explicitEnabled ||
         release.approvalAuditLogId !== approvalAuditLogId) {
       throw new Error("prompt_refiner_product_activation_readback_invalid");
@@ -251,9 +251,10 @@ export async function activatePromptRefinerProductRelease(input: {
   }, { maxWait: 5_000, timeout: 30_000 });
 }
 
-export async function readPromptRefinerProductRelease(
+async function resolvePromptRefinerProductRelease(
   tx: Tx,
   runtime: Record<string, string | undefined>,
+  observeDrift: boolean,
 ) {
   const runtimeCommitSha = runtime.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase();
   const runtimeDeploymentId = runtime.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase();
@@ -272,7 +273,9 @@ export async function readPromptRefinerProductRelease(
   const latchDrift = async (
     reason: PromptRefinerProductImmediateAutoStopReason,
   ) => {
-    await latchPromptRefinerProductAutoStopInTransaction(tx, reason);
+    if (observeDrift) {
+      await latchPromptRefinerProductAutoStopInTransaction(tx, reason);
+    }
     return closed();
   };
   if (!row || row.summary !== ACTIVATION_SUMMARY || !row.actorUserId ||
@@ -293,14 +296,18 @@ export async function readPromptRefinerProductRelease(
   } as const;
   let approvedAt: string;
   try {
-    await exactStageEvidence(tx, target);
-    const limited = await readLimitedReceipt(tx, target,
-      target.limitedAuditReceiptId);
-    if (!limited || limited.actorUserId !== row.actorUserId ||
-        canonicalBenchmarkJson(metadata) !==
-          canonicalBenchmarkJson(promptRefinerProductActivationMetadata(target)) ||
-        !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, row)) {
+    if (canonicalBenchmarkJson(metadata) !==
+        canonicalBenchmarkJson(promptRefinerProductActivationMetadata(target))) {
       return latchDrift("audit_failure");
+    }
+    if (observeDrift) {
+      await exactStageEvidence(tx, target);
+      const limited = await readLimitedReceipt(tx, target,
+        target.limitedAuditReceiptId);
+      if (!limited || limited.actorUserId !== row.actorUserId ||
+          !await promptRefinerVnextOneShotAuditReceiptIsValid(tx, row)) {
+        return latchDrift("audit_failure");
+      }
     }
     approvedAt = row.createdAt.toISOString();
   } catch (error) {
@@ -333,6 +340,22 @@ export async function readPromptRefinerProductRelease(
     runtimeCommitSha, runtimeDeploymentId, approvalAuditLogId: row.id });
 }
 
+/** Side-effect-free release availability for an authenticated view. */
+export async function readPromptRefinerProductRelease(
+  tx: Tx,
+  runtime: Record<string, string | undefined>,
+) {
+  return resolvePromptRefinerProductRelease(tx, runtime, false);
+}
+
+/** Fresh exact evidence admission for a request that may execute or consume. */
+export async function admitPromptRefinerProductRelease(
+  tx: Tx,
+  runtime: Record<string, string | undefined>,
+) {
+  return resolvePromptRefinerProductRelease(tx, runtime, true);
+}
+
 export async function resumePromptRefinerProductAuto(input: {
   session: Session;
   request: Request;
@@ -350,7 +373,7 @@ export async function resumePromptRefinerProductAuto(input: {
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
-    const release = await readPromptRefinerProductRelease(tx, process.env);
+    const release = await admitPromptRefinerProductRelease(tx, process.env);
     const guard = await readPromptRefinerProductAutoGuard(tx);
     if (!release.explicitEnabled || release.runtimeDeploymentId !== runtimeDeploymentId ||
         guard.active || guard.generation !== input.expectedGeneration ||
@@ -397,6 +420,20 @@ export async function loadPromptRefinerProductRelease(
   }
   return prisma.$transaction((tx) =>
     readPromptRefinerProductRelease(tx, runtime),
+  { maxWait: 2_000, timeout: 10_000 });
+}
+
+export async function loadPromptRefinerProductReleaseAdmission(
+  runtime: Record<string, string | undefined> = process.env,
+) {
+  if (!SHA.test(runtime.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase() ?? "") ||
+      !UUID.test(runtime.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase() ?? "")) {
+    return Object.freeze({ explicitEnabled: false, autoEnabled: false,
+      runtimeCommitSha: null, runtimeDeploymentId: null,
+      approvalAuditLogId: null });
+  }
+  return prisma.$transaction((tx) =>
+    admitPromptRefinerProductRelease(tx, runtime),
   { maxWait: 2_000, timeout: 10_000 });
 }
 

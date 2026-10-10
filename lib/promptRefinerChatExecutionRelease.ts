@@ -1,4 +1,5 @@
-import { loadPromptRefinerProductRelease } from
+import { loadPromptRefinerProductRelease,
+  loadPromptRefinerProductReleaseAdmission } from
   "@/lib/promptRefinerProductReleaseStore";
 import { isPromptRefinerEnabled } from "@/lib/appSettings";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
@@ -8,8 +9,17 @@ const closed = () => Object.freeze({ explicitEnabled: false,
   autoEnabled: false, runtimeCommitSha: null, runtimeDeploymentId: null,
   approvalAuditLogId: null });
 
-/** Exact-deployment release facts only; the checked-in registry is empty. */
+/** Side-effect-free capability view; execution requires fresh admission. */
 export async function promptRefinerChatExecutionRelease() {
+  return readPromptRefinerChatExecutionRelease(false);
+}
+
+/** Revalidates live evidence and records a durable stop before execution. */
+export async function promptRefinerChatExecutionAdmission() {
+  return readPromptRefinerChatExecutionRelease(true);
+}
+
+async function readPromptRefinerChatExecutionRelease(admit: boolean) {
   if (promptRefinerKillSwitchEngaged(process.env) || isE2EDatabaseDisabled() ||
       !/^[0-9a-f]{40}$/.test(
         process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase() ?? "") ||
@@ -19,12 +29,13 @@ export async function promptRefinerChatExecutionRelease() {
   }
   try {
     // The ordinary rollout flag remains the first database-owned off gate.
-    // It cannot replace the exact deployment approval checked below.
+    // It cannot replace deployment approval or the fresh execution proof.
     if (!await isPromptRefinerEnabled()) return closed();
-    return await loadPromptRefinerProductRelease(process.env);
+    return await (admit ? loadPromptRefinerProductReleaseAdmission(process.env) :
+      loadPromptRefinerProductRelease(process.env));
   } catch {
-    // A release read is an authorization read. Database uncertainty disables
-    // the product instead of turning a Chat request into a generic 500.
+    // Database uncertainty closes both availability and execution admission
+    // instead of turning a Chat request into a generic 500.
     return closed();
   }
 }

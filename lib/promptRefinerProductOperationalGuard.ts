@@ -49,6 +49,10 @@ type Observation = Readonly<{
   p90LatencyMs: number | null;
   fallbackCount: number | null;
 }>;
+type CurrentReceiptIds = Readonly<{
+  executionReceiptId?: string;
+  dispositionReceiptId?: string;
+}>;
 
 const options = { maxWait: 2_000, timeout: 10_000 };
 
@@ -101,78 +105,144 @@ export async function readPromptRefinerProductAutoGuard(tx: Tx) {
     transitionAuditLogId: row?.lastTransitionAuditLogId ?? null });
 }
 
-async function observe(tx: Tx, guard: GuardRow): Promise<Observation | null> {
-  const [critical] = await tx.$queryRaw<Array<{ present: boolean }>>`
-    SELECT EXISTS (
-      SELECT 1 FROM "PromptRefinerProductExecutionReceipt" r
+async function observe(
+  tx: Tx,
+  guard: GuardRow,
+  current: CurrentReceiptIds,
+): Promise<Observation | null> {
+  const currentExecution = current.executionReceiptId
+    ? await tx.$queryRaw<Array<{
+      failureCode: string | null;
+      attemptState: string | null;
+      auditCount: number;
+    }>>`
+      SELECT r."failureCode", attempt."state" AS "attemptState",
+        audit."count" AS "auditCount"
+      FROM "PromptRefinerProductExecutionReceipt" r
+      JOIN "PromptRefinerProductExecutionContext" c
+        ON c."executionReceiptId" = r."id"
+      LEFT JOIN "PromptRefinerProductAttempt" attempt
+        ON attempt."id" = r."requestId"
+      CROSS JOIN LATERAL (
+        SELECT count(*)::int AS "count" FROM "AdminAuditLog" l
+        WHERE l."action" = 'prompt_refiner.product_execution_recorded'
+          AND l."targetType" = 'PromptRefinerProductExecutionReceipt'
+          AND l."targetId" = r."id"
+      ) audit
+      WHERE r."id" = ${current.executionReceiptId}
+    ` : [];
+  if (current.executionReceiptId && currentExecution.length !== 1) {
+    return Object.freeze({ reasonCode: "audit_failure", sampleSize: 0,
+      p90LatencyMs: null, fallbackCount: null });
+  }
+  if (currentExecution.some(row =>
+    row.failureCode === "execution_contract_mismatch")) {
+    return Object.freeze({ reasonCode: "critical_safety_failure", sampleSize: 0,
+      p90LatencyMs: null, fallbackCount: null });
+  }
+
+  // Each product writer evaluates this guard in the same transaction that
+  // inserts its receipt and audit. Keeping the observation window identical
+  // to the approved latest-100 quality denominator bounds both receipt work
+  // and per-receipt audit verification.
+  const recent = await tx.$queryRaw<Array<{
+    outcome: string;
+    preparationLatencyMs: number;
+    failureCode: string | null;
+    attemptState: string | null;
+    auditCount: number;
+  }>>`
+    SELECT recent."outcome", recent."preparationLatencyMs",
+      recent."failureCode", attempt."state" AS "attemptState",
+      audit."count" AS "auditCount"
+    FROM (
+      SELECT r."id", r."requestId", r."outcome", r."preparationLatencyMs",
+        r."failureCode", r."completedAt"
+      FROM "PromptRefinerProductExecutionReceipt" r
+      JOIN "PromptRefinerProductExecutionContext" c
+        ON c."executionReceiptId" = r."id"
       WHERE r."completedAt" >= ${guard.baselineAt}
-        AND r."failureCode" = 'execution_contract_mismatch'
-    ) AS "present"
+      ORDER BY r."completedAt" DESC, r."id" DESC
+      LIMIT ${PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE}
+    ) recent
+    LEFT JOIN "PromptRefinerProductAttempt" attempt
+      ON attempt."id" = recent."requestId"
+    CROSS JOIN LATERAL (
+      SELECT count(*)::int AS "count" FROM "AdminAuditLog" l
+      WHERE l."action" = 'prompt_refiner.product_execution_recorded'
+        AND l."targetType" = 'PromptRefinerProductExecutionReceipt'
+        AND l."targetId" = recent."id"
+    ) audit
+    ORDER BY recent."completedAt" DESC, recent."id" DESC
   `;
-  if (critical?.present) return Object.freeze({
+  if (recent.some(row =>
+    row.failureCode === "execution_contract_mismatch")) {
+    return Object.freeze({
     reasonCode: "critical_safety_failure", sampleSize: 0,
     p90LatencyMs: null, fallbackCount: null,
   });
+  }
 
-  const [unknown] = await tx.$queryRaw<Array<{ present: boolean }>>`
+  const [unknownHold] = await tx.$queryRaw<Array<{ present: boolean }>>`
     SELECT EXISTS (
-      SELECT 1 FROM "PromptRefinerProductAttempt" a
-      WHERE a."createdAt" >=
-          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
-        AND a."state" = 'unknown'
+      SELECT 1 FROM "PromptRefinerAutoBudgetHold" h
+      WHERE h."status" = 'unknown' AND h."createdAt" >= ${guard.baselineAt}
       UNION ALL
       SELECT 1 FROM "PromptRefinerAutoBudgetHold" h
-      JOIN "PromptRefinerProductAttempt" a ON a."id" = h."requestKey"
-      WHERE h."createdAt" >= ${guard.baselineAt} AND h."status" = 'unknown'
-      UNION ALL
-      SELECT 1 FROM "PromptRefinerProductExecutionReceipt" r
-      WHERE r."completedAt" >= ${guard.baselineAt}
-        AND r."failureCode" = 'unknown_after_dispatch'
+      WHERE h."status" = 'dispatching'
+        AND h."createdAt" >= ${guard.baselineAt}
+        AND h."dispatchedAt" <= clock_timestamp() - INTERVAL '13 seconds'
     ) AS "present"
   `;
-  if (unknown?.present) return Object.freeze({
+  if (unknownHold?.present || currentExecution.some(row =>
+    row.attemptState === "unknown" ||
+    row.failureCode === "unknown_after_dispatch") || recent.some(row =>
+    row.attemptState === "unknown" ||
+    row.failureCode === "unknown_after_dispatch")) return Object.freeze({
     reasonCode: "unknown_dispatch_or_cost", sampleSize: 0,
     p90LatencyMs: null, fallbackCount: null,
   });
 
-  const [auditFailure] = await tx.$queryRaw<Array<{ present: boolean }>>`
-    SELECT EXISTS (
-      SELECT 1 FROM "PromptRefinerProductAttempt" a
-      WHERE a."createdAt" >=
-          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
-        AND a."state" = 'preparing'
-        AND a."createdAt" <=
-          (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '13 seconds'
-      UNION ALL
-      SELECT 1 FROM "PromptRefinerProductAttempt" a
-      JOIN "PromptRefinerAutoBudgetHold" h ON h."requestKey" = a."id"
-      WHERE h."createdAt" >= ${guard.baselineAt}
-        AND a."state" = 'preparing'
-        AND a."createdAt" <=
-          (clock_timestamp() AT TIME ZONE 'UTC') - INTERVAL '13 seconds'
-        AND h."status" IN ('settled', 'released')
-      UNION ALL
-      SELECT 1 FROM "PromptRefinerProductExecutionReceipt" r
-      WHERE r."completedAt" >= ${guard.baselineAt} AND (
-        SELECT count(*) FROM "AdminAuditLog" l
-        WHERE l."action" = 'prompt_refiner.product_execution_recorded'
-          AND l."targetType" = 'PromptRefinerProductExecutionReceipt'
-          AND l."targetId" = r."id"
-      ) <> 1
-      UNION ALL
-      SELECT 1 FROM "PromptRefinerProductDispositionReceipt" d
-      WHERE d."observedAt" >= ${guard.baselineAt} AND (
-        SELECT count(*) FROM "AdminAuditLog" l
+  const currentDispositionAudit = current.dispositionReceiptId
+    ? await tx.$queryRaw<Array<{ auditCount: number }>>`
+      SELECT audit."count" AS "auditCount"
+      FROM "PromptRefinerProductDispositionReceipt" d
+      CROSS JOIN LATERAL (
+        SELECT count(*)::int AS "count" FROM "AdminAuditLog" l
         WHERE l."action" = 'prompt_refiner.product_disposition_recorded'
           AND l."targetType" = 'PromptRefinerProductDispositionReceipt'
           AND l."targetId" = d."id"
-      ) <> 1
-    ) AS "present"
+      ) audit
+      WHERE d."id" = ${current.dispositionReceiptId}
+    ` : [];
+  const recentDispositionAudits = await tx.$queryRaw<Array<{
+    auditCount: number;
+  }>>`
+    SELECT audit."count" AS "auditCount"
+    FROM (
+      SELECT d."id", d."observedAt"
+      FROM "PromptRefinerProductDispositionReceipt" d
+      WHERE d."observedAt" >= ${guard.baselineAt}
+      ORDER BY d."observedAt" DESC, d."id" DESC
+      LIMIT ${PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE}
+    ) recent
+    CROSS JOIN LATERAL (
+      SELECT count(*)::int AS "count" FROM "AdminAuditLog" l
+      WHERE l."action" = 'prompt_refiner.product_disposition_recorded'
+        AND l."targetType" = 'PromptRefinerProductDispositionReceipt'
+        AND l."targetId" = recent."id"
+    ) audit
   `;
-  if (auditFailure?.present) return Object.freeze({
+  if ((current.executionReceiptId && currentExecution[0]?.auditCount !== 1) ||
+      (current.dispositionReceiptId &&
+        currentDispositionAudit[0]?.auditCount !== 1) ||
+      recent.some(row => row.auditCount !== 1) ||
+      recentDispositionAudits.some(row => row.auditCount !== 1)) {
+    return Object.freeze({
     reasonCode: "audit_failure", sampleSize: 0,
     p90LatencyMs: null, fallbackCount: null,
   });
+  }
 
   // docs/policy/prompt-refiner-vnext-full-auto-release-exception-v1.md §3
   // says the latest completed Refiner requests, not Auto-only requests.
@@ -184,17 +254,6 @@ async function observe(tx: Tx, guard: GuardRow): Promise<Observation | null> {
   // distinct explicit-choice disposition. It is not an execution fallback.
   // The fallback numerator is the non-suggested execution receipts that
   // caused the product service to retain the authored prompt.
-  const recent = await tx.$queryRaw<Array<{
-    outcome: string; preparationLatencyMs: number;
-  }>>`
-    SELECT r."outcome", r."preparationLatencyMs"
-    FROM "PromptRefinerProductExecutionReceipt" r
-    JOIN "PromptRefinerProductExecutionContext" c
-      ON c."executionReceiptId" = r."id"
-    WHERE r."completedAt" >= ${guard.baselineAt}
-    ORDER BY r."completedAt" DESC, r."id" DESC
-    LIMIT ${PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE}
-  `;
   if (recent.length < PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE) return null;
   const latencies = recent.map(row => row.preparationLatencyMs)
     .sort((left, right) => left - right);
@@ -242,12 +301,17 @@ async function pause(tx: Tx, guard: GuardRow, observation: Observation) {
     reasonCode: observation.reasonCode });
 }
 
-export async function evaluatePromptRefinerProductAutoGuardInTransaction(tx: Tx) {
+export async function evaluatePromptRefinerProductAutoGuardInTransaction(
+  tx: Tx,
+  currentReceipts: CurrentReceiptIds = {},
+) {
+  const current = await readPromptRefinerProductAutoGuard(tx);
+  if (!current.active) return current;
   await takeAuditChainLock(tx);
   const guard = await lockGuard(tx);
   if (!guard || guard.state !== "active") return Object.freeze({ active: false,
     generation: guard?.generation ?? null, reasonCode: guard?.reasonCode ?? null });
-  const observation = await observe(tx, guard);
+  const observation = await observe(tx, guard, currentReceipts);
   return observation ? pause(tx, guard, observation) : Object.freeze({
     active: true, generation: guard.generation, reasonCode: null });
 }
@@ -271,6 +335,8 @@ export async function latchPromptRefinerProductAutoStopInTransaction(
   tx: Tx,
   reasonCode: PromptRefinerProductImmediateAutoStopReason,
 ) {
+  const current = await readPromptRefinerProductAutoGuard(tx);
+  if (!current.active) return current;
   await takeAuditChainLock(tx);
   const guard = await lockGuard(tx);
   if (!guard || guard.state !== "active") return Object.freeze({

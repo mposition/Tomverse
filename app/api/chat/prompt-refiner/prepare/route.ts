@@ -7,8 +7,6 @@ import { handlePromptRefinerProductPrepare,
   promptRefinerProductApiErrorResponse } from
   "@/lib/promptRefinerProductApi";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
-import { promptRefinerChatExecutionRelease } from
-  "@/lib/promptRefinerChatExecutionRelease";
 import { PROMPT_REFINER_PRODUCT_TIMEOUT_MS } from
   "@/lib/promptRefinerProductContract";
 
@@ -19,10 +17,6 @@ export async function POST(request: Request) {
     deadlineAtMonotonicMs: performance.now() +
       PROMPT_REFINER_PRODUCT_TIMEOUT_MS };
   try {
-    if (!(await promptRefinerChatExecutionRelease()).autoEnabled) {
-      return Response.json({ outcome: "original_fallback",
-        reason: "unavailable" }, { headers });
-    }
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return Response.json({ code: "UNAUTHORIZED" },
       { status: 401, headers });

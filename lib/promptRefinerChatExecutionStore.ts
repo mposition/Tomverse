@@ -8,7 +8,8 @@ import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersisten
 import { verifyDurableChatSourceMessage } from "@/lib/chatDurableSourceMessage";
 import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { promptRefinerKillSwitchEngaged } from "@/lib/promptRefinerAccess";
-import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
+import { promptRefinerChatExecutionAdmission } from
+  "@/lib/promptRefinerChatExecutionRelease";
 import {
   PromptRefinerChatExecutionError,
   promptRefinerChatDecisionSchema,
@@ -309,7 +310,7 @@ export async function consumePromptRefinerChatExecution(input: {
   decision: unknown;
 }) {
   const choice = promptRefinerChatDecisionSchema.safeParse(input.decision);
-  const release = await promptRefinerChatExecutionRelease();
+  const release = await promptRefinerChatExecutionAdmission();
   if (!choice.success || (!release.explicitEnabled && !release.autoEnabled) ||
     promptRefinerKillSwitchEngaged(process.env)) return unavailable();
   await verifyDurableChatSourceMessage({ ...input, sourceUserMessageId: input.sourceMessageId });

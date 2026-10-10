@@ -205,6 +205,57 @@ quota 조회를 우회하거나 검토 서버 설정·권한을 변경하지 않
 완료한 뒤 실제 서버 readback은 quota available, 기존 Claude 검토 3건 running이었다.
 이 인증 복구를 검토 verdict나 제품 활성화 승인으로 처리하지 않는다.
 
+## 실제 Claude 검토 후 인증·운영 감시 보강
+
+제품 head `0cdfedb342a9d9049ddd62af4ee06dc8a48a670e`의 실제 서버 검토
+`r-20261010-001125-6ae218`는 Copilot/Moonshot ACCEPT,
+Claude/Anthropic REJECT로 종료했다. Claude의 major는 인증 전 무거운 release
+검증과 drift 상태에서 전역 audit lock을 반복 취득하는 동작이었다. preparing
+요청의 13초 경과를 audit 실패로 오인하는 것과 전체 receipt 이력을 매번 검사하는
+비용도 minor로 보고했다. 인증 복구 또는 한 vendor의 ACCEPT를 독립 검토 완료로
+표시하지 않았으며, 아래 실제 코드 변경을 다음 두 vendor 검토에 보낸다.
+
+- proposal/prepare는 route 진입 시점부터 13초 deadline을 잡되 session과 origin
+  검증 뒤에 product handler를 호출한다. handler는 rate-limit 뒤에 mode별 view를
+  읽고 closed면 body·draft capture를 건너뛴다. anonymous/invalid-origin은
+  handler·release 호출 0회, 429는 release·body·capture 0회다.
+- UI는 signed-in Chat에서만 side-effect-free DB view를 읽고 두 capability
+  boolean만 넘긴다. guest·Review·loopback fixture는 product release를 읽지
+  않는다. UI view는 source·price·승인 감사 검증이나 drift latch를 실행하지 않는다.
+  product service와 Chat decision consume은 별도의 fresh exact admission으로
+  source·price·배포·승인 감사를 매번 재검증한다. positive cache는 없다.
+- 이미 paused인 guard는 전역 audit lock을 다시 취득하지 않는다. 활성 상태의
+  전이는 audit→guard 잠금 순서와 같은 transaction의 canonical audit를 유지한다.
+  최근 완료 100건의 품질 분모와 execution/disposition 감사 조회를 제한하되,
+  현재 writer가 기록한 정확한 receipt ID는 별도로 확인한다. provider 완료 시각이
+  오래되어 최근 100건 밖인 late receipt의 critical/unknown/감사 누락도 즉시
+  중단한다. 동일 transaction의 execution 및 disposition writer가 이 ID를 넘긴다.
+- preparing 상태와 13초 경과만으로 감사 실패를 만들지 않는다. 확정 settlement
+  후 receipt cleanup을 기다리는 상태는 이를 근거로 중단하지 않는다. 미확정
+  dispatching hold가 13초 execution 상한을 넘으면 unknown dispatch/cost로
+  중단하고, 기존 unknown hold와 현재 receipt의 unknown도 그대로 중단한다.
+  새로운 grace 기간·재호출·예산 release 예외는 추가하지 않았다.
+- Copilot의 비차단 minor인 intent 전이 결과 불명 시 full hold 유지 동작은 보존했다.
+  DB 전이 시작 후 결과를 모른다는 사실은 undispatched 증거가 아니므로 release,
+  blind retry 또는 자동 sweep으로 바꾸지 않았다.
+
+관련 실제 검증은 execution 80/80, product server 42/42 및 client 23/23,
+loopback PostgreSQL 33/33, protected writer/deployment/legacy proposal 45/45다.
+현재 receipt ID 전달, late receipt 및 125개 후발 receipt, 확정 정산 후 cleanup,
+미확정 dispatch, already-paused lock 0회, owner generation-bound resume를 포함한다.
+중간 guard 파라미터 이름 충돌로 실패한 로컬 실행은 보존한 뒤 수정해 재실행했다.
+보호 table writer의 정확한 read mention pin만 갱신했으며 writer 경로·write verb
+허용 범위·migration bytes는 늘리거나 바꾸지 않았다.
+
+이 보강 소스의 full lint, 독립 8GB typecheck, production build,
+security regression 196개와 필수/readiness 정적 검사 13개도 통과했다.
+전체 unit/server 재실행은 앞 회차의 별도 기록이며 이 관련 검사 합계에 합치지 않는다.
+
+수정 commit의 두 vendor 재검토와 CI·PR·병합·정확한 배포·실사용 검증은 아직
+별도 단계다. Auto Router 세 출시 판정은 pending이며 실제 holdout 자료는 읽지
+않았다. 예외 정책·UI view·로컬 합성 통과를 제품 활성화 또는 전면 출시 판정으로
+승격하지 않는다.
+
 ## 초기 서버 경계 검증 기록
 
 아래는 제품 caller를 붙이기 전 단계의 기록이다. 위 확장이 구현 범위와 현재 상태를

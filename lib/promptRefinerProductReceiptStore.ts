@@ -65,7 +65,9 @@ export async function writePromptRefinerProductExecutionReceipt(
       retryCount: receipt.retryCount,
     },
   });
-  await evaluatePromptRefinerProductAutoGuardInTransaction(tx);
+  await evaluatePromptRefinerProductAutoGuardInTransaction(tx, {
+    executionReceiptId: receipt.receiptId,
+  });
   return receipt;
 }
 
@@ -94,6 +96,9 @@ export async function writePromptRefinerProductDispositionReceipt(
     targetId: receipt.dispositionId,
     summary: "Recorded one content-free Prompt Refiner product disposition.",
     metadata: { outcome: receipt.outcome, staleReason: receipt.staleReason },
+  });
+  await evaluatePromptRefinerProductAutoGuardInTransaction(tx, {
+    dispositionReceiptId: receipt.dispositionId,
   });
   return receipt;
 }

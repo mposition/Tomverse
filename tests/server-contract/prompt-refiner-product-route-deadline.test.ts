@@ -7,34 +7,46 @@ const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path: string) => pathToFileURL(resolve(root, path)).href;
 const authStarts: number[] = [];
 const observations: Array<{ requestedAt: number; remainingMs: number }> = [];
-let release = { explicitEnabled: true, autoEnabled: true };
+const admissionEvents: string[] = [];
+let authenticated = true;
+let validOrigin = true;
+let releaseReads = 0;
 
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => {
     authStarts.push(Date.now());
+    admissionEvents.push("auth");
     await new Promise(resolve => setTimeout(resolve, 30));
-    return { user: { id: "owner" } };
+    return authenticated ? { user: { id: "owner" } } : null;
   },
 } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
-  hasValidMutationOrigin: () => true,
+  hasValidMutationOrigin: () => {
+    admissionEvents.push("origin");
+    return validOrigin;
+  },
 } });
 mock.module(mod("lib/e2eTestMode.ts"), { namedExports: {
   isE2EFixtureMode: () => false,
 } });
 mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
-  promptRefinerChatExecutionRelease: async () => release,
+  promptRefinerChatExecutionRelease: async () => {
+    releaseReads += 1;
+    return { explicitEnabled: true, autoEnabled: true };
+  },
 } });
 mock.module(mod("lib/promptRefinerProductApi.ts"), { namedExports: {
   handlePromptRefinerProductPrepare: async (_request: Request, _userId: string,
     deadline: { requestedAt: Date; deadlineAtMonotonicMs: number }) => {
+    admissionEvents.push("prepare-handler");
     observations.push({ requestedAt: deadline.requestedAt.getTime(),
       remainingMs: deadline.deadlineAtMonotonicMs - performance.now() });
     return Response.json({ ok: true });
   },
   handlePromptRefinerProductProposal: async (_request: Request, _userId: string,
     deadline: { requestedAt: Date; deadlineAtMonotonicMs: number }) => {
+    admissionEvents.push("proposal-handler");
     observations.push({ requestedAt: deadline.requestedAt.getTime(),
       remainingMs: deadline.deadlineAtMonotonicMs - performance.now() });
     return Response.json({ ok: true });
@@ -51,11 +63,16 @@ const request = (path: string) => new Request(`https://tomverse.test${path}`, {
 
 test("product route deadline starts before authentication", async () => {
   const prepare = await prepareRoute; const proposal = await proposalRoute;
+  admissionEvents.length = 0;
   assert.equal((await prepare.POST(request(
     "/api/chat/prompt-refiner/prepare"))).status, 200);
   assert.equal((await proposal.POST(request(
     "/api/chat/prompt-refiner/proposal"))).status, 200);
   assert.equal(observations.length, 2);
+  assert.deepEqual(admissionEvents, [
+    "auth", "origin", "prepare-handler",
+    "auth", "origin", "proposal-handler",
+  ]);
   for (const [index, observation] of observations.entries()) {
     assert.ok(observation.requestedAt <= authStarts[index]!);
     assert.ok(observation.remainingMs < 12_990,
@@ -64,54 +81,32 @@ test("product route deadline starts before authentication", async () => {
   }
 });
 
-test("closed mode authority refuses before authentication and body access", async () => {
+test("unauthenticated requests do not enter product admission or read release evidence", async () => {
   const prepare = await prepareRoute; const proposal = await proposalRoute;
   const authCount = authStarts.length;
   const handlerCount = observations.length;
-  const unreadable = {
-    get body() { throw new Error("closed route read request body"); },
-    json: async () => { throw new Error("closed route parsed JSON"); },
-    text: async () => { throw new Error("closed route parsed text"); },
-  } as unknown as Request;
-  release = { explicitEnabled: false, autoEnabled: false };
-  const proposalResponse = await proposal.POST(unreadable);
-  const prepareResponse = await prepare.POST(unreadable);
-  assert.equal(proposalResponse.status, 503);
-  assert.deepEqual(await proposalResponse.json(), {
-    code: "PROMPT_REFINER_UNAVAILABLE",
-  });
-  assert.deepEqual(await prepareResponse.json(), {
-    outcome: "original_fallback", reason: "unavailable",
-  });
-  assert.equal(authStarts.length, authCount);
+  const releaseCount = releaseReads;
+  authenticated = false;
+  assert.equal((await proposal.POST(request(
+    "/api/chat/prompt-refiner/proposal"))).status, 401);
+  assert.equal((await prepare.POST(request(
+    "/api/chat/prompt-refiner/prepare"))).status, 401);
+  authenticated = true;
+  assert.equal(authStarts.length, authCount + 2);
   assert.equal(observations.length, handlerCount);
+  assert.equal(releaseReads, releaseCount);
 });
 
-test("release pre-admission checks explicit and Auto authority separately", async () => {
+test("invalid mutation origins do not enter product admission or read release evidence", async () => {
   const prepare = await prepareRoute; const proposal = await proposalRoute;
-  const unreadable = {
-    get body() { throw new Error("closed mode read request body"); },
-    json: async () => { throw new Error("closed mode parsed JSON"); },
-    text: async () => { throw new Error("closed mode parsed text"); },
-  } as unknown as Request;
-
-  release = { explicitEnabled: true, autoEnabled: false };
+  const handlerCount = observations.length;
+  const releaseCount = releaseReads;
+  validOrigin = false;
   assert.equal((await proposal.POST(request(
-    "/api/chat/prompt-refiner/proposal"))).status, 200);
-  const afterExplicit = { auth: authStarts.length, handler: observations.length };
-  assert.deepEqual(await (await prepare.POST(unreadable)).json(), {
-    outcome: "original_fallback", reason: "unavailable",
-  });
-  assert.deepEqual({ auth: authStarts.length, handler: observations.length },
-    afterExplicit);
-
-  release = { explicitEnabled: false, autoEnabled: true };
-  assert.equal((await proposal.POST(unreadable)).status, 503);
-  assert.deepEqual({ auth: authStarts.length, handler: observations.length },
-    afterExplicit);
+    "/api/chat/prompt-refiner/proposal"))).status, 403);
   assert.equal((await prepare.POST(request(
-    "/api/chat/prompt-refiner/prepare"))).status, 200);
-  assert.deepEqual({ auth: authStarts.length, handler: observations.length }, {
-    auth: afterExplicit.auth + 1, handler: afterExplicit.handler + 1,
-  });
+    "/api/chat/prompt-refiner/prepare"))).status, 403);
+  validOrigin = true;
+  assert.equal(observations.length, handlerCount);
+  assert.equal(releaseReads, releaseCount);
 });

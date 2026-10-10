@@ -46,16 +46,6 @@ export async function POST(request: Request): Promise<Response> {
     deadlineAtMonotonicMs: performance.now() +
       PROMPT_REFINER_PRODUCT_TIMEOUT_MS };
   if (!isE2EFixtureMode()) {
-    try {
-      const { promptRefinerChatExecutionRelease } = await import(
-        "@/lib/promptRefinerChatExecutionRelease"
-      );
-      if (!(await promptRefinerChatExecutionRelease()).explicitEnabled) {
-        return unavailable();
-      }
-    } catch {
-      return unavailable();
-    }
     const [{ getServerSession }, { authOptions },
       { handlePromptRefinerProductProposal,
         promptRefinerProductApiErrorResponse },

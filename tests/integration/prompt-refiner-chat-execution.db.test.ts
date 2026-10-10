@@ -89,7 +89,9 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     mock.module(mod("lib/chatResponseAttemptPersistence.ts"), { namedExports: {
       lockChatRecoveryConversation: async () => {},
     } });
-    mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: { promptRefinerChatExecutionRelease: () => release } });
+    mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
+      promptRefinerChatExecutionAdmission: () => release,
+    } });
     const takeTestAuditLock = async (tx: {
       $executeRaw: (strings: TemplateStringsArray,
         ...values: unknown[]) => Promise<unknown>;
