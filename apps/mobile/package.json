@@ -12,7 +12,7 @@
     "cap:sync": "cap sync"
   },
   "dependencies": {
-    "@capacitor/core": "^8.5.2",
+    "@capacitor/core": "^8.5.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
