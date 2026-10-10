@@ -427,7 +427,6 @@ test("the research room's state comes from the agent's own slot and silence judg
 
 test("a live room's line says what the record says, in Brisbane time, and an unread record is not a state", () => {
   const copy = adminAgentOfficeMessages.ko.real.research;
-  const readAt = "2026-10-07T22:05:00.000Z";
   const ok = researchLiveDept(
     {
       kind: "observed",
@@ -439,24 +438,24 @@ test("a live room's line says what the record says, in Brisbane time, and an unr
       silence: "recent",
       silenceHours: 0.6,
     },
-    readAt,
     copy
   );
   assert.equal(ok.status, "done");
   assert.equal(ok.line, "직전 회차 기록됨 · 10-08 07:30 AEST");
   assert.match(ok.detail, /마지막 성공 10-08 07:30 AEST/);
-  assert.match(ok.detail, /읽은 시각 10-08 08:05 AEST/);
+  // The read time is drawn once, by the clock, not in every room line.
+  assert.doesNotMatch(ok.detail, /읽은 시각|마지막 갱신/);
 
   assert.equal(ok.badge, "기록됨");
 
   // A read that failed needs a look; it is not "waiting on a link" and not done.
-  const unread = researchLiveDept({ kind: "unread" }, readAt, copy);
+  const unread = researchLiveDept({ kind: "unread" }, copy);
   assert.equal(unread.status, "attention");
   assert.equal(unread.badge, "읽지 못함");
   assert.equal(unread.line, copy.unread);
 
   // A switched-off agent waits; it is not a failure.
-  assert.equal(researchLiveDept({ kind: "disabled" }, readAt, copy).status, "waiting");
+  assert.equal(researchLiveDept({ kind: "disabled" }, copy).status, "waiting");
 
   // Before 21:30 UTC the slot that has passed is yesterday's, and the line
   // says which slot it means rather than calling it today's.
@@ -468,7 +467,6 @@ test("a live room's line says what the record says, in Brisbane time, and an unr
       enabledSince: at("2026-10-01T00:00:00Z"),
       now: at("2026-10-08T01:00:00Z"),
     }),
-    "2026-10-08T01:00:00.000Z",
     copy
   );
   assert.equal(morning.line, "직전 회차 실패 · 10-08 07:30 AEST · clone");
@@ -488,7 +486,7 @@ test("a live room is never simulated: no scripted work, and its status is the re
       status: "done",
       badge: "Recorded",
       line: "Today's run recorded · 10-08 07:30 AEST",
-      detail: "read 10-08 08:05 AEST",
+      detail: "",
     },
   };
   const office = new AgentOffice(adminAgentOfficeMessages.en, live);
@@ -613,40 +611,39 @@ test("the QA room's verdict is the agent's own freshness judgement", () => {
 
 test("the QA room says whether a digest arrived, in Brisbane time, and a latched lane needs a look", () => {
   const copy = adminAgentOfficeMessages.ko.real.qa;
-  const readAt = "2026-10-07T22:05:00.000Z";
-  const fresh = qaLiveDept(agentOfficeQaState(qaInput()), readAt, copy);
+  const fresh = qaLiveDept(agentOfficeQaState(qaInput()), copy);
   assert.equal(fresh.status, "done");
   assert.equal(fresh.badge, "수신됨");
   assert.equal(fresh.line, "최근 digest 수신 · 10-07 16:00 AEST");
-  assert.equal(fresh.detail, "제어 기록 4번 · 읽은 시각 10-08 08:05 AEST");
+  assert.equal(fresh.detail, "제어 기록 4번");
 
-  const silent = qaLiveDept(agentOfficeQaState(qaInput({ now: at("2026-10-08T12:00:00Z") })), readAt, copy);
+  const silent = qaLiveDept(agentOfficeQaState(qaInput({ now: at("2026-10-08T12:00:00Z") })), copy);
   assert.equal(silent.status, "attention");
   assert.equal(silent.line, "digest 침묵 · 마지막 수신 10-07 16:00 AEST");
-  assert.equal(qaLiveDept(agentOfficeQaState(qaInput({ latestDigestAt: null })), readAt, copy).line, copy.staleNever);
+  assert.equal(qaLiveDept(agentOfficeQaState(qaInput({ latestDigestAt: null })), copy).line, copy.staleNever);
 
-  const latched = qaLiveDept(agentOfficeQaState(qaInput({ mergeLaneLatched: true })), readAt, copy);
+  const latched = qaLiveDept(agentOfficeQaState(qaInput({ mergeLaneLatched: true })), copy);
   assert.equal(latched.status, "attention");
   assert.equal(latched.badge, "레인 잠김");
   assert.match(latched.detail, /병합 레인 잠김/);
 
-  const mismatch = qaLiveDept(agentOfficeQaState(qaInput({ digestSecretConfigured: false })), readAt, copy);
+  const mismatch = qaLiveDept(agentOfficeQaState(qaInput({ digestSecretConfigured: false })), copy);
   assert.equal(mismatch.status, "attention");
   assert.equal(mismatch.line, copy.mismatch);
 
   // Switched off, or never configured here: waiting, not a failure.
   const off = agentOfficeQaState(qaInput({ control: { revision: 5, digestEnabled: false } }));
   assert.equal(qaTone(off), "waiting");
-  assert.equal(qaLiveDept(off, readAt, copy).line, copy.disabled);
+  assert.equal(qaLiveDept(off, copy).line, copy.disabled);
   // A digest stored before it was switched off is still named.
-  assert.equal(qaLiveDept(off, readAt, copy).detail, "제어 기록 5번 · 마지막 digest 10-07 16:00 AEST · 읽은 시각 10-08 08:05 AEST");
+  assert.equal(qaLiveDept(off, copy).detail, "제어 기록 5번 · 마지막 digest 10-07 16:00 AEST");
   assert.match(mismatch.detail, /마지막 digest 10-07 16:00 AEST/);
   const dark = agentOfficeQaState(qaInput({ control: null, digestSecretConfigured: false, latestDigestAt: null }));
   assert.equal(qaTone(dark), "waiting");
-  assert.equal(qaLiveDept(dark, readAt, copy).detail, "제어 기록 없음 · 읽은 시각 10-08 08:05 AEST");
+  assert.equal(qaLiveDept(dark, copy).detail, "제어 기록 없음");
 
   // A read that failed is not a state.
-  const unread = qaLiveDept({ kind: "unread" }, readAt, copy);
+  const unread = qaLiveDept({ kind: "unread" }, copy);
   assert.equal(unread.status, "attention");
   assert.equal(unread.badge, "읽지 못함");
 
@@ -826,8 +823,7 @@ test("whether the latest run needs a look is the agent's own settlement of its o
 
 test("the engineering room says how the agent stands: halts and decisions first, then switches, then runs", () => {
   const copy = adminAgentOfficeMessages.ko.real.engineering;
-  const readAt = "2026-10-07T22:05:00.000Z";
-  const room = (overrides) => engineeringLiveDept(agentOfficeEngineeringState(engInput(overrides)), readAt, copy);
+  const room = (overrides) => engineeringLiveDept(agentOfficeEngineeringState(engInput(overrides)), copy);
 
   const clear = room({});
   assert.equal(clear.status, "done");
@@ -835,7 +831,7 @@ test("the engineering room says how the agent stands: halts and decisions first,
   assert.equal(clear.line, "직전 회차 private_result · 10-08 07:30 AEST");
   assert.equal(
     clear.detail,
-    "모드 t1 · 실행기 마지막 완료 10-08 07:40 AEST · 게시기 완료 기록 없음 · 읽은 시각 10-08 08:05 AEST"
+    "모드 t1 · 실행기 마지막 완료 10-08 07:40 AEST · 게시기 완료 기록 없음"
   );
 
   // A failed latest run is not clear, whatever its line says.
@@ -899,7 +895,7 @@ test("the engineering room says how the agent stands: halts and decisions first,
   assert.equal(fresh.status, "waiting");
   assert.equal(fresh.line, copy.noRun);
 
-  const unread = engineeringLiveDept({ kind: "unread" }, readAt, copy);
+  const unread = engineeringLiveDept({ kind: "unread" }, copy);
   assert.equal(unread.status, "attention");
   assert.equal(unread.badge, "읽지 못함");
 
@@ -1116,14 +1112,13 @@ test("each AMUX worker's state is its catalog row read against its runtime the w
 
 test("the AMUX room's colour and summary come from its workers, and a missing record is not a state", () => {
   const copy = adminAgentOfficeMessages.ko.real.amux;
-  const readAt = "2026-10-07T22:05:00.000Z";
   const view = (workers, desks = 12) =>
-    amuxRoomView({ kind: "observed", workers }, readAt, desks, copy);
+    amuxRoomView({ kind: "observed", workers }, desks, copy);
   const worker = (name, state) => ({ name, provider: "openai", state, heartbeatAt: "2026-10-07T22:04:30.000Z" });
 
   const mixed = view([worker("a", "ready"), worker("b", "busy"), worker("c", "lost"), worker("d", "stopped")]);
   assert.equal(mixed.status, "attention");
-  assert.equal(mixed.summary, "연결 2/4 · 작업 중 1 · 확인 필요 1 · 읽은 시각 10-08 08:05 AEST");
+  assert.equal(mixed.summary, "연결 2/4 · 작업 중 1 · 확인 필요 1");
   assert.deepEqual(
     mixed.workers.map((w) => [w.name, w.status, w.label, w.dim]),
     [
@@ -1164,12 +1159,12 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   assert.equal(adminAgentOfficeMessages.en.real.amux.more(3), "3 more workers not drawn here");
   assert.equal(view([]).note, copy.noWorkers);
 
-  const unread = amuxRoomView({ kind: "unread" }, readAt, 12, copy);
+  const unread = amuxRoomView({ kind: "unread" }, 12, copy);
   assert.equal(unread.status, "attention");
   assert.deepEqual(unread.workers, []);
   assert.match(unread.summary, /worker 기록을 읽지 못함/);
   assert.equal(unread.note, copy.unread, "a failed read is said in the room, not only in a tooltip");
-  const none = amuxRoomView({ kind: "no_catalog" }, readAt, 12, copy);
+  const none = amuxRoomView({ kind: "no_catalog" }, 12, copy);
   assert.equal(none.status, "waiting");
   assert.match(none.summary, /카탈로그가 없음/);
   assert.equal(none.note, copy.noCatalog);
@@ -1260,14 +1255,13 @@ test("the billing and finance room's verdict is the agent's own silence judgemen
 
 test("the billing and finance room says whether today's digest arrived, never what it held", () => {
   const copy = adminAgentOfficeMessages.ko.real.finance;
-  const readAt = "2026-10-08T08:05:00.000Z";
-  const room = (overrides) => financeLiveDept(agentOfficeFinanceState(financeInput(overrides)), readAt, copy);
+  const room = (overrides) => financeLiveDept(agentOfficeFinanceState(financeInput(overrides)), copy);
 
   const recorded = room({});
   assert.equal(recorded.status, "done");
   assert.equal(recorded.badge, "기록됨");
   assert.equal(recorded.line, "오늘 기한 digest 기록됨 · 10-08 11:00 AEST");
-  assert.equal(recorded.detail, "스위치 기록 3번 · 켜진 시각 10-01 10:00 AEST · 읽은 시각 10-08 18:05 AEST");
+  assert.equal(recorded.detail, "스위치 기록 3번 · 켜진 시각 10-01 10:00 AEST");
 
   const silent = room({ recordedToday: false, latestDigestAt: at("2026-10-07T01:00:09Z") });
   assert.equal(silent.status, "attention");
@@ -1280,7 +1274,6 @@ test("the billing and finance room says whether today's digest arrived, never wh
   // Recorded stays recorded even when the newest digest's time was not read with it.
   const untimed = financeLiveDept(
     { kind: "observed", verdict: "recorded", controlRevision: 3, enabledAt: null, latestDigestAt: null },
-    readAt,
     copy
   );
   assert.equal(untimed.line, copy.recordedUntimed);
@@ -1299,7 +1292,7 @@ test("the billing and finance room says whether today's digest arrived, never wh
   assert.equal(room({ environment: "development" }).status, "waiting");
   assert.equal(room({ environment: "development" }).line, copy.notApplicable);
 
-  const unread = financeLiveDept({ kind: "unread" }, readAt, copy);
+  const unread = financeLiveDept({ kind: "unread" }, copy);
   assert.equal(unread.status, "attention");
   assert.equal(unread.badge, "읽지 못함");
 
@@ -1566,7 +1559,7 @@ test("the review room shows each reviewer's real state, and a silent server as l
   const state = (snapshot, receivedAt, now = "2026-10-09T01:05:00.000Z") =>
     agentOfficeReviewState({ stored: stored(snapshot, receivedAt), now: at(now) });
 
-  const live = reviewRoomView(state(reviewSnapshot()), readAt, REVIEW_ROOM.desks.length, copy);
+  const live = reviewRoomView(state(reviewSnapshot()), REVIEW_ROOM.desks.length, copy);
   assert.equal(live.status, "working");
   assert.equal(live.note, null);
   assert.deepEqual(
@@ -1586,18 +1579,17 @@ test("the review room shows each reviewer's real state, and a silent server as l
   ]);
   assert.equal(
     live.summary,
-    "대기 2 · 최근 24시간 accept 9 · reject 3 · unknown 2 · 마지막 보고 10-09 11:04 AEST · 읽은 시각 10-09 11:05 AEST"
+    "대기 2 · 최근 24시간 accept 9 · reject 3 · unknown 2 · 마지막 보고 10-09 11:04 AEST"
   );
   const idle = reviewRoomView(
     state(reviewSnapshot({ providers: [{ id: "codex", vendor: "openai", enabled: true, running: 0, maxConcurrent: 2 }] })),
-    readAt,
     6,
     copy
   );
   assert.equal(idle.status, "done");
 
   // Five missed beats: every reviewer is lost, and the room says since when.
-  const silent = reviewRoomView(state(reviewSnapshot(), "2026-10-09T00:58:00.000Z"), readAt, 6, copy);
+  const silent = reviewRoomView(state(reviewSnapshot(), "2026-10-09T00:58:00.000Z"), 6, copy);
   assert.equal(silent.status, "attention");
   assert.ok(silent.reviewers.every((r) => r.label === "보고 없음" && r.status === "attention"));
   assert.equal(silent.note, "10-09 10:58 AEST 이후 보고 없음");
@@ -1612,26 +1604,26 @@ test("the review room shows each reviewer's real state, and a silent server as l
     running: i === 7 ? 1 : 0,
     maxConcurrent: 1,
   }));
-  const crowded = reviewRoomView(state(reviewSnapshot({ providers: crowd })), readAt, 6, copy);
+  const crowded = reviewRoomView(state(reviewSnapshot({ providers: crowd })), 6, copy);
   assert.equal(crowded.reviewers.length, 6);
   assert.equal(crowded.status, "working", "the one reviewing is past the desks, and still counts");
   assert.equal(crowded.note, "여기 그리지 못한 검토자 2명");
   assert.equal(
-    reviewRoomView(state(reviewSnapshot({ providers: crowd.slice(0, 7) })), readAt, 6, adminAgentOfficeMessages.en.real.review).note,
+    reviewRoomView(state(reviewSnapshot({ providers: crowd.slice(0, 7) })), 6, adminAgentOfficeMessages.en.real.review).note,
     "1 more reviewer not drawn here"
   );
 
-  const draining = reviewRoomView(state(reviewSnapshot({ draining: true })), readAt, 6, copy);
+  const draining = reviewRoomView(state(reviewSnapshot({ draining: true })), 6, copy);
   assert.equal(draining.status, "waiting");
   assert.equal(draining.note, copy.draining);
 
-  const never = reviewRoomView(agentOfficeReviewState({ stored: null, now: at(readAt) }), readAt, 6, copy);
+  const never = reviewRoomView(agentOfficeReviewState({ stored: null, now: at(readAt) }), 6, copy);
   assert.equal(never.status, "waiting");
   assert.equal(never.note, copy.notReporting);
-  const broken = reviewRoomView(agentOfficeReviewState({ stored: "{", now: at(readAt) }), readAt, 6, copy);
+  const broken = reviewRoomView(agentOfficeReviewState({ stored: "{", now: at(readAt) }), 6, copy);
   assert.equal(broken.status, "attention");
   assert.equal(broken.note, copy.unreadable);
-  assert.equal(reviewRoomView({ kind: "unread" }, readAt, 6, copy).status, "attention");
+  assert.equal(reviewRoomView({ kind: "unread" }, 6, copy).status, "attention");
 
   for (const locale of ["en", "ko"]) {
     const states = adminAgentOfficeMessages[locale].real.review.states;
@@ -1760,12 +1752,12 @@ test("live leads answer a greeting or a thank-you in their own voice, and never 
 });
 
 test("the office reads its rooms again each minute, and a room whose record changed says so", () => {
-  const qa = (line, status = "done", detail = "read 10-09 11:00 AEST") => ({ status, badge: "Fresh", line, detail });
+  const qa = (line, status = "done", detail = "") => ({ status, badge: "Fresh", line, detail });
   const office = new AgentOffice(adminAgentOfficeMessages.en, { qa: qa("Digest received · 10-09 10:55 AEST") });
   const said = () => office.chat.filter((entry) => entry.text.startsWith("🔔")).map((entry) => entry.text);
   // The first reading is not a change, nor is one that only moved the read time.
   office.setLive({ qa: qa("Digest received · 10-09 10:55 AEST") });
-  office.setLive({ qa: qa("Digest received · 10-09 10:55 AEST", "done", "read 10-09 11:01 AEST") });
+  office.setLive({ qa: qa("Digest received · 10-09 10:55 AEST", "done", "") });
   assert.deepEqual(said(), []);
   office.setLive({ qa: qa("Digest silent · last received 10-09 10:55 AEST", "attention") });
   assert.deepEqual(said(), ["🔔 QA & release · Digest silent · last received 10-09 10:55 AEST"]);
@@ -2207,7 +2199,6 @@ test("the Decision Maker room's state is its switches and its ledger's counts, n
 
 test("the Decision Maker room says where questions go, in Brisbane time, and an unread switch needs a look", () => {
   const copy = adminAgentOfficeMessages.ko.real.decision;
-  const readAt = "2026-10-10T01:05:00.000Z";
   const observed = (switches, overrides = {}) => ({
     kind: "observed",
     killSwitch: switches.killSwitch,
@@ -2233,10 +2224,10 @@ test("the Decision Maker room says where questions go, in Brisbane time, and an 
     ...overrides,
   });
 
-  const live = decisionRoomView(observed(dmSwitches()), readAt, copy);
+  const live = decisionRoomView(observed(dmSwitches()), copy);
   assert.equal(live.status, "done");
   assert.equal(live.note, null);
-  assert.equal(live.summary, "제안 모드 1/2 · 최근 24시간 Decision Maker 3건 · 운영자 2건 · 읽은 시각 10-10 11:05 AEST");
+  assert.equal(live.summary, "제안 모드 1/2 · 최근 24시간 Decision Maker 3건 · 운영자 2건");
   assert.deepEqual(
     live.members.map((member) => [member.name, member.state, member.status, member.label, member.dim]),
     [
@@ -2253,7 +2244,7 @@ test("the Decision Maker room says where questions go, in Brisbane time, and an 
   ]);
 
   // The kill switch sends everything to the operator, whatever the instances say.
-  const killed = decisionRoomView(observed(dmSwitches({ killSwitch: true })), readAt, copy);
+  const killed = decisionRoomView(observed(dmSwitches({ killSwitch: true })), copy);
   assert.equal(killed.status, "waiting");
   assert.equal(killed.note, copy.killed);
   assert.ok(killed.members.every((member) => member.state === "killed" && member.dim));
@@ -2261,7 +2252,6 @@ test("the Decision Maker room says where questions go, in Brisbane time, and an 
 
   const allOff = decisionRoomView(
     observed(dmSwitches({ instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "off" } })),
-    readAt,
     copy
   );
   assert.equal(allOff.status, "waiting");
@@ -2270,17 +2260,16 @@ test("the Decision Maker room says where questions go, in Brisbane time, and an 
   // An unreadable switch is not "off": it needs a look, and the room says where questions go.
   const unreadable = decisionRoomView(
     observed({ killSwitch: null, instances: { "decision-maker-openai": null, "decision-maker-anthropic": null } }),
-    readAt,
     copy
   );
   assert.equal(unreadable.status, "attention");
   assert.equal(unreadable.note, copy.unreadable);
   assert.ok(unreadable.members.every((member) => member.state === "unread" && member.status === "attention"));
 
-  const unread = decisionRoomView({ kind: "unread" }, readAt, copy);
+  const unread = decisionRoomView({ kind: "unread" }, copy);
   assert.deepEqual(unread, {
     status: "attention",
-    summary: "Decision Maker 기록을 읽지 못함 · 읽은 시각 10-10 11:05 AEST",
+    summary: "Decision Maker 기록을 읽지 못함",
     note: copy.unread,
     members: [],
   });
@@ -2339,45 +2328,42 @@ test("the digest desk counts each agent's digests and names the newest, never th
   const names = Object.fromEntries(
     Object.entries(AGENT_OFFICE_DIGEST_SENDERS).map(([key, dept]) => [key, adminAgentOfficeMessages.ko.depts[dept].name])
   );
-  const readAt = "2026-10-10T01:05:00.000Z";
-  const desk = digestLiveDept(state, readAt, copy, names);
+  const desk = digestLiveDept(state, copy, names);
   assert.equal(desk.status, "done");
   assert.equal(desk.badge, "수신 중");
   assert.equal(desk.line, `최근 digest · ${names["billing-finance-ops"]} · 10-10 09:30 AEST`);
   assert.equal(
     desk.detail,
-    `${names["qa-release"]} 24시간 2건 · ${names["billing-finance-ops"]} 24시간 1건 · ${names["sre-ops"]} 24시간 0건 · 읽은 시각 10-10 11:05 AEST`
+    `${names["qa-release"]} 24시간 2건 · ${names["billing-finance-ops"]} 24시간 1건 · ${names["sre-ops"]} 24시간 0건`
   );
   // Nothing in 24 hours is quiet, not a fault: an agent's lateness is its own room's call.
   const quiet = digestLiveDept(
     { kind: "observed", agents: state.agents.map((agent) => ({ ...agent, recent: 0 })) },
-    readAt,
     copy,
     names
   );
   assert.equal(quiet.status, "waiting");
   assert.equal(quiet.badge, "24시간 수신 없음");
   assert.equal(quiet.line, desk.line, "the newest digest is still named");
-  const never = digestLiveDept(agentOfficeDigestState({ recent: [], latest: [] }), readAt, copy, names);
+  const never = digestLiveDept(agentOfficeDigestState({ recent: [], latest: [] }), copy, names);
   assert.equal(never.line, "아직 받은 digest 없음");
-  assert.deepEqual(digestLiveDept({ kind: "unread" }, readAt, copy, names), {
+  assert.deepEqual(digestLiveDept({ kind: "unread" }, copy, names), {
     status: "attention",
     badge: "읽기 실패",
     line: "digest를 읽지 못함",
-    detail: "읽은 시각 10-10 11:05 AEST",
+    detail: "",
   });
 
   // A new digest changes the line, so the desk's lead announces it once.
   const office = new AgentOffice(adminAgentOfficeMessages.ko, { digest: desk });
   const said = () => office.snapshot().chat.filter((line) => line.text.startsWith("🔔")).map((line) => line.text);
-  office.setLive({ digest: { ...desk, detail: "읽은 시각 10-10 11:06 AEST" } });
+  office.setLive({ digest: { ...desk, detail: "" } });
   assert.deepEqual(said(), [], "a new read time alone is not news");
   const next = digestLiveDept(
     agentOfficeDigestState({
       recent: [{ agentKey: "sre-ops", count: 1 }],
       latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:00Z") }],
     }),
-    readAt,
     copy,
     names
   );
@@ -2390,7 +2376,6 @@ test("the digest desk counts each agent's digests and names the newest, never th
       recent: [{ agentKey: "sre-ops", count: 2 }],
       latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:40Z") }],
     }),
-    readAt,
     copy,
     names
   );
@@ -2398,7 +2383,7 @@ test("the digest desk counts each agent's digests and names the newest, never th
   assert.notEqual(sameMinute.revision, next.revision);
   office.setLive({ digest: sameMinute });
   assert.equal(said().length, 2, "the same-minute digest is announced");
-  office.setLive({ digest: { ...sameMinute, detail: "읽은 시각 10-10 11:12 AEST" } });
+  office.setLive({ digest: { ...sameMinute, detail: "" } });
   assert.equal(said().length, 2, "a re-read of the same digests is not");
 
   // The read selects counts and times only.
@@ -2412,4 +2397,27 @@ test("the digest desk counts each agent's digests and names the newest, never th
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   assert.match(panel, /digest: digestLiveDept\(\s*live\.digest,/);
   assert.equal(AGENT_OFFICE_DECLARED_RECORD_HREFS.digest, "/admin/agent-digests");
+});
+
+test("the screen says how fresh it is in one place, and says so when it stops refreshing", () => {
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    // No room copy carries a read time: every room was read at the same moment.
+    for (const [room, block] of Object.entries(copy.real)) {
+      if (block && typeof block === "object") assert.equal(block.readAt, undefined, `${locale} ${room}`);
+    }
+    assert.equal(copy.dashboard.briefAsOf, undefined);
+    assert.ok(copy.live.stale);
+  }
+  assert.equal(adminAgentOfficeMessages.ko.live.clockReal, "마지막 갱신");
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  // Two missed re-reads before it says so; the first render starts the clock
+  // at the reading itself, so server and client agree.
+  assert.match(panel, /export const LIVE_STALE_MS = 2 \* LIVE_REFRESH_MS;/);
+  assert.match(panel, /const \[now, setNow\] = useState\(readMs\);/);
+  assert.match(panel, /data-testid="agent-office-stale"/);
+  // Coming back to the tab reads again at once instead of showing a stale screen.
+  assert.match(panel, /addEventListener\("visibilitychange", onVisible\)/);
+  const live = readFileSync("lib/agentOffice/live.ts", "utf8");
+  assert.doesNotMatch(live, /copy\.readAt|readAt: string,\n\s*copy/);
 });
