@@ -821,8 +821,9 @@ export function reviewQuotaView(state: AgentOfficeReviewState, copy: QuotaCopy):
       quota.remaining !== null &&
       (quota.unit === "percent"
         ? quota.remaining < REVIEW_QUOTA_LOW_PERCENT
-        : // judged on the amount the card shows, so "$0.00 left" never reads as plenty
-          Math.round(quota.remaining * 100) <= 0);
+        : // judged on the amount the card shows (USD to the cent, credits whole),
+          // so "$0.00 left" or "0 credits left" never reads as plenty
+          (quota.unit === "usd" ? Math.round(quota.remaining * 100) : Math.round(quota.remaining)) <= 0);
     // The included pool is (nearly) spent but credit keeps the account
     // working: say so rather than "running low".
     const onCredit = low && (quota.credit ?? 0) > 0;
