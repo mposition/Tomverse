@@ -18,6 +18,7 @@ import {
   AGENT_RAILWAY_REGION,
   AGENT_RAILWAY_REPOSITORY,
   AGENT_RUNNER_SERVICES,
+  RAILWAY_DEFAULT_RESTART,
   buildAgentRunnerResources,
 } from "../.railway/agent-runners.ts";
 import {
@@ -197,9 +198,15 @@ test("the resource list is exactly the table for that environment, and refuses t
       assert.equal(resource.start, runner.startCommand);
       assert.deepEqual(resource.deploy, {
         ...(runner.cronSchedule === null ? {} : { cronSchedule: runner.cronSchedule }),
-        ...(runner.restart
-          ? { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }
-          : { restartPolicyType: "NEVER" }),
+        // Railway stores its own default restart policy as null, so a runner
+        // whose policy is exactly that default declares null (see
+        // RAILWAY_DEFAULT_RESTART); anything else is declared as itself.
+        ...(!runner.restart
+          ? { restartPolicyType: "NEVER" }
+          : runner.restart.type === RAILWAY_DEFAULT_RESTART.type &&
+              runner.restart.maxRetries === RAILWAY_DEFAULT_RESTART.maxRetries
+            ? { restartPolicyType: null, restartPolicyMaxRetries: null }
+            : { restartPolicyType: runner.restart.type, restartPolicyMaxRetries: runner.restart.maxRetries }),
       });
       assert.deepEqual(
         resource.build,
@@ -489,4 +496,16 @@ test("the AMUX orchestrator is a long-running production service that cannot run
   for (const other of AGENT_RUNNER_SERVICES.filter((entry) => entry !== runner)) {
     assert.equal(other.restart, undefined, `${other.service} restarts`);
   }
+});
+
+test("the orchestrator's restart policy is Railway's default, so it is declared as null and the plan settles", () => {
+  // Railway's default is On Failure with ten restarts and it stores that as
+  // null; declaring the two values made every plan show `null -> 10`.
+  assert.deepEqual(RAILWAY_DEFAULT_RESTART, { type: "ON_FAILURE", maxRetries: 10 });
+  const { dsl } = recordingDsl();
+  const orchestrator = buildAgentRunnerResources("production", dsl).find((resource) => resource.name === "AMUX Orchestrator");
+  assert.ok(orchestrator);
+  assert.equal(orchestrator.deploy.restartPolicyType, null);
+  assert.equal(orchestrator.deploy.restartPolicyMaxRetries, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(orchestrator.deploy, "restartPolicyType"), true, "null is declared, not left out");
 });
