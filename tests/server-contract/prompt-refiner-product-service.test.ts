@@ -27,9 +27,11 @@ let auditLatches = 0;
 let receiptError = false;
 let adapterConstructionError = false;
 let executeErrorBeforeAuthorization = false;
+let executeErrorAfterAuthorization = false;
 let dispatchIntentError = false;
 let releaseError = false;
 let executionEvents: string[] = [];
+let recordedReceipts: Array<Record<string, unknown>> = [];
 
 class BudgetError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -48,28 +50,48 @@ mock.module(mod("lib/promptRefinerAutoBudgetHold.ts"), { namedExports: {
     return { id: "33333333-3333-4333-8333-333333333333" };
   },
   createPromptRefinerAutoBudgetTransitionAuthority: (verifiers: Record<string,
-    (raw: unknown) => Promise<unknown>>) => ({
-    recordDispatchIntent: async (raw: unknown) => {
+    (raw: unknown) => Promise<unknown>>) => {
+    const recordedDispatches = new WeakSet<object>();
+    return {
+      recordDispatchIntent: async (raw: unknown) => {
       await verifiers.verifyDispatchIntent(raw);
       if (dispatchIntentError) throw new Error("synthetic dispatch outcome unknown");
       dispatches += 1;
-    },
-    settleVerifiedBilled: async (raw: unknown) => {
+      const result = Object.freeze({ holdId:
+        "33333333-3333-4333-8333-333333333333", status: "dispatching" as const,
+      intentId: (raw as { intentId: string }).intentId,
+      adapterConfigDigest: (raw as { adapterConfigDigest: string }).adapterConfigDigest,
+      dispatchAuditLogId: "dispatch-audit" });
+      recordedDispatches.add(result);
+      return result;
+      },
+      retainUnknownAfterRecordedDispatch: async (raw: unknown) => {
+        if (raw === null || typeof raw !== "object" ||
+            !recordedDispatches.has(raw)) throw new Error("untrusted recorded dispatch");
+        unknowns += 1;
+        const now = new Date();
+        return { holdId: "33333333-3333-4333-8333-333333333333",
+          status: "unknown" as const, reservedMicroUsd: BigInt(29_918),
+          unknownAuditLogId: "unknown-audit", retryAuthorized: false as const,
+          dispatchedAt: now, unknownAt: now };
+      },
+      settleVerifiedBilled: async (raw: unknown) => {
       await verifiers.verifyVerifiedBilling(raw);
       if (settlementDelayMs) await new Promise(resolve =>
         setTimeout(resolve, settlementDelayMs));
       settlements += 1;
-    },
-    retainUnknown: async (raw: unknown) => {
+      },
+      retainUnknown: async (raw: unknown) => {
       await verifiers.verifyBillingUnknown(raw); unknowns += 1;
-    },
-    releaseConfirmedUndispatched: async (raw: unknown) => {
+      },
+      releaseConfirmedUndispatched: async (raw: unknown) => {
       const fact = await verifiers.verifyUndispatched(raw);
       if (releaseError) throw new Error("synthetic release outcome unknown");
       releasedFacts.push(fact as Record<string, unknown>);
       releases += 1;
-    },
-  }),
+      },
+    };
+  },
 } });
 mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
   isPromptRefinerCapturedChatDraft: () => true,
@@ -110,6 +132,7 @@ mock.module(mod("lib/promptRefinerProductReceiptStore.ts"), { namedExports: {
   recordPromptRefinerProductExecutionReceipt: async (receipt: Record<string, unknown>,
     _mode: string, state = "terminal") => {
     if (receiptError) throw new Error("synthetic receipt audit failure");
+    recordedReceipts.push(receipt);
     receiptStates.push(state);
     return { ...receipt, receiptId: receipt.receiptId ?? "receipt" };
   },
@@ -146,6 +169,10 @@ mock.module(mod("lib/promptRefinerProductAdapter.ts"), { namedExports: {
         adapterConfigDigest: "a".repeat(64) });
         intents.add(intent);
         await dependencies.authorizeDispatch(intent);
+        if (executeErrorAfterAuthorization) {
+          providerCalls += 1;
+          throw new Error("synthetic outcome unknown after durable dispatch");
+        }
         const outcome = Object.freeze({ ...adapterOutcome });
         if (outcome.status !== "undispatched") providerCalls += 1;
         if (outcome.status === "billing_unknown") unknown.add(outcome);
@@ -186,9 +213,11 @@ beforeEach(() => {
   receiptError = false;
   adapterConstructionError = false;
   executeErrorBeforeAuthorization = false;
+  executeErrorAfterAuthorization = false;
   dispatchIntentError = false;
   releaseError = false;
   executionEvents = [];
+  recordedReceipts = [];
   delete process.env.PROMPT_REFINER_KILL_SWITCH;
 });
 
@@ -265,8 +294,24 @@ test("unknown authorization retains the full hold without provider or retry", as
   assert.equal(reserves, 1); assert.equal(dispatches, 0);
   assert.equal(providerCalls, 0); assert.equal(releases, 0);
   assert.equal(settlements, 0); assert.equal(unknowns, 0);
-  assert.deepEqual(receiptStates, ["terminal"]);
+  assert.deepEqual(receiptStates, ["unknown"]);
   assert.equal(auditLatches, 1);
+});
+
+test("unexpected failure after committed dispatch becomes one terminal unknown", async () => {
+  const { preparePromptRefinerProductSuggestion: prepare } = await servicePromise;
+  executeErrorAfterAuthorization = true;
+  const result = await prepare({ snapshot, mode: "explicit" });
+  assert.deepEqual(result, { outcome: "original_fallback",
+    reason: "billing_unknown" });
+  assert.equal(reserves, 1); assert.equal(dispatches, 1);
+  assert.equal(providerCalls, 1); assert.equal(releases, 0);
+  assert.equal(settlements, 0); assert.equal(unknowns, 1);
+  assert.deepEqual(receiptStates, ["unknown"]);
+  assert.equal(recordedReceipts[0]?.outcome, "failed");
+  assert.equal(recordedReceipts[0]?.failureLayer, "provider");
+  assert.equal(recordedReceipts[0]?.failureCode, "unknown_after_dispatch");
+  assert.equal(auditLatches, 0);
 });
 
 test("unknown pre-authorization release stays held and fails closed", async () => {

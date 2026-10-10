@@ -1716,10 +1716,10 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/promptRefinerAutoBudgetHold.ts",
     table: "PromptRefinerAutoBudgetHold",
-    tableMentions: 13,
-    writeVerbs: 6,
+    tableMentions: 15,
+    writeVerbs: 7,
     reason:
-      "The sole registered budget writer reserves, records one dispatch intent, settles verified usage, retains unknown outcomes or releases a proven undispatched hold through branded transition authority. Database triggers update both windows; canonical audit shares each transaction.",
+      "The sole registered budget writer reserves, records one dispatch intent, settles verified usage, retains adapter-reported unknowns, closes an exception only from its own committed-dispatch capability, or releases a proven undispatched hold through branded transition authority. Database triggers update both windows; canonical audit shares each transaction.",
   },
   {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
@@ -1788,6 +1788,11 @@ export const RAW_SQL_ALLOWLIST = [
     tableMentions: [3, 9, 3, 5, 4, 4][index], writeVerbs: 29,
     reason: "Additive private draft-attempt binding and immutable content-free receipt DDL, exact foreign keys, row and truncate guards. Reads of scopes/suggestions constrain ownership; no seeded activation or audit-table write.",
   })),
+  ...["PromptRefinerProductExecutionReceipt", "PromptRefinerProductAttempt", "PromptRefinerChatSuggestion"].map((table, index) => ({
+    path: "prisma/migrations/20261010124000_prompt_refiner_product_receipt_binding/migration.sql", table,
+    tableMentions: [1, 2, 2][index], writeVerbs: 1,
+    reason: "Additive INSERT-time receipt binding guard. It locks and compares an existing attempt and, for success, its exact suggestion; it adds no lifetime foreign key, seed, provider authority or audit-table write.",
+  })),
   ...["PromptRefinerProductAttempt", "PromptRefinerChatSuggestion"].map((table, index) => ({
     path: "lib/chatDraftMessageConsume.ts", table,
     tableMentions: [3, 1][index], writeVerbs: 2,
@@ -1795,8 +1800,8 @@ export const RAW_SQL_ALLOWLIST = [
   })),
   ...["AdminAuditLog", "PromptRefinerProductExecutionReceipt", "PromptRefinerProductExecutionContext", "PromptRefinerProductDispositionReceipt", "PromptRefinerProductAttempt", "PromptRefinerProductOperationalGuard", "PromptRefinerAutoBudgetHold"].map((table, index) => ({
     path: "lib/promptRefinerProductOperationalGuard.ts", table,
-    tableMentions: [4, 5, 2, 4, 4, 6, 3][index], writeVerbs: 4,
-    reason: "The sole operational guard writer reads the current writer-supplied receipt, bounded latest-100 execution/disposition facts, an indexed generation-wide unknown-attempt probe, and one indexed expired-attempt receipt-gap probe across attempt, budget and audit facts. It inserts the initial latch and updates only the latch for policy stop or a generation-bound human resume; all audits use the canonical writer in the same transaction. It never changes provider accounting or receipt history.",
+    tableMentions: [4, 5, 2, 4, 4, 6, 2][index], writeVerbs: 4,
+    reason: "The sole operational guard writer reads the current writer-supplied receipt, bounded latest-100 execution/disposition facts, an indexed generation-wide unknown-attempt probe, and one indexed expired-attempt receipt-gap probe. It inserts the initial latch and updates only the latch for policy stop or a generation-bound human resume; all audits use the canonical writer in the same transaction. It never changes provider accounting or receipt history.",
   })),
   ...["AdminAuditLog", "PromptRefinerProductOperationalGuard"].map((table, index) => ({
     path: "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql", table,

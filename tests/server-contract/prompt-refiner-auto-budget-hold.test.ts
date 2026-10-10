@@ -65,7 +65,8 @@ const tx = {
         settledMicroUsd: null, status: "reserved", candidateDigest, pricePinDigest,
         runtimeDeploymentId, reservationAuditLogId, dispatchIntentId: null,
         adapterConfigDigest: null, dispatchAuditLogId: null, unknownObservationId: null,
-        unknownAuditLogId: null, settlementObservationId: null,
+        unknownAuditLogId: null, dispatchedAt: null, unknownAt: null,
+        settlementObservationId: null,
         releaseProofId: null, settlementAuditLogId: null };
       holds.set(id as string, hold); refreshWindows(hold);
       events.push("hold:reserved"); return 1;
@@ -86,7 +87,7 @@ const tx = {
       const hold = holds.get(holdId as string);
       if (!hold || hold.status !== "dispatching") return 0;
       Object.assign(hold, { status: "unknown", unknownObservationId: observationId,
-        unknownAuditLogId: auditId });
+        unknownAuditLogId: auditId, unknownAt: dbNow });
       refreshWindows(hold); events.push("hold:unknown"); return 1;
     }
     if (sql.includes("SET \"status\" = 'dispatching'")) {
@@ -94,7 +95,7 @@ const tx = {
       const hold = holds.get(holdId as string);
       if (!hold || hold.status !== "reserved") return 0;
       Object.assign(hold, { status: "dispatching", dispatchIntentId: intentId,
-        adapterConfigDigest, dispatchAuditLogId: auditId });
+        adapterConfigDigest, dispatchAuditLogId: auditId, dispatchedAt: dbNow });
       events.push("hold:dispatching"); return 1;
     }
     const [proofId, auditId, holdId, expectedStatus] = values;
@@ -229,6 +230,30 @@ test("unknown is terminal, retains the full hold, and never authorizes retry", a
     kind: "confirmed_undispatched" as const, binding: bound, proofId: key(305),
     intentId, adapterConfigDigest: configDigest })), /transition_invalid/);
   assert.equal(holds.get(held.id)?.status, "unknown");
+});
+
+test("only a returned durable dispatch result can retain an unexpected unknown", async () => {
+  const budget = await load(); clear();
+  const held = await budget.reservePromptRefinerAutoBudget(base(key(30)));
+  const bound = binding(held.id, key(30));
+  const authority = budget.createPromptRefinerAutoBudgetTransitionAuthority({
+    verifyDispatchIntent: verify, verifyVerifiedBilling: verify,
+    verifyBillingUnknown: verify, verifyUndispatched: verify,
+  });
+  const recorded = await authority.recordDispatchIntent(raw({ binding: bound,
+    intentId: key(130), adapterConfigDigest: configDigest }));
+  assert.equal(Object.hasOwn(recorded, "dispatchedAt"), false);
+  await assert.rejects(authority.retainUnknownAfterRecordedDispatch({
+    ...recorded,
+  }), /evidence_invalid/);
+  const retained = await authority.retainUnknownAfterRecordedDispatch(recorded);
+  assert.equal(retained.status, "unknown");
+  assert.equal(retained.retryAuthorized, false);
+  assert.equal(retained.dispatchedAt.toISOString(), dbNow.toISOString());
+  assert.equal(retained.unknownAt.toISOString(), dbNow.toISOString());
+  assert.deepEqual([...windows.values()], [BigInt(29_918), BigInt(29_918)]);
+  await assert.rejects(authority.retainUnknownAfterRecordedDispatch(recorded),
+    /transition_invalid/);
 });
 
 test("confirmed undispatched proof releases before or after an intent, once", async () => {

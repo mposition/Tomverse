@@ -304,6 +304,55 @@ prerender의 auth/landing 진단은 보존하며 실제 인증 통과로 해석�
 staging의 다른 릴리스 후보 pin·빌드·배포는 변경하지 않았다. 이 수정과 정책 예외는
 제품 활성 배포 또는 Auto Router 세 출시 판정의 증거를 대신하지 않는다.
 
+## H 실제 검토와 후속 경계 보강
+
+실제 검토 서버의 `r-20261010-010426-2fcf29`는 `adac3a9da`의 전체 81개
+변경 파일을 자동 선택 base `86f5c924f`에서 검토했다. Claude/Anthropic accept,
+Copilot/Moonshot reject로 최종 aggregate reject다. receipt INSERT 결속 누락과
+confirmed dispatch intent 이후 예외의 unknown 기록은 유효한 지적이며 보강한다.
+검토 범위 제한 의견도 보존하고 후속 검토에서 비용·admin·UI·운영 경계를 확인한다.
+이 판정은 후속 working tree의 승인이 아니다.
+
+유효한 server draft 소비로 저장하는 Message의 leading/trailing whitespace와
+CRLF를 그대로 유지한다. Message schema의 trim이 정확한 snapshot 결속을 깨던
+경로를 수정했으며, receipt recovery도 같은 원문을 사용한다. 서버 draft와 다른
+본문은 HTTP 409로 거부하고 Message·source binding·감사 기록을 남기지 않는다.
+기존 일반 Message의 trim·길이 정책과 공백만 있는 첨부 Message 정책은 유지한다.
+실제 POST 경로 합성 23/23과 관련 client/durable 49/49가 통과했다.
+
+기존 5분 수명이 지난 preparing attempt의 receipt 공백은 hold 상태에 의존하지
+않고 감지한다. 예약 직후나 예약 전 process crash도 audit failure로 중단하며,
+unknown hold/attempt의 중단 사유가 먼저 적용되는 기존 순서를 유지한다.
+UTC·Brisbane·Los Angeles 회귀에 reserved/no-hold 사례를 추가한 실제 PostgreSQL
+제품 DB 34/34가 통과했다. 새로운 유예 기간·비용 release·자동 resume는 없다.
+
+새 additive INSERT guard는 receipt의 request와 정확한 서버 suggestion의 사용자·
+대화·scope·epoch·draft·revision·mode·상태·Refiner version을 row lock으로 검증한다.
+계정·대화 삭제 후 내용 없는 receipt를 보존하도록 lifetime FK는 추가하지 않는다.
+confirmed dispatch COMMIT 결과 객체만 예외 unknown 전환을 증명할 수 있다.
+복제한 객체나 caller boolean은 거부하고 실제 DB timestamp와 canonical audit를
+기록하며 전체 hold를 보존한다. COMMIT 결과가 불명인 intent는 provider dispatch로
+기록하거나 미집행 비용으로 release하지 않는다. 어느 경로도 재시도를 허용하지 않는다.
+
+통합 Chat execution 80/80, 제품 server 43/43 및 client 23/23, 실제 제품 PostgreSQL
+35/35가 통과했다. Message POST·budget authority·migration baseline 64/64와
+protected writer/deployment binding/legacy proposal 36/36도 통과했다. 비용 proof
+복제·재사용 거부와 post-intent 예외 1회 unknown, orphan/cross-request receipt 거부,
+authorized deletion 이후 receipt 보존을 포함한다. full lint·8GB typecheck·필수
+pricing/accent/enum/DB inventory와 security 196개가 통과했다.
+
+실제 배포용 `db:migrate`는 처음에 trigger-only 새 migration의 baseline 선언
+누락을 DB 변경 전에 거부했다. 적용 전 새 파일 header를 보정한 후 같은 정상
+명령으로 275개 migration을 적용했다. 기존 다섯 SQL은 수정하지 않았고 여섯
+제품 source/applied checksum이 모두 일치한다. 별도 scratch와 3,967 columns·
+1,140 indexes·1,705 constraints·246 routines·270 triggers·1 extension이 동일하다.
+isolated DB 테스트의 최초 두 count 실패는 새 시료를 transaction rollback으로
+격리해 수정했고 재실행 20/20이 통과했다. 중간 실패는 보존한다.
+
+이 검증은 후속 code slice의 로컬 합성 결과다. 정확한 commit의 production build와
+두 공급사 재검토 결과는 별도로 기록한다. PR·병합·활성 배포·제품 활성화는 아직
+완료되지 않았다. Auto Router 세 출시 판정도 pending 그대로다.
+
 ## 초기 서버 경계 검증 기록
 
 아래는 제품 caller를 붙이기 전 단계의 기록이다. 위 확장이 구현 범위와 현재 상태를

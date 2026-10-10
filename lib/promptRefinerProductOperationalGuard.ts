@@ -217,21 +217,19 @@ async function observe(
 
   // expiresAt is the durable five-minute attempt lifetime created by the
   // admission writer. Once that existing boundary has passed, a preparing
-  // attempt whose hold already settled or released cannot still be normal
-  // receipt cleanup. The indexed EXISTS probe distinguishes that abandoned
-  // audit gap from an unexpired writer waiting for the global audit lock.
+  // attempt without its required receipt cannot still be normal cleanup,
+  // whether the process stopped before or after reserving product budget.
+  // The indexed EXISTS probe distinguishes that abandoned audit gap from an
+  // unexpired writer waiting for the global audit lock.
   const [expiredReceiptGap] = await tx.$queryRaw<Array<{ present: boolean }>>`
     SELECT EXISTS (
       SELECT 1
       FROM "PromptRefinerProductAttempt" attempt
-      JOIN "PromptRefinerAutoBudgetHold" hold
-        ON hold."requestKey" = attempt."id"
       WHERE attempt."state" = 'preparing'
         AND attempt."createdAt" >=
           (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
         AND attempt."expiresAt" <=
           (clock_timestamp() AT TIME ZONE 'UTC')
-        AND hold."status" IN ('settled', 'released')
         AND NOT EXISTS (
           SELECT 1 FROM "PromptRefinerProductExecutionReceipt" receipt
           WHERE receipt."requestId" = attempt."id"

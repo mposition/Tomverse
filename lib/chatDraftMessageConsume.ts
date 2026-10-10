@@ -65,7 +65,9 @@ export const chatDraftMessageReceiptSchema = z
     message: z
       .object({
         clientRequestId: z.string().uuid(),
-        content: z.string().trim().max(50_000),
+        // Receipt recovery must compare the exact authored draft bytes. It is
+        // read-only and cannot normalize a Message after the original write.
+        content: z.string().max(50_000),
         attachmentUploadIds: z.array(opaqueId).max(5).optional(),
         attachmentReferences: chatDraftAttachmentReferencesSchema.optional(),
       })
@@ -77,7 +79,7 @@ export const chatDraftMessageReceiptSchema = z
       )
       .refine(
         (message) =>
-          message.content.length > 0 ||
+          message.content.trim().length > 0 ||
           (message.attachmentUploadIds?.length ?? 0) > 0 ||
           (message.attachmentReferences?.length ?? 0) > 0,
         { message: "A receipt message must have text or an attachment." }

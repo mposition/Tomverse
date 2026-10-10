@@ -245,12 +245,17 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
 
       const unknownHold = await reserve(key(2));
       const unknownBinding = binding(unknownHold.id, key(2));
-      await authority.recordDispatchIntent(raw({ binding: unknownBinding,
-        intentId: key(102), adapterConfigDigest }));
-      const unknown = await authority.retainUnknown(raw({ kind: "billing_unknown" as const,
-        binding: unknownBinding, intentId: key(102), adapterConfigDigest,
-        observationId: key(202) }));
+      const unknownDispatch = await authority.recordDispatchIntent(raw({
+        binding: unknownBinding, intentId: key(102), adapterConfigDigest }));
+      await assert.rejects(authority.retainUnknownAfterRecordedDispatch({
+        ...unknownDispatch,
+      }), /evidence_invalid/);
+      const unknown = await authority.retainUnknownAfterRecordedDispatch(
+        unknownDispatch);
       assert.equal(unknown.retryAuthorized, false);
+      assert.ok(unknown.dispatchedAt instanceof Date);
+      assert.ok(unknown.unknownAt instanceof Date);
+      assert.ok(unknown.unknownAt >= unknown.dispatchedAt);
 
       const releasedHold = await reserve(key(3));
       const releasedBinding = binding(releasedHold.id, key(3));
@@ -272,7 +277,8 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       assert.deepEqual(rows.rows.map((row) => [row.status, row.settled]), [
         ["settled", "12345"], ["unknown", null], ["released", "0"],
       ]);
-      assert.equal(rows.rows[1].unknownObservationId, key(202));
+      assert.match(rows.rows[1].unknownObservationId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       assert.equal(rows.rows[2].releaseProofId, key(203));
 
       await assert.rejects(authority.settleVerifiedBilled(raw({

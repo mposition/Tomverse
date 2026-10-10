@@ -185,6 +185,8 @@ type LockedHold = {
   runtimeDeploymentId: string;
   dispatchIntentId: string | null;
   adapterConfigDigest: string | null;
+  dispatchedAt: Date | null;
+  unknownAt?: Date | null;
 };
 
 async function lockBoundHold(tx: Prisma.TransactionClient,
@@ -192,7 +194,8 @@ async function lockBoundHold(tx: Prisma.TransactionClient,
   if (!validBinding(binding)) throw new PromptRefinerAutoBudgetError("binding_invalid");
   const rows = await tx.$queryRaw<LockedHold[]>`
     SELECT "id", "requestKey", "status", "candidateDigest", "pricePinDigest",
-           "runtimeDeploymentId", "dispatchIntentId", "adapterConfigDigest"
+           "runtimeDeploymentId", "dispatchIntentId", "adapterConfigDigest",
+           "dispatchedAt", "unknownAt"
     FROM "PromptRefinerAutoBudgetHold"
     WHERE "id" = ${binding.holdId} AND "requestKey" = ${binding.requestKey}
       AND "candidateDigest" = ${binding.candidateDigest}
@@ -300,10 +303,15 @@ export function createPromptRefinerAutoBudgetTransitionAuthority<
 >(verifiers: PromptRefinerAutoBudgetTransitionVerifiers<
   DispatchInput, BillingInput, UnknownInput, UndispatchedInput
 >) {
+  // Only a result returned after recordDispatchIntent's transaction commits is
+  // accepted by the exceptional unknown path. A caller-shaped object, or an
+  // intent whose transition result was itself unknown, cannot mint this proof.
+  const recordedDispatches = new WeakMap<object,
+    PromptRefinerAutoBudgetDispatchFact>();
   return Object.freeze({
     async recordDispatchIntent(raw: DispatchInput) {
       const fact = normalizedDispatchFact(await verifiers.verifyDispatchIntent(raw));
-      return inBudgetTransaction(async (tx) => {
+      const recorded = await inBudgetTransaction(async (tx) => {
         const hold = await lockBoundHold(tx, fact.binding);
         if (hold.status !== "reserved" || hold.dispatchIntentId !== null ||
             hold.adapterConfigDigest !== null) {
@@ -329,6 +337,50 @@ export function createPromptRefinerAutoBudgetTransitionAuthority<
         return Object.freeze({ holdId: hold.id, status: "dispatching" as const,
           intentId: fact.intentId, adapterConfigDigest: fact.adapterConfigDigest,
           dispatchAuditLogId: auditLogId });
+      });
+      recordedDispatches.set(recorded, fact);
+      return recorded;
+    },
+
+    async retainUnknownAfterRecordedDispatch(raw: unknown) {
+      if (raw === null || typeof raw !== "object") {
+        throw new PromptRefinerAutoBudgetError("evidence_invalid");
+      }
+      const fact = recordedDispatches.get(raw);
+      if (!fact) throw new PromptRefinerAutoBudgetError("evidence_invalid");
+      const observationId = randomUUID();
+      return inBudgetTransaction(async (tx) => {
+        const hold = await lockBoundHold(tx, fact.binding);
+        if (hold.status !== "dispatching" || hold.dispatchIntentId !== fact.intentId ||
+            hold.adapterConfigDigest !== fact.adapterConfigDigest ||
+            !(hold.dispatchedAt instanceof Date)) {
+          throw new PromptRefinerAutoBudgetError("transition_invalid");
+        }
+        const auditLogId = await writeSystemAuditLog({ tx,
+          systemActor: "prompt-refiner-auto-budget",
+          action: "prompt_refiner.auto_budget_unknown_retained",
+          targetType: "PromptRefinerAutoBudgetHold", targetId: hold.id,
+          summary: "Retained the full Prompt Refiner Auto hold after an unknown outcome.",
+          metadata: { requestKey: hold.requestKey, intentId: fact.intentId,
+            observationId, adapterConfigDigest: fact.adapterConfigDigest,
+            candidateDigest: hold.candidateDigest, pricePinDigest: hold.pricePinDigest,
+            runtimeDeploymentId: hold.runtimeDeploymentId },
+        });
+        await oneTransition(tx.$executeRaw`
+          UPDATE "PromptRefinerAutoBudgetHold"
+          SET "status" = 'unknown', "unknownObservationId" = ${observationId},
+              "unknownAuditLogId" = ${auditLogId}
+          WHERE "id" = ${hold.id} AND "status" = 'dispatching'
+        `);
+        const closed = await lockBoundHold(tx, fact.binding);
+        if (closed.status !== "unknown" || !(closed.unknownAt instanceof Date) ||
+            !(closed.dispatchedAt instanceof Date)) {
+          throw new PromptRefinerAutoBudgetError("integrity_unavailable");
+        }
+        return Object.freeze({ holdId: hold.id, status: "unknown" as const,
+          reservedMicroUsd: PROMPT_REFINER_AUTO_REQUEST_HOLD_MICRO_USD,
+          unknownAuditLogId: auditLogId, retryAuthorized: false as const,
+          dispatchedAt: closed.dispatchedAt, unknownAt: closed.unknownAt });
       });
     },
 

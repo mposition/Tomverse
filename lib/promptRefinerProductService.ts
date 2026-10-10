@@ -147,10 +147,11 @@ const recordRefusal = async (snapshot: PromptRefinerCapturedChatDraft,
   mode: Mode, code: PromptRefinerFailureCode,
   layer: PromptRefinerFailureLayer,
   timing?: Readonly<{ requestedAt: string; completedAt: string;
-    preparationLatencyMs: number }>) => {
+    preparationLatencyMs: number }>,
+  attemptState: "terminal" | "unknown" = "terminal") => {
   try {
     await recordPromptRefinerProductExecutionReceipt(
-      refusalReceipt(snapshot, code, layer, timing), mode);
+      refusalReceipt(snapshot, code, layer, timing), mode, attemptState);
     return true;
   } catch {
     await latchProductAutoAuditFailure();
@@ -275,6 +276,9 @@ export async function preparePromptRefinerProductSuggestion(input: {
   });
   let adapter: ReturnType<typeof createPromptRefinerProductAdapter> | null = null;
   let currentIntent: PromptRefinerProductDispatchIntent | null = null;
+  let recordedDispatch: Readonly<{ holdId: string; status: "dispatching";
+    intentId: string; adapterConfigDigest: string;
+    dispatchAuditLogId: string }> | null = null;
   const undispatched = new WeakSet<object>();
   type BilledRaw = { intent: PromptRefinerProductDispatchIntent;
     outcome: PromptRefinerProductAdapterOutcome; observationId: string };
@@ -328,7 +332,7 @@ export async function preparePromptRefinerProductSuggestion(input: {
         // adapter cannot call generateText until this promise succeeds.
         await assertCurrentPrice();
         currentIntent = intent;
-        await authority.recordDispatchIntent(intent);
+        recordedDispatch = await authority.recordDispatchIntent(intent);
       },
     });
   } catch {
@@ -353,31 +357,58 @@ export async function preparePromptRefinerProductSuggestion(input: {
     outcome = await adapter.execute({ requestId: input.snapshot.requestId,
       sourceText: input.snapshot.sourcePrompt });
   } catch {
-    // Until the service marks the trusted intent immediately before its DB
-    // transition, neither a durable intent nor a provider call can exist, so
-    // the reserved hold can be released through the closure-owned proof.
-    // Once marked, the transition result may be unknown: retain the full hold
-    // and never retry.
-    let releasedOrRetained = currentIntent !== null;
+    // Before a trusted intent exists, the adapter cannot have called the
+    // provider and the reserved hold can be released. Once the intent writer
+    // has returned, only its server-issued commit proof can close the hold as
+    // unknown; neither the intent DTO nor a caller boolean is sufficient.
     if (currentIntent === null) {
       const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),
         intent: null });
       undispatched.add(proof);
+      let released = false;
       try {
         await authority.releaseConfirmedUndispatched(proof);
-        releasedOrRetained = true;
+        released = true;
       } catch {
         await latchProductAutoAuditFailure();
       }
-    } else {
-      await latchProductAutoAuditFailure();
+      const recorded = await recordRefusal(input.snapshot, input.mode,
+        "adapter_unavailable", "adapter");
+      return recorded && released ? fallback("unavailable") :
+        fallback("audit_unavailable");
     }
-    const recorded = await recordRefusal(input.snapshot, input.mode,
-      currentIntent === null ? "adapter_unavailable" :
-        "execution_not_approved",
-      currentIntent === null ? "adapter" : "admission");
-    return recorded && releasedOrRetained ? fallback("unavailable") :
-      fallback("audit_unavailable");
+    if (recordedDispatch === null) {
+      // recordDispatchIntent did not return. Its transaction result is unknown,
+      // so the full hold is retained and no provider dispatch is claimed.
+      await latchProductAutoAuditFailure();
+      const recorded = await recordRefusal(input.snapshot, input.mode,
+        "execution_not_approved", "admission", undefined, "unknown");
+      return recorded ? fallback("unavailable") : fallback("audit_unavailable");
+    }
+    try {
+      const retained = await authority.retainUnknownAfterRecordedDispatch(
+        recordedDispatch);
+      const unknownOutcome: PromptRefinerProductAdapterOutcome = Object.freeze({
+        status: "billing_unknown" as const,
+        reason: "response_unverified" as const,
+        requestedAt: requestedAt.toISOString(),
+        dispatchedAt: retained.dispatchedAt.toISOString(),
+        completedAt: retained.unknownAt.toISOString(),
+        preparationLatencyMs: Math.max(0,
+          retained.unknownAt.getTime() - requestedAt.getTime()),
+        inputTokens: null, cachedInputTokens: null, outputTokens: null,
+        reasoningTokens: null, actualCostMicroUsd: null,
+      });
+      const recorded = await recordFailure(input.snapshot, input.mode,
+        unknownOutcome, "unknown_after_dispatch", "provider", "unknown");
+      return recorded ? fallback("billing_unknown") :
+        fallback("audit_unavailable");
+    } catch {
+      // A second transition is never attempted. The full hold remains committed
+      // and the operational latch stops further Auto dispatches.
+      await latchProductAutoAuditFailure();
+      return fallback("audit_unavailable");
+    }
   }
   if (outcome.status === "undispatched") {
     const proof: UndispatchedRaw = Object.freeze({ proofId: randomUUID(),

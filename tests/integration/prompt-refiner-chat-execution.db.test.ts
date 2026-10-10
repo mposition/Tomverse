@@ -64,6 +64,7 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
     await client.query(await readFile(resolve(root, "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql"), "utf8"));
     await client.query(await readFile(resolve(root, "prisma/migrations/20261010100000_prompt_refiner_product_receipts/migration.sql"), "utf8"));
     await client.query(await readFile(resolve(root, "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql"), "utf8"));
+    await client.query(await readFile(resolve(root, "prisma/migrations/20261010124000_prompt_refiner_product_receipt_binding/migration.sql"), "utf8"));
     await client.query(`INSERT INTO "User" VALUES ('owner'), ('other');
       INSERT INTO "Conversation" ("id","userId","kind","productKey") VALUES
       ('conversation','owner','chat','chat'), ('other-conversation','other','chat','chat');`);
@@ -287,6 +288,68 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       const f = await setup(); await f.save(); await store.consumePromptRefinerChatExecution(f.input);
       await assert.rejects(client.query(`UPDATE "PromptRefinerChatSuggestion" SET "state"='ready' WHERE "id"=$1`, [f.held.suggestionId]), /immutable/);
       await assert.rejects(client.query(`UPDATE "PromptRefinerChatSuggestion" SET "sourceMessageId"='another' WHERE "id"=$1`, [f.held.suggestionId]), /immutable/);
+    });
+    await t.test("execution receipt insert rejects orphan and cross-request suggestion bindings", async () => {
+      await assert.rejects(client.query(`WITH clock AS (
+        SELECT clock_timestamp() AS at
+      ) INSERT INTO "PromptRefinerProductExecutionReceipt" (
+        "id","receiptVersion","requestId","suggestionId","refinerVersion",
+        "provider","modelId","adapterVersion","outcome","failureLayer",
+        "failureCode","requestedAt","dispatchedAt","completedAt",
+        "preparationLatencyMs","inputTokens","cachedInputTokens","outputTokens",
+        "reasoningTokens","actualCostMicroUsd","retryCount"
+      ) SELECT $1,'prompt-refiner-execution-v1',$2,NULL,'suggest-v2',
+        NULL,NULL,NULL,'refused_before_dispatch','admission',
+        'execution_not_approved',at,NULL,at,0,NULL,NULL,NULL,NULL,NULL,0
+        FROM clock`, [randomUUID(), randomUUID()]),
+      /prompt_refiner_product_execution_receipt_binding_invalid/);
+
+      await client.query("BEGIN");
+      try {
+        const scopeId = randomUUID(); const draftId = randomUUID();
+        const firstRequestId = randomUUID(); const secondRequestId = randomUUID();
+        const suggestionId = randomUUID(); const source = "cross binding source";
+        await client.query(`INSERT INTO "PromptRefinerChatScope"
+          ("id","userId","mountId","conversationId","surface","epoch")
+          VALUES ($1,'owner',$2,'conversation','chat',1)`,
+        [scopeId, randomUUID()]);
+        await client.query(`INSERT INTO "ChatComposerDraft"
+          ("id","userId","conversationId","revision","text")
+          VALUES ($1,'owner','conversation',23,$2)`, [draftId, source]);
+        await client.query(`INSERT INTO "PromptRefinerProductAttempt" (
+          "id","userId","conversationId","scopeId","scopeEpoch","draftId",
+          "draftRevision","mode","clientRequestId","state","expiresAt")
+          VALUES
+          ($1,'owner','conversation',$3,1,$4,23,'explicit',$5,'preparing',
+            (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes'),
+          ($2,'owner','conversation',$3,1,$4,23,'auto',$6,'preparing',
+            (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`,
+        [firstRequestId, secondRequestId, scopeId, draftId,
+          randomUUID(), randomUUID()]);
+        await client.query(`INSERT INTO "PromptRefinerChatSuggestion" (
+          "id","userId","conversationId","surface","scopeId","scopeEpoch",
+          "recoveryEpoch","draftId","draftRevision","sourceMessageId",
+          "sourcePrompt","refinedPrompt","requestId","refinerVersion","mode",
+          "state","expiresAt") VALUES ($1,'owner','conversation','chat',$2,1,
+          0,$3,23,$4,$5,'refined',$6,'suggest-v2','explicit','ready',
+          (clock_timestamp() AT TIME ZONE 'UTC') + interval '5 minutes')`,
+        [suggestionId, scopeId, draftId, randomUUID(), source, firstRequestId]);
+        await assert.rejects(client.query(`WITH clock AS (
+          SELECT clock_timestamp() AS at
+        ) INSERT INTO "PromptRefinerProductExecutionReceipt" (
+          "id","receiptVersion","requestId","suggestionId","refinerVersion",
+          "provider","modelId","adapterVersion","outcome","failureLayer",
+          "failureCode","requestedAt","dispatchedAt","completedAt",
+          "preparationLatencyMs","inputTokens","cachedInputTokens","outputTokens",
+          "reasoningTokens","actualCostMicroUsd","retryCount"
+        ) SELECT $1,'prompt-refiner-execution-v1',$2,$3,'suggest-v2',
+          'openai','gpt-5-6-luna','prompt-refiner-product-adapter-v1',
+          'suggested','none',NULL,at,at,at,0,1,0,1,0,1,0
+          FROM clock`, [randomUUID(), secondRequestId, suggestionId]),
+        /prompt_refiner_product_execution_receipt_binding_invalid/);
+      } finally {
+        await client.query("ROLLBACK");
+      }
     });
     await t.test("expiry sweep purges only its bounded batch and expired consume refuses", async () => {
       const f = await setup(); await f.save();

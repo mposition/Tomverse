@@ -382,7 +382,7 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         })).reasonCode, "audit_failure");
       });
 
-      await t.test("only expired settled or released receipt gaps pause across time zones", async () => {
+      await t.test("only expired preparing receipt gaps pause across time zones", async () => {
         const resume = async () => {
           const current = await read();
           const resumeAuditLogId = await transitionAudit("owner-resume");
@@ -393,7 +393,8 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
             }));
         };
         const insertGap = async (timeZone: TestTimeZone,
-          status: "settled" | "released", expired: boolean) => {
+          status: "reserved" | "settled" | "released" | null,
+          expired: boolean) => {
           const attemptId = randomUUID();
           await transactionAtTimeZone(timeZone, async tx => {
             await tx.$executeRaw`INSERT INTO "PromptRefinerProductAttempt"
@@ -401,9 +402,11 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
               (${attemptId},'auto','preparing',
                 (clock_timestamp() AT TIME ZONE 'UTC') +
                   ${expired ? -1 : 300} * interval '1 second')`;
-            await tx.$executeRaw`INSERT INTO "PromptRefinerAutoBudgetHold"
-              ("id","requestKey","status") VALUES
-              (${randomUUID()},${attemptId},${status})`;
+            if (status !== null) {
+              await tx.$executeRaw`INSERT INTO "PromptRefinerAutoBudgetHold"
+                ("id","requestKey","status") VALUES
+                (${randomUUID()},${attemptId},${status})`;
+            }
           });
           return attemptId;
         };
@@ -412,11 +415,14 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
           ["UTC", "settled"],
           ["Australia/Brisbane", "released"],
           ["America/Los_Angeles", "settled"],
+          ["Australia/Brisbane", "reserved"],
+          ["America/Los_Angeles", null],
         ] as const) {
           await resume();
           await insertGap(timeZone, status, true);
           assert.equal((await evaluateAtTimeZone(timeZone)).reasonCode,
-            "audit_failure", `${status} gap did not pause in ${timeZone}`);
+            "audit_failure",
+            `${status ?? "no-hold"} gap did not pause in ${timeZone}`);
         }
 
         await resume();
