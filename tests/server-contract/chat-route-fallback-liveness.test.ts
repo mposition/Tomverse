@@ -300,11 +300,17 @@ let fallbackTransitionAbortAt:
   | "during_primary_reader_cancel" = "none";
 let abortActiveRequest: () => void = () => {};
 let recordDispatchedCalls = 0;
+let throwAfterFallbackDispatchRecord = false;
+let throwBeforeFallbackStreamReturn = false;
 
 mock.module("ai", {
   namedExports: {
     ...aiModule,
     streamText: (options: Record<string, unknown>) => {
+      const index = attempts.length;
+      if (index > 0 && throwBeforeFallbackStreamReturn) {
+        throw new Error("FALLBACK_STREAM_CONSTRUCTOR_TEST_FAILURE");
+      }
       const attempt: Attempt = {
         modelId:
           (options.model as { modelId?: string } | undefined)?.modelId ?? null,
@@ -314,7 +320,7 @@ mock.module("ai", {
         messages: options.messages as Attempt["messages"],
       };
       attempts.push(attempt);
-      const index = attempts.length - 1;
+      attemptLifecycle.push(`${index}:provider_start`);
       // Attempt 0 is failed by the injected fault, not by this stream: the
       // route wraps the reader in `faultedReader`, which is the drill's own
       // mechanism rather than a shape invented here.
@@ -455,7 +461,7 @@ type InstrumentationAttemptRow = {
   id: string;
   attemptIndex: number;
   modelId: string;
-  state: "draft" | "finalized" | "dispatched" | "terminal";
+  state: "draft" | "finalized" | "dispatch_started" | "dispatched" | "terminal";
 };
 const instrumentationAttemptRows = new Map<string, InstrumentationAttemptRow>();
 const closedInstrumentationAttempts: Array<
@@ -697,6 +703,8 @@ const reservation = {
 const ledger = {
   accessAcquisitions: 0,
   settlements: [] as Array<{ outcome: string; attempts: number | null }>,
+  settledAttempts: [] as Array<{ attemptIndex: number; modelId: string }>,
+  attemptBudgetReleasesAtSettlement: [] as number[],
   releases: [] as Array<{ leaseId: string }>,
   attemptBudgetReservations: 0,
   attemptBudgetReleases: 0,
@@ -720,12 +728,24 @@ mock.module(mod("lib/chatSecurity.ts"), {
     settleChatUsage: async (
       _reservation: unknown,
       usage: { outcome?: string },
-      extra?: { attempts?: unknown[] }
+      extra?: {
+        attempts?: Array<{
+          attemptIndex: number;
+          price: { modelId: string };
+        }>;
+      }
     ) => {
       ledger.settlements.push({
         outcome: usage?.outcome ?? "unknown",
         attempts: extra?.attempts ? extra.attempts.length : null,
       });
+      ledger.settledAttempts = (extra?.attempts ?? []).map((attempt) => ({
+        attemptIndex: attempt.attemptIndex,
+        modelId: attempt.price.modelId,
+      }));
+      ledger.attemptBudgetReleasesAtSettlement.push(
+        ledger.attemptBudgetReleases
+      );
     },
     linkChatReservationProviderRequest: async () => undefined,
     reserveAttemptProviderBudget: async (input: { provider?: string }) => {
@@ -844,6 +864,18 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       row.state = "finalized";
       return record;
     },
+    recordDispatchStarted: async (record: unknown) => {
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.equal(row.state, "finalized");
+      row.state = "dispatch_started";
+      attemptLifecycle.push(`${row.attemptIndex}:dispatch_start`);
+    },
     recordDispatched: async (record: unknown) => {
       recordDispatchedCalls += 1;
       const instrumentation = record as {
@@ -853,14 +885,43 @@ mock.module(mod("lib/routingDispatchInstrumentation.ts"), {
       const row = instrumentationAttemptRows.get(instrumentation.attemptId);
       assert.ok(row);
       assert.equal(row.modelId, instrumentation.modelId);
-      assert.equal(row.state, "finalized");
+      assert.equal(row.state, "dispatch_started");
       row.state = "dispatched";
+      if (recordDispatchedCalls === 2 && throwAfterFallbackDispatchRecord) {
+        assert.equal(
+          attempts.length,
+          2,
+          "the fallback provider boundary must precede its dispatch record"
+        );
+        throw new Error("DISPATCH_RECORD_TEST_FAILURE");
+      }
       if (
         recordDispatchedCalls === 2 &&
         fallbackTransitionAbortAt === "during_record_dispatched"
       ) {
         abortActiveRequest();
       }
+    },
+    recordNotDispatched: async (record: unknown) => {
+      const instrumentation = record as {
+        attemptId: string;
+        modelId: string;
+      };
+      const row = instrumentationAttemptRows.get(instrumentation.attemptId);
+      assert.ok(row);
+      assert.equal(row.modelId, instrumentation.modelId);
+      assert.ok(
+        row.state === "draft" ||
+          row.state === "finalized" ||
+          row.state === "dispatch_started"
+      );
+      closedInstrumentationAttempts.push({
+        id: row.id,
+        attemptIndex: row.attemptIndex,
+        modelId: row.modelId,
+        outcome: "not_dispatched",
+      });
+      row.state = "terminal";
     },
     completeInstrumentedDispatch: async (
       record: unknown,
@@ -1003,6 +1064,8 @@ const ask = async (
   world.messages = [];
   world.terminals = [];
   ledger.settlements = [];
+  ledger.settledAttempts = [];
+  ledger.attemptBudgetReleasesAtSettlement = [];
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
@@ -1136,10 +1199,9 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
   assert.ok(attempts[0].providerAbortedWith, "the primary provider was not aborted");
   assert.equal(attempts[1].providerAbortedWith, null);
-  assert.deepEqual(attemptLifecycle.slice(0, 2), [
-    "0:provider_abort",
-    "0:reader_cancel",
-  ]);
+  const primaryAbort = attemptLifecycle.indexOf("0:provider_abort");
+  assert.ok(primaryAbort >= 0);
+  assert.equal(attemptLifecycle[primaryAbort + 1], "0:reader_cancel");
 });
 
 test("request abort during fallback terminalizes the partial turn once", async () => {
@@ -1606,9 +1668,87 @@ test("a fallback settles once, releases once, and holds once more", async () => 
   assert.equal(ledger.attemptBudgetReservations, 1);
   assert.equal(ledger.attemptBudgetReleases, 0);
 
+  for (const index of [0, 1]) {
+    assert.ok(
+      attemptLifecycle.indexOf(`${index}:dispatch_start`) <
+        attemptLifecycle.indexOf(`${index}:provider_start`),
+      `attempt ${index} reached its provider before the durable start record`
+    );
+  }
+
   // Both provider streams are accounted for: the primary cancelled at the
   // swap, the fallback closed by finishing.
   assert.ok(attempts[0].cancelledWith);
+});
+
+test("a post-invocation dispatch record failure keeps the fallback hold and settlement", async () => {
+  throwAfterFallbackDispatchRecord = true;
+  try {
+    const { body, streamError } = await ask("answers");
+
+    assert.equal(streamError, null);
+    assert.ok(body.includes(ANSWER));
+    assert.equal(attempts.length, 2, "the recording failure triggered another dispatch");
+    assert.equal(recordDispatchedCalls, 2);
+    assert.equal(ledger.attemptBudgetReservations, 1);
+    assert.equal(
+      ledger.attemptBudgetReleases,
+      0,
+      "a provider invocation was misclassified as an abandoned hold"
+    );
+    assert.deepEqual(ledger.settlements, [{ outcome: "completed", attempts: 2 }]);
+    assert.deepEqual(ledger.settledAttempts, [
+      { attemptIndex: 0, modelId: attempts[0].modelId },
+      { attemptIndex: 1, modelId: attempts[1].modelId },
+    ]);
+    assert.deepEqual(ledger.attemptBudgetReleasesAtSettlement, [0]);
+    assert.deepEqual(ledger.releases, [{ leaseId: "lease-fallback-1" }]);
+    assert.deepEqual(
+      closedInstrumentationAttempts.map(({ attemptIndex, modelId, outcome }) => ({
+        attemptIndex,
+        modelId,
+        outcome,
+      })),
+      [
+        { attemptIndex: 0, modelId: attempts[0].modelId, outcome: "failed_pre_token" },
+        { attemptIndex: 1, modelId: attempts[1].modelId, outcome: "succeeded" },
+      ]
+    );
+  } finally {
+    throwAfterFallbackDispatchRecord = false;
+  }
+});
+
+test("a fallback constructor failure releases its unspent hold without a third dispatch", async () => {
+  throwBeforeFallbackStreamReturn = true;
+  try {
+    await ask("answers");
+
+    assert.equal(attempts.length, 1, "a constructor failure reached the fallback provider");
+    assert.equal(recordDispatchedCalls, 1);
+    assert.equal(ledger.attemptBudgetReservations, 1);
+    assert.equal(ledger.attemptBudgetReleases, 1);
+    assert.equal(ledger.settlements.length, 1);
+    assert.equal(ledger.settlements[0].outcome, "failed");
+    assert.equal(ledger.releases.length, 1);
+    assert.ok(attemptLifecycle.includes("1:dispatch_start"));
+    assert.equal(attemptLifecycle.includes("1:provider_start"), false);
+    assert.deepEqual(
+      closedInstrumentationAttempts
+        .map(({ attemptIndex, modelId, outcome }) => ({
+          attemptIndex,
+          modelId,
+          outcome,
+        }))
+        .sort((left, right) => left.attemptIndex - right.attemptIndex),
+      [
+        { attemptIndex: 0, modelId: attempts[0].modelId, outcome: "failed_pre_token" },
+        { attemptIndex: 1, modelId: "deepseek-v4-pro", outcome: "not_dispatched" },
+      ]
+    );
+  } finally {
+    throwBeforeFallbackStreamReturn = false;
+  }
 });
 
 test("assistant Message transaction failure settles once and terminalizes immediately", async () => {
