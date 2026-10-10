@@ -5520,6 +5520,10 @@ async function handleChatPost(
         };
         if (req.signal.aborted) onRequestAbort();
         const protectedStream = new ReadableStream<string>({
+            start(controller) {
+                streamController = controller;
+                if (streamState !== "open") controller.close();
+            },
             async pull(controller) {
                 if (streamState !== "open") return;
                 streamController = controller;
