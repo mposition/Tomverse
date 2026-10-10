@@ -67,7 +67,9 @@ import {
     beginRetryAttempt,
     recordFallbackRecovery,
     completeInstrumentedDispatch,
+    recordDispatchStarted,
     recordDispatched,
+    recordNotDispatched,
     type DispatchInstrumentation,
 } from "@/lib/routingDispatchInstrumentation";
 import { logChatTurnTiming } from "@/lib/chatTurnTiming";
@@ -4113,6 +4115,7 @@ async function handleChatPost(
             );
         }
         const initialAttemptAbortController = new AbortController();
+        await recordDispatchStarted(dispatchRecord);
         const result = await beginProviderCall(
             modelConfig.provider,
             modelConfig.id,
@@ -5159,6 +5162,12 @@ async function handleChatPost(
                 ...usageReservation!,
                 entries: [...usageReservation!.entries, ...reserved.entries],
             };
+            // Kept before the dispatch because `beginRetryAttempt` opens the
+            // second attempt on this record's run. Closing it is deliberately
+            // *after* the dispatch succeeds -- see below.
+            const failing = dispatchRecord;
+            let nextRecord: DispatchInstrumentation = null;
+            let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
             /**
              * Gives the hold back when the dispatch it authorized never
              * happened.
@@ -5170,29 +5179,32 @@ async function handleChatPost(
              * exist until the reservation expires.
              */
             const abandonFallback = async (reason: string) => {
-                if (fallbackHoldTaken) {
-                    await releaseAttemptProviderBudget({
-                        reservationId: usageReservation!.reservationId,
-                        userId: usageReservation!.userId ?? null,
-                        attemptIndex: fallbackAttemptIndex,
-                    });
-                    usageReservation = {
-                        ...usageReservation!,
-                        entries: usageReservation!.entries.filter(
-                            (entry) => !reserved.entries.includes(entry)
-                        ),
-                    };
+                try {
+                    if (nextRecord) {
+                        await recordNotDispatched(
+                            nextRecord,
+                            reason,
+                            "application"
+                        );
+                    }
+                } finally {
+                    if (fallbackHoldTaken) {
+                        await releaseAttemptProviderBudget({
+                            reservationId: usageReservation!.reservationId,
+                            userId: usageReservation!.userId ?? null,
+                            attemptIndex: fallbackAttemptIndex,
+                        });
+                        usageReservation = {
+                            ...usageReservation!,
+                            entries: usageReservation!.entries.filter(
+                                (entry) => !reserved.entries.includes(entry)
+                            ),
+                        };
+                    }
                 }
                 reportFallbackRefusal(reason);
                 return false;
             };
-
-            // Kept before the dispatch because `beginRetryAttempt` opens the
-            // second attempt on this record's run. Closing it is deliberately
-            // *after* the dispatch succeeds -- see below.
-            const failing = dispatchRecord;
-            let nextRecord: DispatchInstrumentation;
-            let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
             try {
                 // A second attempt on the *same* run, not a second run. One
                 // logical response is one RoutingRun with its attempts hanging
@@ -5235,6 +5247,7 @@ async function handleChatPost(
                     // race a second, failed settlement against it.
                     return true;
                 }
+                await recordDispatchStarted(nextRecord);
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: sdkMessages,

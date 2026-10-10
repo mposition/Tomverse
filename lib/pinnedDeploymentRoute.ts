@@ -37,6 +37,7 @@ import {
     authoriseDispatch,
     beginInstrumentedDispatch,
     completeInstrumentedDispatch,
+    recordDispatchStarted,
     recordDispatched,
     recordNotDispatched,
     type DispatchInstrumentation,
@@ -193,6 +194,10 @@ export const enterPinnedDeploymentChat = async (input: {
             // returning started:false would release it.
             let result;
             try {
+                // Persist the invocation intent immediately before entering
+                // the SDK. A crash after this write remains recoverable even
+                // when the post-call timestamp never reaches the database.
+                await recordDispatchStarted(instrumentation);
                 result = streamPinnedInference({
                     model: active,
                     messages: args.messages.map((message) => ({

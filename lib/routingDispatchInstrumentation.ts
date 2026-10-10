@@ -42,6 +42,7 @@ import {
   abandonDraft,
   createDraftManifest,
   finalizeManifest,
+  markDispatchStarted,
   markDispatched,
   openAttempt,
   recordFallbackTransition,
@@ -537,6 +538,25 @@ export const recordFallbackRecovery = async (
     // The answer has already been delivered. Recording where to go back to is
     // diagnostics and a hint for the next turn, not part of this one.
     await handleFailure("recovery", error, "observe");
+  }
+};
+
+/**
+ * Durably marks the provider invocation boundary before the SDK is called.
+ *
+ * Unlike `recordDispatched`, this is still a refusal point: in enforce mode a
+ * failed write prevents the external call. Observe mode remains the explicit
+ * rollout exception measured by the existing instrumentation failure counter.
+ */
+export const recordDispatchStarted = async (
+  instrumentation: DispatchInstrumentation
+) => {
+  if (!instrumentation) return;
+  const mode = dispatchInstrumentationMode();
+  try {
+    await markDispatchStarted({ attemptId: instrumentation.attemptId });
+  } catch (error) {
+    await handleFailure("dispatch_start", error, mode);
   }
 };
 

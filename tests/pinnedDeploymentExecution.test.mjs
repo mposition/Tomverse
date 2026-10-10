@@ -613,6 +613,9 @@ test("the ordinary chat retry line is unchanged and this path does not borrow th
     const entranceBody = pinned.slice(pinned.indexOf("export const enterPinnedDeploymentChat"));
     assert.match(entranceBody, /dispatched \?\?= recordDispatched\(instrumentation\)/);
     assert.match(entranceBody, /await recordNotDispatched\(instrumentation, reason, "application"\)/);
+    const dispatchStart = entranceBody.indexOf("await recordDispatchStarted(instrumentation)");
+    const providerInvocation = entranceBody.indexOf("result = streamPinnedInference");
+    assert.ok(dispatchStart > 0 && dispatchStart < providerInvocation);
     const finishAt = entranceBody.indexOf("onFinish:");
     const errorAt = entranceBody.indexOf("onError:");
     assert.ok(finishAt > 0 && errorAt > finishAt);
