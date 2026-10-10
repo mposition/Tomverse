@@ -1997,6 +1997,8 @@ test("a reviewer on credit says so, with the credit beside the spent pool", () =
   const usdSpent = view({ state: "available", remaining: 0, unit: "usd", credit: 100 });
   assert.deepEqual([usdSpent.status, usdSpent.label, usdSpent.amount], ["working", "크레딧 사용", "$0.00 남음 · 크레딧 $100.00"]);
   assert.equal(view({ state: "available", remaining: 4, unit: "usd" }).label, "사용 가능");
+  // Judged on what the card shows: $0.004 reads "$0.00 left", so it is low, not plenty.
+  assert.equal(view({ state: "available", remaining: 0.004, unit: "usd" }).label, "얼마 안 남음");
   // Credit with no pool amount stands on its own, without a dangling separator.
   assert.equal(view({ state: "available", remaining: null, unit: null, credit: 50 }).amount, "크레딧 $50.00");
   assert.equal(adminAgentOfficeMessages.en.real.quota.creditOnly("50.00"), "$50.00 credit");
