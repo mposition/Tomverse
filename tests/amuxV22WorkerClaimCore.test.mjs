@@ -12,8 +12,11 @@ import { autoTickHttpStatus } from "../lib/amux/autoPromotionCore.ts";
 import { parseAmuxV22OneShotRequest } from
   "../lib/amux/v22OneShotSidecar.mjs";
 
-test("v22 claim stays dark even when its environment switch is set", () => {
-  assert.equal(amuxV22WorkerClaimEnabled("enabled"), false);
+test("v22 claim requires its own exact environment switch", () => {
+  assert.equal(amuxV22WorkerClaimEnabled("enabled"), true);
+  for (const flag of [undefined, "", "disabled", "true", "1", " enabled", "ENABLED"]) {
+    assert.equal(amuxV22WorkerClaimEnabled(flag), false);
+  }
 });
 
 test("global three, one per lane and the two reserved slots are separate", () => {
@@ -62,7 +65,7 @@ test("task role has a closed tool requirement and unknown roles hold", () => {
   assert.equal(amuxV22RequiredTool("unknown"), null);
 });
 
-test("claim only selects routes the default-off one-shot sidecar can execute", () => {
+test("claim only selects routes the environment-gated one-shot sidecar can execute", () => {
   const base = { version: 1,
     attemptId: "00000000-0000-4000-8000-000000000001",
     worker: "worker-a", modelId: "claude-opus-5-5",
