@@ -1,6 +1,6 @@
 // The Agent office's map: a tile grid, 0 = walkable and 1 = wall or furniture.
 // Ported from the original AI OFFICE layout and its four-by-three grid: the
-// operator's office, digest desk and approval room on top, and the
+// operator's office, digest desk and Decision Maker room on top, and the
 // eight teams below. Under them, the AMUX execution room spans three columns
 // and the independent review room takes the fourth, with the entrance below
 // it. Geometry only: room names come from the console catalog.
@@ -18,8 +18,8 @@ export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
 export type Pt = { x: number; y: number };
-export type RoomKind = "dept" | "operator" | "meeting" | "amux" | "review";
-export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "amux" | "review";
+export type RoomKind = "dept" | "operator" | "decision" | "amux" | "review";
+export type RoomId = AgentOfficeDeptId | "operator" | "decision" | "amux" | "review";
 
 export type Desk = {
   /** Left tile of the desk top. */
@@ -47,8 +47,8 @@ export type Room = {
 
 /**
  * Four columns. The top row is the operator's office, the digest desk and the
- * approval room, with the fourth column left open; the two rows below are the
- * eight teams.
+ * Decision Maker room, with the fourth column left open; the two rows below are
+ * the eight teams.
  */
 const COL_X = [2, 20, 38, 56];
 const ROW_Y = [17, 31];
@@ -130,21 +130,27 @@ export const OPERATOR_ROOM: Room = {
 
 export const DIGEST_ROOM: Room = deskRoom("digest", COL_X[1], TOP_Y, TOP_H, "bottom");
 
-export const MEETING_ROOM: Room = {
-  id: "meeting",
-  short: "approval.room",
-  icon: "💬",
-  kind: "meeting",
+/**
+ * The AMUX Decision Maker room: one desk for each instance, below the table.
+ * The instances are drawn seated with their real switch state and never walk.
+ * The table and its seats are the demo's meeting place, which the real view
+ * never plays.
+ */
+export const DECISION_ROOM: Room = {
+  id: "decision",
+  short: "dm.propose",
+  icon: "⚖️",
+  kind: "decision",
   x: COL_X[2],
   y: TOP_Y,
   w: ROOM_W,
   h: TOP_H,
   doors: bottomDoors(COL_X[2]),
-  desks: [],
-  loiter: [
-    { x: 40, y: 10 },
-    { x: 50, y: 10 },
+  desks: [
+    { deskX: COL_X[2] + 2, deskY: TOP_Y + 8, seat: { x: COL_X[2] + 3, y: TOP_Y + 9 } },
+    { deskX: COL_X[2] + 10, deskY: TOP_Y + 8, seat: { x: COL_X[2] + 11, y: TOP_Y + 9 } },
   ],
+  loiter: [],
 };
 
 /**
@@ -233,7 +239,7 @@ export const DEPT_ROOMS: Room[] = [...TEAM_ROOMS, DIGEST_ROOM];
 export const ROOMS: Room[] = [
   OPERATOR_ROOM,
   DIGEST_ROOM,
-  MEETING_ROOM,
+  DECISION_ROOM,
   ...TEAM_ROOMS,
   AMUX_ROOM,
   REVIEW_ROOM,
@@ -288,8 +294,9 @@ PROPS.push({ kind: "plant", x: 14, y: 4, w: 1, h: 1 });
 PROPS.push({ kind: "table", x: 41, y: 6, w: 10, h: 3 });
 PROPS.push({ kind: "screen", x: 40, y: 3, w: 5, h: 1, label: "screen" });
 PROPS.push({ kind: "whiteboard", x: 46, y: 3, w: 5, h: 1 });
-PROPS.push({ kind: "plant", x: 40, y: 11, w: 1, h: 1 });
-PROPS.push({ kind: "plant", x: 50, y: 11, w: 1, h: 1 });
+for (const desk of DECISION_ROOM.desks) {
+  PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });
+}
 
 /** The walkability grid. */
 function buildGrid(): Uint8Array {

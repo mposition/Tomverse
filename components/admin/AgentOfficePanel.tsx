@@ -18,6 +18,7 @@ import {
   agentOfficeBrief,
   agentOfficeReport,
   operatorQueueTotal,
+  decisionRoomView,
   reviewQuotaView,
   reviewRoomView,
   financeLiveDept,
@@ -25,6 +26,7 @@ import {
   researchLiveDept,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
+  type AgentOfficeDecisionView,
   type AgentOfficeSeatedView,
   type AgentOfficeQuotaView,
   type AgentOfficeOperatorQueue,
@@ -34,6 +36,7 @@ import {
 } from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DEPTS,
   AGENT_OFFICE_TEAM_IDS,
   agentOfficeDept,
@@ -50,7 +53,7 @@ import {
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
 import { aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
-import { AMUX_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
+import { AMUX_ROOM, DECISION_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
 type Filter = "all" | DeptStatus;
@@ -128,6 +131,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
     [live, m]
   );
+  const decisionView = useMemo(() => decisionRoomView(live.decision, live.readAt, m.real.decision), [live, m]);
   const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
@@ -256,7 +260,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     agentOfficeReport(
       {
         readAt: live.readAt,
-        rows: liveRowsFor(teams, amuxView, reviewView, m),
+        rows: liveRowsFor(teams, amuxView, reviewView, decisionView, m),
         notConnected: teams.filter((team) => !team.live).map((team) => `${team.icon} ${team.name}`),
         queue: OPERATOR_QUEUE_KEYS.map((key) => ({ label: m.queue.labels[key], count: live.queue[key] })),
         quota: quotaView,
@@ -341,6 +345,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               engine={engine}
               amuxView={amuxView}
               reviewView={reviewView}
+              decisionView={decisionView}
               quotaView={quotaView}
               queue={live.queue}
               readAt={live.readAt}
@@ -365,6 +370,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               queue={live.queue}
               amuxView={amuxView}
               reviewView={reviewView}
+              decisionView={decisionView}
               onSelect={(id) => setSelectedId(id)}
             />
           )}
@@ -386,6 +392,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
           seated={seated}
           amuxView={amuxView}
           reviewView={reviewView}
+          decisionView={decisionView}
           quotaView={quotaView}
           onClose={() => setSeated(null)}
         />
@@ -440,6 +447,7 @@ function LiveView({
   engine,
   amuxView,
   reviewView,
+  decisionView,
   quotaView,
   queue,
   readAt,
@@ -455,6 +463,7 @@ function LiveView({
   engine: AgentOffice;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
   quotaView: AgentOfficeQuotaView;
   queue: AgentOfficeOperatorQueue;
   /** When the server read the live rooms (UTC ISO). */
@@ -528,6 +537,7 @@ function LiveView({
           engine={engine}
           amux={amuxView}
           review={reviewView}
+          decision={decisionView}
           snap={snap}
           selectedId={selectedId}
           follow={follow}
@@ -805,6 +815,7 @@ function SeatedProfileModal({
   seated,
   amuxView,
   reviewView,
+  decisionView,
   quotaView,
   onClose,
 }: {
@@ -812,12 +823,18 @@ function SeatedProfileModal({
   seated: { room: AgentOfficeSeatedRoom; name: string };
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
   quotaView: AgentOfficeQuotaView;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useOfficeDialog(onClose, closeRef);
-  const people: AgentOfficeSeatedView[] = seated.room === "amux" ? amuxView.workers : reviewView.reviewers;
+  const people: AgentOfficeSeatedView[] =
+    seated.room === "amux" ? amuxView.workers : seated.room === "review" ? reviewView.reviewers : decisionView.members;
+  // Only the AMUX room and the Decision Maker have a record screen; a reviewer's lives on the review server.
+  const recordHref =
+    seated.room === "amux" ? AGENT_OFFICE_AMUX_RECORD_HREF : seated.room === "decision" ? AGENT_OFFICE_DECISION_RECORD_HREF : null;
+  const roomName = { amux: m.rooms.amux, review: m.rooms.review, decision: m.rooms.decision }[seated.room];
   const desk = people.findIndex((person) => person.name === seated.name);
   const person = desk >= 0 ? people[desk] : null;
   const clothes = agentOfficeSeatedClothes(seated.room, Math.max(desk, 0));
@@ -846,7 +863,7 @@ function SeatedProfileModal({
             <div>
               {person ? <span className={cx("status-pill", person.status)}>{person.label}</span> : null}
               <h2>{seated.name}</h2>
-              <p>{seated.room === "amux" ? m.rooms.amux : m.rooms.review}</p>
+              <p>{roomName}</p>
             </div>
           </div>
           <div className={cx("live-box")} data-testid="agent-office-seated-profile-facts">
@@ -874,9 +891,9 @@ function SeatedProfileModal({
               <strong>{m.profile.seatedGone}</strong>
             )}
           </div>
-          {seated.room === "amux" && AGENT_OFFICE_AMUX_RECORD_HREF ? (
+          {recordHref ? (
             <div className={cx("profile-record")} data-testid="agent-office-seated-profile-record">
-              <Link href={AGENT_OFFICE_AMUX_RECORD_HREF}>{m.profile.record}</Link>
+              <Link href={recordHref}>{m.profile.record}</Link>
             </div>
           ) : null}
           <div className={cx("profile-actions")}>
@@ -974,6 +991,7 @@ function liveRowsFor(
   teams: readonly TeamRow[],
   amuxView: AgentOfficeAmuxView,
   reviewView: AgentOfficeReviewView,
+  decisionView: AgentOfficeDecisionView,
   m: OfficeCopy
 ): AgentOfficeLiveRow[] {
   return [
@@ -1007,6 +1025,14 @@ function liveRowsFor(
       line: reviewView.summary,
       href: null,
     },
+    {
+      id: "decision",
+      name: `${DECISION_ROOM.icon} ${m.rooms.decision}`,
+      status: decisionView.status,
+      badge: m.deptStatus[decisionView.status],
+      line: decisionView.summary,
+      href: AGENT_OFFICE_DECISION_RECORD_HREF,
+    },
   ];
 }
 
@@ -1033,6 +1059,7 @@ function DashboardView({
   queue,
   amuxView,
   reviewView,
+  decisionView,
   onSelect,
 }: {
   m: OfficeCopy;
@@ -1047,13 +1074,14 @@ function DashboardView({
   queue: AgentOfficeOperatorQueue;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
+  decisionView: AgentOfficeDecisionView;
   onSelect: (id: string) => void;
 }) {
   const filterLabel = (value: Filter) => (value === "all" ? m.dashboard.filterAll : m.deptStatus[value]);
   const liveCount = teams.filter((team) => team.live !== null).length;
   const engineeringLive = engine.liveDept("engineering") !== null;
   const todo = operatorQueueTotal(queue);
-  const liveRows = liveRowsFor(teams, amuxView, reviewView, m);
+  const liveRows = liveRowsFor(teams, amuxView, reviewView, decisionView, m);
   const notConnected = teams.filter((team) => !team.live);
   const notConnectedNames = notConnected.map((team) => team.name).join(" · ");
   const brief = agentOfficeBrief(liveRows);

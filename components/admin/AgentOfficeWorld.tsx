@@ -7,20 +7,26 @@ import Link from "next/link";
 import { cx } from "@/components/admin/agentOfficeStyles";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminAgentOfficeMessages } from "@/lib/adminMessages/agentOffice";
-import type { AgentOfficeAmuxView, AgentOfficeReviewView, AgentOfficeSeatedView } from "@/lib/agentOffice/live";
+import type {
+  AgentOfficeAmuxView,
+  AgentOfficeDecisionView,
+  AgentOfficeReviewView,
+  AgentOfficeSeatedView,
+} from "@/lib/agentOffice/live";
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DECISION_RECORD_HREF,
   agentOfficeSeatedClothes,
   type AgentOfficeSeatedRoom,
 } from "@/lib/agentOffice/roster";
 import { PHASE, type Agent, type AgentOffice, type Snapshot } from "@/lib/agentOffice/sim";
 import {
   AMUX_ROOM,
+  DECISION_ROOM,
   REVIEW_ROOM,
   type Room,
   ENTRANCE,
   ENTRANCE_MAT,
-  MEETING_ROOM,
   OPERATOR_ROOM,
   PROPS,
   ROOMS,
@@ -36,6 +42,8 @@ type Props = {
   amux: AgentOfficeAmuxView;
   /** The independent review room, read from the review server's latest report. */
   review: AgentOfficeReviewView;
+  /** The Decision Maker room, read from its switches and its ledger's counts. */
+  decision: AgentOfficeDecisionView;
   snap: Snapshot;
   selectedId: string | null;
   follow: boolean;
@@ -231,6 +239,7 @@ export default function AgentOfficeWorld({
   engine,
   amux,
   review,
+  decision,
   snap,
   selectedId,
   follow,
@@ -253,7 +262,7 @@ export default function AgentOfficeWorld({
 
   const hotRoom = useMemo(() => {
     if (snap.spotlight) return snap.spotlight; // a room the operator asked about wins
-    if (snap.meetingTitle) return MEETING_ROOM.id;
+    if (snap.meetingTitle) return DECISION_ROOM.id;
     if (snap.phaseIndex >= PHASE.briefing) return OPERATOR_ROOM.id;
     const working = Object.entries(snap.deptStatus).find(([, status]) => status === "working");
     return working?.[0] ?? null;
@@ -418,7 +427,9 @@ export default function AgentOfficeWorld({
           {ROOMS.map((room) => {
             const isAmux = room.kind === "amux";
             const isReview = room.kind === "review";
-            const real = isAmux ? amux : isReview ? review : null;
+            const isDecision = room.kind === "decision";
+            const real = isAmux ? amux : isReview ? review : isDecision ? decision : null;
+            const recordHref = isAmux ? AGENT_OFFICE_AMUX_RECORD_HREF : isDecision ? AGENT_OFFICE_DECISION_RECORD_HREF : null;
             const status = real ? real.status : snap.deptStatus[room.id];
             return (
               <div
@@ -433,7 +444,8 @@ export default function AgentOfficeWorld({
               >
                 <span className={cx("rm-head")}>
                   <b>
-                    {room.icon} {isAmux ? m.rooms.amux : isReview ? m.rooms.review : roomName(room.id)}
+                    {room.icon}{" "}
+                    {isAmux ? m.rooms.amux : isReview ? m.rooms.review : isDecision ? m.rooms.decision : roomName(room.id)}
                   </b>
                   {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
                   {status ? (
@@ -442,13 +454,13 @@ export default function AgentOfficeWorld({
                       title={real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
                     />
                   ) : null}
-                  {isAmux && AGENT_OFFICE_AMUX_RECORD_HREF ? (
+                  {real && recordHref ? (
                     <Link
-                      href={AGENT_OFFICE_AMUX_RECORD_HREF}
+                      href={recordHref}
                       className={cx("rm-link")}
-                      aria-label={m.rooms.amuxRecord}
-                      title={amux.summary}
-                      data-testid="agent-office-amux-record"
+                      aria-label={isAmux ? m.rooms.amuxRecord : m.rooms.decisionRecord}
+                      title={real.summary}
+                      data-testid={`agent-office-${room.id}-record`}
                     >
                       ↗
                     </Link>
@@ -474,6 +486,7 @@ export default function AgentOfficeWorld({
           <PropLayer screenLabel={m.rooms.screen} entranceLabel={m.rooms.entrance} />
           <SeatedLayer room={AMUX_ROOM} kind="amux" people={amux.workers} onPick={onPickSeated} />
           <SeatedLayer room={REVIEW_ROOM} kind="review" people={review.reviewers} onPick={onPickSeated} />
+          <SeatedLayer room={DECISION_ROOM} kind="decision" people={decision.members} onPick={onPickSeated} />
           <AgentLayer
             agents={engine.agents}
             register={register}

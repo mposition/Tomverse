@@ -202,10 +202,36 @@ export type AgentOfficeReviewState =
       last24h: { accept: number; reject: number; unknown: number };
     };
 
+/** An AMUX Decision Maker instance's switch: `off` or `proposal` (docs/policy/amux-decision-maker.md §8). */
+export type AgentOfficeDecisionMode = "off" | "proposal";
+
+export type AgentOfficeDecisionState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** Null when the switch rows did not read as a state: every question then goes to the operator. */
+      killSwitch: boolean | null;
+      instances: {
+        instance: string;
+        vendor: string;
+        /** Null when its switch did not read. */
+        mode: AgentOfficeDecisionMode | null;
+        /** Questions routed to it in the last 24 hours. */
+        recent: number;
+        /** When the newest question was routed to it (UTC ISO), ever. */
+        lastRoutedAt: string | null;
+        /** When a person last judged one of its results (UTC ISO), ever. */
+        lastJudgedAt: string | null;
+      }[];
+      /** Questions routed to the operator in the last 24 hours. */
+      toOperator: number;
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   review: AgentOfficeReviewState;
+  decision: AgentOfficeDecisionState;
   /** The operator to-do counts (OPERATOR_QUEUE_KEYS). */
   queue: AgentOfficeOperatorQueue;
   research: AgentOfficeResearchState;
@@ -775,6 +801,76 @@ export function reviewRoomView(
       .filter((part): part is string => part !== null)
       .join(" · ") || null;
   return { status, summary, note, reviewers: everyone.slice(0, desks) };
+}
+
+export type AgentOfficeDecisionMemberState = "proposal" | "off" | "killed" | "unread";
+
+type DecisionCopy = {
+  states: Record<AgentOfficeDecisionMemberState, string>;
+  unread: string;
+  unreadable: string;
+  killed: string;
+  allOff: string;
+  summary: (proposal: number, total: number, dm: number, operator: number) => string;
+  none: string;
+  readAt: (time: string) => string;
+  facts: { vendor: string; mode: string; recent: string; lastRouted: string; lastJudged: string };
+};
+
+export type AgentOfficeDecisionView = {
+  status: DeptStatus;
+  summary: string;
+  /** Words drawn in the room itself: why nothing reaches the instances. */
+  note: string | null;
+  members: AgentOfficeSeatedView[];
+};
+
+/**
+ * The Decision Maker room: one desk for each instance. A question reaches an
+ * instance only while the kill switch is off and its own switch is
+ * `proposal`; otherwise it goes to the operator, and the room says so.
+ */
+export function decisionRoomView(state: AgentOfficeDecisionState, readAt: string, copy: DecisionCopy): AgentOfficeDecisionView {
+  const read = copy.readAt(aestStamp(readAt));
+  if (state.kind === "unread") return { status: "attention", summary: `${copy.unread} · ${read}`, note: copy.unread, members: [] };
+
+  const unreadable = state.killSwitch === null || state.instances.some((instance) => instance.mode === null);
+  const members = state.instances.map((instance): AgentOfficeSeatedView => {
+    const memberState: AgentOfficeDecisionMemberState =
+      state.killSwitch === null || instance.mode === null
+        ? "unread"
+        : state.killSwitch
+          ? "killed"
+          : instance.mode === "proposal"
+            ? "proposal"
+            : "off";
+    const label = copy.states[memberState];
+    const routed = instance.lastRoutedAt ? aestStamp(instance.lastRoutedAt) : copy.none;
+    const judged = instance.lastJudgedAt ? aestStamp(instance.lastJudgedAt) : copy.none;
+    return {
+      name: instance.instance,
+      state: memberState,
+      status: memberState === "unread" ? "attention" : memberState === "proposal" ? "done" : "waiting",
+      label,
+      title: [instance.instance, instance.vendor, label].join(" · "),
+      dim: memberState === "off" || memberState === "killed",
+      facts: [
+        { label: copy.facts.vendor, value: instance.vendor },
+        { label: copy.facts.mode, value: label },
+        { label: copy.facts.recent, value: String(instance.recent) },
+        { label: copy.facts.lastRouted, value: routed },
+        { label: copy.facts.lastJudged, value: judged },
+      ],
+    };
+  });
+  const proposing = members.filter((member) => member.state === "proposal").length;
+  const dm = state.instances.reduce((sum, instance) => sum + instance.recent, 0);
+  const note = unreadable ? copy.unreadable : state.killSwitch ? copy.killed : proposing === 0 ? copy.allOff : null;
+  const status: DeptStatus = unreadable ? "attention" : proposing > 0 && !state.killSwitch ? "done" : "waiting";
+  const summary = [note, copy.summary(proposing, members.length, dm, state.toOperator), read]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+  return { status, summary, note, members };
 }
 
 /** Below this share left, an available quota is drawn as running low. */
