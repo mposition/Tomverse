@@ -25,6 +25,7 @@ import path from "node:path";
 
 import {
   MARKETING_WEBHOOK_PIPELINE_FINGERPRINT,
+  canonicalMarketingWebhookFileText,
   digestMarketingWebhookVerificationRecord,
 } from "../lib/marketingAutomationAccess.ts";
 import {
@@ -64,16 +65,28 @@ const recordIdsInTree = () => {
     .sort();
 };
 
+/**
+ * The record as an object, for display only, or `null` when these bytes are not
+ * one.
+ *
+ * Normalised the way the route's check normalises before it parses: a record
+ * written with a byte-order mark is one the route accepts, and parsing the raw
+ * bytes instead would report its fingerprint as unknown -- so the line telling
+ * the reader *which* build a stale record belongs to would go blank for exactly
+ * the records that are fine.
+ */
+const parsedForDisplay = (fileText) => {
+  try {
+    return JSON.parse(canonicalMarketingWebhookFileText(fileText ?? "null"));
+  } catch {
+    return null;
+  }
+};
+
 /** One record, judged by the signing route's own check. */
 const judge = async (recordId) => {
   const fileText = await readMarketingWebhookVerificationRecordFile(recordId);
-  let declaredFingerprint = null;
-  try {
-    declaredFingerprint =
-      JSON.parse(fileText ?? "null")?.pipelineFingerprint ?? null;
-  } catch {
-    // Reported through the route's own refusal below; shown as unknown here.
-  }
+  const declaredFingerprint = parsedForDisplay(fileText)?.pipelineFingerprint ?? null;
   try {
     checkMarketingWebhookRecordForSigning({
       recordId,

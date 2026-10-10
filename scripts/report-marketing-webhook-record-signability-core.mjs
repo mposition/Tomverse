@@ -29,7 +29,7 @@ export const RECORD_REFUSED = "refused";
 export const PIPELINE_STALE_REFUSAL_CODE = "record_pipeline_stale";
 
 const verdictOf = (refusalCode) => {
-  if (refusalCode === null || refusalCode === undefined) return RECORD_SIGNABLE;
+  if (refusalCode === null) return RECORD_SIGNABLE;
   if (refusalCode === PIPELINE_STALE_REFUSAL_CODE) return RECORD_STALE;
   return RECORD_REFUSED;
 };
@@ -41,18 +41,31 @@ const verdictOf = (refusalCode) => {
  * (`null` when it accepted) and the fingerprint the record declares. The
  * declared fingerprint is reported so a reader can see *which* build a stale
  * record belongs to; it is never what decides the verdict.
+ *
+ * `refusalCode` must be stated. An absent key is a caller that has not said
+ * what the route answered, and reading that as "accepted" is the one mistake
+ * this report cannot afford: it would print `signable` for a record nobody
+ * judged. The declared fingerprint stays optional, because it only decides what
+ * a line says, not what the verdict is.
  */
 export const summariseMarketingWebhookRecordSignability = ({
   buildFingerprint,
   records,
 }) => {
-  const judged = records.map((record) => ({
-    recordId: record.recordId,
-    declaredFingerprint: record.declaredFingerprint ?? null,
-    refusalCode: record.refusalCode ?? null,
-    refusalMessage: record.refusalMessage ?? null,
-    verdict: verdictOf(record.refusalCode),
-  }));
+  const judged = records.map((record) => {
+    if (!("refusalCode" in record)) {
+      throw new TypeError(
+        `Record ${record.recordId} does not state a refusalCode; the signing route's answer is what decides the verdict.`,
+      );
+    }
+    return {
+      recordId: record.recordId,
+      declaredFingerprint: record.declaredFingerprint ?? null,
+      refusalCode: record.refusalCode ?? null,
+      refusalMessage: record.refusalMessage ?? null,
+      verdict: verdictOf(record.refusalCode ?? null),
+    };
+  });
   const idsWith = (verdict) =>
     judged.filter((record) => record.verdict === verdict).map((record) => record.recordId);
   const signableRecordIds = idsWith(RECORD_SIGNABLE);

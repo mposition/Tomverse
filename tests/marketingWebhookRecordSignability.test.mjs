@@ -92,6 +92,33 @@ test("no records is not the same answer as nothing signable", () => {
   );
 });
 
+test("a record that does not state a refusal code is refused, not read as signable", () => {
+  // Review finding, 2026-10-10 (copilot/moonshot, nit): an absent key read as
+  // "accepted" is the one wrong answer this report must not give -- it would
+  // print "signable" for a record nobody judged.
+  assert.throws(
+    () => summarise([{ recordId: "2026-10-09__unjudged" }]),
+    /does not state a refusalCode/,
+  );
+  // Stated as null is a different thing: that is the route accepting it.
+  assert.equal(
+    summarise([{ recordId: "2026-10-09__ok", refusalCode: null }]).verdict,
+    "signable",
+  );
+});
+
+test("the display parse normalises the way the route does", () => {
+  // Review finding, 2026-10-10 (cursor, minor): the route parses through
+  // canonicalMarketingWebhookFileText, which strips a byte-order mark and
+  // normalises CRLF. Parsing the raw bytes for display would blank the
+  // fingerprint line on records the route accepts -- exactly the line that says
+  // which build a stale record belongs to. So: one parse, through that function.
+  const source = readFileSync(SCRIPT, "utf8");
+  const parses = [...source.matchAll(/JSON\.parse\(/g)];
+  assert.equal(parses.length, 1, "one place turns record bytes into an object");
+  assert.match(source, /JSON\.parse\(canonicalMarketingWebhookFileText\(/);
+});
+
 test("an absent declared fingerprint is null, not the build's", () => {
   // Reporting the build's fingerprint for a record that does not state one
   // would make an unreadable record look like a current one.
