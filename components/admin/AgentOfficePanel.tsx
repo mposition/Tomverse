@@ -23,7 +23,6 @@ import {
   financeLiveDept,
   qaLiveDept,
   researchLiveDept,
-  utcStamp,
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
   type AgentOfficeSeatedView,
@@ -50,6 +49,7 @@ import {
   type Snapshot,
   type StaffSeed,
 } from "@/lib/agentOffice/sim";
+import { aestStamp, brisbaneIso } from "@/lib/agentOffice/time";
 import { AMUX_ROOM, DEPT_ROOMS, REVIEW_ROOM } from "@/lib/agentOffice/world";
 
 type View = "live" | "dashboard";
@@ -277,7 +277,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     const url = URL.createObjectURL(new Blob([reportText()], { type: "text/markdown;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `tomverse-agent-office-${live.readAt.slice(0, 16).replace(/[:T]/g, "-")}.md`;
+    const stamp = (brisbaneIso(live.readAt) ?? live.readAt).slice(0, 16).replace(/[:T]/g, "-");
+    link.download = `tomverse-agent-office-${stamp}-aest.md`;
     // In the document while it is clicked, and the URL kept a moment after:
     // some browsers abort a download whose object URL is revoked at once.
     document.body.appendChild(link);
@@ -490,7 +491,7 @@ function LiveView({
         ) : (
           <div className={cx("live-clock")}>
             <span>{m.live.clockReal}</span>
-            <b data-testid="agent-office-clock">{utcStamp(readAt)}</b>
+            <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
             <small>{m.live.realPhase}</small>
           </div>
         )}
@@ -1072,7 +1073,7 @@ function DashboardView({
         <div className={cx("hero-body")}>
           <div className={cx("hero-copy")}>
             <p className={cx("eyebrow")}>
-              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(utcStamp(readAt))}
+              {snap.demo ? m.dashboard.eyebrow : m.dashboard.eyebrowReal(aestStamp(readAt))}
             </p>
             <h2 className={cx("office-title")}>
               {m.dashboard.titleBefore}
@@ -1262,7 +1263,7 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body")}>
-                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(utcStamp(readAt))}</p>
+                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(aestStamp(readAt))}</p>
                 <h3>
                   {brief.attention.length > 0
                     ? m.dashboard.briefNeedsLook(brief.attention.length)
