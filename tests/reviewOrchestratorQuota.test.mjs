@@ -153,3 +153,70 @@ test("status reads fresh daemon evidence without launching a provider probe", ()
     rmSync(stateDir, { recursive: true, force: true });
   }
 });
+
+test("Claude usage is paced: a good reading lasts five minutes, a 429 backs off, the last good one stands for 30", async () => {
+  const { pacedClaudeQuota, readClaudeUsage, CLAUDE_REFRESH_MS, CLAUDE_LAST_KNOWN_MAX_MS } =
+    await import("../tools/review-orchestrator/lib/quota.mjs");
+  const provider = { id: "claude", quotaProbe: "claude" };
+  const MIN = 60_000;
+  const good = { state: "available", remainingPercent: 62 };
+  let answer = { quota: good, status: 200, retryAfterSeconds: null };
+  const reads = [];
+  const read = async (_provider, { now }) => (reads.push(now), answer);
+  const pacing = new Map();
+  const at = (now) => pacedClaudeQuota(provider, { now, read, pacing });
+
+  assert.deepEqual(await at(0), good);
+  assert.deepEqual(await at(CLAUDE_REFRESH_MS - 1), good);
+  assert.equal(reads.length, 1, "a good reading is reused for five minutes");
+
+  // Rate-limited: the last good reading stands, and each 429 waits twice as long.
+  answer = { quota: { state: "unknown" }, status: 429, retryAfterSeconds: null };
+  assert.deepEqual(await at(5 * MIN), good);
+  assert.deepEqual(await at(5 * MIN + 2 * MIN - 1), good);
+  assert.equal(reads.length, 2, "no read during the first two-minute wait");
+  assert.deepEqual(await at(7 * MIN), good);
+  assert.equal(reads.length, 3);
+  assert.deepEqual(await at(7 * MIN + 4 * MIN - 1), good);
+  assert.equal(reads.length, 3, "the second 429 waits four minutes");
+  // Retry-After longer than the backoff is honoured.
+  answer = { quota: { state: "unknown" }, status: 429, retryAfterSeconds: 20 * 60 };
+  await at(11 * MIN);
+  assert.equal(reads.length, 4);
+  assert.deepEqual(await at(11 * MIN + 20 * MIN - 1), { state: "unknown" }, "past 30 minutes the last reading is no evidence");
+  assert.equal(reads.length, 4);
+  assert.ok(CLAUDE_LAST_KNOWN_MAX_MS === 30 * MIN);
+
+  // A good reading resets the backoff.
+  answer = { quota: good, status: 200, retryAfterSeconds: null };
+  assert.deepEqual(await at(31 * MIN), good);
+  answer = { quota: { state: "unknown" }, status: 429, retryAfterSeconds: null };
+  await at(36 * MIN);
+  assert.equal(reads.length, 6);
+  await at(36 * MIN + 2 * MIN);
+  assert.equal(reads.length, 7, "back to a two-minute wait after a good reading");
+
+  // Any other failure retries after a minute, with no good reading to fall back on.
+  const fresh = new Map();
+  const failing = async () => ({ quota: { state: "unknown" }, status: 500, retryAfterSeconds: null });
+  assert.deepEqual(await pacedClaudeQuota(provider, { now: 0, read: failing, pacing: fresh }), { state: "unknown" });
+  assert.equal(fresh.get("claude").retryAt, MIN);
+
+  // One read: the status and Retry-After come back; no token, no request.
+  const requests = [];
+  const fetchUsage = async (url, init) => {
+    requests.push({ url, init });
+    return new Response("{\"error\":{}}", { status: 429, headers: { "retry-after": "120" } });
+  };
+  const creds = () => ({ accessToken: "fake-token", expiresAt: 10_000 });
+  assert.deepEqual(await readClaudeUsage({}, { fetchUsage, readCredentials: creds, now: 1 }),
+    { quota: { state: "unknown" }, status: 429, retryAfterSeconds: 120 });
+  assert.equal(requests[0].url, "https://api.anthropic.com/api/oauth/usage");
+  assert.equal(requests[0].init.headers.Authorization, "Bearer fake-token");
+  assert.deepEqual(await readClaudeUsage({}, { fetchUsage, readCredentials: creds, now: 20_000 }),
+    { quota: { state: "unknown" }, status: null, retryAfterSeconds: null });
+  assert.equal(requests.length, 1, "an expired token sends nothing");
+  const ok = async () => new Response(JSON.stringify({ five_hour: { utilization: 30 }, seven_day: { utilization: 55 } }));
+  assert.deepEqual((await readClaudeUsage({}, { fetchUsage: ok, readCredentials: creds, now: 1 })).quota,
+    { state: "available", remainingPercent: 45 });
+});

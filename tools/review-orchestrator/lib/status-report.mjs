@@ -62,14 +62,20 @@ const MAX_QUOTA_AMOUNT = 1_000_000_000;
 export function quotaForSnapshot(quota) {
   const state = QUOTA_STATES.includes(quota?.state) ? quota.state : "unknown";
   if (state === "unknown" || state === "disabled") return { state, remaining: null, unit: null };
+  // Credit left after the included pool (Cursor's credit grants), in USD.
+  // Carried only when the probe read it, so a report without it stays the
+  // shape every earlier sender and app version accepts.
+  const credit = Number.isFinite(quota.creditUsd)
+    ? { credit: Math.round(clamp(quota.creditUsd, 0, MAX_QUOTA_AMOUNT) * 100) / 100 }
+    : {};
   if (Number.isFinite(quota.remainingPercent)) {
-    return { state, remaining: Math.round(clamp(quota.remainingPercent, 0, 100) * 10) / 10, unit: "percent" };
+    return { state, remaining: Math.round(clamp(quota.remainingPercent, 0, 100) * 10) / 10, unit: "percent", ...credit };
   }
   if (Number.isFinite(quota.remaining) && QUOTA_UNITS.includes(quota.unit)) {
     const max = quota.unit === "percent" ? 100 : MAX_QUOTA_AMOUNT;
-    return { state, remaining: Math.round(clamp(quota.remaining, 0, max) * 100) / 100, unit: quota.unit };
+    return { state, remaining: Math.round(clamp(quota.remaining, 0, max) * 100) / 100, unit: quota.unit, ...credit };
   }
-  return { state, remaining: null, unit: null };
+  return { state, remaining: null, unit: null, ...credit };
 }
 
 /**

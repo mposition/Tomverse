@@ -48,12 +48,20 @@ const isCount = (value) => Number.isInteger(value) && value >= 0;
 function normaliseQuota(quota) {
   if (quota === undefined) return undefined;
   if (quota === null || typeof quota !== "object" || !QUOTA_STATES.includes(quota.state)) return null;
-  const { state, remaining, unit } = quota;
-  if (remaining === null && unit === null) return { state, remaining: null, unit: null };
+  const { state, remaining, unit, credit } = quota;
+  // Credit (USD) is optional; when present it is a plain amount, and only on
+  // a quota that was read.
+  let extra = {};
+  if (credit !== undefined) {
+    if (typeof credit !== "number" || !Number.isFinite(credit) || credit < 0 || credit > MAX_QUOTA_AMOUNT) return null;
+    if (state === "unknown" || state === "disabled") return null;
+    extra = { credit };
+  }
+  if (remaining === null && unit === null) return { state, remaining: null, unit: null, ...extra };
   if (state === "unknown" || state === "disabled") return null;
   if (!QUOTA_UNITS.includes(unit) || typeof remaining !== "number" || !Number.isFinite(remaining) || remaining < 0) return null;
   if (remaining > (unit === "percent" ? 100 : MAX_QUOTA_AMOUNT)) return null;
-  return { state, remaining, unit };
+  return { state, remaining, unit, ...extra };
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

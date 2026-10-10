@@ -1966,3 +1966,32 @@ test("a variable set inline on a sprite or a portrait never shadows a theme toke
     for (const name of inline) assert.ok(!tokens.has(name), `${file} sets ${name} inline, shadowing the theme`);
   }
 });
+
+test("a reviewer on credit says so, with the credit beside the spent pool", () => {
+  const copy = adminAgentOfficeMessages.ko.real.quota;
+  const cursor = (quota) => ({ id: "cursor", vendor: "xai", enabled: true, running: 0, maxConcurrent: 2, quota });
+  // The app takes an optional credit, only on a quota that was read.
+  const parses = (quota) => reviewStatusSnapshotSchema.safeParse(reviewSnapshot({ providers: [cursor(quota)] })).success;
+  assert.equal(parses({ state: "available", remaining: 0, unit: "percent", credit: 100 }), true);
+  assert.equal(parses({ state: "available", remaining: 0, unit: "percent", credit: -1 }), false);
+  assert.equal(parses({ state: "unknown", remaining: null, unit: null, credit: 5 }), false);
+  assert.equal(parses({ state: "available", remaining: 0, unit: "percent", credit: "100" }), false);
+
+  const view = (quota) =>
+    reviewQuotaView(
+      agentOfficeReviewState({
+        stored: JSON.stringify({ receivedAt: "2026-10-09T01:04:00.000Z", snapshot: reviewSnapshot({ providers: [cursor(quota)] }) }),
+        now: at("2026-10-09T01:05:00.000Z"),
+      }),
+      copy
+    ).rows[0];
+  const onCredit = view({ state: "available", remaining: 0, unit: "percent", credit: 100 });
+  assert.deepEqual([onCredit.status, onCredit.label, onCredit.amount], ["working", "크레딧 사용", "0% 남음 · 크레딧 $100.00"]);
+  const spent = view({ state: "exhausted", remaining: 0, unit: "percent", credit: 0 });
+  assert.deepEqual([spent.status, spent.label, spent.amount], ["attention", "소진", "0% 남음 · 크레딧 $0.00"]);
+  const plenty = view({ state: "available", remaining: 70, unit: "percent", credit: 25.5 });
+  assert.deepEqual([plenty.status, plenty.label, plenty.amount], ["done", "사용 가능", "70% 남음 · 크레딧 $25.50"]);
+  // Without a credit reading the card reads as before.
+  assert.equal(view({ state: "available", remaining: 12, unit: "percent" }).label, "얼마 안 남음");
+  for (const locale of ["en", "ko"]) assert.ok(adminAgentOfficeMessages[locale].real.quota.states.onCredit);
+});
