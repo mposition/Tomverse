@@ -328,7 +328,10 @@ test("Claude parser diagnostic separates safe failure reasons without raw text",
   for (const [stdout, failureReason, rejectionPoint] of samples) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true }), { kind: "outcome_unknown", failureReason,
-      ...(rejectionPoint ? { rejectionPoint } : {}) });
+      ...(rejectionPoint ? { rejectionPoint } : {}),
+      ...(rejectionPoint === "unexpected_event" ? {
+        unexpectedEventType: "rate_limit_event", unexpectedEventPhase: "before_init",
+      } : {}) });
   }
 });
 
@@ -373,7 +376,8 @@ test("Claude S0 diagnostic reports only bounded unexpected event type and phase"
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true }), { kind: "outcome_unknown",
       failureReason: "output_contract_mismatch",
-      rejectionPoint: "unexpected_event" });
+      rejectionPoint: "unexpected_event", unexpectedEventType: expectedType,
+      unexpectedEventPhase: expectedPhase });
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0),
       { kind: "outcome_unknown" });
   }
@@ -407,7 +411,8 @@ test("Claude S0 pre-init system diagnostic exposes no free-form event data", () 
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan, stdout, 0,
       { diagnostic: true }), { kind: "outcome_unknown",
       failureReason: "output_contract_mismatch",
-      rejectionPoint: "unexpected_event" });
+      rejectionPoint: "unexpected_event", unexpectedEventType: "system",
+      unexpectedEventPhase: "before_init" });
   }
 });
 
