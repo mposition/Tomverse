@@ -777,14 +777,19 @@ Due (within 7 days of the deploy): ____________________
 ```
 
 Run **from the deployed release SHA**, against production on a read-only role.
+The report prints the instant it read, on the database's clock, above its
+findings — copy that into `Ran at (UTC)` rather than your own clock.
 
 - [ ] Production deploy SHA and the timestamp of the run recorded
-- [ ] Both constraints exist and are reported `NOT VALID`
+- [ ] Both constraints exist, and the state the report gives them is
+      recorded below — `NOT VALID` (the validating migration is still owed)
+      or validated (it has already run)
 - [ ] `violationCount` and `readyToValidate` recorded
 
 ```
 Deploy SHA:         ____________________
 Ran at (UTC):       ____________________
+Constraint state:   ____________________   (NOT VALID / validated)
 violationCount:     ____________________
 readyToValidate:    ____________________
 ```
@@ -796,7 +801,15 @@ restricted operations store.
 
 Then, by outcome:
 
-- **Zero violations** — add a forward migration that runs
+- **Already validated** — the report ends with *Nothing left to validate*,
+  meaning the constraints are present and Postgres has checked every
+  existing row as well as every write. There is nothing to add: record the
+  reading and move on. On 2026-10-09 this was production's state for both 7.7
+  and 7.7a, and the record for that release
+  (`.github/audits/release-2026-10-09__570f9e1b.md`) closed the item as
+  satisfied by validation rather than leaving it open against a state
+  production had moved past.
+- **Zero violations, still `NOT VALID`** — add a forward migration that runs
   `ALTER TABLE "CreditLot" VALIDATE CONSTRAINT ...` for both. That is the only
   way to validate them; hand-validating production leaves
   `pg_get_constraintdef()` disagreeing with the migration history, which §7.6
@@ -831,15 +844,19 @@ Due (within 7 days of the deploy): ____________________
 ```
 
 Run **from the deployed release SHA**, against production on a read-only role.
+The report prints the instant it read, on the database's clock, above its
+findings — copy that into `Ran at (UTC)` rather than your own clock.
 
 - [ ] Production deploy SHA and the timestamp of the run recorded
-- [ ] `AssistantKnowledgeFile_extractedCharacters_non_negative_check` exists and
-      is reported `NOT VALID`
+- [ ] `AssistantKnowledgeFile_extractedCharacters_non_negative_check` exists,
+      and the state the report gives it is recorded below — `NOT VALID` (the
+      validating migration is still owed) or validated (it has already run)
 - [ ] `violationCount` and `readyToValidate` recorded
 
 ```
 Deploy SHA:         ____________________
 Ran at (UTC):       ____________________
+Constraint state:   ____________________   (NOT VALID / validated)
 violationCount:     ____________________
 readyToValidate:    ____________________
 ```
@@ -851,7 +868,15 @@ not go into a pull request or an issue either.
 
 Then, by outcome:
 
-- **Zero violations** — add a forward migration that runs
+- **Already validated** — the report ends with *Nothing left to validate*,
+  meaning the constraint is present and Postgres has checked every
+  existing row as well as every write. There is nothing to add: record the
+  reading and move on. On 2026-10-09 this was production's state for both 7.7a
+  and 7.7, and the record for that release
+  (`.github/audits/release-2026-10-09__570f9e1b.md`) closed the item as
+  satisfied by validation rather than leaving it open against a state
+  production had moved past.
+- **Zero violations, still `NOT VALID`** — add a forward migration that runs
   `ALTER TABLE "AssistantKnowledgeFile" VALIDATE CONSTRAINT ...`. That is a
   separate submission and a separate deploy from the one above: `prisma migrate
   deploy` applies every pending migration in one run, so shipping both together
