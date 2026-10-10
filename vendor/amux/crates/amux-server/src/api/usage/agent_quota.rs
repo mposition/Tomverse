@@ -138,13 +138,20 @@ pub(super) async fn probe_cursor_usage() -> ProviderProbe {
         Ok(client) => client,
         Err(_) => return unavailable("cursor", "probe_failed"),
     };
-    let mut body = match cursor_dashboard_call(&client, CURSOR_URL, token).await {
+    // The two reads run together, each within PROBE_TIMEOUT, so the probe
+    // never takes longer than one read: a cache miss in usage.rs waits for
+    // every probe before it answers, and its readers stop at a deadline.
+    let (usage, balance) = tokio::join!(
+        cursor_dashboard_call(&client, CURSOR_URL, token),
+        cursor_dashboard_call(&client, CURSOR_CREDIT_URL, token),
+    );
+    let mut body = match usage {
         Ok(body) => body,
         Err(cause) => return unavailable("cursor", cause),
     };
     // A balance that cannot be read is simply absent: it never fails the
     // usage reading, and an absent balance proves no credit either way.
-    if let Ok(balance) = cursor_dashboard_call(&client, CURSOR_CREDIT_URL, token).await {
+    if let Ok(balance) = balance {
         if let Some(object) = body.as_object_mut() {
             object.insert("creditGrantsBalance".into(), balance);
         }
