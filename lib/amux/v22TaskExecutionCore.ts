@@ -1,5 +1,5 @@
-/** A15 ships dark. The legacy execution API switch never opens v22 Tasks. */
-export const AMUX_V22_TASK_EXECUTION_CODE_LATCH = false;
+/** V22 Tasks need their own environment gate, not the legacy execution switch. */
+export const AMUX_V22_TASK_EXECUTION_CODE_LATCH = true;
 export const AMUX_V22_TASK_EXECUTION_ENV = "TOMVERSE_AMUX_V22_TASK_EXECUTION";
 
 export function amuxV22TaskExecutionEnabled(value: string | undefined) {

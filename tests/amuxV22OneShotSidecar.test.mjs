@@ -62,8 +62,11 @@ function fakeSpawn(result, options = {}) {
   return { spawnChild, calls };
 }
 
-test("sidecar is dark even when its environment switch is set", () => {
-  assert.equal(amuxV22SidecarEnabled("1"), false);
+test("sidecar requires its own exact Ubuntu environment switch", () => {
+  assert.equal(amuxV22SidecarEnabled("1"), true);
+  for (const flag of [undefined, "", "0", "enabled", "true", " 1", "1 "]) {
+    assert.equal(amuxV22SidecarEnabled(flag), false);
+  }
 });
 
 test("the one-shot request and CLI command have bounded capabilities", () => {
