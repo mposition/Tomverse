@@ -145,6 +145,8 @@ export class AgentOffice {
   chat: ChatEntry[] = [];
   spotlight: string | null = null;
 
+  /** How many the office draws, as shown: the teams' staff until the page says otherwise. */
+  private staffText: string;
   private spotlightUntil = 0;
   private elapsed = 0;
   private chatSeq = 0;
@@ -156,6 +158,7 @@ export class AgentOffice {
     this.live = live;
     const { staff, operator } = buildStaff(copy);
     this.staff = staff;
+    this.staffText = String(staff.length);
     this.operatorSeed = operator;
     this.deptLead = Object.fromEntries(staff.filter((s) => s.rank === "lead").map((s) => [s.deptId, s]));
 
@@ -264,7 +267,7 @@ export class AgentOffice {
       if (live && (status === "attention" || status === "working")) lines.push(`${this.roomName(dept)}: ${live.line}`);
     }
     const stats = this.snapshot().stats;
-    lines.push(s.statusCounts(stats.done, stats.attention, stats.blocked, this.staff.length));
+    lines.push(s.statusCounts(stats.done, stats.attention, stats.blocked, this.staffText));
     this.pushChat("staff", this.narratorName(), lines.join("\n"));
   }
 
@@ -400,6 +403,11 @@ export class AgentOffice {
   private showRecordLine(agent: Agent, line: string) {
     agent.speech = line;
     agent.speechFor = Number.POSITIVE_INFINITY;
+  }
+
+/** Everyone the office draws, as the page counts them (agentOfficeStaffCount): the console says the same. */
+  setStaffCount(text: string) {
+    this.staffText = text;
   }
 
   /** The live reading for a room, or null for one without. */
