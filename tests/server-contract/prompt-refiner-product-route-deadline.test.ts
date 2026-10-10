@@ -20,8 +20,10 @@ mock.module("next-auth/next", { namedExports: {
     return authenticated ? { user: { id: "owner" } } : null;
   },
 } });
-mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
-mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
+// The proposal route loads these modules dynamically by their alias. Mock the
+// same specifier so Linux and Windows exercise the same admission boundary.
+mock.module("@/lib/auth", { namedExports: { authOptions: {} } });
+mock.module("@/lib/requestOrigin", { namedExports: {
   hasValidMutationOrigin: () => {
     admissionEvents.push("origin");
     return validOrigin;
@@ -36,7 +38,7 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
     return { explicitEnabled: true, autoEnabled: true };
   },
 } });
-mock.module(mod("lib/promptRefinerProductApi.ts"), { namedExports: {
+mock.module("@/lib/promptRefinerProductApi", { namedExports: {
   handlePromptRefinerProductPrepare: async (_request: Request, _userId: string,
     deadline: { requestedAt: Date; deadlineAtMonotonicMs: number }) => {
     admissionEvents.push("prepare-handler");

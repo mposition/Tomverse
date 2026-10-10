@@ -34,9 +34,12 @@ export type PromptRefinerProductRequestDeadline = Readonly<{
 
 async function conversationAccessible(request: Request, userId: string,
   conversationId: string) {
-  const row = await prisma.conversation.findFirst({ where: {
-    id: conversationId, userId, kind: "chat", productKey: "chat",
-  }, select: { password: true } });
+  const row = await prisma.conversation.findFirst({
+    where: {
+      id: conversationId, userId, kind: "chat", productKey: "chat",
+    },
+    select: { password: true },
+  });
   return Boolean(row && hasConversationUnlockGrant(request, userId,
     conversationId, row.password));
 }

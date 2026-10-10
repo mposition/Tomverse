@@ -87,8 +87,11 @@ export async function capturePromptRefinerChatDraft(input: {
     await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
     const scope = await readScope(tx, input.scopeId, input.userId);
     if (!scope || scope.conversationId !== input.conversationId || scope.epoch !== input.epoch) return unavailable();
-    const conversation = await tx.conversation.findFirst({ where: { id: input.conversationId,
-      userId: input.userId, kind: "chat", productKey: "chat" }, select: { chatRecoveryEpoch: true } });
+    const conversation = await tx.conversation.findFirst({
+      where: { id: input.conversationId, userId: input.userId,
+        kind: "chat", productKey: "chat" },
+      select: { chatRecoveryEpoch: true },
+    });
     const draft = await tx.chatComposerDraft.findUnique({
       where: { userId_scopeKey: { userId: input.userId, scopeKey: input.conversationId } },
       select: { id: true, revision: true, text: true },

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
-const root = resolve(import.meta.dirname, "..");
+const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => null,

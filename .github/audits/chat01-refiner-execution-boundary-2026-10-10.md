@@ -1,10 +1,42 @@
 # CHAT-01 Refiner Chat execution 경계 — 2026-10-10
 
-상태: **default-off 제품 코드 구현·로컬 통합 검증. 독립 검토·활성 배포 미완료.**
+상태: **default-off 제품 코드 구현·로컬 통합 검증과 기존 head 독립 승인 완료.
+PR CI 보강 재검토·병합·활성 배포 미완료.**
 
 전체 Chat 진행률은 승인된 전체 기능 분모를 이번 회차에서 재검증하지 않아 산정을
 보류한다. CHAT-01의 구현·검증과 독립 검토·병합·활성 배포를 구분하며, pending인
 Router 출시 판정을 미구현 0%로 환산하지 않는다.
+
+## PR CI 보강 — 기존 승인과 구분
+
+정확한 `499813cb9191ddbc8de85669033ddf337715d6a3`의 실제 검토 서버 요청
+`r-20261010-013643-8eeb32`에서 Copilot/Moonshot과 Claude/Anthropic이 모두
+ACCEPT했다. PR #2305는 draft 생성 후 ready로 전환했다. 이 승인은 아래 CI
+보강 변경의 독립 검토나 병합·배포 승인을 대신하지 않는다.
+
+첫 ready CI에서 서버 계약 996건 중 993 통과·2 실패·기존 TODO 1이었고,
+unit server lane은 14,305건 중 14,298 통과·2 실패·기존 skip 5였다.
+실패 원인은 제품 제안 경로의 동적 alias import에 file URL mock이 적용되지
+않은 환경 차이, 모듈 mock API 테스트가 실험 옵션 없는 unit lane에 들어간 것,
+그리고 기존 최소 Conversation projection의 같은 줄 구문을 line-based guard가
+인식하지 못한 것이다. 실제 두 조회는 이미 password 또는 chatRecoveryEpoch만
+선택하고 있었으며, projection과 검사 규칙을 그대로 두고 구문 배치만 정리했다.
+
+동적 import와 같은 alias를 mock하고 제안 API 테스트를 기존 옵션이 있는
+server-contract lane으로 옮겼다. 테스트 삭제·검사 완화·전체 unit 실험 옵션
+추가는 없다. 관련 제품 server 43/43·client 23/23과 Conversation 조회 검사
+3/3이 통과했다. 서버 전체 실행은 이동 전 발견한 996건 기준 995 통과·실패 0·
+기존 TODO 1이며, 이동한 API 2건은 기존 실행 옵션을 그대로 쓴 별도 실행에서
+통과했다. 이 둘을 새 전체 discovery 결과로 합치지 않는다. 전체 lint, 8GB 타입
+검사와 관련 정적 검사도 통과했다.
+
+로컬 첫 전체 unit 실행에서는 이동 전 Git index가 삭제된 경로를 추적해 import
+분석이 ENOENT로 실패했다. 해당 부분 실행을 정상 중단하고 실패 증거를 보존했다.
+두 경로의 rename을 index에 반영한 뒤 같은 분석 검사 12/12가 통과했으며,
+source/provenance pin이나 분석 규칙을 바꾸지 않았다. 부분 실행을 전체 unit
+통과로 보고하지 않는다. 새 커밋의 전체 Linux CI와 독립 재검토는 별도 단계다.
+원문 저장·단일 소비·Router/provider 공통 입력·예산·기존 migration·출시
+정책·flag에는 동작 변경이 없다. Router 세 판정은 여전히 pending이다.
 
 ## 제품 연결 코드 확장
 
