@@ -4334,6 +4334,8 @@ async function handleChatPost(
         let completionCommitted = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
         let detachRequestAbortListener: () => void = () => {};
+        let fallbackTransition: Promise<void> | null = null;
+        let pendingFallbackAbortController: AbortController | null = null;
         /**
          * Whether a token the user can see has reached the response stream.
          *
@@ -4777,7 +4779,20 @@ async function handleChatPost(
             }
             streamState = "cancelled";
             stopFirstTokenWatch();
+            // Provider abort must not wait for the fallback bookkeeping below.
+            // During that transition `dispatched` still names the primary, so
+            // abort both the active attempt and the candidate that may already
+            // have crossed streamText's provider boundary.
+            dispatched.abortController.abort(reason);
+            pendingFallbackAbortController?.abort(reason);
             turnCancellation ??= (async () => {
+                // Once a fallback provider exists, the primary close and the
+                // active-attempt swap are one ownership transition. Let it
+                // finish before reader cancellation and settlement choose the
+                // attempt they terminalize. The controllers above have already
+                // stopped provider work, so this wait delays no provider abort.
+                const transition = fallbackTransition;
+                if (transition) await transition;
                 await cancelSourceSafely(reason);
                 await settleSafely("cancelled", earlyCancelSearchFields);
                 await releaseSafely();
@@ -5021,9 +5036,10 @@ async function handleChatPost(
          */
         let lastStreamFailure: StreamFailureClassification | null = null;
 
-        const attemptFallback = async (
+        const attemptFallbackWithinTransition = async (
             controller: ReadableStreamDefaultController<string>,
-            error: unknown
+            error: unknown,
+            nextAttemptAbortController: AbortController
         ): Promise<boolean> => {
             const classified = classifyStreamFailure({
                 error,
@@ -5219,7 +5235,6 @@ async function handleChatPost(
             const failing = dispatchRecord;
             let nextRecord: DispatchInstrumentation;
             let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
-            const nextAttemptAbortController = new AbortController();
             try {
                 // A second attempt on the *same* run, not a second run. One
                 // logical response is one RoutingRun with its attempts hanging
@@ -5256,7 +5271,11 @@ async function handleChatPost(
                     adapterVersion: "vercel-ai-sdk-streamText-v1",
                 });
                 if (req.signal.aborted || streamState !== "open") {
-                    return abandonFallback("request_aborted_before_dispatch");
+                    await abandonFallback("request_aborted_before_dispatch");
+                    // Cancellation owns the primary terminal from here. Tell
+                    // the outer failure path the turn was handled so it cannot
+                    // race a second, failed settlement against it.
+                    return true;
                 }
                 nextStream = await streamText({
                     model: plan.activeModel,
@@ -5294,19 +5313,12 @@ async function handleChatPost(
                     dispatchError,
                     plan.modelId
                 );
-                return abandonFallback("dispatch_failed");
+                await abandonFallback("dispatch_failed");
+                return streamState !== "open" || req.signal.aborted;
             }
             if (!nextStream) {
-                return abandonFallback("dispatch_failed");
-            }
-
-            // §7: the client is told before the next model's first token, and
-            // told a model id and nothing else. Out-of-band, so it is not a
-            // visible token and does not close the door it just opened.
-            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
-                nextAttemptAbortController.abort("client is gone");
-                await nextStream.textStream.getReader().cancel("client is gone");
-                return abandonFallback("client_gone_before_signal");
+                await abandonFallback("dispatch_failed");
+                return streamState !== "open" || req.signal.aborted;
             }
 
             // From here the swap is committed, and only from here.
@@ -5459,6 +5471,18 @@ async function handleChatPost(
             // The next attempt captures under its own key, so the memo from
             // the one it replaced must not answer for it.
             perplexityCapture = null;
+            // §7: the client is told before the next model's first token, and
+            // told a model id and nothing else. The fallback stream is not read
+            // until this function returns, so swapping ownership first cannot
+            // let a visible fallback token overtake this signal. If the client
+            // left during the swap, cancellation now owns the dispatched
+            // fallback attempt and settles it instead of abandoning a hold for
+            // a provider call that already happened.
+            if (streamState !== "open") return true;
+            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
+                void cancelTurnSafely("client is gone before fallback signal");
+                return true;
+            }
             console.info(JSON.stringify({
                 event: "chat_auto_fallback_dispatched",
                 traceId,
@@ -5470,6 +5494,36 @@ async function handleChatPost(
                 timestamp: new Date().toISOString(),
             }));
             return true;
+        };
+        const attemptFallback = async (
+            controller: ReadableStreamDefaultController<string>,
+            error: unknown
+        ): Promise<boolean> => {
+            const nextAttemptAbortController = new AbortController();
+            let finishTransition!: () => void;
+            const transition = new Promise<void>((resolve) => {
+                finishTransition = resolve;
+            });
+            fallbackTransition = transition;
+            pendingFallbackAbortController = nextAttemptAbortController;
+            try {
+                return await attemptFallbackWithinTransition(
+                    controller,
+                    error,
+                    nextAttemptAbortController
+                );
+            } finally {
+                if (
+                    pendingFallbackAbortController ===
+                    nextAttemptAbortController
+                ) {
+                    pendingFallbackAbortController = null;
+                }
+                finishTransition();
+                if (fallbackTransition === transition) {
+                    fallbackTransition = null;
+                }
+            }
         };
         const onRequestAbort = () => {
             const cancellation = cancelTurnSafely(
