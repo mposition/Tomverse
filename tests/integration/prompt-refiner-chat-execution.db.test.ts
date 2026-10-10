@@ -264,9 +264,12 @@ test("server-held Chat decisions on PostgreSQL", { skip: !rawUrl }, async t => {
       await assert.rejects(
         store.consumePreviewedPromptRefinerChatExecution(f.input, preview),
         (error: unknown) => {
-          if (!(error instanceof ChatSourceMessageMismatchError)) return false;
-          assert.equal(error.code, "CHAT_SOURCE_MESSAGE_MISMATCH");
-          assert.equal(error.message,
+          if (!(error instanceof Error) ||
+            error.constructor !== ChatSourceMessageMismatchError) return false;
+          const mismatch = error as Error & { readonly code: string };
+          assert.equal(mismatch.name, "ChatSourceMessageMismatchError");
+          assert.equal(mismatch.code, "CHAT_SOURCE_MESSAGE_MISMATCH");
+          assert.equal(mismatch.message,
             "The persisted source message does not match this Chat request.");
           return true;
         },
