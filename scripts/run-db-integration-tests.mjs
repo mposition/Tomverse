@@ -225,6 +225,7 @@ run(
     // An existing migration prefix through the actual pre-deploy db:migrate
     // path: CHECK-only changes are invisible to Prisma's structural diff.
     "tests/integration/migration-baseline-check-replacement.db.test.mjs",
+    "tests/integration/migration-baseline-check-sidecars.db.test.mjs",
     "tests/integration/chat-concurrency.db.test.ts",
     "tests/integration/chat-rate-limit.db.test.ts",
     "tests/integration/chat-token-quota.db.test.ts",
