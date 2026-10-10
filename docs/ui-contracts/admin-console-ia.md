@@ -232,6 +232,11 @@ reads (rule 8). Cards reads "Read only" because the card list issues no
 request and writes nothing; Assignment reads "Read only" to a role without
 `ops:write`, the permission every decision route checks.
 
+The Promotion auto-promotion section also contains the separate owner-only v22
+admission control. It reads actual graduation counts separately from the approved
+bootstrap exception, requires explicit confirmation and recent authentication for
+writes, and preserves the read-only Cards surface. Unknown writes are not retried.
+
 **Routing** keeps Chat shadow routing only, and one line pointing at AMUX ›
 Execution, because runbooks written before the move send operators there.
 
