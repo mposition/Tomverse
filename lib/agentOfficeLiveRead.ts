@@ -20,6 +20,7 @@ import type {
   AgentOfficeReviewState,
   AgentOfficeAmuxState,
   AgentOfficeDecisionState,
+  AgentOfficeDigestState,
   AgentOfficeEngineeringState,
   AgentOfficeFinanceState,
   AgentOfficeLiveRooms,
@@ -34,6 +35,7 @@ import {
 } from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
 import { AGENT_OFFICE_DECISION_WINDOW_MS, agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
+import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
 import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
 import {
   AGENT_OFFICE_ENGINEERING_SETTING_KEYS,
@@ -307,6 +309,27 @@ async function readDecision(now: Date): Promise<AgentOfficeDecisionState> {
 }
 
 /**
+ * The digest desk: digests per agent in the last 24 hours and each agent's
+ * newest one. Counts and times only: no payload, kind or key is selected.
+ */
+async function readDigest(now: Date): Promise<AgentOfficeDigestState> {
+  try {
+    const since = new Date(now.getTime() - AGENT_OFFICE_DIGEST_WINDOW_MS);
+    const [recent, latest] = await Promise.all([
+      prisma.agentDigestItem.groupBy({ by: ["agentKey"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
+      prisma.agentDigestItem.groupBy({ by: ["agentKey"], _max: { createdAt: true } }),
+    ]);
+    return agentOfficeDigestState({
+      recent: recent.map((row) => ({ agentKey: row.agentKey, count: row._count._all })),
+      latest: latest.map((row) => ({ agentKey: row.agentKey, lastAt: row._max.createdAt })),
+    });
+  } catch {
+    console.warn({ event: "admin_agent_office_read_failed", read: "agent_digests" });
+    return { kind: "unread" };
+  }
+}
+
+/**
  * The operator to-do counts, each read on its own: one failing count is
  * that count unknown, not the whole to-do zero (rule 8).
  */
@@ -331,7 +354,7 @@ async function readOperatorQueue(): Promise<AgentOfficeOperatorQueue> {
 }
 
 export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<AgentOfficeLiveRooms> {
-  const [research, qa, finance, engineering, amux, review, decision, queue] = await Promise.all([
+  const [research, qa, finance, engineering, amux, review, decision, digest, queue] = await Promise.all([
     readResearch(now),
     readQa(),
     readFinance(),
@@ -339,7 +362,8 @@ export async function readAgentOfficeLiveRooms(now: Date = new Date()): Promise<
     readAmuxWorkers(),
     readReview(),
     readDecision(now),
+    readDigest(now),
     readOperatorQueue(),
   ]);
-  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, decision, queue };
+  return { readAt: now.toISOString(), research, qa, finance, engineering, amux, review, decision, digest, queue };
 }

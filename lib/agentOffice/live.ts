@@ -227,11 +227,26 @@ export type AgentOfficeDecisionState =
       toOperator: number;
     };
 
+export type AgentOfficeDigestState =
+  | { kind: "unread" }
+  | {
+      kind: "observed";
+      /** Every agent the digest store accepts, in its order. */
+      agents: {
+        agentKey: string;
+        /** Digests it sent in the last 24 hours. */
+        recent: number;
+        /** When its newest digest arrived (UTC ISO), ever. */
+        lastAt: string | null;
+      }[];
+    };
+
 export type AgentOfficeLiveRooms = {
   /** When the server read them (UTC ISO). */
   readAt: string;
   review: AgentOfficeReviewState;
   decision: AgentOfficeDecisionState;
+  digest: AgentOfficeDigestState;
   /** The operator to-do counts (OPERATOR_QUEUE_KEYS). */
   queue: AgentOfficeOperatorQueue;
   research: AgentOfficeResearchState;
@@ -801,6 +816,44 @@ export function reviewRoomView(
       .filter((part): part is string => part !== null)
       .join(" · ") || null;
   return { status, summary, note, reviewers: everyone.slice(0, desks) };
+}
+
+type DigestCopy = {
+  badges: { received: string; quiet: string; unread: string };
+  unread: string;
+  latest: (agent: string, time: string) => string;
+  none: string;
+  count: (agent: string, count: number) => string;
+  readAt: (time: string) => string;
+};
+
+/**
+ * The digest desk: which agent's digest arrived last and when, and how many
+ * each sent in the last 24 hours. The line names the newest digest, so a new
+ * one changes it and the desk's lead says so in the console (setLive).
+ * Whether an agent is late is its own room's judgement, not the desk's.
+ */
+export function digestLiveDept(
+  state: AgentOfficeDigestState,
+  readAt: string,
+  copy: DigestCopy,
+  /** Each agent's room name, by its digest key. */
+  names: Readonly<Record<string, string>>
+): AgentOfficeLiveDept {
+  const read = copy.readAt(aestStamp(readAt));
+  if (state.kind === "unread") return { status: "attention", badge: copy.badges.unread, line: copy.unread, detail: read };
+  const name = (agentKey: string) => names[agentKey] ?? agentKey;
+  const newest = state.agents.reduce<(typeof state.agents)[number] | null>(
+    (best, agent) => (agent.lastAt && (!best?.lastAt || agent.lastAt > best.lastAt) ? agent : best),
+    null
+  );
+  const recent = state.agents.reduce((sum, agent) => sum + agent.recent, 0);
+  return {
+    status: recent > 0 ? "done" : "waiting",
+    badge: recent > 0 ? copy.badges.received : copy.badges.quiet,
+    line: newest?.lastAt ? copy.latest(name(newest.agentKey), aestStamp(newest.lastAt)) : copy.none,
+    detail: [...state.agents.map((agent) => copy.count(name(agent.agentKey), agent.recent)), read].join(" · "),
+  };
 }
 
 export type AgentOfficeDecisionMemberState = "proposal" | "off" | "killed" | "unread";
