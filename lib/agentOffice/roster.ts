@@ -200,6 +200,16 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
 /** The AMUX execution room's record screen, while the console has it. */
 export const AGENT_OFFICE_AMUX_RECORD_HREF = linkIfOnConsole("/admin/amux-execution");
 
+/** The room of each agent that sends digests, by its digest key (lib/agentDigestContract.ts). */
+export const AGENT_OFFICE_DIGEST_SENDERS: Readonly<Record<string, AgentOfficeDeptId>> = {
+  "qa-release": "qa",
+  "billing-finance-ops": "finance",
+  "sre-ops": "sre",
+};
+
+/** The Decision Maker's record: its section of the AMUX execution screen, while the console has it. */
+export const AGENT_OFFICE_DECISION_RECORD_HREF = linkIfOnConsole("/admin/amux-execution?tab=decision-maker");
+
 /**
  * Clothes for the AMUX workers, by desk: the office's palette, not the
  * original's pink. [hair, shirt, accent].
@@ -217,3 +227,16 @@ export const AGENT_OFFICE_WORKER_COLORS: readonly (readonly [string, string, str
 
 /** Skin tones for the AMUX workers, by desk. */
 export const AGENT_OFFICE_WORKER_SKINS: readonly string[] = ["#ffdcc4", "#f7cdae", "#ffe3cf", "#eec39f"];
+
+/** Where each seated room's clothes start in the palette, so two rooms do not dress alike. */
+export const AGENT_OFFICE_SEATED_PALETTE = { amux: 0, review: 3, decision: 6 } as const;
+
+/** A room whose figures are seated from a real record rather than played by the engine. */
+export type AgentOfficeSeatedRoom = keyof typeof AGENT_OFFICE_SEATED_PALETTE;
+
+/** The clothes of the figure at a seated room's desk: the sprite and its profile wear the same. */
+export function agentOfficeSeatedClothes(room: AgentOfficeSeatedRoom, desk: number) {
+  const [hair, shirt, accent] =
+    AGENT_OFFICE_WORKER_COLORS[(desk + AGENT_OFFICE_SEATED_PALETTE[room]) % AGENT_OFFICE_WORKER_COLORS.length];
+  return { hair, shirt, accent, skin: AGENT_OFFICE_WORKER_SKINS[desk % AGENT_OFFICE_WORKER_SKINS.length] };
+}

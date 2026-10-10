@@ -17,6 +17,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
 
+import { AMUX_DB_BOUNDARIES } from "../lib/amux/dbBoundary.ts";
+
 import {
   DM_ANSWER_MAX_BYTES,
   DM_CARD_TEXT_MAX_BYTES,
@@ -1166,6 +1168,10 @@ for (const [label, integrityKey] of [
       assert.deepEqual(kindsOf(sent), ["execute", "query", "query", "query", ...auditKinds, "query", "query"]);
       assert.equal(sent.length, 9 + extra);
       assert.ok(sent.length + BOUNDARY_STATEMENTS <= 12);
+      // The routing route's boundary holds this at its largest, with nothing to spare.
+      const ceiling = AMUX_DB_BOUNDARIES.decisionMakerRouting.prismaCallCeiling;
+      assert.ok(sent.length + BOUNDARY_STATEMENTS <= ceiling);
+      if (integrityKey !== null) assert.equal(sent.length + BOUNDARY_STATEMENTS, ceiling);
       assert.match(sent[0].sql, LOCK);
       const audit = auditOf(sent);
       assert.equal(audit.action, "amux.decision.route");

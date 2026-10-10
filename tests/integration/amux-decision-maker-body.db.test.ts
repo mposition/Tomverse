@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 
 import { writeAdminAuditLog, writeSystemAuditLog } from "@/lib/adminAudit";
-import { withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
+import { AMUX_DB_BOUNDARIES, AmuxDbBoundaryError, withAmuxDbBoundary } from "@/lib/amux/dbBoundary";
 import {
   DM_KEY_PERIOD_MS,
   dmBodyDigest,
@@ -469,8 +469,11 @@ const ROUTED_CARD = {
   contextPaths: ["lib/cache.ts"],
 };
 
-/** The route transaction's whole budget: the boundary's setup and fence, the routing and its card text. */
-const ROUTE_BOUNDARY = { operation: "dm_route_card_text_test", prismaCallCeiling: 12, isolation: "mutation" as const };
+/**
+ * The routing route's own boundary (app/api/internal/amux/decision-maker/requests/route.ts):
+ * its setup and fence, the routing and its card text.
+ */
+const ROUTE_BOUNDARY = AMUX_DB_BOUNDARIES.decisionMakerRouting;
 
 test("a question routed to a DM keeps its card text from its own routing, and Admin reads it back", async () => {
   const period = await currentPeriod();
@@ -535,6 +538,42 @@ test("a question routed to a DM keeps its card text from its own routing, and Ad
     }),
     /AMUX_DM_BODY_UNAUDITED|AmuxDecisionMakerBody_requestId_field_key|unique/i,
   );
+});
+
+test("the routing route's boundary is the routing at its largest: one call fewer refuses it and leaves nothing", async () => {
+  // With an integrity key the router's audit sends its fourth statement, so a
+  // new question routed to a DM with its card text is the largest routing.
+  const names = ["ADMIN_AUDIT_INTEGRITY_KEY", "ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  process.env.ADMIN_AUDIT_INTEGRITY_KEY = "dm-routing-route-db-test-key";
+  delete process.env.ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS;
+  try {
+    const period = await currentPeriod();
+    const ring = new Map([[period, KEY]]);
+    const short = { ...ROUTE_BOUNDARY, prismaCallCeiling: ROUTE_BOUNDARY.prismaCallCeiling - 1 };
+    const refusedBinding = routingBindingFor();
+    await assert.rejects(
+      withAmuxDbBoundary(short, (tx) =>
+        recordDecisionMakerRequestWithCardText(tx, { binding: refusedBinding, card: ROUTED_CARD, keyRing: ring }),
+      ),
+      (error: unknown) => error instanceof AmuxDbBoundaryError && error.code === "AMUX_DB_PRISMA_CALL_CEILING_EXCEEDED",
+    );
+    const left = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*)::bigint AS "count" FROM "AmuxDecisionMakerRequest" WHERE "cardId" = ${refusedBinding.cardId}
+    `;
+    assert.equal(Number(left[0]!.count), 0);
+
+    const routed = await withAmuxDbBoundary(ROUTE_BOUNDARY, (tx) =>
+      recordDecisionMakerRequestWithCardText(tx, { binding: routingBindingFor(), card: ROUTED_CARD, keyRing: ring }),
+    );
+    assert.equal(routed.route, "dm_proposal");
+    assert.ok(routed.cardText);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
 });
 
 test("a question routed to the operator stores no card text, and one the registry cannot key leaves no request", async () => {

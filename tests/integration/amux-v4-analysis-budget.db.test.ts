@@ -379,16 +379,21 @@ test("owner cancels only an unused hold, releasing the reservation with one audi
   await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
       { session: staleOwner, request, holdId })), isAdminReauthenticationError);
-  const cancelled = await prisma.$transaction((tx) =>
+  await assert.rejects(prisma.$transaction((tx) =>
     commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
-      { session, request, holdId }));
-  assert.equal(cancelled.releasedMicroUsd, "5000");
+      { session, request, holdId, expectedPreviewId: "synthetic-mismatched-preview" })),
+    (error: unknown) => error instanceof AmuxIdeaAnalysisCancellationError &&
+      error.code === "not_cancellable");
+  const receipt = await prisma.$transaction((tx) =>
+    commitAmuxIdeaAnalysisUnusedReservationCancellation(tx,
+      { session, request, holdId, expectedPreviewId: previewId }));
+  assert.equal(receipt.releasedMicroUsd, "5000");
   const [hold, window, audit] = await Promise.all([
     prisma.amuxIdeaAnalysisBudgetHold.findUniqueOrThrow({ where: { id: holdId } }),
     prisma.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
       where: { namespace_monthStart: { namespace, monthStart } },
     }),
-    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: cancelled.auditId } }),
+    prisma.adminAuditLog.findUniqueOrThrow({ where: { id: receipt.auditId } }),
   ]);
   assert.equal(hold.status, "released");
   assert.equal(hold.settledMicroUsd, BigInt(0));

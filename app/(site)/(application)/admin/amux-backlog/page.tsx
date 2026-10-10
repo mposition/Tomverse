@@ -8,6 +8,8 @@ import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadata
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIntakePanel } from "@/components/admin/AmuxIntakePanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
+import { AmuxUnusedAnalysisReservationPanel } from
+  "@/components/admin/AmuxUnusedAnalysisReservationPanel";
 import { AmuxAnalysisClaimResolutionPanel } from
   "@/components/admin/AmuxAnalysisClaimResolutionPanel";
 import { amuxAnalysisClaimRecoveryHoldId } from
@@ -139,6 +141,9 @@ export default async function AdminAmuxBacklogPage({
       {tabs}
       {tab.id === "ideas" ? (
         <>
+        <AmuxUnusedAnalysisReservationPanel operatorId={session.user.id} available={
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&
+          process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_RESERVE === "enabled"} />
         {recoveryHoldId ? <AmuxAnalysisClaimResolutionPanel
           key={recoveryHoldId} holdId={recoveryHoldId} /> : null}
         <AmuxTaskCostCatalogApprovalPanel approvalAvailable={

@@ -256,6 +256,16 @@ export const AMUX_DB_BOUNDARIES = {
     prismaCallCeiling: 9,
     isolation: "mutation",
   },
+  // setup + a question's routing at its largest (audit chain lock, the
+  // request read, the switch read, the throughput read, the router's audit 4
+  // with an integrity key, the request insert, the card text insert: 10,
+  // pinned by tests/amuxDecisionMakerBody.test.mjs) + fence. 12 is also
+  // docs/policy/amux-decision-maker.md §9's ceiling for one DM operation.
+  decisionMakerRouting: {
+    operation: "decision_maker_routing",
+    prismaCallCeiling: 12,
+    isolation: "mutation",
+  },
 } as const satisfies Record<string, AmuxDbBoundary>;
 
 /**
