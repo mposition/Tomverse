@@ -770,16 +770,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         unreadable: "The switch record cannot be read: every question goes to the operator",
         killed: "Kill switch on: every question goes to the operator",
         allOff: "Both instances off: every question goes to the operator",
-        summary: (proposal: number, total: number, dm: number, operator: number) =>
-          `${proposal}/${total} in proposal mode · last 24h ${dm} to the Decision Maker · ${operator} to the operator`,
-        none: "None yet",
-        facts: {
-          vendor: "Vendor",
-          mode: "Mode",
-          recent: "Routed in the last 24h",
-          lastRouted: "Last routed",
-          lastJudged: "Last judged by a person",
-        },
+        summary: (proposal: number, total: number) => `${proposal}/${total} in proposal mode`,
+        facts: { vendor: "Vendor", mode: "Mode" },
       },
       amux: {
         states: {
@@ -1584,16 +1576,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         unreadable: "스위치 기록을 읽을 수 없어 모든 질문이 운영자에게 갑니다",
         killed: "kill switch 켜짐: 모든 질문이 운영자에게 갑니다",
         allOff: "두 인스턴스 모두 꺼짐: 모든 질문이 운영자에게 갑니다",
-        summary: (proposal: number, total: number, dm: number, operator: number) =>
-          `제안 모드 ${proposal}/${total} · 최근 24시간 Decision Maker ${dm}건 · 운영자 ${operator}건`,
-        none: "아직 없음",
-        facts: {
-          vendor: "공급사",
-          mode: "모드",
-          recent: "최근 24시간 배정",
-          lastRouted: "마지막 배정",
-          lastJudged: "마지막 운영자 판단",
-        },
+        summary: (proposal: number, total: number) => `제안 모드 ${proposal}/${total}`,
+        facts: { vendor: "공급사", mode: "모드" },
       },
       amux: {
         states: {
