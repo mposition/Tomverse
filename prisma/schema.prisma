@@ -1214,6 +1214,7 @@ model PromptRefinerProductAttempt {
   @@unique([clientRequestId])
   @@index([scopeId, state])
   @@index([expiresAt, state])
+  @@index([state, createdAt])
 }
 
 /// Content-free immutable product execution fact. It deliberately has no

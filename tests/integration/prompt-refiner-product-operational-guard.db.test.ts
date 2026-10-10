@@ -88,6 +88,16 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         );
       `);
       await client.query(await readFile(resolve(root,
+        "prisma/migrations/20261010123000_prompt_refiner_product_attempt_state_created_at/migration.sql"),
+      "utf8"));
+      const attemptStateIndex = await client.query(`SELECT indexdef
+        FROM pg_indexes WHERE schemaname = $1 AND
+          indexname = 'PromptRefinerProductAttempt_state_createdAt_idx'`,
+      [schema]);
+      assert.equal(attemptStateIndex.rowCount, 1);
+      assert.match(attemptStateIndex.rows[0].indexdef,
+        /USING btree \(state, "createdAt"\)$/);
+      await client.query(await readFile(resolve(root,
         "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql"),
       "utf8"));
       let auditLockCount = 0;
@@ -300,17 +310,17 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         await transaction(tx => guard.resumePromptRefinerProductAutoGuardInTransaction(
           tx as never, { expectedGeneration: current.generation!,
             resumeAuditLogId: resumeAuditId }));
-        for (let index = 0; index < 125; index += 1) {
-          await insertReceipt({});
-        }
         const attemptId = randomUUID();
         await client.query(`INSERT INTO "PromptRefinerProductAttempt"
           ("id","mode","state","expiresAt") VALUES ($1,'auto','unknown',
           clock_timestamp() + interval '5 minutes')`, [attemptId]);
-        const unknownReceiptId = await insertReceipt({ requestId: attemptId,
-          historical: true });
-        assert.equal((await evaluate({ executionReceiptId: unknownReceiptId }))
-          .reasonCode, "unknown_dispatch_or_cost");
+        await insertReceipt({ requestId: attemptId, historical: true });
+        for (let index = 0; index < 125; index += 1) {
+          await insertReceipt({});
+        }
+        assert.equal((await evaluate()).reasonCode,
+          "unknown_dispatch_or_cost",
+          "an unknown attempt remains fail-closed outside latest-100 receipts");
 
         current = await read();
         resumeAuditId = await transitionAudit("owner-resume");
@@ -370,6 +380,66 @@ test("Prompt Refiner product Auto operational latch on PostgreSQL",
         assert.equal((await evaluate({
           executionReceiptId: missingAuditReceiptId,
         })).reasonCode, "audit_failure");
+      });
+
+      await t.test("only expired settled or released receipt gaps pause across time zones", async () => {
+        const resume = async () => {
+          const current = await read();
+          const resumeAuditLogId = await transitionAudit("owner-resume");
+          await transaction(tx =>
+            guard.resumePromptRefinerProductAutoGuardInTransaction(tx as never, {
+              expectedGeneration: current.generation!,
+              resumeAuditLogId,
+            }));
+        };
+        const insertGap = async (timeZone: TestTimeZone,
+          status: "settled" | "released", expired: boolean) => {
+          const attemptId = randomUUID();
+          await transactionAtTimeZone(timeZone, async tx => {
+            await tx.$executeRaw`INSERT INTO "PromptRefinerProductAttempt"
+              ("id","mode","state","expiresAt") VALUES
+              (${attemptId},'auto','preparing',
+                (clock_timestamp() AT TIME ZONE 'UTC') +
+                  ${expired ? -1 : 300} * interval '1 second')`;
+            await tx.$executeRaw`INSERT INTO "PromptRefinerAutoBudgetHold"
+              ("id","requestKey","status") VALUES
+              (${randomUUID()},${attemptId},${status})`;
+          });
+          return attemptId;
+        };
+
+        for (const [timeZone, status] of [
+          ["UTC", "settled"],
+          ["Australia/Brisbane", "released"],
+          ["America/Los_Angeles", "settled"],
+        ] as const) {
+          await resume();
+          await insertGap(timeZone, status, true);
+          assert.equal((await evaluateAtTimeZone(timeZone)).reasonCode,
+            "audit_failure", `${status} gap did not pause in ${timeZone}`);
+        }
+
+        await resume();
+        await insertGap("Australia/Brisbane", "settled", false);
+        assert.equal((await evaluateAtTimeZone("America/Los_Angeles")).active,
+          true, "an unexpired settled writer may still finish receipt cleanup");
+
+        const terminalAttemptId = randomUUID();
+        await transactionAtTimeZone("America/Los_Angeles", async tx => {
+          await tx.$executeRaw`INSERT INTO "PromptRefinerProductAttempt"
+            ("id","mode","state","expiresAt") VALUES
+            (${terminalAttemptId},'auto','terminal',
+              (clock_timestamp() AT TIME ZONE 'UTC') - interval '1 second')`;
+          await tx.$executeRaw`INSERT INTO "PromptRefinerAutoBudgetHold"
+            ("id","requestKey","status") VALUES
+            (${randomUUID()},${terminalAttemptId},'released')`;
+        });
+        await insertReceipt({ requestId: terminalAttemptId });
+        assert.equal((await evaluateAtTimeZone("UTC")).active, true,
+          "a terminal attempt with its receipt is not an audit gap");
+        await transaction(tx =>
+          guard.latchPromptRefinerProductAutoStopInTransaction(
+            tx as never, "audit_failure"));
       });
 
       await t.test("concurrent receipt completion and pause keep audit then guard lock order", async () => {

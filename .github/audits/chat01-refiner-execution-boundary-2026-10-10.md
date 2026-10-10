@@ -256,6 +256,36 @@ security regression 196개와 필수/readiness 정적 검사 13개도 통과했�
 않았다. 예외 정책·UI view·로컬 합성 통과를 제품 활성화 또는 전면 출시 판정으로
 승격하지 않는다.
 
+## 두 vendor 재검토의 운영 감시 보강
+
+`58c7490c3`의 실제 서버 재검토 `r-20261010-003716-fbddca`는 Claude/Anthropic
+accept, Copilot/Moonshot reject로 aggregate reject다. 두 명의 accept로 기록하지
+않으며, 이전 auth-first 수정 검증과 이 후속 보강 검증은 구분한다.
+
+Copilot major의 `dispatchedAt` 미기록 전제는 기존 settlement migration과 다르다.
+BEFORE UPDATE trigger가 `reserved`에서 `dispatching`으로 바뀔 때 DB
+`transaction_timestamp()`를 기록하고, CHECK는 dispatching의 non-null timestamp를
+강제한다. application timestamp를 중복 추가하거나 적용된 migration을 수정하지
+않았다. 실제 production DDL과 `recordDispatchIntent()`를 쓰는 loopback PostgreSQL
+회귀가 caller timestamp 없이 이 기록을 확인하고, malformed NULL dispatch insert의
+거부와 실제 writer 기록 후 13초를 넘긴 미확정 hold의 운영 중단을 검증한다.
+
+최근 100건 밖의 unknown attempt도 현 guard generation의 전체 범위에서 EXISTS로
+감지한다. 새 `state, createdAt` 인덱스만 additive migration으로 추가하며, 표본 수,
+fallback 분모나 비용 권한을 바꾸지 않는다. dispatch 상한 SQL은 literal 13초 대신
+기존 `PROMPT_REFINER_PRODUCT_TIMEOUT_MS`를 사용한다.
+
+Claude minor의 정산 후 process crash도 기존 5분 attempt 수명 경계로 감지한다.
+preparing attempt가 만료되고 hold가 settled/released인데 execution receipt가 없으면
+audit failure로 중단한다. 유효 수명 안에서 정산 후 receipt cleanup을 기다리는
+상태는 허용하며 terminal receipt가 있는 완료 상태는 중단 사유가 아니다.
+UTC·Brisbane·Los Angeles DB timezone에서 이를 검증했다. 새로운 grace 기간,
+묵시적 재호출, unknown 비용의 release 또는 자동 resume는 추가하지 않았다.
+
+통합 소스의 관련 검증과 새 재검토 결과는 다음 단계에서 실제 결과대로 기록한다.
+staging의 다른 릴리스 후보 pin·빌드·배포는 변경하지 않았다. 이 수정과 정책 예외는
+제품 활성 배포 또는 Auto Router 세 출시 판정의 증거를 대신하지 않는다.
+
 ## 초기 서버 경계 검증 기록
 
 아래는 제품 caller를 붙이기 전 단계의 기록이다. 위 확장이 구현 범위와 현재 상태를

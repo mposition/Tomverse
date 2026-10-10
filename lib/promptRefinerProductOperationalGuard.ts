@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
 import { prisma } from "@/lib/prisma";
+import { PROMPT_REFINER_PRODUCT_TIMEOUT_MS } from
+  "@/lib/promptRefinerProductContract";
 
 export const PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID = "auto";
 export const PROMPT_REFINER_PRODUCT_OPERATIONAL_SAMPLE_SIZE = 100;
@@ -191,15 +193,54 @@ async function observe(
       SELECT 1 FROM "PromptRefinerAutoBudgetHold" h
       WHERE h."status" = 'dispatching'
         AND h."createdAt" >= ${guard.baselineAt}
-        AND h."dispatchedAt" <= clock_timestamp() - INTERVAL '13 seconds'
+        AND h."dispatchedAt" <= clock_timestamp() -
+          ${PROMPT_REFINER_PRODUCT_TIMEOUT_MS} * INTERVAL '1 millisecond'
     ) AS "present"
   `;
-  if (unknownHold?.present || currentExecution.some(row =>
+  const [unknownAttempt] = await tx.$queryRaw<Array<{ present: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1 FROM "PromptRefinerProductAttempt" attempt
+      WHERE attempt."state" = 'unknown'
+        AND attempt."createdAt" >=
+          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
+      LIMIT 1
+    ) AS "present"
+  `;
+  if (unknownHold?.present || unknownAttempt?.present || currentExecution.some(row =>
     row.attemptState === "unknown" ||
     row.failureCode === "unknown_after_dispatch") || recent.some(row =>
     row.attemptState === "unknown" ||
     row.failureCode === "unknown_after_dispatch")) return Object.freeze({
     reasonCode: "unknown_dispatch_or_cost", sampleSize: 0,
+    p90LatencyMs: null, fallbackCount: null,
+  });
+
+  // expiresAt is the durable five-minute attempt lifetime created by the
+  // admission writer. Once that existing boundary has passed, a preparing
+  // attempt whose hold already settled or released cannot still be normal
+  // receipt cleanup. The indexed EXISTS probe distinguishes that abandoned
+  // audit gap from an unexpired writer waiting for the global audit lock.
+  const [expiredReceiptGap] = await tx.$queryRaw<Array<{ present: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM "PromptRefinerProductAttempt" attempt
+      JOIN "PromptRefinerAutoBudgetHold" hold
+        ON hold."requestKey" = attempt."id"
+      WHERE attempt."state" = 'preparing'
+        AND attempt."createdAt" >=
+          (${guard.baselineAt}::timestamptz AT TIME ZONE 'UTC')
+        AND attempt."expiresAt" <=
+          (clock_timestamp() AT TIME ZONE 'UTC')
+        AND hold."status" IN ('settled', 'released')
+        AND NOT EXISTS (
+          SELECT 1 FROM "PromptRefinerProductExecutionReceipt" receipt
+          WHERE receipt."requestId" = attempt."id"
+        )
+      LIMIT 1
+    ) AS "present"
+  `;
+  if (expiredReceiptGap?.present) return Object.freeze({
+    reasonCode: "audit_failure", sampleSize: 0,
     p90LatencyMs: null, fallbackCount: null,
   });
 

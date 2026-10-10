@@ -13,6 +13,10 @@ const baseMigration = resolve(root,
   "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql");
 const transitionMigration = resolve(root,
   "prisma/migrations/20261010110000_prompt_refiner_auto_budget_settlement/migration.sql");
+const attemptStateIndexMigration = resolve(root,
+  "prisma/migrations/20261010123000_prompt_refiner_product_attempt_state_created_at/migration.sql");
+const operationalGuardMigration = resolve(root,
+  "prisma/migrations/20261010120000_prompt_refiner_product_operational_guard/migration.sql");
 const key = (ordinal: number) =>
   `00000000-0000-4000-8000-${String(ordinal).padStart(12, "0")}`;
 const candidateDigest = "a".repeat(64);
@@ -36,9 +40,34 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
     try {
       await client.query(`CREATE SCHEMA "${schema}"`);
       await client.query(`SET search_path TO "${schema}"`);
-      await client.query(`CREATE TABLE "AdminAuditLog" ("id" TEXT PRIMARY KEY)`);
+      await client.query(`CREATE TABLE "AdminAuditLog" (
+        "id" TEXT PRIMARY KEY, "action" TEXT, "targetType" TEXT,
+        "targetId" TEXT
+      )`);
       await client.query(await readFile(baseMigration, "utf8"));
       await client.query(await readFile(transitionMigration, "utf8"));
+      await client.query(`
+        CREATE TABLE "PromptRefinerProductAttempt" (
+          "id" TEXT PRIMARY KEY, "state" TEXT NOT NULL,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT
+            (clock_timestamp() AT TIME ZONE 'UTC'),
+          "expiresAt" TIMESTAMP(3) NOT NULL
+        );
+        CREATE TABLE "PromptRefinerProductExecutionReceipt" (
+          "id" TEXT PRIMARY KEY, "requestId" TEXT, "outcome" TEXT NOT NULL,
+          "failureCode" TEXT, "preparationLatencyMs" INTEGER NOT NULL,
+          "completedAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+        );
+        CREATE TABLE "PromptRefinerProductExecutionContext" (
+          "executionReceiptId" TEXT PRIMARY KEY, "mode" TEXT NOT NULL
+        );
+        CREATE TABLE "PromptRefinerProductDispositionReceipt" (
+          "id" TEXT PRIMARY KEY, "executionReceiptId" TEXT NOT NULL,
+          "observedAt" TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+        );
+      `);
+      await client.query(await readFile(attemptStateIndexMigration, "utf8"));
+      await client.query(await readFile(operationalGuardMigration, "utf8"));
       const settlementCap = await client.query(`
         SELECT pg_get_constraintdef(oid) AS definition
         FROM pg_constraint
@@ -52,6 +81,15 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       assert.match(settlementCapDefinition, /"settledMicroUsd" >= 0/);
       assert.match(settlementCapDefinition,
         /"settledMicroUsd" <= "reservedMicroUsd"/);
+      const transitionShape = await client.query(`
+        SELECT pg_get_constraintdef(oid) AS definition
+        FROM pg_constraint
+        WHERE conrelid = '"PromptRefinerAutoBudgetHold"'::regclass
+          AND conname = 'PromptRefinerAutoBudgetHold_status_check'`);
+      assert.equal(transitionShape.rowCount, 1);
+      assert.match(transitionShape.rows[0].definition as string,
+        /status = 'dispatching'::text.*"dispatchedAt" IS NOT NULL/s,
+        "the production catalog requires a timestamp for dispatching rows");
 
       const query = async (strings: TemplateStringsArray, values: unknown[]) => {
         const sql = strings.reduce((result, part, index) => result + part +
@@ -81,34 +119,42 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
           }
         },
       };
+      const inTransaction = async <T>(work: (
+        transaction: typeof tx) => Promise<T>): Promise<T> => {
+        await client.query("BEGIN");
+        try {
+          const result = await work(tx);
+          await client.query("COMMIT");
+          return result;
+        } catch (error) {
+          await client.query("ROLLBACK");
+          throw error;
+        }
+      };
       mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
-        $transaction: async (work: (transaction: typeof tx) => Promise<unknown>) => {
-          await client.query("BEGIN");
-          try {
-            const result = await work(tx);
-            await client.query("COMMIT");
-            return result;
-          } catch (error) {
-            await client.query("ROLLBACK");
-            throw error;
-          }
-        },
+        $transaction: inTransaction,
       } } });
       let auditSequence = 0;
       mock.module(mod("lib/adminAudit.ts"), { namedExports: {
         takeAuditChainLock: async (input: unknown) => assert.equal(input, tx),
         writeSystemAuditLog: async (input: {
           tx: typeof tx; systemActor: string; action: string;
+          targetType: string; targetId: string;
         }) => {
           assert.equal(input.tx, tx);
-          assert.equal(input.systemActor, "prompt-refiner-auto-budget");
+          assert.ok(["prompt-refiner-auto-budget",
+            "prompt-refiner-product-execution"].includes(input.systemActor));
           const id = `audit-${++auditSequence}-${input.action}`;
-          await client.query(`INSERT INTO "AdminAuditLog"("id") VALUES ($1)`, [id]);
+          await client.query(`INSERT INTO "AdminAuditLog"
+            ("id","action","targetType","targetId") VALUES ($1,$2,$3,$4)`,
+          [id, input.action, input.targetType, input.targetId]);
           return id;
         },
       } });
 
       const budget = await import(mod("lib/promptRefinerAutoBudgetHold.ts"));
+      const guard = await import(mod("lib/promptRefinerProductOperationalGuard.ts"));
+      const contract = await import(mod("lib/promptRefinerProductContract.ts"));
       const reserve = (requestKey: string) => budget.reservePromptRefinerAutoBudget({
         requestKey, candidateDigest, pricePinDigest, runtimeDeploymentId,
       });
@@ -126,6 +172,15 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
         verifyDispatchIntent: verify, verifyVerifiedBilling: verify,
         verifyBillingUnknown: verify, verifyUndispatched: verify,
       });
+      const activationAuditLogId = "audit-product-guard-activation";
+      await client.query(`INSERT INTO "AdminAuditLog"
+        ("id","action","targetType","targetId") VALUES
+        ($1,'prompt_refiner.product_auto_activated',
+          'PromptRefinerProductOperationalGuard','auto')`,
+      [activationAuditLogId]);
+      await inTransaction(transaction =>
+        guard.initializePromptRefinerProductAutoGuard(
+          transaction as never, activationAuditLogId));
 
       const settledHold = await reserve(key(1));
       const beforeDuplicate = await client.query(`SELECT
@@ -145,8 +200,43 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
       assert.deepEqual(afterDuplicate.rows, beforeDuplicate.rows,
         "duplicate request rolls its audit back and cannot book either window again");
       const settledBinding = binding(settledHold.id, key(1));
-      await authority.recordDispatchIntent(raw({ binding: settledBinding,
+      const dispatchResult = await authority.recordDispatchIntent(raw({ binding: settledBinding,
         intentId: key(101), adapterConfigDigest }));
+      assert.equal(Object.hasOwn(dispatchResult, "dispatchedAt"), false,
+        "the app writer does not supply a dispatch timestamp");
+      const dispatched = await client.query(`SELECT "status", "createdAt",
+        "dispatchedAt" FROM "PromptRefinerAutoBudgetHold" WHERE "id" = $1`,
+      [settledHold.id]);
+      assert.equal(dispatched.rows[0].status, "dispatching");
+      assert.ok(dispatched.rows[0].dispatchedAt instanceof Date,
+        "the production transition trigger stamps dispatchedAt");
+      assert.ok(dispatched.rows[0].dispatchedAt >= dispatched.rows[0].createdAt);
+
+      await client.query(`INSERT INTO "AdminAuditLog"
+        ("id","action","targetType","targetId") VALUES
+        ('audit-malformed-reservation','test','test','test'),
+        ('audit-malformed-dispatch','test','test','test')`);
+      await assert.rejects(client.query(`INSERT INTO "PromptRefinerAutoBudgetHold" (
+        "id", "requestKey", "dayStart", "monthStart", "reservedMicroUsd",
+        "status", "candidateDigest", "pricePinDigest", "runtimeDeploymentId",
+        "reservationAuditLogId", "dispatchIntentId", "adapterConfigDigest",
+        "dispatchAuditLogId", "dispatchedAt")
+        SELECT $1, $2, "dayStart", "monthStart", "reservedMicroUsd",
+          'dispatching', "candidateDigest", "pricePinDigest", "runtimeDeploymentId",
+          'audit-malformed-reservation', $3, $4,
+          'audit-malformed-dispatch', NULL
+        FROM "PromptRefinerAutoBudgetHold" WHERE "id" = $5`,
+      [key(701), key(702), key(703), adapterConfigDigest, settledHold.id]),
+      /prompt_refiner_auto_budget_reservation_invalid/,
+      "production DDL rejects a direct malformed dispatching row");
+
+      await new Promise(resolveTimeout => setTimeout(resolveTimeout,
+        contract.PROMPT_REFINER_PRODUCT_TIMEOUT_MS + 50));
+      const overdue = await inTransaction(transaction =>
+        guard.evaluatePromptRefinerProductAutoGuardInTransaction(
+          transaction as never));
+      assert.equal(overdue.reasonCode, "unknown_dispatch_or_cost",
+        "the guard observes the DB-stamped actual writer after its deadline");
       await authority.settleVerifiedBilled(raw({ kind: "verified_billed" as const,
         binding: settledBinding, intentId: key(101), adapterConfigDigest,
         observationId: key(201), billedMicroUsd: BigInt(12_345) }));
