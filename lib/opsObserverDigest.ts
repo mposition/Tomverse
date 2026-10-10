@@ -7,12 +7,12 @@
  * anything in it:
  *
  *   1. The chain is trusted, read for that date (§3 rule 7); anything else
- *      stores nothing and answers the reason. The date's reserved items in
- *      the head's mode are read separately, by every genesis and not only
- *      the head, so a recovery or activation that day drops nothing; they
- *      are final because the date is closed (the advance parser admits a
- *      reservation only for today, or yesterday within a run deadline of
- *      midnight).
+ *      stores nothing and answers the reason. The date's messages -- reserved
+ *      or held back by the daily cap, in either mode, by every genesis -- are
+ *      read separately, so a recovery or activation that day, or before the
+ *      digest runs, drops nothing; they are final because the date is closed
+ *      (the advance parser admits an advance only for today, or yesterday
+ *      within a run deadline of midnight).
  *   2. The readiness checks that are not page keys come from the same
  *      function /api/ready runs, at submission time.
  *   3. The shared store writes the row and its system audit entry in one
@@ -36,7 +36,7 @@ import type { PrismaClient } from "@prisma/client";
 import { recordAgentDigestItem } from "@/lib/agentDigestStore";
 import { prisma } from "@/lib/prisma";
 import {
-  readOpsObserverDateReservations,
+  readOpsObserverDateItems,
   readOpsObserverState,
   type OpsObserverDailyBudget,
 } from "@/lib/opsObserverStore";
@@ -117,16 +117,17 @@ export async function submitOpsObserverDigest(
     | { status: "fulfilled"; value: { checks?: Record<string, unknown> } | null }
     | { status: "rejected"; reason: unknown };
   const checks = readiness.status === "fulfilled" ? (readiness.value?.checks ?? null) : null;
-  // The date's reservations in this mode by every genesis, not only the head's
-  // run budget: a recovery or activation that day must not drop what came
-  // before it from the digest kept under the date's key.
-  const reservedOnDate = await readOpsObserverDateReservations(input.ownerDate, state.mode, input.runDeadline, client);
+  // Every message of the date, not only the head's run budget: reserved or
+  // held back by the cap, in either mode, by every genesis -- a recovery or an
+  // activation before this digest runs must not drop what came before it.
+  const items = await readOpsObserverDateItems(input.ownerDate, input.runDeadline, client);
   const payload = buildDigestPayload({
     ownerDate: input.ownerDate,
     mode: state.mode,
     readiness: checks ?? "unknown",
     digestNames: checks ? digestReadinessNames({ readiness: checks }) : [],
-    budget: { ...budget, reservedToday: reservedOnDate },
+    items,
+    channelCheckTaken: budget.channelCheckTaken,
   });
   // The app's own shape: what it would refuse from anyone, it refuses from itself.
   if (!parseDigestPayload(payload).ok) return { result: "refused" };
@@ -182,16 +183,16 @@ export type OpsObserverDigestView = {
     ownerDate: string;
     mode: string;
     readiness: "unknown" | Record<string, boolean>;
-    /** The first DIGEST_MAX_ENTRIES of the date's items. */
-    reserved: { key: string; kind: string; capped: boolean }[];
-    /** Every item of the date, by kind, including any past the list's cap. */
-    reservedCounts: Record<string, number>;
+    /** The first DIGEST_MAX_ENTRIES of the date's messages, reserved first. */
+    items: { key: string; kind: string; capped: boolean; mode: string; status: string }[];
+    /** Every message of the date by mode, status and kind, past the list's cap too. */
+    counts: { mode: string; status: string; kind: string; count: number }[];
     channelCheckTaken: boolean;
   } | null;
   /**
-   * Whether reservedCounts covers every item of the date. False for a body
-   * kept under schema version 1, whose counts come from a list it may have
-   * cut at the cap.
+   * Whether the counts cover every message of the date. False for a body kept
+   * under schema version 1 or 2, which recorded only the head mode's
+   * reservations (version 1 counted from a list it may have cut at the cap).
    */
   countsComplete: boolean;
 };

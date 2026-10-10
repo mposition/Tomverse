@@ -18,6 +18,8 @@ const DIGEST = "d".repeat(40);
 const DAY = "2026-10-05"; // closed for any test clock after 2026-10-05T14:06:30Z
 const ITEM = "33333333-3333-4333-8333-333333333333";
 const reserved = [{ key: "P3#credit_reservation_reconciliation", kind: "new_open", capped: false }];
+// The date's messages as the store reads them: each with its mode and status.
+const dateItems = [{ ...reserved[0], mode: "shadow", status: "reserved" }];
 
 class TestLateError extends Error {}
 
@@ -35,7 +37,7 @@ const world = {
   wrapped: [] as unknown[],
   assertThrows: false,
   kept: null as string | null,
-  dateReserved: reserved as unknown,
+  dateItems: dateItems as unknown,
   dateArgs: [] as unknown[],
 };
 let POST: (request: Request) => Promise<Response>;
@@ -47,9 +49,9 @@ before(async () => {
         world.stateArgs = args;
         return world.state;
       },
-      readOpsObserverDateReservations: async (ownerDate: string, mode: string, deadline: Date) => {
-        world.dateArgs = [ownerDate, mode, deadline instanceof Date ? deadline.toISOString() : null];
-        return world.dateReserved;
+      readOpsObserverDateItems: async (ownerDate: string, deadline: Date) => {
+        world.dateArgs = [ownerDate, deadline instanceof Date ? deadline.toISOString() : null];
+        return world.dateItems;
       },
     },
   });
@@ -127,7 +129,7 @@ beforeEach(() => {
   world.kept = null;
   world.prismaTimeouts = [];
   world.wrapped = [];
-  world.dateReserved = reserved;
+  world.dateItems = dateItems;
   world.dateArgs = [];
 });
 
@@ -161,8 +163,8 @@ test("the app builds the digest from its own reads and keeps it under the date's
     mode: "shadow",
     // Only the checks that are not page keys, from the app's own readiness.
     readiness: { emailUnsubscribeKeyring: true, imageProviderBudget: false },
-    reserved,
-    reservedCounts: { new_open: 1, worsening: 0, reopen: 0, recovery: 0 },
+    items: dateItems,
+    counts: [{ mode: "shadow", status: "reserved", kind: "new_open", count: 1 }],
     channelCheckTaken: true,
   });
   // Armed first, the shared writes, then this agent's guard row last.
@@ -175,18 +177,25 @@ test("the app builds the digest from its own reads and keeps it under the date's
   assert.equal(world.asserted, 1);
 });
 
-test("the digest lists the date's reservations in its mode, not only the head genesis's run budget", async () => {
-  // A recovery that day: the head's own budget holds one item, the date two.
-  const earlier = { key: "P3#credit_reservation_reconciliation", kind: "recovery", capped: true };
-  world.state = { ...trusted(), budget: { ownerDate: DAY, reservedToday: reserved, channelCheckTaken: false } };
-  world.dateReserved = [earlier, ...reserved];
+test("the digest lists every message of the date, not only the head genesis's run budget", async () => {
+  // The head is live by now; the date held shadow reservations and a message
+  // the cap deferred. The head's own budget holds none of them.
+  const shadowItems = [
+    { key: "P3#credit_reservation_reconciliation", kind: "new_open", capped: false, mode: "shadow", status: "reserved" },
+    { key: "P3#credit_reservation_reconciliation", kind: "recovery", capped: true, mode: "shadow", status: "deferred" },
+  ];
+  world.state = { ...trusted(), mode: "live", budget: { ownerDate: DAY, reservedToday: [], channelCheckTaken: false } };
+  world.dateItems = shadowItems;
   const runDeadline = new Date(Date.now() + 120_000).toISOString();
   await call(DIGEST, body({ runDeadline }));
-  assert.deepEqual(world.dateArgs, [DAY, "shadow", runDeadline]);
-  const payload = world.submissions[0].payload as { reserved: unknown; channelCheckTaken: unknown };
-  assert.deepEqual(payload.reserved, [earlier, ...reserved]);
-  assert.deepEqual((payload as unknown as { reservedCounts: unknown }).reservedCounts,
-    { new_open: 1, worsening: 0, reopen: 0, recovery: 1 });
+  assert.deepEqual(world.dateArgs, [DAY, runDeadline]);
+  const payload = world.submissions[0].payload as { mode: string; items: unknown; counts: unknown; channelCheckTaken: unknown };
+  assert.equal(payload.mode, "live");
+  assert.deepEqual(payload.items, shadowItems);
+  assert.deepEqual(payload.counts, [
+    { mode: "shadow", status: "reserved", kind: "new_open", count: 1 },
+    { mode: "shadow", status: "deferred", kind: "recovery", count: 1 },
+  ]);
   assert.equal(payload.channelCheckTaken, false);
 });
 
