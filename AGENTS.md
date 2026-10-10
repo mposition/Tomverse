@@ -1217,6 +1217,16 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   표식이 맞는 전달만 셉니다. pipeline 파일 목록은 수신 route의 import closure 전체이며 테스트가
   강제합니다. schema는 파일 전체가 아니라 수신 경로가 쓰는 모델·그 enum·datasource·generator만 감시합니다(운영자 결정
   2026-10-03) — 무관한 모델 추가가 서명된 기록을 무효로 만들지 않게 하기 위해서입니다.
+- **서명 가능 여부 보고**: `npm run report:marketing-webhook-record-signability`
+  (`scripts/report-marketing-webhook-record-signability.mjs`,
+  `scripts/report-marketing-webhook-record-signability-core.mjs`). 트리의 기록마다
+  서명 route의 `checkMarketingWebhookRecordForSigning()`을 **그대로 불러** 그 답을
+  출력합니다. **판정을 복제하지 않습니다** — 보고가 fingerprint를 자기 손으로
+  비교하면 콘솔이 거절하는 기록을 signable이라고 말할 수 있고,
+  `tests/marketingWebhookRecordSignability.test.mjs`가 그 회귀를 거부합니다.
+  읽기 전용이며 gate가 아니고, signable이라는 출력은 서명 승인이 아닙니다 —
+  서명은 production 콘솔에서 사람이 하는 행위이고, 콘솔은 production이 실제로
+  돌리는 트리를 읽습니다.
 
 # 엔지니어링 Agent
 
