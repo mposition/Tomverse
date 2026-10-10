@@ -5,18 +5,20 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const mod = (path) => pathToFileURL(resolve(root, path)).href;
+let productAdmissionCallCount = 0;
 mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => null,
 } });
-mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
-mock.module(mod("lib/e2eTestMode.ts"), { namedExports: {
+mock.module("@/lib/auth", { namedExports: { authOptions: {} } });
+mock.module("@/lib/e2eTestMode", { namedExports: {
   isE2EFixtureMode: () => false,
 } });
-mock.module(mod("lib/requestOrigin.ts"), { namedExports: {
+mock.module("@/lib/requestOrigin", { namedExports: {
   hasValidMutationOrigin: () => true,
 } });
-mock.module(mod("lib/promptRefinerProductApi.ts"), { namedExports: {
+mock.module("@/lib/promptRefinerProductApi", { namedExports: {
   handlePromptRefinerProductProposal: async () => {
+    productAdmissionCallCount += 1;
     throw new Error("unauthenticated request entered product admission");
   },
   promptRefinerProductApiErrorResponse: () => null,
@@ -33,6 +35,7 @@ test("unauthenticated product proposal refuses before product admission", async 
   assert.deepEqual(await response.json(), {
     code: "UNAUTHORIZED",
   });
+  assert.equal(productAdmissionCallCount, 0);
   assert.equal(route.GET, undefined);
 });
 
@@ -54,4 +57,5 @@ test("a supplied prompt or claimed approval cannot cause an offer", async () => 
   assert.equal(response.status, 401);
   assert.equal(body.includes("private synthetic draft"), false);
   assert.equal(body.includes("refinedPrompt"), false);
+  assert.equal(productAdmissionCallCount, 0);
 });
