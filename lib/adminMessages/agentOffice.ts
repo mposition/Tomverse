@@ -251,7 +251,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       working: "Working",
     },
     live: {
-      eyebrowReal: (count: number) => `LIVE OFFICE · ${count} AI STAFF · REAL VIEW`,
+      eyebrowReal: (count: string) => `LIVE OFFICE · ${count} AI STAFF · REAL VIEW`,
       leadReal: "A room marked LIVE shows its team's real state; the others show whether a record screen is linked.",
       clockReal: "LAST REFRESH",
       stale: "Not refreshed for over 2 minutes",
@@ -327,7 +327,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       eyebrowReal: (time: string) => `REAL VIEW · LAST REFRESH ${time}`,
       titleBefore: "How your agent teams move today, ",
       titleAccent: "at a glance",
-      lead: (teams: number, staff: number) =>
+      lead: (teams: number, staff: string) =>
         `AI drafts, the operator decides. ${teams} agent teams and the digest desk, ${staff} AI staff, from checks to drafts, verification and digests in one flow.`,
       trust: "Real merges, posts, sends and payments happen only after an operator's approval",
       metricStaff: "AI staff",
@@ -336,7 +336,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       metricApproval: "Awaiting you",
       metricAttention: "Needs a look",
       metricBlocked: "Waiting on a link",
-      stampStaff: "STAFF",
+      staffParts: (teams: string, amux: string, review: string, decision: string) =>
+        `teams ${teams} · AMUX ${amux} · review ${review} · DM ${decision}`,
       stampDone: "DONE",
       stampWorking: "WORKING",
       stampApproval: "APPROVAL",
@@ -377,7 +378,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       storageEmpty: "No team with a live record has a record screen yet.",
       storageOpen: "Open",
       storageContentNote: "What an agent produced is read on its own screen, never here.",
-      note: (operator: string, teams: number, staff: number) =>
+      note: (operator: string, teams: number, staff: string) =>
         `${operator} · ${teams} agent teams and the digest desk, ${staff} AI staff · a connected room shows its real record; the rest wait on a link.`,
     },
     real: {
@@ -601,7 +602,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       unknown:
         "These get the fastest answer — “Status report” / “Why is it slow?” / “What is engineering doing?” / “Hello”.",
       ordersDeclined: "The office shows records and takes no orders: nobody here moves, approves or sends anything.",
-      statusCounts: (done: number, attention: number, blocked: number, onDuty: number) =>
+      statusCounts: (done: number, attention: number, blocked: number, onDuty: string) =>
         `${done} ${done === 1 ? "room" : "rooms"} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link · ${onDuty} on duty.`,
       delayBlockedSummary: (count: number, rooms: string) =>
         `Also ${count} teams waiting on a link (${rooms}): the console has no record screen for them, so the office has nothing of theirs to read.`,
@@ -849,7 +850,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       working: "업무 중",
     },
     live: {
-      eyebrowReal: (count: number) => `LIVE OFFICE · AI 직원 ${count}명 · 실제 화면`,
+      eyebrowReal: (count: string) => `LIVE OFFICE · AI 직원 ${count}명 · 실제 화면`,
       leadReal: "'실제' 표시가 붙은 방은 그 팀의 실제 상태이고, 나머지는 기록 화면이 연결됐는지를 보여 줘요.",
       clockReal: "마지막 갱신",
       stale: "2분 넘게 갱신되지 않음",
@@ -925,7 +926,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       eyebrowReal: (time: string) => `실제 화면 · 마지막 갱신 ${time}`,
       titleBefore: "오늘 에이전트 팀이 어떻게 움직이는지 ",
       titleAccent: "한눈에",
-      lead: (teams: number, staff: number) =>
+      lead: (teams: number, staff: string) =>
         `AI는 초안까지, 결정은 운영자. 에이전트 ${teams}개 팀과 다이제스트실, AI 직원 ${staff}명의 점검부터 초안·검증·digest까지 한 흐름으로 보여드려요.`,
       trust: "실제 병합·게시·발송·결제는 운영자 승인 후에만 진행돼요",
       metricStaff: "AI 직원",
@@ -934,7 +935,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       metricApproval: "운영자 확인",
       metricAttention: "확인 필요",
       metricBlocked: "연동 대기",
-      stampStaff: "직원",
+      staffParts: (teams: string, amux: string, review: string, decision: string) =>
+        `팀 ${teams} · AMUX ${amux} · 검토 ${review} · DM ${decision}`,
       stampDone: "완료",
       stampWorking: "진행",
       stampApproval: "결재",
@@ -973,7 +975,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       storageEmpty: "실제 기록을 읽는 팀 중 기록 화면이 있는 팀이 아직 없어요.",
       storageOpen: "열기",
       storageContentNote: "에이전트가 만든 내용은 각 에이전트 화면에서만 봅니다. 여기에는 싣지 않아요.",
-      note: (operator: string, teams: number, staff: number) =>
+      note: (operator: string, teams: number, staff: string) =>
         `${operator} · 에이전트 ${teams}개 팀과 다이제스트실, AI 직원 ${staff}명 · 연결된 방은 실제 기록을, 나머지는 연동 대기를 보여 줘요.`,
     },
     real: {
@@ -1194,7 +1196,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       unknown:
         "이렇게 물어보시면 제일 빨라요 — “현황 보고” / “왜 늦어져?” / “엔지니어링팀 뭐해?” / “안녕하세요”.",
       ordersDeclined: "오피스는 기록을 보여 줄 뿐 지시를 실행하지 않아요. 여기서는 누구도 움직이거나 승인·발송하지 않습니다.",
-      statusCounts: (done: number, attention: number, blocked: number, onDuty: number) =>
+      statusCounts: (done: number, attention: number, blocked: number, onDuty: string) =>
         `완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀 · 근무 인원 ${onDuty}명.`,
       delayBlockedSummary: (count: number, rooms: string) =>
         `그 외 연동 대기 ${count}팀(${rooms})은 콘솔에 기록 화면이 없어 오피스가 읽을 것이 없어요.`,

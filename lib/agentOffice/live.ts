@@ -256,7 +256,36 @@ export type AgentOfficeLiveRooms = {
   amux: AgentOfficeAmuxState;
 };
 
-/** What a live room hands the demo engine: its colour and its lines, already in the console's language. */
+/**
+ * Everyone the office draws: the teams' staff, and one figure per record row in
+ * the AMUX, review and Decision Maker rooms -- including the ones a full room
+ * cannot draw. A room whose record could not be read has an unknown count, and
+ * the total says so rather than counting it as nobody.
+ */
+export type AgentOfficeStaffCount = {
+  total: number;
+  /** Some room's count is unknown: the total is a floor. */
+  unknown: boolean;
+  parts: { teams: number; amux: number | null; review: number | null; decision: number | null };
+};
+
+export function agentOfficeStaffCount(
+  teams: number,
+  rooms: Pick<AgentOfficeLiveRooms, "amux" | "review" | "decision">
+): AgentOfficeStaffCount {
+  const amux = rooms.amux.kind === "observed" ? rooms.amux.workers.length : rooms.amux.kind === "no_catalog" ? 0 : null;
+  const review = rooms.review.kind === "observed" ? rooms.review.reviewers.length : null;
+  const decision = rooms.decision.kind === "observed" ? rooms.decision.instances.length : null;
+  const parts = { teams, amux, review, decision };
+  const known = [amux, review, decision];
+  return {
+    total: teams + known.reduce<number>((sum, part) => sum + (part ?? 0), 0),
+    unknown: known.some((part) => part === null),
+    parts,
+  };
+}
+
+/** What a live room hands the office floor: its colour and its lines, already in the console's language. */
 export type AgentOfficeLiveDept = {
   status: DeptStatus;
   /** A word or two for the room's badge, in place of the demo status word. */

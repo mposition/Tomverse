@@ -24,6 +24,7 @@ import {
 import { AgentOffice } from "../lib/agentOffice/sim.ts";
 import {
   amuxRoomView,
+  agentOfficeStaffCount,
   decisionRoomView,
   digestLiveDept,
   engineeringLiveDept,
@@ -2053,4 +2054,40 @@ test("the screen says how fresh it is in one place, and says so when it stops re
   assert.match(panel, /addEventListener\("visibilitychange", onVisible\)/);
   const live = readFileSync("lib/agentOffice/live.ts", "utf8");
   assert.doesNotMatch(live, /copy\.readAt|readAt: string,\n\s*copy/);
+});
+
+test("the staff count is everyone the office draws, and says so when a room could not be read", () => {
+  const workers = (n) => Array.from({ length: n }, (_, i) => ({ name: `w${i}`, provider: "openai", state: "ready", heartbeatAt: null }));
+  const reviewers = (n) => ({
+    kind: "observed",
+    receivedAt: "2026-10-10T01:00:00.000Z",
+    stale: false,
+    draining: false,
+    pendingJobs: 0,
+    reviewers: Array.from({ length: n }, (_, i) => ({ id: `r${i}`, vendor: "x", state: "idle", running: 0, maxConcurrent: 1, quota: null })),
+    last24h: { accept: 0, reject: 0, unknown: 0 },
+  });
+  const decision = { kind: "observed", killSwitch: false, instances: [{}, {}], toOperator: 0 };
+  // The teams' staff, plus every AMUX worker on record -- including the ones a
+  // full room cannot draw -- every reported reviewer and both instances.
+  assert.deepEqual(
+    agentOfficeStaffCount(26, { amux: { kind: "observed", workers: workers(14) }, review: reviewers(4), decision }),
+    { total: 46, unknown: false, parts: { teams: 26, amux: 14, review: 4, decision: 2 } }
+  );
+  // No catalog is nobody; an unread room is unknown, and the total is a floor.
+  assert.deepEqual(
+    agentOfficeStaffCount(26, { amux: { kind: "no_catalog" }, review: { kind: "not_reporting" }, decision: { kind: "unread" } }),
+    { total: 26, unknown: true, parts: { teams: 26, amux: 0, review: null, decision: null } }
+  );
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /const staffText = staff\.unknown \? `\$\{staff\.total\}\+` : String\(staff\.total\);/);
+  assert.match(panel, /m\.live\.eyebrowReal\(staffText\)/);
+  assert.match(panel, /engine\.setStaffCount\(staffText\)/);
+  assert.doesNotMatch(panel, /engine\.staff\.length\)\}<\/|eyebrowReal\(engine\.staff\.length\)/);
+  // The console says the same number.
+  const office = new AgentOffice(adminAgentOfficeMessages.en);
+  office.setStaffCount("46");
+  office.command("Status?");
+  assert.match(office.chat.at(-1).text, /46 on duty/);
+  assert.equal(adminAgentOfficeMessages.ko.dashboard.staffParts("26", "14", "?", "2"), "팀 26 · AMUX 14 · 검토 ? · DM 2");
 });

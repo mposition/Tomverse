@@ -18,6 +18,7 @@ import {
   agentOfficeBrief,
   agentOfficeReport,
   operatorQueueTotal,
+  agentOfficeStaffCount,
   decisionRoomView,
   digestLiveDept,
   reviewQuotaView,
@@ -28,6 +29,7 @@ import {
   type AgentOfficeAmuxView,
   type AgentOfficeReviewView,
   type AgentOfficeDecisionView,
+  type AgentOfficeStaffCount,
   type AgentOfficeSeatedView,
   type AgentOfficeQuotaView,
   type AgentOfficeOperatorQueue,
@@ -136,6 +138,10 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   const decisionView = useMemo(() => decisionRoomView(live.decision, m.real.decision), [live, m]);
   const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
+  // Everyone drawn: the teams' staff and every AMUX worker, reviewer and
+  // Decision Maker instance on record. An unread room makes the total a floor.
+  const staff = useMemo(() => agentOfficeStaffCount(engine.staff.length, live), [engine, live]);
+  const staffText = staff.unknown ? `${staff.total}+` : String(staff.total);
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // The camera keeps the selected person in view when zoomed in.
@@ -167,6 +173,9 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   useEffect(() => {
     engine.setLive(liveDepts);
   }, [engine, liveDepts]);
+  useEffect(() => {
+    engine.setStaffCount(staffText);
+  }, [engine, staffText]);
 
   // A fresh reading of the live rooms every minute while the tab is visible,
   // and at once when it comes back into view: the page's server component
@@ -344,6 +353,7 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               quotaView={quotaView}
               queue={live.queue}
               readAt={live.readAt}
+              staffText={staffText}
               snap={snap}
               follow={follow}
               selectedId={selectedId}
@@ -362,6 +372,8 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
               setFilter={setFilter}
               snap={snap}
               readAt={live.readAt}
+              staff={staff}
+              staffText={staffText}
               queue={live.queue}
               amuxView={amuxView}
               reviewView={reviewView}
@@ -455,6 +467,7 @@ function LiveView({
   quotaView,
   queue,
   readAt,
+  staffText,
   snap,
   follow,
   selectedId,
@@ -472,6 +485,8 @@ function LiveView({
   queue: AgentOfficeOperatorQueue;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
+  /** Everyone drawn, as shown: "30", or "28+" when a room could not be read. */
+  staffText: string;
   snap: Snapshot;
   follow: boolean;
   selectedId: string | null;
@@ -487,7 +502,7 @@ function LiveView({
     <>
       <header className={cx("live-hero")}>
         <div>
-          <p className={cx("eyebrow")}>{m.live.eyebrowReal(engine.staff.length)}</p>
+          <p className={cx("eyebrow")}>{m.live.eyebrowReal(staffText)}</p>
           <h2 className={cx("office-title")}>
             {m.company.titlePrefix} <em className={cx("highlight")}>{m.company.titleAccent}</em>
           </h2>
@@ -981,6 +996,8 @@ function DashboardView({
   setFilter,
   snap,
   readAt,
+  staff,
+  staffText,
   queue,
   amuxView,
   reviewView,
@@ -996,6 +1013,8 @@ function DashboardView({
   snap: Snapshot;
   /** When the server read the live rooms (UTC ISO). */
   readAt: string;
+  staff: AgentOfficeStaffCount;
+  staffText: string;
   queue: AgentOfficeOperatorQueue;
   amuxView: AgentOfficeAmuxView;
   reviewView: AgentOfficeReviewView;
@@ -1031,7 +1050,7 @@ function DashboardView({
               {m.dashboard.titleBefore}
               <em className={cx("highlight")}>{m.dashboard.titleAccent}</em>
             </h2>
-            <p>{m.dashboard.lead(AGENT_OFFICE_TEAM_IDS.length, engine.staff.length)}</p>
+            <p>{m.dashboard.lead(AGENT_OFFICE_TEAM_IDS.length, staffText)}</p>
           </div>
           <div className={cx("hero-actions")}>
             <span className={cx("trust-copy")}>{m.dashboard.trust}</span>
@@ -1042,8 +1061,15 @@ function DashboardView({
       <section className={cx("summary-grid")}>
         <article className={cx("metric staff")}>
           <span>{m.dashboard.metricStaff}</span>
-          <strong>{engine.staff.length}</strong>
-          <small>{m.dashboard.stampStaff}</small>
+          <strong>{staffText}</strong>
+          <small data-testid="agent-office-staff-parts">
+            {m.dashboard.staffParts(
+              String(staff.parts.teams),
+              staff.parts.amux === null ? "?" : String(staff.parts.amux),
+              staff.parts.review === null ? "?" : String(staff.parts.review),
+              staff.parts.decision === null ? "?" : String(staff.parts.decision)
+            )}
+          </small>
         </article>
         <article className={cx("metric done")}>
           <span>{m.dashboard.metricDone}</span>
@@ -1297,7 +1323,7 @@ function DashboardView({
       </section>
 
       <p className={cx("dash-note")}>
-        {m.dashboard.note(engine.operatorSeed.name, AGENT_OFFICE_TEAM_IDS.length, engine.staff.length)}
+        {m.dashboard.note(engine.operatorSeed.name, AGENT_OFFICE_TEAM_IDS.length, staffText)}
       </p>
     </>
   );
