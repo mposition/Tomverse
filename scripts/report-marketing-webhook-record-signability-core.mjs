@@ -42,28 +42,34 @@ const verdictOf = (refusalCode) => {
  * declared fingerprint is reported so a reader can see *which* build a stale
  * record belongs to; it is never what decides the verdict.
  *
- * `refusalCode` must be stated. An absent key is a caller that has not said
- * what the route answered, and reading that as "accepted" is the one mistake
- * this report cannot afford: it would print `signable` for a record nobody
- * judged. The declared fingerprint stays optional, because it only decides what
- * a line says, not what the verdict is.
+ * `refusalCode` must be stated, as `null` when the route accepted the record or
+ * as the code it refused with. Anything else is a caller that has not said what
+ * the route answered, and reading that as "accepted" is the one mistake this
+ * report cannot afford: it would print `signable` for a record nobody judged.
+ * Nothing here coalesces an absent value, because the only way to coalesce it
+ * is into one of the two real answers. The declared fingerprint stays optional:
+ * it decides what a line says, not what the verdict is.
  */
 export const summariseMarketingWebhookRecordSignability = ({
   buildFingerprint,
   records,
 }) => {
   const judged = records.map((record) => {
-    if (!("refusalCode" in record)) {
+    const { refusalCode } = record;
+    // The value, not the key: `{ refusalCode: undefined }` has the key and says
+    // nothing. Both reviewers found that hole in the first version of this
+    // check, which guarded `"refusalCode" in record` and then coalesced.
+    if (refusalCode !== null && typeof refusalCode !== "string") {
       throw new TypeError(
-        `Record ${record.recordId} does not state a refusalCode; the signing route's answer is what decides the verdict.`,
+        `Record ${record.recordId} does not state a refusalCode: it must be null when the signing route accepted the record, or the code it refused with.`,
       );
     }
     return {
       recordId: record.recordId,
       declaredFingerprint: record.declaredFingerprint ?? null,
-      refusalCode: record.refusalCode ?? null,
+      refusalCode,
       refusalMessage: record.refusalMessage ?? null,
-      verdict: verdictOf(record.refusalCode ?? null),
+      verdict: verdictOf(refusalCode),
     };
   });
   const idsWith = (verdict) =>

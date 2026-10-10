@@ -100,6 +100,23 @@ test("a record that does not state a refusal code is refused, not read as signab
     () => summarise([{ recordId: "2026-10-09__unjudged" }]),
     /does not state a refusalCode/,
   );
+  // Review finding, 2026-10-10 round 2 (codex and copilot, independently): the
+  // first version of this check read the key and then coalesced, so a stated
+  // `undefined` passed `"refusalCode" in record` and became "accepted". The
+  // value is what has to say something.
+  assert.throws(
+    () => summarise([{ recordId: "2026-10-09__stated-undefined", refusalCode: undefined }]),
+    /does not state a refusalCode/,
+  );
+  // Neither does anything that is not a code: a verdict may only come from the
+  // route's own two answers.
+  for (const notACode of [0, false, {}, []]) {
+    assert.throws(
+      () => summarise([{ recordId: "2026-10-09__wrong-type", refusalCode: notACode }]),
+      /does not state a refusalCode/,
+      `expected ${JSON.stringify(notACode)} to be refused as a refusal code`,
+    );
+  }
   // Stated as null is a different thing: that is the route accepting it.
   assert.equal(
     summarise([{ recordId: "2026-10-09__ok", refusalCode: null }]).verdict,
