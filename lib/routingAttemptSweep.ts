@@ -1,9 +1,10 @@
 /**
  * Attempts whose process stopped reporting, closed honestly.
  *
- * A dispatch is recorded before the provider's stream is read and the outcome
- * is written after it. Between those two the process can die -- a deploy, an
- * OOM, a host going away -- and the attempt stays `pending` for ever. That is
+ * A dispatch start is recorded before the provider SDK is invoked and the
+ * outcome is written after it. Between those two the process can die -- a
+ * deploy, an OOM, a host going away -- and the attempt stays `pending` for
+ * ever. That is
  * not an exotic failure to wave at: it is an ordinary condition of running
  * anything, and a permanently unclassified attempt keeps polluting the
  * reliability numbers and ROUTE-06's evidence long after the incident.
@@ -13,15 +14,15 @@
  * Very little, and that is the point. It does **not** record
  * `failed_pre_token`: nobody observed the provider call, so a failure would be
  * a claim about an outcome nothing saw. `unknown_after_dispatch` says the two
- * things that are actually true -- a dispatch was recorded, and the turn never
- * came back to say how it ended -- and `process` names the layer that failed,
+ * things that are actually true -- the invocation boundary was entered, and
+ * the turn never came back to say how it ended -- and `process` names the layer that failed,
  * which was this process and not the provider. Filing it under `provider`
  * would put a host restart into provider health, and §8's recovery decides
  * which model a conversation goes back to from exactly those counters.
  *
- * The manifest and `dispatchedAt` are left untouched. They are the record of
- * what reached a provider, they are still true, and a sweep is not a licence
- * to edit them.
+ * The manifest, `dispatchStartedAt` and `dispatchedAt` are left untouched.
+ * Together they preserve exactly which side of the invocation boundary was
+ * durably observed; a sweep is not a licence to improve that evidence.
  *
  * ## Why all three conditions
  *
@@ -207,7 +208,7 @@ const emptyNoCostReasons = (): NoCostReasonCounts => ({
  */
 const eligibleStaleAttempts = (now: Date, cutoff: Date) => Prisma.sql`
     a."outcome" = 'pending'
-    AND a."dispatchedAt" IS NOT NULL
+    AND (a."dispatchStartedAt" IS NOT NULL OR a."dispatchedAt" IS NOT NULL)
     AND a."createdAt" < ${cutoff}
     AND NOT EXISTS (
         SELECT 1 FROM "ChatRequestLease" l
@@ -516,7 +517,7 @@ export const staleAttemptBacklog = async (now = new Date()) => {
         JOIN "RoutingRun" r ON r."id" = a."runId"
         LEFT JOIN "ChatCreditReservation" c ON c."id" = r."reservationId"
         WHERE a."outcome" = 'pending'
-          AND a."dispatchedAt" IS NOT NULL
+          AND (a."dispatchStartedAt" IS NOT NULL OR a."dispatchedAt" IS NOT NULL)
           AND a."createdAt" < ${cutoff}
     `;
     const row = rows[0];
