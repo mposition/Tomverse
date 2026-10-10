@@ -13,7 +13,7 @@ let writes = 0;
 let auditReads = 0;
 let hold = { id: "synthetic-hold", previewId: "synthetic-preview", status: "reserved",
   namespace: "agent/amux-intake",
-  reservedMicroUsd: 10_560_000n, dispatchedAt: null as Date | null,
+  reservedMicroUsd: BigInt(10_560_000), dispatchedAt: null as Date | null,
   settledMicroUsd: null as bigint | null, closedAt: null as Date | null,
   _count: { cliUsageEvents: 0 } };
 let preview = { confirmedByUserId: "synthetic-owner", ideaId: "synthetic-idea",
@@ -60,7 +60,7 @@ mock.module(mod("lib/amux/ideaAnalysisBudgetCancellationService.ts"), { namedExp
     assert.equal(input.expectedPreviewId, "synthetic-preview");
     if (hold.status !== "reserved" || hold.dispatchedAt) throw new CancellationError("not_cancellable");
     writes++;
-    hold = { ...hold, status: "released", settledMicroUsd: 0n, closedAt: new Date() };
+    hold = { ...hold, status: "released", settledMicroUsd: BigInt(0), closedAt: new Date() };
     return { holdId: hold.id, releasedMicroUsd: "10560000", auditId: "synthetic-audit" };
   },
 } });
@@ -97,10 +97,10 @@ test("unused reservation cancellation fails closed before the writer", async () 
     { holdId: "bad id", previewId: "synthetic-preview", confirmedUnused: true },
   ]) assert.equal((await route.DELETE(request(body))).status, 400);
   ownsPreview = false;
-  assert.equal((await route.DELETE(request())).status, 403);
+  assert.equal((await route.DELETE(request())).status, 404);
   ownsPreview = true;
   preview.idea.actorUserId = "other-owner";
-  assert.equal((await route.DELETE(request())).status, 403);
+  assert.equal((await route.DELETE(request())).status, 404);
   preview.idea.actorUserId = "synthetic-owner";
   assert.equal(writes, 0);
 });

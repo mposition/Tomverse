@@ -12,7 +12,8 @@ test("standalone exact-ID cancellation survives preview expiry and keeps unknown
   assert.ok(panel.indexOf("sessionStorage.setItem(key, hold.id)") < panel.indexOf('method: "DELETE"'));
   assert.match(panel, /row\.status === "released" && row\.cancellationAuditId/);
   assert.match(panel, /confirmed \|\| unknown \|\| inFlight.current/);
-  assert.match(panel, /onRetry=\{\(\) => void read\(\)\}/);
+  assert.match(panel, /onRetry=\{busy \? undefined : onRead\}/);
+  assert.match(panel, /isAmuxClaimResolutionWriteOutcomeUnknown\(response.status, body\)/);
   assert.match(panel, /AdminApiFailureNotice/);
   assert.doesNotMatch(panel, /setInterval|setTimeout|fetch\(|analysis-claim-resolution|\.start\(/);
 });

@@ -6,6 +6,7 @@ import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocale
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
 import { adminAmuxAnalysisBudgetMessages } from "@/lib/adminMessages/amuxAnalysisBudget";
+import { isAmuxClaimResolutionWriteOutcomeUnknown } from "@/lib/amux/ideaAnalysisClaimResolutionUiCore";
 
 type Hold = { id: string; previewId: string; status: string; reservedMicroUsd: string;
   expiresAt: string; canCancel: boolean; cancellationAuditId: string | null };
@@ -75,7 +76,10 @@ export function AmuxUnusedAnalysisReservationPanel({ operatorId, available }: {
         body: JSON.stringify({ holdId: hold.id, previewId: hold.previewId, confirmedUnused: true }),
       });
       if (!response.ok) {
-        if (response.status < 500) { sessionStorage.removeItem(key); setUnknown(false); setHold(null); }
+        const body = await response.clone().json().catch(() => null);
+        if (!isAmuxClaimResolutionWriteOutcomeUnknown(response.status, body)) {
+          sessionStorage.removeItem(key); setUnknown(false); setHold(null);
+        }
         setFailure(await readAdminApiFailure(response, { fallback: m.writeFailed, locale })); return;
       }
       const receipt = await response.json() as Record<string, unknown>;
@@ -87,6 +91,20 @@ export function AmuxUnusedAnalysisReservationPanel({ operatorId, available }: {
     finally { inFlight.current = false; setBusy(false); }
   };
 
+  return <AmuxUnusedAnalysisReservationView m={m} holdId={holdId} hold={hold} available={available}
+    confirmed={confirmed} busy={busy} unknown={unknown} failure={failure}
+    onRead={() => void read()} onCancel={() => void cancel()} onConfirmedChange={setConfirmed}
+    onHoldIdChange={(id) => { setHoldId(id.trim()); setHold(null); setConfirmed(false); setFailure(null); }} />;
+}
+
+/** Hook-free view keeps the unknown-outcome and exact-receipt controls testable. */
+export function AmuxUnusedAnalysisReservationView({ m, holdId, hold, available, confirmed,
+  busy, unknown, failure, onRead, onCancel, onConfirmedChange, onHoldIdChange }: {
+  m: typeof adminAmuxAnalysisBudgetMessages.en.cancellation; holdId: string; hold: Hold | null;
+  available: boolean; confirmed: boolean; busy: boolean; unknown: boolean; failure: AdminApiFailure | null;
+  onRead: () => void; onCancel: () => void; onConfirmedChange: (confirmed: boolean) => void;
+  onHoldIdChange: (id: string) => void;
+}) {
   return <section className="space-y-3 rounded-xl border border-white/10 p-4"
     data-testid="amux-unused-reservation">
     <h2 className="font-semibold">{m.title}</h2>
@@ -94,11 +112,11 @@ export function AmuxUnusedAnalysisReservationPanel({ operatorId, available }: {
     {!available ? <p>{m.disabled}</p> : null}
     <label className="block text-sm">{m.holdId}
       <input className="mt-1 block w-full rounded border border-white/20 bg-transparent p-2"
-        value={holdId} disabled={busy || unknown} maxLength={128} onChange={(event) => {
-          setHoldId(event.target.value.trim()); setHold(null); setConfirmed(false); setFailure(null);
-        }} />
+        data-testid="amux-unused-reservation-id" value={holdId} disabled={busy || unknown} maxLength={128}
+        onChange={(event) => onHoldIdChange(event.target.value)} />
     </label>
-    <button type="button" disabled={busy || !ID.test(holdId)} onClick={() => void read()}
+    <button type="button" disabled={busy || !ID.test(holdId)} onClick={onRead}
+      data-testid="amux-unused-reservation-read"
       className="rounded border border-white/20 px-3 py-2 text-sm">{m.lookup}</button>
     {unknown ? <p role="alert">{m.unknown}</p> : null}
     {hold ? <div className="space-y-2 text-sm">
@@ -108,12 +126,13 @@ export function AmuxUnusedAnalysisReservationPanel({ operatorId, available }: {
         <p role="status">{m.released} {m.audit}: {hold.cancellationAuditId}</p> :
         hold.canCancel && !unknown ? <>
           <label className="flex gap-2"><input type="checkbox" checked={confirmed} disabled={busy || !available}
-            onChange={(event) => setConfirmed(event.target.checked)} />{m.confirm}</label>
-          <button type="button" disabled={!available || !confirmed || busy} onClick={() => void cancel()}
+            onChange={(event) => onConfirmedChange(event.target.checked)} />{m.confirm}</label>
+          <button type="button" data-testid="amux-unused-reservation-cancel"
+            disabled={!available || !confirmed || busy} onClick={onCancel}
             className="rounded border border-white/20 px-3 py-2">{m.cancel}</button>
         </> : <p>{m.ineligible}</p>}
     </div> : null}
-    {failure ? <AdminApiFailureNotice failure={failure} currentPath="/admin/amux-backlog?tab=ideas"
-      onRetry={() => void read()} retryDisabled={busy} /> : null}
+    {failure ? <AdminApiFailureNotice failure={failure}
+      onRetry={busy ? undefined : onRead} /> : null}
   </section>;
 }
