@@ -100,31 +100,28 @@ records the next operator control revision, offered to owner and ops only;
 its route checks that role and a recent sign-in again and answers a stale
 sign-in with the way back. Clearing a merge-lane latch arrives with the lane.
 
-**Agent office** is a shell: a pixel office for the eight agent teams and the
-digest desk, after the original AI OFFICE UI by godseng.mom. It is live only
-(operator decision, 2026-10-09): every team's staff at their desks, every
-room at its real or link status, nobody moving or speaking a scripted line,
-and the console declining orders that would move staff. The demo day the
-original played is no longer reachable from the page -- no "Watch demo", no
-speed or pause control, no demo approval -- and the office approves nothing.
-If a demo ever plays again, rule 8 still applies: everything on it that could
-be read as a fact says it is a demo. It is the one entry marked `wide` in the
-route table: the console drops its reading width there, because the floor is
-a canvas that grows with the screen.
+**Agent office** is a pixel office for the eight agent teams and the digest
+desk, after the original AI OFFICE UI by godseng.mom. It shows records and
+decides nothing. It is live only (operator decision, 2026-10-09), and the demo
+engine the original played is gone (operator decision, 2026-10-10): every
+team's staff sit at their desks, nobody moves or speaks a scripted line, the
+console answers questions from the records and declines every order, and the
+office approves nothing. It is the one entry marked `wide` in the route
+table: the console drops its reading width there, because the floor is a
+canvas that grows with the screen.
 The facts on it are the record links and the rooms marked LIVE. Each team
 links to the page above that holds its record while the route table has that
 page and section, and a team without one -- including on a branch that does
 not carry its screen yet -- is drawn as waiting on a link instead of being
-given a status (the teams the demo day gives work to have screens on every
-branch, and a test holds that); a linked team
-the demo day has no script for stays waiting rather than being reported as
-done. A LIVE room reads that team's operating state on the server and the
-demo leaves it alone -- no scripted work, no seat in a meeting (the day's or
-one the operator calls), and its staff say only the record's line -- which
-its lead keeps on screen in a speech bubble, demo or not. For product research that is the app
+given a status (the teams with a LIVE room have screens on every branch, and
+a test holds that); a linked team with no live reading stays waiting. A LIVE
+room reads that team's operating state on the server, and its staff say only
+the record's line, which its lead keeps on screen in a speech bubble. Every
+time is drawn in Brisbane time (AEST), once per screen as the last refresh,
+and the screen says so when it stops refreshing. For product research that is the app
 switch, the latest scheduled slot (recorded, failed, or not yet, and whether
-its window is open), the newest success and the agent's own silence verdict,
-all in UTC -- never its observations, which
+its window is open), the newest success and the agent's own silence verdict
+-- never its observations, which
 `docs/policy/product-research-agent.md §4` and
 `docs/policy/product-research-agent.md §8` keep to its own section. For QA
 and release it is the agent's own digest freshness verdict
@@ -143,11 +140,9 @@ many decisions wait for a person, how many runs are in progress and since
 when, and the newest ended run's status, outcome and times -- a run needs a
 look unless the agent's own settlement handed its result to a person -- never
 a patch, a reason or a card, which
-`docs/policy/engineering-agent.md §11` keeps to its own record. While
-engineering is live the demo plays no draft and no approval: its decisions
-are real and are made on its own screen, so the office's approval windows and
-the end-of-day briefing say so and link there instead of offering a demo
-approval, and the phases it replaces are marked as replaced, never ticked.
+`docs/policy/engineering-agent.md §11` keeps to its own record. Its
+decisions are real and are made on its own screen, so the office's approval
+window says so and links there; it never offers an approve button.
 Under the teams, the AMUX execution room is LIVE as a whole: a desk for each
 worker in the app's AMUX worker catalog (archived ones left out; past twelve,
 the ones that need a look are drawn first and the room says in words how many
@@ -155,8 +150,8 @@ are not drawn, as it does for a failed read or a missing catalog), each worker
 drawn seated with its real state -- the operator's exclusions first, then its
 runtime row read the way AMUX reads it when it hands out work (live while the
 lease has not run out and the status is idle or busy) -- and, while the
-route table has it, a link to the AMUX execution page. Workers are not demo staff: they never walk, meet or
-speak a demo line, and nothing about the cards they work on is read.
+route table has it, a link to the AMUX execution page. Each worker is one row
+of its record, and nothing about the cards they work on is read.
 Beside it the independent review room is LIVE too: the review server runs on
 the operator's Ubuntu machine, reachable only over SSH, so it reports instead
 of being asked -- a content-free status (per reviewer: vendor, enabled,
