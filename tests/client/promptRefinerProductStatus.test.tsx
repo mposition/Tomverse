@@ -64,8 +64,10 @@ test("the readback shows all pending Router gates and no completion claim", () =
         messages={messages}
       />
     );
-    for (const gate of snapshot.router.outstanding) assert.match(html, new RegExp(gate));
-    assert.match(html, new RegExp(messages.notEstablished));
-    assert.match(html, new RegExp(messages.unknown));
+    for (const gate of snapshot.router.outstanding) {
+      assert.ok(html.includes(gate));
+    }
+    assert.ok(html.includes(messages.notEstablished));
+    assert.ok(html.includes(messages.unknown));
   }
 });

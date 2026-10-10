@@ -7,7 +7,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     description:
       "Read-only state from the serving process. This view cannot approve, activate, resume or call the Refiner.",
     caveat:
-      "This diagnostic readback does not establish that the product connection is complete. Release evidence and all Router gates remain separate authorities.",
+      "This readback shows only recorded release authority. Every request revalidates quality, audit, source and price at admission. This does not establish that the product connection is complete.",
     refresh: "Refresh product status",
     loading: "Loading serving capability...",
     requestFailed: "Could not read the serving capability.",
@@ -18,7 +18,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     exactIdentity: "Exact product identity",
     rollout: "Stored rollout",
     killSwitch: "Kill switch",
-    release: "Verified release",
+    release: "Recorded release authority",
     explicit: "Explicit adoption",
     auto: "Automatic application",
     approval: "Approval audit log",
@@ -36,7 +36,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     pending: "pending",
     notEstablished: "not established by this status readback",
     releaseStates: {
-      verified: "verified for this serving deployment",
+      recorded: "recorded for this serving deployment; admission not evaluated",
       disabled_by_rollout: "disabled by stored rollout",
       blocked_by_kill_switch: "blocked by kill switch",
       runtime_identity_unavailable: "serving identity unavailable",
@@ -50,7 +50,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     description:
       "현재 요청을 처리하는 서버의 읽기 전용 상태입니다. 여기서는 Refiner를 승인·활성화·재개하거나 호출할 수 없습니다.",
     caveat:
-      "이 상태 조회만으로 제품 연결 완료를 입증할 수 없습니다. 출시 증거와 Router의 모든 판정은 서로 다른 권한으로 유지됩니다.",
+      "여기에는 기록된 출시 권한만 표시됩니다. 각 요청은 실행 승인 단계에서 품질·감사·소스·가격을 다시 검증하며, 이 조회만으로 제품 연결 완료를 입증할 수 없습니다.",
     refresh: "현재 상태 새로고침",
     loading: "서버 실행 상태를 불러오는 중...",
     requestFailed: "서버 실행 상태를 조회하지 못했습니다.",
@@ -61,7 +61,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     exactIdentity: "정확한 제품 실행 식별자",
     rollout: "저장된 출시 설정",
     killSwitch: "긴급 중지 스위치",
-    release: "검증된 출시 권한",
+    release: "기록된 출시 권한",
     explicit: "명시적 채택",
     auto: "자동 적용",
     approval: "승인 감사 기록",
@@ -79,7 +79,7 @@ export const adminPromptRefinerProductStatusMessages = defineAdminMessages({
     pending: "대기 중",
     notEstablished: "이 상태 조회만으로는 입증되지 않음",
     releaseStates: {
-      verified: "현재 서버 배포에 결속되어 검증됨",
+      recorded: "현재 서버 배포에 기록됨 — 실행 승인은 판정하지 않음",
       disabled_by_rollout: "저장된 출시 설정에 의해 비활성",
       blocked_by_kill_switch: "긴급 중지 스위치에 의해 차단",
       runtime_identity_unavailable: "서버 실행 식별자를 확인할 수 없음",

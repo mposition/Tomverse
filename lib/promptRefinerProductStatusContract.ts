@@ -26,7 +26,7 @@ export const promptRefinerProductStatusSchema = z.object({
   }).strict(),
   release: z.object({
     state: z.enum([
-      "verified",
+      "recorded",
       "disabled_by_rollout",
       "blocked_by_kill_switch",
       "runtime_identity_unavailable",

@@ -5,6 +5,7 @@ import {
   autoRolloutReadiness,
 } from "@/lib/autoRolloutReadiness";
 import { isPromptRefinerEnabled } from "@/lib/appSettings";
+import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
   promptRefinerChatExecutionRelease,
 } from "@/lib/promptRefinerChatExecutionRelease";
@@ -33,12 +34,15 @@ const servingIdentity = (env: Record<string, string | undefined>) => {
   const deploymentCandidate =
     env.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase() ?? "";
   const commitSha = SHA.test(commitCandidate) ? commitCandidate : null;
-  const deploymentId = deploymentCandidate || null;
+  const deploymentId = deploymentCandidate.length >= 1 &&
+    deploymentCandidate.length <= 128
+    ? deploymentCandidate
+    : null;
   return {
     commitSha,
     deploymentId,
     exactProductIdentity:
-      commitSha !== null && UUID.test(deploymentCandidate),
+      commitSha !== null && deploymentId !== null && UUID.test(deploymentId),
   };
 };
 
@@ -61,10 +65,11 @@ export async function readPromptRefinerProductStatus(
   const observedAtMs = (dependencies.now ?? Date.now)();
   const serving = servingIdentity(env);
   const killSwitchEngaged = promptRefinerKillSwitchEngaged(env);
+  const databaseDisabled = isE2EDatabaseDisabled();
   const readiness = autoRolloutReadiness(undefined, () => observedAtMs);
 
   let rollout: PromptRefinerProductStatus["controls"]["rollout"] = "unknown";
-  if (!killSwitchEngaged) {
+  if (!killSwitchEngaged && !databaseDisabled) {
     try {
       rollout = await (dependencies.readRollout ?? isPromptRefinerEnabled)()
         ? "enabled"
@@ -113,7 +118,7 @@ export async function readPromptRefinerProductStatus(
         release = unavailableRelease("unavailable");
       } else {
         release = {
-          state: "verified",
+          state: "recorded",
           explicitEnabled: current.explicitEnabled,
           autoEnabled: current.autoEnabled,
           approvalAuditLogId: current.approvalAuditLogId,
