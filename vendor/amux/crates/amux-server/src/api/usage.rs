@@ -2036,27 +2036,29 @@ mod tests {
 
     #[tokio::test]
     async fn cache_serves_repeat_opens_from_one_probe_and_reports_age() {
-        let calls = Arc::new(AtomicUsize::new(0));
-        let app = app(probe_fn(
-            UsageProbe::Ok(live_shaped_body()),
-            calls.clone(),
-        ));
-        let (_, first) = get(&app).await;
-        let (_, second) = get(&app).await;
-        let (_, third) = get(&app).await;
-        assert_eq!(
-            calls.load(Ordering::SeqCst),
-            1,
-            "settings reopens must not hammer Anthropic"
-        );
-        assert_eq!(first["available"], json!(true));
-        assert_eq!(second["limits"], first["limits"]);
-        assert_eq!(third["limits"], first["limits"]);
-        // Age is present on every response and TTL is advertised.
-        for r in [&first, &second, &third] {
-            assert!(r["cache_age_s"].is_number(), "{r}");
-            assert_eq!(r["cache_ttl_s"], json!(DEFAULT_USAGE_TTL_S));
-        }
+        temp_env_ttl("60", || async {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let app = app(probe_fn(
+                UsageProbe::Ok(live_shaped_body()),
+                calls.clone(),
+            ));
+            let (_, first) = get(&app).await;
+            let (_, second) = get(&app).await;
+            let (_, third) = get(&app).await;
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "settings reopens must not hammer Anthropic"
+            );
+            assert_eq!(first["available"], json!(true));
+            assert_eq!(second["limits"], first["limits"]);
+            assert_eq!(third["limits"], first["limits"]);
+            // Age is present on every response and TTL is advertised.
+            for r in [&first, &second, &third] {
+                assert!(r["cache_age_s"].is_number(), "{r}");
+                assert_eq!(r["cache_ttl_s"], json!(DEFAULT_USAGE_TTL_S));
+            }
+        }).await;
     }
 
     #[tokio::test]
@@ -2129,14 +2131,16 @@ mod tests {
 
     #[tokio::test]
     async fn failures_are_cached_too_so_a_rate_limit_is_not_amplified() {
-        // Retrying a 429 on every render is what provokes the 429.
-        let calls = Arc::new(AtomicUsize::new(0));
-        let app = app(probe_fn(UsageProbe::Http(429), calls.clone()));
-        for _ in 0..5 {
-            let (_, v) = get(&app).await;
-            assert_eq!(v["cause"], json!("rate_limited"));
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        temp_env_ttl("60", || async {
+            // Retrying a 429 on every render is what provokes the 429.
+            let calls = Arc::new(AtomicUsize::new(0));
+            let app = app(probe_fn(UsageProbe::Http(429), calls.clone()));
+            for _ in 0..5 {
+                let (_, v) = get(&app).await;
+                assert_eq!(v["cause"], json!("rate_limited"));
+            }
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }).await;
     }
 
     /// A probe whose outcome changes between calls — the intermittent 429
@@ -2322,8 +2326,9 @@ mod tests {
         std::env::remove_var("AMUX_USAGE_TTL_S");
     }
 
-    #[test]
-    fn ttl_default_and_override() {
+    #[tokio::test]
+    async fn ttl_default_and_override() {
+        let _g = env_lock().lock().await;
         assert_eq!(usage_ttl(), Duration::from_secs(DEFAULT_USAGE_TTL_S));
     }
 }
