@@ -5429,7 +5429,7 @@ async function handleChatPost(
             // The next attempt captures under its own key, so the memo from
             // the one it replaced must not answer for it.
             perplexityCapture = null;
-            // §7: the client is told before the next model's first token, and
+            // docs/policy/tomverse-chat-routing.md §7: the client is told before the next model's first token, and
             // told a model id and nothing else. The fallback stream is not read
             // until this function returns, so swapping ownership first cannot
             // let a visible fallback token overtake this signal. If the client
