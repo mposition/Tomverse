@@ -1,4 +1,5 @@
 import "server-only";
+import { routingApplicationIdentity } from "@/lib/routingApplicationIdentity";
 
 // Attempt and manifest recording on the existing manual dispatch path
 // (delivery plan §5; routing policy §5).
@@ -266,6 +267,7 @@ export const beginInstrumentedDispatch = async (
     const run = await prisma.routingRun.create({
       data: {
         mode: routed ? "auto" : "manual",
+        ...routingApplicationIdentity(),
         traceId: input.traceId,
         userId: input.userId ?? null,
         subjectKey: input.subjectKey,

@@ -83,6 +83,44 @@ const authorise = (record: Awaited<ReturnType<typeof begin>>) =>
     adapterVersion: "vercel-ai-sdk-streamText-v1",
   });
 
+test("application provenance survives dispatch and cannot be relabelled or backfilled", async () => {
+  const names = ["RAILWAY_GIT_COMMIT_SHA", "RAILWAY_DEPLOYMENT_ID", "APP_ENV"] as const;
+  const previous = names.map((name) => process.env[name]);
+  try {
+    process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+    process.env.RAILWAY_DEPLOYMENT_ID = "7ac2d5a6-f003-489c-8c00-5b50c18e6574";
+    process.env.APP_ENV = "staging";
+    const record = await authorise(await begin());
+    assert.ok(record);
+    const run = await prisma.routingRun.findUniqueOrThrow({ where: { id: record.runId } });
+    assert.equal(run.applicationCommitSha, "a".repeat(40));
+    assert.equal(run.applicationDeploymentId, process.env.RAILWAY_DEPLOYMENT_ID);
+    assert.equal(run.applicationEnvironment, "staging");
+    await recordDispatched(record, "req_provenance");
+    await completeInstrumentedDispatch(record, { outcome: "succeeded", failureLayer: "none" });
+    await assert.rejects(prisma.routingRun.update({ where: { id: record.runId },
+      data: { applicationCommitSha: "b".repeat(40) } }), /immutable/);
+
+    delete process.env.RAILWAY_GIT_COMMIT_SHA;
+    const legacy = await begin();
+    assert.ok(legacy);
+    const unknown = await prisma.routingRun.findUniqueOrThrow({ where: { id: legacy.runId } });
+    assert.equal(unknown.applicationCommitSha, null);
+    assert.equal(unknown.applicationDeploymentId, null);
+    assert.equal(unknown.applicationEnvironment, null);
+    await assert.rejects(prisma.routingRun.update({ where: { id: legacy.runId }, data: {
+      applicationCommitSha: run.applicationCommitSha,
+      applicationDeploymentId: run.applicationDeploymentId,
+      applicationEnvironment: run.applicationEnvironment,
+    } }), /immutable/);
+  } finally {
+    names.forEach((name, index) => {
+      if (previous[index] === undefined) delete process.env[name];
+      else process.env[name] = previous[index];
+    });
+  }
+});
+
 test("a manual dispatch produces a run, an attempt and a finalized manifest", async () => {
   const draft = await begin();
   assert.ok(draft);

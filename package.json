@@ -59,6 +59,8 @@
     "test:one-shot-recovery-db": "node --conditions=react-server --import tsx --test --test-concurrency=1 tests/integration/prompt-refiner-vnext-v3-recovery.db.test.ts",
     "test:one-shot-terminal": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test tests/promptRefinerVnextOneShotOwnerDispatch.test.mjs tests/promptRefinerVnextOneShotRunnerBanner.test.mjs tests/server-contract/prompt-refiner-vnext-shadow-slot-guard.test.ts tests/server-contract/admin-prompt-refiner-vnext-terminal-readback-route.test.ts tests/server-contract/prompt-refiner-vnext-one-shot-terminal-route.test.ts",
     "test:unit": "node scripts/run-unit-tests.mjs",
+    "test:routing-provenance": "node --conditions=react-server --import tsx --test tests/routingApplicationIdentity.test.mjs tests/routingShadowQuery.test.mjs tests/routingShadow.test.mjs tests/routingShadowReport.test.mjs",
+    "test:routing-provenance-db": "node scripts/run-routing-provenance-db-tests.mjs",
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",
     "report:amux-staging-evidence": "node scripts/report-amux-staging-evidence.mjs",
     "report:amux-v4-activation-preflight": "node --conditions=react-server --import tsx scripts/amux-v4-activation-preflight.mjs",
