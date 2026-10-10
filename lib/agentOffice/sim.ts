@@ -392,7 +392,7 @@ export class AgentOffice {
 
   roomName(roomId: string) {
     if (roomId === "operator") return this.copy.rooms.operator;
-    if (roomId === "meeting") return this.copy.rooms.meeting;
+    if (roomId === "decision") return this.copy.rooms.decision;
     return this.deptCopy(roomId).name;
   }
 
@@ -1214,7 +1214,7 @@ export class AgentOffice {
     }
     this.pushChat("staff", this.narratorName(), s.convened(ids.length));
     this.pushLog("🎤", s.convenedLog(ids.length), "yellow");
-    this.spotlightRoom("meeting", 24);
+    this.spotlightRoom("decision", 24);
     this.side.gen = this.conveneScene(ids);
   }
 

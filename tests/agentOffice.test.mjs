@@ -14,6 +14,7 @@ import {
   AGENT_OFFICE_STAFF,
   AGENT_OFFICE_TEAM_IDS,
   AGENT_OFFICE_AMUX_RECORD_HREF,
+  AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DECLARED_RECORD_HREFS,
   AGENT_OFFICE_WORKER_COLORS,
   AGENT_OFFICE_WORKER_SKINS,
@@ -23,6 +24,7 @@ import {
 import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
 import {
   amuxRoomView,
+  decisionRoomView,
   engineeringLiveDept,
   financeLiveDept,
   financeTone,
@@ -39,6 +41,7 @@ import {
   researchTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { AGENT_OFFICE_DECISION_WINDOW_MS, agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
 import { agentOfficeEngineeringState } from "../lib/agentOfficeEngineeringState.ts";
 import { agentOfficeFinanceState } from "../lib/agentOfficeFinanceState.ts";
 import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
@@ -52,6 +55,7 @@ import {
 import { agentOfficeResearchState } from "../lib/agentOfficeResearchState.ts";
 import {
   AMUX_ROOM,
+  DECISION_ROOM,
   REVIEW_ROOM,
   DEPT_ROOMS,
   ENTRANCE,
@@ -159,8 +163,16 @@ test("a record link is kept only while the console has its page and tab", () => 
     AGENT_OFFICE_AMUX_RECORD_HREF,
     consoleHasRecord("/admin/amux-execution") ? "/admin/amux-execution" : null
   );
+  assert.equal(
+    AGENT_OFFICE_DECISION_RECORD_HREF,
+    consoleHasRecord("/admin/amux-execution?tab=decision-maker") ? "/admin/amux-execution?tab=decision-maker" : null
+  );
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
-  assert.match(world, /isAmux && AGENT_OFFICE_AMUX_RECORD_HREF \?/);
+  assert.match(
+    world,
+    /const recordHref = isAmux \? AGENT_OFFICE_AMUX_RECORD_HREF : isDecision \? AGENT_OFFICE_DECISION_RECORD_HREF : null;/
+  );
+  assert.match(world, /\{real && recordHref \? \(/);
 });
 
 test("the catalog names every room, person and phase in both languages", () => {
@@ -1781,7 +1793,8 @@ test("the dashboard's three windows read the live rooms, not a demo day", () => 
   const rowsFor = panel.slice(panel.indexOf("function liveRowsFor"), panel.indexOf("type TeamRow"));
   assert.match(rowsFor, /id: "amux",[\s\S]*href: AGENT_OFFICE_AMUX_RECORD_HREF/);
   assert.match(rowsFor, /id: "review",[\s\S]*status: reviewView\.status/);
-  assert.match(dashboard, /const liveRows = liveRowsFor\(teams, amuxView, reviewView, m\)/);
+  assert.match(rowsFor, /id: "decision",[\s\S]*status: decisionView\.status,[\s\S]*href: AGENT_OFFICE_DECISION_RECORD_HREF/);
+  assert.match(dashboard, /const liveRows = liveRowsFor\(teams, amuxView, reviewView, decisionView, m\)/);
   // The brief is the live rows' brief; the record store links each live team's screen.
   assert.match(dashboard, /const brief = agentOfficeBrief\(liveRows\)/);
   assert.match(dashboard, /data-testid="agent-office-latest-record"/);
@@ -1930,7 +1943,10 @@ test("a seated figure opens a profile read from its room's record, dressed as it
   // no line, no "ask".
   const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
   const modal = panel.slice(panel.indexOf("function SeatedProfileModal"), panel.indexOf("function BriefingModal"));
-  assert.match(modal, /seated\.room === "amux" \? amuxView\.workers : reviewView\.reviewers/);
+  assert.match(
+    modal,
+    /seated\.room === "amux" \? amuxView\.workers : seated\.room === "review" \? reviewView\.reviewers : decisionView\.members/
+  );
   assert.match(modal, /findIndex\(\(person\) => person\.name === seated\.name\)/);
   assert.match(modal, /agentOfficeSeatedClothes\(seated\.room, /);
   assert.match(modal, /quotaView\.rows\.find\(\(row\) => row\.id === seated\.name\)/);
@@ -1938,8 +1954,11 @@ test("a seated figure opens a profile read from its room's record, dressed as it
   assert.match(modal, /useOfficeDialog\(onClose, closeRef\)/);
   assert.match(modal, /aria-modal="true"/);
   assert.doesNotMatch(modal, /engine|onAsk|m\.profile\.ask|taskLabel|speech/);
-  // Only the AMUX room has a record screen; a reviewer's lives on the review server.
-  assert.match(modal, /seated\.room === "amux" && AGENT_OFFICE_AMUX_RECORD_HREF/);
+  // Only the AMUX room and the Decision Maker have a record screen; a reviewer's lives on the review server.
+  assert.match(
+    modal,
+    /seated\.room === "amux" \? AGENT_OFFICE_AMUX_RECORD_HREF : seated\.room === "decision" \? AGENT_OFFICE_DECISION_RECORD_HREF : null/
+  );
   assert.match(panel, /onSelectSeated=\{onSelectSeated\}/);
 
   for (const locale of ["en", "ko"]) {
@@ -2100,7 +2119,7 @@ test("every time the office draws is Brisbane time, the operator's own", async (
 
 test("the office has no lounge: nobody can be in it, so nothing is drawn or said about it", () => {
   assert.deepEqual(
-    ROOMS.map((room) => room.kind).filter((kind) => !["dept", "operator", "meeting", "amux", "review"].includes(kind)),
+    ROOMS.map((room) => room.kind).filter((kind) => !["dept", "operator", "decision", "amux", "review"].includes(kind)),
     []
   );
   assert.ok(!PROPS.some((prop) => prop.kind === "sofa" || prop.kind === "coffee"));
@@ -2114,4 +2133,169 @@ test("the office has no lounge: nobody can be in it, so nothing is drawn or said
   }
   const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
   assert.doesNotMatch(css, /lounge|pr-sofa|pr-coffee/);
+});
+
+// ── Decision Maker ────────────────────────────────────────────────────────
+
+const dmSwitches = (overrides = {}) => ({
+  killSwitch: false,
+  instances: { "decision-maker-openai": "proposal", "decision-maker-anthropic": "off" },
+  ...overrides,
+});
+
+test("the Decision Maker room's state is its switches and its ledger's counts, never its content", () => {
+  const state = agentOfficeDecisionState({
+    switches: dmSwitches(),
+    recent: [
+      { route: "dm_proposal", instance: "decision-maker-openai", count: 3 },
+      { route: "operator", instance: null, count: 2 },
+      { route: "operator", instance: "decision-maker-anthropic", count: 1 },
+    ],
+    latest: [
+      { route: "dm_proposal", instance: "decision-maker-openai", lastAt: at("2026-10-09T23:00:00Z") },
+      { route: "operator", instance: null, lastAt: at("2026-10-10T00:30:00Z") },
+    ],
+    judgments: [{ instance: "decision-maker-openai", lastAt: at("2026-10-09T23:40:00Z") }],
+  });
+  assert.deepEqual(state, {
+    kind: "observed",
+    killSwitch: false,
+    instances: [
+      {
+        instance: "decision-maker-openai",
+        vendor: "openai",
+        mode: "proposal",
+        recent: 3,
+        lastRoutedAt: "2026-10-09T23:00:00.000Z",
+        lastJudgedAt: "2026-10-09T23:40:00.000Z",
+      },
+      {
+        instance: "decision-maker-anthropic",
+        vendor: "anthropic",
+        mode: "off",
+        recent: 0,
+        lastRoutedAt: null,
+        lastJudgedAt: null,
+      },
+    ],
+    // A question sent to the operator counts there whatever instance it would have had.
+    toOperator: 3,
+  });
+  assert.equal(AGENT_OFFICE_DECISION_WINDOW_MS, 24 * 60 * 60 * 1000);
+
+  // The read selects counts and times through Prisma's aggregates, and the
+  // switches through the Decision Maker's own reader; nothing else of the ledger.
+  const decision = readFunction("readDecision");
+  assert.match(decision, /readDecisionMakerSwitchesOrThrow\(prisma\)/);
+  assert.match(decision, /amuxDecisionMakerRequest\.groupBy\(\{\s*by: \["route", "instance"\],\s*where: \{ createdAt: \{ gte: since \} \},\s*_count: \{ _all: true \},\s*\}\)/);
+  assert.match(decision, /amuxDecisionMakerRequest\.groupBy\(\{ by: \["route", "instance"\], _max: \{ createdAt: true \} \}\)/);
+  assert.match(decision, /amuxDecisionMakerJudgment\.groupBy\(\{ by: \["instance"\], _max: \{ createdAt: true \} \}\)/);
+  assert.doesNotMatch(decision, /findMany|findFirst|findUnique|select:|cardId|Digest|actorUserId|body/i);
+  assert.match(decision, /read: "decision_maker"/);
+  const page = readFileSync("lib/agentOfficeLiveRead.ts", "utf8");
+  assert.match(page, /readDecision\(now\),/);
+});
+
+test("the Decision Maker room says where questions go, in Brisbane time, and an unread switch needs a look", () => {
+  const copy = adminAgentOfficeMessages.ko.real.decision;
+  const readAt = "2026-10-10T01:05:00.000Z";
+  const observed = (switches, overrides = {}) => ({
+    kind: "observed",
+    killSwitch: switches.killSwitch,
+    instances: [
+      {
+        instance: "decision-maker-openai",
+        vendor: "openai",
+        mode: switches.instances["decision-maker-openai"],
+        recent: 3,
+        lastRoutedAt: "2026-10-09T23:00:00.000Z",
+        lastJudgedAt: null,
+      },
+      {
+        instance: "decision-maker-anthropic",
+        vendor: "anthropic",
+        mode: switches.instances["decision-maker-anthropic"],
+        recent: 0,
+        lastRoutedAt: null,
+        lastJudgedAt: null,
+      },
+    ],
+    toOperator: 2,
+    ...overrides,
+  });
+
+  const live = decisionRoomView(observed(dmSwitches()), readAt, copy);
+  assert.equal(live.status, "done");
+  assert.equal(live.note, null);
+  assert.equal(live.summary, "제안 모드 1/2 · 최근 24시간 Decision Maker 3건 · 운영자 2건 · 읽은 시각 10-10 11:05 AEST");
+  assert.deepEqual(
+    live.members.map((member) => [member.name, member.state, member.status, member.label, member.dim]),
+    [
+      ["decision-maker-openai", "proposal", "done", "제안 모드", false],
+      ["decision-maker-anthropic", "off", "waiting", "꺼짐", true],
+    ]
+  );
+  assert.deepEqual(live.members[0].facts, [
+    { label: "공급사", value: "openai" },
+    { label: "모드", value: "제안 모드" },
+    { label: "최근 24시간 배정", value: "3" },
+    { label: "마지막 배정", value: "10-10 09:00 AEST" },
+    { label: "마지막 운영자 판단", value: "아직 없음" },
+  ]);
+
+  // The kill switch sends everything to the operator, whatever the instances say.
+  const killed = decisionRoomView(observed(dmSwitches({ killSwitch: true })), readAt, copy);
+  assert.equal(killed.status, "waiting");
+  assert.equal(killed.note, copy.killed);
+  assert.ok(killed.members.every((member) => member.state === "killed" && member.dim));
+  assert.match(killed.summary, /^kill switch 켜짐/);
+
+  const allOff = decisionRoomView(
+    observed(dmSwitches({ instances: { "decision-maker-openai": "off", "decision-maker-anthropic": "off" } })),
+    readAt,
+    copy
+  );
+  assert.equal(allOff.status, "waiting");
+  assert.equal(allOff.note, copy.allOff);
+
+  // An unreadable switch is not "off": it needs a look, and the room says where questions go.
+  const unreadable = decisionRoomView(
+    observed({ killSwitch: null, instances: { "decision-maker-openai": null, "decision-maker-anthropic": null } }),
+    readAt,
+    copy
+  );
+  assert.equal(unreadable.status, "attention");
+  assert.equal(unreadable.note, copy.unreadable);
+  assert.ok(unreadable.members.every((member) => member.state === "unread" && member.status === "attention"));
+
+  const unread = decisionRoomView({ kind: "unread" }, readAt, copy);
+  assert.deepEqual(unread, {
+    status: "attention",
+    summary: "Decision Maker 기록을 읽지 못함 · 읽은 시각 10-10 11:05 AEST",
+    note: copy.unread,
+    members: [],
+  });
+});
+
+test("the approval room is now the Decision Maker room, drawn from its record", () => {
+  assert.equal(DECISION_ROOM.kind, "decision");
+  assert.equal(DECISION_ROOM.desks.length, 2, "one desk for each instance");
+  for (const desk of DECISION_ROOM.desks) assert.ok(reaches(desk.seat), `decision seat ${desk.seat.x},${desk.seat.y}`);
+  // The demo's meeting seats are still reachable around its table.
+  for (const seat of MEETING_SEATS) assert.ok(reaches(seat), `meeting seat ${seat.x},${seat.y}`);
+  assert.ok(!ROOMS.some((room) => room.kind === "meeting"));
+  const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  assert.match(
+    world,
+    /<SeatedLayer room=\{DECISION_ROOM\} kind="decision" people=\{decision\.members\} onPick=\{onPickSeated\} \/>/
+  );
+  assert.match(world, /const real = isAmux \? amux : isReview \? review : isDecision \? decision : null;/);
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.equal(copy.rooms.meeting, undefined);
+    assert.ok(copy.rooms.decision && copy.rooms.decisionRecord);
+    assert.deepEqual(Object.keys(copy.real.decision.facts), ["vendor", "mode", "recent", "lastRouted", "lastJudged"]);
+    // It promises nothing a proposal-only Decision Maker does not do.
+    assert.doesNotMatch(JSON.stringify(copy.real.decision, (key, value) => (typeof value === "function" ? value(1, 2, 3, 4) : value)), /approv|승인|decides|결정합니다/i);
+  }
 });

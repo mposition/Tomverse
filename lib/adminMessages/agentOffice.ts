@@ -43,11 +43,12 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     rooms: {
       operator: "Operator's office",
-      meeting: "Approval room",
+      decision: "Decision Maker",
+      decisionRecord: "Open the Decision Maker record",
       amux: "AMUX execution room",
       amuxRecord: "Open the AMUX execution record",
       review: "Independent review room",
-      screen: "T2 DRAFT",
+      screen: "PROPOSALS",
       entrance: "ENTRANCE",
     },
     depts: {
@@ -657,6 +658,24 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         readAt: (time: string) => `read ${time}`,
         facts: { vendor: "Vendor", state: "State", load: "Running / limit", lastReport: "Last report" },
       },
+      decision: {
+        states: { proposal: "Proposal mode", off: "Off", killed: "Kill switch on", unread: "Switch unreadable" },
+        unread: "Could not read the Decision Maker record",
+        unreadable: "The switch record cannot be read: every question goes to the operator",
+        killed: "Kill switch on: every question goes to the operator",
+        allOff: "Both instances off: every question goes to the operator",
+        summary: (proposal: number, total: number, dm: number, operator: number) =>
+          `${proposal}/${total} in proposal mode · last 24h ${dm} to the Decision Maker · ${operator} to the operator`,
+        none: "None yet",
+        readAt: (time: string) => `read ${time}`,
+        facts: {
+          vendor: "Vendor",
+          mode: "Mode",
+          recent: "Routed in the last 24h",
+          lastRouted: "Last routed",
+          lastJudged: "Last judged by a person",
+        },
+      },
       amux: {
         states: {
           ready: "Ready",
@@ -848,11 +867,12 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     rooms: {
       operator: "운영자실",
-      meeting: "운영자 승인 회의실",
+      decision: "Decision Maker 팀",
+      decisionRecord: "Decision Maker 기록 열기",
       amux: "AMUX 실행실",
       amuxRecord: "AMUX 실행 기록 열기",
       review: "독립 검토실",
-      screen: "T2 초안",
+      screen: "제안",
       entrance: "ENTRANCE",
     },
     depts: {
@@ -1454,6 +1474,24 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         more: (count: number) => `여기 그리지 못한 검토자 ${count}명`,
         readAt: (time: string) => `읽은 시각 ${time}`,
         facts: { vendor: "공급사", state: "상태", load: "실행 중/상한", lastReport: "마지막 보고" },
+      },
+      decision: {
+        states: { proposal: "제안 모드", off: "꺼짐", killed: "kill switch 켜짐", unread: "스위치 읽기 실패" },
+        unread: "Decision Maker 기록을 읽지 못함",
+        unreadable: "스위치 기록을 읽을 수 없어 모든 질문이 운영자에게 갑니다",
+        killed: "kill switch 켜짐: 모든 질문이 운영자에게 갑니다",
+        allOff: "두 인스턴스 모두 꺼짐: 모든 질문이 운영자에게 갑니다",
+        summary: (proposal: number, total: number, dm: number, operator: number) =>
+          `제안 모드 ${proposal}/${total} · 최근 24시간 Decision Maker ${dm}건 · 운영자 ${operator}건`,
+        none: "아직 없음",
+        readAt: (time: string) => `읽은 시각 ${time}`,
+        facts: {
+          vendor: "공급사",
+          mode: "모드",
+          recent: "최근 24시간 배정",
+          lastRouted: "마지막 배정",
+          lastJudged: "마지막 운영자 판단",
+        },
       },
       amux: {
         states: {

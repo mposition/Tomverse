@@ -200,6 +200,9 @@ export const AGENT_OFFICE_DEPT_KEYWORDS: readonly [AgentOfficeDeptId, readonly s
 /** The AMUX execution room's record screen, while the console has it. */
 export const AGENT_OFFICE_AMUX_RECORD_HREF = linkIfOnConsole("/admin/amux-execution");
 
+/** The Decision Maker's record: its section of the AMUX execution screen, while the console has it. */
+export const AGENT_OFFICE_DECISION_RECORD_HREF = linkIfOnConsole("/admin/amux-execution?tab=decision-maker");
+
 /**
  * Clothes for the AMUX workers, by desk: the office's palette, not the
  * original's pink. [hair, shirt, accent].
@@ -219,7 +222,7 @@ export const AGENT_OFFICE_WORKER_COLORS: readonly (readonly [string, string, str
 export const AGENT_OFFICE_WORKER_SKINS: readonly string[] = ["#ffdcc4", "#f7cdae", "#ffe3cf", "#eec39f"];
 
 /** Where each seated room's clothes start in the palette, so two rooms do not dress alike. */
-export const AGENT_OFFICE_SEATED_PALETTE = { amux: 0, review: 3 } as const;
+export const AGENT_OFFICE_SEATED_PALETTE = { amux: 0, review: 3, decision: 6 } as const;
 
 /** A room whose figures are seated from a real record rather than played by the engine. */
 export type AgentOfficeSeatedRoom = keyof typeof AGENT_OFFICE_SEATED_PALETTE;
