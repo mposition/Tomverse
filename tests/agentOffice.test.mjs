@@ -55,10 +55,11 @@ import {
   REVIEW_ROOM,
   DEPT_ROOMS,
   ENTRANCE,
-  LOUNGE_ROOM,
   MEETING_SEATS,
   OPERATOR_REPORT_SPOT,
   OPERATOR_SEAT,
+  PROPS,
+  ROOMS,
   walkable,
 } from "../lib/agentOffice/world.ts";
 
@@ -93,7 +94,6 @@ test("every desk, meeting seat and the operator's spots can be walked to from th
   const targets = [
     ...DEPT_ROOMS.flatMap((room) => room.desks.map((desk) => desk.seat)),
     ...MEETING_SEATS,
-    ...LOUNGE_ROOM.loiter,
     OPERATOR_REPORT_SPOT,
     OPERATOR_SEAT,
   ];
@@ -290,7 +290,7 @@ test("a question that mentions approval does not give it", () => {
 test("a team is not done while someone it gave work to is still on the way", () => {
   const office = new AgentOffice(adminAgentOfficeMessages.en);
   const far = office.agentById.get("qa-m2");
-  const spot = LOUNGE_ROOM.loiter.at(-1);
+  const spot = OPERATOR_REPORT_SPOT;
   // Everyone is at a desk except one teammate, who is across the office.
   for (const agent of office.agents) {
     if (agent.rank === "operator") continue;
@@ -508,7 +508,7 @@ test("a live room is never simulated: no scripted work, and its status is the re
     watch();
   }
   for (const agent of office.agents) {
-    if (agent.deptId === "research") assert.notEqual(agent.status, "onBreak", agent.id);
+    if (agent.deptId === "research") assert.deepEqual([agent.x, agent.y], [agent.home.x, agent.home.y], agent.id);
   }
   assert.deepEqual(
     [...spoken].filter((line) => line !== live.research.line),
@@ -2096,4 +2096,22 @@ test("every time the office draws is Brisbane time, the operator's own", async (
     const source = readFileSync(file, "utf8");
     assert.doesNotMatch(source, /utcStamp|\} UTC`|" UTC"/, file);
   }
+});
+
+test("the office has no lounge: nobody can be in it, so nothing is drawn or said about it", () => {
+  assert.deepEqual(
+    ROOMS.map((room) => room.kind).filter((kind) => !["dept", "operator", "meeting", "amux", "review"].includes(kind)),
+    []
+  );
+  assert.ok(!PROPS.some((prop) => prop.kind === "sofa" || prop.kind === "coffee"));
+  for (const locale of ["en", "ko"]) {
+    const copy = adminAgentOfficeMessages[locale];
+    assert.equal(copy.rooms.lounge, undefined);
+    assert.equal(copy.sim.coffee, undefined);
+    assert.equal(copy.sim.delayAway, undefined);
+    assert.equal(copy.agentStatus.onBreak, undefined);
+    assert.doesNotMatch(JSON.stringify(copy, (key, value) => (typeof value === "function" ? value(2, "x", "y") : value)), /lounge|라운지/i);
+  }
+  const css = readFileSync("components/admin/agentOffice.module.css", "utf8");
+  assert.doesNotMatch(css, /lounge|pr-sofa|pr-coffee/);
 });

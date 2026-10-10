@@ -1,6 +1,6 @@
 // The Agent office's map: a tile grid, 0 = walkable and 1 = wall or furniture.
 // Ported from the original AI OFFICE layout and its four-by-three grid: the
-// operator's office, digest desk, approval room and lounge on top, and the
+// operator's office, digest desk and approval room on top, and the
 // eight teams below. Under them, the AMUX execution room spans three columns
 // and the independent review room takes the fourth, with the entrance below
 // it. Geometry only: room names come from the console catalog.
@@ -18,8 +18,8 @@ export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
 export type Pt = { x: number; y: number };
-export type RoomKind = "dept" | "operator" | "meeting" | "lounge" | "amux" | "review";
-export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "lounge" | "amux" | "review";
+export type RoomKind = "dept" | "operator" | "meeting" | "amux" | "review";
+export type RoomId = AgentOfficeDeptId | "operator" | "meeting" | "amux" | "review";
 
 export type Desk = {
   /** Left tile of the desk top. */
@@ -46,8 +46,9 @@ export type Room = {
 };
 
 /**
- * Four columns. The top row is the operator's office, the digest desk, the
- * approval room and the lounge; the two rows below are the eight teams.
+ * Four columns. The top row is the operator's office, the digest desk and the
+ * approval room, with the fourth column left open; the two rows below are the
+ * eight teams.
  */
 const COL_X = [2, 20, 38, 56];
 const ROW_Y = [17, 31];
@@ -146,27 +147,6 @@ export const MEETING_ROOM: Room = {
   ],
 };
 
-export const LOUNGE_ROOM: Room = {
-  id: "lounge",
-  short: "lounge.chill",
-  icon: "☕",
-  kind: "lounge",
-  x: COL_X[3],
-  y: TOP_Y,
-  w: ROOM_W,
-  h: TOP_H,
-  doors: bottomDoors(COL_X[3]),
-  desks: [],
-  loiter: [
-    { x: 59, y: 7 },
-    { x: 61, y: 7 },
-    { x: 63, y: 7 },
-    { x: 62, y: 10 },
-    { x: 68, y: 6 },
-    { x: 68, y: 9 },
-  ],
-};
-
 /**
  * The AMUX execution room: one desk for each AMUX worker, in a row. Workers
  * are drawn seated at their desks with their real state; nobody walks in or
@@ -254,7 +234,6 @@ export const ROOMS: Room[] = [
   OPERATOR_ROOM,
   DIGEST_ROOM,
   MEETING_ROOM,
-  LOUNGE_ROOM,
   ...TEAM_ROOMS,
   AMUX_ROOM,
   REVIEW_ROOM,
@@ -264,8 +243,6 @@ export type Prop = {
   kind:
     | "desk"
     | "table"
-    | "sofa"
-    | "coffee"
     | "plant"
     | "shelf"
     | "screen"
@@ -278,7 +255,7 @@ export type Prop = {
   w: number;
   h: number;
   /** A label the renderer looks up; not displayed as is. */
-  label?: "screen" | "coffee";
+  label?: "screen";
 };
 
 /** Furniture, drawn and used for collision alike. */
@@ -313,12 +290,6 @@ PROPS.push({ kind: "screen", x: 40, y: 3, w: 5, h: 1, label: "screen" });
 PROPS.push({ kind: "whiteboard", x: 46, y: 3, w: 5, h: 1 });
 PROPS.push({ kind: "plant", x: 40, y: 11, w: 1, h: 1 });
 PROPS.push({ kind: "plant", x: 50, y: 11, w: 1, h: 1 });
-
-PROPS.push({ kind: "sofa", x: 59, y: 5, w: 5, h: 1 });
-PROPS.push({ kind: "table", x: 64, y: 8, w: 3, h: 2 });
-PROPS.push({ kind: "coffee", x: 66, y: 4, w: 3, h: 1, label: "coffee" });
-PROPS.push({ kind: "plant", x: 68, y: 11, w: 1, h: 1 });
-PROPS.push({ kind: "plant", x: 57, y: 11, w: 1, h: 1 });
 
 /** The walkability grid. */
 function buildGrid(): Uint8Array {

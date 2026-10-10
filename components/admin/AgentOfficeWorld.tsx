@@ -205,7 +205,6 @@ const PropLayer = memo(function PropLayer({
         >
           {prop.kind === "desk" ? <i className={cx("pr-monitor")} /> : null}
           {prop.label === "screen" ? <span>{screenLabel}</span> : null}
-          {prop.label === "coffee" ? <span aria-hidden="true">☕</span> : null}
         </div>
       ))}
       <div

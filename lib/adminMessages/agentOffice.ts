@@ -44,7 +44,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     rooms: {
       operator: "Operator's office",
       meeting: "Approval room",
-      lounge: "AI lounge",
       amux: "AMUX execution room",
       amuxRecord: "Open the AMUX execution record",
       review: "Independent review room",
@@ -268,7 +267,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       working: "Working",
       meeting: "In a meeting",
       reporting: "Reporting",
-      onBreak: "On a break",
       blocked: "Waiting on a link",
     },
     phases: [
@@ -743,7 +741,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefOperator: "Thanks, everyone ✨",
       briefLog: (done: number, attention: number, blocked: number) =>
         `Digest desk briefing done — ${done} done · ${attention} ${attention === 1 ? "needs" : "need"} a look · ${blocked} waiting on a link`,
-      dayOver: "Demo day over. Staff are heading to the lounge.",
+      dayOver: "Demo day over.",
       deptStarted: (room: string, label: string) => `${room} started — ${label}`,
       deptDone: (room: string, report: string) => `${room} done — ${report}`,
       leadDone: "Done!",
@@ -752,7 +750,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quote: (name: string, text: string) => `${name}: “${text}”`,
       delivered: (from: string, room: string, line: string) => `${from} → ${room}: “${line}”`,
       onMyWay: "On my way!",
-      coffee: ["Quick coffee ☕", "Clearing my head", "Need a sugar boost"],
       chatAsk: ["What do you think of this?", "Hang on, look at this", "Is this worth keeping?"],
       chatReply: ["Oh, that works", "Tilt the angle a bit", "Just add the evidence"],
       cheer: ["Thank you 🩷", "That helps!", "I'll do even better ✨"],
@@ -780,7 +777,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         `${room}: ${label} — ${percent}% done. Normal pace.`,
       delayBlockedSummary: (count: number, rooms: string) =>
         `Also ${count} teams waiting on a link (${rooms}): the console has no record screen for them, so the office cannot move them today.`,
-      delayAway: (count: number) => `${count} are in the lounge right now. Say “Focus mode” and everyone goes back to their desks.`,
       delayNone: "No delays and nothing stuck.",
       delayNotStarted: "Nobody is in yet, so there is no work to run.",
       deptWorking: (label: string, percent: number) => `Working on ${label}. ${percent}% done.`,
@@ -792,7 +788,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       deptNotLate: "We are not late; the previous team's output has not arrived yet.",
       speaker: (name: string, room: string) => `${name} · ${room}`,
       deptCheckLog: (room: string) => `Operator order: checking on ${room}`,
-      focusOn: "Focus mode on. No coffee, no chat: everyone works at their desk.",
+      focusOn: "Focus mode on. No chat: everyone works at their desk.",
       focusOnLog: "Operator order: focus mode ON — breaks paused",
       focusOff: "Focus mode off. Everyone can breathe again ☕",
       focusOffLog: "Operator order: focus mode OFF",
@@ -853,7 +849,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     rooms: {
       operator: "운영자실",
       meeting: "운영자 승인 회의실",
-      lounge: "AI 라운지",
       amux: "AMUX 실행실",
       amuxRecord: "AMUX 실행 기록 열기",
       review: "독립 검토실",
@@ -1077,7 +1072,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       working: "업무 중",
       meeting: "회의 중",
       reporting: "보고 중",
-      onBreak: "휴식",
       blocked: "연동 대기",
     },
     phases: [
@@ -1544,7 +1538,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       briefOperator: "고생했어요 ✨",
       briefLog: (done: number, attention: number, blocked: number) =>
         `다이제스트실 최종 브리핑 완료 — 완료 ${done}개 방 · 확인 필요 ${attention}개 · 연동 대기 ${blocked}팀`,
-      dayOver: "데모 하루 종료. 직원들이 라운지로 이동합니다.",
+      dayOver: "데모 하루 종료.",
       deptStarted: (room: string, label: string) => `${room} 업무 시작 — ${label}`,
       deptDone: (room: string, report: string) => `${room} 완료 — ${report}`,
       leadDone: "완료했어요!",
@@ -1553,7 +1547,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       quote: (name: string, text: string) => `${name}: “${text}”`,
       delivered: (from: string, room: string, line: string) => `${from} → ${room}: “${line}”`,
       onMyWay: "네, 바로 갈게요!",
-      coffee: ["잠깐 커피 ☕", "머리 좀 식히고요", "당 충전 필요해요"],
       chatAsk: ["이거 어떻게 생각해요?", "잠깐만요, 이거 봐봐요", "이거 남겨둘 만한가요?"],
       chatReply: ["오, 괜찮은데요?", "각도를 살짝 틀면 좋겠어요", "근거만 붙이면 돼요"],
       cheer: ["감사합니다 🩷", "힘나요!", "더 잘할게요 ✨"],
@@ -1581,7 +1574,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         `${room}: ${label} — 진행률 ${percent}%. 정상 속도예요.`,
       delayBlockedSummary: (count: number, rooms: string) =>
         `그 외 연동 대기 ${count}팀(${rooms})은 콘솔에 기록 화면이 없어 오늘은 움직일 수 없어요.`,
-      delayAway: (count: number) => `참고로 지금 ${count}명이 라운지에 있어요. ‘집중 모드’라고 하시면 전원 자리로 붙입니다.`,
       delayNone: "지연 없습니다. 대기 중인 병목도 없어요.",
       delayNotStarted: "아직 출근 전이라 진행할 업무가 없어요.",
       deptWorking: (label: string, percent: number) => `${label} 작업 중이에요. 진행률 ${percent}%.`,
@@ -1593,7 +1585,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       deptNotLate: "저희가 늦는 게 아니라 앞 팀 산출물이 아직 안 왔어요.",
       speaker: (name: string, room: string) => `${name} · ${room}`,
       deptCheckLog: (room: string) => `운영자 지시: ${room} 상황 확인`,
-      focusOn: "집중 모드 켰습니다. 커피·잡담 없이 전원 자리에서 업무만 봅니다.",
+      focusOn: "집중 모드 켰습니다. 잡담 없이 전원 자리에서 업무만 봅니다.",
       focusOnLog: "운영자 지시: 집중 모드 ON — 자율 휴식 중단",
       focusOff: "집중 모드 껐어요. 다들 숨 좀 돌리겠습니다 ☕",
       focusOffLog: "운영자 지시: 집중 모드 OFF",

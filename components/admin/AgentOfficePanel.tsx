@@ -67,7 +67,6 @@ const AGENT_STATUS_TONE: Record<AgentStatus, DeptStatus> = {
   meeting: "approval",
   reporting: "approval",
   blocked: "blocked",
-  onBreak: "done",
   offDuty: "waiting",
   commuting: "waiting",
   idle: "waiting",
