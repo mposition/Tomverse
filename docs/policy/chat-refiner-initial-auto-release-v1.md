@@ -96,6 +96,13 @@ record, a browser boolean, a forged object, a staging drill header or an
 environment flag alone cannot mint this authority. No new evaluation-stage,
 slot, holdout or direct product-database writer is introduced.
 
+A separate owner-authenticated rollout action may write only
+`feature.promptRefinerEnabled`, with the same recent authentication, origin,
+bounded-input and canonical transactional audit boundary. Enabling requires
+the valid exact-deployment activation pair; disabling remains available even
+when that authority has closed. Activation itself does not enable rollout,
+and rollout never edits a kill switch or resumes a paused Auto guard.
+
 Availability, mode storage and turn routing consult the same server-owned
 initial-release authority. The serving deployment must match on every use.
 Missing or ambiguous activation, policy/config drift, database uncertainty,
