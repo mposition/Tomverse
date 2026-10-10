@@ -640,6 +640,20 @@ const REGISTRY = {
     reason:
       "The default-off product Auto budget books exactly the Brisbane day and month windows. An unknown period cannot acquire a bounded reservation or authorize a provider call.",
   },
+  PromptRefinerProductOperationalGuard_state_check: {
+    owner: "list",
+    module: "lib/promptRefinerProductOperationalGuard.ts",
+    list: "PROMPT_REFINER_PRODUCT_AUTO_GUARD_STATES",
+    reason:
+      "The durable product Auto operational latch is either active or paused. Runtime admission and exact owner resume share this list with the database so no unhandled state can authorize execution.",
+  },
+  PromptRefinerProductOperationalGuard_reason_check: {
+    owner: "list",
+    module: "lib/promptRefinerProductOperationalGuard.ts",
+    list: "PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS",
+    reason:
+      "The five approved Auto stop causes are content-free operational classifications. The pause writer and strict owner resume route validate this same list before a durable transition.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",

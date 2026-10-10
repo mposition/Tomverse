@@ -149,6 +149,21 @@ type DraftSyncMeta = {
   failureCount: number;
 };
 
+/** Reuse only the exact server-backed generation; same text after ABA is not enough. */
+export function reusablePreparedDraftRevision(input: {
+  revision: number;
+  persistedGeneration: number;
+  captureGeneration: number;
+  capturedDraft: ConversationDraft;
+  currentDraft: ConversationDraft;
+}) {
+  return input.revision >= 1 &&
+    input.persistedGeneration === input.captureGeneration &&
+    sameDraftSnapshot(input.capturedDraft, input.currentDraft)
+    ? input.revision
+    : null;
+}
+
 const DRAFT_SAVE_DEBOUNCE_MS = 350;
 const serverScopeKey = (scopeId: string | null | undefined) => scopeId || "new";
 const draftKeyIdentitySegment = (identityKey: string | null) =>
@@ -1060,6 +1075,24 @@ export function useConversationDrafts(
         return null;
       }
       meta.frozen = true;
+      const currentDraft = readDraftEntry(draftsRef.current, key);
+      const reusableRevision = reusablePreparedDraftRevision({
+        revision: meta.revision,
+        persistedGeneration: meta.persistedGeneration,
+        captureGeneration: capture.generation,
+        capturedDraft: capture.draft,
+        currentDraft,
+      });
+      if (reusableRevision !== null) {
+        // The exact generation is already durable. Reusing its revision keeps
+        // a server-held pre-send decision bound to the revision it captured;
+        // writing identical bytes again would manufacture a new revision and
+        // make that exact-snapshot authority stale before the Message save.
+        return {
+          ...capture,
+          revision: reusableRevision,
+        };
+      }
       const ok = await persistKey(key, capture.draft, capture.generation);
       if (!captureIsCurrent()) {
         releasePendingConsume();

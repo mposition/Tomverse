@@ -9,7 +9,11 @@ type PromptRefinerCopy = {
   proposalLabel: string;
   previewOnly: string;
   previewAction: string;
+  selectedForSend: string;
+  useSuggestion: string;
   keepOriginal: string;
+  autoApplied: string;
+  useOriginalNext: string;
   close: string;
   failed: string;
   retry: string;
@@ -30,7 +34,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "제안된 문장",
     previewOnly: "검증용 미리보기입니다. 원문은 바뀌지 않았고 대화 메시지는 전송되지 않았습니다.",
     previewAction: "제안 미리보기 확인",
+    selectedForSend: "다음 전송에서 이 제안문을 실행 입력으로 사용합니다. 저장되는 메시지는 원문을 유지합니다.",
+    useSuggestion: "이 문장 사용",
     keepOriginal: "원문 유지",
+    autoApplied: "문장을 자동으로 다듬어 답변에 사용했습니다. 저장된 메시지는 원문 그대로입니다.",
+    useOriginalNext: "다음에는 원문 사용",
     close: "닫기",
     failed: "문장을 제안하지 못했습니다. 원문은 바뀌지 않았습니다.",
     retry: "다시 시도",
@@ -49,7 +57,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "Suggested wording",
     previewOnly: "Fixture preview only. Your original is unchanged. No chat message was sent.",
     previewAction: "Confirm preview",
+    selectedForSend: "This suggestion will be used for the next send. Your saved message will keep the original wording.",
+    useSuggestion: "Use this wording",
     keepOriginal: "Keep original",
+    autoApplied: "The wording was improved automatically for this answer. Your saved message keeps the original.",
+    useOriginalNext: "Use original next time",
     close: "Close",
     failed: "A suggestion could not be prepared. Your original was not changed.",
     retry: "Try again",
@@ -68,7 +80,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "建议表述",
     previewOnly: "仅供测试预览。原文未更改，未发送聊天消息。",
     previewAction: "确认预览",
+    selectedForSend: "下次发送将使用此建议作为执行输入，保存的消息仍保留原文。",
+    useSuggestion: "使用此表述",
     keepOriginal: "保留原文",
+    autoApplied: "此回答已自动使用优化后的表述，保存的消息仍保留原文。",
+    useOriginalNext: "下次使用原文",
     close: "关闭",
     failed: "无法生成建议，原文未被更改。",
     retry: "重试",
@@ -87,7 +103,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "Formulation proposée",
     previewOnly: "Aperçu de test uniquement. L’original reste inchangé. Aucun message de chat n’a été envoyé.",
     previewAction: "Confirmer l’aperçu",
+    selectedForSend: "Cette proposition sera utilisée au prochain envoi. Le message enregistré conservera le texte original.",
+    useSuggestion: "Utiliser cette formulation",
     keepOriginal: "Garder l’original",
+    autoApplied: "La formulation a été clarifiée automatiquement pour cette réponse. Le message enregistré conserve l’original.",
+    useOriginalNext: "Utiliser l’original ensuite",
     close: "Fermer",
     failed: "Aucune suggestion n’a pu être préparée. L’original est inchangé.",
     retry: "Réessayer",
@@ -106,7 +126,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "Vorgeschlagene Formulierung",
     previewOnly: "Nur Testvorschau. Das Original blieb unverändert. Keine Chat-Nachricht wurde gesendet.",
     previewAction: "Vorschau bestätigen",
+    selectedForSend: "Dieser Vorschlag wird beim nächsten Senden verwendet. Die gespeicherte Nachricht behält den Originaltext.",
+    useSuggestion: "Diese Formulierung verwenden",
     keepOriginal: "Original behalten",
+    autoApplied: "Die Formulierung wurde für diese Antwort automatisch verbessert. Die gespeicherte Nachricht behält das Original.",
+    useOriginalNext: "Nächstes Mal Original verwenden",
     close: "Schließen",
     failed: "Kein Vorschlag möglich. Das Original wurde nicht geändert.",
     retry: "Erneut versuchen",
@@ -125,7 +149,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "Redacción sugerida",
     previewOnly: "Solo vista previa de prueba. El original no cambió. No se envió ningún mensaje de chat.",
     previewAction: "Confirmar vista previa",
+    selectedForSend: "Esta sugerencia se usará en el próximo envío. El mensaje guardado conservará el texto original.",
+    useSuggestion: "Usar esta redacción",
     keepOriginal: "Conservar original",
+    autoApplied: "La redacción se mejoró automáticamente para esta respuesta. El mensaje guardado conserva el original.",
+    useOriginalNext: "Usar el original la próxima vez",
     close: "Cerrar",
     failed: "No se pudo preparar una sugerencia. El original no cambió.",
     retry: "Reintentar",
@@ -144,7 +172,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     proposalLabel: "Redação sugerida",
     previewOnly: "Prévia de teste apenas. O original não mudou. Nenhuma mensagem de chat foi enviada.",
     previewAction: "Confirmar prévia",
+    selectedForSend: "Esta sugestão será usada no próximo envio. A mensagem salva manterá o texto original.",
+    useSuggestion: "Usar esta redação",
     keepOriginal: "Manter original",
+    autoApplied: "A redação foi melhorada automaticamente para esta resposta. A mensagem salva mantém o original.",
+    useOriginalNext: "Usar o original na próxima vez",
     close: "Fechar",
     failed: "Não foi possível preparar uma sugestão. O original não mudou.",
     retry: "Tentar novamente",

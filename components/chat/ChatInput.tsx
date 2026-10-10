@@ -152,6 +152,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import {
+  resolvePromptRefinerDecision,
   resolvePromptRefinerFixtureDecision,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerResolution,
@@ -660,6 +661,7 @@ type ChatInputProps = {
    */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
+  promptRefinerProductMode?: boolean;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   /**
    * Fixture decisions are validated by the state owner. Acceptance shows a
@@ -890,6 +892,7 @@ export function ChatInput({
   onSelectionModeChange,
   promptRefinerOffered = false,
   promptRefinerState,
+  promptRefinerProductMode = false,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
   onPromptRefinerDismiss,
@@ -1332,7 +1335,9 @@ export function ChatInput({
       suggestion: BoundPromptRefinerSuggestion,
       decision: "accepted" | "kept_original"
     ) => {
-      const resolution = resolvePromptRefinerFixtureDecision({
+      const resolution = (promptRefinerProductMode
+        ? resolvePromptRefinerDecision
+        : resolvePromptRefinerFixtureDecision)({
         suggestion,
         currentPrompt: value,
         decision,
@@ -1344,7 +1349,7 @@ export function ChatInput({
       requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
       onPromptRefinerDecision?.(resolution);
     },
-    [onPromptRefinerDecision, value]
+    [onPromptRefinerDecision, promptRefinerProductMode, value]
   );
 
   const handlePromptRefinerDismiss = useCallback(
@@ -3609,6 +3614,7 @@ export function ChatInput({
             language={lang}
             currentPrompt={value}
             state={promptRefinerState}
+            productMode={promptRefinerProductMode}
             interactionBlockReason={
               isComposingDraft
                 ? "composition_active"

@@ -12,8 +12,14 @@ import {
   PROMPT_REFINER_VERSION,
   type PromptRefinerRequest,
 } from "@/lib/promptRefinerSuggestion";
+import { PROMPT_REFINER_PRODUCT_TIMEOUT_MS } from
+  "@/lib/promptRefinerProductContract";
 
 const headers = { "Cache-Control": "no-store" };
+const unavailable = () => Response.json(
+  { code: "PROMPT_REFINER_UNAVAILABLE" },
+  { status: 503, headers }
+);
 
 const fixtureProposal = async (request: PromptRefinerRequest) => {
   const primary =
@@ -31,24 +37,42 @@ const fixtureProposal = async (request: PromptRefinerRequest) => {
 };
 
 /**
- * Product Prompt Refiner proposals are not admitted yet.
- *
- * The only executable suggestion adapter is the loopback E2E fixture. A
- * rollout flag, an approved one-shot evaluation budget, or a successful
- * synthetic test cannot authorize a proposal on a real Chat request. Keep
- * this product boundary closed until a separately reviewed server-owned
- * quality/rollout gate and product adapter are connected here.
+ * Fixture traffic keeps its isolated loopback path. Product traffic accepts
+ * only scope/draft identifiers; the server captures the authoritative draft
+ * and the product release store remains default-off without exact evidence.
  */
 export async function POST(request: Request): Promise<Response> {
-  // Product traffic never reads cookies, text or reaches an adapter here.
-  if (
-    !isE2EFixtureMode() ||
-    promptRefinerKillSwitchEngaged(process.env)
-  ) {
-    return Response.json(
-      { code: "PROMPT_REFINER_UNAVAILABLE" },
-      { status: 503, headers }
-    );
+  const requestDeadline = { requestedAt: new Date(),
+    deadlineAtMonotonicMs: performance.now() +
+      PROMPT_REFINER_PRODUCT_TIMEOUT_MS };
+  if (!isE2EFixtureMode()) {
+    const [{ getServerSession }, { authOptions },
+      { handlePromptRefinerProductProposal,
+        promptRefinerProductApiErrorResponse },
+      { hasValidMutationOrigin }] = await Promise.all([
+      import("next-auth/next"),
+      import("@/lib/auth"),
+      import("@/lib/promptRefinerProductApi"),
+      import("@/lib/requestOrigin"),
+    ]);
+    try {
+      const session = await getServerSession(authOptions);
+      if (!session?.user?.id) return Response.json({ code: "UNAUTHORIZED" },
+        { status: 401, headers });
+      if (!hasValidMutationOrigin(request)) {
+        return Response.json({ code: "FORBIDDEN" },
+          { status: 403, headers });
+      }
+      return await handlePromptRefinerProductProposal(request, session.user.id,
+        requestDeadline);
+    } catch (error) {
+      return promptRefinerProductApiErrorResponse(error) ??
+        Response.json({ code: "PROMPT_REFINER_FALLBACK_ORIGINAL",
+          reason: "audit_unavailable" }, { status: 503, headers });
+    }
+  }
+  if (promptRefinerKillSwitchEngaged(process.env)) {
+    return unavailable();
   }
 
   const { cookies } = await import("next/headers");
@@ -63,10 +87,7 @@ export async function POST(request: Request): Promise<Response> {
     }),
     adapterReady: fixtureAdapterReady,
   })) {
-    return Response.json(
-      { code: "PROMPT_REFINER_UNAVAILABLE" },
-      { status: 503, headers }
-    );
+    return unavailable();
   }
 
   const { handlePromptRefinerProposal } =

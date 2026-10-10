@@ -58,6 +58,7 @@ const LIMITED_DARK_ACCESS = {
     ModelDeployment: ["lib/pinnedDeploymentPlacement.ts"],
     ProviderEndpoint: ["lib/pinnedDeploymentPlacement.ts"],
     PromptRefinerVnextOneShotStage: [
+        "lib/promptRefinerProductReleaseStore.ts",
         "lib/promptRefinerVnextOneShotCandidateSourceReadback.ts",
         "lib/promptRefinerVnextOneShotDeploymentBinding.ts",
         "lib/promptRefinerVnextOneShotOutcomeRecovery.ts",
