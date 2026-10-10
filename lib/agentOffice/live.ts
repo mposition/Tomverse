@@ -265,6 +265,12 @@ export type AgentOfficeLiveDept = {
   line: string;
   /** Supporting facts: last success, silence, the read time. */
   detail: string;
+  /**
+   * What tells one reading from the next when the line cannot: compared for
+   * the console's announcement, never shown. The line is drawn to the minute,
+   * so two digests from one sender in the same minute draw the same line.
+   */
+  revision?: string;
 };
 
 /**
@@ -853,6 +859,8 @@ export function digestLiveDept(
     badge: recent > 0 ? copy.badges.received : copy.badges.quiet,
     line: newest?.lastAt ? copy.latest(name(newest.agentKey), aestStamp(newest.lastAt)) : copy.none,
     detail: [...state.agents.map((agent) => copy.count(name(agent.agentKey), agent.recent)), read].join(" · "),
+    // Every sender's newest arrival to the millisecond: any new digest moves it.
+    revision: state.agents.map((agent) => `${agent.agentKey}@${agent.lastAt ?? ""}`).join(","),
   };
 }
 

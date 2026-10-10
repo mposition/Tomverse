@@ -1339,9 +1339,18 @@ export class AgentOffice {
       if (lead) this.showRecordLine(lead, room.line);
       // A room whose record changed since the last reading says so in the
       // console, in its lead's name. The first reading is not a change, and a
-      // reading that only moved the read time (it lives in `detail`) is not one.
+      // reading that only moved the read time (it lives in `detail`) is not
+      // one; a room whose line cannot tell two readings apart says so with
+      // its revision.
       const before = previous[deptId];
-      if (lead && before && (before.status !== room.status || before.badge !== room.badge || before.line !== room.line)) {
+      if (
+        lead &&
+        before &&
+        (before.status !== room.status ||
+          before.badge !== room.badge ||
+          before.line !== room.line ||
+          before.revision !== room.revision)
+      ) {
         this.pushChat("staff", lead.name, this.copy.real.changed(this.roomName(deptId), room.line));
       }
     }
