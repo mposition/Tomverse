@@ -52,6 +52,8 @@
     "staging:continuation-fixtures": "node --import tsx scripts/build-continuation-staging-fixtures.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
+    "test:routing-provenance": "node --conditions=react-server --import tsx --test tests/routingApplicationIdentity.test.mjs tests/routingShadowQuery.test.mjs tests/routingShadow.test.mjs tests/routingShadowReport.test.mjs",
+    "test:routing-provenance-db": "node scripts/run-routing-provenance-db-tests.mjs",
     "test:server-contract": "node scripts/run-server-contract-tests.mjs",
     "report:amux-staging-evidence": "node scripts/report-amux-staging-evidence.mjs",
     "report:amux-v4-activation-preflight": "node --conditions=react-server --import tsx scripts/amux-v4-activation-preflight.mjs",

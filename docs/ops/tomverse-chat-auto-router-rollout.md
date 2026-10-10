@@ -45,6 +45,45 @@ An attestation expires. Readiness measures a system that keeps changing, and
 an attestation with no deadline would outlive what it described — so
 `expiresAt` is required, and the check fails once it passes.
 
+### Reading the running deployment
+
+The authenticated, read-only `GET /api/admin/routing-shadow` includes a
+`runtime` snapshot: observation time, public build/deployment identity, current
+readiness, effective shadow flag and dispatch instrumentation mode, and whether
+the manifest keyring resolves. It reads the serving process's environment and
+returns no keys, cohort salt or parser error prose. Responses use `no-store`.
+The Routing workspace displays this snapshot, including when there are no shadow
+rows. An older response without it is labelled unknown, never ready or off.
+
+The top-level `measurementScope` is
+`historical_window_without_deployment_binding`. The build identifies the
+process answering the readback; it does **not** bind historical shadow rows to
+that deployment. Those rows still need separately verified traffic approval,
+version/window provenance and a human attestation. A green runtime readback
+does not approve any of the three gates or replace enforce-mode measurements.
+
+### Binding new measurements to an application deployment
+
+New shadow and dispatch rows snapshot `applicationCommitSha`,
+`applicationDeploymentId` and `applicationEnvironment` from the writer's
+Railway runtime. All three remain null if that identity is incomplete. The
+database refuses changes to this tuple, including backfilling a historical
+null tuple. These fields identify the application, not a model-provider
+deployment, and contain no request text or credentials.
+
+`npm run report:routing-shadow -- --json --commit=<full SHA>
+--deployment=<Railway deployment UUID> --environment=<environment>
+--since=<UTC instant> --until=<UTC instant>` reads only matching rows in a
+closed observation window. Supply the complete identity together. The report
+marks its scope `recorded_application_identity` and discloses truncation;
+without a filter it remains an unbound historical report. A zero-row or
+truncated report cannot establish a complete deployment measurement.
+
+The recorded tuple is the writer's report, not independent authentication.
+Corroborate it against the serving readback and Railway's exact deployment
+record, retain the approved traffic scope and report digest, and obtain the
+human attestation. Historical rows are never assigned the current identity.
+
 ## 3. Configuration
 
 Every default is off, so a deployment that sets nothing routes nobody. A

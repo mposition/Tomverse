@@ -64,6 +64,19 @@ async function loadRoute(): Promise<{
         mock.module(mod("lib/adminAuth.ts"), {
             namedExports: { isAdminSession: () => world.isAdmin },
         });
+        mock.module(mod("lib/buildInfo.ts"), {
+            namedExports: { getPublicBuildInfo: async () => ({
+                environment: "production", commitSha: "a".repeat(40),
+                deploymentId: "readback-deployment",
+            }) },
+        });
+        mock.module(mod("lib/autoRoutingRuntimeReadback.ts"), {
+            namedExports: { autoRoutingRuntimeReadback: (build: unknown) => ({
+                build, readiness: { ready: false, outstanding: ["shadow_report"] },
+                shadowEnabled: true, dispatchInstrumentationMode: "observe",
+                manifestKeyringConfigured: true,
+            }) },
+        });
         const { createRequire } = await import("node:module");
         const require = createRequire(import.meta.url);
         const realApiSecurity = require(
@@ -127,6 +140,11 @@ test("an admin receives the report", async () => {
     const body = await response.json();
     assert.equal(body.rows, 2);
     assert.equal(body.agreementRate, 0.5);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(body.runtime.build.commitSha, "a".repeat(40));
+    assert.equal(body.runtime.readiness.ready, false);
+    assert.equal(body.runtime.dispatchInstrumentationMode, "observe");
+    assert.equal(body.measurementScope, "historical_window_without_deployment_binding");
     assert.equal(world.reportCalls.length, 1);
     assert.equal(world.reportCalls[0].windowDays, undefined);
 });

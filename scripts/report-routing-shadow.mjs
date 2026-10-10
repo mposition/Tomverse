@@ -32,6 +32,7 @@ import {
   selectionDistributionKeys,
 } from "../lib/routingShadowReport.ts";
 import { prisma } from "../lib/prisma.ts";
+import { routingShadowQuery } from "../lib/routingShadowQuery.ts";
 import {
   ROUTER_SHADOW_FLAG,
   isRouterShadowEnabled,
@@ -49,14 +50,14 @@ const compareBy =
     ? "selectionVersion"
     : "selectionPolicyVersion";
 const comparePair = flag("compare", "");
-const days = Math.max(1, Number(flag("days", "30")) || 30);
-const maxRows = Math.max(1, Number(flag("limit", "200000")) || 200_000);
-const since = new Date(Date.now() - days * 86_400_000);
+const scope = routingShadowQuery(args);
+const { days, since, until } = scope;
+const maxRows = scope.limit;
 
 const runs = await prisma.routingRun.findMany({
-  where: { mode: "shadow", createdAt: { gte: since } },
+  where: scope.where,
   orderBy: { createdAt: "desc" },
-  take: maxRows,
+  take: maxRows + 1,
   // The columns this reads, and no more. The table is content-free by
   // construction, but a narrow select keeps it that way as the schema grows.
   select: {
@@ -75,7 +76,8 @@ const runs = await prisma.routingRun.findMany({
   },
 });
 
-const shadowRows = runs.map((run) => ({
+const truncated = runs.length > maxRows;
+const shadowRows = runs.slice(0, maxRows).map((run) => ({
   ...run,
   rejectedByReason:
     run.rejectedByReason && typeof run.rejectedByReason === "object"
@@ -118,6 +120,10 @@ if (asJson) {
       {
         windowDays: days,
         since: since.toISOString(),
+        until: until.toISOString(),
+        measurementScope: scope.measurementScope,
+        applicationIdentity: scope.identity,
+        truncated,
         recording,
         ...report,
         distributionGroups,
@@ -129,6 +135,9 @@ if (asJson) {
   );
 } else {
   console.log(`Shadow routing — last ${days} day(s), since ${since.toISOString()}`);
+  console.log(`Measurement scope: ${scope.measurementScope}`);
+  if (scope.identity) console.log(`Application identity: ${JSON.stringify(scope.identity)}`);
+  if (truncated) console.log("TRUNCATED — this is not the complete population in the window.");
   // Whether recording is on, before any count of what it recorded. A zero row
   // count reads as "Auto would have agreed with everyone" until you know
   // whether anything was ever written down.

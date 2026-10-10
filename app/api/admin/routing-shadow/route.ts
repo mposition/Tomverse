@@ -6,6 +6,8 @@ import { authOptions } from "@/lib/auth";
 import { isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { getRoutingShadowReport } from "@/lib/routingShadowMetrics";
+import { autoRoutingRuntimeReadback } from "@/lib/autoRoutingRuntimeReadback";
+import { getPublicBuildInfo } from "@/lib/buildInfo";
 
 /**
  * Shadow routing, for the Admin Console (routing policy §5, delivery plan §6).
@@ -41,7 +43,14 @@ export async function GET(req: Request) {
             );
         }
 
-        return NextResponse.json(await getRoutingShadowReport({ windowDays }));
+        const report = await getRoutingShadowReport({ windowDays });
+        const runtime = autoRoutingRuntimeReadback(await getPublicBuildInfo());
+        return NextResponse.json({
+            ...report,
+            runtime,
+            // The build identifies this readback, not each historical row.
+            measurementScope: "historical_window_without_deployment_binding",
+        }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
         const securityResponse = apiSecurityResponse(error);
         if (securityResponse) return securityResponse;
