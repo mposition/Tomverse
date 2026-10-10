@@ -225,6 +225,7 @@
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
     "report:email-dns": "node --conditions=react-server --import tsx scripts/report-email-dns.mjs",
     "report:marketing-reach": "node --conditions=react-server --import tsx scripts/report-marketing-reach.mjs",
+    "report:marketing-webhook-record-signability": "node --conditions=react-server --import tsx scripts/report-marketing-webhook-record-signability.mjs",
     "report:gdpr-article-27-presence": "node --conditions=react-server --import tsx scripts/report-gdpr-article-27-presence.mjs",
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
     "report:routing-attempt-error-classes": "node --conditions=react-server --import tsx scripts/report-routing-attempt-error-classes.mjs",
