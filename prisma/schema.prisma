@@ -4341,10 +4341,11 @@ model RoutingAttempt {
   /// erasing the distinction that section draws to keep such an attempt out of
   /// provider billing.
   ///
-  /// `unknown_after_dispatch` is the stale-attempt sweep's, and only its: a
-  /// dispatch was recorded and the turn never came back to say how it ended.
-  /// Not `failed_pre_token`, which would be a claim about a provider call
-  /// nobody observed.
+  /// `unknown_after_dispatch` is the stale-attempt sweep's, and only its: the
+  /// durable dispatch boundary was entered and the turn never came back to say
+  /// how it ended. It is not `failed_pre_token`, which would claim a provider
+  /// result nobody observed. A start-only row may have stopped immediately
+  /// before the SDK invocation, so recovery uses the reserved upper bound.
   outcome      String @default("pending")
   /// planner | adapter | manifest | billing | process | storage | application |
   /// model_output | provider | stream | none
@@ -4365,6 +4366,10 @@ model RoutingAttempt {
   /// cross-table assertion nothing enforces. ROUTE-06 grades exactly this.
   manifestFinalizedAt DateTime?
 
+  /// Durable evidence that this process was about to invoke the provider.
+  /// Written after manifest finalization and before the SDK call. NULL on
+  /// historical rows: migrations must not invent a boundary they did not see.
+  dispatchStartedAt    DateTime?
   dispatchedAt        DateTime?
   providerRequestId   String?
   firstVisibleTokenAt DateTime?

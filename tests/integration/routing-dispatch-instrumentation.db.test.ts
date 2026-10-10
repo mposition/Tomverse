@@ -16,6 +16,7 @@ import {
   completeInstrumentedDispatch,
   dispatchInstrumentationCounters,
   dispatchInstrumentationMode,
+  recordDispatchStarted,
   recordDispatched,
   recordNotDispatched,
 } from "@/lib/routingDispatchInstrumentation";
@@ -83,6 +84,14 @@ const authorise = (record: Awaited<ReturnType<typeof begin>>) =>
     adapterVersion: "vercel-ai-sdk-streamText-v1",
   });
 
+const startAndRecord = async (
+  record: Awaited<ReturnType<typeof authorise>>,
+  providerRequestId?: string
+) => {
+  await recordDispatchStarted(record);
+  await recordDispatched(record, providerRequestId);
+};
+
 test("application provenance survives dispatch and cannot be relabelled or backfilled", async () => {
   const names = ["RAILWAY_GIT_COMMIT_SHA", "RAILWAY_DEPLOYMENT_ID", "APP_ENV"] as const;
   const previous = names.map((name) => process.env[name]);
@@ -96,7 +105,7 @@ test("application provenance survives dispatch and cannot be relabelled or backf
     assert.equal(run.applicationCommitSha, "a".repeat(40));
     assert.equal(run.applicationDeploymentId, process.env.RAILWAY_DEPLOYMENT_ID);
     assert.equal(run.applicationEnvironment, "staging");
-    await recordDispatched(record, "req_provenance");
+    await startAndRecord(record, "req_provenance");
     await completeInstrumentedDispatch(record, { outcome: "succeeded", failureLayer: "none" });
     await assert.rejects(prisma.routingRun.update({ where: { id: record.runId },
       data: { applicationCommitSha: "b".repeat(40) } }), /immutable/);
@@ -127,7 +136,7 @@ test("a manual dispatch produces a run, an attempt and a finalized manifest", as
 
   const authorised = await authorise(draft);
   assert.ok(authorised);
-  await recordDispatched(authorised, "req_abc");
+  await startAndRecord(authorised, "req_abc");
 
   const run = await prisma.routingRun.findUniqueOrThrow({
     where: { id: authorised!.runId },
@@ -147,7 +156,11 @@ test("a manual dispatch produces a run, an attempt and a finalized manifest", as
   assert.equal(run.routingAttempts.length, 1);
   const attempt = run.routingAttempts[0];
   assert.equal(attempt.providerRequestId, "req_abc");
+  assert.notEqual(attempt.dispatchStartedAt, null);
   assert.notEqual(attempt.dispatchedAt, null);
+  assert.ok(
+    attempt.dispatchStartedAt!.getTime() <= attempt.dispatchedAt!.getTime()
+  );
   assert.equal(attempt.manifest?.state, "finalized");
   assert.ok(attempt.manifest?.effectiveRequestHash);
 
@@ -200,7 +213,7 @@ for (const [outcome, expected, layer] of [
 ] as const) {
   test(`a ${outcome} stream closes the attempt and the run`, async () => {
     const record = await authorise(await begin());
-    await recordDispatched(record);
+    await startAndRecord(record);
     await completeInstrumentedDispatch(record, {
       outcome,
       failureLayer: layer,
@@ -230,7 +243,7 @@ for (const [outcome, expected, layer] of [
 // read as having no first token at all.
 test("a first visible token reaches both the attempt and the run", async () => {
   const record = await authorise(await begin());
-  await recordDispatched(record);
+  await startAndRecord(record);
   const firstVisibleTokenAt = new Date();
   await completeInstrumentedDispatch(record, {
     outcome: "succeeded",
@@ -250,7 +263,7 @@ test("a first visible token reaches both the attempt and the run", async () => {
 
 test("a turn that never showed a token leaves the first-token columns empty", async () => {
   const record = await authorise(await begin());
-  await recordDispatched(record);
+  await startAndRecord(record);
   await completeInstrumentedDispatch(record, {
     outcome: "failed_pre_token",
     failureLayer: "provider",
@@ -391,6 +404,7 @@ test("off means off: nothing is written and nothing throws", async () => {
   const record = await begin();
   assert.equal(record, null);
   assert.equal(await authorise(record), null);
+  await recordDispatchStarted(record);
   await recordDispatched(record);
   await completeInstrumentedDispatch(record, { outcome: "succeeded" });
   assert.equal(await prisma.routingRun.count(), 0);
@@ -417,6 +431,21 @@ test("enforce refuses the dispatch where observe continues without a record", as
   assert.equal(observed, null, "observe mode should return null rather than throw");
 });
 
+test("dispatch-start persistence is fail-closed only in enforce mode", async () => {
+  const record = await authorise(await begin());
+
+  process.env.ROUTING_DISPATCH_INSTRUMENTATION = "enforce";
+  await recordDispatchStarted(record);
+  await assert.rejects(
+    recordDispatchStarted(record),
+    (error: unknown) => error instanceof DispatchBoundaryError,
+    "enforce mode invoked a provider after the durable start CAS was lost"
+  );
+
+  process.env.ROUTING_DISPATCH_INSTRUMENTATION = "observe";
+  await recordDispatchStarted(record);
+});
+
 // "How often does this fail" has to be a number before enforce can be turned
 // on, which is the whole reason observe exists.
 test("the counters make the recording rate readable", async () => {
@@ -434,7 +463,7 @@ test("the counters make the recording rate readable", async () => {
 // two responses and the reroute rate would read as zero forever.
 test("a retry is a second attempt on the same run, with its own manifest", async () => {
   const first = await authorise(await begin());
-  await recordDispatched(first);
+  await startAndRecord(first);
   await completeInstrumentedDispatch(first, {
     outcome: "failed_pre_token",
     failureLayer: "provider",
