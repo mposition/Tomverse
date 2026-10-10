@@ -94,7 +94,13 @@ IaC는 값을 만들지 않고 **보존만** 합니다. apply 전에 대시보�
 
 ### 5. S0 — 이미지가 무엇을 할 수 있는지 재기
 
-staging에서 Product Research Probe를 **손으로 실행**합니다. 출력에 적힙니다.
+Product Research Probe를 **손으로 실행**합니다. 출력에 적힙니다.
+
+**환경마다 따로 재야 합니다.** probe가 말하는 것은 그 환경의 이미지이고 환경마다
+이미지를 따로 빌드하므로, staging에서 잰 값은 production에 대해 아무 말도 하지
+않습니다. S0은 staging에서 하지만, **P2 전에는 production에서도 한 번 돌립니다** —
+정책 §9의 P2 첫 조건이 production 실행이고, git 없는 이미지는 그 실행을
+`clone_failed`로 끝냅니다.
 
 ```
 git available: true|false
