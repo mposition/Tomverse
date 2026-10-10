@@ -141,6 +141,7 @@ process.env.DATABASE_URL ||=
 process.env.DIRECT_URL ||= process.env.DATABASE_URL;
 process.env.NEXTAUTH_SECRET ||= "server-contract-test-secret";
 process.env.NEXTAUTH_URL ||= "http://127.0.0.1:3100";
+// Always replace an inherited key so this no-provider fixture cannot make a paid call.
 process.env.OPENAI_API_KEY = "server-contract-test-key";
 process.env.ANTHROPIC_API_KEY ||= "server-contract-test-key";
 
@@ -458,7 +459,7 @@ type InstrumentationAttemptRow = {
 };
 const instrumentationAttemptRows = new Map<string, InstrumentationAttemptRow>();
 const closedInstrumentationAttempts: Array<
-  InstrumentationAttemptRow & { outcome: string }
+  Omit<InstrumentationAttemptRow, "state"> & { outcome: string }
 > = [];
 
 const conversationRow = () => ({
