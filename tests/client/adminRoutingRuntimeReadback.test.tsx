@@ -36,6 +36,16 @@ test("an enforced process still displays the outstanding release gates and exact
     shadowEnabled: true,
     dispatchInstrumentationMode: "enforce" as const,
     manifestKeyringConfigured: true,
+    limitedRelease: {
+      admitted: false as const,
+      reason: "approval_pending" as const,
+      unexpectedSecret: "do-not-render",
+    },
+    rollout: {
+      uiEnabled: false, killSwitch: false, percent: 0,
+      eligiblePlans: [], cohortSaltConfigured: false,
+      unexpectedSecret: "do-not-render",
+    },
     unexpectedSecret: "do-not-render",
   };
   const tree = AdminRoutingRuntimeReadback({ runtime, messages: adminRoutingShadowMessages.en.runtime });
@@ -48,6 +58,8 @@ test("an enforced process still displays the outstanding release gates and exact
   assert.equal(snapshot.dispatchInstrumentationMode, "enforce");
   assert.equal(snapshot.readiness.ready, false);
   assert.deepEqual(snapshot.readiness.outstanding, runtime.readiness.outstanding);
+  assert.deepEqual(snapshot.limitedRelease, { admitted: false, reason: "approval_pending" });
+  assert.equal(snapshot.rollout.percent, 0);
   assert.equal((json as string).includes("do-not-render"), false);
 });
 

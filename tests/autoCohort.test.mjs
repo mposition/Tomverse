@@ -25,6 +25,22 @@ const notReady = {
   problems: [],
 };
 
+const limitedRelease = {
+  admitted: true,
+  exceptionId: "CHAT-01-AUTO-ROUTER-LIMITED-RELEASE-V1",
+  version: "auto-router-limited-release-approval-v1",
+  evidenceRef: "docs/ops/tomverse-chat-auto-router-limited-release-v1-approval.md",
+  approvedBy: "mposition",
+  approvedAt: "2026-10-11T00:00:00.000Z",
+  expiresAt: "2026-11-11T00:00:00.000Z",
+  evaluatedImplementationCommit: "c".repeat(40),
+  servingCommitSha: "a".repeat(40),
+  targetEnvironmentId: "11111111-1111-4111-8111-111111111111",
+  targetServiceId: "22222222-2222-4222-8222-222222222222",
+  rolloutPercent: 100,
+  eligiblePlans: ["Pro", "Max"],
+};
+
 const config = (overrides = {}) => ({
   killSwitch: false,
   rolloutPercent: 100,
@@ -69,6 +85,64 @@ test("an outstanding readiness gate refuses everyone, at any percentage", () => 
     assert.equal(decision.reason, "readiness_incomplete");
     assert.deepEqual(decision.outstandingGates, ["offline_quality_evaluation"]);
   }
+});
+
+test("a separately approved limited release may admit honest pending gates", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({ limitedRelease }),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.deepEqual(decision.limitedReleaseException, {
+    exceptionId: "CHAT-01-AUTO-ROUTER-LIMITED-RELEASE-V1",
+    evidenceRef: "docs/ops/tomverse-chat-auto-router-limited-release-v1-approval.md",
+    outstandingGates: ["offline_quality_evaluation"],
+  });
+  assert.equal(decision.drillOverride, undefined);
+});
+
+test("a limited release never overrides a malformed readiness register", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: {
+      ready: false,
+      outstanding: [],
+      problems: ["the register has no entry for shadow_report"],
+    },
+    config: config({ limitedRelease }),
+  }));
+  assert.equal(decision.eligible, false);
+  assert.equal(decision.reason, "readiness_incomplete");
+
+  const expired = decideAutoCohort(subject({
+    readiness: {
+      ready: false,
+      outstanding: [],
+      problems: ["shadow_report's attestation expired"],
+    },
+    config: config({ limitedRelease }),
+  }));
+  assert.equal(expired.eligible, false);
+  assert.equal(expired.reason, "readiness_incomplete");
+});
+
+test("the kill switch and guest exclusion still outrank an approved exception", () => {
+  assert.equal(decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({ killSwitch: true, limitedRelease }),
+  })).reason, "kill_switch");
+  assert.equal(decideAutoCohort(subject({
+    readiness: notReady,
+    isGuest: true,
+    config: config({ limitedRelease }),
+  })).reason, "guest_not_eligible");
+});
+
+test("ordinary full readiness does not carry an exception marker", () => {
+  const decision = decideAutoCohort(subject({
+    config: config({ limitedRelease }),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.limitedReleaseException, undefined);
 });
 
 test("readiness is checked above the percentage, so the reason is the real one", () => {
