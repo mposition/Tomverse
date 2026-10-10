@@ -160,6 +160,11 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 `quotaProbe: "claude"`는 reviewer가 쓰는 OAuth 토큰으로 Claude 사용량의 5시간·7일
 창을 조회합니다. `CLAUDE_CODE_OAUTH_TOKEN`을 `passEnv`로 전달하는 설정이면 그 토큰을
 우선하고, 그렇지 않으면 `~review/.claude/.credentials.json`을 읽습니다.
+이 사용량 API는 요청 수를 엄격히 제한하고(HTTP 429), 같은 구독 계정을 AMUX도
+조회합니다. 그래서 Claude만 따로 속도를 지킵니다: 정상 조회 뒤 5분 동안 다시 묻지
+않고, 429면 `Retry-After`나 2·4·8…분(최대 30분) 중 긴 쪽만큼 기다리며, 그동안은
+30분 이내의 마지막 정상값을 씁니다. 그보다 오래되면 `unknown`으로 배정을 보류합니다
+(AMUX의 `provider/claude/usage_cache.rs`와 같은 방식).
 `quotaProbe: "codex"`는 reviewer와 같은 `codex` 실행 파일의 app-server에서
 `account/rateLimits/read`를 조회합니다. 각 창의 남은 비율이 0이면 배정하지
 않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
@@ -168,10 +173,15 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 쓰는 `DashboardService/GetCurrentPeriodUsage`를 조회합니다. Ubuntu에서는
 `~review/.config/cursor/auth.json`의 로그인 access token을 사용하며, `CURSOR_API_KEY`를
 reviewer에게 전달하는 설정이면 저장된 토큰이 그 API key의 계정과 일치해야 합니다.
-보고된 포함 사용량 pool 중 하나라도 소진됐으면 Cursor 배정을 보류합니다.
+이어서 같은 토큰으로 `DashboardService/GetCreditGrantsBalance`를 조회해 크레딧 잔액
+(`creditBalanceCents`)을 읽습니다. **포함 사용량 pool이 소진됐어도 크레딧이 남아 있으면
+배정합니다**(Cursor는 포함 사용량 뒤 크레딧으로 계속 처리합니다). 포함 사용량 소진과
+크레딧 0이 함께일 때만 보류하고, 크레딧 조회가 실패하면 크레딧을 모르는 것으로 보아
+포함 사용량 소진만으로 보류합니다. 크레딧 금액은 `status`의 `creditUsd`와 Agent office
+quota 카드에 함께 표시됩니다.
 이 경로는 공개 Admin API가 아닌 CLI 내부 API이므로 응답이 바뀌거나 로그인 토큰이
 만료되면 `unknown`으로 보류하며, probe는 로그인·토큰 갱신을 하지 않습니다.
-추가 지출 한도가 남아 있어도 포함 사용량 소진 뒤 새 검토를 시작하지 않습니다.
+종량제 추가 지출 한도(`GetHardLimit`)는 보지 않습니다.
 
 `quotaProbe: "copilot"`는 reviewer와 같은 CLI를 `--headless --stdio`로 띄워 공식
 SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)를
@@ -183,7 +193,7 @@ SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-s
 GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)는
 별도 `Plan` 읽기 권한이 필요해 기존 reviewer 토큰의 권한을 넓히지 않았습니다.
 
-자동 probe는 60초마다 갱신하고 `status`는 데몬의 최근 관측 파일만 읽습니다.
+자동 probe는 60초마다(Claude는 위의 간격으로) 갱신하고 `status`는 데몬의 최근 관측 파일만 읽습니다.
 Cursor 내부 API와 Copilot CLI quota 응답은 운영 서버의 `review` 계정으로 실측한 뒤
 가동합니다. 확인 불가한 계정은 `unknown`이 되어 대기하며 검토를 시험 호출하지 않습니다.
 
@@ -372,7 +382,7 @@ Agent office "독립 검토실"에서 그것을 봅니다.
   때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
 - **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
   (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
-  USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
+  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
   **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
   계정 정보. daemon이 그런
   값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을

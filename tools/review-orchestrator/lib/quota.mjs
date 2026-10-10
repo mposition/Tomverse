@@ -57,22 +57,34 @@ export function manualQuotaFromSnapshot(row, now = Date.now()) {
     remaining: row.remaining, unit: row.unit };
 }
 
-async function claudeQuota(provider) {
+/**
+ * One read of the Claude subscription usage endpoint, with what a caller needs
+ * to pace the next one: the HTTP status when there was an answer, and the
+ * server's Retry-After in seconds when it sent one.
+ */
+export async function readClaudeUsage(provider, {
+  fetchUsage = fetch,
+  readCredentials = () => JSON.parse(readFileSync(join(process.env.HOME ?? homedir(), ".claude", ".credentials.json"), "utf8"))
+    .claudeAiOauth,
+  sourceEnv = process.env,
+  now = Date.now(),
+} = {}) {
   let credential = null;
   if (provider.passEnv?.includes("CLAUDE_CODE_OAUTH_TOKEN")) {
-    credential = { accessToken: process.env.CLAUDE_CODE_OAUTH_TOKEN };
+    credential = { accessToken: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN };
   } else {
     try {
-      credential = JSON.parse(readFileSync(join(process.env.HOME ?? homedir(), ".claude", ".credentials.json"), "utf8"))
-        .claudeAiOauth;
+      credential = readCredentials();
     } catch {
-      return unknown;
+      return { quota: unknown, status: null, retryAfterSeconds: null };
     }
   }
   if (!credential?.accessToken ||
-      (Number.isFinite(credential.expiresAt) && credential.expiresAt <= Date.now())) return unknown;
+      (Number.isFinite(credential.expiresAt) && credential.expiresAt <= now)) {
+    return { quota: unknown, status: null, retryAfterSeconds: null };
+  }
   try {
-    const response = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    const response = await fetchUsage("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${credential.accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
@@ -80,11 +92,87 @@ async function claudeQuota(provider) {
       },
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (!response.ok) return unknown;
-    return claudeQuotaFromUsage(await response.json());
+    const retryAfterSeconds = retryAfterSecondsFrom(response.headers?.get?.("retry-after"), now);
+    if (!response.ok) {
+      await response.body?.cancel?.().catch(() => undefined);
+      return { quota: unknown, status: response.status, retryAfterSeconds };
+    }
+    return { quota: claudeQuotaFromUsage(await response.json()), status: response.status, retryAfterSeconds };
   } catch {
-    return unknown;
+    return { quota: unknown, status: null, retryAfterSeconds: null };
   }
+}
+
+/** The longest Retry-After honoured: a day. A larger value would park the probe until a restart. */
+export const RETRY_AFTER_MAX_SECONDS = 24 * 60 * 60;
+
+/** Retry-After as seconds: a delay in seconds or an HTTP date (RFC 9110); null when absent or past. */
+export function retryAfterSecondsFrom(header, now = Date.now()) {
+  if (typeof header !== "string" || header.trim() === "") return null;
+  const value = header.trim();
+  let seconds;
+  if (/^\d+$/.test(value)) {
+    seconds = Number(value);
+  } else {
+    const at = Date.parse(value);
+    if (!Number.isFinite(at)) return null;
+    seconds = Math.ceil((at - now) / 1000);
+  }
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.min(seconds, RETRY_AFTER_MAX_SECONDS);
+}
+
+// The Claude usage endpoint rate-limits hard (HTTP 429), and AMUX reads the
+// same subscription accounts. So a good reading is reused for five minutes;
+// a 429 waits Retry-After or an exponential delay (2, 4, 8 ... up to 30
+// minutes); and while waiting, the last good reading stands for up to 30
+// minutes. Older than that it is unknown -- assignment needs evidence, not a
+// memory. (AMUX's own probe does the same: provider/claude/usage_cache.rs.)
+export const CLAUDE_REFRESH_MS = 5 * 60_000;
+export const CLAUDE_LAST_KNOWN_MAX_MS = 30 * 60_000;
+const CLAUDE_BACKOFF_BASE_MS = 2 * 60_000;
+const CLAUDE_BACKOFF_MAX_MS = 30 * 60_000;
+const claudePacing = new Map();
+
+/**
+ * The Claude quota for one provider, paced as above. `read` is
+ * readClaudeUsage, injectable for tests; `pacing` holds each provider's
+ * record, in memory for the daemon's lifetime.
+ */
+export async function pacedClaudeQuota(provider, { now = Date.now(), read = readClaudeUsage, pacing = claudePacing } = {}) {
+  // Paced per credential, not per provider: two providers on the same login
+  // share one account's rate limit, and must not each spend it.
+  const key = provider.passEnv?.includes("CLAUDE_CODE_OAUTH_TOKEN") ? "claude:env-token" : "claude:credentials-file";
+  const entry = pacing.get(key) ?? { retryAt: 0, rateLimited: 0, lastGood: null, inflight: null };
+  pacing.set(key, entry);
+  const lastKnown = () =>
+    entry.lastGood && now - entry.lastGood.at <= CLAUDE_LAST_KNOWN_MAX_MS ? entry.lastGood.quota : unknown;
+  // probeProviderQuotas asks for every provider at once: a read already on
+  // its way answers every caller on the same credential, so one account is
+  // read once and no answer overwrites another's pacing.
+  if (entry.inflight) return entry.inflight;
+  if (now < entry.retryAt) return lastKnown();
+  entry.inflight = (async () => {
+    const { quota, status, retryAfterSeconds } = await read(provider, { now });
+    if (quota.state !== "unknown") {
+      entry.lastGood = { quota, at: now };
+      entry.rateLimited = 0;
+      entry.retryAt = now + CLAUDE_REFRESH_MS;
+      return quota;
+    }
+    // Only 429s climb the backoff; any other failure retries after a minute
+    // and leaves the 429 count where it was.
+    let delay = 60_000;
+    if (status === 429) {
+      entry.rateLimited += 1;
+      delay = Math.min(CLAUDE_BACKOFF_BASE_MS * 2 ** Math.min(entry.rateLimited - 1, 10), CLAUDE_BACKOFF_MAX_MS);
+    }
+    entry.retryAt = now + Math.max(delay, (retryAfterSeconds ?? 0) * 1000);
+    return lastKnown();
+  })().finally(() => {
+    entry.inflight = null;
+  });
+  return entry.inflight;
 }
 
 function codexQuota(provider) {
@@ -144,7 +232,9 @@ export async function probeProviderQuota(provider, stateDir, now = Date.now()) {
       return unknown;
     }
   }
-  const probes = { claude: claudeQuota, codex: codexQuota, cursor: cursorQuota, copilot: copilotQuota };
+  // Claude paces itself (pacedClaudeQuota); the others share the one-minute cache.
+  if (provider.quotaProbe === "claude") return pacedClaudeQuota(provider, { now });
+  const probes = { codex: codexQuota, cursor: cursorQuota, copilot: copilotQuota };
   if (!Object.hasOwn(probes, provider.quotaProbe)) return unknown;
   const cached = cache.get(provider.id);
   if (cached && now - cached.at < CACHE_MS && now >= cached.at) return cached.result;

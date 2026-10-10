@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { cursorQuota, cursorQuotaFromUsage } from "../tools/review-orchestrator/lib/cursor-quota.mjs";
+import { cursorCreditCentsFromBalance, cursorQuota, cursorQuotaFromUsage } from "../tools/review-orchestrator/lib/cursor-quota.mjs";
 import { copilotQuota, copilotQuotaFromUsage } from "../tools/review-orchestrator/lib/copilot-quota.mjs";
 
 const snapshot = (remainingPercentage, usedRequests = 100 - remainingPercentage) => ({
@@ -24,9 +24,32 @@ test("Cursor current-period account usage blocks an exhausted pool and unrecogni
   assert.deepEqual(cursorQuotaFromUsage({ spendLimitUsage: { individualRemaining: 1000 } }), { state: "unknown" });
 });
 
-test("Cursor probe reads the CLI account token and makes only the account-usage request", async () => {
+test("Cursor credit keeps an exhausted included pool available; no credit pauses it", () => {
+  // The 2026-10-10 account: included $400 used up, bonus used up, $100 of credit grants left.
+  const spent = { planUsage: { totalSpend: 325122, includedSpend: 40000, bonusSpend: 285122, limit: 40000,
+    remainingBonus: false, autoPercentUsed: 100, apiPercentUsed: 100, totalPercentUsed: 100 } };
+  assert.deepEqual(cursorQuotaFromUsage(spent, 10000), { state: "available", remainingPercent: 0, creditUsd: 100 });
+  assert.deepEqual(cursorQuotaFromUsage(spent, 0), { state: "exhausted", remainingPercent: 0, creditUsd: 0 });
+  // A balance that could not be read proves nothing: the exhausted pool stays exhausted.
+  assert.deepEqual(cursorQuotaFromUsage(spent, null), { state: "exhausted", remainingPercent: 0 });
+  // Credit is reported beside a pool that still has room, and changes nothing there.
+  assert.deepEqual(cursorQuotaFromUsage({ planUsage: { totalPercentUsed: 40 } }, 2550),
+    { state: "available", remainingPercent: 60, creditUsd: 25.5 });
+
+  assert.equal(cursorCreditCentsFromBalance({ hasCreditGrants: true, creditBalanceCents: "10000", totalCents: "10000" }), 10000);
+  assert.equal(cursorCreditCentsFromBalance({ creditBalanceCents: 1234 }), 1234);
+  assert.equal(cursorCreditCentsFromBalance({ hasCreditGrants: false }), 0);
+  assert.equal(cursorCreditCentsFromBalance({ creditBalanceCents: "-50" }), 0);
+  for (const unknown of [null, {}, { hasCreditGrants: true }, { creditBalanceCents: "ten" }, { creditBalanceCents: "1e3" },
+    { creditBalanceCents: "99999999999999999999" }, { creditBalanceCents: 1.5 }]) {
+    assert.equal(cursorCreditCentsFromBalance(unknown), null, JSON.stringify(unknown));
+  }
+});
+
+test("Cursor probe reads the CLI account token and makes only the usage and credit-balance requests", async () => {
   const requests = [];
   const provider = { passEnv: ["CURSOR_API_KEY"] };
+  let credit = () => new Response(JSON.stringify({ hasCreditGrants: true, creditBalanceCents: "10000", totalCents: "10000" }));
   const options = { sourceEnv: { HOME: tmpdir(), CURSOR_API_KEY: "fake-key" },
     readCredentials: (path) => {
       assert.equal(path.endsWith(join(process.platform === "win32" ? "Cursor" : "cursor", "auth.json")), true);
@@ -34,21 +57,31 @@ test("Cursor probe reads the CLI account token and makes only the account-usage 
     },
     fetchUsage: async (url, init) => {
       requests.push({ url, init });
+      if (url.endsWith("/GetCreditGrantsBalance")) return credit();
       return new Response(JSON.stringify({ planUsage: { remaining: 0, limit: 2000 } }));
     } };
+  assert.deepEqual(await cursorQuota(provider, options), { state: "available", remainingPercent: 0, creditUsd: 100 });
+  assert.deepEqual(requests.map((request) => request.url), [
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage",
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCreditGrantsBalance",
+  ]);
+  for (const request of requests) {
+    assert.equal(request.init.headers.Authorization, "Bearer fake-token");
+    assert.equal(request.init.body, "{}");
+    assert.equal(request.init.redirect, "error");
+  }
+  // A credit read that fails leaves the exhausted pool exhausted.
+  credit = () => new Response("denied", { status: 403 });
   assert.deepEqual(await cursorQuota(provider, options), { state: "exhausted", remainingPercent: 0 });
-  assert.equal(requests.length, 1);
+  credit = () => { throw new TypeError("fetch failed"); };
+  assert.deepEqual(await cursorQuota(provider, options), { state: "exhausted", remainingPercent: 0 });
+  const before = requests.length;
   const expired = `header.${Buffer.from(JSON.stringify({ exp: 1 })).toString("base64url")}.signature`;
   assert.deepEqual(await cursorQuota(provider, { ...options,
     readCredentials: () => ({ accessToken: expired, apiKey: "fake-key" }) }), { state: "unknown" });
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage");
-  assert.equal(requests[0].init.headers.Authorization, "Bearer fake-token");
-  assert.equal(requests[0].init.body, "{}");
-  assert.equal(requests[0].init.redirect, "error");
   assert.deepEqual(await cursorQuota(provider, { ...options,
     readCredentials: () => ({ accessToken: "fake-token", apiKey: "different-account-key" }) }), { state: "unknown" });
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, before, "no request without a usable token for this account");
   assert.deepEqual(await cursorQuota(provider, { ...options,
     fetchUsage: async () => new Response("denied", { status: 401 }) }), { state: "unknown" });
 });

@@ -98,6 +98,8 @@ function overview(store, config, quotas = null) {
       quota: quotas?.[p.id]?.state ?? "unknown",
       remaining: quotas?.[p.id]?.remaining ?? quotas?.[p.id]?.remainingPercent ?? null,
       quotaUnit: quotas?.[p.id]?.unit ?? (quotas?.[p.id]?.remainingPercent === undefined ? null : "percent"),
+      // Credit left after the included pool (Cursor), shown only when the probe read it.
+      ...(Number.isFinite(quotas?.[p.id]?.creditUsd) ? { creditUsd: quotas[p.id].creditUsd } : {}),
     })),
   };
 }

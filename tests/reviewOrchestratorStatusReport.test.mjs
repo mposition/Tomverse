@@ -356,3 +356,28 @@ test("the sender sends a fresh snapshot, and goes quiet when the daemon stops wr
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a reviewer's credit travels with its quota, only when the probe read it", () => {
+  const providers = [{ id: "cursor", vendor: "xai", enabled: true }];
+  const quota = (value) => buildStatusSnapshot({ jobs: [], providers, load: {}, quotas: { cursor: value }, now: NOW }).providers[0].quota;
+  assert.deepEqual(quota({ state: "available", remainingPercent: 0, creditUsd: 100 }),
+    { state: "available", remaining: 0, unit: "percent", credit: 100 });
+  assert.deepEqual(quota({ state: "exhausted", remainingPercent: 0, creditUsd: 0 }),
+    { state: "exhausted", remaining: 0, unit: "percent", credit: 0 });
+  assert.deepEqual(quota({ state: "available", remainingPercent: 40, creditUsd: 12.345 }).credit, 12.35);
+  // No credit read: no credit key, the shape every earlier sender and app accepts.
+  assert.deepEqual(quota({ state: "exhausted", remainingPercent: 0 }), { state: "exhausted", remaining: 0, unit: "percent" });
+  assert.deepEqual(quota({ state: "unknown", creditUsd: 100 }), { state: "unknown", remaining: null, unit: null });
+
+  const withQuota = (value) => normaliseStatusSnapshot({ ...SNAPSHOT, providers: [{ ...SNAPSHOT.providers[0], quota: value }] });
+  assert.deepEqual(withQuota({ state: "available", remaining: 0, unit: "percent", credit: 100 }).providers[0].quota,
+    { state: "available", remaining: 0, unit: "percent", credit: 100 });
+  for (const bad of [
+    { state: "available", remaining: 0, unit: "percent", credit: -1 },
+    { state: "available", remaining: 0, unit: "percent", credit: "100" },
+    { state: "unknown", remaining: null, unit: null, credit: 5 },
+    { state: "available", remaining: 0, unit: "percent", credit: 2_000_000_000 },
+  ]) {
+    assert.equal(withQuota(bad), null, JSON.stringify(bad));
+  }
+});
