@@ -19,6 +19,7 @@ import {
   agentOfficeReport,
   operatorQueueTotal,
   decisionRoomView,
+  digestLiveDept,
   reviewQuotaView,
   reviewRoomView,
   financeLiveDept,
@@ -38,6 +39,7 @@ import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
   AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DEPTS,
+  AGENT_OFFICE_DIGEST_SENDERS,
   AGENT_OFFICE_TEAM_IDS,
   agentOfficeDept,
   agentOfficeSeatedClothes,
@@ -119,6 +121,14 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
       qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
       finance: financeLiveDept(live.finance, live.readAt, m.real.finance),
       engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
+      digest: digestLiveDept(
+        live.digest,
+        live.readAt,
+        m.real.digest,
+        Object.fromEntries(
+          Object.entries(AGENT_OFFICE_DIGEST_SENDERS).map(([agentKey, deptId]) => [agentKey, m.depts[deptId].name])
+        )
+      ),
     }),
     [live, m]
   );

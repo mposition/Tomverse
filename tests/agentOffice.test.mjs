@@ -16,6 +16,7 @@ import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
   AGENT_OFFICE_DECISION_RECORD_HREF,
   AGENT_OFFICE_DECLARED_RECORD_HREFS,
+  AGENT_OFFICE_DIGEST_SENDERS,
   AGENT_OFFICE_WORKER_COLORS,
   AGENT_OFFICE_WORKER_SKINS,
   agentOfficeSeatedClothes,
@@ -25,6 +26,7 @@ import { AgentOffice, PHASE, PHASE_COUNT } from "../lib/agentOffice/sim.ts";
 import {
   amuxRoomView,
   decisionRoomView,
+  digestLiveDept,
   engineeringLiveDept,
   financeLiveDept,
   financeTone,
@@ -42,6 +44,8 @@ import {
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
 import { AGENT_OFFICE_DECISION_WINDOW_MS, agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
+import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "../lib/agentOfficeDigestState.ts";
+import { AGENT_DIGEST_AGENT_KEYS } from "../lib/agentDigestContract.ts";
 import { agentOfficeEngineeringState } from "../lib/agentOfficeEngineeringState.ts";
 import { agentOfficeFinanceState } from "../lib/agentOfficeFinanceState.ts";
 import { agentOfficeQaState } from "../lib/agentOfficeQaState.ts";
@@ -168,11 +172,15 @@ test("a record link is kept only while the console has its page and tab", () => 
     consoleHasRecord("/admin/amux-execution?tab=decision-maker") ? "/admin/amux-execution?tab=decision-maker" : null
   );
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  // A room's header links its record: the AMUX room, the Decision Maker, and a
+  // team room only while it reads a live record -- a link is never offered for
+  // a room the office shows as waiting on one.
+  assert.match(world, /const liveDept = real \? null : engine\.liveDept\(room\.id\);/);
   assert.match(
     world,
-    /const recordHref = isAmux \? AGENT_OFFICE_AMUX_RECORD_HREF : isDecision \? AGENT_OFFICE_DECISION_RECORD_HREF : null;/
+    /const recordHref = isAmux\s*\? AGENT_OFFICE_AMUX_RECORD_HREF\s*: isDecision\s*\? AGENT_OFFICE_DECISION_RECORD_HREF\s*: liveDept\s*\? \(agentOfficeDept\(room\.id\)\?\.recordHref \?\? null\)\s*: null;/
   );
-  assert.match(world, /\{real && recordHref \? \(/);
+  assert.match(world, /\{recordHref \? \(/);
 });
 
 test("the catalog names every room, person and phase in both languages", () => {
@@ -2298,4 +2306,92 @@ test("the approval room is now the Decision Maker room, drawn from its record", 
     // It promises nothing a proposal-only Decision Maker does not do.
     assert.doesNotMatch(JSON.stringify(copy.real.decision, (key, value) => (typeof value === "function" ? value(1, 2, 3, 4) : value)), /approv|승인|decides|결정합니다/i);
   }
+});
+
+// ── Digest desk ───────────────────────────────────────────────────────────
+
+test("the digest desk counts each agent's digests and names the newest, never their content", () => {
+  const state = agentOfficeDigestState({
+    recent: [
+      { agentKey: "qa-release", count: 2 },
+      { agentKey: "billing-finance-ops", count: 1 },
+    ],
+    latest: [
+      { agentKey: "qa-release", lastAt: at("2026-10-09T21:00:00Z") },
+      { agentKey: "billing-finance-ops", lastAt: at("2026-10-09T23:30:00Z") },
+    ],
+  });
+  assert.deepEqual(state, {
+    kind: "observed",
+    agents: [
+      { agentKey: "qa-release", recent: 2, lastAt: "2026-10-09T21:00:00.000Z" },
+      { agentKey: "billing-finance-ops", recent: 1, lastAt: "2026-10-09T23:30:00.000Z" },
+      // An agent that has never sent one is still listed, at zero.
+      { agentKey: "sre-ops", recent: 0, lastAt: null },
+    ],
+  });
+  assert.equal(AGENT_OFFICE_DIGEST_WINDOW_MS, 24 * 60 * 60 * 1000);
+  // Every sender the store accepts has a room to be named by.
+  assert.deepEqual(Object.keys(AGENT_OFFICE_DIGEST_SENDERS).sort(), [...AGENT_DIGEST_AGENT_KEYS].sort());
+
+  const copy = adminAgentOfficeMessages.ko.real.digest;
+  const names = Object.fromEntries(
+    Object.entries(AGENT_OFFICE_DIGEST_SENDERS).map(([key, dept]) => [key, adminAgentOfficeMessages.ko.depts[dept].name])
+  );
+  const readAt = "2026-10-10T01:05:00.000Z";
+  const desk = digestLiveDept(state, readAt, copy, names);
+  assert.equal(desk.status, "done");
+  assert.equal(desk.badge, "수신 중");
+  assert.equal(desk.line, `최근 digest · ${names["billing-finance-ops"]} · 10-10 09:30 AEST`);
+  assert.equal(
+    desk.detail,
+    `${names["qa-release"]} 24시간 2건 · ${names["billing-finance-ops"]} 24시간 1건 · ${names["sre-ops"]} 24시간 0건 · 읽은 시각 10-10 11:05 AEST`
+  );
+  // Nothing in 24 hours is quiet, not a fault: an agent's lateness is its own room's call.
+  const quiet = digestLiveDept(
+    { kind: "observed", agents: state.agents.map((agent) => ({ ...agent, recent: 0 })) },
+    readAt,
+    copy,
+    names
+  );
+  assert.equal(quiet.status, "waiting");
+  assert.equal(quiet.badge, "24시간 수신 없음");
+  assert.equal(quiet.line, desk.line, "the newest digest is still named");
+  const never = digestLiveDept(agentOfficeDigestState({ recent: [], latest: [] }), readAt, copy, names);
+  assert.equal(never.line, "아직 받은 digest 없음");
+  assert.deepEqual(digestLiveDept({ kind: "unread" }, readAt, copy, names), {
+    status: "attention",
+    badge: "읽기 실패",
+    line: "digest를 읽지 못함",
+    detail: "읽은 시각 10-10 11:05 AEST",
+  });
+
+  // A new digest changes the line, so the desk's lead announces it once.
+  const office = new AgentOffice(adminAgentOfficeMessages.ko, { digest: desk });
+  const said = () => office.snapshot().chat.filter((line) => line.text.startsWith("🔔")).map((line) => line.text);
+  office.setLive({ digest: { ...desk, detail: "읽은 시각 10-10 11:06 AEST" } });
+  assert.deepEqual(said(), [], "a new read time alone is not news");
+  const next = digestLiveDept(
+    agentOfficeDigestState({
+      recent: [{ agentKey: "sre-ops", count: 1 }],
+      latest: [{ agentKey: "sre-ops", lastAt: at("2026-10-10T01:10:00Z") }],
+    }),
+    readAt,
+    copy,
+    names
+  );
+  office.setLive({ digest: next });
+  assert.deepEqual(said(), [`🔔 ${office.roomName("digest")} · 최근 digest · ${names["sre-ops"]} · 10-10 11:10 AEST`]);
+
+  // The read selects counts and times only.
+  const digest = readFunction("readDigest");
+  assert.match(digest, /agentDigestItem\.groupBy\(\{ by: \["agentKey"\], where: \{ createdAt: \{ gte: since \} \}, _count: \{ _all: true \} \}\)/);
+  assert.match(digest, /agentDigestItem\.groupBy\(\{ by: \["agentKey"\], _max: \{ createdAt: true \} \}\)/);
+  assert.doesNotMatch(digest, /payload|"kind"|kind: true|idempotencyKey|findMany|select:/);
+  assert.match(digest, /read: "agent_digests"/);
+  assert.match(readFileSync("lib/agentOfficeLiveRead.ts", "utf8"), /readDigest\(now\),/);
+  // The desk is a live room in the panel, linked to the digest screen through its roster entry.
+  const panel = readFileSync("components/admin/AgentOfficePanel.tsx", "utf8");
+  assert.match(panel, /digest: digestLiveDept\(\s*live\.digest,/);
+  assert.equal(AGENT_OFFICE_DECLARED_RECORD_HREFS.digest, "/admin/agent-digests");
 });

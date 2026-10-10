@@ -16,6 +16,7 @@ import type {
 import {
   AGENT_OFFICE_AMUX_RECORD_HREF,
   AGENT_OFFICE_DECISION_RECORD_HREF,
+  agentOfficeDept,
   agentOfficeSeatedClothes,
   type AgentOfficeSeatedRoom,
 } from "@/lib/agentOffice/roster";
@@ -429,7 +430,17 @@ export default function AgentOfficeWorld({
             const isReview = room.kind === "review";
             const isDecision = room.kind === "decision";
             const real = isAmux ? amux : isReview ? review : isDecision ? decision : null;
-            const recordHref = isAmux ? AGENT_OFFICE_AMUX_RECORD_HREF : isDecision ? AGENT_OFFICE_DECISION_RECORD_HREF : null;
+            const liveDept = real ? null : engine.liveDept(room.id);
+            // Every room that reads a record links it: a team room while it is live.
+            const recordHref = isAmux
+              ? AGENT_OFFICE_AMUX_RECORD_HREF
+              : isDecision
+                ? AGENT_OFFICE_DECISION_RECORD_HREF
+                : liveDept
+                  ? (agentOfficeDept(room.id)?.recordHref ?? null)
+                  : null;
+            const recordLabel = isAmux ? m.rooms.amuxRecord : isDecision ? m.rooms.decisionRecord : m.rooms.recordOf(roomName(room.id));
+            const recordTitle = real ? real.summary : (liveDept?.line ?? "");
             const status = real ? real.status : snap.deptStatus[room.id];
             return (
               <div
@@ -454,12 +465,12 @@ export default function AgentOfficeWorld({
                       title={real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
                     />
                   ) : null}
-                  {real && recordHref ? (
+                  {recordHref ? (
                     <Link
                       href={recordHref}
                       className={cx("rm-link")}
-                      aria-label={isAmux ? m.rooms.amuxRecord : m.rooms.decisionRecord}
-                      title={real.summary}
+                      aria-label={recordLabel}
+                      title={recordTitle}
                       data-testid={`agent-office-${room.id}-record`}
                     >
                       ↗
