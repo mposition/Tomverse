@@ -4106,6 +4106,13 @@ async function handleChatPost(
         // The provider boundary. Everything above it is ours; everything from
         // here on may legitimately be the provider's fault, and the record this
         // mints is what says so to the failure path below.
+        if (req.signal.aborted) {
+            throw req.signal.reason ?? new DOMException(
+                "request aborted before provider dispatch",
+                "AbortError"
+            );
+        }
+        const initialAttemptAbortController = new AbortController();
         const result = await beginProviderCall(
             modelConfig.provider,
             modelConfig.id,
@@ -4116,6 +4123,14 @@ async function handleChatPost(
                 streamText({
                     model: activeModel,
                     messages: sdkMessages,
+                    // The request signal closes the provider promptly when the
+                    // client goes away. The attempt-local controller is kept
+                    // separately so replacing or timing out one attempt never
+                    // aborts a later fallback attempt.
+                    abortSignal: AbortSignal.any([
+                        req.signal,
+                        initialAttemptAbortController.signal,
+                    ]),
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
                     maxOutputTokens: requestMaxOutputTokens,
                     maxRetries: modelConfig.provider === "zhipu" ? 0 : undefined,
@@ -4170,6 +4185,7 @@ async function handleChatPost(
             modelId: modelConfig.id,
             provider: modelConfig.provider,
             reasoning: modelConfig.reasoning,
+            abortController: initialAttemptAbortController,
             stream: result,
             reader: faultedReader(result.textStream.getReader(), injectedFault, 0),
             // Perplexity buffers response bodies under this key and consuming
@@ -4272,7 +4288,12 @@ async function handleChatPost(
         let released = false;
         let sourceCancelled = false;
         let usageSettlement: Promise<void> | null = null;
+        let turnCancellation: Promise<void> | null = null;
+        let completionCommitted = false;
         let streamState: "open" | "closed" | "cancelled" = "open";
+        let detachRequestAbortListener: () => void = () => {};
+        let fallbackTransition: Promise<void> | null = null;
+        let pendingFallbackAbortController: AbortController | null = null;
         /**
          * Whether a token the user can see has reached the response stream.
          *
@@ -4644,6 +4665,7 @@ async function handleChatPost(
         const release = async () => {
             if (released) return;
             released = true;
+            detachRequestAbortListener();
             stopHeartbeat();
             // Belt and braces: every terminal path already stops these, and
             // every terminal path also funnels through here. A keepalive
@@ -4685,6 +4707,11 @@ async function handleChatPost(
             }
         };
         const cancelSourceSafely = async (reason?: unknown) => {
+            // AI SDK text streams are tee branches. Cancelling the reader only
+            // cancels that branch; the provider receives cancellation through
+            // the signal passed to streamText. Abort it first, then release the
+            // branch, so no provider work remains behind a settled turn.
+            dispatched.abortController.abort(reason);
             if (sourceCancelled) return;
             sourceCancelled = true;
             try {
@@ -4699,6 +4726,45 @@ async function handleChatPost(
                     );
                 }
             }
+        };
+        const cancelTurnSafely = (reason?: unknown) => {
+            // This state transition and watchdog stop are deliberately
+            // synchronous. A request abort must close the completion path
+            // before an in-flight provider read can resolve and persist an
+            // assistant Message.
+            if (completionCommitted || streamState === "closed") {
+                return Promise.resolve();
+            }
+            streamState = "cancelled";
+            stopFirstTokenWatch();
+            // Provider abort must not wait for the fallback bookkeeping below.
+            // During that transition `dispatched` still names the primary, so
+            // abort both the active attempt and the candidate that may already
+            // have crossed streamText's provider boundary.
+            dispatched.abortController.abort(reason);
+            pendingFallbackAbortController?.abort(reason);
+            turnCancellation ??= (async () => {
+                // Once a fallback provider exists, the primary close and the
+                // active-attempt swap are one ownership transition. Let it
+                // finish before reader cancellation and settlement choose the
+                // attempt they terminalize. The controllers above have already
+                // stopped provider work, so this wait delays no provider abort.
+                const transition = fallbackTransition;
+                if (transition) await transition;
+                await cancelSourceSafely(reason);
+                await settleSafely("cancelled", earlyCancelSearchFields);
+                await releaseSafely();
+            })();
+            return turnCancellation;
+        };
+        const finishCancellationBeforeCompletion = async () => {
+            if (streamState === "open") return false;
+            if (streamState === "cancelled") {
+                await cancelTurnSafely(
+                    req.signal.reason ?? "response cancelled during completion"
+                );
+            }
+            return true;
         };
         const enqueueSafely = (
             controller: ReadableStreamDefaultController<string>,
@@ -4928,9 +4994,10 @@ async function handleChatPost(
          */
         let lastStreamFailure: StreamFailureClassification | null = null;
 
-        const attemptFallback = async (
+        const attemptFallbackWithinTransition = async (
             controller: ReadableStreamDefaultController<string>,
-            error: unknown
+            error: unknown,
+            nextAttemptAbortController: AbortController
         ): Promise<boolean> => {
             const classified = classifyStreamFailure({
                 error,
@@ -5125,7 +5192,7 @@ async function handleChatPost(
             // *after* the dispatch succeeds -- see below.
             const failing = dispatchRecord;
             let nextRecord: DispatchInstrumentation;
-            let nextStream: Awaited<ReturnType<typeof streamText>>;
+            let nextStream: Awaited<ReturnType<typeof streamText>> | null = null;
             try {
                 // A second attempt on the *same* run, not a second run. One
                 // logical response is one RoutingRun with its attempts hanging
@@ -5161,14 +5228,40 @@ async function handleChatPost(
                     plannerVersion: "none",
                     adapterVersion: "vercel-ai-sdk-streamText-v1",
                 });
+                if (req.signal.aborted || streamState !== "open") {
+                    await abandonFallback("request_aborted_before_dispatch");
+                    // Cancellation owns the primary terminal from here. Tell
+                    // the outer failure path the turn was handled so it cannot
+                    // race a second, failed settlement against it.
+                    return true;
+                }
                 nextStream = await streamText({
                     model: plan.activeModel,
                     messages: sdkMessages,
                     ...(sdkInstructions ? { instructions: sdkInstructions } : {}),
+                    abortSignal: AbortSignal.any([
+                        req.signal,
+                        nextAttemptAbortController.signal,
+                    ]),
                     ...attemptDispatchOptions(plan),
                 });
                 await recordDispatched(nextRecord);
             } catch (dispatchError) {
+                nextAttemptAbortController.abort(dispatchError);
+                if (nextStream) {
+                    try {
+                        await nextStream.textStream.cancel(dispatchError);
+                    } catch (cancelError) {
+                        if (!isClosedStreamControllerError(cancelError)) {
+                            logRequestError(
+                                "ai_source_stream_cancel_failed",
+                                traceId,
+                                cancelError,
+                                plan.modelId
+                            );
+                        }
+                    }
+                }
                 // The turn ends on the primary's failure, which is what the
                 // caller was already about to do. Nothing has been shown and
                 // nothing about the response has changed.
@@ -5178,15 +5271,12 @@ async function handleChatPost(
                     dispatchError,
                     plan.modelId
                 );
-                return abandonFallback("dispatch_failed");
+                await abandonFallback("dispatch_failed");
+                return streamState !== "open" || req.signal.aborted;
             }
-
-            // §7: the client is told before the next model's first token, and
-            // told a model id and nothing else. Out-of-band, so it is not a
-            // visible token and does not close the door it just opened.
-            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
-                await nextStream.textStream.getReader().cancel("client is gone");
-                return abandonFallback("client_gone_before_signal");
+            if (!nextStream) {
+                await abandonFallback("dispatch_failed");
+                return streamState !== "open" || req.signal.aborted;
             }
 
             // From here the swap is committed, and only from here.
@@ -5263,8 +5353,9 @@ async function handleChatPost(
             // moment a different source is installed. Latching it here would
             // leave a later disconnect with nothing to cancel, and the
             // *fallback's* provider stream would stay open and billing after
-            // the user had gone. Cancelling before the next dispatch also means
-            // a dispatch that fails leaves nothing behind.
+            // the user had gone. The next attempt has its own controller, so
+            // aborting this one cannot cancel the replacement.
+            dispatched.abortController.abort("replaced by a fallback attempt");
             try {
                 await dispatched.reader.cancel(
                     "replaced by a fallback attempt"
@@ -5302,6 +5393,7 @@ async function handleChatPost(
             dispatched.modelId = plan.modelId;
             dispatched.provider = plan.provider;
             dispatched.reasoning = plan.modelConfig.reasoning;
+            dispatched.abortController = nextAttemptAbortController;
             dispatched.stream = nextStream;
             dispatched.reader = faultedReader(
                 nextStream.textStream.getReader(),
@@ -5337,6 +5429,18 @@ async function handleChatPost(
             // The next attempt captures under its own key, so the memo from
             // the one it replaced must not answer for it.
             perplexityCapture = null;
+            // docs/policy/tomverse-chat-routing.md §7: the client is told before the next model's first token, and
+            // told a model id and nothing else. The fallback stream is not read
+            // until this function returns, so swapping ownership first cannot
+            // let a visible fallback token overtake this signal. If the client
+            // left during the swap, cancellation now owns the dispatched
+            // fallback attempt and settles it instead of abandoning a hold for
+            // a provider call that already happened.
+            if (streamState !== "open") return true;
+            if (!enqueueSafely(controller, buildRoutingRetryChunk(plan.modelId))) {
+                void cancelTurnSafely("client is gone before fallback signal");
+                return true;
+            }
             console.info(JSON.stringify({
                 event: "chat_auto_fallback_dispatched",
                 traceId,
@@ -5349,7 +5453,77 @@ async function handleChatPost(
             }));
             return true;
         };
+        const attemptFallback = async (
+            controller: ReadableStreamDefaultController<string>,
+            error: unknown
+        ): Promise<boolean> => {
+            const nextAttemptAbortController = new AbortController();
+            let finishTransition!: () => void;
+            const transition = new Promise<void>((resolve) => {
+                finishTransition = resolve;
+            });
+            fallbackTransition = transition;
+            pendingFallbackAbortController = nextAttemptAbortController;
+            try {
+                return await attemptFallbackWithinTransition(
+                    controller,
+                    error,
+                    nextAttemptAbortController
+                );
+            } finally {
+                if (
+                    pendingFallbackAbortController ===
+                    nextAttemptAbortController
+                ) {
+                    pendingFallbackAbortController = null;
+                }
+                finishTransition();
+                if (fallbackTransition === transition) {
+                    fallbackTransition = null;
+                }
+            }
+        };
+        const onRequestAbort = () => {
+            const cancellation = cancelTurnSafely(
+                req.signal.reason ?? "request aborted"
+            );
+            // Unlike response.body.cancel(), an aborted request does not ask
+            // this userland ReadableStream to close. End it explicitly after
+            // the synchronous cancelled transition so a pending downstream
+            // read cannot keep pulling an already-terminal turn.
+            if (streamController) {
+                try {
+                    streamController.close();
+                } catch (error) {
+                    if (!isClosedStreamControllerError(error)) {
+                        logRequestError(
+                            "chat_response_stream_close_failed",
+                            traceId,
+                            error,
+                            dispatched.modelId
+                        );
+                    }
+                }
+            }
+            void cancellation.catch((error) => {
+                logRequestError(
+                    "chat_request_abort_cleanup_failed",
+                    traceId,
+                    error,
+                    dispatched.modelId
+                );
+            });
+        };
+        req.signal.addEventListener("abort", onRequestAbort, { once: true });
+        detachRequestAbortListener = () => {
+            req.signal.removeEventListener("abort", onRequestAbort);
+        };
+        if (req.signal.aborted) onRequestAbort();
         const protectedStream = new ReadableStream<string>({
+            start(controller) {
+                streamController = controller;
+                if (streamState !== "open") controller.close();
+            },
             async pull(controller) {
                 if (streamState !== "open") return;
                 streamController = controller;
@@ -5378,6 +5552,7 @@ async function handleChatPost(
                             dispatched.stream.content,
                             dispatched.stream.providerMetadata,
                         ] as const);
+                        if (await finishCancellationBeforeCompletion()) return;
                         const [
                             responseResult,
                             usageResult,
@@ -5446,6 +5621,7 @@ async function handleChatPost(
                                 );
                             }
                         }
+                        if (await finishCancellationBeforeCompletion()) return;
 
                         if (completionError) {
                             logRequestError(
@@ -5464,6 +5640,7 @@ async function handleChatPost(
                         // point at. Every other provider is unaffected.
                         const perplexitySearchCitations =
                             (await takePerplexityCapture())?.search?.citations;
+                        if (await finishCancellationBeforeCompletion()) return;
                         // What this turn's own executor counted and collected.
                         // Read once, here, so the citations, the executed flag,
                         // the surcharge refund and the settled backend cost all
@@ -5564,11 +5741,21 @@ async function handleChatPost(
                         const durableFinalCheckpoint = durableCheckpointWriter
                             ? await durableCheckpointWriter.flush(generatedText)
                             : null;
+                        if (await finishCancellationBeforeCompletion()) return;
                         if (durableAttempt && durableFinalCheckpoint) {
                             durableAttempt.revision = durableFinalCheckpoint.revision;
                             durableAttempt.partialContent =
                                 durableFinalCheckpoint.partialContent;
                         }
+
+                        // From this point the completed settlement owns the
+                        // turn. The provider has ended and the durable final
+                        // checkpoint is fixed; a later transport close must not
+                        // race that atomic settlement into `cancelled` or cause
+                        // a second terminal writer. Abort accepted before this
+                        // line is handled by the guards above.
+                        completionCommitted = true;
+                        detachRequestAbortListener();
 
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
@@ -5993,9 +6180,7 @@ async function handleChatPost(
                     visibleTokenEmitted = true;
                     stopFirstTokenWatch();
                     if (!enqueueSafely(controller, value)) {
-                        await cancelSourceSafely("response stream is no longer open");
-                        await settleSafely("cancelled", earlyCancelSearchFields);
-                        await releaseSafely();
+                        await cancelTurnSafely("response stream is no longer open");
                         return;
                     }
                     // After the enqueue, not before it: a chunk the closed
@@ -6021,10 +6206,7 @@ async function handleChatPost(
                                 dispatched.modelId
                             );
                         }
-                        streamState = "cancelled";
-                        await cancelSourceSafely(error);
-                        await settleSafely("cancelled", earlyCancelSearchFields);
-                        await releaseSafely();
+                        await cancelTurnSafely(error);
                         return;
                     }
                     const errorMetadata = safeErrorMetadata(error);
@@ -6130,11 +6312,7 @@ async function handleChatPost(
                 }
             },
             async cancel(reason) {
-                streamState = "cancelled";
-                stopFirstTokenWatch();
-                await cancelSourceSafely(reason);
-                await settleSafely("cancelled", earlyCancelSearchFields);
-                await releaseSafely();
+                await cancelTurnSafely(reason);
             },
         });
 
