@@ -1407,6 +1407,19 @@ AMUX worker의 질문에 답 제안을 만드는 Decision Maker(DM)의 판정·�
   전에는 어떤 버튼도 풀지 않습니다. 다시 읽기에 실패하면 상태를 표시하지 않고 "다시 읽기"만
   남깁니다 — 확인되지 않은 상태 위에서 같은 변경을 다시 보내 latch를 풀 수 없게 하기 위해서입니다. 탭에
   badge는 없습니다.
+- **S1f3(라우팅 route)**: `app/api/internal/amux/decision-maker/requests/route.ts`,
+  `lib/amux/dbBoundary.ts`의 `decisionMakerRouting`(상한 12),
+  `tests/server-contract/amux-decision-maker-routing-route.test.ts`,
+  `tests/server-contract/amux-decision-maker-routing-route-budget.test.ts`. bridge가 부를 판정 route이며
+  **`TOMVERSE_AMUX_DM_ROUTING=enabled`가 아니면 body를 읽기 전에 409 `dm_routing_disabled`입니다** — 이
+  route를 부르는 bridge 경로가 S2(docs/policy/amux-decision-maker.md §12)이므로, 그 승인 전에는 스위치와
+  상관없이 요청 원장에 아무것도 쓰지 않습니다. 판정은 body store의
+  `recordDecisionMakerRequestWithCardText()` 하나이고(route는 인증·body·key ring·예산·경계만), 같은 (카드,
+  질문 revision)은 기존 요청을 돌려주므로 결과 불명 뒤 같은 질문을 다시 보내는 것은 조회입니다. key ring
+  오류는 DB에 닿기 전에 503이며 로그에는 코드만 남깁니다. 응답과 로그에 카드 문구·digest·감사 id는
+  없습니다. **경계 상한 12는 라우팅의 가장 긴 경우(무결성 키, DM으로 가는 새 질문과 그 카드 본문) +
+  setup + fence와 같고**, `tests/amuxDecisionMakerBody.test.mjs`가 그 셈을, body DB 테스트가 하나 줄인
+  상한의 거부를 고정합니다. bridge·DM 호출은 없습니다.
 
 # AI Review (교차검토) 품질과 M5
 
