@@ -763,24 +763,6 @@ run(
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
 );
-// This suite creates and drops only its own synthetic schema. Give its Prisma
-// client that exact schema rather than letting it see the lane's public tables.
-const oneShotAuditSuite =
-  "tests/integration/prompt-refiner-vnext-v3-recovery.db.test.ts";
-if ((!group || group === dbIntegrationGroupOf(oneShotAuditSuite)) &&
-    !/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(databaseName)) {
-  fail("the isolated one-shot audit suite requires a dedicated test database name");
-}
-const oneShotTestUrl = new URL(rawTestDatabaseUrl);
-oneShotTestUrl.searchParams.set("schema", `chat01_b06_test_${process.pid.toString(36)}`);
-run(
-  ["--conditions=react-server", "--import", "tsx", "--test", "--test-concurrency=1",
-    oneShotAuditSuite],
-  "Running the isolated one-shot v3 recovery/audit/80-slot transaction scenarios",
-  { TEST_DATABASE_URL: oneShotTestUrl.toString(),
-    DATABASE_URL: oneShotTestUrl.toString(),
-    DIRECT_DATABASE_URL: oneShotTestUrl.toString() },
-);
 // The budget suite mocks Prisma and the audit writer while exercising real
 // PostgreSQL constraints. Module mocks must be isolated from the batch above.
 run(

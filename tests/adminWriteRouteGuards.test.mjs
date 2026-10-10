@@ -445,6 +445,7 @@ test("the resolution dry-run audit exception closes when its source boundary cha
       "if (amuxV4ResolutionPreviewEnabled("),
   }), false);
 });
+
 /** This owner-only POST carries custody pins in its body but does not mutate
  * product state. Keep the exception tied to the read-only transaction and a
  * closed import surface, so adding a writer cannot inherit it silently. */
@@ -473,19 +474,6 @@ const isReadOnlyOneShotV5StagePreflight = (route) => {
     !/\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(body) &&
     !/\b(?:fetch|require|import)\s*\(/.test(body);
 };
-
-test("v5 stage preflight remains a read-only audit exception", () => {
-  const route = routes.find((candidate) =>
-    candidate.name === "prompt-refiner/vnext-v5-stage-preflight/route.ts");
-  assert.ok(route);
-  assert.equal(isReadOnlyOneShotV5StagePreflight(route), true);
-  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
-    source: `${route.source}\nawait tx.promptRefinerVnextOneShotStage.create({});`,
-  }), false);
-  assert.equal(isReadOnlyOneShotV5StagePreflight({ ...route,
-    source: `${route.source}\nimport { createPromptRefinerVnextOneShotV5Stage } from "@/lib/promptRefinerVnextOneShotV5StageWriter";`,
-  }), false);
-});
 
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(

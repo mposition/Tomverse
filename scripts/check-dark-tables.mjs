@@ -24,6 +24,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+    PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS,
+    promptRefinerProductLimitedDarkAccessPermitted,
+} from "./prompt-refiner-product-limited-dark-access.mjs";
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 
 /** The Prisma delegate names, and the table names raw SQL would use. */
@@ -67,12 +72,18 @@ const LIMITED_DARK_ACCESS = {
         "lib/promptRefinerVnextOneShotSlotConsumption.ts",
         "lib/promptRefinerVnextOneShotStageReadback.ts",
         "lib/promptRefinerVnextOneShotStageWriter.ts",
+        ...PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS
+            .filter((entry) => entry.tables.includes("PromptRefinerVnextOneShotStage"))
+            .map((entry) => entry.file),
     ],
     PromptRefinerVnextOneShotSlot: [
         "lib/promptRefinerVnextOneShotOutcomeRecovery.ts",
         "lib/promptRefinerVnextOneShotSlotConsumption.ts",
         "lib/promptRefinerVnextOneShotStageReadback.ts",
         "lib/promptRefinerVnextOneShotStageWriter.ts",
+        ...PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS
+            .filter((entry) => entry.tables.includes("PromptRefinerVnextOneShotSlot"))
+            .map((entry) => entry.file),
     ],
 };
 
@@ -283,7 +294,19 @@ for (const file of files) {
     const normalised = file.split("\\").join("/");
     for (const table of DARK_TABLES) {
         const writers = LIMITED_DARK_ACCESS[table] ?? [];
-        if (writers.includes(normalised)) continue;
+        if (writers.includes(normalised)) {
+            const productRead = promptRefinerProductLimitedDarkAccessPermitted({
+                file: normalised,
+                table,
+                source,
+            });
+            if (productRead === false) {
+                problems.push(
+                    `${normalised}: reviewed source hash or table scope changed for ${table}`
+                );
+            }
+            continue;
+        }
         const delegate = table.charAt(0).toLowerCase() + table.slice(1);
         // `prisma.modelDeployment`, `tx.modelDeployment`, `client.modelDeployment`
         const dotted = new RegExp(`\\.\\s*${delegate}\\s*\\.`);
