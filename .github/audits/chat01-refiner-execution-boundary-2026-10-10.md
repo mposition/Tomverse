@@ -282,7 +282,25 @@ audit failure로 중단한다. 유효 수명 안에서 정산 후 receipt cleanu
 UTC·Brisbane·Los Angeles DB timezone에서 이를 검증했다. 새로운 grace 기간,
 묵시적 재호출, unknown 비용의 release 또는 자동 resume는 추가하지 않았다.
 
-통합 소스의 관련 검증과 새 재검토 결과는 다음 단계에서 실제 결과대로 기록한다.
+최신 develop `86f5c924f`를 충돌 없이 통합해 Router application provenance,
+failed research-row CHECK와 bounded AMUX diagnostics를 보존했다. 통합 소스의
+Chat execution 80/80, 제품 server 42/42 및 client 23/23, 실제 제품 PostgreSQL
+34/34와 Router provenance PostgreSQL 39/39 및 unit 40/40이 통과했다.
+protected writer/deployment binding/legacy proposal 36/36, full lint, security
+196개와 필수/readiness 정적 검사 13개도 통과했다. 새 DB 테스트의 정규식 target와
+반환 타입 오류 두 건을 수정한 뒤 8GB typecheck와 실제 제품 DB 34/34를 재실행해
+통과했다. 중간 오류·기본 4GB OOM과 잘못 적은 검사 script 이름 두 개의 실행도
+보존했으며, 정적 검사는 package.json의 실제 script로 수정해 실행한 결과다.
+
+local-only PostgreSQL 17.10에 274개 migration이 적용됐다. 제품 migration 다섯
+개의 source/applied checksum이 모두 일치하고, 별도로 migration한 scratch와
+3,967 columns·1,140 indexes·1,705 constraints·245 routines·269 triggers·1
+extension이 동일하다. 이 기록은 합성 DB 검증이며 실제 staging 비용이나
+제품 활성화의 증거가 아니다. 새 재검토 결과는 완료된 현재 commit에 따로 기록한다.
+production build도 통과했다. build는 통합 runtime `d293a0036` 위에서 최종
+테스트 수정까지 포함한 working tree로 실행했으며, 다음 commit의 추가 delta는
+테스트 타입 수정과 이 감사 기록뿐이다. 기존 tracing 경고와 자격증명 없는
+prerender의 auth/landing 진단은 보존하며 실제 인증 통과로 해석하지 않는다.
 staging의 다른 릴리스 후보 pin·빌드·배포는 변경하지 않았다. 이 수정과 정책 예외는
 제품 활성 배포 또는 Auto Router 세 출시 판정의 증거를 대신하지 않는다.
 

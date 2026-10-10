@@ -88,7 +88,7 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
           AND conname = 'PromptRefinerAutoBudgetHold_status_check'`);
       assert.equal(transitionShape.rowCount, 1);
       assert.match(transitionShape.rows[0].definition as string,
-        /status = 'dispatching'::text.*"dispatchedAt" IS NOT NULL/s,
+        /status = 'dispatching'::text[\s\S]*"dispatchedAt" IS NOT NULL/,
         "the production catalog requires a timestamp for dispatching rows");
 
       const query = async (strings: TemplateStringsArray, values: unknown[]) => {
@@ -232,9 +232,11 @@ test("product Auto budget transitions preserve exact audited Brisbane windows",
 
       await new Promise(resolveTimeout => setTimeout(resolveTimeout,
         contract.PROMPT_REFINER_PRODUCT_TIMEOUT_MS + 50));
-      const overdue = await inTransaction(transaction =>
+      const overdue = await inTransaction<{
+        readonly reasonCode: string | null;
+      }>(async transaction => await
         guard.evaluatePromptRefinerProductAutoGuardInTransaction(
-          transaction as never));
+          transaction as never) as { readonly reasonCode: string | null });
       assert.equal(overdue.reasonCode, "unknown_dispatch_or_cost",
         "the guard observes the DB-stamped actual writer after its deadline");
       await authority.settleVerifiedBilled(raw({ kind: "verified_billed" as const,
