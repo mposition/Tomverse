@@ -117,13 +117,12 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   // navigation brings a fresh server reading, and the engine takes it.
   const liveDepts = useMemo<Record<string, AgentOfficeLiveDept>>(
     () => ({
-      research: researchLiveDept(live.research, live.readAt, m.real.research),
-      qa: qaLiveDept(live.qa, live.readAt, m.real.qa),
-      finance: financeLiveDept(live.finance, live.readAt, m.real.finance),
-      engineering: engineeringLiveDept(live.engineering, live.readAt, m.real.engineering),
+      research: researchLiveDept(live.research, m.real.research),
+      qa: qaLiveDept(live.qa, m.real.qa),
+      finance: financeLiveDept(live.finance, m.real.finance),
+      engineering: engineeringLiveDept(live.engineering, m.real.engineering),
       digest: digestLiveDept(
         live.digest,
-        live.readAt,
         m.real.digest,
         Object.fromEntries(
           Object.entries(AGENT_OFFICE_DIGEST_SENDERS).map(([agentKey, deptId]) => [agentKey, m.depts[deptId].name])
@@ -134,14 +133,14 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
   );
   // The AMUX room is not a team: its workers are drawn from the record and never enter the demo.
   const amuxView = useMemo(
-    () => amuxRoomView(live.amux, live.readAt, AMUX_ROOM.desks.length, m.real.amux),
+    () => amuxRoomView(live.amux, AMUX_ROOM.desks.length, m.real.amux),
     [live, m]
   );
   const reviewView = useMemo(
-    () => reviewRoomView(live.review, live.readAt, REVIEW_ROOM.desks.length, m.real.review),
+    () => reviewRoomView(live.review, REVIEW_ROOM.desks.length, m.real.review),
     [live, m]
   );
-  const decisionView = useMemo(() => decisionRoomView(live.decision, live.readAt, m.real.decision), [live, m]);
+  const decisionView = useMemo(() => decisionRoomView(live.decision, m.real.decision), [live, m]);
   const quotaView = useMemo(() => reviewQuotaView(live.review, m.real.quota), [live, m]);
   const [engine] = useState(() => new AgentOffice(m, liveDepts));
   const [snap, setSnap] = useState<Snapshot>(() => engine.snapshot());
@@ -177,14 +176,22 @@ export function AgentOfficePanel({ view, live }: { view: View; live: AgentOffice
     engine.setLive(liveDepts);
   }, [engine, liveDepts]);
 
-  // A fresh reading of the live rooms every minute while the tab is visible:
-  // the page's server component reads again and a room whose record changed
-  // says so (engine.setLive). Reading only -- nothing on the page writes.
+  // A fresh reading of the live rooms every minute while the tab is visible,
+  // and at once when it comes back into view: the page's server component
+  // reads again and a room whose record changed says so (engine.setLive).
+  // Reading only -- nothing on the page writes.
   useEffect(() => {
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") router.refresh();
     }, LIVE_REFRESH_MS);
-    return () => window.clearInterval(id);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") router.refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [router]);
 
   useEffect(() => {
@@ -427,6 +434,25 @@ const ENGINEERING_RECORD_HREF = agentOfficeDept("engineering")?.recordHref ?? nu
 
 /** How often the open office reads the live rooms again. */
 const LIVE_REFRESH_MS = 60_000;
+/** Past this, the screen says it has stopped refreshing: two missed re-reads. */
+export const LIVE_STALE_MS = 2 * LIVE_REFRESH_MS;
+
+/**
+ * Whether the reading on screen is older than LIVE_STALE_MS. The clock starts
+ * at the reading itself, so the server render and the first client render
+ * agree; it then ticks every 15 seconds.
+ */
+function useStaleReading(readAt: string): boolean {
+  const readMs = Date.parse(readAt);
+  const [now, setNow] = useState(readMs);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    tick();
+    const id = window.setInterval(tick, 15_000);
+    return () => window.clearInterval(id);
+  }, [readMs]);
+  return Number.isFinite(readMs) && now - readMs > LIVE_STALE_MS;
+}
 
 /**
  * The approval card while the engineering room reads its real record: the
@@ -487,6 +513,7 @@ function LiveView({
   onDownloadReport: () => void;
 }) {
   const engineeringLive = engine.liveDept("engineering") !== null;
+  const stale = useStaleReading(readAt);
 
   return (
     <>
@@ -510,7 +537,15 @@ function LiveView({
           <div className={cx("live-clock")}>
             <span>{m.live.clockReal}</span>
             <b data-testid="agent-office-clock">{aestStamp(readAt)}</b>
-            <small>{m.live.realPhase}</small>
+            {/* The one place the screen says how fresh it is: every room line
+                was read at this same moment, so none repeats it. */}
+            {stale ? (
+              <small className={cx("stale")} role="status" data-testid="agent-office-stale">
+                {m.live.stale}
+              </small>
+            ) : (
+              <small>{m.live.realPhase}</small>
+            )}
           </div>
         )}
       </header>
@@ -783,7 +818,7 @@ function ProfileModal({
                 <em className={cx("live-chip")}>{m.real.chip}</em> {m.real.boxLabel}
               </span>
               <strong>{live.line}</strong>
-              <small>{live.detail}</small>
+              {live.detail ? <small>{live.detail}</small> : null}
               <small>{m.real.contentElsewhere}</small>
             </div>
           ) : null}
@@ -1302,7 +1337,6 @@ function DashboardView({
                 </span>
               </div>
               <div className={cx("win-body")}>
-                <p className={cx("brief-date")}>{m.dashboard.briefAsOf(aestStamp(readAt))}</p>
                 <h3>
                   {brief.attention.length > 0
                     ? m.dashboard.briefNeedsLook(brief.attention.length)

@@ -595,6 +595,7 @@ a.integration-row:hover { border-color: var(--accent); }
 .live-clock span { font-family: var(--font-ui); font-size: 11px; letter-spacing: .18em; color: #60a5fa; }
 .live-clock b { font-family: var(--font-ui); font-size: 28px; line-height: 1.05; font-variant-numeric: tabular-nums; }
 .live-clock small { font-size: 11px; color: #6ee7b7; }
+.live-clock small.stale { color: #fcd34d; font-weight: 800; }
 
 .live-bar {
   display: flex;

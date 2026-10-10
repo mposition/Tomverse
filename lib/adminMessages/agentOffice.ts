@@ -293,7 +293,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       lead: "They arrive, work at their desks, meet in the approval room and report to the operator's office.",
       leadReal: "A room marked LIVE shows its team's real state; the others show whether a record screen is linked. “Watch demo” plays a day in the office.",
       clockLabel: "SIM CLOCK",
-      clockReal: "READ AT",
+      clockReal: "LAST REFRESH",
+      stale: "Not refreshed for over 2 minutes",
       realPhase: "Real view",
       watchDemo: "▶ Watch demo",
       endDemo: "■ Back to the real view",
@@ -423,7 +424,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     dashboard: {
       eyebrow: "TODAY · 07:00 SIMULATED START",
-      eyebrowReal: (time: string) => `REAL VIEW · READ ${time}`,
+      eyebrowReal: (time: string) => `REAL VIEW · LAST REFRESH ${time}`,
       watchDemo: "▶ Watch demo",
       titleBefore: "How your agent teams move today, ",
       titleAccent: "at a glance",
@@ -461,7 +462,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       filterLabel: "Filter by team status",
       filterAll: "All",
       briefTitle: "📋 digest_desk.brief",
-      briefAsOf: (time: string) => `As read at ${time}`,
       briefNeedsLook: (count: number) =>
         count === 1 ? "1 place needs a look" : `${count} places need a look`,
       briefAllClear: "Nothing needs a look right now",
@@ -537,7 +537,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noSuccess: "no success recorded yet",
         silent: (hours: number) => `no success for ${hours} hours`,
         anchorMissing: "silence anchor not recorded yet",
-        readAt: (time: string) => `read ${time}`,
       },
       qa: {
         badges: {
@@ -560,7 +559,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noRevision: "no control recorded",
         latched: "merge lane latched",
         lastReceived: (time: string) => `last digest ${time}`,
-        readAt: (time: string) => `read ${time}`,
       },
       finance: {
         badges: {
@@ -585,7 +583,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noRevision: "no readable switch",
         enabledAt: (time: string) => `on since ${time}`,
         lastDigest: (time: string) => `last digest ${time}`,
-        readAt: (time: string) => `read ${time}`,
       },
       engineering: {
         badges: {
@@ -625,7 +622,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         runnerNever: "no runner finish recorded",
         publisherFinish: (time: string) => `publisher last finished ${time}`,
         publisherNever: "no publisher finish recorded",
-        readAt: (time: string) => `read ${time}`,
       },
       quota: {
         windowTitle: "🔋 cli.quota — reviewer CLI quota",
@@ -656,7 +652,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         load: (running: number, max: number) => `${running}/${max} running`,
         more: (count: number) =>
           count === 1 ? "1 more reviewer not drawn here" : `${count} more reviewers not drawn here`,
-        readAt: (time: string) => `read ${time}`,
         facts: { vendor: "Vendor", state: "State", load: "Running / limit", lastReport: "Last report" },
       },
       digest: {
@@ -665,7 +660,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         latest: (agent: string, time: string) => `Latest digest · ${agent} · ${time}`,
         none: "No digest received yet",
         count: (agent: string, count: number) => `${agent} ${count} in 24h`,
-        readAt: (time: string) => `read ${time}`,
       },
       decision: {
         states: { proposal: "Proposal mode", off: "Off", killed: "Kill switch on", unread: "Switch unreadable" },
@@ -676,7 +670,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         summary: (proposal: number, total: number, dm: number, operator: number) =>
           `${proposal}/${total} in proposal mode · last 24h ${dm} to the Decision Maker · ${operator} to the operator`,
         none: "None yet",
-        readAt: (time: string) => `read ${time}`,
         facts: {
           vendor: "Vendor",
           mode: "Mode",
@@ -708,7 +701,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           count === 1 ? "1 more worker not drawn here" : `${count} more workers not drawn here`,
         heartbeat: (time: string) => `last heartbeat ${time}`,
         noHeartbeat: "no heartbeat recorded",
-        readAt: (time: string) => `read ${time}`,
         facts: { provider: "Provider", state: "State", heartbeat: "Last heartbeat" },
       },
       log: (room: string, line: string) => `${room} (real record): ${line}`,
@@ -1126,7 +1118,8 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       lead: "출근하고, 자리에서 일하고, 승인 회의실에 모이고, 운영자실로 보고하러 갑니다.",
       leadReal: "'실제' 표시가 붙은 방은 그 팀의 실제 상태이고, 나머지는 기록 화면이 연결됐는지를 보여 줘요. '데모 보기'를 누르면 사무실의 하루를 재생해요.",
       clockLabel: "SIM CLOCK",
-      clockReal: "읽은 시각",
+      clockReal: "마지막 갱신",
+      stale: "2분 넘게 갱신되지 않음",
       realPhase: "실제 화면",
       watchDemo: "▶ 데모 보기",
       endDemo: "■ 실제 화면으로",
@@ -1254,7 +1247,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
     },
     dashboard: {
       eyebrow: "TODAY · 07:00 SIMULATED START",
-      eyebrowReal: (time: string) => `실제 화면 · 읽은 시각 ${time}`,
+      eyebrowReal: (time: string) => `실제 화면 · 마지막 갱신 ${time}`,
       watchDemo: "▶ 데모 보기",
       titleBefore: "오늘 에이전트 팀이 어떻게 움직이는지 ",
       titleAccent: "한눈에",
@@ -1291,7 +1284,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
       filterLabel: "팀 상태 필터",
       filterAll: "전체",
       briefTitle: "📋 digest_desk.brief",
-      briefAsOf: (time: string) => `${time} 읽은 기준`,
       briefNeedsLook: (count: number) => `확인이 필요한 곳 ${count}곳`,
       briefAllClear: "지금 확인이 필요한 곳은 없어요",
       briefWorking: (count: number) => `진행 중 ${count}`,
@@ -1365,7 +1357,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noSuccess: "아직 성공 기록 없음",
         silent: (hours: number) => `${hours}시간째 성공 없음`,
         anchorMissing: "침묵 판정 기준 시각 미기록",
-        readAt: (time: string) => `읽은 시각 ${time}`,
       },
       qa: {
         badges: {
@@ -1388,7 +1379,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noRevision: "제어 기록 없음",
         latched: "병합 레인 잠김",
         lastReceived: (time: string) => `마지막 digest ${time}`,
-        readAt: (time: string) => `읽은 시각 ${time}`,
       },
       finance: {
         badges: {
@@ -1413,7 +1403,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         noRevision: "읽을 수 있는 스위치 없음",
         enabledAt: (time: string) => `켜진 시각 ${time}`,
         lastDigest: (time: string) => `마지막 digest ${time}`,
-        readAt: (time: string) => `읽은 시각 ${time}`,
       },
       engineering: {
         badges: {
@@ -1452,7 +1441,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         runnerNever: "실행기 완료 기록 없음",
         publisherFinish: (time: string) => `게시기 마지막 완료 ${time}`,
         publisherNever: "게시기 완료 기록 없음",
-        readAt: (time: string) => `읽은 시각 ${time}`,
       },
       quota: {
         windowTitle: "🔋 cli.quota — 검토 CLI 사용량",
@@ -1482,7 +1470,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         lastReport: (time: string) => `마지막 보고 ${time}`,
         load: (running: number, max: number) => `실행 ${running}/${max}`,
         more: (count: number) => `여기 그리지 못한 검토자 ${count}명`,
-        readAt: (time: string) => `읽은 시각 ${time}`,
         facts: { vendor: "공급사", state: "상태", load: "실행 중/상한", lastReport: "마지막 보고" },
       },
       digest: {
@@ -1491,7 +1478,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         latest: (agent: string, time: string) => `최근 digest · ${agent} · ${time}`,
         none: "아직 받은 digest 없음",
         count: (agent: string, count: number) => `${agent} 24시간 ${count}건`,
-        readAt: (time: string) => `읽은 시각 ${time}`,
       },
       decision: {
         states: { proposal: "제안 모드", off: "꺼짐", killed: "kill switch 켜짐", unread: "스위치 읽기 실패" },
@@ -1502,7 +1488,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         summary: (proposal: number, total: number, dm: number, operator: number) =>
           `제안 모드 ${proposal}/${total} · 최근 24시간 Decision Maker ${dm}건 · 운영자 ${operator}건`,
         none: "아직 없음",
-        readAt: (time: string) => `읽은 시각 ${time}`,
         facts: {
           vendor: "공급사",
           mode: "모드",
@@ -1533,7 +1518,6 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         more: (count: number) => `여기 그리지 못한 worker ${count}개`,
         heartbeat: (time: string) => `마지막 heartbeat ${time}`,
         noHeartbeat: "heartbeat 기록 없음",
-        readAt: (time: string) => `읽은 시각 ${time}`,
         facts: { provider: "공급사", state: "상태", heartbeat: "마지막 heartbeat" },
       },
       log: (room: string, line: string) => `${room}(실제 기록): ${line}`,

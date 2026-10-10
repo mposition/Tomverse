@@ -1078,7 +1078,9 @@ export class AgentOffice {
     if (live) {
       // The lead answers in its own voice, then with the record.
       const voice = (this.copy.real.voices as Record<string, { answer: string }>)[deptId] ?? this.copy.real.voiceDefault;
-      lines.push(voice.answer, this.copy.real.console(live.line), live.detail, this.copy.real.contentElsewhere);
+      lines.push(voice.answer, this.copy.real.console(live.line));
+      if (live.detail) lines.push(live.detail);
+      lines.push(this.copy.real.contentElsewhere);
     } else if (status === "working") {
       lines.push(s.deptWorking(this.deptTaskLabel(deptId), this.deptProgress(deptId)));
     } else if (status === "done") {
