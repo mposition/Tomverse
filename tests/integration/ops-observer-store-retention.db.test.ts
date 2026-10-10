@@ -26,6 +26,7 @@ const migrations = [
   "20261004030000_ops_observer_transition",
   "20261005030000_ops_observer_retention_deadline",
   "20261008020000_ops_observer_run_guard",
+  "20261009120000_ops_observer_deferred_item",
 ].map((name) => path.resolve(here, `../../prisma/migrations/${name}/migration.sql`));
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 const schema = `ops_observer_retention_${randomUUID().replaceAll("-", "")}`;
@@ -44,7 +45,7 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     advanceOpsObserverState,
     confirmOpsObserverDelivery,
     purgeOpsObserverDeliveries,
-    readOpsObserverDateReservations,
+    readOpsObserverDateItems,
     readOpsObserverDelivery,
     readOpsObserverState,
   } = await import("@/lib/opsObserverStore");
@@ -106,7 +107,7 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
     }));
     const runId = `run-${randomUUID().slice(0, 8)}`;
     const result = await advanceOpsObserverState(
-      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: state.generation, keys,
+      { runDeadline: inSeconds(150), runId, baseGenesisId: genesisId, baseGeneration: state.generation, ownerDate, keys,
         reservation: reserve ? { ownerDate, channelCheck: items.length === 0, items } : null },
       client,
     );
@@ -214,17 +215,17 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
       assert.deepEqual(kinds, ["read", "check"]);
     });
 
-    await t.test("the digest's date read spans every genesis of the mode; the run budget stays the head's", async () => {
-      const date = await readOpsObserverDateReservations("2026-10-03", "shadow", inSeconds(120), client);
-      assert.deepEqual(date.map((i) => `${i.key}:${i.kind}`).sort(), [`${P3_KEY}:new_open`, `${P3_KEY}:recovery`].sort());
+    await t.test("the digest's date read spans every genesis; the run budget stays the head's", async () => {
+      const date = await readOpsObserverDateItems("2026-10-03", inSeconds(120), client);
+      assert.deepEqual(date.map((i) => `${i.key}:${i.kind}:${i.mode}:${i.status}`).sort(),
+        [`${P3_KEY}:new_open:shadow:reserved`, `${P3_KEY}:recovery:shadow:reserved`].sort());
       const head = (await readOpsObserverState(inSeconds(120), client, "2026-10-03")) as {
         budget: { reservedToday: { kind: string }[] };
       };
       assert.deepEqual(head.budget.reservedToday.map((i) => i.kind), ["new_open"]);
-      // Another mode's reservations, or another date's, are not this digest's.
-      assert.deepEqual(await readOpsObserverDateReservations("2026-10-03", "live", inSeconds(120), client), []);
-      assert.deepEqual(await readOpsObserverDateReservations("2026-09-30", "shadow", inSeconds(120), client), []);
-      await assert.rejects(readOpsObserverDateReservations("2026-10-03", "shadow", inSeconds(5), client));
+      // Another date's messages are not this digest's.
+      assert.deepEqual(await readOpsObserverDateItems("2026-09-30", inSeconds(120), client), []);
+      await assert.rejects(readOpsObserverDateItems("2026-10-03", inSeconds(5), client));
     });
 
     await t.test("nothing past retention: nothing deleted and nothing audited", async () => {
@@ -250,7 +251,7 @@ test("the ops-observer retention batch", { skip: !rawUrl }, async (t) => {
         [false, true, true]);
       // The deleted reservation took its item; the recent one keeps its own.
       assert.deepEqual([await itemsOf(old1.deliveryId), await itemsOf(recent.deliveryId)], [0, 1]);
-      assert.deepEqual(await purgeAudits(), [1, 2].map(() => ({ count: 1, retentionDays: 90, systemActor: "ops-observer" })));
+      assert.deepEqual(await purgeAudits(), [1, 2].map(() => ({ count: 1, deferredCount: 0, retentionDays: 90, systemActor: "ops-observer" })));
     });
 
     await t.test("a delete that names no deadline, or commits past it, does not commit", async () => {
