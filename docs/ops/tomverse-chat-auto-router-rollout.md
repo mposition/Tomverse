@@ -1,7 +1,8 @@
 # Tomverse Chat Auto Router rollout
 
-- Status: **not started.** All three readiness gates are `pending`, so no
-  account can be routed by Auto regardless of configuration.
+- Status: **not started.** All three readiness gates are `pending`, and the
+  separate limited-release approval is also pending, so no account can be
+  routed by Auto regardless of configuration.
 - Owner: Backend/AI, with Product as rollout owner
 - Companion to `docs/ops/tomverse-chat-router-evaluation-set.md` (which
   produces one of the three gates) and
@@ -14,9 +15,13 @@ somebody is in a hurry.
 
 ## 1. The three gates, and why they are three
 
-Auto routes nobody until all three are attested. They are not
-interchangeable, and each produces reassuring numbers that look like the
-others':
+Ordinarily, Auto routes nobody until all three are attested. A separately
+approved limited-release exception may accept the disclosed risk for a bounded
+cohort without changing any gate from `pending`; its exact non-waivable
+conditions are in
+`docs/policy/tomverse-chat-auto-router-limited-release-exception-v1.md`.
+The gates are not interchangeable, and each produces reassuring numbers that
+look like the others':
 
 | Gate | Establishes | Is silent about |
 | --- | --- | --- |
@@ -99,6 +104,8 @@ missing variable is never mistaken for a deliberate rollout.
 | `MANIFEST_HASH_ACTIVE_KEY_ID` | which of them new manifests are digested with |
 | `AUTO_ROUTER_FALLBACK_ENABLED` | `on` allows a second provider attempt after a pre-token failure. Anything else, including unset, allows none |
 | `AUTO_ROUTER_DRILL_SUBJECTS` | staging only. Subject ids that may route while a readiness gate is outstanding, for the fallback drill. Empty means nobody, and production refuses regardless |
+| `AUTO_ROUTER_LIMITED_RELEASE_EXCEPTION` | Exact value `v1` selects the separately approved product exception. Unset or any other value grants nothing |
+| `AUTO_ROUTER_LIMITED_RELEASE_COMMIT` | Full serving commit SHA approved for this activation; it must equal `RAILWAY_GIT_COMMIT_SHA` |
 
 **The manifest keyring is not optional and not the session secret.** Recording
 a dispatch refuses outright without it, because a manifest whose key nobody
@@ -144,10 +151,11 @@ the figures either side as separate runs.
 ## 5. Falling back is normal
 
 There are five ways Auto declines a turn — the conversation is manual, the
-account is outside the cohort, a gate is outstanding, the kill switch is on,
-or the Router found no candidate — and all five behave identically: the user
-gets the model they would have had anyway, and is told nothing, because from
-their side nothing went wrong.
+account is outside the cohort, a gate is outstanding without an admitted
+limited-release exception, the kill switch is on, or the Router found no
+candidate — and all five behave identically: the user gets the model they
+would have had anyway, and is told nothing, because from their side nothing
+went wrong.
 
 What must never happen is the reverse. A turn that reported itself as routed
 when it fell back would put turns the Router never decided into the metrics
@@ -245,9 +253,10 @@ being routed to a model that cannot see one.
 
 ## 9. What is not built yet
 
-- **The Auto UI is behind a flag that is off**, and stays off until a cohort is
-  actually running: a toggle that saves and changes nothing is the failure
-  `docs/ui-contracts/auto-model-selection.md` §1 exists to prevent.
+- **The Auto UI is behind a flag that is off**, and stays off until either the
+  ordinary readiness path or the separately approved limited-release path can
+  actually route that account: a toggle that saves and changes nothing is the
+  failure `docs/ui-contracts/auto-model-selection.md` §1 exists to prevent.
 - **Automatic fallback is built and switched off.** `AUTO_ROUTER_FALLBACK_ENABLED`
   defaults to off and stays off until the staging drill has been run:
   `docs/ops/tomverse-chat-fallback-drill.md`. §9.1 to §9.4 are the record of
@@ -758,5 +767,7 @@ This is its own change and should not ride along with the pieces above.
 | Shadow report attested | | |
 | Offline quality evaluation attested | | |
 | Attempt/manifest boundary attested | | |
+| Limited-release exception approved (if used) | | |
+| Limited-release activation/readback (if used) | | |
 | Cohort salt chosen | | |
 | First cohort percentage set | | |

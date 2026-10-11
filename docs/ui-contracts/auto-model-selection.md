@@ -1,9 +1,10 @@
 # Auto model selection — UI contract
 
 - Status: **wired, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off,
-  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, and Auto
-  is offered in one product that no conversation belongs to yet — so no account
-  is offered Auto today. The controls are now mounted
+  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, the
+  separate limited-release approval is also `pending`, and Auto is offered in
+  one product that no conversation belongs to yet — so no account is offered
+  Auto today. The controls are now mounted
   (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
   something executes rather than a claim about components nothing rendered.
   Coverage: `tests/client/autoRoutingRender.test.tsx` and
@@ -28,8 +29,14 @@ true and does not exist when it is false.
 offered =
     uiFlagEnabled &&
     product === "chat" &&   // written in the order it is decided
-    cohortEligible;         // readiness, kill switch, plan and bucket
+    cohortEligible;         // ordinary readiness or admitted limited exception,
+                            // then kill switch, plan and bucket
 ```
+
+An admitted limited-release exception changes only the readiness term inside
+`cohortEligible`. It does not make the flag, product, plan, guest, kill-switch
+or bucket checks optional. The three ordinary readiness gates remain pending,
+and neither that fact nor the exception identifier crosses the client boundary.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one
