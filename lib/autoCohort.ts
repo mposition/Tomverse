@@ -40,6 +40,11 @@ import { createHash } from "node:crypto";
 import { autoRolloutReadiness, type AutoReadinessGateId } from "@/lib/autoRolloutReadiness";
 import { DRILL_OVERRIDE_REASON } from "@/lib/autoDrillOverride";
 import {
+  CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
+  isChatRefinerInitialAutoRouterAuthority,
+  type ChatRefinerInitialAutoRouterAuthority,
+} from "@/lib/chatRefinerInitialAutoRouterAuthority";
+import {
   resolveAutoRouterLimitedRelease,
   type AutoRouterLimitedReleaseAdmission,
 } from "@/lib/autoRouterLimitedRelease";
@@ -68,7 +73,9 @@ export type AutoCohortDecision =
        * readable as one that qualified on its own.
        */
       drillOverride?: typeof DRILL_OVERRIDE_REASON;
-      /** The separately approved, still-gate-pending release path. */
+      /** Exact-deployment owner authority, separate from the staging drill. */
+      initialReleaseAuthority?: typeof CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS;
+      /** The separately approved, artifact-bound release path. */
       limitedReleaseException?: Readonly<{
         exceptionId: string;
         evidenceRef: string;
@@ -121,7 +128,7 @@ const parsePercent = (raw: string | undefined): number => {
  * deliberate rollout.
  */
 export const autoCohortConfig = (
-  env: NodeJS.ProcessEnv = process.env,
+  env: Record<string, string | undefined> = process.env,
   now: () => number = Date.now,
 ): AutoCohortConfig => ({
   killSwitch: env.AUTO_ROUTER_KILL_SWITCH === "on",
@@ -152,6 +159,18 @@ export const cohortBucket = (subjectKey: string, salt: string): number => {
   return digest.readUInt32BE(0) % BUCKETS;
 };
 
+const limitedReleaseOverridesReadiness = (
+  readiness: ReturnType<typeof autoRolloutReadiness>,
+  limitedRelease: AutoRouterLimitedReleaseAdmission | undefined,
+): limitedRelease is Extract<AutoRouterLimitedReleaseAdmission, { admitted: true }> =>
+  !readiness.ready &&
+  readiness.problems.length === 0 &&
+  limitedRelease?.admitted === true &&
+  readiness.outstanding.length === limitedRelease.unmetReadinessGates.length &&
+  new Set(readiness.outstanding).size === readiness.outstanding.length &&
+  readiness.outstanding.every((gate) =>
+    limitedRelease.unmetReadinessGates.includes(gate));
+
 export type AutoCohortInput = {
   /** Stable per person. Guests have one, but see `isGuest`. */
   subjectKey: string;
@@ -168,6 +187,39 @@ export type AutoCohortInput = {
    * same thing, which is what every request that is not a staging drill gets.
    */
   drillOverride?: boolean;
+  /**
+   * Server-minted exact-deployment authority for the approved initial release.
+   * A browser object or copied audit id is not a member of the mint's WeakSet.
+   */
+  initialReleaseAuthority?: ChatRefinerInitialAutoRouterAuthority | null;
+};
+
+/**
+ * Whether readiness is the only cohort control for which an initial-release
+ * authority could matter. This performs no release read and grants nothing;
+ * callers use it only to avoid a database lookup for a request that kill,
+ * rollout, plan, guest or bucket rules will refuse anyway.
+ */
+export const autoInitialReleaseAuthorityRelevant = (
+  input: Pick<AutoCohortInput, "subjectKey" | "isGuest" | "plan" | "config" | "readiness">
+): boolean => {
+  const config = input.config ?? autoCohortConfig();
+  const readiness = input.readiness ?? autoRolloutReadiness();
+  if (
+    readiness.ready ||
+    limitedReleaseOverridesReadiness(readiness, config.limitedRelease) ||
+    config.killSwitch ||
+    config.rolloutPercent <= 0 ||
+    config.eligiblePlans.length === 0 ||
+    input.isGuest ||
+    !input.plan ||
+    !config.eligiblePlans.includes(input.plan) ||
+    config.salt === "unset"
+  ) {
+    return false;
+  }
+  return cohortBucket(input.subjectKey, config.salt) <
+    Math.round(config.rolloutPercent * (BUCKETS / 100));
 };
 
 /**
@@ -190,21 +242,13 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
 
   const readiness = input.readiness ?? autoRolloutReadiness();
   const limitedRelease = config.limitedRelease;
-  const limitedReleaseGateSetMatches =
-    limitedRelease?.admitted === true &&
-    readiness.outstanding.length === limitedRelease.unmetReadinessGates.length &&
-    new Set(readiness.outstanding).size === readiness.outstanding.length &&
-    readiness.outstanding.every((gate) =>
-      limitedRelease.unmetReadinessGates.includes(gate));
-  // A product exception may bypass only honest pending gates. A malformed
-  // register or an expired ordinary attestation is a defect, not a risk the
-  // limited-release approval accepted.
-  const limitedReleaseOverride =
-    !readiness.ready &&
-    readiness.problems.length === 0 &&
-    limitedReleaseGateSetMatches;
-  // The separate staging fallback drill may also pass an outstanding gate,
-  // and only because the alternative was worse: the register is static
+  const limitedReleaseOverride = limitedReleaseOverridesReadiness(
+    readiness,
+    limitedRelease,
+  );
+  // Three separately-auditable authorities may pass an outstanding gate. The
+  // artifact-bound limited release and exact-deployment initial release retain
+  // their own evidence. The staging fallback drill exists because the register is static
   // code with no environment dimension, so attesting a gate to make staging
   // route would have committed the same `passed` to production. See
   // lib/autoDrillOverride.ts for the four locks, the first of which is "not
@@ -212,7 +256,15 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   //
   // Below the kill switch, deliberately. An operator turning Auto off during a
   // drill must not have to also remember to withdraw a credential.
-  if (!readiness.ready && !input.drillOverride && !limitedReleaseOverride) {
+  const initialReleaseAuthorized = isChatRefinerInitialAutoRouterAuthority(
+    input.initialReleaseAuthority
+  );
+  if (
+    !readiness.ready &&
+    !limitedReleaseOverride &&
+    !initialReleaseAuthorized &&
+    !input.drillOverride
+  ) {
     return {
       eligible: false,
       reason: "readiness_incomplete",
@@ -223,8 +275,13 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
   // Recorded on the decision, so a routed turn that took this path is never
   // mistaken for one that qualified.
+  const initiallyReleased =
+    !readiness.ready && !limitedReleaseOverride && initialReleaseAuthorized;
   const overridden =
-    !readiness.ready && !limitedReleaseOverride && input.drillOverride === true;
+    !readiness.ready &&
+    !limitedReleaseOverride &&
+    !initiallyReleased &&
+    input.drillOverride === true;
 
   if (config.rolloutPercent <= 0 || config.eligiblePlans.length === 0) {
     return { eligible: false, reason: "rollout_disabled", bucket: null, ...shared };
@@ -253,6 +310,9 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     eligible: true,
     bucket,
     ...(overridden ? { drillOverride: DRILL_OVERRIDE_REASON } : {}),
+    ...(initiallyReleased
+      ? { initialReleaseAuthority: CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS }
+      : {}),
     ...(limitedReleaseOverride
       ? {
           limitedReleaseException: {
@@ -284,7 +344,7 @@ export const describeAutoCohortRefusal = (
       return (
         "Auto rollout readiness is incomplete: " +
         `${(decision.outstandingGates ?? []).join(", ") || "the register does not validate"}. ` +
-        "Auto stays in shadow unless the separately approved limited-release boundary admits it."
+        "Auto stays in shadow unless a separately approved release boundary admits it."
       );
     case "rollout_disabled":
       return "The rollout is off: no percentage, no eligible plans, or no cohort salt set.";

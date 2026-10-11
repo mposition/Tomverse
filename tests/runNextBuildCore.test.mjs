@@ -54,6 +54,32 @@ test("the production cache-restore failure is recognised", () => {
   assert.equal(isRecoverableTurbopackCacheFailure(CACHE_RESTORE_FAILURE), true);
 });
 
+// Next.js 16.3.8 aborts outside the per-task panic boundary instead of emitting
+// TurbopackInternalError. Observed on Railway staging d9efa670, 2026-10-11.
+const PANIC_BOUNDARY_CACHE_FAILURE = `
+thread 'tokio-rt-worker' (105) panicked at turbopack/crates/turbo-tasks-backend/src/backend/operation/mod.rs:551:13:
+Restore failures:
+Failed to restore data for task TaskId 4: Batch data restore failed: Failed to restore Data for batch of 3 tasks
+Caused by:
+    0: Looking up typed data for 3 tasks from database failed
+    1: Unable to open static sorted file referenced from 00003182.meta
+    2: failed to open file \`/app/.next/cache/turbopack/v16.3.8-b0fad0d4/00003173.sst\`: No such file or directory (os error 2)
+turbo-tasks: an internal panic occurred outside the per-task panic boundary. This is a bug in turbo-tasks/Turbopack
+Aborting.
+`;
+
+test("the panic-boundary cache restore failure is recognised", () => {
+  assert.equal(isRecoverableTurbopackCacheFailure(PANIC_BOUNDARY_CACHE_FAILURE), true);
+});
+
+test("the panic-boundary marker does not retry unrelated failures", () => {
+  const marker = "This is a bug in turbo-tasks/Turbopack";
+  assert.equal(isRecoverableTurbopackCacheFailure(marker), false);
+  assert.equal(isRecoverableTurbopackCacheFailure(`${marker}\nUnexpected task execution failure`), false);
+  assert.equal(isRecoverableTurbopackCacheFailure(
+    PANIC_BOUNDARY_CACHE_FAILURE.replace(marker, "An unrelated process panicked")), false);
+});
+
 // A wrapper that retried on anything would hide real breakage and take twice
 // as long to report it. These are the failures that must still exit on the
 // first attempt.

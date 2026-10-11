@@ -1,10 +1,12 @@
 # Auto model selection — UI contract
 
-- Status: **wired, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off,
-  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, the
-  separate limited-release approval is also `pending`, and Auto is offered in
-  one product that no conversation belongs to yet — so no account is offered
-  Auto today. The controls are now mounted
+- Status: **default off; release authority requires serving readback.** The three
+  readiness attestations in `lib/autoRolloutReadiness.ts` remain `pending`.
+  The owner-approved initial release may authorize Auto through
+  [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md),
+  while the separate limited-release path requires its exact reviewed artifact
+  and runtime tuple. This document is not evidence that either path is active.
+  The controls are mounted
   (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
   something executes rather than a claim about components nothing rendered.
   Coverage: `tests/client/autoRoutingRender.test.tsx` and
@@ -29,14 +31,20 @@ true and does not exist when it is false.
 offered =
     uiFlagEnabled &&
     product === "chat" &&   // written in the order it is decided
-    cohortEligible;         // ordinary readiness or admitted limited exception,
-                            // then kill switch, plan and bucket
+    cohortEligible;         // readiness or an exact release authority; kill, plan, bucket
 ```
 
-An admitted limited-release exception changes only the readiness term inside
-`cohortEligible`. It does not make the flag, product, plan, guest, kill-switch
-or bucket checks optional. The three ordinary readiness gates remain pending,
-and neither that fact nor the exception identifier crosses the client boundary.
+The initial authority is verified by the server from its canonical owner
+activation pair, current deployment and configuration. The same authority
+serves availability, mode changes and turn routing. A browser flag or object
+cannot supply it. Missing manifest enforcement or keys closes that exception;
+the actual finalized manifest remains mandatory. The historical measurement
+attestations retain their real status.
+
+The separate limited-release exception changes only the readiness term when
+its policy, reviewed 18-path artifact, deployment, plans and rollout tuple all
+match. It grants no substitute initial authority and is omitted from the client
+response.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one

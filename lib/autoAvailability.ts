@@ -26,6 +26,13 @@
 
 import { autoUiAvailability, isAutoRouterUiEnabled } from "@/lib/autoRoutingUi";
 import { getUserBillingPlan } from "@/lib/billingEntitlements";
+import { readChatRefinerInitialAutoRouterAuthority } from
+  "@/lib/chatRefinerInitialAutoReleaseStore";
+import {
+  autoCohortConfig,
+  autoInitialReleaseAuthorityRelevant,
+} from "@/lib/autoCohort";
+import { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
 
 export const autoAvailabilityFor = async (
   userId: string,
@@ -47,11 +54,48 @@ export const autoAvailabilityFor = async (
     return { offered: false, reason: "ui_flag_off" as const, cohort: null };
   }
   const billingPlan = await getUserBillingPlan(userId);
-  return autoUiAvailability({
+  const cohortConfig = autoCohortConfig();
+  const readiness = autoRolloutReadiness();
+  const availabilityInput = {
     subjectKey: userId,
     isGuest: false,
     plan: billingPlan.tier,
     productKey: conversation?.productKey ?? null,
     hasConversation: conversation !== undefined,
-  });
+    cohortConfig,
+    readiness,
+  } as const;
+  const ordinary = autoUiAvailability(availabilityInput);
+  // Product is decided before either cohort or release evidence. Ready
+  // rollouts and requests refused by ordinary cohort controls need no release
+  // lookup, preserving the read-free refusal path.
+  if (
+    ordinary.reason === "product_not_chat" ||
+    readiness.ready ||
+    !autoInitialReleaseAuthorityRelevant({
+      subjectKey: userId,
+      isGuest: false,
+      plan: billingPlan.tier,
+      config: cohortConfig,
+    })
+  ) {
+    return ordinary;
+  }
+  try {
+    const initialReleaseAuthority =
+      await readChatRefinerInitialAutoRouterAuthority();
+    return initialReleaseAuthority
+      ? autoUiAvailability({ ...availabilityInput, initialReleaseAuthority })
+      : ordinary;
+  } catch (error) {
+    // Database uncertainty cannot mint the initial-release exception. Keep
+    // the ordinary readiness path available for the day the three gates have
+    // actually passed, while the current pending register fails closed.
+    console.error(JSON.stringify({
+      event: "chat_auto_initial_release_authority_unavailable",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      timestamp: new Date().toISOString(),
+    }));
+    return ordinary;
+  }
 };

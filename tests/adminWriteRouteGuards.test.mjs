@@ -263,6 +263,19 @@ const reachesCanonicalAmuxReviewAudit = (route) =>
   amuxProposalWriter.includes('action: "amux.human_escalation.proposed"') &&
   performs(amuxProposalWriter, "writeAdminAuditLog");
 
+const oneShotStageWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageWriter.ts"), "utf8"));
+const oneShotStageAuditWriter = withoutComments(readFileSync(
+  join(LIB_DIR, "promptRefinerVnextOneShotStageApprovalAudit.ts"), "utf8"));
+const reachesCanonicalOneShotStageAudit = (route) =>
+  route.name === "prompt-refiner/vnext-stage-approval/route.ts" &&
+  route.source.includes("createPromptRefinerVnextOneShotStageWithSlots({") &&
+  oneShotStageWriter.includes("return prisma.$transaction(async (tx) => {") &&
+  oneShotStageWriter.includes("writePromptRefinerVnextOneShotStageApprovalAudit({ ...input, tx })") &&
+  oneShotStageAuditWriter.includes('action: "prompt_refiner.vnext_one_shot.stage_approved"') &&
+  oneShotStageAuditWriter.includes("tx: input.tx,") &&
+  performs(oneShotStageAuditWriter, "writeAdminAuditLog");
+
 /** A POST body is needed for a private scope proposal, but this particular
  * handler is read-only. Keep the audit exemption conditional on one of the two
  * reviewed code-switch states, the single service call and the transaction's
@@ -432,6 +445,36 @@ test("the resolution dry-run audit exception closes when its source boundary cha
       "if (amuxV4ResolutionPreviewEnabled("),
   }), false);
 });
+
+/** This owner-only POST carries custody pins in its body but does not mutate
+ * product state. Keep the exception tied to the read-only transaction and a
+ * closed import surface, so adding a writer cannot inherit it silently. */
+const isReadOnlyOneShotV5StagePreflight = (route) => {
+  if (route.name !== "prompt-refiner/vnext-v5-stage-preflight/route.ts") return false;
+  const imports = [...route.source.matchAll(/from\s+"@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+    .map((match) => match[1]).sort();
+  const expectedImports = [
+    "adminAuditIntegrityCore", "adminAuth", "adminReauthentication",
+    "apiSecurity", "auth", "promptRefinerQualityEvaluationVnextOneShotPriceReadback",
+    "promptRefinerVnextOneShotStageAdmission",
+    "promptRefinerVnextOneShotV5PredecessorReadback",
+    "promptRefinerVnextOneShotV5Recovery", "readOnlySnapshotTransaction",
+    "requestOrigin",
+  ].sort();
+  const reader = withoutComments(readFileSync(join(LIB_DIR,
+    "promptRefinerVnextOneShotV5PredecessorReadback.ts"), "utf8"));
+  const transaction = withoutComments(readFileSync(join(LIB_DIR,
+    "readOnlySnapshotTransaction.ts"), "utf8"));
+  const body = `${route.source}\n${reader}`;
+  return JSON.stringify(imports) === JSON.stringify(expectedImports) &&
+    !route.reaches("writeAdminAuditLog") &&
+    route.source.includes("readOnlySnapshotTransaction(async (tx) => {") &&
+    transaction.includes("await tx.$executeRaw`SET TRANSACTION READ ONLY`;") &&
+    !/\b(?:tx|prisma)\.[A-Za-z][\w]*\.(?:create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(/.test(body) &&
+    !/\$(?:executeRaw|queryRaw)(?:Unsafe)?(?:<[^`]+>)?`\s*(?:INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(body) &&
+    !/\b(?:fetch|require|import)\s*\(/.test(body);
+};
+
 test("the sweep sees the admin API, so a silent pass is impossible", () => {
   assert.ok(
     routes.length >= 60,
@@ -488,7 +531,9 @@ test("every admin write route writes an audit entry", () => {
     .filter((route) => !route.reaches("writeAdminAuditLog") &&
       !reachesCanonicalAmuxReviewAudit(route) &&
       !isDarkReadOnlyAmuxSourceScopePreview(route) &&
-      !isReadOnlyAmuxResolutionPreview(route))
+      !isReadOnlyAmuxResolutionPreview(route) &&
+      !reachesCanonicalOneShotStageAudit(route) &&
+      !isReadOnlyOneShotV5StagePreflight(route))
     .map((route) => route.name);
 
   assert.deepEqual(

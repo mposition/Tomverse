@@ -387,10 +387,10 @@ export async function isVoiceInputEnabled(): Promise<boolean> {
 /**
  * Prompt Refiner's default-off rollout flag plus environment kill switch.
  *
- * There is intentionally no application writer yet. Enabling the flag would
- * authorize a paid model call whose fixed model/cap/timeout and PLANNER-03
- * evidence are not approved. The server shell also requires adapter readiness
- * before it turns this availability into an offered UI decision.
+ * The owner-only initial-release writer may enable this flag only after the
+ * exact serving deployment's canonical activation pair is verified
+ * (docs/policy/chat-refiner-initial-auto-release-v1.md §3). This uncached read
+ * is an off gate; it never replaces fresh release, budget or adapter admission.
  */
 export async function isPromptRefinerEnabled(): Promise<boolean> {
   return readPromptRefinerAvailability({

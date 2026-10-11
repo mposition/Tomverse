@@ -125,6 +125,35 @@ test("the functional artifact digest is deterministic, closed and byte-sensitive
   }), /missing fixture/);
 });
 
+test("the integrated Refiner seam invalidates the prior checked-in artifact approval", () => {
+  const actualArtifactSha256 = autoRouterLimitedReleaseArtifactSha256();
+  assert.notEqual(
+    actualArtifactSha256,
+    AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.evaluatedArtifactSha256,
+  );
+  const checkedInEnvironment = environment({
+    RAILWAY_ENVIRONMENT_NAME:
+      AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.targetEnvironmentName,
+    RAILWAY_ENVIRONMENT_ID:
+      AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.targetEnvironmentId,
+    RAILWAY_SERVICE_ID:
+      AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.targetServiceId,
+    AUTO_ROUTER_ROLLOUT_PERCENT: String(
+      AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.maxRolloutPercent,
+    ),
+    AUTO_ROUTER_ELIGIBLE_PLANS:
+      AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.eligiblePlans.join(","),
+  });
+  const decision = resolveAutoRouterLimitedRelease({
+    environment: checkedInEnvironment,
+    now: () => Date.parse("2026-10-11T01:00:00.000Z"),
+  });
+  assert.deepEqual(decision, {
+    admitted: false,
+    reason: "evaluated_artifact_mismatch",
+  });
+});
+
 test("the policy digest canonicalizes source line endings and remains byte-sensitive", () => {
   const lf = Buffer.from("policy\nline\n", "utf8");
   const crlf = Buffer.from("policy\r\nline\r\n", "utf8");

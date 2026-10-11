@@ -51,6 +51,8 @@ import type { RouterCandidateInput } from "@/lib/routerCandidates";
 import type { RouterTieBreakSignals } from "@/lib/routerScorePolicy";
 import type { RouterStickyState } from "@/lib/routerSelection";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
+import type { ChatRefinerInitialAutoRouterAuthority } from
+  "@/lib/chatRefinerInitialAutoRouterAuthority";
 
 export type AutoSelectionRefusal =
   /**
@@ -222,6 +224,8 @@ export type AutoSelectionInput = {
    * not a staging drill gets.
    */
   drillOverride?: boolean;
+  /** Server-minted initial-release authority; structural copies are refused. */
+  initialReleaseAuthority?: ChatRefinerInitialAutoRouterAuthority | null;
   /**
    * Session-seeded tie exploration. Absent and false are off.
    *
@@ -276,6 +280,7 @@ export const selectAutoModel = (input: AutoSelectionInput): AutoSelection => {
     config: input.cohortConfig,
     readiness: input.readiness,
     drillOverride: input.drillOverride,
+    initialReleaseAuthority: input.initialReleaseAuthority,
   });
   if (!cohort.eligible) {
     return { routed: false, reason: "cohort_refused", fallbackModelId, cohort };

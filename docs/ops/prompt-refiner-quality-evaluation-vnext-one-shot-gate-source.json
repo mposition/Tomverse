@@ -1,0 +1,26 @@
+{
+  "version": "prompt-refiner-vnext-one-shot-gate-source-v1",
+  "files": {
+    "lib/promptRefinerVnextOneShotGateSource.ts": "0887546766d0cb6eeb0be31b271f7d634543a1ef6500eb0cfd0f2ec68c69810c",
+    "lib/promptRefinerVnextOneShotGateSummary.ts": "1e0f2c2d998dc9f7bb481e115189128304fd24995caa46c517a8185323a8ea56",
+    "lib/promptRefinerVnextOneShotGateAttestation.ts": "6fb86203ea65879330d4029bd96e8e6ede9e6ac191b064379bc9bb9f702f5c4e",
+    "lib/promptRefinerVnextOneShotOwnerGate.ts": "37b4ac5f73c853593b8fddd49acf8ddd130748c39fdfc5fa01dbe9ca9782410e",
+    "lib/promptRefinerVnextOneShotOwnerSeal.ts": "2280f0ee48a605da6178354d39302878bd23c5de7857bbe2fd76fe3cc7045643",
+    "lib/promptRefinerQualityEvaluationVnextOneShotPredicateCore.ts": "a0d14eb6c4b4be5474f2dcab1c20261b231594b8e09921340668f863050b4b91",
+    "lib/promptRefinerQualityEvaluationVnextOneShotManifestEnvelope.ts": "7434176cff734f2fea86ea32262539032bea7e58062188b406148f7ce91017c6",
+    "lib/promptRefinerQualityEvaluationVnextExecutionContract.ts": "aae45c7104a8b2205a12a72beeafc75fdfccbfd166d48a51dacb690df4e6623f",
+    "lib/promptRefinerQualityEvaluationVnextCore.ts": "9b00c71b51ecc743ad8a61fb04f174bc4aecde3fd98342d441bba1cda7e54f08",
+    "lib/providerUsageCost.ts": "7a52578f8a306562e0c43a527fb749c88d7221699214749b1a8fe3df62e3662a",
+    "lib/routerDevelopmentBenchmark.ts": "aa7b9784ba7360545ce88856ffcc2a2c0fcc2ff6d8caa8ffc9f331a3f33a54e0",
+    "scripts/prompt-refiner-vnext-one-shot-owner-gate.mjs": "9ae11baf71a7debe96061cd2b50ab98e5e69d75cd2c5a3298b6da30c3687f6d7",
+    "scripts/prompt-refiner-vnext-one-shot-check-manifest.mjs": "67b7bb6908abf42ffbc55ba40c58cf2d66affe9b193d0d0639cb8374114f4062",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-primitives-closure.json": "ba14200389af4b237ae5f34c09ec48184d96d82df50edc9dc77802eae49b4019",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-predicate-core-closure.json": "39cb72853672b34db697678e5b4a35f20da9d1c9efdd777c613887b03e59e1e2",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-witnesses-closure.json": "a21771efe61d6ac4bb74d02e54a8fcb4980cca39f4a25a36e87a1755ec2fdcf7",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-rubrics-closure.json": "697b007c3aaaa8109295a8449d61bd08213f9dd6e7adcf86322b849f7584151d",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-envelope-closure.json": "eeddb19919d5f13867e48aad7de39ec839a19f19f4e190cda373dfcd76b3b632",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-manifest-core-closure.json": "e220a1a32c1f99aff61d201f7adfbcc02adffb4a5255ad4626398f413fd56caa",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-format-witness-closure.json": "346dddc23ea63c96e357f08eaef83751863c32415dfefcbb463aebbcbd314adc",
+    "docs/ops/prompt-refiner-quality-evaluation-vnext-one-shot-challenge-witness-closure.json": "4c68770e1be62987f4d72a2d91f9c562fc274649d8e66fa0f6fd1f1a3d97742f"
+  }
+}

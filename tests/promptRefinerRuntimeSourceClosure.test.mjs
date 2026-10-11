@@ -435,12 +435,16 @@ const compilerOptions = parsedConfig.options;
 // `lib/adminAuditSystemActors.ts`, `lib/adminAudit.ts` gains
 // `writeSystemAuditLogEntry()`, and the fingerprint record gains a note. No
 // access is added; count and the position-free inventory are unchanged.
+// 2026-10-10, CHAT-01 production selective integration: the product release
+// readiness and audit scopes move existing accesses in the already-reviewed
+// closure. The 228-entry count and position-free inventory remain unchanged;
+// this repins only their final source positions on the main release base.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "34a24191c2e58e5c21c11dfded53ccd7",
-  "f40ae7adfc5efb53dc271fed2a1edb8d",
+  "54518b09e096d37dfe4fd70a69fddec2",
+  "8633c118fd3e3cda5c900aeea2838205",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
