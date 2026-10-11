@@ -1,13 +1,13 @@
 ---
-status: proposed_exact_approval_pending
+status: approved
 policyVersion: 1
 workId: CHAT-01
 scope: AUTO_ROUTER_LIMITED_RELEASE_EXCEPTION
 scopeRequestedBy: mposition
 scopeRequestedAt: 2026-10-11
-approvedBy: null
-approvedAt: null
-activationAuthority: none
+approvedBy: mposition
+approvedAt: 2026-10-11T00:44:09Z
+activationAuthority: operator_runtime_selector
 ---
 
 # Tomverse Chat Auto Router limited-release exception v1
