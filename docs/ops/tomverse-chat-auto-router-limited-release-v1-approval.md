@@ -8,6 +8,7 @@ approvedAt: null
 approvedPolicyCommit: null
 approvedPolicySha256: null
 evaluatedImplementationCommit: null
+evaluatedArtifactSha256: null
 targetEnvironmentName: null
 targetEnvironmentId: null
 targetServiceId: null
@@ -29,7 +30,8 @@ content-free evidence are concrete and the operator has reviewed them.
 
 An approved record must bind the exact policy commit and SHA-256, evaluated
 implementation commit, Railway environment and service, maximum percentage,
-exact eligible plans, expiry, evidence location, and written limitations. Its
+functional-source artifact SHA-256, exact eligible plans, expiry, evidence
+location, and written limitations. Its
 runtime counterpart in `lib/autoRouterLimitedReleaseApproval.ts` must carry the
 same decision. Activation additionally requires the live serving commit in
 `AUTO_ROUTER_LIMITED_RELEASE_COMMIT`; the post-activation runtime readback

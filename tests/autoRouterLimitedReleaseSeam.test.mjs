@@ -11,6 +11,8 @@ import { AVAILABLE_MODELS } from "../lib/models.ts";
 // Synthetic authorization fixtures only. No real attestation, evaluation
 // corpus, database, network request, or provider dispatch is created here.
 const now = () => Date.parse("2026-10-11T01:00:00.000Z");
+const artifactSha256 = "e".repeat(64);
+const policySha256 = "c".repeat(64);
 const env = {
   AUTO_ROUTER_LIMITED_RELEASE_EXCEPTION: "v1",
   AUTO_ROUTER_LIMITED_RELEASE_COMMIT: "a".repeat(40),
@@ -30,8 +32,9 @@ const approval = {
   ...AUTO_ROUTER_LIMITED_RELEASE_APPROVAL,
   status: "approved", approvedBy: "operator-fixture",
   approvedAt: "2026-10-11T00:00:00.000Z",
-  policyCommit: "b".repeat(40), policySha256: "c".repeat(64),
+  policyCommit: "b".repeat(40), policySha256,
   evaluatedImplementationCommit: "d".repeat(40),
+  evaluatedArtifactSha256: artifactSha256,
   targetEnvironmentName: env.RAILWAY_ENVIRONMENT_NAME,
   targetEnvironmentId: env.RAILWAY_ENVIRONMENT_ID,
   targetServiceId: env.RAILWAY_SERVICE_ID,
@@ -43,7 +46,11 @@ const approval = {
 };
 const cohortConfig = {
   ...autoCohortConfig(env, now),
-  limitedRelease: resolveAutoRouterLimitedRelease({ environment: env, approval, now }),
+  limitedRelease: resolveAutoRouterLimitedRelease({
+    environment: env, approval, now,
+    artifactSha256: () => artifactSha256,
+    policySha256: () => policySha256,
+  }),
 };
 const common = {
   subjectKey: "synthetic-user", isGuest: false, plan: "Pro",
