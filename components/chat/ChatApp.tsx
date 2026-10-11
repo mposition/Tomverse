@@ -109,6 +109,13 @@ import {
   gapFilledModelTranscript,
   mergeGuestTranscripts,
 } from "@/lib/chatTranscriptGapFill";
+import type { PromptRefinerProductChatDecision } from
+  "@/lib/promptRefinerProductApiContract";
+import {
+  parsePromptRefinerExecutionHeaders,
+  promptRefinerAllowsAutomaticChatRecovery,
+} from
+  "@/components/chat/promptRefinerProductClient";
 
 const processedPromptKeys = new Set<string>();
 const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
@@ -241,6 +248,8 @@ type ChatAppProps = {
      * that prepared the context knows which it issued.
      */
     contextLayout?: "single" | "comparison";
+    /** Opaque reference to a server-held Refiner decision; carries no prompt. */
+    promptRefinerDecision?: PromptRefinerProductChatDecision;
   } | null;
   /**
    * Asks the shell for a context the whole run can share, after this panel's
@@ -333,6 +342,12 @@ type ChatAppProps = {
     responseText: string,
     searchMetadata?: WebSearchExecution | null
   ) => void;
+  /** Content-free observation from a successful Chat response header. */
+  onPromptRefinerExecution?: (input: {
+    promptId: string | null;
+    execution: "applied" | "original";
+    mode: "explicit" | "auto";
+  }) => void;
   /**
    * This panel's turn ended as an error, with the code it ended on.
    *
@@ -421,6 +436,7 @@ function ChatAppComponent({
   onContentStateChange,
   onStatusChange,
   onResponseComplete,
+  onPromptRefinerExecution,
   onTurnError,
   onFollowupSent,
   onBeforeSend,
@@ -1414,7 +1430,9 @@ function ChatAppComponent({
     /** Persisted identity used by authenticated durable Chat verification. */
     sourceUserMessageId: string = userMsgId,
     /** Fires at the exact boundary where a provider-facing fetch is attempted. */
-    onDispatchStarted?: () => void
+    onDispatchStarted?: () => void,
+    /** One server-held Refiner decision. Never reused by a recovery send. */
+    promptRefinerDecision?: PromptRefinerProductChatDecision
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -1710,6 +1728,7 @@ function ChatAppComponent({
             ...(acknowledgedUnavailableAttachmentIds.length > 0
               ? { acknowledgedUnavailableAttachmentIds }
               : {}),
+            ...(promptRefinerDecision ? { promptRefinerDecision } : {}),
           }),
           signal: controller.signal,
         });
@@ -1802,6 +1821,7 @@ function ChatAppComponent({
             sendAfterGrant: () => sendChatRequest(),
           });
         } else if (
+          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason !== "already_consumed"
         ) {
@@ -1852,6 +1872,7 @@ function ChatAppComponent({
           // this panel's to spend.
           response = await sendChatRequest();
         } else if (
+          promptRefinerAllowsAutomaticChatRecovery(promptRefinerDecision) &&
           code === "CHAT_CONTEXT_BUNDLE_STALE" &&
           refusalReason === "already_consumed" &&
           !isGuestMode &&
@@ -1901,6 +1922,18 @@ function ChatAppComponent({
         } else {
           throw error;
         }
+      }
+
+      const promptRefinerObservation = parsePromptRefinerExecutionHeaders(
+        response.headers
+      );
+      if (promptRefinerObservation) {
+        // Display telemetry only. Authorization was already decided and the
+        // held row consumed on the server; these headers cannot cause a send.
+        onPromptRefinerExecution?.({
+          promptId: analyticsPromptId,
+          ...promptRefinerObservation,
+        });
       }
 
       // Capture the successful dispatch's attribution before a first chunk:
@@ -2379,6 +2412,7 @@ function ChatAppComponent({
     messages,
     modelId,
     onResponseComplete,
+    onPromptRefinerExecution,
     persistGuestTranscript,
     pollDeepResearchJob,
     runGuestChatRequest,
@@ -2673,7 +2707,8 @@ function ChatAppComponent({
               promptPayload.chatId,
               promptPayload.id
             );
-          }
+          },
+          promptPayload.promptRefinerDecision
         ).then(() => {
           if (!providerStarted) reportDisposition("terminal");
         });

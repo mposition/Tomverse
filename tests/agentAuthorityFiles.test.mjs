@@ -97,6 +97,7 @@ test("classification of representative paths", () => {
     ["components/chat/ChatInput.tsx", "product"],
     ["locales/ko.ts", "product"],
     ["tests/chatInput.test.mjs", "product"],
+    ["bin/prompt-refiner-vnext-one-shot-runner-0.1.0-candidate.3.json", "control-plane"],
     ["docs/ops/amux/staging-checklist.md", "control-plane"],
     ["vendor/amux/crates/amux-server/src/main.rs", "control-plane"],
     ["vendor/other/file.rs", "unclassified"],

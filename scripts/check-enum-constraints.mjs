@@ -620,6 +620,40 @@ const REGISTRY = {
     reason:
       "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
   },
+  PromptRefinerVnextOneShotStage_id_check: {
+    owner: "database",
+    reason:
+      "The one-shot stage has exactly two immutable identities: the audited original v1 and its single approved unrun replacement v2. Admission, run approval, and readback use pinned literals rather than a runtime list; a future identity requires a separate policy and migration.",
+  },
+  PromptRefinerVnextOneShotStage_status_check: {
+    owner: "database",
+    reason:
+      "The dark one-shot stage has no active writer. The database permits staged, separately run-approved, then permanently closed; any future admission must match this closed vocabulary.",
+  },
+  PromptRefinerVnextOneShotSlot_status_check: {
+    owner: "database",
+    reason:
+      "The dark 80-slot reservation has no active writer. The database permits only reserved to consumed, with a permanent consumed tombstone and no replacement.",
+  },
+  PromptRefinerAutoBudgetWindow_period_check: {
+    owner: "database",
+    reason:
+      "The default-off product Auto budget books exactly the Brisbane day and month windows. An unknown period cannot acquire a bounded reservation or authorize a provider call.",
+  },
+  PromptRefinerProductOperationalGuard_state_check: {
+    owner: "list",
+    module: "lib/promptRefinerProductOperationalGuard.ts",
+    list: "PROMPT_REFINER_PRODUCT_AUTO_GUARD_STATES",
+    reason:
+      "The durable product Auto operational latch is either active or paused. Runtime admission and exact owner resume share this list with the database so no unhandled state can authorize execution.",
+  },
+  PromptRefinerProductOperationalGuard_reason_check: {
+    owner: "list",
+    module: "lib/promptRefinerProductOperationalGuard.ts",
+    list: "PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS",
+    reason:
+      "The five approved Auto stop causes are content-free operational classifications. The pause writer and strict owner resume route validate this same list before a durable transition.",
+  },
   // --- AMUX development-agent orchestration ------------------------------
   AmuxIdeaFrontierModelApproval_provider_check: {
     owner: "database",

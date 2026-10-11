@@ -8,11 +8,19 @@
 
 export const PROMPT_REFINER_FLAG_KEY = "feature.promptRefinerEnabled";
 export const PROMPT_REFINER_KILL_SWITCH_ENV = "PROMPT_REFINER_KILL_SWITCH";
-// No product model-facing adapter exists in this slice. This function is the
-// one readiness seam a future adapter replaces; returning a boolean rather
-// than exporting a literal keeps the server decision executable without
-// pretending that an adapter is present or reading rollout state today.
-export const promptRefinerProductAdapterReady = (): boolean => false;
+// Adapter presence is insufficient: readiness is granted only by the exact
+// deployment release readback. The no-argument form stays closed so an old
+// shell cannot turn product execution on merely because code was deployed.
+export const promptRefinerProductAdapterReady = (release?: {
+  explicitEnabled: boolean;
+  autoEnabled: boolean;
+}): boolean => release !== undefined &&
+  (release.explicitEnabled || release.autoEnabled);
+
+export const promptRefinerProductReleaseReady = (release: {
+  explicitEnabled: boolean;
+  autoEnabled: boolean;
+}): boolean => release.explicitEnabled || release.autoEnabled;
 
 export const promptRefinerEnabledFromValue = (
   value: string | null | undefined

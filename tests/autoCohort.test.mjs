@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   AUTO_COHORT_VERSION,
   autoCohortConfig,
+  autoInitialReleaseAuthorityRelevant,
   cohortBucket,
   decideAutoCohort,
   describeAutoCohortRefusal,
@@ -13,6 +14,10 @@ import {
   autoRolloutReadiness,
   autoRolloutReadinessProblems,
 } from "../lib/autoRolloutReadiness.ts";
+import {
+  CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
+  mintChatRefinerInitialAutoRouterAuthority,
+} from "../lib/chatRefinerInitialAutoRouterAuthority.ts";
 
 // The cohort boundary is the only thing standing between "Auto works in
 // shadow" and "Auto answers a real person". These tests are about the ways it
@@ -68,6 +73,13 @@ const subject = (overrides = {}) => ({
   ...overrides,
 });
 
+const initialReleaseAuthority = () =>
+  mintChatRefinerInitialAutoRouterAuthority({
+    routerActivationAuditLogId: "audit_router_initial_release",
+    runtimeCommitSha: "a".repeat(40),
+    runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+  });
+
 test("a fully ready, fully enabled rollout routes an eligible subject", () => {
   const decision = decideAutoCohort(subject());
   assert.equal(decision.eligible, true);
@@ -109,6 +121,45 @@ test("a separately approved limited release may admit honest pending gates", () 
     outstandingGates: notReady.outstanding,
   });
   assert.equal(decision.drillOverride, undefined);
+});
+
+test("an admitted limited release outranks the initial authority without mixing markers", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({ limitedRelease }),
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.ok(decision.limitedReleaseException);
+  assert.equal(decision.initialReleaseAuthority, undefined);
+  assert.equal(decision.drillOverride, undefined);
+  assert.equal(autoInitialReleaseAuthorityRelevant(subject({
+    readiness: notReady,
+    config: config({ limitedRelease }),
+  })), false);
+});
+
+test("the initial authority remains available when the limited gate tuple does not match", () => {
+  const readiness = {
+    ready: false,
+    outstanding: ["offline_quality_evaluation"],
+    problems: [],
+  };
+  const decision = decideAutoCohort(subject({
+    readiness,
+    config: config({ limitedRelease }),
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(
+    decision.initialReleaseAuthority,
+    CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
+  );
+  assert.equal(decision.limitedReleaseException, undefined);
+  assert.equal(autoInitialReleaseAuthorityRelevant(subject({
+    readiness,
+    config: config({ limitedRelease }),
+  })), true);
 });
 
 test("a limited release never overrides a malformed readiness register", () => {
@@ -181,6 +232,81 @@ test("readiness is checked above the percentage, so the reason is the real one",
     subject({ readiness: notReady, config: config({ rolloutPercent: 0 }) })
   );
   assert.equal(decision.reason, "readiness_incomplete");
+});
+
+test("a server-minted initial release authority passes only readiness and marks the basis", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: notReady,
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(
+    decision.initialReleaseAuthority,
+    CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS
+  );
+  assert.equal(decision.drillOverride, undefined);
+});
+
+test("a structural or JSON copy cannot forge the initial release authority", () => {
+  const real = initialReleaseAuthority();
+  for (const forged of [{ ...real }, JSON.parse(JSON.stringify(real))]) {
+    const decision = decideAutoCohort(subject({
+      readiness: notReady,
+      initialReleaseAuthority: forged,
+    }));
+    assert.equal(decision.eligible, false);
+    assert.equal(decision.reason, "readiness_incomplete");
+  }
+});
+
+test("kill, rollout, plan, guest and bucket controls still bind an initial release", () => {
+  const authority = initialReleaseAuthority();
+  const cases = [
+    ["kill_switch", { config: config({ killSwitch: true }) }],
+    ["rollout_disabled", { config: config({ rolloutPercent: 0 }) }],
+    ["plan_not_eligible", { plan: "Free" }],
+    ["guest_not_eligible", { isGuest: true }],
+    ["outside_cohort", { config: config({ rolloutPercent: 0.0001 }) }],
+  ];
+  for (const [reason, overrides] of cases) {
+    const decision = decideAutoCohort(subject({
+      readiness: notReady,
+      initialReleaseAuthority: authority,
+      ...overrides,
+    }));
+    assert.equal(decision.eligible, false, `${reason} routed anyway`);
+    assert.equal(decision.reason, reason);
+  }
+});
+
+test("authority relevance matches every non-readiness cohort control", () => {
+  const cases = [
+    {},
+    { config: config({ killSwitch: true }) },
+    { config: config({ rolloutPercent: 0 }) },
+    { config: config({ eligiblePlans: [] }) },
+    { config: config({ salt: "unset" }) },
+    { plan: "Free" },
+    { isGuest: true },
+    { config: config({ rolloutPercent: 0.0001 }) },
+  ];
+  for (const overrides of cases) {
+    const candidate = subject({ ...overrides, readiness: notReady });
+    const actual = decideAutoCohort({ ...candidate, readiness: ready });
+    assert.equal(
+      autoInitialReleaseAuthorityRelevant(candidate),
+      actual.eligible,
+      JSON.stringify(overrides)
+    );
+  }
+});
+
+test("an actually ready rollout does not claim the initial exception", () => {
+  const decision = decideAutoCohort(subject({
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(decision.initialReleaseAuthority, undefined);
 });
 
 test("every default is off, so a deployment that sets nothing routes nobody", () => {

@@ -152,6 +152,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import {
+  resolvePromptRefinerDecision,
   resolvePromptRefinerFixtureDecision,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerResolution,
@@ -660,6 +661,7 @@ type ChatInputProps = {
    */
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
+  promptRefinerProductMode?: boolean;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
   /**
    * Fixture decisions are validated by the state owner. Acceptance shows a
@@ -667,6 +669,8 @@ type ChatInputProps = {
    * draft; the owner discards it when the authored source changes.
    */
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  /** Return true only when the owner dismissed this exact fixture state. */
+  onPromptRefinerDismiss?: (requestId: string) => boolean;
   /**
    * The assistant this conversation runs under (§14), or null when it runs
    * under none. Undefined when the control does not apply at all — a guest,
@@ -888,8 +892,10 @@ export function ChatInput({
   onSelectionModeChange,
   promptRefinerOffered = false,
   promptRefinerState,
+  promptRefinerProductMode = false,
   onPromptRefinerRequest,
   onPromptRefinerDecision,
+  onPromptRefinerDismiss,
   assistantProfile,
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
@@ -1329,7 +1335,9 @@ export function ChatInput({
       suggestion: BoundPromptRefinerSuggestion,
       decision: "accepted" | "kept_original"
     ) => {
-      const resolution = resolvePromptRefinerFixtureDecision({
+      const resolution = (promptRefinerProductMode
+        ? resolvePromptRefinerDecision
+        : resolvePromptRefinerFixtureDecision)({
         suggestion,
         currentPrompt: value,
         decision,
@@ -1338,10 +1346,19 @@ export function ChatInput({
       // A fixture decision is preview-only. The owner may acknowledge a
       // validated handoff, but these synthetic bytes must never enter the
       // authored composer draft or its durable draft writer.
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
       onPromptRefinerDecision?.(resolution);
     },
-    [onPromptRefinerDecision, value]
+    [onPromptRefinerDecision, promptRefinerProductMode, value]
+  );
+
+  const handlePromptRefinerDismiss = useCallback(
+    (requestId: string) => {
+      if (onPromptRefinerDismiss?.(requestId)) {
+        requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      }
+    },
+    [onPromptRefinerDismiss]
   );
 
   /*
@@ -3590,12 +3607,14 @@ export function ChatInput({
         {promptRefinerOffered &&
         promptRefinerState &&
         onPromptRefinerRequest &&
-        onPromptRefinerDecision ? (
+        onPromptRefinerDecision &&
+        onPromptRefinerDismiss ? (
           <PromptRefinerSuggestionPanel
             offered
             language={lang}
             currentPrompt={value}
             state={promptRefinerState}
+            productMode={promptRefinerProductMode}
             interactionBlockReason={
               isComposingDraft
                 ? "composition_active"
@@ -3610,6 +3629,7 @@ export function ChatInput({
             onKeepOriginal={(suggestion) =>
               handlePromptRefinerDecision(suggestion, "kept_original")
             }
+            onDismiss={handlePromptRefinerDismiss}
           />
         ) : null}
         {/*

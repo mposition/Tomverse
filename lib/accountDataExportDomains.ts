@@ -407,6 +407,21 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
   },
   {
+    domain: "promptRefinerChatScope", publicName: "prompt_refiner_scopes",
+    prismaModel: "PromptRefinerChatScope", state: "included_filtered",
+    withheldReason: "The mounted surface and epoch are exported. Internal scope, mount and owner identifiers are withheld execution protocol keys.",
+  },
+  {
+    domain: "promptRefinerChatSuggestion", publicName: "prompt_refiner_suggestions",
+    prismaModel: "PromptRefinerChatSuggestion", state: "included_filtered",
+    withheldReason: "The transient source and proposal, mode, state, decision and timestamps are exported. Terminal bodies are purged. Internal binding, request and source identifiers are withheld execution protocol keys.",
+  },
+  {
+    domain: "promptRefinerProductAttempt", publicName: "prompt_refiner_preparations",
+    prismaModel: "PromptRefinerProductAttempt", state: "included_filtered",
+    withheldReason: "The preparation mode, state, draft revision, epoch and timestamps are exported. Internal owner, scope, draft, conversation, suggestion and request identifiers are withheld execution protocol keys. This contains no prompt, attachment or cost basis.",
+  },
+  {
     domain: "imageCreditReservation",
     publicName: "image_credit_usage",
     prismaModel: "ImageCreditReservation",
@@ -550,6 +565,14 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "excluded",
     exclusionReason:
       "Content-free, immutable staging approval evidence. It contains only deployment/source digests, bounded cost and capacity, expiry, and the approving operator id; it never contains a customer id, prompt, output, credential, provider error, or model response. Operator access requests are handled through the manual PrivacyRequest path because the linked audit record is tamper-evident and retained.",
+  },
+  {
+    domain: "promptRefinerVnextOneShotStage",
+    publicName: "prompt_refiner_vnext_one_shot_stage_approvals",
+    prismaModel: "PromptRefinerVnextOneShotStage",
+    state: "excluded",
+    exclusionReason:
+      "Content-free one-shot stage evidence with immutable approval identities. It records exact source, deployment, manifest and bounded cost identities with the approving operator id, but no customer id, prompt, answer or provider prose. Operator access requests use the manual PrivacyRequest path because the linked audit entry is tamper-evident and retained.",
   },
   {
     domain: "promptRefinerShadowRun",

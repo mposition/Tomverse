@@ -158,14 +158,6 @@ const READ_ONLY_KEYS = {
       "written. There is no admin toggle. Stopping is " +
       "AUTO_EXPLORATION_KILL_SWITCH, which needs no database write.",
   },
-  PROMPT_REFINER_FLAG_KEY: {
-    reason:
-      "Prompt Refiner activation requires an approved paid adapter, fixed " +
-      "cost and timeout bounds, PLANNER-03 evidence and rollout disposition. " +
-      "Until those exist, an application toggle would expose the final step " +
-      "without the safety and quality gates that make it usable. Emergency " +
-      "stopping remains available through PROMPT_REFINER_KILL_SWITCH.",
-  },
 };
 
 /**

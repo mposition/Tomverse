@@ -272,6 +272,18 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  promptRefinerChatScope: (userId) =>
+    prisma.$queryRaw<unknown[]>`SELECT "surface", "epoch" FROM "PromptRefinerChatScope"
+      WHERE "userId" = ${userId} ORDER BY "id" LIMIT ${EXPORT_ROW_CAP}`,
+
+  promptRefinerChatSuggestion: (userId) =>
+    prisma.$queryRaw<unknown[]>`SELECT "sourcePrompt", "refinedPrompt", "mode", "state", "decision", "createdAt", "expiresAt", "consumedAt"
+      FROM "PromptRefinerChatSuggestion" WHERE "userId" = ${userId} ORDER BY "createdAt", "id" LIMIT ${EXPORT_ROW_CAP}`,
+
+  promptRefinerProductAttempt: (userId) =>
+    prisma.$queryRaw<unknown[]>`SELECT "mode", "state", "scopeEpoch", "draftRevision", "createdAt", "expiresAt"
+      FROM "PromptRefinerProductAttempt" WHERE "userId" = ${userId} ORDER BY "createdAt", "id" LIMIT ${EXPORT_ROW_CAP}`,
+
   imageCreditReservation: (userId) =>
     prisma.imageCreditReservation.findMany({
       where: { userId },

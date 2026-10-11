@@ -14,7 +14,7 @@
 // delegate by any of the spellings that reach it, plus the table name inside
 // raw SQL. Fail-closed: an unrecognised use is a failure. Opening a table
 // to every file means taking it out of DARK_TABLES. A file named in
-// LIMITED_DARK_WRITERS may use that one table while every other file fails.
+// LIMITED_DARK_ACCESS may use that one table while every other file fails.
 //
 // Tests are excluded. `tests/deploymentIdentity.test.mjs` names the delegates
 // in order to assert they are unused, and a check that forbade naming them
@@ -23,6 +23,12 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+    PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS,
+    promptRefinerProductLimitedDarkAccessConfigurationProblems,
+    promptRefinerProductLimitedDarkAccessPermitted,
+} from "./prompt-refiner-product-limited-dark-access.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
@@ -43,17 +49,42 @@ const DARK_TABLES = [
     "RoutingSnapshotCeilingApproval",
     "AvailabilityRollupApplication",
     "DeploymentPriceSnapshot",
+    "PromptRefinerVnextOneShotStage",
+    "PromptRefinerVnextOneShotSlot",
 ];
 
 /**
- * Files that may name one dark table because they are its limited writer.
+ * Files that may name one dark table because they are its reviewed, limited
+ * one-shot readback or writer path.
  * The table stays dark for every other file. This is not registry activation:
  * the placement writer stores a row that matches the call the client already
  * makes, and nothing else may read it.
  */
-const LIMITED_DARK_WRITERS = {
+const LIMITED_DARK_ACCESS = {
     ModelDeployment: ["lib/pinnedDeploymentPlacement.ts"],
     ProviderEndpoint: ["lib/pinnedDeploymentPlacement.ts"],
+    PromptRefinerVnextOneShotStage: [
+        "lib/promptRefinerVnextOneShotCandidateSourceReadback.ts",
+        "lib/promptRefinerVnextOneShotDeploymentBinding.ts",
+        "lib/promptRefinerVnextOneShotOutcomeRecovery.ts",
+        "lib/promptRefinerVnextOneShotPriceBinding.ts",
+        "lib/promptRefinerVnextOneShotRunApproval.ts",
+        "lib/promptRefinerVnextOneShotSlotConsumption.ts",
+        "lib/promptRefinerVnextOneShotStageReadback.ts",
+        "lib/promptRefinerVnextOneShotStageWriter.ts",
+        ...PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS
+            .filter((entry) => entry.tables.includes("PromptRefinerVnextOneShotStage"))
+            .map((entry) => entry.file),
+    ],
+    PromptRefinerVnextOneShotSlot: [
+        "lib/promptRefinerVnextOneShotOutcomeRecovery.ts",
+        "lib/promptRefinerVnextOneShotSlotConsumption.ts",
+        "lib/promptRefinerVnextOneShotStageReadback.ts",
+        "lib/promptRefinerVnextOneShotStageWriter.ts",
+        ...PROMPT_REFINER_PRODUCT_LIMITED_DARK_ACCESS
+            .filter((entry) => entry.tables.includes("PromptRefinerVnextOneShotSlot"))
+            .map((entry) => entry.file),
+    ],
 };
 
 
@@ -256,14 +287,30 @@ const files = ROOTS.flatMap((directory) => walk(directory)).filter((file) => {
     return !ALLOWED.some((allowed) => normalised.startsWith(allowed));
 });
 
-const problems = [];
+const problems = [
+    ...promptRefinerProductLimitedDarkAccessConfigurationProblems().map(
+        (problem) => `Prompt Refiner limited dark access: ${problem}`
+    ),
+];
 
 for (const file of files) {
     const source = readFileSync(join(root, file), "utf8");
     const normalised = file.split("\\").join("/");
     for (const table of DARK_TABLES) {
-        const writers = LIMITED_DARK_WRITERS[table] ?? [];
-        if (writers.includes(normalised)) continue;
+        const writers = LIMITED_DARK_ACCESS[table] ?? [];
+        if (writers.includes(normalised)) {
+            const productRead = promptRefinerProductLimitedDarkAccessPermitted({
+                file: normalised,
+                table,
+                source,
+            });
+            if (productRead === false) {
+                problems.push(
+                    `${normalised}: reviewed source hash or table scope changed for ${table}`
+                );
+            }
+            continue;
+        }
         const delegate = table.charAt(0).toLowerCase() + table.slice(1);
         // `prisma.modelDeployment`, `tx.modelDeployment`, `client.modelDeployment`
         const dotted = new RegExp(`\\.\\s*${delegate}\\s*\\.`);
@@ -319,12 +366,12 @@ if (problems.length > 0) {
     console.error(
         "These tables were added ahead of the work that uses them, on the condition\n" +
             "that nothing reads or writes them until the routing identity change is\n" +
-            "approved on its own. A limited writer is named in LIMITED_DARK_WRITERS.\n" +
+            "approved on its own. Limited access is named in LIMITED_DARK_ACCESS.\n" +
             "Opening the table to every file means taking it out of DARK_TABLES."
     );
     process.exit(1);
 }
 
 console.log("");
-console.log("No dark table is read outside its named limited writer.");
+console.log("No dark table is read outside its named limited access paths.");
 console.log("");

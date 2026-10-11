@@ -109,7 +109,7 @@ if (group) {
  * A step whose arguments name no suite at all -- the Prisma schema build -- is
  * never filtered. Each lane gets its own database and has to build it.
  */
-const run = (args, label) => {
+const run = (args, label, environmentOverrides = {}) => {
   const suites = args.filter((arg) => arg.startsWith("tests/"));
   let selected = args;
   if (group && suites.length > 0) {
@@ -120,7 +120,7 @@ const run = (args, label) => {
   console.log(`\n[db-integration] ${label}`);
   const result = spawnSync(process.execPath, selected, {
     cwd: resolve(import.meta.dirname, ".."),
-    env: testEnvironment,
+    env: { ...testEnvironment, ...environmentOverrides },
     stdio: "inherit",
   });
   if (result.error) throw result.error;
@@ -427,6 +427,9 @@ run(
     // Prompt Refiner authority: stage-first locking, runtime price drift,
     // one-time consume and the permanent 100-slot/cost ceiling.
     "tests/integration/prompt-refiner-reservation.db.test.ts",
+    // vNext one-shot storage remains dark but must commit exactly 80 fixed-
+    // price slots and refuse consumption before run approval or any reuse.
+    "tests/integration/prompt-refiner-vnext-one-shot-slots.db.test.ts",
     // The staging-only create-once writer: exact historical/current provenance,
     // audit atomicity, immutable approval and DB-clock expiry.
     "tests/integration/prompt-refiner-reservation-admission.db.test.ts",
@@ -759,6 +762,19 @@ run(
     "tests/integration/account-operational-restriction.db.test.ts",
   ],
   "Running financial, credit, chat-concurrency, chat-rate-limit, fallback-pricing, model-registry, admin-security, admin-users, login-methods, account-deletion, account export and anonymisation, conversation-title, conversation-lock-migration, provider-recovery, provider-failure-scope, provider-probe, subscription-sync-ordering, plan-change-reservation, image-generation, external-import, and memory transaction scenarios"
+);
+// The budget suite mocks Prisma and the audit writer while exercising real
+// PostgreSQL constraints. Module mocks must be isolated from the batch above.
+run(
+  ["--conditions=react-server", "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning", "--import", "tsx", "--test",
+    "--test-concurrency=1",
+    "tests/integration/prompt-refiner-auto-budget-hold.db.test.ts",
+    "tests/integration/prompt-refiner-chat-execution.db.test.ts",
+    "tests/integration/prompt-refiner-chat-execution-full-schema.db.test.ts",
+    "tests/integration/prompt-refiner-product-operational-guard.db.test.ts",
+    "tests/integration/chat-refiner-initial-auto-release.db.test.ts"],
+  "Running the Prompt Refiner Auto budget hold transaction scenarios",
 );
 // Runs apart from the batch above: it drives the real route handlers, which
 // needs mock.module (--experimental-test-module-mocks) to replace the session

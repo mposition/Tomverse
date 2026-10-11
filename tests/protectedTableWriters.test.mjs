@@ -260,6 +260,45 @@ test("an allowlisted raw SQL file that gains a statement fails", () => {
   assert.equal(extended[0].rule, "raw-sql");
 });
 
+test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
+  const path = "lib/promptRefinerChatExecutionStore.ts";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const entries = RAW_SQL_ALLOWLIST.filter(
+    (entry) => entry.path === path &&
+      ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].includes(entry.table)
+  );
+  assert.deepEqual(
+    entries.map(({ table, tableMentions, writeVerbs }) => ({
+      table,
+      tableMentions,
+      writeVerbs,
+    })),
+    [
+      { table: "PromptRefinerChatScope", tableMentions: 5, writeVerbs: 12 },
+      { table: "PromptRefinerChatSuggestion", tableMentions: 11, writeVerbs: 12 },
+    ]
+  );
+  assert.ok(entries.every((entry) =>
+    entry.reason.includes("read-only preview") &&
+    entry.reason.includes("atomic consume boundary")));
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path),
+    []
+  );
+
+  for (const entry of entries) {
+    const findings = checkProtectedTableWriters({
+      sources: [{ path, text:
+        `${source}\nconst unexpected = tx.$queryRaw\`SELECT 1 FROM "${entry.table}"\`;\n` }],
+    }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+    assert.ok(
+      findings.some((finding) => finding.detail.includes(entry.table)),
+      `an unreviewed ${entry.table} read must fail closed`
+    );
+  }
+});
+
 test("the listed runtime-SQL spellings are inventoried, in both directions", () => {
   const cases = {
     "lib/new.ts": "await tx.$executeRawUnsafe(sql, ...values)",

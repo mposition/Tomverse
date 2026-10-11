@@ -39,6 +39,7 @@ export const KNOWN_TOP_LEVEL_DIRECTORIES = [
   ".tmp",
   "app",
   "apps",
+  "bin",
   "components",
   "config",
   "crates",
@@ -98,6 +99,7 @@ export const CONTROL_PLANE_PATTERNS: readonly string[] = [
   // §4-2: the execution environment. Root files and root dot-directories are
   // handled structurally in `classifyPath`.
   ".github/**",
+  "bin/**",
   "scripts/**",
   "config/**",
   // Operator tooling that runs reviewer CLIs (the independent review

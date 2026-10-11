@@ -519,6 +519,17 @@ test("the guard reads probes only on the refusal path, read-only and rolled back
   assert.ok(guard.includes("undeclared,"));
 });
 
+test("the B07 v5 stage guard is detectable before migration deployment", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(join(MIGRATIONS,
+    "20261006160000_prompt_refiner_one_shot_post_unknown_v5", "migration.sql"),
+  "utf8");
+  const created = /CREATE FUNCTION "([a-z0-9_]+)"\(/.exec(sql)?.[1];
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function", function: created,
+  });
+});
+
 test("the AMUX chunk deadline migration pins the exact previous function body", async () => {
   const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
   const sql = readFileSync(
@@ -660,4 +671,23 @@ test("the sre-ops digest registration pins the billing migration's insert trigge
       }
     });
   assert.deepEqual(between, []);
+});
+
+test("the B06 v3 recovery migration pins the deployed v2 supersession function", async () => {
+  const { presenceDeclarationIn } = await import("../scripts/baseline-presence-core.mjs");
+  const sql = readFileSync(
+    join(MIGRATIONS, "20261005210000_prompt_refiner_one_shot_run_approved_recovery", "migration.sql"),
+    "utf8",
+  );
+  const previousSql = readFileSync(
+    join(MIGRATIONS, "20261005140000_prompt_refiner_one_shot_unrun_replacement", "migration.sql"),
+    "utf8",
+  );
+  const previousBody = /CREATE FUNCTION "prompt_refiner_vnext_one_shot_supersession_guard"\(\)[\s\S]*?AS \$\$([\s\S]*?)\$\$/.exec(previousSql)?.[1];
+  assert.ok(previousBody);
+  assert.deepEqual(presenceDeclarationIn(sql), {
+    kind: "function-replacement",
+    function: "prompt_refiner_vnext_one_shot_supersession_guard",
+    previousBodySha256: createHash("sha256").update(previousBody).digest("hex"),
+  });
 });
