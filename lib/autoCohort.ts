@@ -44,9 +44,13 @@ import {
   isChatRefinerInitialAutoRouterAuthority,
   type ChatRefinerInitialAutoRouterAuthority,
 } from "@/lib/chatRefinerInitialAutoRouterAuthority";
+import {
+  resolveAutoRouterLimitedRelease,
+  type AutoRouterLimitedReleaseAdmission,
+} from "@/lib/autoRouterLimitedRelease";
 
 /** Bump when bucketing, salt handling or the refusal set changes. */
-export const AUTO_COHORT_VERSION = "auto-cohort-v1";
+export const AUTO_COHORT_VERSION = "auto-cohort-v2";
 
 /** Buckets per cohort. 10,000 makes a 0.01% cohort expressible. */
 const BUCKETS = 10_000;
@@ -71,6 +75,12 @@ export type AutoCohortDecision =
       drillOverride?: typeof DRILL_OVERRIDE_REASON;
       /** Exact-deployment owner authority, separate from the staging drill. */
       initialReleaseAuthority?: typeof CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS;
+      /** The separately approved, artifact-bound release path. */
+      limitedReleaseException?: Readonly<{
+        exceptionId: string;
+        evidenceRef: string;
+        outstandingGates: readonly AutoReadinessGateId[];
+      }>;
       version: string;
       salt: string;
     }
@@ -99,6 +109,8 @@ export type AutoCohortConfig = {
   salt: string;
   /** Plans Auto may route. Empty means none, never "all". */
   eligiblePlans: readonly string[];
+  /** Separate product authority; never inferred from the rollout fields. */
+  limitedRelease?: AutoRouterLimitedReleaseAdmission;
 };
 
 const parsePercent = (raw: string | undefined): number => {
@@ -116,7 +128,8 @@ const parsePercent = (raw: string | undefined): number => {
  * deliberate rollout.
  */
 export const autoCohortConfig = (
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
+  now: () => number = Date.now,
 ): AutoCohortConfig => ({
   killSwitch: env.AUTO_ROUTER_KILL_SWITCH === "on",
   rolloutPercent: parsePercent(env.AUTO_ROUTER_ROLLOUT_PERCENT),
@@ -125,6 +138,7 @@ export const autoCohortConfig = (
     .split(",")
     .map((plan) => plan.trim())
     .filter(Boolean),
+  limitedRelease: resolveAutoRouterLimitedRelease({ environment: env, now }),
 });
 
 /**
@@ -144,6 +158,18 @@ export const cohortBucket = (subjectKey: string, salt: string): number => {
   const digest = createHash("sha256").update(`${salt}:${subjectKey}`).digest();
   return digest.readUInt32BE(0) % BUCKETS;
 };
+
+const limitedReleaseOverridesReadiness = (
+  readiness: ReturnType<typeof autoRolloutReadiness>,
+  limitedRelease: AutoRouterLimitedReleaseAdmission | undefined,
+): limitedRelease is Extract<AutoRouterLimitedReleaseAdmission, { admitted: true }> =>
+  !readiness.ready &&
+  readiness.problems.length === 0 &&
+  limitedRelease?.admitted === true &&
+  readiness.outstanding.length === limitedRelease.unmetReadinessGates.length &&
+  new Set(readiness.outstanding).size === readiness.outstanding.length &&
+  readiness.outstanding.every((gate) =>
+    limitedRelease.unmetReadinessGates.includes(gate));
 
 export type AutoCohortInput = {
   /** Stable per person. Guests have one, but see `isGuest`. */
@@ -175,10 +201,13 @@ export type AutoCohortInput = {
  * rollout, plan, guest or bucket rules will refuse anyway.
  */
 export const autoInitialReleaseAuthorityRelevant = (
-  input: Pick<AutoCohortInput, "subjectKey" | "isGuest" | "plan" | "config">
+  input: Pick<AutoCohortInput, "subjectKey" | "isGuest" | "plan" | "config" | "readiness">
 ): boolean => {
   const config = input.config ?? autoCohortConfig();
+  const readiness = input.readiness ?? autoRolloutReadiness();
   if (
+    readiness.ready ||
+    limitedReleaseOverridesReadiness(readiness, config.limitedRelease) ||
     config.killSwitch ||
     config.rolloutPercent <= 0 ||
     config.eligiblePlans.length === 0 ||
@@ -212,8 +241,14 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
 
   const readiness = input.readiness ?? autoRolloutReadiness();
-  // Two separately-auditable authorities may pass an outstanding gate. The
-  // staging fallback drill exists because the register is static
+  const limitedRelease = config.limitedRelease;
+  const limitedReleaseOverride = limitedReleaseOverridesReadiness(
+    readiness,
+    limitedRelease,
+  );
+  // Three separately-auditable authorities may pass an outstanding gate. The
+  // artifact-bound limited release and exact-deployment initial release retain
+  // their own evidence. The staging fallback drill exists because the register is static
   // code with no environment dimension, so attesting a gate to make staging
   // route would have committed the same `passed` to production. See
   // lib/autoDrillOverride.ts for the four locks, the first of which is "not
@@ -224,7 +259,12 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   const initialReleaseAuthorized = isChatRefinerInitialAutoRouterAuthority(
     input.initialReleaseAuthority
   );
-  if (!readiness.ready && !input.drillOverride && !initialReleaseAuthorized) {
+  if (
+    !readiness.ready &&
+    !limitedReleaseOverride &&
+    !initialReleaseAuthorized &&
+    !input.drillOverride
+  ) {
     return {
       eligible: false,
       reason: "readiness_incomplete",
@@ -235,8 +275,13 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
   // Recorded on the decision, so a routed turn that took this path is never
   // mistaken for one that qualified.
-  const overridden = !readiness.ready && input.drillOverride === true;
-  const initiallyReleased = !readiness.ready && initialReleaseAuthorized;
+  const initiallyReleased =
+    !readiness.ready && !limitedReleaseOverride && initialReleaseAuthorized;
+  const overridden =
+    !readiness.ready &&
+    !limitedReleaseOverride &&
+    !initiallyReleased &&
+    input.drillOverride === true;
 
   if (config.rolloutPercent <= 0 || config.eligiblePlans.length === 0) {
     return { eligible: false, reason: "rollout_disabled", bucket: null, ...shared };
@@ -268,6 +313,15 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     ...(initiallyReleased
       ? { initialReleaseAuthority: CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS }
       : {}),
+    ...(limitedReleaseOverride
+      ? {
+          limitedReleaseException: {
+            exceptionId: limitedRelease.exceptionId,
+            evidenceRef: limitedRelease.evidenceRef,
+            outstandingGates: Object.freeze([...readiness.outstanding]),
+          },
+        }
+      : {}),
     ...shared,
   };
 };
@@ -290,7 +344,7 @@ export const describeAutoCohortRefusal = (
       return (
         "Auto rollout readiness is incomplete: " +
         `${(decision.outstandingGates ?? []).join(", ") || "the register does not validate"}. ` +
-        "Until every gate is attested, Auto stays in shadow."
+        "Auto stays in shadow unless a separately approved release boundary admits it."
       );
     case "rollout_disabled":
       return "The rollout is off: no percentage, no eligible plans, or no cohort salt set.";
