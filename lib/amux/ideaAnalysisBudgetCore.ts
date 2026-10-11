@@ -12,10 +12,10 @@
  * and dark code-drafting gate are recorded in docs/policy/amux-intake.md v12.
  */
 export const AMUX_V4_ANALYSIS_NAMESPACE = "agent/amux-intake" as const;
-export const AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD = "50000000" as const;
+/** Legacy bootstrap only, until an owner saves the first budget version. */
+export const AMUX_V4_ANALYSIS_INITIAL_MONTHLY_CAP_MICROUSD = "50000000" as const;
 
 const TOKENS_PER_MILLION = BigInt(1_000_000);
-const MONTHLY_CAP = BigInt(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD);
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
 const UTC_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/;
@@ -81,6 +81,8 @@ export type AmuxIdeaAnalysisBudgetBasis = {
   /** Current month, agent namespace only; includes failed calls. */
   consumedMicroUsd: string;
   reservedMicroUsd: string;
+  /** Loaded by the app from the owner-managed monthly window, never the CLI. */
+  monthlyLimitMicroUsd: string;
   usageState: "known" | "unknown";
 };
 
@@ -103,7 +105,7 @@ export function assessAmuxIdeaAnalysisBudget(
     "pricingVerifiedAt", "pricingExpiresAt", "asOfIso", "windowStartsAtIso",
     "worstTierVerified", "tokenCapsEnforceable", "billableToolsDisabled",
     "inputTokensCap", "outputTokensCap", "inputMicroUsdPerMillion",
-    "outputMicroUsdPerMillion", "consumedMicroUsd", "reservedMicroUsd", "usageState"];
+    "outputMicroUsdPerMillion", "consumedMicroUsd", "reservedMicroUsd", "monthlyLimitMicroUsd", "usageState"];
   const value = snapshotExact(raw, keys);
   if (!value ||
       value.namespace !== AMUX_V4_ANALYSIS_NAMESPACE ||
@@ -120,6 +122,7 @@ export function assessAmuxIdeaAnalysisBudget(
       !nonnegativeSafeInteger(value.inputMicroUsdPerMillion) ||
       !nonnegativeSafeInteger(value.outputMicroUsdPerMillion) ||
       !amount(value.consumedMicroUsd) || !amount(value.reservedMicroUsd) ||
+      !amount(value.monthlyLimitMicroUsd) || BigInt(value.monthlyLimitMicroUsd) <= BigInt(0) ||
       (value.usageState !== "known" && value.usageState !== "unknown") ||
       typeof value.worstTierVerified !== "boolean" ||
       typeof value.tokenCapsEnforceable !== "boolean" ||
@@ -140,7 +143,8 @@ export function assessAmuxIdeaAnalysisBudget(
     ceilDivide(BigInt(value.inputTokensCap) * BigInt(value.inputMicroUsdPerMillion), TOKENS_PER_MILLION) +
     ceilDivide(BigInt(value.outputTokensCap) * BigInt(value.outputMicroUsdPerMillion), TOKENS_PER_MILLION);
   const outstanding = BigInt(value.consumedMicroUsd) + BigInt(value.reservedMicroUsd) + worstCase;
-  if (outstanding > MONTHLY_CAP) return hold("monthly_cap_exceeded");
+  const monthlyCap = BigInt(value.monthlyLimitMicroUsd);
+  if (outstanding > monthlyCap) return hold("monthly_cap_exceeded");
   return {
     decision: "reservation_candidate",
     namespace: AMUX_V4_ANALYSIS_NAMESPACE,
@@ -148,7 +152,7 @@ export function assessAmuxIdeaAnalysisBudget(
     provider: value.provider,
     modelId: value.modelId,
     worstCaseMicroUsd: worstCase.toString(),
-    remainingAfterMicroUsd: (MONTHLY_CAP - outstanding).toString(),
+    remainingAfterMicroUsd: (monthlyCap - outstanding).toString(),
     pricingVersion: value.pricingVersion,
     windowStartsAtIso: value.windowStartsAtIso,
     amountMeaning: value.mode === "subscription_cli"

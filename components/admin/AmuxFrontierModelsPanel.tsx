@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AmuxAnalysisBudgetPanel } from "@/components/admin/AmuxAnalysisBudgetPanel";
+import { AmuxAnalysisMonthlyBudgetPanel } from "@/components/admin/AmuxAnalysisMonthlyBudgetPanel";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { readAdminApiFailure, type AdminApiFailure } from "@/lib/adminApiOutcome";
 import { adminFetch } from "@/lib/adminFetch";
@@ -524,6 +525,8 @@ export function AmuxFrontierModelsPanel({ available, writeAvailable, previewAvai
         {m.frontierModelsTitle}
       </h3>
       <p className="text-zinc-700 dark:text-zinc-300">{m.frontierModelsHint}</p>
+      <AmuxAnalysisMonthlyBudgetPanel key={operatorId} available={analysisBudgetAvailable}
+        operatorId={operatorId} />
       <div className="space-y-3 rounded-lg border border-zinc-300 p-3 dark:border-zinc-700">
         <h4 className="font-semibold text-zinc-900 dark:text-zinc-100">
           {m.frontierRegistrationTitle}

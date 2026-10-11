@@ -179,6 +179,12 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    delegate: "amuxIdeaAnalysisBudgetSetting",
+    writers: ["lib/amux/ideaAnalysisBudgetSettingStore.ts"],
+    contract: "docs/policy/amux-intake.md v16",
+  },
+  {
     table: "AgentDigestItem",
     delegate: "agentDigestItem",
     writers: ["lib/agentDigestStore.ts"],
@@ -545,6 +551,20 @@ export const DELEGATE_NAME_ALLOWLIST = [
  * write it. Counts are exact: a new statement in the file changes one of them.
  */
 export const RAW_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 6,
+    writeVerbs: 13,
+    reason: "This migration creates the protected append-only setting and its audited version/ledger consistency guards. No live setting or usage is seeded or changed.",
+  },
+  {
+    path: "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 13,
+    reason: "The setting migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the budget setting and window; it never writes AdminAuditLog.",
+  },
   {
     path: "lib/opsObserverDigest.ts",
     table: "AgentDigestItem",
