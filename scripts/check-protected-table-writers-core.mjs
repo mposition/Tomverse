@@ -1731,14 +1731,6 @@ export const RAW_SQL_ALLOWLIST = [
       "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
   },
   {
-    path: "prisma/migrations/20261006160000_prompt_refiner_one_shot_post_unknown_v5/migration.sql",
-    table: "AdminAuditLog",
-    tableMentions: 4,
-    writeVerbs: 6,
-    reason:
-      "The v5 one-shot guard reads three immutable audit relationships: the v4 terminal count, the single linked recovery approval, and its signed predecessor stop. Its DDL changes only the one-shot stage ID constraint and creates guards on the stage and slot tables; it never inserts, updates, or deletes AdminAuditLog.",
-  },
-  {
     path: "prisma/migrations/20261009044000_prompt_refiner_auto_budget_hold/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 2,
