@@ -9,8 +9,8 @@ import { auditRowActorKind } from "@/lib/adminAuditSystemActors";
 import { openAmuxContent, verifyAmuxContentDigest,
   type AmuxContentKeys } from "./ideaCrypto.ts";
 import { assessAmuxIdeaAnalysisBudget,
-  AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
   AMUX_V4_ANALYSIS_NAMESPACE } from "./ideaAnalysisBudgetCore.ts";
+import { readAnalysisMonthlyBudgetSetting } from "./ideaAnalysisBudgetSettingStore.ts";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "./ideaAnalysisPriceVersionRead.ts";
 import { writeAmuxAnalysisBudgetSystemAudit } from "./ideaAnalysisBudgetSystemAudit.ts";
 
@@ -220,9 +220,10 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
   // First reservation in a UTC month creates its own capped ledger row. The
   // audit-chain lock serializes this with other reservation writers, while
   // the unique month key remains the database backstop.
+  const monthlySetting = await readAnalysisMonthlyBudgetSetting(tx);
   await tx.amuxIdeaAnalysisBudgetWindow.createMany({
     data: [{ namespace: AMUX_V4_ANALYSIS_NAMESPACE, monthStart,
-      limitMicroUsd: BigInt(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD),
+      limitMicroUsd: BigInt(monthlySetting.limitMicroUsd),
       spentMicroUsd: BigInt(0), reservedMicroUsd: BigInt(0) }],
     skipDuplicates: true,
   });
@@ -236,7 +237,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     FOR UPDATE
   `;
   const window = lockedWindow[0];
-  if (!window || window.limitMicroUsd !== BigInt(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD)) {
+  if (!window || window.limitMicroUsd !== BigInt(monthlySetting.limitMicroUsd)) {
     refuse("budget_unavailable");
   }
   const unknown = await tx.amuxIdeaAnalysisBudgetHold.findFirst({
@@ -249,6 +250,7 @@ export async function commitAmuxIdeaAnalysisBudgetReservation(tx: Tx, input: {
     namespace: AMUX_V4_ANALYSIS_NAMESPACE,
     asOfIso: now.toISOString(),
     windowStartsAtIso: monthStart.toISOString(),
+    monthlyLimitMicroUsd: window.limitMicroUsd.toString(),
     consumedMicroUsd: window.spentMicroUsd.toString(),
     reservedMicroUsd: window.reservedMicroUsd.toString(),
     usageState: unknown ? "unknown" : "known",

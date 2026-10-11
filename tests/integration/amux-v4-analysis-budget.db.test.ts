@@ -58,6 +58,7 @@ import { commitAmuxIdeaAnalysisPriceApproval,
   commitAmuxIdeaAnalysisPriceRevocation,
   AmuxIdeaAnalysisPriceApprovalError } from "@/lib/amux/ideaAnalysisPriceVersionWrite";
 import { readApprovedAmuxIdeaAnalysisPriceVersion } from "@/lib/amux/ideaAnalysisPriceVersionRead";
+import { commitAnalysisBudgetSetting } from "@/lib/amux/ideaAnalysisBudgetSettingStore";
 import { prisma } from "@/lib/prisma";
 
 const testUrl = process.env.TEST_DATABASE_URL?.trim();
@@ -1852,7 +1853,7 @@ test("two confirmed previews cannot reserve the last monthly allowance twice", a
   }), 1);
 });
 
-test("budget window rejects another namespace or a larger monthly cap", async () => {
+test("budget window rejects another namespace or a cap without owner approval", async () => {
   const invalidMonth = new Date("2026-11-01T00:00:00.000Z");
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.create({
     data: { namespace: "user-credit", monthStart: invalidMonth,
@@ -1861,5 +1862,36 @@ test("budget window rejects another namespace or a larger monthly cap", async ()
   await assert.rejects(prisma.amuxIdeaAnalysisBudgetWindow.create({
     data: { namespace, monthStart: invalidMonth,
       limitMicroUsd: BigInt(50_000_001) },
-  }), /AmuxIdeaAnalysisBudgetWindow_amount_check/);
+  }), /analysis budget limit requires current owner approval/);
+});
+
+test("a saved USD 1000 setting immediately admits a real reservation that the old ceiling refused", async () => {
+  const selectedModelId = modelId();
+  const previewId = await confirmedPreviewId(selectedModelId);
+  const priceVersionId = await approvedPriceVersionId("openai", selectedModelId);
+  const holdId = randomUUID();
+  class Rollback extends Error {}
+  await assert.rejects(prisma.$transaction(async (tx) => {
+    await tx.amuxIdeaAnalysisBudgetWindow.update({
+      where: { namespace_monthStart: { namespace, monthStart } },
+      data: { spentMicroUsd: BigInt(49_995_000), reservedMicroUsd: BigInt(5_000) },
+    });
+    await assert.rejects(commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId, previewId, priceVersionId, runner, keys }), (error: unknown) =>
+      error instanceof AmuxIdeaAnalysisReservationError && error.reason === "monthly_cap_exceeded");
+    await commitAnalysisBudgetSetting(tx, { session, request, id: randomUUID(),
+      expectedPreviousVersion: 0, monthlyUsd: "1000", ownerConfirmed: true });
+    const reserved = await commitAmuxIdeaAnalysisBudgetReservation(tx,
+      { holdId, previewId, priceVersionId, runner, keys });
+    assert.equal(reserved.reservedMicroUsd, "5000");
+    const window = await tx.amuxIdeaAnalysisBudgetWindow.findUniqueOrThrow({
+      where: { namespace_monthStart: { namespace, monthStart } },
+    });
+    assert.equal(window.limitMicroUsd, BigInt(1_000_000_000));
+    assert.equal(window.spentMicroUsd, BigInt(49_995_000));
+    assert.equal(window.reservedMicroUsd, BigInt(10_000));
+    throw new Rollback();
+  }, { timeout: 15_000 }), Rollback);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetSetting.count(), 0);
+  assert.equal(await prisma.amuxIdeaAnalysisBudgetHold.count({ where: { id: holdId } }), 0);
 });

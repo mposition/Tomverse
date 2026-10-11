@@ -55,6 +55,7 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
   const [pendingRevocationId, setPendingRevocationId] = useState<string | null>(null);
   const [unknown, setUnknown] = useState<"price" | "hold" | null>(null);
   const [failure, setFailure] = useState(false);
+  const [monthlyExceeded, setMonthlyExceeded] = useState(false);
 
   const loadPrice = useCallback(async () => {
     const response = await adminFetch("/api/admin/amux/ideas/analysis-prices?profile=first-live",
@@ -141,14 +142,23 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
     if (!available || busy || !current || !latest || !confirmed.previewId ||
         hold?.state !== "not_visible" || unknown) return;
     const holdId = crypto.randomUUID();
-    setBusy(true); setFailure(false);
+    setBusy(true); setFailure(false); setMonthlyExceeded(false);
     try {
       const response = await adminFetch("/api/admin/amux/ideas/analysis-reservations", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ holdId, previewId: confirmed.previewId,
           priceVersionId: latest.id }),
       });
-      if (!response.ok) throw new Error("reservation_unknown");
+      if (!response.ok) {
+        const refusal: unknown = await response.json();
+        if (response.status === 409 && refusal && typeof refusal === "object" &&
+          (refusal as { error?: unknown }).error === "budget_hold" &&
+          (refusal as { reason?: unknown }).reason === "monthly_cap_exceeded" &&
+          (refusal as { modelCallStarted?: unknown }).modelCallStarted === false) {
+          setMonthlyExceeded(true); return;
+        }
+        throw new Error("reservation_unknown");
+      }
       const body: unknown = await response.json();
       if (!body || typeof body !== "object" ||
           (body as Record<string, unknown>).holdId !== holdId) {
@@ -243,6 +253,7 @@ export function AmuxAnalysisBudgetPanel({ confirmed, available }: {
       {m.check}
     </button></> : null}
     {failure ? <p role="alert">{m.failed}</p> : null}
+    {monthlyExceeded ? <p role="alert">{m.monthlyExceeded}</p> : null}
     {busy ? <p role="status">{m.checking}</p> : null}
   </section>;
 }

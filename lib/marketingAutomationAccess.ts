@@ -578,7 +578,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * watched closure bytes moved, so existing signed staging evidence is stale.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "b9fef04f561d94087802d02e42bcc708374988fa8d3f5fef190fc852acc62087";
+  "f88ad0827c25f3f4b432d18c014e029dbfe247226e234e1664743d775b4e5ce8";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -1220,3 +1220,10 @@ export const resolveMarketingAutomationAccess = (
   result.webhookApply = webhookApplyDecision(input);
   return result;
 };
+
+// 2026-10-11: the analysis-only monthly budget adds an audit relation on the
+// watched AdminAuditLog model. The marketing descriptor, receiver, writers
+// and admission decisions are unchanged. Repin the actual closure bytes;
+// old signed evidence remains stale and no marketing switch is opened.
+// Keep this provenance after the code so existing reviewed access positions
+// remain unchanged.
