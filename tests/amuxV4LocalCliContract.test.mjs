@@ -177,7 +177,7 @@ test("Claude result needs exact served model and complete usage", () => {
     "verified_success");
 });
 
-test("Claude ignores only bounded pre-init UI invalidation notices", () => {
+test("Claude ignores only bounded empty UI invalidation notices before the result", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const startup = { type: "system", subtype: "ui_invalidate",
     event: "ui.render", uuid: "notice-1", session_id: "session-1" };
@@ -189,6 +189,14 @@ test("Claude ignores only bounded pre-init UI invalidation notices", () => {
   ].map((event) => JSON.stringify(event)).join("\n"));
   assert.equal(inspectAmuxV4AnalysisCliResult(plan,
     stream([startup]), 0).kind, "verified_success");
+  const events = stream([]).toString("utf8").split("\n")
+    .map((line) => JSON.parse(line));
+  for (const position of [1, 2]) {
+    const interleaved = events.toSpliced(position, 0, startup);
+    assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+      Buffer.from(interleaved.map((event) => JSON.stringify(event)).join("\n")),
+      0).kind, "verified_success");
+  }
   for (const prefix of [
     [{ ...startup, tools: ["Bash"] }],
     [{ ...startup, content: "unexpected" }],
@@ -198,6 +206,81 @@ test("Claude ignores only bounded pre-init UI invalidation notices", () => {
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
       stream(prefix), 0), { kind: "outcome_unknown" });
+  }
+  assert.equal(inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from([...events, startup].map((event) => JSON.stringify(event))
+      .join("\n")), 0).kind, "outcome_unknown");
+});
+
+test("Claude accepts bounded requesting and neutral status notices in a no-tool turn", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  const init = { type: "system", subtype: "init", tools: [] };
+  const assistant = { type: "assistant", message: { role: "assistant",
+    content: [{ type: "text", text: "answer" }] } };
+  const status = { type: "system", subtype: "status", status: "requesting",
+    uuid: "notice-1", session_id: "session-1" };
+  const render = { type: "system", subtype: "ui_invalidate", event: "ui.render",
+    instances: [] };
+  const parse = (events) => inspectAmuxV4AnalysisCliResult(plan,
+    Buffer.from(events.map((event) => JSON.stringify(event)).join("\n")), 0);
+  assert.deepEqual(parse([init, { ...status, status: null, permissionMode: "manual" },
+    status, render, assistant, { ...status, status: null }, claudeEnvelope()]), {
+    kind: "verified_success", rawModelOutput: claudeEnvelope().result,
+    inputTokens: 14, outputTokens: 2,
+  });
+  assert.equal(parse([init, assistant, status, claudeEnvelope()]).kind,
+    "verified_success");
+  for (const candidate of [
+    { ...status, status: null, permissionMode: "default" },
+    status,
+  ]) {
+    assert.equal(parse([init, candidate, assistant, claudeEnvelope()]).kind,
+      "verified_success");
+  }
+  for (const candidate of [
+    { ...status, status: "compacting" },
+    { ...status, status: "future_status" },
+    { ...status, status: undefined },
+    { ...status, permissionMode: "bypassPermissions" },
+    { ...status, permissionMode: "acceptEdits" },
+    { ...status, permissionMode: "auto" },
+    { ...status, permission_mode: "manual" },
+    { ...status, tools: ["Bash"] },
+    { ...status, content: "private text" },
+    { ...status, compact_result: {} },
+    { ...status, uuid: 1 },
+    { ...status, session_id: "x".repeat(129) },
+  ]) {
+    assert.equal(parse([init, candidate, assistant, claudeEnvelope()]).kind,
+      "outcome_unknown");
+  }
+  for (const events of [
+    [status, init, assistant, claudeEnvelope()],
+    [init, assistant, claudeEnvelope(), status],
+    [init, ...Array.from({ length: 9 }, () => status), assistant, claudeEnvelope()],
+    [init, status, assistant],
+    [init, status, assistant, claudeEnvelope("different-model")],
+    [init, status, assistant, { ...claudeEnvelope(), modelUsage: {} }],
+    [init, status, assistant, { ...claudeEnvelope(), num_turns: 2 }],
+    [init, status, { ...assistant, message: { role: "assistant",
+      content: [{ type: "tool_use", name: "Read" }] } }, claudeEnvelope()],
+  ]) {
+    assert.equal(parse(events).kind, "outcome_unknown");
+  }
+});
+
+test("Claude never ignores retries, hooks or arbitrary system events as status notices", () => {
+  const plan = planAmuxV4AnalysisCliInvocation(anthropic);
+  for (const subtype of ["api_retry", "hook_started", "session_state_changed",
+    "informational", "compact_boundary", "future_system_event"]) {
+    const stdout = Buffer.from([
+      { type: "system", subtype: "init", tools: [] },
+      { type: "system", subtype, status: null },
+      { type: "assistant", message: { role: "assistant",
+        content: [{ type: "text", text: "answer" }] } }, claudeEnvelope(),
+    ].map((event) => JSON.stringify(event)).join("\n"));
+    assert.equal(inspectAmuxV4AnalysisCliResult(plan, stdout, 0).kind,
+      "outcome_unknown");
   }
 });
 
@@ -412,7 +495,7 @@ test("Claude S0 pre-init system diagnostic exposes no free-form event data", () 
       { diagnostic: true }), { kind: "outcome_unknown",
       failureReason: "output_contract_mismatch",
       rejectionPoint: "unexpected_event", unexpectedEventType: "system",
-      unexpectedEventPhase: "before_init" });
+      unexpectedEventPhase: "before_init", unexpectedSystemSubtype: subtype });
   }
 });
 
