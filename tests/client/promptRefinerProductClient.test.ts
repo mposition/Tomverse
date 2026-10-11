@@ -12,7 +12,7 @@ import {
   resolvePromptRefinerExplicitSend,
 } from "@/components/chat/promptRefinerProductClient";
 import { resolvePromptRefinerDecision } from "@/lib/promptRefinerSuggestion";
-import { reusablePreparedDraftRevision } from
+import { releasedPreparedDraftNeedsSave, reusablePreparedDraftRevision } from
   "@/components/chat/useConversationDrafts";
 
 const scope = {
@@ -164,6 +164,29 @@ test("an exact durable draft generation reuses its held revision without ABA", (
     capturedDraft: draft,
     currentDraft: { text: "edited source", attachments: [] },
   }), null);
+});
+
+test("releasing a Refiner preparation does not autosave its unchanged held revision", () => {
+  const draft = { text: "  authored notes\n", attachments: [] };
+  const held = { revision: 3, persistedGeneration: 9, captureGeneration: 9,
+    currentGeneration: 9, capturedDraft: draft, currentDraft: draft };
+  // Rewriting this snapshot would advance revision 3 to 4 and make the
+  // server-held proposal unusable at the following Message transaction.
+  assert.equal(releasedPreparedDraftNeedsSave(held), false);
+  assert.equal(reusablePreparedDraftRevision(held), 3);
+  assert.equal(releasedPreparedDraftNeedsSave({ ...held, revision: 0 }), true);
+  assert.equal(releasedPreparedDraftNeedsSave({ ...held, persistedGeneration: 8 }), true);
+});
+
+test("releasing a preparation still persists newer edits and same-text ABA generations", () => {
+  const draft = { text: "authored notes", attachments: [] };
+  const held = { revision: 3, persistedGeneration: 9, captureGeneration: 9,
+    currentGeneration: 9, capturedDraft: draft, currentDraft: draft };
+  assert.equal(releasedPreparedDraftNeedsSave({ ...held, currentGeneration: 10 }), true);
+  assert.equal(releasedPreparedDraftNeedsSave({ ...held, currentGeneration: 11,
+    persistedGeneration: 11, revision: 5 }), true);
+  assert.equal(releasedPreparedDraftNeedsSave({ ...held,
+    currentDraft: { text: "edited notes", attachments: [] } }), true);
 });
 
 test("a bound response preserves the local authored source for display only", () => {

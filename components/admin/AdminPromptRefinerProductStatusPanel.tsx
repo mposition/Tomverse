@@ -2,6 +2,8 @@
 
 import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AdminPromptRefinerAutoResumeControl } from
+  "@/components/admin/AdminPromptRefinerAutoResumeControl";
 
 import {
   useAdminMessages,
@@ -305,6 +307,8 @@ export function AdminPromptRefinerProductStatusPanel() {
       {snapshot ? <>
         <AdminPromptRefinerProductStatusReadback snapshot={snapshot} messages={m} />
         <AdminChatRefinerInitialAutoReleaseControls
+          snapshot={snapshot} onRefresh={load} messages={m} />
+        <AdminPromptRefinerAutoResumeControl
           snapshot={snapshot} onRefresh={load} messages={m} />
       </> : null}
     </section>
