@@ -47,7 +47,9 @@ function ideaIdFromSnapshot(snapshot: unknown): string | null {
   return typeof ideaId === "string" && UUID.test(ideaId) ? ideaId : null;
 }
 
-async function cardTitle(row: CardRow): Promise<string | null> {
+export async function readAmuxCardTitle(row: Pick<CardRow, "id" | "title" |
+  "sourceSystem" | "sourceSnapshot" | "v4TitleCiphertext" | "v4TitleKeyId" |
+  "v4TitleKeyVersion" | "v4TitleDigest" | "v4TitleDigestKeyId">): Promise<string | null> {
   if (row.sourceSystem !== "admin-idea-v4") return row.title;
   const ideaId = ideaIdFromSnapshot(row.sourceSnapshot);
   if (!ideaId || !row.v4TitleCiphertext || !row.v4TitleKeyId ||
@@ -72,7 +74,7 @@ async function cardSummaries(rows: CardRow[]) {
   const ids = rows.map((row) => row.id);
   const storyIds = rows.filter((row) => row.cardType === "story").map((row) => row.id);
   const [titles, scores, dependencies, lanes, progress] = await Promise.all([
-    Promise.all(rows.map(cardTitle)),
+    Promise.all(rows.map(readAmuxCardTitle)),
     ids.length ? prisma.$queryRaw<Array<{ taskId: string;
       taskRevision: number; scoreTotal: number; activeStaleAt: Date }>>`
       SELECT DISTINCT ON ("taskId") "taskId", "taskRevision",

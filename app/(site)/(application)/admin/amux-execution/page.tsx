@@ -97,7 +97,8 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace />
+        <AmuxExecutionWorkspace initialTaskId={typeof query.taskId === "string" &&
+          /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxCardListPanel rows={rows} total={total} limit={limit} />
         <AmuxCliUsagePanel view={usage} />
       </div>
@@ -128,7 +129,7 @@ export default async function AdminAmuxExecutionPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      <AdminAmuxRoutingPanel focusEscalationId={
+      <AdminAmuxRoutingPanel canInspectCards={isOwner} focusEscalationId={
         typeof query.focusEscalation === "string" &&
         /^c[a-z0-9]{20,}$/i.test(query.focusEscalation) ?
           query.focusEscalation : null} />
