@@ -159,7 +159,8 @@ const amuxReads = new Map();
  * one read a minute, and a read already on its way answers every caller.
  * `provider.amuxProvider` names the AMUX provider when its id differs.
  * The certificate is read for each read, so a copy replaced after AMUX
- * regenerates its own is picked up without a restart.
+ * regenerates its own is picked up without a restart -- at the next read,
+ * since a failed read is reused for the minute like any other.
  */
 export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = readAmuxUsage, reads = amuxReads, caFile } = {}) {
   const url = amuxUsageEndpoint(usageUrl);
