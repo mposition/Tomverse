@@ -223,11 +223,11 @@ function codexQuota(provider) {
   });
 }
 
-export async function probeProviderQuota(provider, stateDir, now = Date.now(), { amuxUsageUrl } = {}) {
+export async function probeProviderQuota(provider, stateDir, now = Date.now(), { amuxUsageUrl, amuxCaFile } = {}) {
   if (provider.enabled !== true) return { state: "disabled" };
   // AMUX's own reading of the shared account: one read a minute for every
   // provider that names it (amux-usage.mjs), and no call to the vendor here.
-  if (provider.quotaProbe === "amux") return amuxQuota(provider, amuxUsageUrl, { now });
+  if (provider.quotaProbe === "amux") return amuxQuota(provider, amuxUsageUrl, { now, caFile: amuxCaFile });
   if (provider.quotaProbe === "manual") {
     try {
       const snapshot = JSON.parse(readFileSync(join(stateDir, "quotas", `${provider.id}.json`), "utf8"));
@@ -250,7 +250,8 @@ export async function probeProviderQuota(provider, stateDir, now = Date.now(), {
 
 export async function probeProviderQuotas(config, now = Date.now()) {
   const rows = await Promise.all(config.providers.map(async (provider) =>
-    [provider.id, await probeProviderQuota(provider, config.stateDir, now, { amuxUsageUrl: config.amuxUsageUrl })]));
+    [provider.id, await probeProviderQuota(provider, config.stateDir, now,
+      { amuxUsageUrl: config.amuxUsageUrl, amuxCaFile: config.amuxCaFile })]));
   return Object.fromEntries(rows);
 }
 

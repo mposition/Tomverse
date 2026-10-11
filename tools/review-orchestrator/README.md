@@ -164,8 +164,17 @@ forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고
 읽기만 합니다.
 
 - 설정 최상위의 `amuxUsageUrl`(예: `https://127.0.0.1:8824/api/usage`)을 읽습니다.
-  **이 기계의 loopback 주소만** 받고, AMUX의 자체 서명 인증서는 loopback에서만 검증 없이
-  받습니다. 다른 주소는 설정 오류입니다.
+  **이 기계의 loopback 주소만** 받고, 다른 주소는 설정 오류입니다.
+- **https는 인증서를 검증합니다.** AMUX의 자체 서명 인증서 하나만 신뢰하고, 이름은 AMUX가
+  서명한 `localhost`로 확인합니다(`crates/amux-server/src/tls.rs`). 그래서 https URL에는
+  `amuxCaFile`이 필요합니다. 이 값은 AMUX를 실행하는 계정의 `~/.amux/tls/cert.pem`을 검토
+  계정이 읽을 수 있는 곳에 복사한 파일의 절대 경로입니다(예:
+  `/etc/review-orchestrator/amux-cert.pem`). 인증서는 공개 정보이므로 복사해도 됩니다.
+  `key.pem`은 복사하지 않습니다.
+  인증서를 읽지 못하거나 서명이 맞지 않으면 `unknown`으로 보류합니다. 파일은 1분마다 하는
+  조회 때마다 다시 읽습니다. 그래서 AMUX가 인증서를 새로 만들었으면 복사만 다시 하면 되고
+  재시작은 필요 없습니다. 실패한 조회도 1분 동안 재사용되므로, 반영은 다음 조회부터입니다
+  (최대 1분).
 - 이 URL을 쓰는 모든 provider가 **1분에 한 번 읽은 한 응답**을 함께 씁니다(AMUX 자체 캐시와
   같은 주기). 동시에 묻는 provider는 진행 중인 한 요청을 함께 기다립니다.
 - provider id(다르면 `amuxProvider`)와 같은 AMUX provider의 창들 중 **가장 적게 남은

@@ -20,6 +20,7 @@
     "docs/ui-contracts/**"
   ],
   "amuxUsageUrl": "https://127.0.0.1:8824/api/usage",
+  "amuxCaFile": "/etc/review-orchestrator/amux-cert.pem",
   "providers": [
     {
       "id": "claude",
