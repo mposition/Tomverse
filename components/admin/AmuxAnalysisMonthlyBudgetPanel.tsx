@@ -1,8 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch } from "@/lib/adminFetch";
+import { adminCommonMessages } from "@/lib/adminMessages/common";
+import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { adminAmuxAnalysisMonthlyBudgetMessages } from "@/lib/adminMessages/amuxAnalysisMonthlyBudget";
 import { analysisBudgetUsdToMicroUsd, analysisBudgetMicroUsdToUsd,
   analysisBudgetSavedMatches, readAnalysisBudgetSnapshotReply,
@@ -10,6 +13,15 @@ import { analysisBudgetUsdToMicroUsd, analysisBudgetMicroUsdToUsd,
 
 const endpoint = "/api/admin/amux/ideas/analysis-budget-settings";
 type Snapshot = NonNullable<ReturnType<typeof readAnalysisBudgetSnapshotReply>>;
+
+export function AmuxAnalysisBudgetReauthenticationNotice() {
+  const m = useAdminMessages(adminCommonMessages).apiFailure;
+  return <p role="alert"><Link
+    href={adminRecentAuthenticationHref("/admin/amux-backlog?tab=ideas")}
+    className="inline-flex min-h-11 items-center rounded-lg border border-amber-500 px-4">
+    {m.reauthenticate}
+  </Link></p>;
+}
 
 export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
   available: boolean; operatorId: string;
@@ -24,9 +36,11 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
   const [pending, setPending] = useState<PendingAnalysisBudgetSetting | null>(null);
   const [notice, setNotice] = useState<"unavailable" | "changed" | "below" | "refused" | "saved" | "storage" | null>(null);
   const [savedAuditId, setSavedAuditId] = useState<string | null>(null);
+  const [requiresReauthentication, setRequiresReauthentication] = useState(false);
 
   const refresh = useCallback(async () => {
     const response = await adminFetch(endpoint, { cache: "no-store" });
+    setRequiresReauthentication(response.status === 428);
     const parsed = response.ok ? readAnalysisBudgetSnapshotReply(await response.json()) : null;
     if (!parsed) throw new Error("budget_unavailable");
     setSnapshot(parsed);
@@ -71,6 +85,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
       const response = await adminFetch(endpoint, { method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...attempt, ownerConfirmed: true }) });
+      setRequiresReauthentication(response.status === 428);
       const body: unknown = await response.json();
       if (!response.ok) {
         const error = body && typeof body === "object" ? (body as { error?: unknown }).error : null;
@@ -96,6 +111,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
     setBusy(true);
     try {
       const response = await adminFetch(`${endpoint}?${new URLSearchParams({ id: pending.id })}`, { cache: "no-store" });
+      setRequiresReauthentication(response.status === 428);
       const body: unknown = response.ok ? await response.json() : null;
       if (!analysisBudgetSavedMatches(body, pending)) return;
       clearPending(); setNotice("saved"); setSavedAuditId((body as { auditId: string }).auditId);
@@ -138,6 +154,7 @@ export function AmuxAnalysisMonthlyBudgetPanel({ available, operatorId }: {
     </div>
     {pending ? <p role="alert">{m.unknown} <span className="font-mono">{pending.id}</span></p> : null}
     {notice ? <p role={notice === "saved" ? "status" : "alert"}>{m[notice]}</p> : null}
+    {requiresReauthentication ? <AmuxAnalysisBudgetReauthenticationNotice /> : null}
     {savedAuditId ? <p>{m.audit}: <span className="font-mono">{savedAuditId}</span></p> : null}
     {busy ? <p role="status">{m.loading}</p> : null}
   </section>;
