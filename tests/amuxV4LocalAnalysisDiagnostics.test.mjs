@@ -155,3 +155,42 @@ test("unknown event labels collapse to other and incompatible phases are omitted
     { unexpectedEventType: "system", unexpectedEventPhase: "before_init" });
   assert.equal(Object.hasOwn(unknown, "unexpectedEventType"), false);
 });
+
+test("rejected system subtypes survive the live runner as fixed codes in every phase", () => {
+  const plan = planAmuxV4AnalysisCliInvocation({ provider: "anthropic",
+    modelId: "frontier-anthropic", reasoningEffort: "high" });
+  const init = { type: "system", subtype: "init", tools: [] };
+  const assistant = { type: "assistant", message: { role: "assistant",
+    content: [{ type: "text", text: "PRIVATE_SENTINEL" }] } };
+  for (const [phase, prefix] of [
+    ["before_init", []], ["after_init", [init]],
+    ["after_assistant", [init, assistant]],
+    ["after_result", [init, assistant, { type: "result" }]],
+  ]) {
+    for (const subtype of ["api_retry", "session_state_changed", "PRIVATE_SENTINEL"]) {
+      const inspected = inspectAmuxV4AnalysisCliResult(plan, Buffer.from([
+        ...prefix, { type: "system", subtype, message: "PRIVATE_SENTINEL",
+          uuid: "PRIVATE_SENTINEL", session_id: "PRIVATE_SENTINEL" },
+      ].map((event) => JSON.stringify(event)).join("\n")), 0, { diagnostic: true });
+      const cliResult = amuxV4CliUnknownResult("parser_rejected", 0,
+        { approved: 1, denied: 0 }, inspected.failureReason,
+        inspected.rejectionPoint, inspected);
+      const diagnostic = amuxV4AnalysisCliDiagnostic(cliResult);
+      assert.deepEqual(diagnostic, { failureStage: "parser_rejected",
+        parserReason: "output_contract_mismatch", rejectionPoint: "unexpected_event",
+        unexpectedEventType: "system", unexpectedEventPhase: phase,
+        unexpectedSystemSubtype: subtype === "PRIVATE_SENTINEL" ? "other" : subtype });
+      const log = amuxV4AnalysisDiagnosticLog(
+        amuxV4AnalysisWithCliDiagnostic({ kind: "outcome_unknown" }, cliResult));
+      assert.doesNotMatch(log, /PRIVATE_SENTINEL|session_id|uuid|message/);
+      assert.deepEqual(JSON.parse(log.slice(log.indexOf(" ") + 1)), diagnostic);
+    }
+  }
+});
+
+test("malformed status notices retain a fixed rejection code without text", () => {
+  assert.deepEqual(amuxV4AnalysisCliDiagnostic({ ...failure,
+    rejectionPoint: "status_shape", status: "PRIVATE_SENTINEL" }), {
+    ...codes, rejectionPoint: "status_shape",
+  });
+});
