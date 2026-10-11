@@ -29,6 +29,14 @@ test("runtime readback uses effective modes and retains pending readiness", () =
   assert.equal(snapshot.dispatchInstrumentationMode, "enforce");
   assert.equal(snapshot.manifestKeyringConfigured, true);
   assert.equal(snapshot.readiness.ready, false);
+  assert.equal(snapshot.limitedRelease?.admitted, false);
+  assert.deepEqual(snapshot.rollout, {
+    uiEnabled: false,
+    killSwitch: false,
+    percent: 100,
+    eligiblePlans: [],
+    cohortSaltConfigured: false,
+  });
   assert.deepEqual(snapshot.readiness.outstanding, [
     "shadow_report", "offline_quality_evaluation", "attempt_manifest_boundary",
   ]);
@@ -54,7 +62,7 @@ test("missing or invalid settings stay off and do not expose keyring input", () 
   assert.equal(snapshot.manifestKeyringConfigured, false);
   assert.ok(!JSON.stringify(snapshot).includes(secret));
   assert.deepEqual(Object.keys(snapshot).sort(), [
-    "build", "dispatchInstrumentationMode", "manifestKeyringConfigured",
-    "observedAt", "readiness", "shadowEnabled",
+    "build", "dispatchInstrumentationMode", "limitedRelease",
+    "manifestKeyringConfigured", "observedAt", "readiness", "rollout", "shadowEnabled",
   ]);
 });

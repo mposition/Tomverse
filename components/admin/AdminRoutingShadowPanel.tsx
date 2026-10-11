@@ -71,6 +71,7 @@ export function AdminRoutingRuntimeReadback({ runtime, messages }: {
     messages: typeof adminRoutingShadowMessages.en.runtime;
 }) {
     // Project only the documented fields, even if a future response adds more.
+    const limited = runtime?.limitedRelease;
     const snapshot = runtime && {
         observedAt: runtime.observedAt,
         build: {
@@ -92,6 +93,28 @@ export function AdminRoutingRuntimeReadback({ runtime, messages }: {
         shadowEnabled: runtime.shadowEnabled,
         dispatchInstrumentationMode: runtime.dispatchInstrumentationMode,
         manifestKeyringConfigured: runtime.manifestKeyringConfigured,
+        limitedRelease: limited && (limited.admitted ? {
+            admitted: true,
+            exceptionId: limited.exceptionId,
+            version: limited.version,
+            evidenceRef: limited.evidenceRef,
+            approvedBy: limited.approvedBy,
+            approvedAt: limited.approvedAt,
+            expiresAt: limited.expiresAt,
+            evaluatedImplementationCommit: limited.evaluatedImplementationCommit,
+            servingCommitSha: limited.servingCommitSha,
+            targetEnvironmentId: limited.targetEnvironmentId,
+            targetServiceId: limited.targetServiceId,
+            rolloutPercent: limited.rolloutPercent,
+            eligiblePlans: limited.eligiblePlans,
+        } : { admitted: false, reason: limited.reason }),
+        rollout: runtime.rollout && {
+            uiEnabled: runtime.rollout.uiEnabled,
+            killSwitch: runtime.rollout.killSwitch,
+            percent: runtime.rollout.percent,
+            eligiblePlans: runtime.rollout.eligiblePlans,
+            cohortSaltConfigured: runtime.rollout.cohortSaltConfigured,
+        },
     };
 
     return (

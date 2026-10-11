@@ -8,6 +8,8 @@ import type { PublicBuildInfo } from "@/lib/buildInfo";
 import { activeManifestHashKey } from "@/lib/manifestHashKeyring";
 import { dispatchInstrumentationMode } from "@/lib/routingInstrumentationMode";
 import { isRouterShadowEnabled } from "@/lib/routingShadow";
+import { autoCohortConfig } from "@/lib/autoCohort";
+import { isAutoRouterUiEnabled } from "@/lib/autoRoutingUi";
 
 /** Runtime diagnostics only: neither an attestation nor evidence for old rows. */
 export function autoRoutingRuntimeReadback(
@@ -16,6 +18,7 @@ export function autoRoutingRuntimeReadback(
   now: () => number = Date.now
 ) {
   const observedAt = now();
+  const cohort = autoCohortConfig(environment, () => observedAt);
   let manifestKeyringConfigured = false;
   try {
     activeManifestHashKey(environment);
@@ -34,5 +37,15 @@ export function autoRoutingRuntimeReadback(
     shadowEnabled: isRouterShadowEnabled(environment),
     dispatchInstrumentationMode: dispatchInstrumentationMode(environment),
     manifestKeyringConfigured,
+    // A limited exception authorizes a release; it never attests the original
+    // register. Keep both facts visible, including when the selector is off.
+    limitedRelease: cohort.limitedRelease,
+    rollout: {
+      uiEnabled: isAutoRouterUiEnabled(environment),
+      killSwitch: cohort.killSwitch,
+      percent: cohort.rolloutPercent,
+      eligiblePlans: cohort.eligiblePlans,
+      cohortSaltConfigured: cohort.salt !== "unset",
+    },
   };
 }
