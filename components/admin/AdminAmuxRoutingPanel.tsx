@@ -61,7 +61,7 @@ type AmuxReport = {
     reason_code: "human_review_required" | "task_blocked" | "operator_review_required" | null;
     status: string;
     createdAt: string;
-    task: { id: string; title: string; priority: string; status: string };
+    task: { id: string; title: string; sourceKey?: string | null; priority: string; status: string };
   }>;
   workers: Array<{
     name: string;
@@ -240,8 +240,9 @@ const readable = (value: string) => value.replaceAll("_", " ");
 const pct = (numerator: number, denominator: number) =>
   denominator === 0 ? "—" : `${((numerator / denominator) * 100).toFixed(1)}%`;
 
-export function AdminAmuxRoutingPanel({ focusEscalationId = null }: {
+export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCards = false }: {
   focusEscalationId?: string | null;
+  canInspectCards?: boolean;
 } = {}) {
   const m = useAdminMessages(adminAmuxRoutingMessages);
   const { locale } = useAdminLocale();
@@ -763,7 +764,7 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null }: {
                       >
                         <div className="flex items-center justify-between gap-3">
                           <strong className="text-amber-100">
-                            {escalation.task.title}
+                            {escalation.task.sourceKey ?? escalation.task.title}
                           </strong>
                           <span className="text-xs text-amber-200">
                             {escalation.status}
@@ -784,6 +785,11 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null }: {
                         >
                           {m.openReview}
                         </button>
+                        {canInspectCards && <Link
+                          href={`/admin/amux-execution?tab=cards&taskId=${encodeURIComponent(escalation.task.id)}`}
+                          className="ml-3 text-xs underline underline-offset-2">
+                          {m.openCardDetail}
+                        </Link>}
                       </li>
                     ))}
                   </ul>
