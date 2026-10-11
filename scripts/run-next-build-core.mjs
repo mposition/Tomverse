@@ -46,6 +46,7 @@ export const nodeOptionsForBuild = (env) => {
 const INTERNAL_ERROR_MARKERS = [
   "TurbopackInternalError",
   "An unexpected Turbopack error occurred",
+  "This is a bug in turbo-tasks/Turbopack",
 ];
 
 const CACHE_RESTORE_MARKERS = [
