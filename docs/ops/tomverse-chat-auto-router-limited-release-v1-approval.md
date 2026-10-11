@@ -35,6 +35,19 @@ them, a quality certification, a Refiner release, or CHAT-01 completion.
 The approved policy is commit
 `fa997387b93ddfaa181ffd98918247ed8c6d02d3`, canonical-LF SHA-256
 `a0d0f119d1c5ab9d647ef5c72cd8af658e4cd8b4b5c92d23d6bca3c0adc6999b`.
+The approval timing has two distinct events. The operator reviewed the
+already-existing candidate policy at commit
+`1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177` (Git author time
+`2026-10-11T00:35:00Z`; commit time `2026-10-11T00:35:16Z`), whose
+canonical-LF policy SHA-256 was
+`2b9090ffcdcd3f34a5497ed87809cea5f1ff056a62db67e3d6d0b9959c589be3`.
+The human reply was observed at `2026-10-11T00:44:09Z`. Commit
+`fa997387b93ddfaa181ffd98918247ed8c6d02d3` (Git author and commit time
+`2026-10-11T00:44:58Z`) is the post-reply transcription of that approval into
+policy frontmatter; `approvedAt` is the human-reply observation time, not a
+backdated Git commit time. The policy body stayed exactly 6,113 bytes with
+SHA-256 `50186c3ce7751d0114430fcfac1823743a957c5d4d92398a796d5c018f41b991`
+across those commits.
 The evaluated implementation is the fixed public source at
 [`1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177`](https://github.com/mposition/Tomverse/tree/1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177),
 whose 18-path functional artifact SHA-256 is
