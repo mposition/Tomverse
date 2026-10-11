@@ -4,9 +4,9 @@ import test, { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { mintChatRefinerInitialAutoRouterAuthority } from
-  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
+  "../../lib/chatRefinerInitialAutoRouterAuthority.ts";
 
-const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "..", path)).href;
+const mod = (path) => pathToFileURL(resolve(import.meta.dirname, "..", "..", path)).href;
 const originalEnv = { ...process.env };
 let plan = "Pro";
 let authorityReads = 0;
