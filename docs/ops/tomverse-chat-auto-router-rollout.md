@@ -1,9 +1,11 @@
 # Tomverse Chat Auto Router rollout
 
-- Status: **measurement attestations pending; default-off initial release.**
+- Status: **measurement attestations pending; exceptions remain separately bound.**
   All three readiness gates retain their actual status. A separately verified
   exact-deployment owner activation under
   [the initial Auto release policy](../policy/chat-refiner-initial-auto-release-v1.md)
+  or an admitted artifact-bound
+  [limited-release exception](../policy/tomverse-chat-auto-router-limited-release-exception-v1.md)
   may admit the configured cohort. Configuration alone grants no exception.
 - Owner: Backend/AI, with Product as rollout owner
 - Companion to `docs/ops/tomverse-chat-router-evaluation-set.md` (which
@@ -20,9 +22,10 @@ somebody is in a hurry.
 The ordinary release requires all three attestations. The initial release
 exception defers these measurements while retaining actual enforced,
 immutable finalized manifests. It binds the owner audit pair, policy,
-candidate/configuration and exact serving deployment; it is distinct from
-the staging-only drill and closes on missing enforcement or manifest keys.
-The three attestations are not
+candidate/configuration and exact serving deployment. The separate limited
+release accepts only its disclosed pending-gate set and binds exact reviewed
+runtime source bytes. Both are distinct from the staging-only drill and close
+on missing enforcement or manifest keys. The three attestations are not
 interchangeable, and each produces reassuring numbers that look like the
 others':
 

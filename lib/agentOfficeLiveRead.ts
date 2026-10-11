@@ -34,6 +34,7 @@ import {
   countPendingMarketingApprovals,
 } from "@/lib/adminNavigationCounts";
 import { agentOfficeAmuxState } from "@/lib/agentOfficeAmuxState";
+import { AGENT_OFFICE_AMUX_ROSTER } from "@/lib/agentOffice/amuxRoster";
 import { agentOfficeDecisionState } from "@/lib/agentOfficeDecisionState";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "@/lib/agentOfficeDigestState";
 import { agentOfficeFinanceState } from "@/lib/agentOfficeFinanceState";
@@ -241,7 +242,8 @@ async function readEngineering(): Promise<AgentOfficeEngineeringState> {
 async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
   try {
     const catalog = getConfiguredAmuxWorkerCatalog();
-    const names = (catalog ?? []).filter((worker) => !worker.archived).map((worker) => worker.worker_name);
+    const admitted = new Set((catalog ?? []).filter((worker) => !worker.archived).map((worker) => worker.worker_name));
+    const names = AGENT_OFFICE_AMUX_ROSTER.filter((worker) => admitted.has(worker.name)).map((worker) => worker.name);
     const runtimes = names.length
       ? await prisma.amuxWorkerRuntime.findMany({
           where: { workerName: { in: names } },
@@ -250,7 +252,7 @@ async function readAmuxWorkers(): Promise<AgentOfficeAmuxState> {
       : [];
     // Judged against a clock taken after the read: a lease that has run out
     // by then is lost, never live.
-    return agentOfficeAmuxState({ catalog, runtimes, now: new Date() });
+    return agentOfficeAmuxState({ catalog, roster: AGENT_OFFICE_AMUX_ROSTER, runtimes, now: new Date() });
   } catch {
     console.warn({ event: "admin_agent_office_read_failed", read: "amux_workers" });
     return { kind: "unread" };

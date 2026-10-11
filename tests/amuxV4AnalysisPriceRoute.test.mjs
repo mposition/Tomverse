@@ -56,7 +56,9 @@ test("first reservation creates a capped UTC monthly ledger in the same transact
   const source = await readFile(new URL(
     "../lib/amux/ideaAnalysisBudgetReservationService.ts", import.meta.url), "utf8");
   assert.match(source, /amuxIdeaAnalysisBudgetWindow\.createMany/);
-  assert.match(source, /limitMicroUsd: BigInt\(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD\)/);
+  assert.match(source, /readAnalysisMonthlyBudgetSetting\(tx\)/);
+  assert.match(source, /limitMicroUsd: BigInt\(monthlySetting\.limitMicroUsd\)/);
+  assert.match(source, /monthlyLimitMicroUsd: window\.limitMicroUsd\.toString\(\)/);
   assert.match(source, /monthStart = new Date\(Date\.UTC/);
 });
 

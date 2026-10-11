@@ -138,7 +138,7 @@ export const DECISION_ROOM: Room = {
 };
 
 /**
- * The AMUX execution room: one desk for each AMUX worker, in a row. Workers
+ * The AMUX execution room: thirteen desks in two rows. Workers
  * are drawn seated at their desks with their real state; nobody walks in or
  * out of this room, because nothing in it is the demo's.
  */
@@ -159,9 +159,10 @@ export const AMUX_ROOM: Room = {
     { x: COL_X[0] + 25, y: AMUX_Y },
     { x: COL_X[0] + 26, y: AMUX_Y },
   ],
-  desks: Array.from({ length: 12 }, (_, i) => {
-    const dx = 3 + i * 4;
-    return { deskX: COL_X[0] + dx - 1, deskY: AMUX_Y + 5, seat: { x: COL_X[0] + dx, y: AMUX_Y + 6 } };
+  desks: Array.from({ length: 13 }, (_, i) => {
+    const dx = 4 + (i % 7) * 7;
+    const dy = 3 + Math.floor(i / 7) * 4;
+    return { deskX: COL_X[0] + dx - 1, deskY: AMUX_Y + dy, seat: { x: COL_X[0] + dx, y: AMUX_Y + dy + 1 } };
   }),
 };
 
@@ -244,8 +245,8 @@ for (const room of DEPT_ROOMS) {
 for (const desk of AMUX_ROOM.desks) {
   PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });
 }
-PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + 1, w: 3, h: 1 });
-PROPS.push({ kind: "plant", x: AMUX_ROOM.x + AMUX_ROOM.w - 2, y: AMUX_ROOM.y + 1, w: 1, h: 1 });
+PROPS.push({ kind: "shelf", x: AMUX_ROOM.x + 44, y: AMUX_ROOM.y + 7, w: 3, h: 1 });
+PROPS.push({ kind: "plant", x: AMUX_ROOM.x + AMUX_ROOM.w - 2, y: AMUX_ROOM.y + 6, w: 1, h: 1 });
 PROPS.push({ kind: "plant", x: AMUX_ROOM.x + 1, y: AMUX_ROOM.y + AMUX_ROOM.h - 2, w: 1, h: 1 });
 for (const desk of REVIEW_ROOM.desks) {
   PROPS.push({ kind: "desk", x: desk.deskX, y: desk.deskY, w: 3, h: 1 });

@@ -227,7 +227,7 @@ export async function getAmuxExplainabilityReport() {
         status: true,
         createdAt: true,
         task: {
-          select: { id: true, title: true, priority: true, status: true },
+          select: { id: true, title: true, sourceKey: true, priority: true, status: true },
         },
       },
     }),

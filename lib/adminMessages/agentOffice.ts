@@ -480,7 +480,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           does: [
             "The orchestrator assigns an unowned card to a worker, and a worker holds one open card at a time.",
             "The runner's bridge sends the approved brief to that worker's session; the worker opens a develop pull request, and the card settles to review or blocked.",
-            "Assignment reads the worker catalog and each worker's runtime lease and heartbeat.",
+            "The floor uses the v27 Ubuntu resident roster; dispatch reads the admission catalog and runtime lease and heartbeat.",
             "Every CLI call is logged to a usage ledger, where a missing figure is unknown, never zero.",
           ],
           never: [
@@ -774,15 +774,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         facts: { vendor: "Vendor", mode: "Mode" },
       },
       amux: {
+        chip: "Dispatch status",
+        attention: (count: number) => `${count} warnings`,
         states: {
           ready: "Ready",
           idle: "Idle",
           busy: "Busy",
           starting: "Starting",
           error: "Error",
-          lost: "Heartbeat lost",
-          stopped: "Stopped",
-          not_running: "Not running",
+          lost: "Dispatch heartbeat lost",
+          stopped: "Dispatch stopped",
+          not_running: "No dispatch record",
+          not_admitted: "Not admitted to dispatch",
+          catalog_unknown: "Admission unknown",
           paused: "Paused",
           isolated: "Isolated",
           blocked: "Blocked",
@@ -790,8 +794,11 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         unread: "Could not read the workers",
         noCatalog: "No usable worker catalog in this environment",
         noWorkers: "The worker catalog has no active worker",
-        summary: (connected: number, total: number, busy: number, attention: number) =>
-          `${connected}/${total} connected · ${busy} busy · ${attention} need a look`,
+        catalogUnavailable: (total: number) => `${total} residents · dispatch catalog unavailable`,
+        roster: "Ubuntu resident roster · policy v27 · not a process-health reading",
+        connection: (connected: number, admitted: number) => `${connected}/${admitted} dispatch bridges connected`,
+        summary: (connected: number, total: number, busy: number, attention: number, notAdmitted: number) =>
+          `${total} residents · ${connected}/${total - notAdmitted} dispatch bridges connected · ${notAdmitted} not admitted · ${busy} busy · ${attention} need a look`,
         more: (count: number) =>
           count === 1 ? "1 more worker not drawn here" : `${count} more workers not drawn here`,
         heartbeat: (time: string) => `last heartbeat ${time}`,
@@ -1290,7 +1297,7 @@ export const adminAgentOfficeMessages = defineAdminMessages({
           does: [
             "orchestrator가 주인 없는 카드를 worker에게 배정하고, worker는 한 번에 열린 카드 하나만 가집니다.",
             "runner의 bridge가 승인된 brief를 그 worker의 세션에 보내고, worker가 develop PR을 열면 카드는 review 또는 blocked로 정리됩니다.",
-            "배정은 worker catalog와 각 worker의 runtime lease·heartbeat를 읽습니다.",
+            "좌석 목록은 v27 Ubuntu 상주 목록이며, 배정 현황은 편입 카탈로그와 runtime lease·heartbeat를 읽습니다.",
             "CLI 호출은 모두 사용량 원장에 남고, 없는 값은 0이 아니라 '모름'으로 남습니다.",
           ],
           never: [
@@ -1580,15 +1587,19 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         facts: { vendor: "공급사", mode: "모드" },
       },
       amux: {
+        chip: "배정 현황",
+        attention: (count: number) => `확인 ${count}`,
         states: {
           ready: "배정 가능",
           idle: "대기",
           busy: "작업 중",
           starting: "시작 중",
           error: "오류",
-          lost: "연결 끊김",
-          stopped: "정지",
-          not_running: "실행 안 함",
+          lost: "배정 연결 끊김",
+          stopped: "배정 정지",
+          not_running: "배정 기록 없음",
+          not_admitted: "배정 미편입",
+          catalog_unknown: "배정 설정 미확인",
           paused: "일시정지",
           isolated: "격리",
           blocked: "차단",
@@ -1596,8 +1607,11 @@ export const adminAgentOfficeMessages = defineAdminMessages({
         unread: "worker 기록을 읽지 못함",
         noCatalog: "이 환경에는 쓸 수 있는 worker 카탈로그가 없음",
         noWorkers: "worker 카탈로그에 활성 worker가 없음",
-        summary: (connected: number, total: number, busy: number, attention: number) =>
-          `연결 ${connected}/${total} · 작업 중 ${busy} · 확인 필요 ${attention}`,
+        catalogUnavailable: (total: number) => `상주 목록 ${total} · 배정 카탈로그 미확인`,
+        roster: "Ubuntu 상주 목록 · 정책 v27 · 프로세스 상태는 별도",
+        connection: (connected: number, admitted: number) => `배정 bridge 연결 ${connected}/${admitted}`,
+        summary: (connected: number, total: number, busy: number, attention: number, notAdmitted: number) =>
+          `상주 목록 ${total} · 배정 연결 ${connected}/${total - notAdmitted} · 미편입 ${notAdmitted} · 작업 중 ${busy} · 확인 필요 ${attention}`,
         more: (count: number) => `여기 그리지 못한 worker ${count}개`,
         heartbeat: (time: string) => `마지막 heartbeat ${time}`,
         noHeartbeat: "heartbeat 기록 없음",

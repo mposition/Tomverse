@@ -44,6 +44,7 @@ import {
   researchTone,
 } from "../lib/agentOffice/live.ts";
 import { agentOfficeAmuxState } from "../lib/agentOfficeAmuxState.ts";
+import { AGENT_OFFICE_AMUX_ROSTER } from "../lib/agentOffice/amuxRoster.ts";
 import { agentOfficeDecisionState } from "../lib/agentOfficeDecisionState.ts";
 import { AGENT_OFFICE_DIGEST_WINDOW_MS, agentOfficeDigestState } from "../lib/agentOfficeDigestState.ts";
 import { AGENT_DIGEST_AGENT_KEYS } from "../lib/agentDigestContract.ts";
@@ -751,7 +752,7 @@ const runtimeRow = (name, overrides = {}) => ({
 const amuxNow = at("2026-10-07T22:05:00Z");
 
 test("the AMUX room sits under the teams, with a desk for every worker", () => {
-  assert.ok(AMUX_ROOM.desks.length >= 8, "fewer desks than the catalog's workers");
+  assert.equal(AMUX_ROOM.desks.length, AGENT_OFFICE_AMUX_ROSTER.length);
   assert.ok(AMUX_ROOM.y > DEPT_ROOMS.reduce((bottom, room) => Math.max(bottom, room.y + room.h), 0));
   // The entrance's doormat is in the lobby, not in the AMUX room.
   assert.ok(ENTRANCE_MAT.x >= AMUX_ROOM.x + AMUX_ROOM.w, "the entrance is drawn in the AMUX room");
@@ -759,7 +760,7 @@ test("the AMUX room sits under the teams, with a desk for every worker", () => {
 
 test("each AMUX worker's state is its catalog row read against its runtime the way AMUX reads it", () => {
   const state = (catalog, runtime, now = amuxNow) =>
-    agentOfficeAmuxState({ catalog: [catalog], runtimes: runtime ? [runtime] : [], now }).workers[0].state;
+    agentOfficeAmuxState({ catalog: [catalog], roster: [{ name: catalog.worker_name, provider: catalog.provider }], runtimes: runtime ? [runtime] : [], now }).workers[0].state;
   const w = (overrides) => catalogRow("w1", overrides);
   const r = (overrides) => runtimeRow("w1", overrides);
   assert.equal(state(w(), r()), "ready");
@@ -779,6 +780,7 @@ test("each AMUX worker's state is its catalog row read against its runtime the w
 
   const observed = agentOfficeAmuxState({
     catalog: [catalogRow("b"), catalogRow("old", { archived: true }), catalogRow("a")],
+    roster: [{ name: "b", provider: "anthropic" }, { name: "a", provider: "anthropic" }],
     runtimes: [runtimeRow("a"), runtimeRow("old")],
     now: amuxNow,
   });
@@ -788,9 +790,52 @@ test("each AMUX worker's state is its catalog row read against its runtime the w
       ["b", "not_running", null],
       ["a", "ready", "2026-10-07T22:04:30.000Z"],
     ],
-    "an archived worker is left out and catalog order is kept"
+    "only resident workers are drawn in roster order"
   );
-  assert.deepEqual(agentOfficeAmuxState({ catalog: null, runtimes: [], now: amuxNow }), { kind: "no_catalog" });
+  const unconfigured = agentOfficeAmuxState({ catalog: null, roster: AGENT_OFFICE_AMUX_ROSTER, runtimes: [runtimeRow("claude-impl")], now: amuxNow });
+  assert.equal(unconfigured.workers.length, 13);
+  assert.equal(unconfigured.catalogConfigured, false);
+  assert.ok(unconfigured.workers.every((worker) => worker.state === "catalog_unknown" && worker.heartbeatAt === null));
+  const unknownView = amuxRoomView(unconfigured, 13, adminAgentOfficeMessages.ko.real.amux);
+  assert.equal(unknownView.connectionStatus, "waiting");
+  assert.equal(unknownView.summary, "상주 목록 13 · 배정 카탈로그 미확인");
+  assert.doesNotMatch(unknownView.summary, /연결 0\/13|미편입 13/);
+});
+
+test("the display-only v27 roster shows thirteen residents without admitting new workers", () => {
+  assert.equal(AGENT_OFFICE_AMUX_ROSTER.length, 13);
+  const names = AGENT_OFFICE_AMUX_ROSTER.map((worker) => worker.name);
+  assert.equal(new Set(names).size, 13);
+  for (const [prefix, count] of [["claude-", 4], ["codex-", 3], ["cursor-", 3], ["copilot-", 3]]) {
+    assert.equal(names.filter((name) => name.startsWith(prefix)).length, count);
+  }
+  const oldCatalog = [
+    ...names.filter((name) => /^(claude|codex)-/.test(name)).map((name) => catalogRow(name)),
+    catalogRow("devin-worker"), catalogRow("engineering-runner"),
+  ];
+  const state = agentOfficeAmuxState({
+    catalog: oldCatalog,
+    roster: AGENT_OFFICE_AMUX_ROSTER,
+    runtimes: [...oldCatalog.map((worker) => runtimeRow(worker.worker_name)), runtimeRow("cursor-worker")],
+    now: amuxNow,
+  });
+  assert.deepEqual(state.workers.map((worker) => worker.name), names);
+  assert.ok(!names.includes("devin-worker"));
+  assert.ok(!names.includes("engineering-runner"));
+  const unadmitted = state.workers.filter((worker) => /^(cursor|copilot)-/.test(worker.name));
+  assert.equal(unadmitted.length, 6);
+  assert.ok(unadmitted.every((worker) => worker.state === "not_admitted" && worker.heartbeatAt === null));
+  const view = amuxRoomView(state, AMUX_ROOM.desks.length, adminAgentOfficeMessages.ko.real.amux);
+  assert.equal(view.workers.length, 13);
+  assert.match(view.summary, /상주 목록 13 · 배정 연결 7\/7 · 미편입 6/);
+  assert.match(view.note, /정책 v27/);
+  assert.ok(view.workers.filter((worker) => worker.state === "not_admitted").every((worker) => worker.status === "waiting" && !worker.dim));
+  const officeReader = readFunction("readAmuxWorkers");
+  assert.match(officeReader, /AGENT_OFFICE_AMUX_ROSTER\.filter\(\(worker\) => admitted\.has\(worker\.name\)\)/);
+  assert.match(officeReader, /roster: AGENT_OFFICE_AMUX_ROSTER/);
+  for (const path of ["lib/amux/routing.ts", "app/api/internal/amux/workers/register/route.ts"]) {
+    assert.doesNotMatch(readFileSync(path, "utf8"), /agentOffice\/amuxRoster|AGENT_OFFICE_AMUX_ROSTER/);
+  }
 });
 
 test("the AMUX room's colour and summary come from its workers, and a missing record is not a state", () => {
@@ -801,14 +846,17 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
 
   const mixed = view([worker("a", "ready"), worker("b", "busy"), worker("c", "lost"), worker("d", "stopped")]);
   assert.equal(mixed.status, "attention");
-  assert.equal(mixed.summary, "연결 2/4 · 작업 중 1 · 확인 필요 1");
+  assert.equal(mixed.summary, "상주 목록 4 · 배정 연결 2/4 · 미편입 0 · 작업 중 1 · 확인 필요 1");
+  assert.equal(mixed.connectionStatus, "done", "a lost worker does not hide live app connections");
+  assert.equal(mixed.connectionLabel, "배정 bridge 연결 2/4");
+  assert.equal(mixed.attention, 1);
   assert.deepEqual(
     mixed.workers.map((w) => [w.name, w.status, w.label, w.dim]),
     [
       ["a", "done", "배정 가능", false],
       ["b", "working", "작업 중", false],
-      ["c", "attention", "연결 끊김", false],
-      ["d", "waiting", "정지", true],
+      ["c", "attention", "배정 연결 끊김", false],
+      ["d", "waiting", "배정 정지", true],
     ]
   );
   assert.equal(mixed.workers[0].title, "a · openai · 배정 가능 · 마지막 heartbeat 10-08 08:04 AEST");
@@ -826,12 +874,15 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
   assert.equal(view([worker("a", "ready")]).status, "done");
   assert.equal(view([worker("a", "paused"), worker("b", "not_running")]).status, "waiting");
   assert.equal(view([]).status, "waiting");
-  assert.equal(mixed.note, null);
+  assert.equal(mixed.note, copy.roster);
+  assert.equal(view([worker("a", "lost")]).connectionStatus, "attention");
+  assert.equal(view([worker("a", "not_admitted")]).connectionStatus, "waiting");
+  assert.equal(view([worker("a", "busy")]).connectionStatus, "done", "busy is a connected bridge, not a disconnected one");
   // When they do not all fit, the ones that need a look are drawn, and the
   // room says in words how many are not.
   const crowded = view([worker("a", "ready"), worker("b", "busy"), worker("c", "error")], 1);
   assert.equal(crowded.workers[0].name, "c");
-  assert.equal(crowded.note, "여기 그리지 못한 worker 2개");
+  assert.equal(crowded.note, `${copy.roster} · 여기 그리지 못한 worker 2개`);
   assert.match(crowded.summary, /여기 그리지 못한 worker 2개/);
   // It says the workers are not drawn, not where else they are: one not
   // running has no runtime row for any other screen to list.
@@ -844,6 +895,7 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
 
   const unread = amuxRoomView({ kind: "unread" }, 12, copy);
   assert.equal(unread.status, "attention");
+  assert.equal(unread.connectionStatus, "attention");
   assert.deepEqual(unread.workers, []);
   assert.match(unread.summary, /worker 기록을 읽지 못함/);
   assert.equal(unread.note, copy.unread, "a failed read is said in the room, not only in a tooltip");
@@ -854,7 +906,7 @@ test("the AMUX room's colour and summary come from its workers, and a missing re
 
   for (const locale of ["en", "ko"]) {
     const states = adminAgentOfficeMessages[locale].real.amux.states;
-    for (const key of ["ready", "idle", "busy", "starting", "error", "lost", "stopped", "not_running", "paused", "isolated", "blocked"]) {
+    for (const key of ["ready", "idle", "busy", "starting", "error", "lost", "stopped", "not_running", "not_admitted", "catalog_unknown", "paused", "isolated", "blocked"]) {
       assert.ok(states[key], `${locale}: ${key}`);
     }
   }
@@ -878,6 +930,8 @@ test("the office reads AMUX workers' runtime state, never their work, and draws 
   // neither move them nor give them a line. A click names the room and the
   // worker, and nothing else.
   const world = readFileSync("components/admin/AgentOfficeWorld.tsx", "utf8");
+  assert.match(world, /isAmux \? amux\.connectionStatus : status/);
+  assert.match(world, /isAmux && amux\.attention > 0/);
   const layer = world.slice(world.indexOf("const SeatedLayer"), world.indexOf("const PropLayer"));
   assert.doesNotMatch(layer, /engine|onSelect\b/);
   assert.equal(layer.match(/onPick\(/g)?.length, 2, "pointer and keyboard open the same profile");

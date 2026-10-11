@@ -1,10 +1,11 @@
 # Auto model selection — UI contract
 
-- Status: **default off; activation requires serving readback.** The three
+- Status: **default off; release authority requires serving readback.** The three
   readiness attestations in `lib/autoRolloutReadiness.ts` remain `pending`.
-  The separate owner-approved initial release may authorize Auto through
-  [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md).
-  This document is not evidence that an account has been activated.
+  The owner-approved initial release may authorize Auto through
+  [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md),
+  while the separate limited-release path requires its exact reviewed artifact
+  and runtime tuple. This document is not evidence that either path is active.
   The controls are mounted
   (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
   something executes rather than a claim about components nothing rendered.
@@ -30,7 +31,7 @@ true and does not exist when it is false.
 offered =
     uiFlagEnabled &&
     product === "chat" &&   // written in the order it is decided
-    cohortEligible;         // readiness or exact initial authority; kill, plan, bucket
+    cohortEligible;         // readiness or an exact release authority; kill, plan, bucket
 ```
 
 The initial authority is verified by the server from its canonical owner
@@ -39,6 +40,11 @@ serves availability, mode changes and turn routing. A browser flag or object
 cannot supply it. Missing manifest enforcement or keys closes that exception;
 the actual finalized manifest remains mandatory. The historical measurement
 attestations retain their real status.
+
+The separate limited-release exception changes only the readiness term when
+its policy, reviewed 18-path artifact, deployment, plans and rollout tuple all
+match. It grants no substitute initial authority and is omitted from the client
+response.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one
