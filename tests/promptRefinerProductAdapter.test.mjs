@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { generateText } from "ai";
 
 import {
   createPromptRefinerProductAdapter,
@@ -10,6 +11,52 @@ import { PROMPT_REFINER_PRODUCT_ADAPTER_CONFIG_DIGEST } from
 const languageModel = Object.freeze({
   provider: "openai.responses",
   modelId: "gpt-5.6-luna",
+});
+
+test("fractional route deadlines reach the real SDK model boundary exactly once", async () => {
+  let calls = 0;
+  let elapsed = 0;
+  let receivedTimeout;
+  const model = { ...languageModel, specificationVersion: "v4",
+    supportedUrls: {}, doGenerate: async () => {
+      calls += 1;
+      throw new Error("synthetic transport failure");
+    } };
+  const adapter = createPromptRefinerProductAdapter({
+    languageModel: model,
+    now: () => elapsed,
+    authorizeDispatch: async () => { elapsed = 2_000.25; },
+    generate: async options => {
+      receivedTimeout = options.timeout;
+      return generateText(options);
+    },
+  });
+  const outcome = await adapter.execute({
+    requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    sourceText: "Synthetic SDK deadline check.",
+  });
+  assert.equal(receivedTimeout, 10_999);
+  assert.equal(calls, 1);
+  assert.equal(outcome.status, "billing_unknown");
+  assert.equal(outcome.reason, "provider_error");
+});
+
+test("a sub-millisecond remaining deadline refuses before SDK dispatch", async () => {
+  let elapsed = 0;
+  let calls = 0;
+  const adapter = createPromptRefinerProductAdapter({
+    languageModel,
+    now: () => elapsed,
+    authorizeDispatch: async () => { elapsed = 12_999.75; },
+    generate: async () => { calls += 1; throw new Error("must not dispatch"); },
+  });
+  const outcome = await adapter.execute({
+    requestId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    sourceText: "Synthetic sub-millisecond deadline check.",
+  });
+  assert.equal(calls, 0);
+  assert.equal(outcome.status, "undispatched");
+  assert.equal(adapter.isTrustedUndispatched(outcome), true);
 });
 
 test("product adapter includes durable admission in its 13 second deadline", async () => {
