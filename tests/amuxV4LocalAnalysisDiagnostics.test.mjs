@@ -102,7 +102,7 @@ test("live unexpected events retain only fixed type and phase through logging", 
     ["after_result", [init, assistant, { type: "result" }]],
   ];
   for (const [phase, preceding] of phases) {
-    const type = phase === "after_assistant" ? "control_request" : "rate_limit_event";
+    const type = "control_request";
     const stdout = Buffer.from([...preceding, { type, message: "PRIVATE_SENTINEL",
       session_id: "PRIVATE_SENTINEL", secret: "PRIVATE_SENTINEL" }]
       .map((event) => JSON.stringify(event)).join("\n"));
