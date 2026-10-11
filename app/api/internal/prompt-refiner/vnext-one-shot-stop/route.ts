@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
+import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -35,10 +36,10 @@ function authorized(request: Request): boolean {
       !provided?.startsWith("Bearer ")) return false;
   const token = provided.slice(7);
   if (token.length < 32 || token.length > 256) return false;
-  return timingSafeEqual(
-    createHash("sha256").update(expected).digest(),
-    createHash("sha256").update(token).digest(),
-  );
+  const expectedBytes = Buffer.from(expected, "utf8");
+  const providedBytes = Buffer.from(token, "utf8");
+  return expectedBytes.byteLength === providedBytes.byteLength &&
+    timingSafeEqual(expectedBytes, providedBytes);
 }
 
 /**

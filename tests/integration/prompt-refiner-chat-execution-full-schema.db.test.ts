@@ -4,6 +4,48 @@ import test, { mock } from "node:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import type { AdminAuditLog, PrismaClient } from "@prisma/client";
+
+import {
+  adminAuditIntegrityKeys,
+  computeAdminAuditEntryHash,
+} from "@/lib/adminAuditIntegrityCore";
+
+const assertCanonicalAuditRows = async (
+  prisma: PrismaClient,
+  rows: readonly AdminAuditLog[],
+) => {
+  const activeKey = adminAuditIntegrityKeys(process.env)[0];
+  assert.ok(activeKey, "the audit integrity key must be configured");
+  for (const row of rows) {
+    const previous = await prisma.adminAuditLog.findFirst({
+      where: {
+        entryHash: { not: null },
+        OR: [
+          { createdAt: { lt: row.createdAt } },
+          { createdAt: row.createdAt, id: { lt: row.id } },
+        ],
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { entryHash: true },
+    });
+    assert.equal(row.previousHash, previous?.entryHash ?? null);
+    assert.equal(row.entryHash, computeAdminAuditEntryHash({
+      previousHash: row.previousHash,
+      actorUserId: row.actorUserId,
+      actorEmail: row.actorEmail,
+      action: row.action,
+      targetType: row.targetType,
+      targetId: row.targetId,
+      summary: row.summary,
+      metadata: row.metadata || null,
+      ipAddress: row.ipAddress,
+      userAgent: row.userAgent,
+      createdAt: row.createdAt.toISOString(),
+    }, activeKey));
+  }
+};
+
 const rawUrl = process.env.TEST_DATABASE_URL?.trim();
 test("Refiner execution with migrated schema, canonical audit and durable recovery", { skip: !rawUrl }, async t => {
   if (!rawUrl) return;
@@ -25,7 +67,6 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
   const { consumeChatDraftForMessage } = await import("@/lib/chatDraftMessageConsume");
   const { claimChatResponseAttempt, readChatResponseAttempt } = await import("@/lib/chatResponseAttemptPersistence");
   const { chatResponseAttemptRequestPayloadDigest } = await import("@/lib/chatResponseAttemptCore");
-  const { verifyAdminAuditIntegrity } = await import("@/lib/adminAuditIntegrity");
   const userId = randomUUID(); const conversationId = randomUUID();
   const original = "  authored Cafe\u0301 🙂\r\nunchanged  ";
   try {
@@ -61,7 +102,7 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
       const audits = await prisma.adminAuditLog.findMany({ where: { targetId: held.suggestionId }, orderBy: { createdAt: "asc" } });
       assert.deepEqual(audits.map(row => row.action), ["prompt_refiner.chat_suggestion_held", "prompt_refiner.chat_decision_consumed"]);
       assert.equal(JSON.stringify(audits).includes(original), false);
-      assert.equal((await verifyAdminAuditIntegrity()).valid, true);
+      await assertCanonicalAuditRows(prisma, audits);
       await assert.rejects(store.consumePromptRefinerChatExecution(input), /no longer available/);
     });
     await t.test("durable reattach uses execution identity without consuming or sending again", async () => {
@@ -126,14 +167,16 @@ test("Refiner execution with migrated schema, canonical audit and durable recove
         where: { executionReceiptId: productHeld.executionReceiptId! } }), 1);
       await assert.rejects(prisma.promptRefinerProductExecutionReceipt.update({
         where: { id: productHeld.executionReceiptId! }, data: { retryCount: 0 } }), /immutable/);
-      const actions = await prisma.adminAuditLog.findMany({ where: {
-        targetId: productSnapshot.requestId }, orderBy: { createdAt: "asc" } });
-      assert.deepEqual(actions.map(row => row.action), [
+      const productAudits = await prisma.adminAuditLog.findMany({ where: {
+        targetId: { in: [productSnapshot.requestId, productHeld.suggestionId] },
+      }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+      assert.deepEqual(productAudits.filter(row => row.targetId === productSnapshot.requestId)
+        .map(row => row.action), [
         "prompt_refiner.product_attempt_claimed", "prompt_refiner.product_attempt_transitioned",
         "prompt_refiner.product_source_bound",
       ]);
-      assert.equal(JSON.stringify(actions).includes(original), false);
-      assert.equal((await verifyAdminAuditIntegrity()).valid, true);
+      assert.equal(JSON.stringify(productAudits).includes(original), false);
+      await assertCanonicalAuditRows(prisma, productAudits);
     });
   } finally {
     await prisma.user.deleteMany({ where: { id: userId } }); await prisma.$disconnect();

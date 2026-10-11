@@ -55,3 +55,48 @@ approved initial-release policy. They are not changed to PASS. Product
 connection completion requires the exact active deployment and actual runtime
 evidence; this review exception alone does not complete the connection or
 CHAT-01.
+
+## PR #2342 source-order and final-source disposition
+
+- Decision maker: mposition, in the active development conversation.
+- Decision observed: 2026-10-11T05:38:37Z (observation time).
+- Instruction: `이번 PR의 두 절차 예외 승인`.
+- Scope: PR #2342 only, for the initial Refiner and Chat Auto automatic-
+  application release.
+
+The owner approved releasing this selective release PR to main before its
+develop backport. Existing develop Stage/Slot permission failures remain
+separate unresolved work; this decision grants no additional table access and
+does not represent those checks as passing.
+
+For this PR, the owner also approved judging the final main integration using
+the prior partial Moonshot report, checks on the current source and required
+CI, without another model review. Neither that disposition nor the second-
+review waiver changes the old source's ACCEPT into a verdict on a new head.
+Subsequent CI failures must still receive a concrete fix and relevant tests;
+the final PR head and exact CI results must be recorded before merge.
+
+These two narrow decisions supersede only the develop-first source ordering
+and additional final-source model review conditions for this PR. Required
+CI, exact staging and production verification, canonical owner activation,
+original Message storage, single consumption, shared Router/provider input,
+budget reservation and settlement, audit integrity, kill switches and
+finalized manifests remain required. No deployment or activation is attested
+by this record.
+
+## Required CI corrections
+
+The first PR candidate, `fe41cd4d6083df24c29e30f0c9eb4b3268c39821`, failed
+CodeQL on SHA-256 hashing of the internal one-shot stop bearer token. The
+correction compares the bounded UTF-8 token bytes directly with
+`timingSafeEqual` after checking equal byte lengths. The existing refusal,
+single-writer and unknown-outcome contracts remain in place; the security
+finding is not suppressed or waived.
+
+Its shared PostgreSQL agents lane also failed two full-schema test assertions
+that checked the entire audit history with one test process's synthetic key.
+Other suites use different synthetic keys in that same database. The test
+now verifies its own canonical Refiner rows and their immediate predecessor
+links. Product audit writers, runtime integrity verification and permissions
+remain unchanged. These corrections require current-source tests and new
+required CI results; the failed candidate is retained as history.
