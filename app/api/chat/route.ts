@@ -61,8 +61,15 @@ import {
 import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
 import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
-import { decideAutoCohort } from "@/lib/autoCohort";
+import {
+    autoCohortConfig,
+    autoInitialReleaseAuthorityRelevant,
+    decideAutoCohort,
+} from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
+import { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
+import { readChatRefinerInitialAutoRouterAuthority } from
+    "@/lib/chatRefinerInitialAutoReleaseStore";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
 import {
     attachmentTokensForModel,
@@ -1440,19 +1447,58 @@ async function handleChatPost(
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
         // the chat path pays nothing for a feature nobody has.
-        // The staging fallback drill's one exception, and the only path that
-        // routes a turn while a readiness gate is outstanding. Fails closed in
-        // production whatever the request carries -- see lib/autoDrillOverride.
+        // The staging fallback drill remains its own narrow exception and
+        // fails closed in production whatever the request carries. The
+        // separately audited initial-release authority below is never derived
+        // from this header -- see lib/autoDrillOverride.
         const drillOverride = decideDrillOverride({
             faultHeader: req.headers.get(FAULT_INJECTION_HEADER),
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
         });
+        const autoConfig = autoCohortConfig();
+        const autoReadiness = autoRolloutReadiness();
+        // The initial-release exception is server-owned and exact-deployment
+        // bound. Read it once for this request and pass that same opaque object
+        // to both cohort decisions; no request field or browser boolean can
+        // become authority. Ordinary ready and staging-drill paths need no
+        // release read, and a disabled/ineligible rollout keeps the old zero-
+        // query behavior.
+        const releaseAuthorityRelevant =
+            !autoReadiness.ready &&
+            !drillOverride.allowed &&
+            autoInitialReleaseAuthorityRelevant({
+                subjectKey: session?.user?.id ?? "",
+                isGuest: !session?.user?.id,
+                plan: accountPlan?.tier ?? null,
+                config: autoConfig,
+            });
+        let initialReleaseAuthority = null;
+        if (releaseAuthorityRelevant) {
+            try {
+                initialReleaseAuthority =
+                    await readChatRefinerInitialAutoRouterAuthority();
+            } catch (error) {
+                // Unknown release state is not a retry condition. The pending
+                // readiness register below refuses Auto and the authored turn
+                // follows the existing manual-model path once.
+                console.error(JSON.stringify({
+                    event: "chat_auto_initial_release_authority_unavailable",
+                    traceId,
+                    conversationId,
+                    errorName: error instanceof Error ? error.name : "UnknownError",
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+        }
         const autoCohort = decideAutoCohort({
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,
+            config: autoConfig,
+            readiness: autoReadiness,
             drillOverride: drillOverride.allowed,
+            initialReleaseAuthority,
         });
         // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
         // the product before the cohort, and the product lives on this row --
@@ -1580,6 +1626,9 @@ async function handleChatPost(
             // consults the cohort again, and without this the drill's turn was
             // refused on the very gate the override exists to pass.
             drillOverride: drillOverride.allowed,
+            initialReleaseAuthority,
+            cohortConfig: autoConfig,
+            readiness: autoReadiness,
             reservedInputTokens: preflightInputEstimate(autoRoutingMessages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
@@ -1613,6 +1662,17 @@ async function handleChatPost(
                     traceId,
                     conversationId,
                     reason: autoSelection.cohort.drillOverride,
+                    selectedModelId: effectiveModelId,
+                    environment: resolveDeploymentEnvironment(),
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+            if (autoSelection.cohort.initialReleaseAuthority) {
+                console.warn(JSON.stringify({
+                    event: "chat_auto_readiness_exception_used",
+                    traceId,
+                    conversationId,
+                    reason: autoSelection.cohort.initialReleaseAuthority,
                     selectedModelId: effectiveModelId,
                     environment: resolveDeploymentEnvironment(),
                     timestamp: new Date().toISOString(),

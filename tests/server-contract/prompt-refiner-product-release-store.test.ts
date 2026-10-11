@@ -20,25 +20,44 @@ let sourceReadCount = 0;
 let stageReadCount = 0;
 let priceReadCount = 0;
 let auditValidationCount = 0;
+let guardActive = true;
+let guardGeneration = 1;
+let guardReasonCode: string | null = null;
+let guardTransitionAuditLogId = "activation";
+let capturedAuditMetadata: unknown = null;
+let initialInspection: Readonly<Record<string, unknown>> = { state: "absent" };
 const stopReasons: string[] = [];
 
 mock.module(mod("lib/adminAudit.ts"), { namedExports: {
-  takeAuditChainLock: async () => {}, writeAdminAuditLog: async () => "audit",
+  takeAuditChainLock: async () => {},
+  writeAdminAuditLog: async (input: { metadata: unknown }) => {
+    capturedAuditMetadata = input.metadata;
+    return "resume-audit";
+  },
 } });
 mock.module(mod("lib/adminAuditIntegrityCore.ts"), { namedExports: {
   adminAuditIntegrityKeys: () => ["synthetic"],
 } });
-mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {} } });
+mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: {
+  $transaction: async (callback: (value: unknown) => unknown) => callback(await tx()),
+} } });
 mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: {
   PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID: "auto",
   initializePromptRefinerProductAutoGuard: async () => ({ initialized: true,
     active: true, generation: 1 }),
-  readPromptRefinerProductAutoGuard: async () => ({ active: true,
-    generation: 1, reasonCode: null, transitionAuditLogId: "activation" }),
-  resumePromptRefinerProductAutoGuardInTransaction: async () => ({ active: true,
-    generation: 2 }),
+  readPromptRefinerProductAutoGuard: async () => ({ active: guardActive,
+    generation: guardGeneration, reasonCode: guardReasonCode,
+    transitionAuditLogId: guardTransitionAuditLogId }),
+  resumePromptRefinerProductAutoGuardInTransaction: async () => {
+    guardActive = true; guardGeneration += 1;
+    guardReasonCode = null; guardTransitionAuditLogId = "resume-audit";
+    return { active: true, generation: guardGeneration };
+  },
   latchPromptRefinerProductAutoStopInTransaction: async (_tx: unknown,
     reason: string) => { stopReasons.push(reason); return { active: false }; },
+} });
+mock.module(mod("lib/chatRefinerInitialAutoReleaseStore.ts"), { namedExports: {
+  inspectChatRefinerInitialAutoRelease: async () => initialInspection,
 } });
 mock.module(mod("lib/promptRefinerVnextOneShotCandidateSourceReadback.ts"), {
   namedExports: {
@@ -96,10 +115,17 @@ const tx = async () => {
       "Recorded the owner's content-free Prompt Refiner limited audit receipt.",
     metadata: limitedMetadata, createdAt: new Date() };
   return {
-    adminAuditLog: { findMany: async ({ where }: { where: { action: string } }) => {
+    adminAuditLog: { findMany: async ({ where }: { where: {
+      action: string | { in: string[] };
+    } }) => {
       if (queryFails) throw new Error("synthetic_db_unavailable");
-      return where.action === "prompt_refiner.product_release_activated"
-        ? activationRows : [limited];
+      if (where.action === "prompt_refiner.product_release_activated") {
+        return activationRows;
+      }
+      if (typeof where.action === "object") {
+        return initialInspection.state === "absent" ? [] : [{ id: "initial" }];
+      }
+      return [limited];
     } },
   };
 };
@@ -108,6 +134,9 @@ beforeEach(async () => {
   stopReasons.length = 0; priceMatches = true; sourceMatches = true;
   queryFails = false; sourceReadCount = 0; priceReadCount = 0;
   auditValidationCount = 0; stageReadCount = 0;
+  guardActive = true; guardGeneration = 1; guardReasonCode = null;
+  guardTransitionAuditLogId = "activation"; capturedAuditMetadata = null;
+  initialInspection = { state: "absent" };
   const store = await storePromise;
   activationRows = [{ id: "activation", actorUserId: "owner",
     createdAt: new Date("2026-10-10T00:00:00.000Z"),
@@ -173,4 +202,82 @@ test("a malformed view closes without mutating the operational guard", async () 
   assert.deepEqual(stopReasons, []);
   assert.deepEqual({ sourceReadCount, priceReadCount, auditValidationCount },
     { sourceReadCount: 0, priceReadCount: 0, auditValidationCount: 0 });
+});
+
+test("initial release resume records the current policy and exact authority pair", async () => {
+  const store = await storePromise;
+  activationRows = [];
+  initialInspection = { state: "active",
+    binding: { runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+      runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID },
+    routerActivationAuditLogId: "router-audit",
+    productActivationAuditLogId: "product-audit",
+    actorUserId: "owner", approvedAt: "2026-10-11T00:00:00.000Z" };
+  guardActive = false; guardGeneration = 7;
+  guardReasonCode = "unknown_dispatch_or_cost";
+  guardTransitionAuditLogId = "pause-audit";
+  const previous = {
+    RAILWAY_GIT_COMMIT_SHA: process.env.RAILWAY_GIT_COMMIT_SHA,
+    RAILWAY_DEPLOYMENT_ID: process.env.RAILWAY_DEPLOYMENT_ID,
+    ADMIN_AUDIT_INTEGRITY_SECRET: process.env.ADMIN_AUDIT_INTEGRITY_SECRET,
+  };
+  Object.assign(process.env, runtime, {
+    ADMIN_AUDIT_INTEGRITY_SECRET: "synthetic",
+  });
+  try {
+    const result = await store.resumePromptRefinerProductAuto({
+      session: { user: { id: "owner" } } as never,
+      request: new Request("https://tomverse.test", { method: "POST" }),
+      expectedGeneration: 7,
+      expectedReasonCode: "unknown_dispatch_or_cost",
+      expectedPauseAuditLogId: "pause-audit",
+    });
+    assert.equal(result.generation, 8);
+    assert.deepEqual(capturedAuditMetadata, {
+      version: "prompt-refiner-product-auto-resume-v2",
+      releaseKind: "initial_auto_v1",
+      policyCommit: "3aeb001a4abde2d93e945ed5e5de61b10c412c0b",
+      policySha256:
+        "a9dbe509a056152015a59a45fd6438304fac36f36521a1319c11f8d1704970f9",
+      operatorConfirmedReasonCode: "unknown_dispatch_or_cost",
+      pauseAuditLogId: "pause-audit",
+      priorGeneration: 7,
+      runtimeCommitSha: runtime.RAILWAY_GIT_COMMIT_SHA,
+      runtimeDeploymentId: runtime.RAILWAY_DEPLOYMENT_ID,
+      routerExceptionAuditLogId: "router-audit",
+      productActivationAuditLogId: "product-audit",
+    });
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("legacy activation refuses an initial authority for the same deployment", async () => {
+  const store = await storePromise;
+  initialInspection = { state: "active" };
+  const previous = {
+    RAILWAY_GIT_COMMIT_SHA: process.env.RAILWAY_GIT_COMMIT_SHA,
+    RAILWAY_DEPLOYMENT_ID: process.env.RAILWAY_DEPLOYMENT_ID,
+    ADMIN_AUDIT_INTEGRITY_SECRET: process.env.ADMIN_AUDIT_INTEGRITY_SECRET,
+  };
+  Object.assign(process.env, runtime, {
+    ADMIN_AUDIT_INTEGRITY_SECRET: "synthetic",
+  });
+  try {
+    await assert.rejects(store.activatePromptRefinerProductRelease({
+      session: { user: { id: "owner" } } as never,
+      request: new Request("https://tomverse.test", { method: "POST" }),
+      target,
+    }), /initial_authority_present/);
+    assert.equal(stageReadCount, 0);
+    assert.equal(capturedAuditMetadata, null);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

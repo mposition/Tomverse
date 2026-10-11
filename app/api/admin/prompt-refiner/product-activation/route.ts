@@ -9,6 +9,10 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
   "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { chatRefinerInitialAutoActivationRequestSchema } from
+  "@/lib/chatRefinerInitialAutoReleaseApiContract";
+import { activateChatRefinerInitialAutoRelease } from
+  "@/lib/chatRefinerInitialAutoReleaseStore";
 import { activatePromptRefinerProductRelease } from
   "@/lib/promptRefinerProductReleaseStore";
 import { V4_STAGE_ID, V5_STAGE_ID } from
@@ -16,7 +20,7 @@ import { V4_STAGE_ID, V5_STAGE_ID } from
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
 const headers = { "Cache-Control": "private, no-store, max-age=0" };
-const schema = z.object({
+const legacySchema = z.object({
   stageId: z.enum([V4_STAGE_ID, V5_STAGE_ID]),
   gateAuditLogId: z.string().min(1).max(128),
   dispositionAuditLogId: z.string().min(1).max(128),
@@ -25,6 +29,8 @@ const schema = z.object({
   runtimeDeploymentId: z.string().uuid(),
   confirmation: z.literal("ACTIVATE_EXACT_REFINER_PRODUCT_DEPLOYMENT"),
 }).strict();
+const schema = z.union([legacySchema,
+  chatRefinerInitialAutoActivationRequestSchema]);
 
 export async function POST(request: Request) {
   try {
@@ -51,13 +57,18 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 2 * 1024, schema);
     await consumeApiRateLimit(request, session.user.id,
       "admin-prompt-refiner-product-activation", { minute: 2, day: 8 });
-    const result = await activatePromptRefinerProductRelease({ session, request,
-      target: { stageId: body.stageId,
-        gateAuditLogId: body.gateAuditLogId,
-        dispositionAuditLogId: body.dispositionAuditLogId,
-        limitedAuditReceiptId: body.limitedAuditReceiptId,
+    const result = "releaseKind" in body
+      ? await activateChatRefinerInitialAutoRelease({ session, request,
         runtimeCommitSha: body.runtimeCommitSha,
-        runtimeDeploymentId: body.runtimeDeploymentId } });
+        runtimeDeploymentId: body.runtimeDeploymentId,
+        evidenceRefs: body.evidenceRefs })
+      : await activatePromptRefinerProductRelease({ session, request,
+        target: { stageId: body.stageId,
+          gateAuditLogId: body.gateAuditLogId,
+          dispositionAuditLogId: body.dispositionAuditLogId,
+          limitedAuditReceiptId: body.limitedAuditReceiptId,
+          runtimeCommitSha: body.runtimeCommitSha,
+          runtimeDeploymentId: body.runtimeDeploymentId } });
     return Response.json(result, { status: 201, headers });
   } catch (error) {
     const security = apiSecurityResponse(error);
@@ -65,7 +76,9 @@ export async function POST(request: Request) {
       security.headers.set("Cache-Control", headers["Cache-Control"]);
       return security;
     }
-    if (error instanceof Error && error.message.startsWith("prompt_refiner_product_")) {
+    if (error instanceof Error &&
+        (error.message.startsWith("prompt_refiner_product_") ||
+          error.message.startsWith("chat_refiner_initial_auto_"))) {
       return Response.json({ code: "PROMPT_REFINER_PRODUCT_ACTIVATION_REFUSED",
         retryAuthorized: false, humanReviewRequired: true },
       { status: 409, headers });

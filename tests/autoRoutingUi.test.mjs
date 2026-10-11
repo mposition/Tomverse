@@ -18,6 +18,8 @@ import {
 } from "../lib/autoRoutingCopy.ts";
 import { SELECTION_REASONS } from "../lib/routerSelection.ts";
 import { SELECTION_MODES } from "../lib/conversationSelectionMode.ts";
+import { mintChatRefinerInitialAutoRouterAuthority } from
+  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
 
 // The UI is the last step of the rollout and the first thing a user reads as a
 // promise. These tests are mostly about not making one the product cannot keep.
@@ -41,6 +43,13 @@ const availability = (overrides = {}) =>
     ...overrides,
   });
 
+const initialReleaseAuthority = () =>
+  mintChatRefinerInitialAutoRouterAuthority({
+    routerActivationAuditLogId: "audit_router_initial_release",
+    runtimeCommitSha: "a".repeat(40),
+    runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+  });
+
 test("the flag is off unless it is explicitly turned on", () => {
   assert.equal(isAutoRouterUiEnabled({}), false);
   assert.equal(isAutoRouterUiEnabled({ [AUTO_ROUTER_UI_FLAG]: "" }), false);
@@ -61,6 +70,31 @@ test("the option is offered only when it would actually route", () => {
   assert.equal(
     availability({ readiness: { ready: false, outstanding: ["shadow_report"], problems: [] } })
       .offered,
+    false
+  );
+});
+
+test("pending readiness is offered only with the server-minted initial authority", () => {
+  const pending = {
+    ready: false,
+    outstanding: ["shadow_report", "offline_quality_evaluation"],
+    problems: [],
+  };
+  assert.equal(availability({ readiness: pending }).offered, false);
+  const offered = availability({
+    readiness: pending,
+    initialReleaseAuthority: initialReleaseAuthority(),
+  });
+  assert.equal(offered.offered, true);
+  assert.equal(
+    offered.cohort.initialReleaseAuthority,
+    "chat_refiner_initial_auto_release"
+  );
+  assert.equal(
+    availability({
+      readiness: pending,
+      initialReleaseAuthority: { ...initialReleaseAuthority() },
+    }).offered,
     false
   );
 });

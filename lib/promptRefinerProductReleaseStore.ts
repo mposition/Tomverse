@@ -6,6 +6,12 @@ import type { Session } from "next-auth";
 
 import { takeAuditChainLock, writeAdminAuditLog } from "@/lib/adminAudit";
 import { adminAuditIntegrityKeys } from "@/lib/adminAuditIntegrityCore";
+import { inspectChatRefinerInitialAutoRelease } from
+  "@/lib/chatRefinerInitialAutoReleaseStore";
+import { CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION,
+  CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
+  chatRefinerInitialAutoResumeMetadata } from
+  "@/lib/chatRefinerInitialAutoRelease";
 import { prisma } from "@/lib/prisma";
 import { initializePromptRefinerProductAutoGuard,
   latchPromptRefinerProductAutoStopInTransaction,
@@ -223,6 +229,15 @@ export async function activatePromptRefinerProductRelease(input: {
   }
   return prisma.$transaction(async (tx) => {
     await takeAuditChainLock(tx);
+    const initial = await tx.adminAuditLog.findMany({ where: {
+      action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
+        CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
+      targetType: "RailwayDeployment",
+      targetId: runtimeDeploymentId,
+    }, select: { id: true }, take: 1 });
+    if (initial.length !== 0) {
+      throw new Error("prompt_refiner_product_initial_authority_present");
+    }
     const stage = await exactStageEvidence(tx, input.target);
     const limited = await readLimitedReceipt(tx, input.target,
       input.target.limitedAuditReceiptId);
@@ -264,16 +279,11 @@ async function resolvePromptRefinerProductRelease(
   const runtimeDeploymentId = runtime.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase();
   const closed = () => Object.freeze({ explicitEnabled: false,
     autoEnabled: false, runtimeCommitSha: null, runtimeDeploymentId: null,
-    approvalAuditLogId: null });
+    approvalAuditLogId: null, releaseKind: null,
+    routerExceptionAuditLogId: null });
   if (!SHA.test(runtimeCommitSha ?? "") || !UUID.test(runtimeDeploymentId ?? "")) {
     return closed();
   }
-  const rows = await tx.adminAuditLog.findMany({ where: {
-    action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
-    targetId: runtimeDeploymentId,
-  } });
-  const row = rows.length === 1 ? rows[0] : null;
-  if (rows.length === 0) return closed();
   const latchDrift = async (
     reason: PromptRefinerProductImmediateAutoStopReason,
   ) => {
@@ -282,6 +292,36 @@ async function resolvePromptRefinerProductRelease(
     }
     return closed();
   };
+  const rows = await tx.adminAuditLog.findMany({ where: {
+    action: ACTIVATION_ACTION, targetType: "RailwayDeployment",
+    targetId: runtimeDeploymentId,
+  } });
+  const initialRows = await tx.adminAuditLog.findMany({ where: {
+    action: { in: [CHAT_REFINER_INITIAL_AUTO_ROUTER_ACTION,
+      CHAT_REFINER_INITIAL_AUTO_PRODUCT_ACTION] },
+    targetType: "RailwayDeployment", targetId: runtimeDeploymentId,
+  }, select: { id: true }, take: 3 });
+  const initial = initialRows.length === 0
+    ? ({ state: "absent" } as const)
+    : await inspectChatRefinerInitialAutoRelease(tx, runtime);
+  if (initial.state === "active") {
+    if (rows.length !== 0) return latchDrift("audit_failure");
+    const operational = await readPromptRefinerProductAutoGuard(tx);
+    return Object.freeze({ explicitEnabled: true,
+      autoEnabled: operational.active,
+      runtimeCommitSha, runtimeDeploymentId,
+      approvalAuditLogId: initial.productActivationAuditLogId,
+      releaseKind: "initial_auto_v1" as const,
+      routerExceptionAuditLogId: initial.routerActivationAuditLogId });
+  }
+  if (initial.state === "invalid") {
+    const reason = initial.reason === "price_pin_invalid"
+      ? "unknown_dispatch_or_cost" : initial.reason === "runtime_controls_invalid"
+        ? "critical_safety_failure" : "audit_failure";
+    return latchDrift(reason);
+  }
+  const row = rows.length === 1 ? rows[0] : null;
+  if (rows.length === 0) return closed();
   if (!row || row.summary !== ACTIVATION_SUMMARY || !row.actorUserId ||
       !row.metadata || typeof row.metadata !== "object" ||
       Array.isArray(row.metadata)) return latchDrift("audit_failure");
@@ -341,7 +381,9 @@ async function resolvePromptRefinerProductRelease(
   const operational = await readPromptRefinerProductAutoGuard(tx);
   return Object.freeze({ explicitEnabled: true,
     autoEnabled: operational.active,
-    runtimeCommitSha, runtimeDeploymentId, approvalAuditLogId: row.id });
+    runtimeCommitSha, runtimeDeploymentId, approvalAuditLogId: row.id,
+    releaseKind: "latency_only_v1" as const,
+    routerExceptionAuditLogId: null });
 }
 
 /** Side-effect-free release availability for an authenticated view. */
@@ -385,13 +427,18 @@ export async function resumePromptRefinerProductAuto(input: {
         guard.transitionAuditLogId !== input.expectedPauseAuditLogId) {
       throw new Error("prompt_refiner_product_auto_resume_not_allowed");
     }
-    const resumeAuditLogId = await writeAdminAuditLog({ tx,
-      session: input.session, request: input.request,
-      action: RESUME_ACTION,
-      targetType: "PromptRefinerProductOperationalGuard",
-      targetId: PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID,
-      summary: RESUME_SUMMARY,
-      metadata: {
+    const metadata = release.releaseKind === "initial_auto_v1" &&
+      release.routerExceptionAuditLogId && release.approvalAuditLogId
+      ? chatRefinerInitialAutoResumeMetadata({
+        operatorConfirmedReasonCode: guard.reasonCode,
+        pauseAuditLogId: guard.transitionAuditLogId,
+        priorGeneration: guard.generation,
+        runtimeCommitSha: runtimeCommitSha!,
+        runtimeDeploymentId: runtimeDeploymentId!,
+        routerExceptionAuditLogId: release.routerExceptionAuditLogId,
+        productActivationAuditLogId: release.approvalAuditLogId,
+      })
+      : {
         version: "prompt-refiner-product-auto-resume-v1",
         policyCommit: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_COMMIT,
         policySha256: PROMPT_REFINER_AUTO_EXCEPTION_POLICY_SHA256,
@@ -400,7 +447,14 @@ export async function resumePromptRefinerProductAuto(input: {
         priorGeneration: guard.generation,
         runtimeCommitSha,
         runtimeDeploymentId,
-      },
+      };
+    const resumeAuditLogId = await writeAdminAuditLog({ tx,
+      session: input.session, request: input.request,
+      action: RESUME_ACTION,
+      targetType: "PromptRefinerProductOperationalGuard",
+      targetId: PROMPT_REFINER_PRODUCT_AUTO_GUARD_ID,
+      summary: RESUME_SUMMARY,
+      metadata,
     });
     const resumed = await resumePromptRefinerProductAutoGuardInTransaction(tx, {
       expectedGeneration: input.expectedGeneration, resumeAuditLogId });
@@ -420,7 +474,8 @@ export async function loadPromptRefinerProductRelease(
       !UUID.test(runtime.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase() ?? "")) {
     return Object.freeze({ explicitEnabled: false, autoEnabled: false,
       runtimeCommitSha: null, runtimeDeploymentId: null,
-      approvalAuditLogId: null });
+      approvalAuditLogId: null, releaseKind: null,
+      routerExceptionAuditLogId: null });
   }
   return prisma.$transaction((tx) =>
     readPromptRefinerProductRelease(tx, runtime),
@@ -434,7 +489,8 @@ export async function loadPromptRefinerProductReleaseAdmission(
       !UUID.test(runtime.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase() ?? "")) {
     return Object.freeze({ explicitEnabled: false, autoEnabled: false,
       runtimeCommitSha: null, runtimeDeploymentId: null,
-      approvalAuditLogId: null });
+      approvalAuditLogId: null, releaseKind: null,
+      routerExceptionAuditLogId: null });
   }
   return prisma.$transaction((tx) =>
     admitPromptRefinerProductRelease(tx, runtime),

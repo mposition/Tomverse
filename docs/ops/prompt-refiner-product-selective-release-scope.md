@@ -5,8 +5,9 @@
 - Production base: `cf18bf4e71c341603410540177d3ac4cf4f2be6a`
 - Prior cancellation checkpoint:
   `dd98e0fb261b44c573bddde792441a3b27a11fac`
-- Latest main preserved before final validation:
-  `666f7b164f7d3d101d1145a480324e6239773114`
+- Latest main preserved in the initial-release candidate:
+  `d5eb48b8eff1827a3f61c0eaa8a40abddb4ae256` (including the earlier `666f7b164f7d3d101d1145a480324e6239773114`
+  dispatch boundary)
 - Integrated checkpoint before scope reduction:
   `332037d80fa816ce07590b266798e99cf0c09f6e`
 - Work item: `CHAT-01`
@@ -97,7 +98,13 @@ forbidding the separate frozen Gate lock import or retained emergency stop
 caller. Its fixture test covers positive and negative inventories without
 making source absence a universal repository rule.
 
-The remaining blockers are unchanged: the available quality result is not a
-qualifying pass, unresolved limited-audit findings are nonzero, all three Router
-release decisions are pending, and no exact product activation exists. These
-facts keep explicit and Auto product release closed even after code deployment.
+The historical quality result is not a qualifying pass, unresolved evaluation
+audit findings are nonzero, and all three Router measurement decisions remain
+pending. The operator's subsequent
+[initial Auto release policy](../policy/chat-refiner-initial-auto-release-v1.md)
+defers that quality/measurement work under a separate exact-deployment owner
+authority. It does not rewrite these facts or extend the legacy latency-only
+activation. Server binding, authored storage, budget, product audit, stop
+controls, actual manifests, independent review, CI and exact runtime checks
+remain required. Without actual activation/readback, this record grants no
+product authority or completion claim.

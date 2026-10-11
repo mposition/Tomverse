@@ -7,7 +7,8 @@ import { promptRefinerKillSwitchEngaged } from "@/lib/promptRefinerAccess";
 
 const closed = () => Object.freeze({ explicitEnabled: false,
   autoEnabled: false, runtimeCommitSha: null, runtimeDeploymentId: null,
-  approvalAuditLogId: null });
+  approvalAuditLogId: null, releaseKind: null,
+  routerExceptionAuditLogId: null });
 
 /** Side-effect-free capability view; execution requires fresh admission. */
 export async function promptRefinerChatExecutionRelease() {

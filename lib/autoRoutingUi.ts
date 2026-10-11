@@ -40,6 +40,8 @@ import { autoProductBoundary } from "@/lib/autoProductBoundary";
 import type { ProductKeyReadMode } from "@/lib/productKeyReadMode";
 import type { ModelTier } from "@/lib/models";
 import type { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
+import type { ChatRefinerInitialAutoRouterAuthority } from
+  "@/lib/chatRefinerInitialAutoRouterAuthority";
 
 /** Off by default. A flag that has to be turned on is the whole point. */
 export const AUTO_ROUTER_UI_FLAG = "TOMVERSE_AUTO_ROUTER_UI_ENABLED";
@@ -89,6 +91,7 @@ export type AutoUiAvailabilityInput = {
   flagEnabled?: boolean;
   cohortConfig?: AutoCohortConfig;
   readiness?: ReturnType<typeof autoRolloutReadiness>;
+  initialReleaseAuthority?: ChatRefinerInitialAutoRouterAuthority | null;
 };
 
 export const autoUiAvailability = (
@@ -120,6 +123,7 @@ export const autoUiAvailability = (
     plan: input.plan,
     config: input.cohortConfig,
     readiness: input.readiness,
+    initialReleaseAuthority: input.initialReleaseAuthority,
   });
   return cohort.eligible
     ? { offered: true, reason: null, cohort }

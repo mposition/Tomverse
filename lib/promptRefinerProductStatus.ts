@@ -6,9 +6,8 @@ import {
 } from "@/lib/autoRolloutReadiness";
 import { isPromptRefinerEnabled } from "@/lib/appSettings";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
-import {
-  promptRefinerChatExecutionRelease,
-} from "@/lib/promptRefinerChatExecutionRelease";
+import { loadPromptRefinerProductRelease } from
+  "@/lib/promptRefinerProductReleaseStore";
 import { promptRefinerKillSwitchEngaged } from "@/lib/promptRefinerAccess";
 import {
   PROMPT_REFINER_PRODUCT_STATUS_VERSION,
@@ -18,9 +17,15 @@ import {
 const SHA = /^[0-9a-f]{40}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-type ProductRelease = Awaited<
-  ReturnType<typeof promptRefinerChatExecutionRelease>
->;
+type ProductRelease = Readonly<{
+  explicitEnabled: boolean;
+  autoEnabled: boolean;
+  runtimeCommitSha: string | null | undefined;
+  runtimeDeploymentId: string | null | undefined;
+  approvalAuditLogId: string | null;
+  releaseKind?: "latency_only_v1" | "initial_auto_v1" | null;
+  routerExceptionAuditLogId?: string | null;
+}>;
 
 type ProductStatusDependencies = {
   env?: Record<string, string | undefined>;
@@ -52,6 +57,8 @@ PromptRefinerProductStatus["release"] => ({
   explicitEnabled: null,
   autoEnabled: null,
   approvalAuditLogId: null,
+  releaseKind: null,
+  routerExceptionAuditLogId: null,
 });
 
 /**
@@ -86,22 +93,17 @@ export async function readPromptRefinerProductStatus(
       explicitEnabled: false,
       autoEnabled: false,
       approvalAuditLogId: null,
+      releaseKind: null,
+      routerExceptionAuditLogId: null,
     };
   } else if (rollout === "unknown") {
     release = unavailableRelease("unavailable");
-  } else if (rollout === "disabled") {
-    release = {
-      state: "disabled_by_rollout",
-      explicitEnabled: false,
-      autoEnabled: false,
-      approvalAuditLogId: null,
-    };
   } else if (!serving.exactProductIdentity) {
     release = unavailableRelease("runtime_identity_unavailable");
   } else {
     try {
       const current = await (
-        dependencies.readRelease ?? promptRefinerChatExecutionRelease
+        dependencies.readRelease ?? loadPromptRefinerProductRelease
       )();
       if (!current.explicitEnabled && !current.autoEnabled) {
         // The established release reader intentionally folds database errors
@@ -118,10 +120,12 @@ export async function readPromptRefinerProductStatus(
         release = unavailableRelease("unavailable");
       } else {
         release = {
-          state: "recorded",
-          explicitEnabled: current.explicitEnabled,
-          autoEnabled: current.autoEnabled,
+          state: rollout === "disabled" ? "disabled_by_rollout" : "recorded",
+          explicitEnabled: rollout === "disabled" ? false : current.explicitEnabled,
+          autoEnabled: rollout === "disabled" ? false : current.autoEnabled,
           approvalAuditLogId: current.approvalAuditLogId,
+        releaseKind: current.releaseKind ?? null,
+        routerExceptionAuditLogId: current.routerExceptionAuditLogId ?? null,
         };
       }
     } catch {

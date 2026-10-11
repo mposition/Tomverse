@@ -163,4 +163,12 @@ Online Router evaluation links final assistant messages, manual model changes, r
 
 ## 11. Release evidence
 
+The separate owner-approved
+[initial Refiner/Auto release](./chat-refiner-initial-auto-release-v1.md) may
+authorize an initial cohort through its exact-deployment canonical audit pair
+while the Router's three measurement attestations remain pending. It preserves
+their real status and requires the actual enforced, immutable finalized
+manifest boundary, ordinary authorization/billing and every rollout/kill
+control. This is an initial product connection, not quality certification.
+
 The generated release-gate view (`docs/release-gates/tomverse-chat-v1.generated.md`, rendered from the canonical YAML by `npm run generate:tomverse-chat-release-gate-view`) must link routing results to the IDs under `ROUTE-*`, `ESTIMATE-*`, `FALLBACK-*`, `PLANNER-*`, `BILLING-*`, `ABUSE-*`, `MODERATION-*`, `MEMORY-*`, and `MANIFEST-*` in the canonical YAML. This policy intentionally does not duplicate their numeric thresholds.
