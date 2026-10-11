@@ -548,7 +548,7 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * move and the fingerprint is repinned after the full reviewed closure lands.
  */
 export const MARKETING_WEBHOOK_PIPELINE_FINGERPRINT =
-  "44d4eab421c1591875c62395d740929ef9223bd8f0d5efa0307a44aa94c1a276";
+  "be5d07c42a05c4c1dba304ad712f5ad2272152f6c36dd89ab48deba387ac21c6";
 
 const sha256 = (value: string): string =>
   createHash("sha256").update(value, "utf8").digest("hex");
@@ -1190,3 +1190,10 @@ export const resolveMarketingAutomationAccess = (
   result.webhookApply = webhookApplyDecision(input);
   return result;
 };
+
+// 2026-10-11: the analysis-only monthly budget adds an audit relation on the
+// watched AdminAuditLog model. The marketing descriptor, receiver, writers
+// and admission decisions are unchanged. Repin the actual closure bytes;
+// old signed evidence remains stale and no marketing switch is opened.
+// Keep this provenance after the code so existing reviewed access positions
+// remain unchanged.

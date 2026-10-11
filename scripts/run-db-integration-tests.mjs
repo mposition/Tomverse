@@ -366,9 +366,12 @@ run(
     // The idea-only initial source plan is derived without a model call or
     // external excerpt, and its pointer, immutable row and audit are atomic.
     "tests/integration/amux-v4-initial-source-plan.db.test.ts",
-    // The analysis-only USD 50 ledger migration must install its namespace,
+    // The analysis-only ledger migration must install its namespace,
     // one-preview hold and fail-closed lifecycle constraints in PostgreSQL.
     "tests/integration/amux-v4-analysis-budget.db.test.ts",
+    // Owner-managed monthly ceilings preserve usage and bind one canonical
+    // audit/version without permitting unaudited or duplicate changes.
+    "tests/integration/amux-v4-analysis-monthly-setting.db.test.ts",
     // Retention must clear due bodies, preserve the audit trail and retire
     // external unit keys without silently extending a legal hold.
     "tests/integration/amux-v4-raw-retention.db.test.ts",

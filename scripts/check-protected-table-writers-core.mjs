@@ -179,6 +179,12 @@ export const findTruncateStatements = ({ sources }) => {
 
 export const PROTECTED_TABLES = [
   {
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    delegate: "amuxIdeaAnalysisBudgetSetting",
+    writers: ["lib/amux/ideaAnalysisBudgetSettingStore.ts"],
+    contract: "docs/policy/amux-intake.md v16",
+  },
+  {
     table: "AgentDigestItem",
     delegate: "agentDigestItem",
     writers: ["lib/agentDigestStore.ts"],
@@ -473,6 +479,12 @@ export const EXCLUDED_PREFIXES = [
 
 /** Non-type string literals equal to a protected delegate name, by file. */
 export const DELEGATE_NAME_ALLOWLIST = [
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "amuxIdeaAnalysisBudgetSetting",
+    count: 1,
+    reason: "Account export domain key only; no client is indexed and no database connection or writer exists in this metadata file.",
+  },
   ...["promptRefinerChatScope", "promptRefinerChatSuggestion", "promptRefinerProductAttempt"].map(delegate => ({
     path: "lib/accountDataExportDomains.ts", delegate, count: 1,
     reason: "Account export domain key only; it is never used to index a client.",
@@ -546,6 +558,27 @@ export const RAW_SQL_ALLOWLIST = [
     writeVerbs: 1,
     reason:
       "The AdminAuditLog delegate only reads terminal and stop receipts. The one SQL write verb is FOR NO KEY UPDATE NOWAIT on PromptRefinerVnextOneShotStage, a row lock before writeSystemAuditLog appends the receipt through the sole audit writer. No statement here inserts, updates or deletes AdminAuditLog.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 2,
+    writeVerbs: 3,
+    reason: "Only the domain key and prismaModel name this setting; the three existing prose verbs belong to other descriptors. This metadata builds no SQL or database client. Exact counts still reject added literals or writes.",
+  },
+  {
+    path: "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql",
+    table: "AmuxIdeaAnalysisBudgetSetting",
+    tableMentions: 6,
+    writeVerbs: 13,
+    reason: "This migration creates the protected append-only setting and its audited version/ledger consistency guards. No live setting or usage is seeded or changed.",
+  },
+  {
+    path: "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 13,
+    reason: "The setting migration adds an audit foreign key and reads same-transaction human approval evidence. Its DDL/trigger verbs affect only the budget setting and window; it never writes AdminAuditLog.",
   },
   {
     path: "lib/opsObserverDigest.ts",

@@ -188,8 +188,8 @@ test("a user-linked model missing from the registry is rejected", () => {
   assert.match(output, /MemoryItem holds user data but is not in the registry/);
 });
 
-for (const model of ["AmuxIdeaContentKeyRetirement", "AmuxV22TaskResult", "AmuxV22TaskPatch"]) {
-  test(`${model} cannot escape through its direct idea relation`, () => {
+for (const model of ["AmuxIdeaContentKeyRetirement", "AmuxV22TaskResult", "AmuxV22TaskPatch", "AmuxIdeaAnalysisBudgetSetting"]) {
+  test(`${model} cannot escape the user-data registry`, () => {
     const { code, output } = run((registry) => {
       registry.domains = registry.domains.filter((row) => row.prismaModel !== model);
     });

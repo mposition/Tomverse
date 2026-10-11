@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD,
+  AMUX_V4_ANALYSIS_INITIAL_MONTHLY_CAP_MICROUSD,
   advanceAmuxIdeaAnalysisFailureState,
   assessAmuxIdeaAnalysisBudget,
   assessAmuxIdeaAnalysisSettlement,
@@ -27,12 +27,13 @@ const basis = (overrides = {}) => ({
   outputMicroUsdPerMillion: 2_000_000,
   consumedMicroUsd: "10000000",
   reservedMicroUsd: "5000000",
+  monthlyLimitMicroUsd: "50000000",
   usageState: "known",
   ...overrides,
 });
 
-test("v4 analysis budget is a separate USD 50 shadow reservation candidate, not CLI billing", () => {
-  assert.equal(AMUX_V4_ANALYSIS_MONTHLY_CAP_MICROUSD, "50000000");
+test("v4 analysis budget preserves the legacy bootstrap until an owner setting is saved", () => {
+  assert.equal(AMUX_V4_ANALYSIS_INITIAL_MONTHLY_CAP_MICROUSD, "50000000");
   assert.deepEqual(assessAmuxIdeaAnalysisBudget(basis()), {
     decision: "reservation_candidate",
     namespace: "agent/amux-intake",
@@ -47,6 +48,18 @@ test("v4 analysis budget is a separate USD 50 shadow reservation candidate, not 
   });
   assert.equal(assessAmuxIdeaAnalysisBudget(basis({ mode: "api" })).amountMeaning,
     "api_price_reservation_ceiling");
+});
+
+test("the approved dynamic USD 1000 ceiling preserves already recorded internal cost", () => {
+  const usage = { consumedMicroUsd: "42240000", reservedMicroUsd: "0",
+    inputTokensCap: 1_000_000, outputTokensCap: 128_000,
+    inputMicroUsdPerMillion: 8_000_000, outputMicroUsdPerMillion: 20_000_000 };
+  assert.deepEqual(assessAmuxIdeaAnalysisBudget(basis(usage)),
+    { decision: "hold", reason: "monthly_cap_exceeded" });
+  const result = assessAmuxIdeaAnalysisBudget(basis({ ...usage, monthlyLimitMicroUsd: "1000000000" }));
+  assert.equal(result.decision, "reservation_candidate");
+  assert.equal(result.worstCaseMicroUsd, "10560000");
+  assert.equal(result.remainingAfterMicroUsd, "947200000");
 });
 
 test("consumed and in-flight reservations both count; the exact cap is allowed", () => {
@@ -91,6 +104,9 @@ test("malformed or cross-namespace ledger values never become zero", () => {
     { namespace: "chat" }, { consumedMicroUsd: null },
     { consumedMicroUsd: "-1" }, { reservedMicroUsd: "1.2" },
     { consumedMicroUsd: "9223372036854775808" },
+    { monthlyLimitMicroUsd: undefined }, { monthlyLimitMicroUsd: "0" },
+    { monthlyLimitMicroUsd: "-1" }, { monthlyLimitMicroUsd: "1e9" },
+    { monthlyLimitMicroUsd: "9223372036854775808" },
     { inputMicroUsdPerMillion: "1000000" },
     { outputMicroUsdPerMillion: Number.NaN },
     { inputTokensCap: Number.NaN }, { outputTokensCap: 0 },
