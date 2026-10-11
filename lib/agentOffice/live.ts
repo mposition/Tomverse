@@ -129,6 +129,8 @@ export type AgentOfficeAmuxWorkerState =
   | "lost"
   | "stopped"
   | "not_running"
+  | "not_admitted"
+  | "catalog_unknown"
   | "paused"
   | "isolated"
   | "blocked";
@@ -139,6 +141,8 @@ export type AgentOfficeAmuxState =
   | { kind: "no_catalog" }
   | {
       kind: "observed";
+      /** Absent on older responses; false means admission cannot be determined. */
+      catalogConfigured?: boolean;
       workers: { name: string; provider: string; state: AgentOfficeAmuxWorkerState; heartbeatAt: string | null }[];
     };
 
@@ -582,7 +586,10 @@ type AmuxCopy = {
   unread: string;
   noCatalog: string;
   noWorkers: string;
-  summary: (connected: number, total: number, busy: number, attention: number) => string;
+  catalogUnavailable: (total: number) => string;
+  roster: string;
+  connection: (connected: number, admitted: number) => string;
+  summary: (connected: number, total: number, busy: number, attention: number, notAdmitted: number) => string;
   more: (count: number) => string;
   heartbeat: (time: string) => string;
   noHeartbeat: string;
@@ -620,6 +627,10 @@ export type AgentOfficeAmuxWorkerView = {
 
 export type AgentOfficeAmuxView = {
   status: DeptStatus;
+  /** Connection to the app, separate from individual worker warnings. */
+  connectionStatus: DeptStatus;
+  connectionLabel: string;
+  attention: number;
   summary: string;
   /** Words drawn in the room itself: why it is empty, or how many are not drawn. */
   note: string | null;
@@ -636,10 +647,10 @@ export function amuxRoomView(
   copy: AmuxCopy
 ): AgentOfficeAmuxView {
   if (state.kind === "unread") {
-    return { status: "attention", summary: copy.unread, note: copy.unread, workers: [] };
+    return { status: "attention", connectionStatus: "attention", connectionLabel: copy.unread, attention: 0, summary: copy.unread, note: copy.unread, workers: [] };
   }
   if (state.kind === "no_catalog") {
-    return { status: "waiting", summary: copy.noCatalog, note: copy.noCatalog, workers: [] };
+    return { status: "waiting", connectionStatus: "waiting", connectionLabel: copy.noCatalog, attention: 0, summary: copy.noCatalog, note: copy.noCatalog, workers: [] };
   }
 
   const workers = state.workers.map((worker): AgentOfficeAmuxWorkerView => {
@@ -662,15 +673,19 @@ export function amuxRoomView(
   });
   const count = (tone: DeptStatus) => workers.filter((worker) => worker.status === tone).length;
   const connected = workers.filter((worker) => ["ready", "idle", "busy"].includes(worker.state)).length;
+  const notAdmitted = workers.filter((worker) => worker.state === "not_admitted").length;
   const status: DeptStatus =
     count("attention") > 0 ? "attention" : count("working") > 0 ? "working" : count("done") > 0 ? "done" : "waiting";
   const overflow = Math.max(0, workers.length - desks);
-  const parts = [copy.summary(connected, workers.length, count("working"), count("attention"))];
+  const parts = [state.catalogConfigured === false ? copy.catalogUnavailable(workers.length) : copy.summary(connected, workers.length, count("working"), count("attention"), notAdmitted)];
   if (overflow > 0) parts.push(copy.more(overflow));
   return {
     status,
+    connectionStatus: connected > 0 ? "done" : count("attention") > 0 ? "attention" : "waiting",
+    connectionLabel: state.catalogConfigured === false ? copy.noCatalog : copy.connection(connected, workers.length - notAdmitted),
+    attention: count("attention"),
     summary: parts.join(" · "),
-    note: workers.length === 0 ? copy.noWorkers : overflow > 0 ? copy.more(overflow) : null,
+    note: workers.length === 0 ? copy.noWorkers : [copy.roster, ...(state.catalogConfigured === false ? [copy.noCatalog] : []), ...(overflow > 0 ? [copy.more(overflow)] : [])].join(" · "),
     // Catalog order, unless they do not all fit: then a worker that needs a
     // look is never the one left off the floor.
     workers:
