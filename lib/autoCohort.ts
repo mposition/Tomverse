@@ -197,8 +197,8 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     !readiness.ready &&
     readiness.problems.length === 0 &&
     limitedRelease?.admitted === true;
-  // The staging fallback drill is the one thing that may pass an outstanding
-  // gate, and only because the alternative was worse: the register is static
+  // The separate staging fallback drill may also pass an outstanding gate,
+  // and only because the alternative was worse: the register is static
   // code with no environment dimension, so attesting a gate to make staging
   // route would have committed the same `passed` to production. See
   // lib/autoDrillOverride.ts for the four locks, the first of which is "not

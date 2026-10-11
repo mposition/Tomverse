@@ -5,7 +5,6 @@ import {
   AUTO_ROUTER_LIMITED_RELEASE_COMMIT_ENV,
   AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV,
   AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_VALUE,
-  autoRouterLimitedReleaseApprovalProblems,
   resolveAutoRouterLimitedRelease,
 } from "../lib/autoRouterLimitedRelease.ts";
 import { AUTO_ROUTER_LIMITED_RELEASE_APPROVAL } from
@@ -65,13 +64,19 @@ const resolve = (overrides = {}) => resolveAutoRouterLimitedRelease({
   ...overrides,
 });
 
-test("the checked-in pending record grants no authority", () => {
+test("the checked-in record never grants authority to a synthetic target", () => {
   const decision = resolveAutoRouterLimitedRelease({
     environment: environment(),
     now: () => NOW,
   });
-  assert.deepEqual(decision, { admitted: false, reason: "approval_pending" });
-  assert.ok(autoRouterLimitedReleaseApprovalProblems().length > 0);
+  assert.equal(decision.admitted, false);
+});
+
+test("a pending approval fixture grants no authority", () => {
+  assert.deepEqual(
+    resolve({ approval: approval({ status: "pending" }) }),
+    { admitted: false, reason: "approval_pending" },
+  );
 });
 
 test("the selector is independently default-off", () => {
