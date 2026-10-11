@@ -53,7 +53,7 @@
     "staging:continuation-fixtures": "node --import tsx scripts/build-continuation-staging-fixtures.mjs",
     "test:db:integration": "node scripts/run-db-integration-tests.mjs",
     "test:unit": "node scripts/run-unit-tests.mjs",
-    "test:auto-router-limited-release": "node --conditions=react-server --import tsx --test tests/autoRouterLimitedRelease.test.mjs tests/autoRouterLimitedReleaseSeam.test.mjs tests/autoCohort.test.mjs tests/autoModelSelection.test.mjs tests/autoRoutingUi.test.mjs tests/autoRoutingRuntimeReadback.test.mjs tests/autoProductBoundary.test.mjs",
+    "test:auto-router-limited-release": "node --conditions=react-server --import tsx --test tests/autoRouterLimitedRelease.test.mjs tests/autoRouterLimitedReleaseSeam.test.mjs tests/autoCohort.test.mjs tests/autoDrillOverride.test.mjs tests/autoModelSelection.test.mjs tests/autoRoutingUi.test.mjs tests/autoRoutingRuntimeReadback.test.mjs tests/autoProductBoundary.test.mjs",
     "test:auto-router-limited-release-contract": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/server-contract/admin-routing-shadow-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
     "test:auto-router-limited-release-client": "node --import tsx --test tests/client/adminRoutingRuntimeReadback.test.tsx tests/client/autoRoutingRender.test.tsx",
     "test:routing-provenance": "node --conditions=react-server --import tsx --test tests/routingApplicationIdentity.test.mjs tests/routingShadowQuery.test.mjs tests/routingShadow.test.mjs tests/routingShadowReport.test.mjs",
