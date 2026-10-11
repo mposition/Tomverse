@@ -164,6 +164,13 @@ export function reusablePreparedDraftRevision(input: {
     : null;
 }
 
+/** Releasing a pre-send freeze must not rewrite an already durable generation. */
+export function releasedPreparedDraftNeedsSave(input: Parameters<
+  typeof reusablePreparedDraftRevision>[0] & { currentGeneration: number }) {
+  return input.currentGeneration !== input.captureGeneration ||
+    reusablePreparedDraftRevision(input) === null;
+}
+
 const DRAFT_SAVE_DEBOUNCE_MS = 350;
 const serverScopeKey = (scopeId: string | null | undefined) => scopeId || "new";
 const draftKeyIdentitySegment = (identityKey: string | null) =>
@@ -1233,7 +1240,16 @@ export function useConversationDrafts(
         meta.identityKey !== prepared.identityKey ||
         meta.identityEpoch !== prepared.identityEpoch) return;
     meta.frozen = false;
-    scheduleSave(prepared.key);
+    if (releasedPreparedDraftNeedsSave({
+      revision: meta.revision,
+      persistedGeneration: meta.persistedGeneration,
+      captureGeneration: prepared.generation,
+      currentGeneration: meta.generation,
+      capturedDraft: prepared.draft,
+      currentDraft: readDraftEntry(draftsRef.current, prepared.key),
+    })) {
+      scheduleSave(prepared.key);
+    }
     bumpSyncRevision();
   }, [bumpSyncRevision, identityFenceIsCurrent, scheduleSave]);
 

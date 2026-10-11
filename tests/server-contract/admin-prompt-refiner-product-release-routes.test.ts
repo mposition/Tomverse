@@ -15,6 +15,9 @@ const world = {
   rolloutWrites: 0,
   auditWrites: 0,
   resumeWrites: 0,
+  guardReads: 0,
+  guard: { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost",
+    transitionAuditLogId: "pause-audit" },
   rateLimits: 0,
   activationOutcome: "ok" as "ok" | "refused" | "unknown",
   auditOutcome: "ok" as "ok" | "refused" | "unknown",
@@ -30,6 +33,17 @@ mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => world.session,
 } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+mock.module(mod("lib/prisma.ts"), { namedExports: {
+  prisma: { $transaction: async (read: (tx: unknown) => unknown) => read({}) },
+} });
+mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: {
+  PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS: ["latency_p90_exceeded",
+    "original_fallback_rate_exceeded", "critical_safety_failure",
+    "unknown_dispatch_or_cost", "audit_failure"],
+  readPromptRefinerProductAutoGuard: async () => {
+    world.guardReads += 1; return world.guard;
+  },
+} });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
   isAdminSession: () => world.session !== null,
   getAdminRole: () => world.role,
@@ -195,6 +209,11 @@ beforeEach(() => {
   world.activationWrites = 0; world.initialActivationWrites = 0;
   world.rolloutWrites = 0; world.auditWrites = 0; world.resumeWrites = 0;
   world.rateLimits = 0;
+  world.guardReads = 0;
+  world.guard = { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost",
+    transitionAuditLogId: "pause-audit" };
+  process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+  process.env.RAILWAY_DEPLOYMENT_ID = "11111111-1111-4111-8111-111111111111";
   world.activationOutcome = "ok"; world.auditOutcome = "ok";
   world.resumeOutcome = "ok";
   world.activationInput = null; world.initialActivationInput = null;
@@ -203,6 +222,40 @@ beforeEach(() => {
   delete process.env.PROMPT_REFINER_PRODUCT_LIMITED_AUDIT_WRITE_ENABLED;
   delete process.env.PROMPT_REFINER_PRODUCT_AUTO_RESUME_WRITE_ENABLED;
   delete process.env.PROMPT_REFINER_PRODUCT_ROLLOUT_WRITE_ENABLED;
+});
+
+test("Auto pause readback is owner-only and never invokes a mutation", async () => {
+  const route = await resumeRoute;
+  const get = () => route.GET(new Request("https://tomverse.test/api/admin/prompt-refiner/product-auto-resume"));
+  world.session = null;
+  assert.equal((await get()).status, 404);
+  world.session = { user: { id: "synthetic-owner" } }; world.role = "admin";
+  assert.equal((await get()).status, 404);
+  assert.equal(world.guardReads, 0);
+  world.role = "owner"; world.recent = false;
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.deepEqual(await response.json(), {
+    version: "prompt-refiner-product-auto-resume-state-v1",
+    runtimeCommitSha: "a".repeat(40),
+    runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+    writerEnabled: false, ...world.guard,
+  });
+  assert.equal(world.guardReads, 1);
+  assert.equal(world.resumeWrites + world.activationWrites + world.auditWrites, 0);
+});
+
+test("Auto pause readback refuses unknown runtime and malformed guard data", async () => {
+  const route = await resumeRoute;
+  const get = () => route.GET(new Request("https://tomverse.test/api/admin/prompt-refiner/product-auto-resume"));
+  delete process.env.RAILWAY_GIT_COMMIT_SHA;
+  assert.equal((await get()).status, 503);
+  assert.equal(world.guardReads, 0);
+  process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+  world.guard.generation = 0;
+  assert.equal((await get()).status, 503);
+  assert.equal(world.resumeWrites, 0);
 });
 
 test("product release mutations require hidden owner, origin, recent auth and write gates", async () => {

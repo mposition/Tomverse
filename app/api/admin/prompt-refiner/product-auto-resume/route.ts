@@ -9,9 +9,13 @@ import { assertRecentAdminAuthentication, isAdminReauthenticationError } from
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from
   "@/lib/apiSecurity";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { promptRefinerProductAutoResumeStateSchema } from
+  "@/lib/promptRefinerProductAutoResumeContract";
 import { resumePromptRefinerProductAuto } from
   "@/lib/promptRefinerProductReleaseStore";
-import { PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS } from
+import { PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS,
+  readPromptRefinerProductAutoGuard } from
   "@/lib/promptRefinerProductOperationalGuard";
 import { hasValidMutationOrigin } from "@/lib/requestOrigin";
 
@@ -22,6 +26,43 @@ const schema = z.object({
   expectedPauseAuditLogId: z.string().min(1).max(128),
   confirmation: z.literal("RESUME_REFINER_PRODUCT_AUTO_AFTER_OPERATOR_REVIEW"),
 }).strict();
+
+/** Owner-only readback; does not observe receipts, resume or write an audit. */
+export async function GET(request: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || !isAdminSession(session) ||
+        getAdminRole(session) !== "owner") {
+      return Response.json({ error: "Not found." }, { status: 404, headers });
+    }
+    await consumeApiRateLimit(request, session.user.id,
+      "admin-prompt-refiner-product-auto-resume-state", { minute: 30, day: 1_000 });
+    const runtime = promptRefinerProductAutoResumeStateSchema.pick({
+      version: true, runtimeCommitSha: true, runtimeDeploymentId: true, writerEnabled: true,
+    }).parse({
+      version: "prompt-refiner-product-auto-resume-state-v1",
+      runtimeCommitSha: process.env.RAILWAY_GIT_COMMIT_SHA?.trim().toLowerCase(),
+      runtimeDeploymentId: process.env.RAILWAY_DEPLOYMENT_ID?.trim().toLowerCase(),
+      writerEnabled: process.env.PROMPT_REFINER_PRODUCT_AUTO_RESUME_WRITE_ENABLED === "1",
+    });
+    const guard = await prisma.$transaction(
+      (tx) => readPromptRefinerProductAutoGuard(tx),
+      { maxWait: 2_000, timeout: 10_000 });
+    const state = promptRefinerProductAutoResumeStateSchema.parse({
+      ...runtime,
+      ...guard,
+    });
+    return Response.json(state, { headers });
+  } catch (error) {
+    const security = apiSecurityResponse(error);
+    if (security) {
+      security.headers.set("Cache-Control", headers["Cache-Control"]);
+      return security;
+    }
+    return Response.json({ code: "PROMPT_REFINER_PRODUCT_AUTO_RESUME_STATE_UNAVAILABLE" },
+      { status: 503, headers });
+  }
+}
 
 export async function POST(request: Request) {
   try {
