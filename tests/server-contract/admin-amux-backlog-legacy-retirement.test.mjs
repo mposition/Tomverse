@@ -11,6 +11,9 @@ const priorReact = globalThis.React;
 globalThis.React = React;
 let session;
 let messageReads;
+let backlogReads;
+let recentAuthentication;
+const backlog = { rows: [], total: 0, page: 1, pageCount: 1, pageSize: 50 };
 class Redirect extends Error {
   constructor(destination) { super(destination); this.destination = destination; }
 }
@@ -21,6 +24,15 @@ mock.module("next/navigation", { namedExports: {
 mock.module("next-auth/next", { namedExports: { getServerSession: async () => session } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: { getAdminRole: (value) => value.user.role } });
+mock.module(mod("lib/adminReauthentication.ts"), { namedExports: {
+  hasRecentAdminAuthentication: () => recentAuthentication,
+} });
+mock.module(mod("lib/amux/adminBacklogRead.ts"), { namedExports: {
+  readAmuxBacklogList: async (search, page) => {
+    backlogReads.push({ search, page });
+    return backlog;
+  },
+} });
 mock.module(mod("lib/adminLocaleServer.ts"), { namedExports: {
   getAdminMessages: async (messages) => { messageReads++; return messages.en; },
 } });
@@ -33,7 +45,7 @@ mock.module(mod("lib/amux/portfolioAssessmentService.ts"), { namedExports: {
   amuxV4PortfolioWriteEnabled: () => false,
 } });
 const panels = {};
-for (const name of ["AdminPageTabs", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
+for (const name of ["AdminPageTabs", "AmuxBacklogListPanel", "AmuxBacklogMetadataPanel", "AmuxBoardImportPanel",
   "AmuxIdeaInputPanel", "AmuxUnusedAnalysisReservationPanel", "AmuxAnalysisClaimResolutionPanel",
   "AmuxTaskCostCatalogApprovalPanel", "AmuxPortfolioPanel", "AmuxReconciliationPanel"]) {
   const panel = () => null;
@@ -45,6 +57,8 @@ const { ADMIN_LEGACY_ROUTES, adminRedirectTarget } = await import(mod("lib/admin
 test.beforeEach(() => {
   session = { user: { id: "owner-a", role: "owner" } };
   messageReads = 0;
+  backlogReads = [];
+  recentAuthentication = true;
 });
 test.after(() => {
   if (priorReact === undefined) delete globalThis.React;
@@ -56,17 +70,47 @@ function elements(element) {
 }
 const query = (values = {}) => ({ searchParams: Promise.resolve(values) });
 
-test("default and unknown tabs render Ideas without offering legacy intake", async () => {
+test("default and unknown tabs render List without offering legacy intake", async () => {
   for (const values of [{}, { tab: "unknown" }]) {
     const tree = elements(await open(query(values)));
     const tabs = tree.find((element) => element.type === panels.AdminPageTabs).props;
-    assert.equal(tabs.activeTabId, "ideas");
-    assert.deepEqual(tabs.tabs.map((tab) => tab.id), ["ideas", "import", "reconciliation", "metadata"]);
+    assert.equal(tabs.activeTabId, "list");
+    assert.deepEqual(tabs.tabs.map((tab) => tab.id), ["list", "ideas", "import", "reconciliation", "metadata"]);
     assert.equal("intake" in tabs.chips, false);
-    assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
+    const list = tree.find((element) => element.type === panels.AmuxBacklogListPanel);
+    assert.equal(list.props.data, backlog);
+    assert.equal(tree.some((element) => element.type === panels.AmuxIdeaInputPanel), false);
   }
+  assert.deepEqual(backlogReads, [{ search: "", page: 1 }, { search: "", page: 1 }]);
   const page = readFileSync(resolve(root, "app/(site)/(application)/admin/amux-backlog/page.tsx"), "utf8");
   assert.doesNotMatch(page, /AmuxIntakePanel|AmuxLocalIntakePanel/);
+});
+
+test("explicit Ideas still renders the input panel without reading the backlog", async () => {
+  const tree = elements(await open(query({ tab: "ideas" })));
+  assert.ok(tree.some((element) => element.type === panels.AmuxIdeaInputPanel));
+  assert.equal(tree.some((element) => element.type === panels.AmuxBacklogListPanel), false);
+  assert.deepEqual(backlogReads, []);
+});
+
+test("List reads the normalized filter and page only after recent authentication", async () => {
+  await open(query({ tab: "list", cardNumber: " CARD-1 ", page: "2" }));
+  assert.deepEqual(backlogReads, [{ search: "CARD-1", page: 2 }]);
+  backlogReads = [];
+  recentAuthentication = false;
+  const tree = elements(await open(query({ tab: "list", cardNumber: "CARD-1" })));
+  const list = tree.find((element) => element.type === panels.AmuxBacklogListPanel);
+  assert.equal(list.props.data, null);
+  assert.equal(list.props.search, "CARD-1");
+  assert.deepEqual(backlogReads, []);
+});
+
+test("invalid card-number filters do not read the backlog", async () => {
+  const tree = elements(await open(query({ tab: "list", cardNumber: "%" })));
+  const list = tree.find((element) => element.type === panels.AmuxBacklogListPanel);
+  assert.equal(list.props.valid, false);
+  assert.equal(list.props.data, null);
+  assert.deepEqual(backlogReads, []);
 });
 
 test("old intake tab redirects before panel reads and preserves recovery and filter queries", async () => {
@@ -77,6 +121,7 @@ test("old intake tab redirects before panel reads and preserves recovery and fil
     return true;
   });
   assert.equal(messageReads, 0);
+  assert.deepEqual(backlogReads, []);
   assert.equal(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], "/admin/amux-backlog?tab=ideas");
   assert.equal(adminRedirectTarget(ADMIN_LEGACY_ROUTES["/admin/amux-intake"], values),
     "/admin/amux-backlog?tab=ideas&analysisHoldId=hold-a&sourceKey=source-a");
@@ -115,6 +160,7 @@ test("non-owners are refused before a legacy tab redirect or any panel read", as
     await assert.rejects(open(query()), /NOT_FOUND/);
   }
   assert.equal(messageReads, 0);
+  assert.deepEqual(backlogReads, []);
 });
 
 test("surviving sections still mount only their own panel", async () => {
@@ -126,4 +172,5 @@ test("surviving sections still mount only their own panel", async () => {
     assert.deepEqual(tree.filter((element) => Object.values(panels).includes(element.type))
       .map((element) => element.type), [panels.AdminPageTabs, panels[name]]);
   }
+  assert.deepEqual(backlogReads, []);
 });
