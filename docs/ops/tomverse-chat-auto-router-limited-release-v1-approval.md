@@ -5,7 +5,7 @@ approvalVersion: 1
 exceptionId: CHAT-01-AUTO-ROUTER-LIMITED-RELEASE-V1
 approvedBy: mposition
 approvedAt: 2026-10-11T00:44:09Z
-approvedPolicyCommit: fa997387b93ddfaa181ffd98918247ed8c6d02d3
+approvedPolicyCommit: 9851b4863639871f2b6b83b62df59a76510a7334
 approvedPolicySha256: a0d0f119d1c5ab9d647ef5c72cd8af658e4cd8b4b5c92d23d6bca3c0adc6999b
 evaluatedImplementationCommit: 1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177
 evaluatedArtifactSha256: 159f2227c1ece70e18df8450ae313053813b280d1e21048b50ac18067fe4999f
@@ -33,8 +33,20 @@ them, a quality certification, a Refiner release, or CHAT-01 completion.
 ## Approved evidence
 
 The approved policy is commit
-`fa997387b93ddfaa181ffd98918247ed8c6d02d3`, canonical-LF SHA-256
+`9851b4863639871f2b6b83b62df59a76510a7334`, canonical-LF SHA-256
 `a0d0f119d1c5ab9d647ef5c72cd8af658e4cd8b4b5c92d23d6bca3c0adc6999b`.
+This is the policy-signature commit in this selective release's own ancestry,
+cherry-picked from original feature commit
+`fa997387b93ddfaa181ffd98918247ed8c6d02d3`; both policy blobs are identical.
+The policy existed before approval at evaluated candidate
+`1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177`, committed at
+`2026-10-11T00:35:16Z`, with canonical-LF SHA-256
+`2b9090ffcdcd3f34a5497ed87809cea5f1ff056a62db67e3d6d0b9959c589be3`.
+`approvedAt` records the actual human reply observed at `2026-10-11T00:44:09Z`.
+The later signature commit only transcribes that decision into frontmatter;
+its timestamp is not a new approval time. The approved policy body is unchanged
+at 6,113 bytes, SHA-256
+`50186c3ce7751d0114430fcfac1823743a957c5d4d92398a796d5c018f41b991`.
 The evaluated implementation is the fixed public source at
 [`1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177`](https://github.com/mposition/Tomverse/tree/1f5d4c60123fc33b5e40f9b5f5cb4e36bd29b177),
 whose 18-path functional artifact SHA-256 is
