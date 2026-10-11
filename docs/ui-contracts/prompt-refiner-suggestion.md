@@ -4,9 +4,10 @@
   검증된 adapter 결과만 1회 소비해 Router/provider 공통 execution view를 만들고,
   저장 Message에는 저작 원문을 유지한다. explicit proposal과 Auto prepare, 공통 운영
   예산·정산, immutable receipt와 exact-deployment activation authority가 연결됐다.
-  그러나 현재 staging에는 activation이 요구하는 signed B03G/limited-audit 기록이 없어
-  product release readback은 explicit/auto 모두 false다. loopback Playwright fixture와
-  아래 E04 합성 QA 예외도 이 release를 바꾸지 않는다.
+  기존 activation은 signed B03G/limited-audit 조건을 계속 요구한다. 별도
+  [초기 Auto 출시 정책](../policy/chat-refiner-initial-auto-release-v1.md)은 실패한
+  품질 기록을 보존하면서 exact-deployment owner activation으로 이번 출시를 허용한다.
+  실제 활성 여부는 serving readback으로 확인하며 문서·fixture·E04 합성 QA는 권한이 아니다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - Chat 원문/실행 projection: `lib/promptRefinerChatHandoff.ts`
@@ -45,7 +46,7 @@ adapter가 준비됐다는 뜻이 아니다. 전체 allowlist, 종료 규칙, �
 
 Refiner는 답을 만들지 않고 현재 composer 문장을 다시 쓰는 제안을 만든다. 결과는
 전송 전에 별도 행에 표시된다. 수동 모드의 선택은 `이 문장 사용` 또는 `원문 유지`다.
-승인된 자동 적용 예외 v1은 Chat 대화가 이미 Auto mode이고 exact-deployment release가
+승인된 자동 적용 예외 또는 별도 초기 Auto 출시 권한은 Chat 대화가 이미 Auto mode이고 exact-deployment release가
 auto를 허용할 때 사용자의 통상 Send 준비 과정에서만 서버가 `accepted` 결정을 만든다.
 브라우저의 boolean이나 제안문은 이 결정을 만들 수 없다. 현재 fixture 버튼은
 `제안 미리보기 확인`이다. fixture 확인은
@@ -138,6 +139,22 @@ terminal tombstone에서는 원문·제안문을 즉시 지우며 5분 만료는
 authority나 checked-in empty registry는 출시 승인이 아니다. 실제 activation은 signed
 B03G latency-only disposition, content-free limited audit, exact candidate/price/config와
 현재 runtime commit/deployment를 canonical audit chain에서 함께 검증해야 한다.
+
+2026-10-11 운영자는 이번 초기 출시에 Chat Auto 자동 적용까지 포함하고 품질 개선은
+후속으로 진행하도록 승인했다. 별도 초기 정책은
+`chat_auto.initial_release_exception_activated`와
+`prompt_refiner.product_initial_auto_release_activated`를 같은 canonical audit
+transaction에서 기록하며 정확한 정책 bytes·serving commit/deployment·candidate·price·
+adapter·routing config에 결속한다. B08-v5 실패, 미해결 평가 감사 34건과 Router 세
+measurement 판정은 원래 상태로 보존한다. 실제 제품 감사 무결성, 서버 결속·1회 소비,
+원문 보존, 비용·fallback·kill·latch와 finalized manifest는 면제하지 않는다.
+기존 activation shape는 latency-only 조건을 그대로 검증한다.
+
+초기 activation과 rollout은 별도 owner action이다. activation은 flag를 자동으로 켜지
+않으며, 별도 제어는 유효한 exact activation을 확인한 뒤
+`feature.promptRefinerEnabled`만 canonical 감사와 같은 transaction에서 변경한다.
+끄기는 권한이 닫힌 뒤에도 가능하다. kill switch와 Auto pause latch를 변경하거나
+자동 재개하지 않는다.
 
 제품 Auto에는 영속적인 운영 중지 latch가 있다. 전체 제품 Refiner의 최근 완료
 100건에서 준비 지연 p90이 6,000ms를 넘거나 원문 fallback이 5건을 넘으면 Auto만
@@ -273,7 +290,9 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 3. 원문 대비 제안문 주입·의미 보존 평가 (동결 16건의 provider-independent
    content-free anchor gate는 구현됨. 이는 일반 의미 동등성·주입 저항 인증이 아니며,
    과거 v3 output이 보존되지 않아 새 confirmatory 계약과 별도 실행 승인이 필요함)
-4. 승인된 품질 증거와 release gate disposition
+4. 기존 출시의 승인된 품질 증거와 release gate disposition. 별도 초기 Auto 출시는
+   새 정책의 네 가지 필수 확인과 exact owner activation을 사용하며, 기존 품질 실패를
+   통과로 바꾸지 않고 후속 개선 항목으로 보존한다.
 5. server-owned offered 결정, exact-deployment release readback과 kill switch
 
 1·2·5번의 제품 경계는 구현됐다. `feature.promptRefinerEnabled`는 literal `"true"`만

@@ -66,6 +66,7 @@ const REFINER_PROMPT = "이 질문에 답해 줘. 사용자가 작성한 질문�
 const REFINER_SCOPE_ID = "44444444-4444-4444-8444-444444444444";
 const REFINER_SUGGESTION_ID = "55555555-5555-4555-8555-555555555555";
 let refinerMode: "explicit" | "auto" | null = null;
+let refinerPreviews = 0;
 let refinerConsumes = 0;
 let pinnedResponse: Response | null = null;
 let pinnedInputs: readonly object[] | null = null;
@@ -91,10 +92,9 @@ mock.module(mod("lib/promptRefinerChatExecutionRelease.ts"), { namedExports: {
   }),
 } });
 mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
-  consumePromptRefinerChatExecution: async (
-    input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").consumePromptRefinerChatExecution>[0]
+  previewPromptRefinerChatExecution: async (
+    input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").previewPromptRefinerChatExecution>[0]
   ) => {
-    assert.equal(refinerConsumes, 0);
     assert.ok(refinerMode);
     const view = validatePromptRefinerChatExecution({ ...input,
       held: { id: REFINER_SUGGESTION_ID, userId: USER_ID, conversationId: CONVERSATION_ID,
@@ -109,8 +109,16 @@ mock.module(mod("lib/promptRefinerChatExecutionStore.ts"), { namedExports: {
         dbNow: new Date("2026-10-10T00:00:00Z"), explicitEnabled: refinerMode === "explicit",
         autoEnabled: refinerMode === "auto", autoConversation: conversationSelectionMode === "auto", killSwitch: false },
     });
-    refinerConsumes += 1;
+    refinerPreviews += 1;
     return view;
+  },
+  consumePreviewedPromptRefinerChatExecution: async (
+    _input: Parameters<typeof import("../../lib/promptRefinerChatExecutionStore").consumePreviewedPromptRefinerChatExecution>[0],
+    preview: Awaited<ReturnType<typeof import("../../lib/promptRefinerChatExecutionStore").previewPromptRefinerChatExecution>>,
+  ) => {
+    assert.equal(refinerConsumes, 0);
+    refinerConsumes += 1;
+    return preview;
   },
 } });
 const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as typeof import("../../lib/autoModelSelection");
@@ -1076,6 +1084,7 @@ const ask = async (
   durableClaimCalls = 0;
   lastDurableClaimInput = null;
   messageFindFirstArgs = [];
+  refinerPreviews = 0;
   routerInputs.length = 0;
   shadowInputs.length = 0;
 
@@ -1832,31 +1841,60 @@ test("a stall after the swap cancels the fallback's stream, settles and releases
 
 for (const [mode, decision] of [
   ["explicit", "accepted"], ["explicit", "kept_original"], ["auto", "accepted"],
-] as const) test(`${mode} Refiner ${decision} preserves pinned response and execution notice`, async () => {
+] as const) test(`${mode} Refiner ${decision} refuses pinned entry without consuming`, async () => {
   refinerMode = mode;
   refinerConsumes = 0;
   conversationSelectionMode = mode === "auto" ? "auto" : "manual";
+  process.env.PINNED_DEPLOYMENT_EXECUTION = "on";
+  process.env.PINNED_DEPLOYMENT_ACCOUNT_ID = USER_ID;
   pinnedResponse = new Response("Pinned synthetic answer.", { status: 202,
     headers: { "X-Pinned-Receipt": "synthetic", "Set-Cookie": "synthetic=1; Path=/; HttpOnly" } });
   const messages = [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }];
   const authored = structuredClone(messages);
   try {
-    const { response, body, streamError } = await ask("answers", "claimed", 202, false, messages, true, false, decision);
+    const { response, body, streamError } = await ask("answers", "claimed", 409, false, messages, true, false, decision);
     assert.equal(streamError, null);
-    assert.equal(body, "Pinned synthetic answer.");
-    assert.equal(response.headers.get("X-Pinned-Receipt"), "synthetic");
-    assert.ok(response.headers.get("Set-Cookie")?.includes("synthetic=1"));
-    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), decision === "accepted" ? "applied" : "original");
-    assert.equal(response.headers.get("X-Prompt-Refiner-Mode"), mode);
-    assert.equal(refinerConsumes, 1);
-    assert.deepEqual(pinnedInputs, [{ ...messages[0], content: decision === "accepted" ? REFINER_PROMPT : messages[0].content }]);
+    assert.equal((JSON.parse(body) as { code?: string }).code,
+      "PROMPT_REFINER_DECISION_UNAVAILABLE");
+    assert.equal(response.headers.get("X-Pinned-Receipt"), null);
+    assert.equal(response.headers.get("X-Prompt-Refiner-Execution"), null);
+    assert.equal(refinerPreviews, 1);
+    assert.equal(refinerConsumes, 0);
+    assert.equal(pinnedInputs, null);
     assert.deepEqual(messages, authored);
-    assert.equal(attempts.length, 0, "the successful pinned dispatch does not fall through to another provider");
+    assert.equal(attempts.length, 0);
   } finally {
     pinnedResponse = null;
     pinnedInputs = null;
+    delete process.env.PINNED_DEPLOYMENT_EXECUTION;
+    delete process.env.PINNED_DEPLOYMENT_ACCOUNT_ID;
     refinerMode = null;
     conversationSelectionMode = "auto";
+  }
+});
+
+test("a decision-free pinned turn preserves the existing dispatch path", async () => {
+  process.env.PINNED_DEPLOYMENT_EXECUTION = "on";
+  process.env.PINNED_DEPLOYMENT_ACCOUNT_ID = USER_ID;
+  pinnedResponse = new Response("Pinned synthetic answer.", { status: 202,
+    headers: { "X-Pinned-Receipt": "synthetic" } });
+  const messages = [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ];
+  try {
+    const { response, body } = await ask("answers", "claimed", 202, false,
+      messages, true, false);
+    assert.equal(body, "Pinned synthetic answer.");
+    assert.equal(response.headers.get("X-Pinned-Receipt"), "synthetic");
+    assert.equal(refinerPreviews, 0);
+    assert.equal(refinerConsumes, 0);
+    assert.deepEqual(pinnedInputs, messages);
+    assert.equal(attempts.length, 0);
+  } finally {
+    pinnedResponse = null;
+    pinnedInputs = null;
+    delete process.env.PINNED_DEPLOYMENT_EXECUTION;
+    delete process.env.PINNED_DEPLOYMENT_ACCOUNT_ID;
   }
 });
 

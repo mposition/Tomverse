@@ -1738,8 +1738,8 @@ export const RAW_SQL_ALLOWLIST = [
       "The additive migration creates only this new content-free hold and its immutable/delete/truncate guards. It seeds no hold row; exact counts require new review for changed DDL.",
   },
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
-    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [4, 10][index], writeVerbs: 12,
-    reason: "The sole default-off Chat binding writer advances epochs, holds validated snapshots, atomically consumes or purges bodies, and records canonical audit in the same transaction.",
+    path: "lib/promptRefinerChatExecutionStore.ts", table, tableMentions: [5, 11][index], writeVerbs: 12,
+    reason: "The sole default-off Chat binding writer adds one read-only preview lookup per table before its separately revalidated atomic consume boundary; it still only advances epochs, holds validated snapshots, consumes or purges bodies, and records canonical audit in the same transaction.",
   })),
   ...["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].map((table, index) => ({
     path: "prisma/migrations/20261009140000_prompt_refiner_chat_execution/migration.sql", table,

@@ -39,6 +39,11 @@ import { createHash } from "node:crypto";
 
 import { autoRolloutReadiness, type AutoReadinessGateId } from "@/lib/autoRolloutReadiness";
 import { DRILL_OVERRIDE_REASON } from "@/lib/autoDrillOverride";
+import {
+  CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
+  isChatRefinerInitialAutoRouterAuthority,
+  type ChatRefinerInitialAutoRouterAuthority,
+} from "@/lib/chatRefinerInitialAutoRouterAuthority";
 
 /** Bump when bucketing, salt handling or the refusal set changes. */
 export const AUTO_COHORT_VERSION = "auto-cohort-v1";
@@ -64,6 +69,8 @@ export type AutoCohortDecision =
        * readable as one that qualified on its own.
        */
       drillOverride?: typeof DRILL_OVERRIDE_REASON;
+      /** Exact-deployment owner authority, separate from the staging drill. */
+      initialReleaseAuthority?: typeof CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS;
       version: string;
       salt: string;
     }
@@ -109,7 +116,7 @@ const parsePercent = (raw: string | undefined): number => {
  * deliberate rollout.
  */
 export const autoCohortConfig = (
-  env: NodeJS.ProcessEnv = process.env
+  env: Record<string, string | undefined> = process.env
 ): AutoCohortConfig => ({
   killSwitch: env.AUTO_ROUTER_KILL_SWITCH === "on",
   rolloutPercent: parsePercent(env.AUTO_ROUTER_ROLLOUT_PERCENT),
@@ -154,6 +161,36 @@ export type AutoCohortInput = {
    * same thing, which is what every request that is not a staging drill gets.
    */
   drillOverride?: boolean;
+  /**
+   * Server-minted exact-deployment authority for the approved initial release.
+   * A browser object or copied audit id is not a member of the mint's WeakSet.
+   */
+  initialReleaseAuthority?: ChatRefinerInitialAutoRouterAuthority | null;
+};
+
+/**
+ * Whether readiness is the only cohort control for which an initial-release
+ * authority could matter. This performs no release read and grants nothing;
+ * callers use it only to avoid a database lookup for a request that kill,
+ * rollout, plan, guest or bucket rules will refuse anyway.
+ */
+export const autoInitialReleaseAuthorityRelevant = (
+  input: Pick<AutoCohortInput, "subjectKey" | "isGuest" | "plan" | "config">
+): boolean => {
+  const config = input.config ?? autoCohortConfig();
+  if (
+    config.killSwitch ||
+    config.rolloutPercent <= 0 ||
+    config.eligiblePlans.length === 0 ||
+    input.isGuest ||
+    !input.plan ||
+    !config.eligiblePlans.includes(input.plan) ||
+    config.salt === "unset"
+  ) {
+    return false;
+  }
+  return cohortBucket(input.subjectKey, config.salt) <
+    Math.round(config.rolloutPercent * (BUCKETS / 100));
 };
 
 /**
@@ -175,8 +212,8 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   }
 
   const readiness = input.readiness ?? autoRolloutReadiness();
-  // The staging fallback drill is the one thing that may pass an outstanding
-  // gate, and only because the alternative was worse: the register is static
+  // Two separately-auditable authorities may pass an outstanding gate. The
+  // staging fallback drill exists because the register is static
   // code with no environment dimension, so attesting a gate to make staging
   // route would have committed the same `passed` to production. See
   // lib/autoDrillOverride.ts for the four locks, the first of which is "not
@@ -184,7 +221,10 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   //
   // Below the kill switch, deliberately. An operator turning Auto off during a
   // drill must not have to also remember to withdraw a credential.
-  if (!readiness.ready && !input.drillOverride) {
+  const initialReleaseAuthorized = isChatRefinerInitialAutoRouterAuthority(
+    input.initialReleaseAuthority
+  );
+  if (!readiness.ready && !input.drillOverride && !initialReleaseAuthorized) {
     return {
       eligible: false,
       reason: "readiness_incomplete",
@@ -196,6 +236,7 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
   // Recorded on the decision, so a routed turn that took this path is never
   // mistaken for one that qualified.
   const overridden = !readiness.ready && input.drillOverride === true;
+  const initiallyReleased = !readiness.ready && initialReleaseAuthorized;
 
   if (config.rolloutPercent <= 0 || config.eligiblePlans.length === 0) {
     return { eligible: false, reason: "rollout_disabled", bucket: null, ...shared };
@@ -224,6 +265,9 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
     eligible: true,
     bucket,
     ...(overridden ? { drillOverride: DRILL_OVERRIDE_REASON } : {}),
+    ...(initiallyReleased
+      ? { initialReleaseAuthority: CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS }
+      : {}),
     ...shared,
   };
 };

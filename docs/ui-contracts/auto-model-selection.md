@@ -1,9 +1,11 @@
 # Auto model selection — UI contract
 
-- Status: **wired, not shipped.** `TOMVERSE_AUTO_ROUTER_UI_ENABLED` is off,
-  every readiness gate in `lib/autoRolloutReadiness.ts` is `pending`, and Auto
-  is offered in one product that no conversation belongs to yet — so no account
-  is offered Auto today. The controls are now mounted
+- Status: **default off; activation requires serving readback.** The three
+  readiness attestations in `lib/autoRolloutReadiness.ts` remain `pending`.
+  The separate owner-approved initial release may authorize Auto through
+  [its exact-deployment activation](../policy/chat-refiner-initial-auto-release-v1.md).
+  This document is not evidence that an account has been activated.
+  The controls are mounted
   (`ModelPickerPanel` and `ChatMessageList`), which is what makes §1 a rule
   something executes rather than a claim about components nothing rendered.
   Coverage: `tests/client/autoRoutingRender.test.tsx` and
@@ -28,8 +30,15 @@ true and does not exist when it is false.
 offered =
     uiFlagEnabled &&
     product === "chat" &&   // written in the order it is decided
-    cohortEligible;         // readiness, kill switch, plan and bucket
+    cohortEligible;         // readiness or exact initial authority; kill, plan, bucket
 ```
+
+The initial authority is verified by the server from its canonical owner
+activation pair, current deployment and configuration. The same authority
+serves availability, mode changes and turn routing. A browser flag or object
+cannot supply it. Missing manifest enforcement or keys closes that exception;
+the actual finalized manifest remains mandatory. The historical measurement
+attestations retain their real status.
 
 The product condition is not a third clause bolted on — **it is answered
 before the cohort is consulted**, and `lib/autoProductBoundary.ts` is the one

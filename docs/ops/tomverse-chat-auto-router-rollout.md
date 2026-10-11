@@ -1,7 +1,10 @@
 # Tomverse Chat Auto Router rollout
 
-- Status: **not started.** All three readiness gates are `pending`, so no
-  account can be routed by Auto regardless of configuration.
+- Status: **measurement attestations pending; default-off initial release.**
+  All three readiness gates retain their actual status. A separately verified
+  exact-deployment owner activation under
+  [the initial Auto release policy](../policy/chat-refiner-initial-auto-release-v1.md)
+  may admit the configured cohort. Configuration alone grants no exception.
 - Owner: Backend/AI, with Product as rollout owner
 - Companion to `docs/ops/tomverse-chat-router-evaluation-set.md` (which
   produces one of the three gates) and
@@ -14,7 +17,12 @@ somebody is in a hurry.
 
 ## 1. The three gates, and why they are three
 
-Auto routes nobody until all three are attested. They are not
+The ordinary release requires all three attestations. The initial release
+exception defers these measurements while retaining actual enforced,
+immutable finalized manifests. It binds the owner audit pair, policy,
+candidate/configuration and exact serving deployment; it is distinct from
+the staging-only drill and closes on missing enforcement or manifest keys.
+The three attestations are not
 interchangeable, and each produces reassuring numbers that look like the
 others':
 
