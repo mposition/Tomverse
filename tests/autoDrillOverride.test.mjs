@@ -103,7 +103,7 @@ test("a guest is refused, because the product has no such exception", () => {
 // What the override actually does to the cohort decision, and what it
 // deliberately leaves alone.
 
-const pendingReadiness = { ready: false, outstanding: ["shadow_report"] };
+const pendingReadiness = { ready: false, outstanding: ["shadow_report"], problems: [] };
 const cohortConfig = {
   killSwitch: false,
   rolloutPercent: 100,
@@ -137,7 +137,7 @@ test("an ordinary eligible decision carries no override marker", () => {
   // The absence is what makes a genuinely-ready decision readable as one.
   const decision = cohort({
     drillOverride: true,
-    readiness: { ready: true, outstanding: [] },
+    readiness: { ready: true, outstanding: [], problems: [] },
   });
   assert.equal(decision.eligible, true);
   assert.equal(decision.drillOverride, undefined);
