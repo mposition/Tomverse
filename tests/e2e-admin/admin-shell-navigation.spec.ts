@@ -634,7 +634,9 @@ test.describe("admin console shell", () => {
 
     await page.goto("/admin/amux-backlog");
     const backlog = page.getByRole("navigation", { name: "Backlog sections" });
-    await expect(backlog.getByRole("link")).toHaveCount(4);
+    await expect(backlog.getByRole("link")).toHaveCount(5);
+    await expect(backlog.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=list$/);
+    await expect(page.getByTestId("amux-backlog-list")).toBeVisible();
     await expect(backlog.locator('a[href$="tab=ideas"]')).toHaveCount(1);
     // Catalog import's code latch ships closed, so its chip reads off in any
     // environment; the chip is read from that latch, not written.
@@ -650,13 +652,13 @@ test.describe("admin console shell", () => {
 });
 
 test.describe("the AMUX group by role", () => {
-  for (const url of ["/admin/amux-backlog", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a"]) {
+  for (const url of ["/admin/amux-backlog?tab=ideas", "/admin/amux-backlog?tab=intake&sourceKey=legacy-a"]) {
     test(`Backlog replaces legacy JSON intake with Ideas at ${url}`, async ({ page, signInAs }) => {
       await signInAs("owner");
       await page.goto(url);
       await expect(consoleHeading(page)).toHaveText("Backlog");
       const strip = page.getByRole("navigation", { name: "Backlog sections" });
-      await expect(strip.getByRole("link")).toHaveCount(4);
+      await expect(strip.getByRole("link")).toHaveCount(5);
       await expect(strip.locator('a[aria-current="page"]')).toHaveAttribute("href", /tab=ideas/);
       await expect(strip.locator('a[href*="tab=intake"]')).toHaveCount(0);
       await expect(page.getByTestId("amux-v4-idea-input")).toBeVisible();
