@@ -123,6 +123,45 @@ test("a separately approved limited release may admit honest pending gates", () 
   assert.equal(decision.drillOverride, undefined);
 });
 
+test("an admitted limited release outranks the initial authority without mixing markers", () => {
+  const decision = decideAutoCohort(subject({
+    readiness: notReady,
+    config: config({ limitedRelease }),
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.ok(decision.limitedReleaseException);
+  assert.equal(decision.initialReleaseAuthority, undefined);
+  assert.equal(decision.drillOverride, undefined);
+  assert.equal(autoInitialReleaseAuthorityRelevant(subject({
+    readiness: notReady,
+    config: config({ limitedRelease }),
+  })), false);
+});
+
+test("the initial authority remains available when the limited gate tuple does not match", () => {
+  const readiness = {
+    ready: false,
+    outstanding: ["offline_quality_evaluation"],
+    problems: [],
+  };
+  const decision = decideAutoCohort(subject({
+    readiness,
+    config: config({ limitedRelease }),
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(decision.eligible, true);
+  assert.equal(
+    decision.initialReleaseAuthority,
+    CHAT_REFINER_INITIAL_AUTO_ROUTER_BASIS,
+  );
+  assert.equal(decision.limitedReleaseException, undefined);
+  assert.equal(autoInitialReleaseAuthorityRelevant(subject({
+    readiness,
+    config: config({ limitedRelease }),
+  })), true);
+});
+
 test("a limited release never overrides a malformed readiness register", () => {
   const decision = decideAutoCohort(subject({
     readiness: {
@@ -252,7 +291,7 @@ test("authority relevance matches every non-readiness cohort control", () => {
     { config: config({ rolloutPercent: 0.0001 }) },
   ];
   for (const overrides of cases) {
-    const candidate = subject(overrides);
+    const candidate = subject({ ...overrides, readiness: notReady });
     const actual = decideAutoCohort({ ...candidate, readiness: ready });
     assert.equal(
       autoInitialReleaseAuthorityRelevant(candidate),
