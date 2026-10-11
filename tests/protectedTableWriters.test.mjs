@@ -320,6 +320,19 @@ test("the Prompt Refiner preview adds exact reads without widening its write bou
   }
 });
 
+test("the budget export descriptor does not allow added SQL or delegate writes", () => {
+  const path = "lib/accountDataExportDomains.ts";
+  const original = readFileSync(resolve(ROOT, path), "utf8");
+  const findingsFor = (text) => checkProtectedTableWriters({
+    sources: [{ path, text }],
+  }).filter((finding) => finding.path === path);
+  assert.deepEqual(findingsFor(original), []);
+  assert.ok(findingsFor(`${original}\nconst injected = 'DELETE FROM "AmuxIdeaAnalysisBudgetSetting"';\n`)
+    .some((finding) => finding.rule === "raw-sql" && finding.detail.startsWith("AmuxIdeaAnalysisBudgetSetting:")));
+  assert.ok(findingsFor(`${original}\nprisma.amuxIdeaAnalysisBudgetSetting.create({});\n`)
+    .some((finding) => finding.rule === "delegate-write"));
+});
+
 test("the listed runtime-SQL spellings are inventoried, in both directions", () => {
   const cases = {
     "lib/new.ts": "await tx.$executeRawUnsafe(sql, ...values)",

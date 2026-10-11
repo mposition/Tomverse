@@ -693,6 +693,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     state: "unverified",
   },
   {
+    domain: "amuxIdeaAnalysisBudgetSetting",
+    publicName: "amux_idea_analysis_budget_settings",
+    prismaModel: "AmuxIdeaAnalysisBudgetSetting",
+    state: "unverified",
+  },
+  {
     domain: "amuxIdeaAnalysisPriceVersion",
     publicName: "amux_idea_analysis_price_versions",
     prismaModel: "AmuxIdeaAnalysisPriceVersion",
