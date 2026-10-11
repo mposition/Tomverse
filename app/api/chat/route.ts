@@ -1472,6 +1472,7 @@ async function handleChatPost(
                 isGuest: !session?.user?.id,
                 plan: accountPlan?.tier ?? null,
                 config: autoConfig,
+                readiness: autoReadiness,
             });
         let initialReleaseAuthority = null;
         if (releaseAuthorityRelevant) {
