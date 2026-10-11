@@ -471,6 +471,17 @@ const compilerOptions = parsedConfig.options;
 // 2026-10-09, product-Auto budget hold: the shared audit actor and the
 // marketing fingerprint note move reviewed access positions only. Count 228
 // and the position-free inventory remain unchanged.
+// 2026-10-09, selective release of the AMUX Decision Maker S1 slices to main:
+// three actor names join the existing line of `SYSTEM_AUDIT_ACTORS`, their
+// array is declared at the end of `lib/adminAuditSystemActors.ts`, and the
+// fingerprint record in `lib/marketingAutomationAccess.ts` gains a note above
+// that file's accesses. No access is added; count 228 and the position-free
+// inventory are unchanged, so this repins positions only.
+// 2026-10-09, sre-ops selective release: "ops-observer" joins the same line of
+// `SYSTEM_AUDIT_ACTORS` and its constant is declared at the end of
+// `lib/adminAuditSystemActors.ts`, `lib/adminAudit.ts` gains
+// `writeSystemAuditLogEntry()`, and the fingerprint record gains a note. No
+// access is added; count and the position-free inventory are unchanged.
 // 2026-10-10, CHAT-01 product connection: release readiness, the product audit
 // scope and the reviewed marketing fingerprint provenance move only existing
 // accesses in promptRefinerAccess.ts, adminAuditSystemActors.ts and
@@ -478,6 +489,12 @@ const compilerOptions = parsedConfig.options;
 // existing promptRefinerSuggestion.ts closure, so the runtime remains 178/190
 // files. Count 228 and the position-free inventory remain unchanged; only
 // positions in the reviewed closure move.
+// 2026-10-10, CHAT-01 production selective integration: the product release
+// readiness and audit scopes move existing accesses in the already-reviewed
+// closure. The 228-entry count and position-free inventory remain unchanged;
+// this repins only their final source positions on the main release base.
+// 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
+// are kept. Every closure file equals develop's, so develop's pins hold.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";

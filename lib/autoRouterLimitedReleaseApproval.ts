@@ -50,7 +50,7 @@ export const AUTO_ROUTER_LIMITED_RELEASE_APPROVAL:
     status: "approved",
     approvedBy: "mposition",
     approvedAt: "2026-10-11T00:44:09Z",
-    policyCommit: "fa997387b93ddfaa181ffd98918247ed8c6d02d3",
+    policyCommit: "9851b4863639871f2b6b83b62df59a76510a7334",
     policySha256:
       "a0d0f119d1c5ab9d647ef5c72cd8af658e4cd8b4b5c92d23d6bca3c0adc6999b",
     evaluatedImplementationCommit:

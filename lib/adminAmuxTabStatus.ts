@@ -31,6 +31,8 @@ import {
   RECOMMENDATION_CODE_LATCH,
   recommendationApplyPermitted,
 } from "@/lib/amux/recommendationPoolCore";
+import { AMUX_V22_AUTO_PROMOTION_ENV,
+  amuxV22AutoPromotionEnabled } from "@/lib/amux/v22AutoPromotionCore";
 
 /**
  * The status chip on each AMUX section tab.
@@ -92,6 +94,7 @@ export const AMUX_TAB_SWITCHES = {
       codeLatch: BOARD_PROMOTION_APPLY_CODE_LATCH,
     }),
   "auto-promotion": (env: Environment) =>
+    amuxV22AutoPromotionEnabled(env[AMUX_V22_AUTO_PROMOTION_ENV]) ||
     autoPromotionApplyPermitted({
       envValue: env[AUTO_PROMOTION_APPLY_ENV],
       codeLatch: AUTO_PROMOTION_CODE_LATCH,

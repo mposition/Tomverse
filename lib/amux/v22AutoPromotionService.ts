@@ -25,9 +25,12 @@ import { evaluateAmuxV4TaskReadyInTransaction,
   loadAmuxV4TaskReadyContext } from "./v4TaskReadyService.ts";
 import { AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
   AMUX_V22_AUTO_PROMOTION_ENV, AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
+  AMUX_V22_GRADUATION_EXCEPTION_ENV, AMUX_V22_GRADUATION_EXCEPTION_ID,
+  AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
   AMUX_V22_PARALLEL_RESERVED, AMUX_V22_SEV1_RESERVED,
   amuxV22AssessmentIdsCurrent, amuxV22AutoPromotionEnabled, amuxV22Capacity,
-  amuxV22ScoreCurrent } from "./v22AutoPromotionCore.ts";
+  amuxV22ScoreCurrent, amuxV22GraduationExceptionEnabled,
+  amuxV22GraduationPermitted } from "./v22AutoPromotionCore.ts";
 import { writeV22AutoPromotionAudit } from "./v22AutoPromotionAudit.ts";
 
 type Candidate = { id: string; taskId: string; scoreTotal: number };
@@ -58,14 +61,26 @@ async function openV22CriticalHalt(tx: Prisma.TransactionClient, now: Date,
     haltId };
 }
 
-/** Owner activation is separate from the v8 switch. The shipped code latch
- * stays false, and deactivation remains available even while it is closed. */
+/** Owner activation is separate from the v8 switch. Deactivation remains
+ * available even while the environment gate is closed. */
 export async function configureV22AutoPromotion(input: {
   session: Session; request: Request; active: boolean;
   expectedAuditLogId: string | null;
+  graduationExceptionId?: typeof AMUX_V22_GRADUATION_EXCEPTION_ID;
 }) {
   const actorUserId = input.session.user?.id;
   if (!actorUserId) throw new BoardImportError("forbidden", 403);
+  const exceptionRequested = input.graduationExceptionId ===
+    AMUX_V22_GRADUATION_EXCEPTION_ID;
+  if (input.graduationExceptionId !== undefined && (!input.active ||
+      !exceptionRequested || !amuxV22GraduationExceptionEnabled(
+        process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV]))) {
+    throw new BoardImportError("graduation_exception_unavailable", 409);
+  }
+  const exceptionMetadata = exceptionRequested ? {
+    graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
+    graduationExceptionPolicyVersion: AMUX_V22_GRADUATION_EXCEPTION_POLICY_VERSION,
+  } : {};
   if (input.active && !AMUX_V22_AUTO_PROMOTION_CODE_LATCH) {
     throw new BoardImportError("apply_disabled", 409);
   }
@@ -78,7 +93,7 @@ export async function configureV22AutoPromotion(input: {
           input.expectedAuditLogId) {
         throw new BoardImportError("conflict", 409);
       }
-      if ((current?.active ?? false) === input.active) {
+      if ((current?.active ?? false) === input.active && !exceptionRequested) {
         return { active: input.active, changed: false as const,
           authorizationAuditLogId: current?.authorizationAuditLogId ?? null };
       }
@@ -91,7 +106,11 @@ export async function configureV22AutoPromotion(input: {
           where: { decision: "approve", status: "consumed" },
           select: { createdAt: true },
         });
-        if (!autoGraduationAccepted(decisions).ok) {
+        if (!amuxV22GraduationPermitted({
+          graduated: autoGraduationAccepted(decisions).ok,
+          environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
+          authorization: exceptionMetadata,
+        })) {
           throw new BoardImportError("graduation_unmet", 409);
         }
         const [halt, orchestratorHalt, capacity] = await Promise.all([
@@ -117,7 +136,7 @@ export async function configureV22AutoPromotion(input: {
         summary: input.active ? "Activated v22 Task auto-promotion." :
           "Deactivated v22 Task auto-promotion.",
         metadata: { policyVersion: AMUX_V22_AUTO_PROMOTION_POLICY_VERSION,
-          active: input.active },
+          active: input.active, ...exceptionMetadata },
       });
       await tx.amuxV22PromotionControl.upsert({
         where: { id: "queue" },
@@ -136,13 +155,37 @@ export async function configureV22AutoPromotion(input: {
 export async function readV22AutoPromotionControl() {
   const row = await prisma.amuxV22PromotionControl.findUnique({
     where: { id: "queue" }, select: { active: true, activatedAt: true,
-      authorizationAuditLogId: true },
+      authorizationAuditLogId: true, approvedByUserId: true },
   });
+  const [decisions, audit] = await Promise.all([
+    prisma.amuxRecommendationDecision.findMany({
+      where: { decision: "approve", status: "consumed" },
+      select: { createdAt: true },
+    }),
+    row ? prisma.adminAuditLog.findUnique({
+      where: { id: row.authorizationAuditLogId },
+      select: { action: true, targetType: true, targetId: true,
+        entryHash: true, metadata: true, actorUserId: true },
+    }) : null,
+  ]);
+  const graduation = autoGraduationAccepted(decisions);
   return { codeLatch: AMUX_V22_AUTO_PROMOTION_CODE_LATCH,
     environmentEnabled: process.env[AMUX_V22_AUTO_PROMOTION_ENV] === "enabled",
     active: row?.active ?? false,
     activatedAt: row?.activatedAt ?? null,
-    authorizationAuditLogId: row?.authorizationAuditLogId ?? null };
+    authorizationAuditLogId: row?.authorizationAuditLogId ?? null,
+    graduation,
+    graduationExceptionId: AMUX_V22_GRADUATION_EXCEPTION_ID,
+    graduationExceptionAvailable: amuxV22GraduationExceptionEnabled(
+      process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV]),
+    graduationExceptionApplied: Boolean(row?.active && audit?.entryHash &&
+      audit.actorUserId === row.approvedByUserId &&
+      audit.action === "amux.v22.auto_promotion.activated" &&
+      audit.targetType === "AmuxV22PromotionControl" && audit.targetId === "queue" &&
+      amuxV22GraduationPermitted({ graduated: false,
+        environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
+        authorization: audit.metadata })),
+  };
 }
 
 async function latestCandidates(tx: Prisma.TransactionClient, now: Date):
@@ -194,7 +237,7 @@ async function requireV22GlobalGate(tx: Prisma.TransactionClient, now: Date) {
   const activationAudit = await tx.adminAuditLog.findUnique({
     where: { id: control.authorizationAuditLogId },
     select: { action: true, actorUserId: true, targetType: true,
-      targetId: true, entryHash: true },
+      targetId: true, entryHash: true, metadata: true },
   });
   if (!activationAudit?.entryHash ||
       activationAudit.action !== "amux.v22.auto_promotion.activated" ||
@@ -222,7 +265,10 @@ async function requireV22GlobalGate(tx: Prisma.TransactionClient, now: Date) {
     throw new BoardImportError("incident_blocked", 409);
   }
   const graduation = autoGraduationAccepted(decisions);
-  if (!graduation.ok) throw new BoardImportError(graduation.code, 409);
+  if (!amuxV22GraduationPermitted({ graduated: graduation.ok,
+    environmentValue: process.env[AMUX_V22_GRADUATION_EXCEPTION_ENV],
+    authorization: activationAudit.metadata,
+  })) throw new BoardImportError("graduation_unmet", 409);
   const cost = autoCostAccepted({ proposedCents: 0, entries, now });
   return cost.ok ? null : cost.code;
 }

@@ -1351,6 +1351,16 @@ orchestrator 코드, 버전 20의 정지·재시작 동작(1~8항, 11항), claim
 - `AMUX_V22_ENGINEERING_PUBLICATION_CODE_LATCH`와 `AMUX_V22_OUTCOME_WRITE_CODE_LATCH`는 false로 유지한다. 자동 PR 게시·병합, 운영자 완료 판정의 자동화는 포함하지 않는다. main 병합은 운영자 전용이며 추가 배포는 기존 별도 승인 경계를 따른다.
 - 되돌리기는 해당 환경 값을 끄는 것이다. 새 편입·claim·실행 접수를 막되 이미 시작한 attempt와 결과·감사 기록을 지우지 않고 기존 정산·복구 계약으로 처리한다. 코드 구현, 검토, 병합, 배포, 런타임 활성화와 첫 Task 실행을 각각 구분해 보고한다.
 
+## 버전 30 — 초기 v22 활성화의 졸업 근거 예외
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-11`. 운영자는 초기 자동 승격을 막는 졸업 기준에 대한 이번 예외와 자동 편입·worker claim·실제 Task 실행 스위치 활성화를 승인했다. wire `policyVersion: 22`는 유지한다.
+
+- v29의 20건/14일 졸업 조건에만 초기 활성화 예외 `owner-bootstrap-2026-10-11`을 둔다. 실제 승인 건수·기간과 졸업 판정은 고치거나 통과로 위장하지 않는다.
+- 앱의 `TOMVERSE_AMUX_V22_GRADUATION_EXCEPTION`이 정확히 이 예외 ID이고, 최근 재인증한 owner가 이 ID를 명시하여 기존 v22 활성화 writer로 승인한 경우에만 적용한다. 동일 transaction의 canonical 활성화 감사에 예외 ID와 정책 버전 30을 기록한다. 환경 변수만 켜거나 기존 활성화 감사만 재사용해서는 예외를 얻지 않는다.
+- 매 자동 편입에서 현재 활성화 행과 결속된 owner 감사 및 현재 예외 환경 값을 다시 확인한다. 예외 값을 끄거나 owner가 비활성화하면 새 편입을 중단한다. 새 승인 전까지는 다른 졸업 예외를 받지 않는다.
+- 비용·권한·source/hierarchy/brief 승인·점수·ready·의존성·worker 검증·용량·예약 슬롯·감사·kill switch·미해결 결과 불명/정지 검사는 그대로다. legacy 자동 승격 writer와 v22 writer는 동시에 켜지 않는다. legacy 카드는 자동 변환하거나 실행하지 않는다.
+- 활성화 범위는 자동 편입 → 담당 없는 Todo → worker claim → Ubuntu의 실제 Task 실행이다. 공개 PR·자동 병합·배포 및 운영자 완료 판정 자동화는 포함하지 않는다. main 병합은 운영자 전용이고 배포는 기존 승인 경계를 따른다. 코드·독립 검토·CI·배포와 실제 런타임 활성화는 구분해 기록한다.
+
 ## CLI 사용량 보존·집계 부속 계약 — 2026-10-02 승인
 
 approvedBy: mposition · approvedAt: 2026-10-02 · 부속 계약 식별자: `cli-usage-retention-2026-10-02`
