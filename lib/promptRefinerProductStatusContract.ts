@@ -4,7 +4,7 @@ export const PROMPT_REFINER_PRODUCT_STATUS_PATH =
   "/api/admin/prompt-refiner/product-status";
 
 export const PROMPT_REFINER_PRODUCT_STATUS_VERSION =
-  "prompt-refiner-product-status-v1" as const;
+  "prompt-refiner-product-status-v2" as const;
 
 const routerGate = z.enum([
   "shadow_report",
@@ -36,6 +36,8 @@ export const promptRefinerProductStatusSchema = z.object({
     explicitEnabled: z.boolean().nullable(),
     autoEnabled: z.boolean().nullable(),
     approvalAuditLogId: z.string().min(1).max(128).nullable(),
+    releaseKind: z.enum(["latency_only_v1", "initial_auto_v1"]).nullable(),
+    routerExceptionAuditLogId: z.string().min(1).max(128).nullable(),
   }).strict(),
   router: z.object({
     version: z.string().min(1).max(128),

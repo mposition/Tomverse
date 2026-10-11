@@ -179,8 +179,9 @@ export function createPromptRefinerProductAdapter(dependencies: {
       return undispatchedTimeout();
     }
     const dispatchedAtDate = wallClock();
-    const remainingMs = Math.max(1,
-      deadlineAt - now());
+    // AI SDK uses AbortSignal.timeout, which requires integer milliseconds.
+    const remainingMs = Math.floor(deadlineAt - now());
+    if (remainingMs < 1) return undispatchedTimeout();
 
     const abort = new AbortController();
     let timedOut = false;

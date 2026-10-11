@@ -32,7 +32,7 @@ mock.module(mod("lib/apiSecurity.ts"), { namedExports: {
 mock.module(mod("lib/promptRefinerProductStatus.ts"), { namedExports: {
   readPromptRefinerProductStatus: async () => {
     statusReads += 1;
-    return { version: "prompt-refiner-product-status-v1" };
+    return { version: "prompt-refiner-product-status-v2" };
   },
 } });
 
@@ -68,7 +68,7 @@ test("an owner receives one no-store serving snapshot", async () => {
   assert.equal(response.headers.get("cache-control"),
     "private, no-store, max-age=0");
   assert.deepEqual(await response.json(), {
-    version: "prompt-refiner-product-status-v1",
+    version: "prompt-refiner-product-status-v2",
   });
   assert.equal(rateReads, 1);
   assert.equal(statusReads, 1);

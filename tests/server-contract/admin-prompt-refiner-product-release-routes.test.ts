@@ -11,13 +11,20 @@ const world = {
   role: "owner",
   recent: true,
   activationWrites: 0,
+  initialActivationWrites: 0,
+  rolloutWrites: 0,
   auditWrites: 0,
   resumeWrites: 0,
+  guardReads: 0,
+  guard: { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost",
+    transitionAuditLogId: "pause-audit" },
   rateLimits: 0,
   activationOutcome: "ok" as "ok" | "refused" | "unknown",
   auditOutcome: "ok" as "ok" | "refused" | "unknown",
   resumeOutcome: "ok" as "ok" | "refused" | "unknown",
   activationInput: null as unknown,
+  initialActivationInput: null as unknown,
+  rolloutInput: null as unknown,
   auditInput: null as unknown,
   resumeInput: null as unknown,
 };
@@ -26,6 +33,17 @@ mock.module("next-auth/next", { namedExports: {
   getServerSession: async () => world.session,
 } });
 mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+mock.module(mod("lib/prisma.ts"), { namedExports: {
+  prisma: { $transaction: async (read: (tx: unknown) => unknown) => read({}) },
+} });
+mock.module(mod("lib/promptRefinerProductOperationalGuard.ts"), { namedExports: {
+  PROMPT_REFINER_PRODUCT_AUTO_STOP_REASONS: ["latency_p90_exceeded",
+    "original_fallback_rate_exceeded", "critical_safety_failure",
+    "unknown_dispatch_or_cost", "audit_failure"],
+  readPromptRefinerProductAutoGuard: async () => {
+    world.guardReads += 1; return world.guard;
+  },
+} });
 mock.module(mod("lib/adminAuth.ts"), { namedExports: {
   isAdminSession: () => world.session !== null,
   getAdminRole: () => world.role,
@@ -99,6 +117,38 @@ mock.module(mod("lib/promptRefinerProductReleaseStore.ts"), { namedExports: {
       generation: 8 };
   },
 } });
+mock.module(mod("lib/chatRefinerInitialAutoReleaseStore.ts"), { namedExports: {
+  activateChatRefinerInitialAutoRelease: async (input: unknown) => {
+    world.initialActivationWrites += 1;
+    world.initialActivationInput = input;
+    if (world.activationOutcome === "refused") {
+      throw new Error("chat_refiner_initial_auto_activation_refused");
+    }
+    if (world.activationOutcome === "unknown") {
+      throw new Error("synthetic database outcome unknown");
+    }
+    return { releaseKind: "initial_auto_v1",
+      routerActivationAuditLogId: "router-audit",
+      productActivationAuditLogId: "product-audit",
+      runtimeCommitSha: "a".repeat(40),
+      runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+      rolloutChanged: false };
+  },
+} });
+mock.module(mod("lib/chatRefinerInitialAutoRolloutStore.ts"), { namedExports: {
+  setChatRefinerInitialAutoRollout: async (input: unknown) => {
+    world.rolloutWrites += 1; world.rolloutInput = input;
+    if (world.activationOutcome === "refused") {
+      throw new Error("chat_refiner_initial_auto_rollout_refused");
+    }
+    if (world.activationOutcome === "unknown") {
+      throw new Error("synthetic database outcome unknown");
+    }
+    return { enabled: (input as { enabled: boolean }).enabled, changed: true,
+      auditLogId: "rollout-audit", runtimeCommitSha: "a".repeat(40),
+      runtimeDeploymentId: "11111111-1111-4111-8111-111111111111" };
+  },
+} });
 
 const activationRoute = import(mod(
   "app/api/admin/prompt-refiner/product-activation/route.ts"));
@@ -106,6 +156,8 @@ const auditRoute = import(mod(
   "app/api/admin/prompt-refiner/product-limited-audit/route.ts"));
 const resumeRoute = import(mod(
   "app/api/admin/prompt-refiner/product-auto-resume/route.ts"));
+const rolloutRoute = import(mod(
+  "app/api/admin/prompt-refiner/product-rollout/route.ts"));
 
 const activationBody = {
   stageId: "prompt-refiner-vnext-one-shot-v5",
@@ -123,6 +175,23 @@ const auditBody = {
   reviewedCaseCount: 3,
   confirmation: "RECORD_CONTENT_FREE_REFINER_LIMITED_AUDIT",
 };
+const initialActivationBody = {
+  releaseKind: "initial_auto_v1",
+  runtimeCommitSha: "a".repeat(40),
+  runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+  evidenceRefs: {
+    independentReviewJobId: "r-20261011-000000-abcdef",
+    validationSealSha256: "b".repeat(64),
+    deploymentReadbackSha256: "c".repeat(64),
+  },
+  confirmation: "ACTIVATE_EXACT_CHAT_REFINER_INITIAL_AUTO_RELEASE",
+};
+const rolloutBody = {
+  enabled: true,
+  runtimeCommitSha: "a".repeat(40),
+  runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+  confirmation: "ENABLE_EXACT_CHAT_REFINER_INITIAL_AUTO_ROLLOUT",
+};
 const resumeBody = {
   expectedGeneration: 7,
   expectedReasonCode: "unknown_dispatch_or_cost",
@@ -137,19 +206,61 @@ const request = (path: string, body: unknown, origin = "https://tomverse.test") 
 beforeEach(() => {
   world.session = { user: { id: "synthetic-owner" } };
   world.role = "owner"; world.recent = true;
-  world.activationWrites = 0; world.auditWrites = 0; world.resumeWrites = 0;
+  world.activationWrites = 0; world.initialActivationWrites = 0;
+  world.rolloutWrites = 0; world.auditWrites = 0; world.resumeWrites = 0;
   world.rateLimits = 0;
+  world.guardReads = 0;
+  world.guard = { active: false, generation: 7, reasonCode: "unknown_dispatch_or_cost",
+    transitionAuditLogId: "pause-audit" };
+  process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+  process.env.RAILWAY_DEPLOYMENT_ID = "11111111-1111-4111-8111-111111111111";
   world.activationOutcome = "ok"; world.auditOutcome = "ok";
   world.resumeOutcome = "ok";
-  world.activationInput = null; world.auditInput = null; world.resumeInput = null;
+  world.activationInput = null; world.initialActivationInput = null;
+  world.rolloutInput = null; world.auditInput = null; world.resumeInput = null;
   delete process.env.PROMPT_REFINER_PRODUCT_ACTIVATION_WRITE_ENABLED;
   delete process.env.PROMPT_REFINER_PRODUCT_LIMITED_AUDIT_WRITE_ENABLED;
   delete process.env.PROMPT_REFINER_PRODUCT_AUTO_RESUME_WRITE_ENABLED;
+  delete process.env.PROMPT_REFINER_PRODUCT_ROLLOUT_WRITE_ENABLED;
+});
+
+test("Auto pause readback is owner-only and never invokes a mutation", async () => {
+  const route = await resumeRoute;
+  const get = () => route.GET(new Request("https://tomverse.test/api/admin/prompt-refiner/product-auto-resume"));
+  world.session = null;
+  assert.equal((await get()).status, 404);
+  world.session = { user: { id: "synthetic-owner" } }; world.role = "admin";
+  assert.equal((await get()).status, 404);
+  assert.equal(world.guardReads, 0);
+  world.role = "owner"; world.recent = false;
+  const response = await get();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.deepEqual(await response.json(), {
+    version: "prompt-refiner-product-auto-resume-state-v1",
+    runtimeCommitSha: "a".repeat(40),
+    runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+    writerEnabled: false, ...world.guard,
+  });
+  assert.equal(world.guardReads, 1);
+  assert.equal(world.resumeWrites + world.activationWrites + world.auditWrites, 0);
+});
+
+test("Auto pause readback refuses unknown runtime and malformed guard data", async () => {
+  const route = await resumeRoute;
+  const get = () => route.GET(new Request("https://tomverse.test/api/admin/prompt-refiner/product-auto-resume"));
+  delete process.env.RAILWAY_GIT_COMMIT_SHA;
+  assert.equal((await get()).status, 503);
+  assert.equal(world.guardReads, 0);
+  process.env.RAILWAY_GIT_COMMIT_SHA = "a".repeat(40);
+  world.guard.generation = 0;
+  assert.equal((await get()).status, 503);
+  assert.equal(world.resumeWrites, 0);
 });
 
 test("product release mutations require hidden owner, origin, recent auth and write gates", async () => {
   const activation = await activationRoute; const audit = await auditRoute;
-  const resume = await resumeRoute;
+  const resume = await resumeRoute; const rollout = await rolloutRoute;
   const cases = [
     { session: null, role: "owner", recent: true, origin: "https://tomverse.test", status: 404 },
     { session: { user: { id: "synthetic-owner" } }, role: "admin", recent: true,
@@ -166,6 +277,8 @@ test("product release mutations require hidden owner, origin, recent auth and wr
       body: auditBody },
     { post: resume.POST, path: "/api/admin/prompt-refiner/product-auto-resume",
       body: resumeBody },
+    { post: rollout.POST, path: "/api/admin/prompt-refiner/product-rollout",
+      body: rolloutBody },
   ]) {
     for (const item of cases) {
       world.session = item.session; world.role = item.role;
@@ -174,15 +287,15 @@ test("product release mutations require hidden owner, origin, recent auth and wr
       assert.equal(response.status, item.status);
       assert.equal(response.headers.get("cache-control"),
         "private, no-store, max-age=0");
-      assert.equal(world.activationWrites + world.auditWrites +
-        world.resumeWrites, 0);
+      assert.equal(world.activationWrites + world.initialActivationWrites +
+        world.rolloutWrites + world.auditWrites + world.resumeWrites, 0);
     }
     world.session = { user: { id: "synthetic-owner" } };
     world.role = "owner"; world.recent = true;
     const disabled = await route.post(request(route.path, route.body));
     assert.equal(disabled.status, 409);
-    assert.equal(world.activationWrites + world.auditWrites +
-      world.resumeWrites, 0);
+    assert.equal(world.activationWrites + world.initialActivationWrites +
+      world.rolloutWrites + world.auditWrites + world.resumeWrites, 0);
   }
 });
 
@@ -222,6 +335,57 @@ test("only strict content-free activation and limited-audit bodies reach writers
   assert.equal(JSON.stringify(world.activationInput).includes("confirmation"), false);
   assert.equal(JSON.stringify(world.auditInput).includes("confirmation"), false);
   assert.equal(JSON.stringify(world.auditInput).includes("rawCase"), false);
+});
+
+test("initial Auto activation and rollout are separate strict owner actions", async () => {
+  const activation = await activationRoute; const rollout = await rolloutRoute;
+  process.env.PROMPT_REFINER_PRODUCT_ACTIVATION_WRITE_ENABLED = "1";
+  process.env.PROMPT_REFINER_PRODUCT_ROLLOUT_WRITE_ENABLED = "1";
+  for (const invalid of [
+    { ...initialActivationBody, confirmation: "yes" },
+    { ...initialActivationBody, claimedQualityPass: true },
+    { ...initialActivationBody, evidenceRefs: {
+      ...initialActivationBody.evidenceRefs,
+      validationSealSha256: "not-a-digest",
+    } },
+    { ...initialActivationBody, evidenceRefs: {
+      ...initialActivationBody.evidenceRefs,
+      unexpected: "not-content-free",
+    } },
+    { ...rolloutBody, confirmation: "yes" },
+    { ...rolloutBody, enabled: false },
+  ]) {
+    const post = "releaseKind" in invalid ? activation.POST : rollout.POST;
+    const path = "releaseKind" in invalid
+      ? "/api/admin/prompt-refiner/product-activation"
+      : "/api/admin/prompt-refiner/product-rollout";
+    assert.equal((await post(request(path, invalid))).status, 400);
+  }
+  assert.equal(world.initialActivationWrites + world.rolloutWrites, 0);
+  const activated = await activation.POST(request(
+    "/api/admin/prompt-refiner/product-activation", initialActivationBody));
+  assert.equal(activated.status, 201);
+  assert.equal((await activated.json()).rolloutChanged, false);
+  assert.equal(world.initialActivationWrites, 1);
+  assert.equal(world.rolloutWrites, 0);
+  assert.deepEqual((world.initialActivationInput as {
+    evidenceRefs: unknown;
+  }).evidenceRefs, initialActivationBody.evidenceRefs);
+  const enabled = await rollout.POST(request(
+    "/api/admin/prompt-refiner/product-rollout", rolloutBody));
+  assert.equal(enabled.status, 201);
+  assert.equal((await enabled.json()).enabled, true);
+  assert.equal(world.rolloutWrites, 1);
+  assert.equal(JSON.stringify(world.initialActivationInput).includes("confirmation"), false);
+  assert.equal(JSON.stringify(world.rolloutInput).includes("confirmation"), false);
+
+  const disableBody = { ...rolloutBody, enabled: false,
+    confirmation: "DISABLE_CHAT_REFINER_INITIAL_AUTO_ROLLOUT" };
+  const disabled = await rollout.POST(request(
+    "/api/admin/prompt-refiner/product-rollout", disableBody));
+  assert.equal(disabled.status, 201);
+  assert.equal((await disabled.json()).enabled, false);
+  assert.equal(world.rolloutWrites, 2);
 });
 
 test("refused and unknown release writes are non-retryable safe failures", async () => {

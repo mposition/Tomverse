@@ -1662,6 +1662,13 @@ Before changing `components/chat/AutoRoutingToggle.tsx`, `components/chat/AutoRo
 Non-negotiable requirements:
 
 - **`offered` is the only input.** It already folds the feature flag, the conversation's product and cohort eligibility together, so no surface may derive availability from the flag alone.
+- The owner-approved initial release in
+  `docs/policy/chat-refiner-initial-auto-release-v1.md` may supply a separate,
+  server-verified exact-deployment authority while the three measurement
+  attestations remain pending. Availability, mode storage and turn routing
+  must share that authority. It never marks a gate passed, extends a staging
+  drill into production or relaxes manifest enforcement, plan, product,
+  cohort, rollout or kill controls.
 - **The product is decided before the cohort, in `lib/autoProductBoundary.ts`, and all three consumers share it** — surface entry, `offered`, and turn routing. `product_not_chat` is an `AutoSelectionRefusal`/`AutoUiRefusal` and never an `AutoCohortRefusal`: a Review conversation was not a subject of the cohort question, and counting it as a refusal dilutes the rollout percentage with Review traffic. The refusal carries no cohort. A row whose `productKey` is still NULL resolves through `PRODUCT_KEY_READ_MODE` and is refused; a turn with no conversation is `no_conversation` instead. There is no disabled state and no greyed row: a control that flips, saves and changes nothing cannot be told apart from Auto agreeing with the user every time.
 - No user-facing string may name a bucket, a percentage, a cohort salt or a readiness gate. A client that could read its own bucket could work out the rollout percentage.
 - No locale may promise a better, best, optimal or smartest model. `ROUTE-01` measures non-inferiority, which is a far weaker claim than that copy would be making, and `tests/autoRoutingUi.test.mjs` fails the build on the words.
@@ -1760,10 +1767,18 @@ Non-negotiable requirements:
 - The current server gate folds the default-off AppSetting, environment kill
   switch, adapter readiness and exact-deployment release readback into one
   answer. A stored flag or deployed adapter alone must never expose product
-  controls. Missing/invalid runtime identity, DB uncertainty, absent signed
-  B03G latency-only evidence, limited audit, candidate/price/config drift, or
-  kill switch keeps explicit and Auto closed. The loopback E2E fixture carries
-  no product authority.
+  controls. Legacy activation still requires signed B03G latency-only evidence
+  and its limited audit. The separate initial release in
+  `docs/policy/chat-refiner-initial-auto-release-v1.md` preserves those failed
+  or pending records and requires its own canonical owner activation pair.
+  Missing/invalid runtime identity, DB uncertainty, absent applicable
+  authority, product audit failure, candidate/price/config drift or kill switch
+  keeps explicit and Auto closed. The loopback E2E fixture carries no product
+  authority. A separate owner rollout action may write only
+  `feature.promptRefinerEnabled` with recent authentication, same-origin
+  validation and a canonical audit in the same transaction. Enabling requires
+  valid activation; disabling must remain available. Neither action changes
+  kill controls or resumes the durable Auto stop latch.
 - Product proposal/prepare accepts only owner-bound conversation, scope epoch
   and draft revision identifiers. The server captures exact draft bytes and
   claims one durable `(owner, scope, epoch, draft, revision, mode)` attempt

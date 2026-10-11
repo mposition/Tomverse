@@ -281,6 +281,45 @@ test("the monthly budget migration rejects added writes for both protected table
   );
 });
 
+test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
+  const path = "lib/promptRefinerChatExecutionStore.ts";
+  const source = readFileSync(resolve(ROOT, path), "utf8");
+  const entries = RAW_SQL_ALLOWLIST.filter(
+    (entry) => entry.path === path &&
+      ["PromptRefinerChatScope", "PromptRefinerChatSuggestion"].includes(entry.table)
+  );
+  assert.deepEqual(
+    entries.map(({ table, tableMentions, writeVerbs }) => ({
+      table,
+      tableMentions,
+      writeVerbs,
+    })),
+    [
+      { table: "PromptRefinerChatScope", tableMentions: 5, writeVerbs: 12 },
+      { table: "PromptRefinerChatSuggestion", tableMentions: 11, writeVerbs: 12 },
+    ]
+  );
+  assert.ok(entries.every((entry) =>
+    entry.reason.includes("read-only preview") &&
+    entry.reason.includes("atomic consume boundary")));
+  assert.deepEqual(
+    checkProtectedTableWriters({ sources: [{ path, text: source }] })
+      .filter((finding) => finding.path === path),
+    []
+  );
+
+  for (const entry of entries) {
+    const findings = checkProtectedTableWriters({
+      sources: [{ path, text:
+        `${source}\nconst unexpected = tx.$queryRaw\`SELECT 1 FROM "${entry.table}"\`;\n` }],
+    }).filter((finding) => finding.path === path && finding.rule === "raw-sql");
+    assert.ok(
+      findings.some((finding) => finding.detail.includes(entry.table)),
+      `an unreviewed ${entry.table} read must fail closed`
+    );
+  }
+});
+
 test("the budget export descriptor does not allow added SQL or delegate writes", () => {
   const path = "lib/accountDataExportDomains.ts";
   const original = readFileSync(resolve(ROOT, path), "utf8");

@@ -2,13 +2,26 @@
 
 import { Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AdminPromptRefinerAutoResumeControl } from
+  "@/components/admin/AdminPromptRefinerAutoResumeControl";
 
 import {
   useAdminMessages,
 } from "@/components/admin/AdminLocaleProvider";
 import { adminFetch, isAdminFetchAbort } from "@/lib/adminFetch";
+import { adminRecentAuthenticationHref } from
+  "@/lib/adminReauthenticationCore";
 import { adminPromptRefinerProductStatusMessages } from
   "@/lib/adminMessages/promptRefinerProductStatus";
+import {
+  CHAT_REFINER_INITIAL_AUTO_ACTIVATION_CONFIRMATION,
+  CHAT_REFINER_INITIAL_AUTO_ACTIVATION_PATH,
+  CHAT_REFINER_INITIAL_AUTO_ROLLOUT_CONFIRMATIONS,
+  CHAT_REFINER_INITIAL_AUTO_ROLLOUT_PATH,
+  chatRefinerInitialAutoEvidenceRefsSchema,
+  chatRefinerInitialAutoActivationResponseSchema,
+  chatRefinerInitialAutoRolloutResponseSchema,
+} from "@/lib/chatRefinerInitialAutoReleaseApiContract";
 import {
   PROMPT_REFINER_PRODUCT_STATUS_PATH,
   parsePromptRefinerProductStatus,
@@ -16,6 +29,8 @@ import {
 } from "@/lib/promptRefinerProductStatusContract";
 
 type Failure = "request_failed" | "invalid_response" | null;
+type MutationKind = "activate" | "enable" | "disable";
+const ADMIN_PATH = "/admin/prompt-refiner-shadow";
 
 const StatusField = ({ label, value }: { label: string; value: string }) => (
   <div className="min-w-0 rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2.5">
@@ -49,11 +64,151 @@ export function AdminPromptRefinerProductStatusReadback({ snapshot, messages: m 
       <StatusField label={m.explicit} value={bool(snapshot.release.explicitEnabled)} />
       <StatusField label={m.auto} value={bool(snapshot.release.autoEnabled)} />
       <StatusField label={m.approval} value={snapshot.release.approvalAuditLogId ?? m.unknown} />
+      <StatusField label={m.releaseKind} value={snapshot.release.releaseKind ?? m.unknown} />
+      <StatusField label={m.routerExceptionApproval}
+        value={snapshot.release.routerExceptionAuditLogId ?? m.unknown} />
       <StatusField label={m.router} value={snapshot.router.ready ? m.ready : m.pending} />
       <StatusField label={m.outstanding} value={snapshot.router.outstanding.join(", ") || m.none} />
       <StatusField label={m.problems} value={snapshot.router.problems.join("; ") || m.none} />
       <StatusField label={m.completion} value={m.notEstablished} />
     </dl>
+  );
+}
+
+export function AdminChatRefinerInitialAutoReleaseControls({ snapshot, onRefresh,
+  messages: m }: {
+  snapshot: PromptRefinerProductStatus;
+  onRefresh: () => Promise<void>;
+  messages: typeof adminPromptRefinerProductStatusMessages.en;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [pending, setPending] = useState<MutationKind | null>(null);
+  const [result, setResult] = useState<"success" | "failed" | "reauth" | null>(null);
+  const [evidenceRefs, setEvidenceRefs] = useState({
+    independentReviewJobId: "",
+    validationSealSha256: "",
+    deploymentReadbackSha256: "",
+  });
+  const runtime = snapshot.serving.commitSha && snapshot.serving.deploymentId
+    ? { runtimeCommitSha: snapshot.serving.commitSha,
+      runtimeDeploymentId: snapshot.serving.deploymentId }
+    : null;
+
+  const mutate = async (kind: MutationKind) => {
+    if (!confirmed || !runtime || pending) return;
+    setPending(kind);
+    setResult(null);
+    const activation = kind === "activate";
+    const body = activation
+      ? { releaseKind: "initial_auto_v1", ...runtime,
+        evidenceRefs,
+        confirmation: CHAT_REFINER_INITIAL_AUTO_ACTIVATION_CONFIRMATION }
+      : { enabled: kind === "enable", ...runtime,
+        confirmation: kind === "enable"
+          ? CHAT_REFINER_INITIAL_AUTO_ROLLOUT_CONFIRMATIONS.enabled
+          : CHAT_REFINER_INITIAL_AUTO_ROLLOUT_CONFIRMATIONS.disabled };
+    try {
+      const response = await adminFetch(activation
+        ? CHAT_REFINER_INITIAL_AUTO_ACTIVATION_PATH
+        : CHAT_REFINER_INITIAL_AUTO_ROLLOUT_PATH, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => null);
+      if (response.status === 428 ||
+          (payload as { code?: unknown } | null)?.code ===
+            "ADMIN_REAUTHENTICATION_REQUIRED") {
+        setConfirmed(false);
+        setResult("reauth");
+        return;
+      }
+      const valid = activation
+        ? chatRefinerInitialAutoActivationResponseSchema.safeParse(payload).success
+        : chatRefinerInitialAutoRolloutResponseSchema.safeParse(payload).success;
+      if (!response.ok || !valid) {
+        setConfirmed(false);
+        setResult("failed");
+        return;
+      }
+      setConfirmed(false);
+      setResult("success");
+      await onRefresh();
+    } catch {
+      setConfirmed(false);
+      setResult("failed");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const evidenceReady = chatRefinerInitialAutoEvidenceRefsSchema
+    .safeParse(evidenceRefs).success;
+  const disabled = !confirmed || !runtime || !snapshot.serving.exactProductIdentity ||
+    pending !== null;
+  return (
+    <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4"
+      data-testid="prompt-refiner-initial-auto-controls">
+      <h3 className="text-sm font-bold text-white">{m.activationTitle}</h3>
+      <p className="mt-1 text-sm leading-6 text-zinc-400">{m.activationDescription}</p>
+      <label className="mt-3 flex items-start gap-3 text-sm text-zinc-200">
+        <input type="checkbox" checked={confirmed}
+          onChange={(event) => setConfirmed(event.target.checked)}
+          className="mt-1 h-4 w-4" />
+        <span>{m.confirmLabel}</span>
+      </label>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {([
+          ["independentReviewJobId", m.reviewJobId],
+          ["validationSealSha256", m.validationSeal],
+          ["deploymentReadbackSha256", m.deploymentReadback],
+        ] as const).map(([key, label]) => <label key={key}
+          className="text-xs font-semibold text-zinc-300">
+          {label}
+          <input value={evidenceRefs[key]}
+            onChange={(event) => setEvidenceRefs((current) => ({
+              ...current, [key]: event.target.value.trim().toLowerCase(),
+            }))}
+            autoComplete="off" spellCheck={false}
+            className="mt-1 min-h-11 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-100" />
+        </label>)}
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button type="button" disabled={disabled || !evidenceReady ||
+          snapshot.release.releaseKind !== null}
+          onClick={() => void mutate("activate")}
+          className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 disabled:opacity-50">
+          {m.activate}
+        </button>
+        <button type="button" disabled={disabled ||
+          snapshot.controls.rollout === "enabled" ||
+          snapshot.release.releaseKind !== "initial_auto_v1"}
+          onClick={() => void mutate("enable")}
+          className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 disabled:opacity-50">
+          {m.enableRollout}
+        </button>
+        <button type="button" disabled={disabled ||
+          snapshot.controls.rollout === "disabled"}
+          onClick={() => void mutate("disable")}
+          className="min-h-11 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-semibold text-zinc-100 disabled:opacity-50">
+          {m.disableRollout}
+        </button>
+      </div>
+      {pending ? <p role="status" className="mt-3 text-sm text-zinc-400">
+        {m.mutationPending}
+      </p> : null}
+      {result === "success" ? <p role="status" className="mt-3 text-sm text-emerald-200">
+        {m.mutationSucceeded}
+      </p> : null}
+      {result === "failed" ? <p role="alert" className="mt-3 text-sm text-red-200">
+        {m.mutationFailed}
+      </p> : null}
+      {result === "reauth" ? <a
+        href={adminRecentAuthenticationHref(ADMIN_PATH)}
+        className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-red-100 underline underline-offset-4">
+        {m.reauthenticate}
+      </a> : null}
+    </div>
   );
 }
 
@@ -149,8 +304,13 @@ export function AdminPromptRefinerProductStatusPanel() {
         </p>
       ) : null}
 
-      {snapshot ? <AdminPromptRefinerProductStatusReadback
-        snapshot={snapshot} messages={m} /> : null}
+      {snapshot ? <>
+        <AdminPromptRefinerProductStatusReadback snapshot={snapshot} messages={m} />
+        <AdminChatRefinerInitialAutoReleaseControls
+          snapshot={snapshot} onRefresh={load} messages={m} />
+        <AdminPromptRefinerAutoResumeControl
+          snapshot={snapshot} onRefresh={load} messages={m} />
+      </> : null}
     </section>
   );
 }

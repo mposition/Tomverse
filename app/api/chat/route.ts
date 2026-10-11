@@ -38,7 +38,11 @@ import {
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
 import { prisma } from "@/lib/prisma";
 import { enterPinnedDeploymentChat } from "@/lib/pinnedDeploymentRoute";
-import { pinnedRefusalHttp } from "@/lib/pinnedDeploymentExecution";
+import {
+    classifyPinnedDeployment,
+    pinnedRefusalHttp,
+    readPinnedDeploymentConfig,
+} from "@/lib/pinnedDeploymentExecution";
 import {
     modelSupportsImageInput,
     modelSupportsNativePdfInput,
@@ -50,12 +54,22 @@ import {
     scheduleRoutingShadowRun,
 } from "@/lib/routingShadow";
 import { selectAutoModel } from "@/lib/autoModelSelection";
-import { consumePromptRefinerChatExecution } from "@/lib/promptRefinerChatExecutionStore";
+import {
+    consumePreviewedPromptRefinerChatExecution,
+    previewPromptRefinerChatExecution,
+} from "@/lib/promptRefinerChatExecutionStore";
 import { PromptRefinerChatExecutionError } from "@/lib/promptRefinerChatExecutionCore";
 import { promptRefinerChatExecutionRelease } from "@/lib/promptRefinerChatExecutionRelease";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
-import { decideAutoCohort } from "@/lib/autoCohort";
+import {
+    autoCohortConfig,
+    autoInitialReleaseAuthorityRelevant,
+    decideAutoCohort,
+} from "@/lib/autoCohort";
 import { decideDrillOverride } from "@/lib/autoDrillOverride";
+import { autoRolloutReadiness } from "@/lib/autoRolloutReadiness";
+import { readChatRefinerInitialAutoRouterAuthority } from
+    "@/lib/chatRefinerInitialAutoReleaseStore";
 import { stickyStateAfterRoutedTurn } from "@/lib/conversationSelectionMode";
 import {
     attachmentTokensForModel,
@@ -1154,7 +1168,28 @@ async function handleChatPost(
         // The durable source remains authored. Only the server's atomic
         // consume may select a different current-turn execution view.
         let executionMessages = messages;
-        let refinerExecution: { mode: "explicit" | "auto"; applied: boolean } | null = null;
+        type RefinerExecution = { mode: "explicit" | "auto"; applied: boolean };
+        let refinerExecution: RefinerExecution | null = null;
+        let refinerPreview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>> | null = null;
+        const consumeRefinerPreview = async (): Promise<RefinerExecution | null> => {
+            if (!refinerPreview || refinerExecution) return refinerExecution;
+            if (!session?.user?.id || !conversationId || !sourceUserMessageId) {
+                throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+            try {
+                const view = await consumePreviewedPromptRefinerChatExecution({
+                    userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,
+                    messages, decision: promptRefinerDecision,
+                }, refinerPreview);
+                executionMessages = [...view.executionMessages];
+                const consumed = { mode: view.mode, applied: view.provenance.decision === "accepted" };
+                refinerExecution = consumed;
+                return consumed;
+            } catch (error) {
+                throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
+                    "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
+            }
+        };
         if (promptRefinerDecision !== undefined) {
             if (!session?.user?.id || !conversationId || !sourceUserMessageId || !assistantMessageId) {
                 throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
@@ -1173,16 +1208,33 @@ async function handleChatPost(
             await consumeApiRateLimit(req, session.user.id, "chat-durable-attempt", { minute: 60, day: 5_000 });
             durableAttemptAdmissionConsumed = true;
             try {
-                const view = await consumePromptRefinerChatExecution({
+                refinerPreview = await previewPromptRefinerChatExecution({
                     userId: session.user.id, conversationId, sourceMessageId: sourceUserMessageId,
                     messages, decision: promptRefinerDecision,
                 });
-                executionMessages = [...view.executionMessages];
-                refinerExecution = { mode: view.mode, applied: view.provenance.decision === "accepted" };
+                executionMessages = [...refinerPreview.executionMessages];
             } catch (error) {
                 throw new ChatAccessError(error instanceof PromptRefinerChatExecutionError ? 409 : 503,
                     "PROMPT_REFINER_DECISION_UNAVAILABLE", "The Prompt Refiner decision is no longer available.");
             }
+        }
+        const pinnedDeploymentEntered = classifyPinnedDeployment(
+            readPinnedDeploymentConfig({
+                PINNED_DEPLOYMENT_EXECUTION: process.env.PINNED_DEPLOYMENT_EXECUTION,
+                PINNED_DEPLOYMENT_ACCOUNT_ID: process.env.PINNED_DEPLOYMENT_ACCOUNT_ID,
+                PINNED_DEPLOYMENT_ID: process.env.PINNED_DEPLOYMENT_ID,
+                PINNED_DEPLOYMENT_EXPERIMENT_ID: process.env.PINNED_DEPLOYMENT_EXPERIMENT_ID,
+            }),
+            session?.user?.id ?? null,
+        ) === "entered";
+        // The pinned experiment owns a separate placement/budget refusal
+        // pipeline. It has no preview-before-reserve seam, so a Refiner
+        // decision cannot enter it without risking a consumed decision on a
+        // deterministic pinned refusal. Keep the held suggestion intact and
+        // require an ordinary Chat dispatch instead.
+        if (pinnedDeploymentEntered && refinerPreview) {
+            throw new ChatAccessError(409, "PROMPT_REFINER_DECISION_UNAVAILABLE",
+                "The Prompt Refiner decision is no longer available.");
         }
         // A pinned internal account either finishes on this path or, when the
         // flag is off or the account is not the configured one, falls through
@@ -1201,13 +1253,7 @@ async function handleChatPost(
         }
         if (pinnedDeployment.route === "dispatched") {
             if (pinnedDeployment.response instanceof Response) {
-                if (!refinerExecution) return pinnedDeployment.response;
-                const response = pinnedDeployment.response;
-                const headers = new Headers(response.headers);
-                headers.set("X-Prompt-Refiner-Execution", refinerExecution.applied ? "applied" : "original");
-                headers.set("X-Prompt-Refiner-Mode", refinerExecution.mode);
-                return new Response(response.body, { status: response.status,
-                    statusText: response.statusText, headers });
+                return pinnedDeployment.response;
             }
             const http = pinnedRefusalHttp("provider_error");
             return tracedJsonError(http.message, http.code, http.status, traceId);
@@ -1401,19 +1447,59 @@ async function handleChatPost(
         // costs nothing -- the plan is already in hand and readiness is read
         // from memory -- so while the rollout is off this query never runs and
         // the chat path pays nothing for a feature nobody has.
-        // The staging fallback drill's one exception, and the only path that
-        // routes a turn while a readiness gate is outstanding. Fails closed in
-        // production whatever the request carries -- see lib/autoDrillOverride.
+        // The staging fallback drill remains its own narrow exception and
+        // fails closed in production whatever the request carries. The
+        // separately audited initial-release authority below is never derived
+        // from this header -- see lib/autoDrillOverride.
         const drillOverride = decideDrillOverride({
             faultHeader: req.headers.get(FAULT_INJECTION_HEADER),
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
         });
+        const autoConfig = autoCohortConfig();
+        const autoReadiness = autoRolloutReadiness();
+        // The initial-release exception is server-owned and exact-deployment
+        // bound. Read it once for this request and pass that same opaque object
+        // to both cohort decisions; no request field or browser boolean can
+        // become authority. Ordinary ready and staging-drill paths need no
+        // release read, and a disabled/ineligible rollout keeps the old zero-
+        // query behavior.
+        const releaseAuthorityRelevant =
+            !autoReadiness.ready &&
+            !drillOverride.allowed &&
+            autoInitialReleaseAuthorityRelevant({
+                subjectKey: session?.user?.id ?? "",
+                isGuest: !session?.user?.id,
+                plan: accountPlan?.tier ?? null,
+                config: autoConfig,
+                readiness: autoReadiness,
+            });
+        let initialReleaseAuthority = null;
+        if (releaseAuthorityRelevant) {
+            try {
+                initialReleaseAuthority =
+                    await readChatRefinerInitialAutoRouterAuthority();
+            } catch (error) {
+                // Unknown release state is not a retry condition. The pending
+                // readiness register below refuses Auto and the authored turn
+                // follows the existing manual-model path once.
+                console.error(JSON.stringify({
+                    event: "chat_auto_initial_release_authority_unavailable",
+                    traceId,
+                    conversationId,
+                    errorName: error instanceof Error ? error.name : "UnknownError",
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+        }
         const autoCohort = decideAutoCohort({
             subjectKey: session?.user?.id ?? "",
             isGuest: !session?.user?.id,
             plan: accountPlan?.tier ?? null,
+            config: autoConfig,
+            readiness: autoReadiness,
             drillOverride: drillOverride.allowed,
+            initialReleaseAuthority,
         });
         // No longer gated on cohort eligibility. Decision record v1.2 §3 puts
         // the product before the cohort, and the product lives on this row --
@@ -1541,6 +1627,9 @@ async function handleChatPost(
             // consults the cohort again, and without this the drill's turn was
             // refused on the very gate the override exists to pass.
             drillOverride: drillOverride.allowed,
+            initialReleaseAuthority,
+            cohortConfig: autoConfig,
+            readiness: autoReadiness,
             reservedInputTokens: preflightInputEstimate(autoRoutingMessages).estimatedInputTokens,
             // The unfitted application cap. The filters fit it to each model's
             // own window; a figure already fitted to the requested model's
@@ -1551,7 +1640,10 @@ async function handleChatPost(
         const effectiveModelId = autoSelection.routed
             ? autoSelection.modelId
             : requestedModelId;
-        if (autoSelection.routed) {
+        let autoSelectionRecorded = false;
+        const recordAutoSelection = () => {
+            if (autoSelectionRecorded || !autoSelection.routed) return;
+            autoSelectionRecorded = true;
             console.info(JSON.stringify({
                 event: "chat_auto_routed",
                 traceId,
@@ -1564,29 +1656,35 @@ async function handleChatPost(
                     autoSelection.cohort.limitedReleaseException ?? null,
                 timestamp: new Date().toISOString(),
             }));
-        }
-        // Loud, and every time -- but only about a turn that was actually
-        // routed. A routed turn that only routed because a drill said so must
-        // be legible as one in the record it produces, not inferred later from
-        // the absence of an attestation.
-        //
-        // Recorded here rather than beside the cohort read, which is where it
-        // used to be. Passing the override does not make routing happen: the
-        // selection can still refuse for `product_not_chat`,
-        // `conversation_is_manual` or `no_candidate`, and logging on the
-        // cohort alone claimed an overridden routing decision for every turn
-        // that went on to be refused for a reason unrelated to readiness.
-        if (autoSelection.routed && autoSelection.cohort.drillOverride) {
-            console.warn(JSON.stringify({
-                event: "chat_auto_readiness_overridden",
-                traceId,
-                conversationId,
-                reason: autoSelection.cohort.drillOverride,
-                selectedModelId: effectiveModelId,
-                environment: resolveDeploymentEnvironment(),
-                timestamp: new Date().toISOString(),
-            }));
-        }
+            // Loud, and every time -- but only about a turn that was actually
+            // routed. A routed turn that only routed because a drill said so
+            // must be legible as one in the record it produces.
+            if (autoSelection.cohort.drillOverride) {
+                console.warn(JSON.stringify({
+                    event: "chat_auto_readiness_overridden",
+                    traceId,
+                    conversationId,
+                    reason: autoSelection.cohort.drillOverride,
+                    selectedModelId: effectiveModelId,
+                    environment: resolveDeploymentEnvironment(),
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+            if (autoSelection.cohort.initialReleaseAuthority) {
+                console.warn(JSON.stringify({
+                    event: "chat_auto_readiness_exception_used",
+                    traceId,
+                    conversationId,
+                    reason: autoSelection.cohort.initialReleaseAuthority,
+                    selectedModelId: effectiveModelId,
+                    environment: resolveDeploymentEnvironment(),
+                    timestamp: new Date().toISOString(),
+                }));
+            }
+        };
+        // A Refiner preview is tentative until the same view is atomically
+        // revalidated and consumed after deterministic preflight refusals.
+        if (!refinerPreview) recordAutoSelection();
         const routedCatalogModel = autoSelection.routed
             ? runtimeModelMap.get(effectiveModelId)
             : requestedModelConfig;
@@ -2244,6 +2342,13 @@ async function handleChatPost(
                 },
             };
         }
+
+        // The preview may inform profiling and model-selection preflight, but
+        // it cannot authorize shadow work or a provider call. Revalidate the
+        // exact view and consume it only after deterministic plan, selection,
+        // and recoverable context-bundle refusals have all passed.
+        await consumeRefinerPreview();
+        recordAutoSelection();
 
         const isDurableStoredChat = Boolean(
             session?.user?.id &&

@@ -25,6 +25,8 @@ test("recorded capability stays distinct from admission and pending Router gates
       runtimeCommitSha: commitSha,
       runtimeDeploymentId: deploymentId,
       approvalAuditLogId: "approval-audit-1",
+      releaseKind: "initial_auto_v1" as const,
+      routerExceptionAuditLogId: "router-audit-1",
     }),
   });
   assert.equal(snapshot.observedAt, "2026-10-10T02:00:00.000Z");
@@ -36,6 +38,8 @@ test("recorded capability stays distinct from admission and pending Router gates
     explicitEnabled: true,
     autoEnabled: false,
     approvalAuditLogId: "approval-audit-1",
+    releaseKind: "initial_auto_v1",
+    routerExceptionAuditLogId: "router-audit-1",
   });
   assert.equal(snapshot.router.ready, false);
   assert.deepEqual(snapshot.router.outstanding, [
@@ -57,6 +61,8 @@ test("stored rollout alone never becomes recorded product capability", async () 
       runtimeCommitSha: null,
       runtimeDeploymentId: null,
       approvalAuditLogId: null,
+      releaseKind: null,
+      routerExceptionAuditLogId: null,
     }),
   });
   assert.equal(snapshot.controls.rollout, "enabled");
@@ -65,6 +71,8 @@ test("stored rollout alone never becomes recorded product capability", async () 
     explicitEnabled: null,
     autoEnabled: null,
     approvalAuditLogId: null,
+    releaseKind: null,
+    routerExceptionAuditLogId: null,
   });
 });
 
@@ -189,14 +197,6 @@ test("runtime, release, approval and genuine rollout-off boundaries are explicit
       expectedState: "unavailable",
       expectedRollout: "enabled",
     },
-    {
-      name: "genuine stored rollout off",
-      env: base.env,
-      readRollout: async () => false,
-      readRelease: undefined,
-      expectedState: "disabled_by_rollout",
-      expectedRollout: "disabled",
-    },
   ] as const;
 
   for (const item of cases) {
@@ -214,12 +214,36 @@ test("runtime, release, approval and genuine rollout-off boundaries are explicit
       assert.equal(snapshot.controls.rollout, item.expectedRollout);
       assert.equal(snapshot.release.state, item.expectedState);
       assert.equal(snapshot.release.approvalAuditLogId, null);
-      if (item.expectedState === "runtime_identity_unavailable" ||
-          item.expectedState === "disabled_by_rollout") {
+      if (item.expectedState === "runtime_identity_unavailable") {
         assert.equal(releaseReads, 0);
       }
     });
   }
+});
+
+test("stored rollout off preserves recorded authority without claiming availability", async () => {
+  const snapshot = await readPromptRefinerProductStatus({
+    ...base,
+    readRollout: async () => false,
+    readRelease: async () => Object.freeze({
+      explicitEnabled: true,
+      autoEnabled: true,
+      runtimeCommitSha: commitSha,
+      runtimeDeploymentId: deploymentId,
+      approvalAuditLogId: "product-audit-1",
+      releaseKind: "initial_auto_v1" as const,
+      routerExceptionAuditLogId: "router-audit-1",
+    }),
+  });
+  assert.equal(snapshot.controls.rollout, "disabled");
+  assert.deepEqual(snapshot.release, {
+    state: "disabled_by_rollout",
+    explicitEnabled: false,
+    autoEnabled: false,
+    approvalAuditLogId: "product-audit-1",
+    releaseKind: "initial_auto_v1",
+    routerExceptionAuditLogId: "router-audit-1",
+  });
 });
 
 test("E2E database-disabled mode is unknown rather than rollout off", async () => {

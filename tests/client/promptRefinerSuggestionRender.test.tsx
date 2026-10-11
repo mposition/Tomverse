@@ -13,6 +13,9 @@ import {
 const hasTestId = (markup: string, id: string) =>
   markup.includes(`data-testid="${id}"`);
 const visibleText = (markup: string) => markup.replace(/<[^>]*>/g, " ");
+const renderAutoApplied = (language: keyof typeof promptRefinerCopy) =>
+  renderToStaticMarkup(createElement("div", { role: "status" },
+    promptRefinerCopy[language].autoApplied));
 const testIdText = (markup: string, id: string) => {
   const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = markup.match(
@@ -199,6 +202,17 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
   }
 });
 
+test("all seven Auto notifications render the neutral applied-suggestion status", () => {
+  for (const language of Object.keys(promptRefinerCopy) as Array<
+    keyof typeof promptRefinerCopy
+  >) {
+    const rendered = renderAutoApplied(language);
+    assert.match(rendered, /role="status"/);
+    assert.ok(rendered.includes(promptRefinerCopy[language].autoApplied), language);
+    assert.match(promptRefinerCopy[language].autoApplied, /Refiner/);
+  }
+});
+
 test("request refusal is visible, bounded by the request schema, and has a 44px target", () => {
   const idle = { status: "idle" as const };
   const empty = render({ currentPrompt: "", state: idle });
@@ -257,6 +271,7 @@ test("rendered copy never names the internal refiner model or makes a superiorit
     const text = [
       render({ language }),
       render({ language, state: { status: "accepted_preview", suggestion } }),
+      renderAutoApplied(language),
     ].join(" ").toLowerCase();
     for (const word of forbidden) {
       // German "bestätigen" is a confirmation verb, not a superiority claim.

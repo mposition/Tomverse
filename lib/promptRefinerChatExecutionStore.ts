@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { Prisma } from "@prisma/client";
 
 import { takeAuditChainLock, writeSystemAuditLog } from "@/lib/adminAudit";
@@ -38,6 +39,36 @@ const unavailable = (): never => { throw new PromptRefinerChatExecutionError(); 
 const options = { maxWait: 2_000, timeout: 5_000 };
 // A serialized browser object cannot become a server-captured snapshot.
 const capturedSnapshots = new WeakSet<object>();
+const previewSnapshots = new WeakMap<object, PromptRefinerChatExecutionSnapshot>();
+
+type PromptRefinerChatExecutionInput = {
+  userId: string; conversationId: string; sourceMessageId: string;
+  messages: Array<{ id?: string; role: "user" | "assistant"; content: string; attachments?: unknown[] }>;
+  decision: unknown;
+};
+
+type PromptRefinerChatExecutionView = ReturnType<typeof validatePromptRefinerChatExecution>;
+type PromptRefinerChatExecutionSnapshot = Readonly<{
+  executionMessages: PromptRefinerChatExecutionView["executionMessages"];
+  provenance: PromptRefinerChatExecutionView["provenance"];
+  mode: PromptRefinerChatExecutionView["mode"];
+}>;
+
+const snapshotExecutionView = (
+  view: PromptRefinerChatExecutionView,
+): PromptRefinerChatExecutionSnapshot => structuredClone({
+  executionMessages: view.executionMessages,
+  provenance: view.provenance,
+  mode: view.mode,
+});
+
+const deepFreeze = <Value>(value: Value): Value => {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) {
+    deepFreeze(child);
+  }
+  return Object.freeze(value);
+};
 
 export const isPromptRefinerCapturedChatDraft = (
   value: unknown,
@@ -306,54 +337,127 @@ async function readScope(tx: Tx, id: string, userId: string) {
   return rows[0] ?? null;
 }
 
-/** One transaction owns validation, the permanent consume and canonical audit. */
-export async function consumePromptRefinerChatExecution(input: {
-  userId: string; conversationId: string; sourceMessageId: string;
-  messages: Array<{ id?: string; role: "user" | "assistant"; content: string; attachments?: unknown[] }>;
-  decision: unknown;
-}) {
+async function readExecutionView(
+  tx: Tx,
+  input: PromptRefinerChatExecutionInput,
+  choice: import("@/lib/promptRefinerChatExecutionCore").PromptRefinerChatDecision,
+  release: { explicitEnabled: boolean; autoEnabled: boolean },
+  lockForConsume: boolean,
+) {
+  if (lockForConsume) {
+    await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
+  }
+  const scope = lockForConsume
+    ? await readScope(tx, choice.scopeId, input.userId)
+    : (await tx.$queryRaw<Scope[]>`SELECT "id", "userId", "conversationId", "surface", "epoch"
+        FROM "PromptRefinerChatScope" WHERE "id" = ${choice.scopeId} AND "userId" = ${input.userId}`)[0] ?? null;
+  if (!scope) return unavailable();
+  const rows = lockForConsume
+    ? await tx.$queryRaw<PromptRefinerHeldChatSuggestion[]>`SELECT *
+        FROM "PromptRefinerChatSuggestion" WHERE "id" = ${choice.suggestionId} AND "userId" = ${input.userId} FOR UPDATE`
+    : await tx.$queryRaw<PromptRefinerHeldChatSuggestion[]>`SELECT *
+        FROM "PromptRefinerChatSuggestion" WHERE "id" = ${choice.suggestionId} AND "userId" = ${input.userId}`;
+  const source = lockForConsume
+    ? await tx.$queryRaw<Array<{ content: string; recoveryEpoch: number;
+        autoConversation: boolean; dbNow: Date; receiptNow: Date }>>`
+        SELECT m."content", c."chatRecoveryEpoch" AS "recoveryEpoch",
+          c."selectionMode" = 'auto' AS "autoConversation",
+          clock_timestamp() AT TIME ZONE 'UTC' AS "dbNow",
+          clock_timestamp() AS "receiptNow"
+        FROM "Message" m JOIN "Conversation" c ON c."id" = m."conversationId"
+        WHERE m."id" = ${input.sourceMessageId} AND m."role" = 'user' AND c."id" = ${input.conversationId}
+          AND c."userId" = ${input.userId} AND c."kind" = 'chat' AND c."productKey" = 'chat' FOR SHARE OF m, c`
+    : await tx.$queryRaw<Array<{ content: string; recoveryEpoch: number;
+        autoConversation: boolean; dbNow: Date; receiptNow: Date }>>`
+        SELECT m."content", c."chatRecoveryEpoch" AS "recoveryEpoch",
+          c."selectionMode" = 'auto' AS "autoConversation",
+          clock_timestamp() AT TIME ZONE 'UTC' AS "dbNow",
+          clock_timestamp() AS "receiptNow"
+        FROM "Message" m JOIN "Conversation" c ON c."id" = m."conversationId"
+        WHERE m."id" = ${input.sourceMessageId} AND m."role" = 'user' AND c."id" = ${input.conversationId}
+          AND c."userId" = ${input.userId} AND c."kind" = 'chat' AND c."productKey" = 'chat'`;
+  if (rows.length !== 1 || source.length !== 1) return unavailable();
+  if (rows[0].mode === "auto") {
+    if (lockForConsume) {
+      // Chat draft/scope writers already order Conversation -> audit. Preserve
+      // that order, then serialize the operational read behind every pause
+      // transition (audit -> guard) before consuming an Auto suggestion.
+      await takeAuditChainLock(tx);
+    }
+    if (!(await readPromptRefinerProductAutoGuard(tx)).active) {
+      return unavailable();
+    }
+  }
+  return {
+    view: validatePromptRefinerChatExecution({ messages: input.messages, decision: choice,
+      held: rows[0], facts: { ...source[0], ...release, userId: input.userId,
+        conversationId: input.conversationId, sourceMessageId: input.sourceMessageId,
+        persistedSourcePrompt: source[0].content, scope,
+        killSwitch: promptRefinerKillSwitchEngaged(process.env) } }),
+    held: rows[0],
+    receiptNow: source[0].receiptNow,
+  };
+}
+
+async function admitExecution(input: PromptRefinerChatExecutionInput) {
   const choice = promptRefinerChatDecisionSchema.safeParse(input.decision);
+  if (!choice.success) return unavailable();
   const release = await promptRefinerChatExecutionAdmission();
-  if (!choice.success || (!release.explicitEnabled && !release.autoEnabled) ||
+  if ((!release.explicitEnabled && !release.autoEnabled) ||
     promptRefinerKillSwitchEngaged(process.env)) return unavailable();
   await verifyDurableChatSourceMessage({ ...input, sourceUserMessageId: input.sourceMessageId });
-  return consumeWithRelease(input, choice.data, release);
+  return { choice: choice.data, release };
+}
+
+/**
+ * Read and validate the exact server-held execution view without consuming it.
+ * This is only a tentative input for deterministic preflight. It cannot
+ * authorize shadow work or dispatch; the branded object must be revalidated
+ * by consumePreviewedPromptRefinerChatExecution first.
+ */
+export async function previewPromptRefinerChatExecution(input: PromptRefinerChatExecutionInput) {
+  const { choice, release } = await admitExecution(input);
+  const validated = await prisma.$transaction(async tx =>
+    (await readExecutionView(tx, input, choice, release, false)).view, options);
+  // Never expose aliases into the request object. The Router receives one
+  // immutable clone, while the private snapshot remains the final comparison
+  // authority even if a caller attempts to mutate that clone.
+  const preview = deepFreeze(structuredClone(validated));
+  previewSnapshots.set(preview, snapshotExecutionView(preview));
+  return preview;
+}
+
+/** One transaction owns validation, the permanent consume and canonical audit. */
+export async function consumePromptRefinerChatExecution(input: PromptRefinerChatExecutionInput) {
+  const { choice, release } = await admitExecution(input);
+  return consumeWithRelease(input, choice, release);
+}
+
+/** Final authorization for a previously validated preflight view. */
+export async function consumePreviewedPromptRefinerChatExecution(
+  input: PromptRefinerChatExecutionInput,
+  preview: Awaited<ReturnType<typeof previewPromptRefinerChatExecution>>,
+) {
+  const expected = previewSnapshots.get(preview);
+  if (!expected || !isDeepStrictEqual(snapshotExecutionView(preview), expected)) {
+    return unavailable();
+  }
+  previewSnapshots.delete(preview);
+  const { choice, release } = await admitExecution(input);
+  return consumeWithRelease(input, choice, release, expected);
 }
 
 async function consumeWithRelease(
   input: Parameters<typeof consumePromptRefinerChatExecution>[0],
   choice: import("@/lib/promptRefinerChatExecutionCore").PromptRefinerChatDecision,
   release: { explicitEnabled: boolean; autoEnabled: boolean },
+  expectedPreview?: PromptRefinerChatExecutionSnapshot,
 ) {
   return prisma.$transaction(async tx => {
-    await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
-    const scope = await readScope(tx, choice.scopeId, input.userId);
-    if (!scope) return unavailable();
-    const rows = await tx.$queryRaw<PromptRefinerHeldChatSuggestion[]>`SELECT *
-      FROM "PromptRefinerChatSuggestion" WHERE "id" = ${choice.suggestionId} AND "userId" = ${input.userId} FOR UPDATE`;
-    const source = await tx.$queryRaw<Array<{ content: string; recoveryEpoch: number;
-      autoConversation: boolean; dbNow: Date; receiptNow: Date }>>`
-      SELECT m."content", c."chatRecoveryEpoch" AS "recoveryEpoch",
-        c."selectionMode" = 'auto' AS "autoConversation",
-        clock_timestamp() AT TIME ZONE 'UTC' AS "dbNow",
-        clock_timestamp() AS "receiptNow"
-      FROM "Message" m JOIN "Conversation" c ON c."id" = m."conversationId"
-      WHERE m."id" = ${input.sourceMessageId} AND m."role" = 'user' AND c."id" = ${input.conversationId}
-        AND c."userId" = ${input.userId} AND c."kind" = 'chat' AND c."productKey" = 'chat' FOR SHARE OF m, c`;
-    if (rows.length !== 1 || source.length !== 1) return unavailable();
-    if (rows[0].mode === "auto") {
-      // Chat draft/scope writers already order Conversation -> audit. Preserve
-      // that order, then serialize the operational read behind every pause
-      // transition (audit -> guard) before consuming an Auto suggestion.
-      await takeAuditChainLock(tx);
-      if (!(await readPromptRefinerProductAutoGuard(tx)).active) {
-        return unavailable();
-      }
-    }
-    const view = validatePromptRefinerChatExecution({ messages: input.messages, decision: choice,
-      held: rows[0], facts: { ...source[0], ...release, userId: input.userId,
-        conversationId: input.conversationId, sourceMessageId: input.sourceMessageId,
-        persistedSourcePrompt: source[0].content, scope, killSwitch: promptRefinerKillSwitchEngaged(process.env) } });
+    const { view, held, receiptNow } =
+      await readExecutionView(tx, input, choice, release, true);
+    if (expectedPreview &&
+      !isDeepStrictEqual(snapshotExecutionView(view), expectedPreview)) return unavailable();
     const changed = await tx.$executeRaw`UPDATE "PromptRefinerChatSuggestion"
       SET "state" = 'consumed', "consumedAt" = clock_timestamp() AT TIME ZONE 'UTC',
         "decision" = ${choice.decision}, "sourcePrompt" = NULL, "refinedPrompt" = NULL
@@ -363,7 +467,7 @@ async function consumeWithRelease(
     await writeSystemAuditLog({ tx, systemActor: "prompt-refiner-chat-execution",
       action: "prompt_refiner.chat_decision_consumed", targetType: "PromptRefinerChatSuggestion",
       targetId: choice.suggestionId, summary: "Consumed one verified Prompt Refiner Chat decision.",
-      metadata: { mode: rows[0].mode, decision: choice.decision, refinerVersion: rows[0].refinerVersion } });
+      metadata: { mode: held.mode, decision: choice.decision, refinerVersion: held.refinerVersion } });
     const product = await tx.$queryRaw<Array<{ id: string; requestId: string }>>`
       SELECT "id", "requestId" FROM "PromptRefinerProductExecutionReceipt"
       WHERE "suggestionId" = ${choice.suggestionId} FOR SHARE
@@ -391,7 +495,7 @@ async function consumeWithRelease(
         suggestionId: choice.suggestionId,
         outcome: choice.decision,
         staleReason: null,
-        observedAt: source[0].receiptNow.toISOString(),
+        observedAt: receiptNow.toISOString(),
       });
     }
     return view;

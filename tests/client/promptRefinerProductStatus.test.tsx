@@ -3,6 +3,7 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  AdminChatRefinerInitialAutoReleaseControls,
   AdminPromptRefinerProductStatusReadback,
 } from "@/components/admin/AdminPromptRefinerProductStatusPanel";
 import { adminPromptRefinerProductStatusMessages } from
@@ -13,7 +14,7 @@ import {
 } from "@/lib/promptRefinerProductStatusContract";
 
 const snapshot: PromptRefinerProductStatus = {
-  version: "prompt-refiner-product-status-v1",
+  version: "prompt-refiner-product-status-v2",
   observedAt: "2026-10-10T02:00:00.000Z",
   serving: {
     commitSha: "a".repeat(40),
@@ -26,6 +27,8 @@ const snapshot: PromptRefinerProductStatus = {
     explicitEnabled: null,
     autoEnabled: null,
     approvalAuditLogId: null,
+    releaseKind: null,
+    routerExceptionAuditLogId: null,
   },
   router: {
     version: "auto-rollout-readiness-v1",
@@ -69,5 +72,34 @@ test("the readback shows all pending Router gates and no completion claim", () =
     }
     assert.ok(html.includes(messages.notEstablished));
     assert.ok(html.includes(messages.unknown));
+  }
+});
+
+test("the owner control keeps activation and rollout as separate actions", () => {
+  const initial = {
+    ...snapshot,
+    controls: { ...snapshot.controls, rollout: "disabled" as const },
+    release: { state: "disabled_by_rollout" as const,
+      explicitEnabled: false, autoEnabled: false,
+      approvalAuditLogId: "product-audit",
+      releaseKind: "initial_auto_v1" as const,
+      routerExceptionAuditLogId: "router-audit" },
+  };
+  for (const messages of [
+    adminPromptRefinerProductStatusMessages.en,
+    adminPromptRefinerProductStatusMessages.ko,
+  ]) {
+    const html = renderToStaticMarkup(
+      <AdminChatRefinerInitialAutoReleaseControls snapshot={initial}
+        onRefresh={async () => {}} messages={messages} />
+    );
+    assert.ok(html.includes(messages.activationTitle));
+    assert.ok(html.includes(messages.activate));
+    assert.ok(html.includes(messages.enableRollout));
+    assert.ok(html.includes(messages.disableRollout));
+    assert.ok(html.includes(messages.reviewJobId));
+    assert.ok(html.includes(messages.validationSeal));
+    assert.ok(html.includes(messages.deploymentReadback));
+    assert.equal(html.includes("MANIFEST_HASH_KEYS"), false);
   }
 });

@@ -184,10 +184,11 @@ export async function preparePromptRefinerProductSuggestion(input: {
   deadlineAtMonotonicMs?: number;
 }): Promise<ProductResult> {
   const requestedAt = input.requestedAt ?? new Date();
+  const nowMonotonicMs = performance.now();
   const deadlineAtMonotonicMs = Math.min(
     input.deadlineAtMonotonicMs ??
-      performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
-    performance.now() + PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
+      nowMonotonicMs + PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
+    nowMonotonicMs + PROMPT_REFINER_PRODUCT_TIMEOUT_MS,
   );
   const requestTiming = () => {
     const completed = new Date();

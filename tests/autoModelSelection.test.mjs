@@ -11,6 +11,8 @@ import {
   stickyStateFor,
   storedSelectionMode,
 } from "../lib/conversationSelectionMode.ts";
+import { mintChatRefinerInitialAutoRouterAuthority } from
+  "../lib/chatRefinerInitialAutoRouterAuthority.ts";
 
 // The seam decides which model answers. Most of what matters is what it does
 // when it declines, because every decline has to land on the same behaviour --
@@ -57,6 +59,13 @@ const input = (overrides = {}) => ({
   readiness: ready,
   ...overrides,
 });
+
+const initialReleaseAuthority = () =>
+  mintChatRefinerInitialAutoRouterAuthority({
+    routerActivationAuditLogId: "audit_router_initial_release",
+    runtimeCommitSha: "a".repeat(40),
+    runtimeDeploymentId: "11111111-1111-4111-8111-111111111111",
+  });
 
 test("an Auto conversation in an open cohort is routed by the Router", () => {
   const selection = selectAutoModel(input());
@@ -305,6 +314,29 @@ test("an outstanding gate still refuses when no drill override is given", () => 
   const selection = selectAutoModel(input({ readiness: pending }));
   assert.equal(selection.routed, false);
   assert.equal(selection.reason, "cohort_refused");
+});
+
+test("the exact initial release authority reaches the selection that routes", () => {
+  const selection = selectAutoModel(input({
+    readiness: pending,
+    initialReleaseAuthority: initialReleaseAuthority(),
+  }));
+  assert.equal(selection.routed, true);
+  assert.equal(
+    selection.cohort.initialReleaseAuthority,
+    "chat_refiner_initial_auto_release"
+  );
+  assert.equal(selection.cohort.drillOverride, undefined);
+});
+
+test("a copied initial release object cannot route a turn", () => {
+  const selection = selectAutoModel(input({
+    readiness: pending,
+    initialReleaseAuthority: JSON.parse(JSON.stringify(initialReleaseAuthority())),
+  }));
+  assert.equal(selection.routed, false);
+  assert.equal(selection.reason, "cohort_refused");
+  assert.equal(selection.cohort.reason, "readiness_incomplete");
 });
 
 test("a permitted drill override routes the turn and marks the decision", () => {
