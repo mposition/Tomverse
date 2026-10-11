@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
+import { AmuxBacklogListPanel } from "@/components/admin/AmuxBacklogListPanel";
 import { AmuxBacklogMetadataPanel } from "@/components/admin/AmuxBacklogMetadataPanel";
 import { AmuxBoardImportPanel } from "@/components/admin/AmuxBoardImportPanel";
 import { AmuxIdeaInputPanel } from "@/components/admin/AmuxIdeaInputPanel";
@@ -57,6 +58,9 @@ import {
   amuxV4AnalysisResultReadEnabled,
 } from "@/lib/amux/ideaAnalysisResultReadCore";
 import { getAdminRole } from "@/lib/adminAuth";
+import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
+import { amuxBacklogPage, amuxBacklogSearch } from "@/lib/amux/adminBacklogListCore";
+import { readAmuxBacklogList } from "@/lib/amux/adminBacklogRead";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminAmuxWorkspaceMessages } from "@/lib/adminMessages/amuxWorkspace";
 import { adminNavItemTabs, adminRedirectTarget, resolveAdminTab } from "@/lib/adminNavigation";
@@ -100,6 +104,9 @@ export default async function AdminAmuxBacklogPage({
   const recoveryHoldId = amuxAnalysisClaimRecoveryHoldId(query.analysisHoldId,
     process.env.TOMVERSE_AMUX_V4_ANALYSIS_CLAIM_RESOLUTION_READ);
   const tab = resolveAdminTab(TABS, query.tab);
+  const search = amuxBacklogSearch(query.cardNumber);
+  const backlogList = tab.id === "list" && search.valid && hasRecentAdminAuthentication(session)
+    ? await readAmuxBacklogList(search.search, amuxBacklogPage(query.page)) : null;
   const m = await getAdminMessages(adminAmuxWorkspaceMessages);
   const ideaSubmissionAvailable =
     ideaSubmissionWritePermitted(process.env[AMUX_V4_IDEA_SUBMISSION_ENV]) &&
@@ -139,7 +146,9 @@ export default async function AdminAmuxBacklogPage({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       {tabs}
-      {tab.id === "ideas" ? (
+      {tab.id === "list" ? (
+        <AmuxBacklogListPanel data={backlogList} search={search.search} valid={search.valid} />
+      ) : tab.id === "ideas" ? (
         <>
         <AmuxUnusedAnalysisReservationPanel operatorId={session.user.id} available={
           process.env.TOMVERSE_AMUX_V4_ANALYSIS_BUDGET_READ === "enabled" &&

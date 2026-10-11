@@ -717,6 +717,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     ],
     tabs: [
       {
+        id: "list",
+        label: "List",
+        description: "Backlog cards, creation dates, summaries and recorded scores",
+      },
+      {
         id: "ideas",
         label: "Ideas",
         description: "Check an operator idea before any external transfer",

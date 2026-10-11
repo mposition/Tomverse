@@ -118,7 +118,7 @@ async function getJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function AmuxExecutionWorkspace() {
+export function AmuxExecutionWorkspace({ initialTaskId = null }: { initialTaskId?: string | null }) {
   const m = useAdminMessages(adminAmuxExecutionMessages);
   const [view, setView] = useState<"board" | "hierarchy">("board");
   const [board, setBoard] = useState<BoardSnapshot | null>(null);
@@ -209,7 +209,7 @@ export function AmuxExecutionWorkspace() {
     } catch (reason) { showError(reason); }
     finally { setBoardBusy(null); }
   };
-  const openCard = async (id: string) => {
+  const openCard = useCallback(async (id: string) => {
     const request = ++detailRequest.current;
     setDetailBusy(true); setSelected(null); setError(null);
     try {
@@ -218,7 +218,14 @@ export function AmuxExecutionWorkspace() {
       if (request === detailRequest.current) setSelected(result);
     } catch (reason) { if (request === detailRequest.current) showError(reason); }
     finally { if (request === detailRequest.current) setDetailBusy(false); }
-  };
+  }, [showError]);
+
+  useEffect(() => {
+    if (!initialTaskId) return;
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) void openCard(initialTaskId); });
+    return () => { cancelled = true; detailRequest.current += 1; };
+  }, [initialTaskId, openCard]);
 
   const renderTree = (parent: Parent, depth: number): React.ReactNode => {
     const key = keyOf(parent);
