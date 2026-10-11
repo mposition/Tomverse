@@ -1,10 +1,10 @@
 /**
  * The AMUX execution room's state, from the worker catalog and the runtime rows.
  *
- * The catalog is the app's own (`getConfiguredAmuxWorkerCatalog`): the workers
- * AMUX may route to, with the operator's static exclusions. An archived worker
- * is left out. Each remaining worker is read against its runtime row the way
- * AMUX reads it when it hands out work: a runtime is live while its lease has
+ * The display roster and dispatch catalog are separate: roster membership
+ * grants no execution rights. Only admitted resident workers are read against
+ * their runtime rows the way AMUX reads them when it hands out work: a runtime
+ * is live while its lease has
  * not run out and its status is idle or busy (lib/amux/v22WorkerClaimService.ts).
  * The operator's exclusions come first, because AMUX skips an excluded worker
  * however alive it is. Only names, providers, states and heartbeat times leave
@@ -47,23 +47,29 @@ function workerState(worker: CatalogWorker, runtime: Runtime | undefined, now: D
 
 export function agentOfficeAmuxState(input: {
   catalog: readonly CatalogWorker[] | null;
+  roster: readonly { name: string; provider: string }[];
   runtimes: readonly Runtime[];
   now: Date;
 }): AgentOfficeAmuxState {
-  if (!input.catalog) return { kind: "no_catalog" };
+  const catalog = new Map(
+    (input.catalog ?? []).filter((worker) => !worker.archived).map((worker) => [worker.worker_name, worker])
+  );
   const runtimes = new Map(input.runtimes.map((runtime) => [runtime.workerName, runtime]));
   return {
     kind: "observed",
-    workers: input.catalog
-      .filter((worker) => !worker.archived)
-      .map((worker) => {
-        const runtime = runtimes.get(worker.worker_name);
-        return {
-          name: worker.worker_name,
-          provider: worker.provider,
-          state: workerState(worker, runtime, input.now),
-          heartbeatAt: runtime?.heartbeatAt.toISOString() ?? null,
-        };
-      }),
+    catalogConfigured: input.catalog !== null,
+    workers: input.roster.map((resident) => {
+      const worker = catalog.get(resident.name);
+      const runtime = worker ? runtimes.get(resident.name) : undefined;
+      const state: AgentOfficeAmuxWorkerState = worker
+        ? workerState(worker, runtime, input.now)
+        : input.catalog ? "not_admitted" : "catalog_unknown";
+      return {
+        name: resident.name,
+        provider: worker?.provider ?? resident.provider,
+        state,
+        heartbeatAt: runtime?.heartbeatAt.toISOString() ?? null,
+      };
+    }),
   };
 }

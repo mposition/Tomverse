@@ -701,6 +701,7 @@ a.integration-row:hover { border-color: var(--accent); }
 .rm-dot.attention { background: var(--attention-dot); }
 .rm-dot.blocked { background: var(--blocked-dot); }
 .rm-dot.waiting { background: var(--waiting-bg); }
+.rm-warning { color: var(--attention-dot); }
 .rm-door { position: absolute; width: 18px; height: 4px; background: var(--door); box-shadow: 0 0 0 1.5px var(--outline); }
 
 .pr { position: absolute; }

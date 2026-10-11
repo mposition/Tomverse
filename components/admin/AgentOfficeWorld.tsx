@@ -455,12 +455,19 @@ export default function AgentOfficeWorld({
                       {room.icon} {name}
                     </button>
                   )}
-                  {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{m.real.chip}</em> : null}
+                  {real || engine.liveDept(room.id) ? <em className={cx("live-chip")}>{isAmux ? m.real.amux.chip : m.real.chip}</em> : null}
                   {status ? (
                     <i
-                      className={cx("rm-dot", status)}
-                      title={real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
+                      className={cx("rm-dot", isAmux ? amux.connectionStatus : status)}
+                      title={isAmux ? amux.connectionLabel : real ? real.summary : (engine.liveDept(room.id)?.badge ?? m.deptStatus[status])}
+                      data-testid={`agent-office-${room.id}-connection`}
+                      data-connection-state={isAmux ? amux.connectionStatus : status}
                     />
+                  ) : null}
+                  {isAmux && amux.attention > 0 ? (
+                    <span className={cx("rm-warning")} title={amux.summary} data-testid="agent-office-amux-warning">
+                      {m.real.amux.attention(amux.attention)}
+                    </span>
                   ) : null}
                   {recordHref ? (
                     <Link
