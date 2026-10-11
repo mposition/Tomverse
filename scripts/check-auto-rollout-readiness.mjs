@@ -22,6 +22,12 @@ import {
   autoRolloutReadiness,
 } from "../lib/autoRolloutReadiness.ts";
 import { autoCohortConfig, decideAutoCohort } from "../lib/autoCohort.ts";
+import {
+  autoRouterLimitedReleaseApprovalProblems,
+} from "../lib/autoRouterLimitedRelease.ts";
+import {
+  AUTO_ROUTER_LIMITED_RELEASE_APPROVAL,
+} from "../lib/autoRouterLimitedReleaseApproval.ts";
 
 const state = autoRolloutReadiness();
 
@@ -52,6 +58,23 @@ console.log(
   `\nReady: ${state.ready ? "yes" : "no"}` +
     (state.ready ? "" : ` — outstanding: ${state.outstanding.join(", ")}`)
 );
+
+const limitedReleaseProblems = autoRouterLimitedReleaseApprovalProblems();
+console.log(
+  `Limited release approval: ${AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.status}`
+);
+if (
+  AUTO_ROUTER_LIMITED_RELEASE_APPROVAL.status === "approved" &&
+  limitedReleaseProblems.length > 0
+) {
+  console.log("\nLimited release approval problems:");
+  for (const problem of limitedReleaseProblems) console.log(`  - ${problem}`);
+  console.log(
+    "\nAn approved limited-release record is authority to route real requests; " +
+      "an incomplete or expired record must fail closed."
+  );
+  process.exit(1);
+}
 
 // What the configuration would do if the gates were open. Printed rather than
 // enforced: a deployment's environment is not this repository's business, but

@@ -1511,6 +1511,8 @@ async function handleChatPost(
                 selectedModelId: effectiveModelId,
                 selectionReason: autoSelection.record.selectionReason,
                 routerVersion: autoSelection.versions.decision,
+                limitedReleaseException:
+                    autoSelection.cohort.limitedReleaseException ?? null,
                 timestamp: new Date().toISOString(),
             }));
         }
