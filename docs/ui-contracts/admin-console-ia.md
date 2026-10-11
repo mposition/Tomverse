@@ -143,15 +143,26 @@ a patch, a reason or a card, which
 `docs/policy/engineering-agent.md §11` keeps to its own record. Its
 decisions are real and are made on its own screen, so the office's approval
 window says so and links there; it never offers an approve button.
-Under the teams, the AMUX execution room is LIVE as a whole: a desk for each
-worker in the app's AMUX worker catalog (archived ones left out; past twelve,
+Under the teams, the AMUX execution room separates the display-only Ubuntu
+resident roster approved in orchestration policy v27 (thirteen desks, no Devin
+or virtual engineering runner) from the app's dispatch admission catalog.
+The roster is labelled as a policy roster, not a live process-health reading;
+it grants no registration, claim or execution authority. Workers absent from
+the usable admission catalog are labelled not admitted, never stopped or
+connected, even if an old runtime row exists. Each admitted worker's
+dispatch state is read from its runtime row. Past thirteen,
 the ones that need a look are drawn first and the room says in words how many
-are not drawn, as it does for a failed read or a missing catalog), each worker
+are not drawn, as it does for a failed read or a missing catalog. Each worker is
 drawn seated with its real state -- the operator's exclusions first, then its
 runtime row read the way AMUX reads it when it hands out work (live while the
 lease has not run out and the status is idle or busy) -- and, while the
 route table has it, a link to the AMUX execution page. Each worker is one row
 of its record, and nothing about the cards they work on is read.
+The room's connection light is green while at least one admitted worker has
+a live idle/busy dispatch bridge. Individual lost/error bridges remain red,
+with a separate warning count and attention status in the dashboard; green
+does not claim every worker or the native AMUX process is healthy. With no
+live connection, lost/error records are red and unobserved records are grey.
 Beside it the independent review room is LIVE too: the review server runs on
 the operator's Ubuntu machine, reachable only over SSH, so it reports instead
 of being asked -- a content-free status (per reviewer: vendor, enabled,
