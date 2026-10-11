@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
 
@@ -23,9 +24,7 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 /**
  * The usage URL, if it names AMUX on this machine: http or https on a
- * loopback host. AMUX serves a self-signed certificate there, so TLS is not
- * verified -- which is only acceptable because the request never leaves the
- * machine. Anything else is refused rather than read without verification.
+ * loopback host. Anything else is refused.
  */
 export function amuxUsageEndpoint(value) {
   if (typeof value !== "string") return null;
@@ -38,6 +37,27 @@ export function amuxUsageEndpoint(value) {
   if (!["http:", "https:"].includes(url.protocol) || !LOOPBACK_HOSTS.has(url.hostname)) return null;
   if (url.username || url.password) return null;
   return url;
+}
+
+/**
+ * TLS for AMUX's self-signed certificate, verified rather than waved through:
+ * that one certificate is the only CA, and the identity is checked as
+ * "localhost", which AMUX signs for (crates/amux-server/src/tls.rs) whatever
+ * loopback spelling the URL uses -- "[::1]" is not in the certificate.
+ */
+export function amuxTlsOptions(caPem) {
+  return { ca: caPem, servername: "localhost" };
+}
+
+/** AMUX's certificate as configured (amuxCaFile), or null when it cannot be read. */
+export function readAmuxCa(caFile) {
+  if (typeof caFile !== "string" || caFile === "") return null;
+  try {
+    const pem = readFileSync(caFile, "utf8");
+    return pem.includes("-----BEGIN CERTIFICATE-----") ? pem : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -70,10 +90,13 @@ export function amuxQuotaFromUsage(body, providerId) {
  * GET the usage body: JSON within the size limit and the time limit, or null
  * for any failure. The limit is a deadline for the whole read, not the
  * socket's idle timeout: every provider's probe waits on this one read, so a
- * response that trickles in must not hold them past it.
+ * response that trickles in must not hold them past it. https needs AMUX's
+ * certificate (`ca`); without it nothing is sent.
  */
-export function readAmuxUsage(url, { request, timeoutMs = AMUX_USAGE_TIMEOUT_MS } = {}) {
-  const send = request ?? (url.protocol === "https:" ? https.request : http.request);
+export function readAmuxUsage(url, { request, timeoutMs = AMUX_USAGE_TIMEOUT_MS, ca } = {}) {
+  const tls = url.protocol === "https:";
+  if (tls && !ca) return Promise.resolve(null);
+  const send = request ?? (tls ? https.request : http.request);
   return new Promise((resolve) => {
     let settled = false;
     let req;
@@ -91,8 +114,7 @@ export function readAmuxUsage(url, { request, timeoutMs = AMUX_USAGE_TIMEOUT_MS 
       req = send(url, {
         method: "GET",
         headers: { accept: "application/json" },
-        // Loopback only (amuxUsageEndpoint): AMUX's certificate is self-signed.
-        ...(url.protocol === "https:" ? { rejectUnauthorized: false } : {}),
+        ...(tls ? amuxTlsOptions(ca) : {}),
         timeout: timeoutMs,
       }, (res) => {
         if (res.statusCode !== 200) {
@@ -136,8 +158,10 @@ const amuxReads = new Map();
  * The quota for one provider from AMUX. Every provider on the same URL shares
  * one read a minute, and a read already on its way answers every caller.
  * `provider.amuxProvider` names the AMUX provider when its id differs.
+ * The certificate is read for each read, so a copy replaced after AMUX
+ * regenerates its own is picked up without a restart.
  */
-export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = readAmuxUsage, reads = amuxReads } = {}) {
+export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = readAmuxUsage, reads = amuxReads, caFile } = {}) {
   const url = amuxUsageEndpoint(usageUrl);
   if (!url) return UNKNOWN;
   const key = url.href;
@@ -146,7 +170,7 @@ export async function amuxQuota(provider, usageUrl, { now = Date.now(), read = r
   const providerId = provider.amuxProvider ?? provider.id;
   if (entry.inflight) return amuxQuotaFromUsage(await entry.inflight, providerId);
   if (now >= entry.at && now - entry.at < AMUX_USAGE_CACHE_MS) return amuxQuotaFromUsage(entry.body, providerId);
-  entry.inflight = read(url)
+  entry.inflight = read(url, { ca: url.protocol === "https:" ? readAmuxCa(caFile) : undefined })
     .catch(() => null)
     .then((body) => {
       entry.body = body;

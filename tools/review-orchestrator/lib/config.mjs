@@ -96,6 +96,15 @@ export function validateConfig(raw) {
   if (config.amuxUsageUrl !== undefined && !amuxUsageEndpoint(config.amuxUsageUrl)) {
     errors.push("amuxUsageUrl: an http(s) URL on a loopback host");
   }
+  // AMUX's https is verified against its own self-signed certificate, never
+  // read unverified: a copy of ~/.amux/tls/cert.pem the review account can read.
+  if (config.amuxCaFile !== undefined &&
+      !(typeof config.amuxCaFile === "string" && config.amuxCaFile.startsWith("/") && !config.amuxCaFile.split("/").includes(".."))) {
+    errors.push("amuxCaFile: the absolute path of a copy of AMUX's certificate");
+  }
+  if (amuxUsageEndpoint(config.amuxUsageUrl)?.protocol === "https:" && config.amuxCaFile === undefined) {
+    errors.push("amuxCaFile: an https amuxUsageUrl is verified against AMUX's certificate (~/.amux/tls/cert.pem)");
+  }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();
   for (const provider of config.providers ?? []) {
