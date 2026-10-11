@@ -7,6 +7,8 @@ import { inspectAmuxV4AnalysisCliResult,
 import { amuxV4CodexNoToolsCatalogJson,
   amuxV4CodexNoToolsConfigArgs } from
   "../lib/amux/ideaLocalCodexNoToolsCore.mjs";
+import { AMUX_V4_MAX_PASSIVE_EVENTS } from
+  "../lib/amux/ideaLocalClaudeTransportCore.mjs";
 
 const openai = { provider: "openai", modelId: "frontier-openai",
   reasoningEffort: "high" };
@@ -177,7 +179,7 @@ test("Claude result needs exact served model and complete usage", () => {
     "verified_success");
 });
 
-test("Claude ignores only bounded empty UI invalidation notices before the result", () => {
+test("Claude projects bounded empty UI invalidation notices without changing the result", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const startup = { type: "system", subtype: "ui_invalidate",
     event: "ui.render", uuid: "notice-1", session_id: "session-1" };
@@ -202,14 +204,14 @@ test("Claude ignores only bounded empty UI invalidation notices before the resul
     [{ ...startup, content: "unexpected" }],
     [{ ...startup, event: "other" }],
     [{ ...startup, instances: [{ surface: "terminal" }] }],
-    Array.from({ length: 9 }, () => startup),
+    Array.from({ length: AMUX_V4_MAX_PASSIVE_EVENTS + 1 }, () => startup),
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
       stream(prefix), 0), { kind: "outcome_unknown" });
   }
   assert.equal(inspectAmuxV4AnalysisCliResult(plan,
     Buffer.from([...events, startup].map((event) => JSON.stringify(event))
-      .join("\n")), 0).kind, "outcome_unknown");
+      .join("\n")), 0).kind, "verified_success");
 });
 
 test("Claude accepts bounded requesting and neutral status notices in a no-tool turn", () => {
@@ -244,7 +246,6 @@ test("Claude accepts bounded requesting and neutral status notices in a no-tool 
     { ...status, permissionMode: "bypassPermissions" },
     { ...status, permissionMode: "acceptEdits" },
     { ...status, permissionMode: "auto" },
-    { ...status, permission_mode: "manual" },
     { ...status, tools: ["Bash"] },
     { ...status, content: "private text" },
     { ...status, compact_result: {} },
@@ -256,8 +257,7 @@ test("Claude accepts bounded requesting and neutral status notices in a no-tool 
   }
   for (const events of [
     [status, init, assistant, claudeEnvelope()],
-    [init, assistant, claudeEnvelope(), status],
-    [init, ...Array.from({ length: 9 }, () => status), assistant, claudeEnvelope()],
+    [init, ...Array.from({ length: AMUX_V4_MAX_PASSIVE_EVENTS + 1 }, () => status), assistant, claudeEnvelope()],
     [init, status, assistant],
     [init, status, assistant, claudeEnvelope("different-model")],
     [init, status, assistant, { ...claudeEnvelope(), modelUsage: {} }],
@@ -284,7 +284,7 @@ test("Claude never ignores retries, hooks or arbitrary system events as status n
   }
 });
 
-test("Claude accepts only a bounded rate-limit observation after assistant", () => {
+test("Claude accepts bounded rate-limit observations only after no-tool init", () => {
   const plan = planAmuxV4AnalysisCliInvocation(anthropic);
   const init = { type: "system", subtype: "init", tools: [] };
   const assistant = { type: "assistant", message: { role: "assistant",
@@ -298,10 +298,9 @@ test("Claude accepts only a bounded rate-limit observation after assistant", () 
   "verified_success");
   for (const events of [
     [rate, init, assistant, claudeEnvelope()],
-    [init, rate, assistant, claudeEnvelope()],
     [init, assistant, { ...rate, tools: ["Bash"] }, claudeEnvelope()],
     [init, assistant, { ...rate, rate_limit_info: null }, claudeEnvelope()],
-    [init, assistant, ...Array.from({ length: 9 }, () => rate),
+    [init, assistant, ...Array.from({ length: AMUX_V4_MAX_PASSIVE_EVENTS + 1 }, () => rate),
       claudeEnvelope()],
   ]) {
     assert.deepEqual(inspectAmuxV4AnalysisCliResult(plan,
