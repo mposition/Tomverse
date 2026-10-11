@@ -1739,6 +1739,15 @@ pub struct LaneTruth {
 ///
 /// Gated on `>= min_lanes` running lanes so a one- or two-lane box, where a
 /// genuine quiet spell is plausible, reads `Unknown` rather than crying wolf.
+///
+/// QUIET FLEET (2026-10-09): "someone is always at a turn boundary" assumes
+/// someone is working. On the live box all 13 lanes sat idle while hooks were
+/// still landing (a Stop report 200 OK at 08:17Z), and the check failed for
+/// hours as "control plane down". An idle lane reports once on Stop and then
+/// owes nothing, so a stale minimum is only evidence of an outage while a
+/// lane is MID-TURN by its pane and is known to self-report (it has reported
+/// since its session started). With nobody working, a dead hook and a quiet
+/// fleet look the same, and the answer is `Unknown`.
 pub fn self_reports_landing(
     lanes: &[LaneReport],
     min_lanes: usize,
@@ -1771,9 +1780,28 @@ pub fn self_reports_landing(
             }
         }
     }
+    // Lanes that owe a report right now: mid-turn by their pane. For the stale
+    // minimum they must also be known to self-report, or a hookless lane's
+    // long turn would read as an outage.
+    let working: Vec<&str> = lanes.iter().filter(|l| l.working).map(|l| l.name.as_str()).collect();
+    let working_hooked: Vec<&str> = lanes
+        .iter()
+        .filter(|l| l.working && l.hooked)
+        .map(|l| l.name.as_str())
+        .collect();
+    if with_report == 0 && working.is_empty() {
+        return vec![InvariantResult::unknown(
+            ID,
+            format!(
+                "0 of {} running lanes have any self-report, and none is working by its pane \
+                 — a quiet fleet and a dead report hook look the same",
+                lanes.len()
+            ),
+        )];
+    }
     if with_report == 0 {
-        // Not one running lane has EVER reported: the control plane is fully
-        // down, not merely quiet.
+        // Not one running lane has EVER reported while lanes are working: the
+        // control plane is fully down, not merely quiet.
         return vec![InvariantResult::fail(
             ID,
             format!("at least one of {} running lanes reporting", lanes.len()),
@@ -1785,11 +1813,32 @@ pub fn self_reports_landing(
         .evidence(json!({
             "running_lanes": lanes.len(),
             "lanes_with_report": 0,
+            "working_lanes": working,
             "class": "report-control-plane-down",
             "incident": "2026-08-13: endpoint.json.legacy_port went null; baked-in report \
                          hooks POSTed to the dead 8822 and failed silently",
             "likely_cause": "endpoint.json legacy_port/retired_ports not naming the port \
                              pre-cutover sessions carry — status is running blind on pane-scrape",
+        }))];
+    }
+    if freshest > max_freshest_s && working_hooked.is_empty() {
+        return vec![InvariantResult::unknown(
+            ID,
+            format!(
+                "youngest report across {} running lanes is {freshest:.0}s old (from \
+                 {freshest_name}), but no self-reporting lane is working by its pane — a quiet \
+                 fleet and a dead report hook look the same",
+                lanes.len()
+            ),
+        )
+        .evidence(json!({
+            "running_lanes": lanes.len(),
+            "lanes_with_report": with_report,
+            "freshest_report_age_s": freshest,
+            "freshest_lane": freshest_name,
+            "threshold_s": max_freshest_s,
+            "working_lanes": working,
+            "working_self_reporting_lanes": working_hooked,
         }))];
     }
     if freshest > max_freshest_s {
@@ -1809,6 +1858,7 @@ pub fn self_reports_landing(
             "freshest_report_age_s": freshest,
             "freshest_lane": freshest_name,
             "threshold_s": max_freshest_s,
+            "working_self_reporting_lanes": working_hooked,
             "class": "report-control-plane-down",
             "incident": "2026-08-13: baked-in report hooks POSTed to the dead 8822 silently; \
                          0/48 fresh self-reports, worker status inaccurate/delayed",
@@ -1827,6 +1877,13 @@ pub fn self_reports_landing(
 pub struct LaneReport {
     pub name: String,
     pub report_age_s: Option<f64>,
+    /// The pane shows unambiguous work right now, by the SAME detector the
+    /// status derivation uses.
+    pub working: bool,
+    /// The lane has self-reported since its session started, so its report
+    /// hooks are known to fire (`FleetSignals::hookless_workers` is the
+    /// complement).
+    pub hooked: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -5949,16 +6006,19 @@ mod negative_controls {
     /// `primis` at 7379s and everything else 40h+. The check must FAIL and name
     /// the freshest lane and its age — the fleet MINIMUM is what discriminates a
     /// dead control plane from a legitimately quiet lane.
+    fn lane(name: &str, report_age_s: Option<f64>, working: bool, hooked: bool) -> LaneReport {
+        LaneReport { name: name.into(), report_age_s, working, hooked }
+    }
+
     #[test]
     fn a_fleet_whose_youngest_report_is_hours_old_fails() {
-        // Ages drawn from the real outage: one 2h outlier, the rest ~40h.
+        // Ages drawn from the real outage: one 2h outlier, the rest ~40h. The
+        // fleet was mid-turn (status read "inaccurate/delayed"), so lanes whose
+        // hooks had fired this session were working by their panes.
         let mut lanes: Vec<LaneReport> = (0..47)
-            .map(|i| LaneReport {
-                name: format!("lane-{i}"),
-                report_age_s: Some(143_000.0 + i as f64),
-            })
+            .map(|i| lane(&format!("lane-{i}"), Some(143_000.0 + i as f64), i % 5 == 0, true))
             .collect();
-        lanes.push(LaneReport { name: "primis".into(), report_age_s: Some(7_379.0) });
+        lanes.push(lane("primis", Some(7_379.0), false, true));
         let rs = self_reports_landing(&lanes, 10, 3600.0);
         assert_eq!(rs.len(), 1);
         assert_eq!(rs[0].status, Status::Fail, "youngest 7379s > 3600s must fail: {rs:?}");
@@ -5973,12 +6033,9 @@ mod negative_controls {
     #[test]
     fn a_fleet_with_one_fresh_report_passes_even_if_most_are_stale() {
         let mut lanes: Vec<LaneReport> = (0..40)
-            .map(|i| LaneReport {
-                name: format!("idle-{i}"),
-                report_age_s: Some(30_000.0),
-            })
+            .map(|i| lane(&format!("idle-{i}"), Some(30_000.0), false, true))
             .collect();
-        lanes.push(LaneReport { name: "busy".into(), report_age_s: Some(4.0) });
+        lanes.push(lane("busy", Some(4.0), true, true));
         let rs = self_reports_landing(&lanes, 10, 3600.0);
         assert!(
             rs.iter().all(|r| r.status == Status::Pass),
@@ -5986,12 +6043,13 @@ mod negative_controls {
         );
     }
 
-    /// Not one lane has ever reported: the control plane is fully down — a
-    /// distinct, louder failure than a merely-stale minimum.
+    /// Not one lane has ever reported while lanes are working: the control
+    /// plane is fully down — a distinct, louder failure than a merely-stale
+    /// minimum.
     #[test]
     fn a_fleet_with_zero_reports_fails_as_control_plane_down() {
         let lanes: Vec<LaneReport> = (0..20)
-            .map(|i| LaneReport { name: format!("l-{i}"), report_age_s: None })
+            .map(|i| lane(&format!("l-{i}"), None, i < 3, false))
             .collect();
         let rs = self_reports_landing(&lanes, 10, 3600.0);
         assert_eq!(rs[0].status, Status::Fail);
@@ -6002,9 +6060,60 @@ mod negative_controls {
     /// spell is plausible there, and a false alarm trains the reader to skim.
     #[test]
     fn a_tiny_fleet_is_unknown_not_a_false_alarm() {
-        let lanes = vec![LaneReport { name: "solo".into(), report_age_s: Some(999_999.0) }];
+        let lanes = vec![lane("solo", Some(999_999.0), true, true)];
         let rs = self_reports_landing(&lanes, 10, 3600.0);
         assert_eq!(rs[0].status, Status::Unknown, "too-small fleet must be Unknown: {rs:?}");
+    }
+
+    /// THE 2026-10-09 FALSE ALARM: 13 lanes, every one idle or waiting, the
+    /// freshest report a copilot Stop hook 14205s old while that hook was still
+    /// landing 200 OK. An idle lane owes no report, so this is Unknown, not
+    /// "control plane down".
+    #[test]
+    fn a_quiet_fleet_with_stale_reports_is_unknown_not_an_outage() {
+        let mut lanes: Vec<LaneReport> = [
+            ("claude-impl", Some(170_604.0)),
+            ("claude-chore", Some(467_549.0)),
+            ("claude-review", Some(514_841.0)),
+            ("codex-contract", Some(516_021.0)),
+            ("claude-contract", Some(1_816_983.0)),
+        ]
+        .into_iter()
+        .map(|(n, age)| lane(n, age, false, true))
+        .collect();
+        lanes.push(lane("copilot-chore", Some(14_205.0), false, true));
+        for n in ["codex-chore", "codex-impl", "copilot-impl", "copilot-worker", "cursor-chore", "cursor-impl", "cursor-worker"] {
+            lanes.push(lane(n, None, false, false));
+        }
+        assert_eq!(lanes.len(), 13);
+        let rs = self_reports_landing(&lanes, 10, 3600.0);
+        assert_eq!(rs[0].status, Status::Unknown, "a quiet fleet is not an outage: {rs:?}");
+        assert!(rs[0].observed.contains("copilot-chore"), "{}", rs[0].observed);
+
+        // The same fleet with nobody reporting at all is still not an outage
+        // while nobody works.
+        let silent: Vec<LaneReport> = lanes.iter().map(|l| lane(&l.name, None, false, false)).collect();
+        assert_eq!(self_reports_landing(&silent, 10, 3600.0)[0].status, Status::Unknown);
+
+        // The moment a self-reporting lane is mid-turn, the stale minimum IS
+        // the outage again.
+        lanes[0].working = true;
+        let rs = self_reports_landing(&lanes, 10, 3600.0);
+        assert_eq!(rs[0].status, Status::Fail, "{rs:?}");
+        assert_eq!(rs[0].evidence["working_self_reporting_lanes"], json!(["claude-impl"]), "{rs:?}");
+    }
+
+    /// A lane that has never self-reported this session (codex, cursor, a fresh
+    /// worker) owes no report even mid-turn, so its long turn behind an idle,
+    /// stale fleet must not read as an outage.
+    #[test]
+    fn only_a_hookless_lane_working_is_unknown() {
+        let mut lanes: Vec<LaneReport> = (0..12)
+            .map(|i| lane(&format!("idle-{i}"), Some(20_000.0), false, true))
+            .collect();
+        lanes.push(lane("codex-impl", None, true, false));
+        let rs = self_reports_landing(&lanes, 10, 3600.0);
+        assert_eq!(rs[0].status, Status::Unknown, "{rs:?}");
     }
 
     /// AMUX-3468 both directions: a guarded-absent family (tunnel, AF-63

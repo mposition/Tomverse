@@ -1,5 +1,7 @@
+import { amuxUsageEndpoint } from "./amux-usage.mjs";
 import { readJson } from "./fsutil.mjs";
 import { isName } from "./assign.mjs";
+import { STATUS_REPORT_SECRET_ENV } from "./status-report.mjs";
 
 const DEFAULT_CONFIG_PATH = "/etc/review-orchestrator/config.json";
 
@@ -44,6 +46,23 @@ export function globToRegExp(glob) {
 }
 
 /**
+ * `statusSnapshot` is optional: { dir }. The daemon writes a content-free
+ * snapshot.json into `dir` once a minute for the separate status sender. It
+ * takes no URL and no secret, because the review account holds no credential
+ * for the app, and no interval, because the sender's staleness rule depends on
+ * it (lib/status-report.mjs).
+ */
+function statusSnapshotProblem(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "an object with dir";
+  const unknown = Object.keys(value).filter((key) => key !== "dir");
+  if (unknown.length > 0) return `unknown field ${unknown[0]}`;
+  if (typeof value.dir !== "string" || !value.dir.startsWith("/") || value.dir.split("/").includes("..")) {
+    return "dir must be an absolute path";
+  }
+  return null;
+}
+
+/**
  * Validated configuration. Fails closed: an enabled provider without a known
  * vendor or without a command is a configuration error, not a provider that
  * silently never runs.
@@ -69,12 +88,25 @@ export function validateConfig(raw) {
   for (const key of ["maxChangeBytes", "maxPendingJobs", "maxStderrBytes", "retentionDays"]) {
     if (!(Number.isInteger(config[key]) && config[key] > 0)) errors.push(`${key}: positive integer`);
   }
+  if (config.statusSnapshot !== undefined) {
+    const problem = statusSnapshotProblem(config.statusSnapshot);
+    if (problem) errors.push(`statusSnapshot: ${problem}`);
+    else config.statusSnapshot = { dir: config.statusSnapshot.dir };
+  }
+  if (config.amuxUsageUrl !== undefined && !amuxUsageEndpoint(config.amuxUsageUrl)) {
+    errors.push("amuxUsageUrl: an http(s) URL on a loopback host");
+  }
   if (!Array.isArray(config.providers) || config.providers.length === 0) errors.push("providers");
   const ids = new Set();
   for (const provider of config.providers ?? []) {
     const label = `providers.${provider?.id}`;
     if (!isName(provider?.id) || ids.has(provider.id)) errors.push(`${label}: id`);
     ids.add(provider?.id);
+    // The status-report secret belongs to the sender's own account. A reviewer
+    // reads the change under review, which could ask it to print its environment.
+    if (Array.isArray(provider?.passEnv) && provider.passEnv.includes(STATUS_REPORT_SECRET_ENV)) {
+      errors.push(`${label}: passEnv must not carry ${STATUS_REPORT_SECRET_ENV}`);
+    }
     if (provider?.enabled !== true) continue;
     if (!isName(provider.vendor) || provider.vendor === "unknown") {
       errors.push(`${label}: an enabled provider needs a measured vendor`);
@@ -84,6 +116,19 @@ export function validateConfig(raw) {
     }
     if (provider.priority !== undefined && !(Number.isInteger(provider.priority) && provider.priority >= 0)) {
       errors.push(`${label}: priority must be a non-negative integer`);
+    }
+    if (provider.quotaProbe !== undefined && !["amux", "claude", "codex", "cursor", "copilot", "manual"].includes(provider.quotaProbe)) {
+      errors.push(`${label}: quotaProbe must be amux, claude, codex, cursor, copilot or manual`);
+    }
+    if (provider.quotaProbe === "amux" && !amuxUsageEndpoint(config.amuxUsageUrl)) {
+      errors.push(`${label}: quotaProbe amux needs amuxUsageUrl, an http(s) URL on this machine`);
+    }
+    if (provider.amuxProvider !== undefined && (provider.quotaProbe !== "amux" || !isName(provider.amuxProvider))) {
+      errors.push(`${label}: amuxProvider names an AMUX usage provider, with quotaProbe amux`);
+    }
+    if (provider.quotaKey !== undefined && (provider.quotaProbe !== "copilot" ||
+        typeof provider.quotaKey !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(provider.quotaKey))) {
+      errors.push(`${label}: quotaKey must name a Copilot account quota snapshot`);
     }
     if (provider.promptNote !== undefined && !(typeof provider.promptNote === "string" && provider.promptNote.length <= 4000)) {
       errors.push(`${label}: promptNote must be a string of at most 4000 characters`);

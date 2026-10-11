@@ -10,7 +10,7 @@ import {
 import { aggregate, parseReviewerOutput } from "../tools/review-orchestrator/lib/verdict.mjs";
 import { globToRegExp, requiredReviewers, validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { decodeRpc, tokenFromSshCommand } from "../tools/review-orchestrator/bin/review-orchestrator.mjs";
-import { encodeRpc, repoNameFromRemote } from "../tools/review-orchestrator/client/review.mjs";
+import { encodeRpc, parseArgs, repoNameFromRemote, supportsReviewerSelection } from "../tools/review-orchestrator/client/review.mjs";
 import { reviewerEnv } from "../tools/review-orchestrator/lib/service.mjs";
 import { isInstructionPath } from "../tools/review-orchestrator/lib/git.mjs";
 import { release, tryAcquire } from "../tools/review-orchestrator/lib/fsutil.mjs";
@@ -24,6 +24,34 @@ const PROVIDERS = [
   { id: "cursor", vendor: "xai", enabled: true },
   { id: "devin", vendor: "unknown", enabled: false },
 ];
+
+test("explicit reviewer options accumulate and require a capable server", () => {
+  const { options } = parseArgs(["submit", "--reviewer", "claude,cursor", "--reviewer", "copilot"]);
+  assert.deepEqual(options.reviewer, ["claude", "cursor", "copilot"]);
+  assert.equal(supportsReviewerSelection({ capabilities: ["reviewer-selection-v1"] }), true);
+  assert.equal(supportsReviewerSelection({ providers: PROVIDERS }), false);
+  assert.equal(supportsReviewerSelection(null), false);
+});
+
+test("a pinned reviewer ignores load ordering but retains independence, quota and concurrency", () => {
+  const request = { providers: PROVIDERS, authorVendor: "openai", load: {}, requestedProvider: "cursor" };
+  assert.equal(pickReviewer(request).provider.id, "cursor");
+  assert.equal(pickReviewer({ ...request, blockedProviders: new Set(["cursor"]) }).kind, "wait");
+  assert.equal(pickReviewer({ ...request, load: { cursor: { running: 1 } } }).kind, "wait");
+  for (const requestedProvider of ["codex", "devin", "missing"]) {
+    assert.equal(pickReviewer({ ...request, requestedProvider }).kind, "impossible");
+  }
+});
+
+test("automatic slots reserve the vendor of a pinned slot while it waits", () => {
+  const providers = [...PROVIDERS, { id: "claude-alt", vendor: "anthropic", enabled: true }];
+  const decisions = planAssignments({
+    providers, now: 1, blockedProviders: new Set(["claude"]), load: {},
+    jobs: [{ job: { id: "pinned", authorVendor: "openai", reviewerProviders: ["claude"] },
+      slots: [{ index: 0, status: "queued" }, { index: 1, status: "queued" }] }],
+  });
+  assert.deepEqual(decisions, [{ kind: "assign", jobId: "pinned", slot: 1, provider: "cursor", vendor: "xai" }]);
+});
 
 test("author vendor: implied for claude and codex, required for cursor, never contradicted", () => {
   assert.equal(resolveAuthorVendor("claude"), "anthropic");

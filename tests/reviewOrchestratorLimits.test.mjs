@@ -11,6 +11,8 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator } from "../tools/review-orchestrator/lib/service.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
 
+const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
+
 const TOOL = resolve("tools/review-orchestrator");
 const CLIENT = join(TOOL, "client/review.mjs");
 const SERVER = join(TOOL, "bin/review-orchestrator.mjs");
@@ -148,7 +150,7 @@ test("retention counts from when the last review finished, not from submission",
     const job = JSON.parse(readFileSync(jobFile, "utf8"));
     writeFileSync(jobFile, JSON.stringify({ ...job, submittedAt: Date.now() - 3 * 24 * 60 * 60 * 1000 }));
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     assert.equal(await orchestrator.prune(), 0);
     assert.equal(existsSync(store.jobDir(jobId)), true);
@@ -178,7 +180,7 @@ test("reviewer stderr is capped", async () => {
     f.commit("a.txt", "two\n");
     const { jobId } = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     const store = new Store(f.config.stateDir);
     assert.equal(store.readSlot(jobId, 0).verdict, "accept");
@@ -194,7 +196,7 @@ test("finished jobs past retention are pruned with their review refs; pending on
     f.commit("a.txt", "two\n");
     const done = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout).jobId;
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     f.commit("a.txt", "three\n");
     const pending = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout).jobId;

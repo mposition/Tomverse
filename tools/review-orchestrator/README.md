@@ -4,8 +4,10 @@
 요청하면, Ubuntu 서버가 작성자와 **모델 공급사가 다른** reviewer를 부하에 따라
 골라 실행하는 개발 도구입니다.
 
-- 외부 게시, PR 코멘트, 앱 DB 쓰기, 병합을 하지 않습니다. 사람이 개발 세션에서
-  부르는 도구이며, 결과는 서버 디스크에만 남습니다.
+- 외부 게시, PR 코멘트, 병합을 하지 않고 앱 DB에 직접 쓰지 않습니다. 사람이 개발
+  세션에서 부르는 도구이며, 결과는 서버 디스크에만 남습니다. 앱으로 나가는 것은
+  설정했을 때의 **내용 없는 상태 보고 하나**뿐이고, 그것도 daemon이 아니라 별도 계정의
+  sender가 보내며, 앱이 그 최신값 한 행을 씁니다(아래 "Agent office 상태 보고").
 - 판정은 결정적 코드가 합니다. reviewer의 답은 마지막 ```json 블록 하나로만
   읽고, 형식이 맞지 않으면 `unknown`입니다. blocker·major 지적이 있으면 reviewer가
   accept라고 해도 reject입니다.
@@ -19,6 +21,8 @@
    `--author cursor --author-vendor anthropic`이고, Claude reviewer는 제외됩니다.
 2. `vendor`가 `unknown`이거나 `enabled: false`인 provider는 배정하지 않습니다.
    enabled인데 vendor를 모르면 설정 오류로 서버가 시작하지 않습니다.
+   새 배정에는 해당 **서버 계정**의 사용 가능 잔액도 필요합니다. `quotaProbe`가 없거나
+   조회가 실패한 계정, 소진된 계정은 대기시키고 이미 시작한 검토는 끝까지 진행합니다.
 3. 순서: `priority`(기본 0, 작을수록 먼저) → 진행 중 건수 → 최근 24시간 배정 수 → 가장 오래 쉰
    provider → id. provider마다 동시 실행은 `maxConcurrent`(기본 1)까지이고, 모두 바쁘면 대기합니다.
    막힌 작업이 뒤의 작업을 막지 않습니다. 요청마다 credit을 쓰는 provider(Copilot, 검토 1건 약
@@ -28,6 +32,9 @@
 4. reviewer는 기본 1명입니다. 바뀐 파일이 `contractPaths`에 걸리면 서버가 2명으로
    올리며, 두 명은 반드시 서로 다른 공급사입니다. 집계는 reject 하나라도 있으면
    reject, 그다음 unknown, 모두 accept여야 accept입니다.
+5. 운영자가 예외로 특정 검토자를 요청한 경우 `--reviewer <providerId>`로 지정합니다.
+   지정은 기본 배정 순서에 우선하지만 독립성·잔액·동시 실행 한도와 계약 검토자 수는
+   그대로 적용합니다. 지정된 검토자가 대기하면 다른 검토자로 대체하지 않습니다.
 
 ## Windows에서 쓰기
 
@@ -85,12 +92,42 @@ npm run -s review -- wait r-20261002-061500-a1b2c3
   diff와 계약 경로 판정은 범위를 좁히지 않고 base..HEAD 전체로 합니다 — checkout에 base
   버전이 들어 있으므로, 좁히면 그 이전의 지시 파일 변경이 보이지 않게 됩니다.
 
+### 예외 상황에서 특정 검토자 지정
+
+자동 배정이 기본입니다. 운영자가 특정 검토자를 요청한 경우 서버 설정의 provider ID를
+`--reviewer`로 전달합니다. 옵션 반복 또는 쉼표로 최대 3명을 지정할 수 있고, 지정 순서대로
+검토 슬롯에 연결됩니다. 지정 수보다 `--reviewers`나 계약 규칙의 최소 인원이 크면 나머지
+슬롯은 자동 배정합니다. 예를 들어 계약 변경에 `--reviewer claude` 하나만 지정해도
+검토자는 2명이며, 두 번째는 다른 공급사에서 자동으로 고릅니다.
+
+**로컬 PC의 PowerShell, 저장소 clone 폴더 안.** Node 22 이상, 지정 기능이 포함된
+클라이언트와 서버, `review-orch` SSH key가 필요합니다. production 자격증명은 필요 없습니다.
+명령은 서버에 검토 작업을 만들고 배정 후 계정의 사용량을 소비할 수 있습니다. 대기 중인
+작업을 취소하려면 운영자가 아래 서버 운영 절의 `cancel`을 사용합니다. 실행된 검토의
+사용량은 되돌릴 수 없습니다.
+
+```powershell
+npm run -s review -- submit --author codex --reviewer claude --scope "운영자가 지정한 예외 검토"
+npm run -s review -- submit --author codex --reviewer claude --reviewer copilot --scope "운영자가 지정한 두 검토자"
+```
+
+- ID는 `status`의 provider 목록에서 확인합니다. 없는 ID, 비활성 provider, 작성자와 같은
+  공급사, 중복 ID 또는 같은 공급사의 검토자 두 명은 요청 오류로 거절합니다.
+- 지정 계정이 동시 실행 한도에 도달했거나 잔액이 없거나 조회 결과를 확인할 수 없으면
+  해당 슬롯은 대기합니다. 다른 작업은 계속 배정할 수 있습니다.
+- `status <jobId>`와 `wait <jobId>`의 `reviewerProviders`·`requestedProvider`는 지정한
+  검토자를, 슬롯의 `provider`는 실제 배정된 검토자를 보여 줍니다.
+- 클라이언트와 서버를 모두 업데이트해야 합니다. 새 클라이언트는 서버의
+  `reviewer-selection-v1` capability를 먼저 확인하고, 구버전 서버이면 작업을 보내기 전에
+  거절합니다. 구버전 클라이언트는 이 옵션을 지원하지 않습니다.
+
 ### 앱 지시 파일에 넣을 문장 (서버 가동 후)
 
 > 작업을 마치고 독립 검토가 필요하면 `npm run -s review -- submit --author <claude|codex|cursor>`
 > 를 실행하고(Cursor는 `--author-vendor`로 사용한 모델 공급사를 함께 적습니다),
-> 결과가 나올 때까지 `npm run -s review -- wait <jobId>`를 반복합니다. reviewer를
-> 직접 고르지 않습니다. `reject`는 지적을 고친 뒤 새로 submit하고, `unknown`은
+> 결과가 나올 때까지 `npm run -s review -- wait <jobId>`를 반복합니다. reviewer는
+> 기본으로 서버가 고르고, 운영자가 특정 검토자를 명시한 경우에만 `--reviewer <providerId>`를
+> 사용합니다. `reject`는 지적을 고친 뒤 새로 submit하고, `unknown`은
 > 다시 보내지 말고 사람에게 알립니다.
 
 ## 서버 설치 (Ubuntu)
@@ -117,6 +154,122 @@ command="REVIEW_ORCH_CONFIG=/etc/review-orchestrator/config.json node /opt/revie
 
 forced command를 쓰면 클라이언트가 보낸 원격 명령은 무시되고 마지막 `rpc <token>`만
 읽힙니다. 상태 확인은 서버에서 `node .../bin/review-orchestrator.mjs status`.
+
+### 계정 잔액 확인과 배정 재개
+
+**AMUX와 같은 구독 계정을 쓰면 `quotaProbe: "amux"`를 씁니다.** AMUX는 같은 기계에서
+모든 구독 계정의 사용량을 이미 속도를 지켜 조회·캐시하고 `GET /api/usage`로 내놓습니다
+(`crates/amux-server/src/api/usage.rs`). 검토 서버가 같은 계정을 공급사에 따로 물으면
+조회자가 둘이 되고, Claude 사용량 API는 그때 HTTP 429로 막힙니다. `amux`는 그 응답을
+읽기만 합니다.
+
+- 설정 최상위의 `amuxUsageUrl`(예: `https://127.0.0.1:8824/api/usage`)을 읽습니다.
+  **이 기계의 loopback 주소만** 받고, AMUX의 자체 서명 인증서는 loopback에서만 검증 없이
+  받습니다. 다른 주소는 설정 오류입니다.
+- 이 URL을 쓰는 모든 provider가 **1분에 한 번 읽은 한 응답**을 함께 씁니다(AMUX 자체 캐시와
+  같은 주기). 동시에 묻는 provider는 진행 중인 한 요청을 함께 기다립니다.
+- provider id(다르면 `amuxProvider`)와 같은 AMUX provider의 창들 중 **가장 적게 남은
+  비율**이 잔액입니다. Claude는 5시간·주간·모델별 주간 창, Codex는 7일 창, Copilot은
+  account entitlement 창입니다. 0이면 배정을 보류합니다.
+- AMUX가 측정하지 않았거나(`measured`가 아님), 사용할 수 없거나, stale이거나, 읽을 수 없는
+  창이 하나라도 있거나, 응답이 없으면 `unknown`으로 보류합니다.
+- AMUX가 공급사 항목에 `credit_usd`를 보고하면(Cursor의 크레딧 grant 잔액) Cursor probe와 같은
+  규칙을 씁니다: 포함 사용량이 소진돼도 크레딧이 남아 있으면 배정하고, 크레딧 0이면 보류하며,
+  크레딧을 못 읽었으면 소진으로 봅니다. `status`와 Agent office에 크레딧 금액도 함께 보입니다.
+- **Cursor는 AMUX가 `credit_usd`를 보고하는 빌드로 바뀐 뒤에 `amux`로 옮깁니다.** 그 전 빌드는
+  크레딧을 읽지 않아, 포함 사용량이 소진되면 크레딧이 남아도 소진으로 보입니다. 그때까지는
+  `quotaProbe: "cursor"`에 둡니다.
+
+아래의 공급사별 probe는 AMUX가 없는 기계나 AMUX가 보지 않는 계정을 위한 것입니다.
+
+`quotaProbe: "claude"`는 reviewer가 쓰는 OAuth 토큰으로 Claude 사용량의 5시간·7일
+창을 조회합니다. `CLAUDE_CODE_OAUTH_TOKEN`을 `passEnv`로 전달하는 설정이면 그 토큰을
+우선하고, 그렇지 않으면 `~review/.claude/.credentials.json`을 읽습니다.
+이 사용량 API는 요청 수를 엄격히 제한하고(HTTP 429), 같은 구독 계정을 AMUX도
+조회합니다. 그래서 Claude만 따로 속도를 지킵니다: 정상 조회 뒤 5분 동안 다시 묻지
+않고, 429면 `Retry-After`나 2·4·8…분(최대 30분) 중 긴 쪽만큼 기다리며, 그동안은
+30분 이내의 마지막 정상값을 씁니다. 그보다 오래되면 `unknown`으로 배정을 보류합니다
+(AMUX의 `provider/claude/usage_cache.rs`와 같은 방식).
+`quotaProbe: "codex"`는 reviewer와 같은 `codex` 실행 파일의 app-server에서
+`account/rateLimits/read`를 조회합니다. 각 창의 남은 비율이 0이면 배정하지
+않습니다. 조회 실패·응답 형식 불명·설정 누락도 새 배정을 대기시킵니다.
+
+`quotaProbe: "cursor"`는 Cursor CLI 2026.10.01의 [`/usage`](https://cursor.com/docs/cli/changelog)가
+쓰는 `DashboardService/GetCurrentPeriodUsage`를 조회합니다. Ubuntu에서는
+`~review/.config/cursor/auth.json`의 로그인 access token을 사용하며, `CURSOR_API_KEY`를
+reviewer에게 전달하는 설정이면 저장된 토큰이 그 API key의 계정과 일치해야 합니다.
+이어서 같은 토큰으로 `DashboardService/GetCreditGrantsBalance`를 조회해 크레딧 잔액
+(`creditBalanceCents`)을 읽습니다. **포함 사용량 pool이 소진됐어도 크레딧이 남아 있으면
+배정합니다**(Cursor는 포함 사용량 뒤 크레딧으로 계속 처리합니다). 포함 사용량 소진과
+크레딧 0이 함께일 때만 보류하고, 크레딧 조회가 실패하면 크레딧을 모르는 것으로 보아
+포함 사용량 소진만으로 보류합니다. 크레딧 금액은 `status`의 `creditUsd`와 Agent office
+quota 카드에 함께 표시됩니다.
+이 경로는 공개 Admin API가 아닌 CLI 내부 API이므로 응답이 바뀌거나 로그인 토큰이
+만료되면 `unknown`으로 보류하며, probe는 로그인·토큰 갱신을 하지 않습니다.
+종량제 추가 지출 한도(`GetHardLimit`)는 보지 않습니다.
+
+`quotaProbe: "copilot"`는 reviewer와 같은 CLI를 `--headless --stdio`로 띄워 공식
+SDK의 [`account.getQuota`](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing)를
+호출합니다. 검토 세션이나 모델 호출 없이 같은 `COPILOT_GITHUB_TOKEN`으로 현재
+계정의 남은 할당량을 읽습니다. `quotaKey`는 기본 `premium_interactions`이고,
+서버의 실제 응답에서 다른 계정 quota key를 확인했다면 설정으로 지정할 수 있습니다.
+남은 비율이 0이면 추가 과금이 허용된 계정도 새 배정을 보류합니다. 이 수치를 AI Credits
+금액으로 변환하지 않으며, `--max-ai-credits 50`은 별도의 한 검토 제한입니다.
+GitHub의 [AI Credit 사용량 REST 보고서](https://docs.github.com/en/rest/billing/usage?apiVersion=2026-03-10)는
+별도 `Plan` 읽기 권한이 필요해 기존 reviewer 토큰의 권한을 넓히지 않았습니다.
+
+자동 probe는 60초마다(Claude는 위의 간격으로) 갱신하고 `status`는 데몬의 최근 관측 파일만 읽습니다.
+Cursor 내부 API와 Copilot CLI quota 응답은 운영 서버의 `review` 계정으로 실측한 뒤
+가동합니다. 확인 불가한 계정은 `unknown`이 되어 대기하며 검토를 시험 호출하지 않습니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 저장소 clone 위치와 무관.** Node 22와
+`review` 서비스 계정으로 실행할 권한이 필요합니다. production 앱 자격증명은
+필요 없습니다. 아래 명령은 계정 사용량만 조회하며 검토 배정·모델 호출·설정 변경을
+하지 않습니다. 변수는 이 셸에서만 유지됩니다.
+
+```bash
+RO="sudo -u review env REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs"
+$RO quota check cursor
+$RO status
+```
+
+`quota check`는 비활성 provider도 읽기 전용으로 확인할 수 있으며 그 provider의
+배정을 활성화하지 않습니다. Copilot 토큰을 systemd `EnvironmentFile`에서 받는
+설정이면 같은 서비스 환경에서 실행해야 합니다. 토큰을 명령 인자에 붙이지 않습니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 저장소 clone 위치와 무관.** 위의 권한과 Node 22가
+필요하며 production 앱 자격증명은 필요 없습니다. 현재 검토 서버의 Copilot 환경 파일을
+읽는 일회성 서비스를 만들고 계정 사용량만 조회한 뒤 제거합니다. 계정·배정·설정은
+변경하지 않으며 토큰 값은 인자나 출력에 넣지 않습니다.
+
+```bash
+sudo systemd-run --wait --pipe --collect \
+  --property=User=review \
+  --property=EnvironmentFile=/home/review/.config/review-orchestrator/copilot.env \
+  --setenv=REVIEW_ORCH_CONFIG=/home/review/.config/review-orchestrator/config.json \
+  --setenv=PATH=/home/review/.local/bin:/usr/local/bin:/usr/bin:/bin \
+  /usr/bin/node /home/review/review-orchestrator/tools/review-orchestrator/bin/review-orchestrator.mjs quota check copilot
+```
+
+자동 조회가 없는 계정의 fallback은 `quotaProbe: "manual"`입니다. 그 설정을 먼저
+지정한 provider에만 아래 명령을 쓰며, **review 서버에 로그인된 바로 그 계정**의
+사용량 화면에서 확인한 잔액을 기록합니다.
+
+**Ubuntu 검토 서버의 관리 계정 bash, 위의 `RO`를 설정한 같은 셸.** production 앱
+자격증명은 필요 없습니다. 아래 명령은 `review` 계정의 상태 폴더에 관측값을 쓰며,
+0으로 다시 기록하면 배정을 멈출 수 있습니다.
+
+```bash
+$RO quota record cursor 25 percent
+$RO quota record copilot 100 credits
+$RO status
+```
+
+수동 관측은 5분 동안만 유효하며 **한 번 기록하면 검토 한 건만** 시작합니다. 다음
+배정 전에는 다시 확인해 기록해야 합니다. `status`의 provider별 `quota`와
+`remaining`을 보되, 수동 기록을 사용한 뒤에는 `quota: "unknown"`으로 돌아갑니다.
+대기열의 작업은 삭제되지 않으며 새 관측값이 들어오면 자동으로 배정됩니다.
+`quota record`는 서버 로컬 명령이고 forced-command SSH RPC에는 열려 있지 않습니다.
 
 ### 설치 후 실측할 것
 
@@ -231,6 +384,106 @@ SSH 키·다른 작업의 소스는 보이지 않습니다.
 | `maxPendingJobs` | 20 | `queue_full` |
 | `maxOutputBytes` / `maxStderrBytes` | 8 MiB / 1 MiB | stdout은 `unknown`, stderr는 앞부분만 보관 |
 | `retentionDays` | 30 | 끝난 작업과 `refs/review/<id>`를 daemon이 한 시간마다 지움 |
+
+## Agent office 상태 보고
+
+앱은 이 서버에 접속할 수 없으므로(SSH 뒤에 있음), 1분마다 앱의
+`POST /api/internal/review-orchestrator/status`로 상태를 보냅니다. 운영자는 Admin의
+Agent office "독립 검토실"에서 그것을 봅니다.
+
+**보내는 일은 두 프로세스가 나눠 하고, 둘은 계정이 다릅니다.**
+
+- **daemon(`review` 계정)은 자격증명을 갖지 않습니다.** reviewer CLI가 모두 같은 `review`
+  계정으로 돌고, 검토 대상 변경은 reviewer에게 그 계정이 읽을 수 있는 파일이나 프로세스
+  환경을 출력하라고 시킬 수 있습니다. 그래서 daemon은 `statusSnapshot.dir`에 내용 없는
+  `snapshot.json` 하나만 씁니다(1분마다, 원자적 교체, 0644).
+- **sender(`bin/review-status-sender.mjs`)는 systemd `DynamicUser`의 별도 계정으로 돕니다.**
+  secret은 root만 읽는 파일에서 systemd가 이 서비스 환경에만 넣으므로, `review` 계정은 그
+  파일도 그 프로세스 환경도 읽을 수 없습니다.
+- **sender가 실행하는 코드는 `review` 계정이 고칠 수 없는 곳에 있습니다.** sender는 Node
+  내장 모듈만 import하는 파일 하나이고, 운영자가 GitHub에서 root 소유 경로
+  (`/usr/local/lib/review-status-sender/`)로 직접 받습니다. `review` 계정의 checkout을 실행하거나
+  그곳에서 복사하지 않습니다 — 그 계정이 고친 코드가 재시작 때 secret을 가진 채 실행되기
+  때문입니다. unit 파일도 같은 이유로 GitHub에서 받습니다.
+- **보내는 것**: reviewer별 id·vendor·켜짐 여부·실행 중 건수/동시 실행 상한, 계정 quota
+  (`quota check`와 같은 probe가 마지막으로 읽은 상태 하나와 남은 양 하나 — 퍼센트, credits 또는
+  USD — 그리고 읽었을 때만 크레딧 잔액 USD), reviewer를 기다리는 job 수, drain 여부, 최근 24시간 판정 수(accept·reject·unknown).
+  **보내지 않는 것**: jobId, 작성자, 브랜치, scope, diff, 지적, reviewer 원문, probe가 읽은
+  계정 정보. daemon이 그런
+  값을 snapshot에 넣지 않고, sender는 review 설정·job·reviewer 원문을 읽지 않으며 파일을
+  필드 단위로 다시 만들어 그 밖의 것은 버리고, 앱도 모르는 필드를 거절합니다.
+- **`review` 계정이 할 수 있는 최악은 검토실 숫자를 틀리게 보이는 것입니다**(snapshot 파일을
+  고쳐 쓰는 것). 앱에서 이 숫자로 결정되는 것은 없습니다.
+- **검토에 영향을 주지 않습니다.** daemon은 작은 파일 하나를 쓸 뿐 네트워크를 기다리지
+  않고, 쓰기에 실패해도 검토는 그대로 진행합니다. 로그는 결과가 바뀔 때만 한 줄입니다.
+- **daemon이 멈추면 sender도 조용해집니다.** snapshot이 3분보다 오래되면(1분 쓰기 세 번
+  누락) 보내지 않으므로, 앱은 마지막 보고 뒤 5분이 지나면 검토실을 "보고 없음"으로
+  바꿉니다. 앱은 받은 시각을 **앱의 시계로** 적습니다. 이 시간들이 서로 맞물려 있으므로
+  주기는 설정으로 바꾸지 않습니다.
+- **기본은 꺼짐입니다.** config에 `statusSnapshot`이 없으면 파일을 쓰지 않고, sender
+  서비스를 설치하지 않으면 아무것도 보내지 않습니다.
+
+### 켜기
+
+앱 쪽 route와 이 sender가 **main**에 들어가 production에 배포된 뒤에 합니다(sender 파일을
+main에서 받습니다). 먼저 켜도 해는 없고, sender 로그에 `http_404` 한 줄이 남습니다. 아래
+경로는 이 서버의 현재 배치(`/home/review/...`) 기준입니다.
+
+**① Ubuntu 검토 서버의 관리 계정 bash, 아무 폴더.** secret을 root만 읽는 파일에 바로
+씁니다. 값은 화면에 나오지 않습니다.
+
+```bash
+sudo install -d -m 0700 /etc/review-status
+sudo sh -c 'umask 077; printf "REVIEW_ORCHESTRATOR_STATUS_SECRET=%s\n" "$(openssl rand -hex 32)" > /etc/review-status/secret.env'
+```
+
+**② Railway 대시보드, production 앱 서비스의 Variables.** 같은 값을
+`REVIEW_ORCHESTRATOR_STATUS_SECRET`로 넣습니다. 값은 ①의 서버에서
+`sudo cat /etc/review-status/secret.env`로 보고 대시보드에 직접 붙입니다(대화나 문서에
+옮기지 않습니다). 변수 저장은 재배포를 일으킵니다.
+
+**③ 같은 서버 bash.** snapshot 폴더를 만들고 daemon config에 적은 뒤, 코드 업데이트와
+재시작을 위 "서버 업데이트 (drain)" 절차로 합니다.
+
+```bash
+sudo install -d -o review -m 0755 /var/lib/review-status
+sudo -u review nano /home/review/.config/review-orchestrator/config.json
+#   "statusSnapshot": { "dir": "/var/lib/review-status" }
+```
+
+`dir` 하나만 받습니다. 절대 경로여야 하고, URL·secret·주기 필드를 넣으면 설정 오류로
+시작하지 않습니다. 재시작 뒤
+`sudo journalctl -u review-orchestrator --since "5 min ago" | grep "status snapshot"`에
+`status snapshot written`이 보이면 됩니다.
+
+**④ 같은 서버 bash.** sender와 unit 파일을 GitHub의 main에서 root 소유로 받고 켭니다.
+`review` 계정의 checkout에서 복사하지 않습니다.
+
+```bash
+RAW=https://raw.githubusercontent.com/mposition/Tomverse/main/tools/review-orchestrator
+sudo install -d -m 0755 /usr/local/lib/review-status-sender
+sudo curl -fsSL -o /usr/local/lib/review-status-sender/review-status-sender.mjs "$RAW/bin/review-status-sender.mjs"
+sudo curl -fsSL -o /etc/systemd/system/review-status-sender.service "$RAW/deploy/review-status-sender.service"
+sudo chmod 0644 /usr/local/lib/review-status-sender/review-status-sender.mjs /etc/systemd/system/review-status-sender.service
+sudo systemctl daemon-reload && sudo systemctl enable --now review-status-sender
+sudo journalctl -u review-status-sender --since "5 min ago"
+```
+
+`status sender started` 다음에 `status report ok`가 나오면 끝입니다.
+
+- `http_401`: ①과 ②의 값이 다릅니다.
+- `status snapshot is stale`: ③의 daemon이 파일을 쓰지 않습니다.
+- `status snapshot unreadable: ENOENT`: ③의 `dir`과 unit의 `REVIEW_STATUS_SNAPSHOT`이
+  다릅니다.
+- `status sender not started: ...`: 그 줄이 말하는 설정이 빠졌습니다(종료 코드 64, 재시작하지
+  않습니다).
+- 서비스가 아예 시작하지 않고 `Failed to load environment files`가 보이면 ①의
+  `/etc/review-status/secret.env`가 없습니다.
+
+sender를 업데이트할 때는 ④의 `curl` 두 줄과 `chmod`를 다시 실행하고
+`sudo systemctl daemon-reload && sudo systemctl restart review-status-sender`를 합니다.
+끄려면 `sudo systemctl disable --now review-status-sender`입니다. 검토실은 5분 뒤 "보고
+없음"이 됩니다.
 
 ## 알려진 한계
 
