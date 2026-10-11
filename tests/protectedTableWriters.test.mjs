@@ -246,7 +246,12 @@ test("the SQL comment lexer keeps quotes, identifiers and dollar bodies", () => 
 });
 
 test("an allowlisted raw SQL file that gains a statement fails", () => {
-  const entry = RAW_SQL_ALLOWLIST.find((candidate) => candidate.path.endsWith(".sql"));
+  // Keep this single-table fixture independent of registry insertion order.
+  const entry = RAW_SQL_ALLOWLIST.find((candidate) =>
+    candidate.path === "prisma/migrations/00000000000000_baseline/migration.sql" &&
+    candidate.table === "AdminAuditLog"
+  );
+  assert.ok(entry, "the baseline audit fixture remains explicitly allowlisted");
   const original = readFileSync(resolve(ROOT, entry.path), "utf8");
   const clean = checkProtectedTableWriters({
     sources: [{ path: entry.path, text: original }],
@@ -258,6 +263,22 @@ test("an allowlisted raw SQL file that gains a statement fails", () => {
   }).filter((finding) => finding.path === entry.path);
   assert.equal(extended.length, 1);
   assert.equal(extended[0].rule, "raw-sql");
+});
+
+test("the monthly budget migration rejects added writes for both protected tables", () => {
+  const path = "prisma/migrations/20261011070000_amux_v4_owner_monthly_budget/migration.sql";
+  const original = readFileSync(resolve(ROOT, path), "utf8");
+  const findingsFor = (text) => checkProtectedTableWriters({
+    sources: [{ path, text }],
+  }).filter((finding) => finding.path === path);
+  assert.deepEqual(findingsFor(original), []);
+  const extended = findingsFor(`${original}\nDELETE FROM "AdminAuditLog";\n`);
+  assert.equal(extended.length, 2);
+  assert.ok(extended.every((finding) => finding.rule === "raw-sql"));
+  assert.deepEqual(
+    extended.map((finding) => finding.detail.split(":")[0]).sort(),
+    ["AdminAuditLog", "AmuxIdeaAnalysisBudgetSetting"]
+  );
 });
 
 test("the Prompt Refiner preview adds exact reads without widening its write boundary", () => {
