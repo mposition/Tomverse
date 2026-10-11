@@ -35,6 +35,6 @@ test("the AMUX floor shows the resident roster, not obsolete runtime workers", a
       return boxes.some((a, i) => boxes.some((b, j) => i < j && a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top));
     });
     expect(overlaps).toBe(false);
-    await page.screenshot({ path: `test-results-admin/agent-office-amux-${viewport.width}.png` });
+    await page.getByTestId("agent-office-world").screenshot({ path: `test-results-admin/agent-office-amux-${viewport.width}.png` });
   }
 });
