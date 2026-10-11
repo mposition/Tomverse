@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { createServer as createTlsServer } from "node:https";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   AMUX_USAGE_CACHE_MS,
   AMUX_USAGE_MAX_BYTES,
@@ -9,6 +13,7 @@ import {
   amuxQuota,
   amuxQuotaFromUsage,
   amuxUsageEndpoint,
+  readAmuxCa,
   readAmuxUsage,
 } from "../tools/review-orchestrator/lib/amux-usage.mjs";
 import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
@@ -84,7 +89,7 @@ test("a provider's quota is the smallest share AMUX measured across its windows"
   assert.deepEqual(amuxQuotaFromUsage(odd, "copilot"), { state: "unknown" });
 });
 
-test("only AMUX on this machine is read, and its self-signed certificate only there", async () => {
+test("only AMUX on this machine is read, and its certificate is verified, never waved through", async () => {
   assert.equal(amuxUsageEndpoint("https://127.0.0.1:8824/api/usage")?.href, "https://127.0.0.1:8824/api/usage");
   assert.ok(amuxUsageEndpoint("http://localhost:8824/api/usage"));
   assert.ok(amuxUsageEndpoint("https://[::1]:8824/api/usage"));
@@ -93,20 +98,92 @@ test("only AMUX on this machine is read, and its self-signed certificate only th
     "https://user:pw@127.0.0.1:8824/api/usage", "not a url", 8824, undefined]) {
     assert.equal(amuxUsageEndpoint(bad), null, String(bad));
   }
-  // The TLS check is relaxed for https on loopback, and nowhere else.
+  // https trusts AMUX's certificate alone and checks the name AMUX signs for;
+  // verification is never switched off, here or anywhere in the module.
   let seen;
+  let sent = 0;
   let destroyed = 0;
   const fake = (url, options) => {
+    sent += 1;
     seen = options;
     return { on() {}, end() {}, destroy() { destroyed += 1; } };
   };
-  const tls = readAmuxUsage(new URL("https://127.0.0.1:8824/api/usage"), { request: fake, timeoutMs: 10 });
-  assert.equal(seen.rejectUnauthorized, false);
-  const plain = readAmuxUsage(new URL("http://127.0.0.1:8824/api/usage"), { request: fake, timeoutMs: 10 });
+  const tls = readAmuxUsage(new URL("https://[::1]:8824/api/usage"), { request: fake, timeoutMs: 10, ca: "PEM" });
+  assert.equal(seen.ca, "PEM");
+  assert.equal(seen.servername, "localhost");
   assert.equal("rejectUnauthorized" in seen, false);
+  const plain = readAmuxUsage(new URL("http://127.0.0.1:8824/api/usage"), { request: fake, timeoutMs: 10 });
+  assert.equal("ca" in seen || "rejectUnauthorized" in seen, false);
   // Neither fake ever answers: the deadline ends both reads and tears down the request.
   assert.deepEqual(await Promise.all([tls, plain]), [null, null]);
   assert.equal(destroyed, 2);
+  // Without the certificate, https sends nothing at all.
+  assert.equal(await readAmuxUsage(new URL("https://127.0.0.1:8824/api/usage"), { request: fake }), null);
+  assert.equal(sent, 2);
+  assert.doesNotMatch(readFileSync("tools/review-orchestrator/lib/amux-usage.mjs", "utf8"), /rejectUnauthorized/);
+});
+
+// A self-signed certificate made the way AMUX makes its own: CN amux, for
+// localhost and 127.0.0.1 (crates/amux-server/src/tls.rs). Made per run, so
+// no private key is committed. CI has openssl; a machine without it skips.
+const hasOpenssl = spawnSync("openssl", ["version"]).status === 0;
+const selfSigned = (dir, name) => {
+  const key = join(dir, `${name}-key.pem`);
+  const cert = join(dir, `${name}-cert.pem`);
+  const made = spawnSync("openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+    "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=amux",
+    "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"], { encoding: "utf8" });
+  assert.equal(made.status, 0, made.stderr);
+  return { key: readFileSync(key, "utf8"), cert: readFileSync(cert, "utf8"), certFile: cert };
+};
+
+test("https reads AMUX only under its own certificate", {
+  skip: !hasOpenssl && !process.env.CI ? "openssl is not installed here" : false,
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "review-amux-tls-"));
+  const servers = [];
+  const serveTls = async (identity) => {
+    const server = createTlsServer({ key: identity.key, cert: identity.cert }, (req, res) => res.end(JSON.stringify(usage())));
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    servers.push(server);
+    return server.address().port;
+  };
+  try {
+    const amux = selfSigned(dir, "amux");
+    const impostor = selfSigned(dir, "impostor");
+    const port = await serveTls(amux);
+    const at = (host) => new URL(`https://${host}:${port}/api/usage`);
+    // AMUX's own certificate: read, by IP and by name.
+    assert.equal((await readAmuxUsage(at("127.0.0.1"), { ca: amux.cert })).providers.length, 6);
+    assert.equal((await readAmuxUsage(at("localhost"), { ca: amux.cert })).providers.length, 6);
+    // Trusting a different certificate, or none, reads nothing.
+    assert.equal(await readAmuxUsage(at("127.0.0.1"), { ca: impostor.cert }), null);
+    assert.equal(await readAmuxUsage(at("127.0.0.1"), {}), null);
+    // Another server on the port with the same names but another key is refused.
+    const otherPort = await serveTls(impostor);
+    assert.equal(await readAmuxUsage(new URL(`https://127.0.0.1:${otherPort}/api/usage`), { ca: amux.cert }), null);
+
+    // The configured copy is read for each read, and anything unreadable is unknown.
+    assert.equal(readAmuxCa(amux.certFile), amux.cert);
+    const notCert = join(dir, "not-a-cert.pem");
+    writeFileSync(notCert, amux.key);
+    assert.equal(readAmuxCa(notCert), null);
+    assert.equal(readAmuxCa(join(dir, "missing.pem")), null);
+    assert.equal(readAmuxCa(undefined), null);
+    const url = at("127.0.0.1").href;
+    assert.deepEqual(await amuxQuota({ id: "codex" }, url, { caFile: amux.certFile, reads: new Map() }),
+      { state: "available", remainingPercent: 46 });
+    assert.deepEqual(await amuxQuota({ id: "codex" }, url, { caFile: notCert, reads: new Map() }), { state: "unknown" });
+    assert.deepEqual(await amuxQuota({ id: "codex" }, url, { reads: new Map() }), { state: "unknown" });
+    // The daemon passes the configured copy through.
+    assert.deepEqual(await probeProviderQuotas({
+      stateDir: dir, amuxUsageUrl: url, amuxCaFile: amux.certFile,
+      providers: [{ id: "claude", enabled: true, quotaProbe: "amux" }],
+    }), { claude: { state: "available", remainingPercent: 3 } });
+  } finally {
+    await Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const serve = async (handler) => {
@@ -210,10 +287,16 @@ test("every provider on one URL shares one read a minute", async () => {
 test("the daemon reads AMUX for every provider that names it, and the config must say where", async () => {
   const base = { stateDir: "/x", repos: { demo: { url: "u", mirror: "m" } } };
   const provider = (overrides = {}) => ({ id: "claude", vendor: "anthropic", enabled: true, command: "c", args: [], quotaProbe: "amux", ...overrides });
-  assert.ok(validateConfig({ ...base, amuxUsageUrl: "https://127.0.0.1:8824/api/usage", providers: [provider()] }));
+  const https = { amuxUsageUrl: "https://127.0.0.1:8824/api/usage", amuxCaFile: "/etc/review-orchestrator/amux-cert.pem" };
+  assert.ok(validateConfig({ ...base, ...https, providers: [provider()] }));
   assert.throws(() => validateConfig({ ...base, providers: [provider()] }), /quotaProbe amux needs amuxUsageUrl/);
   assert.throws(() => validateConfig({ ...base, amuxUsageUrl: "https://amux.example.com/api/usage", providers: [provider()] }), /amuxUsageUrl/);
-  assert.throws(() => validateConfig({ ...base, amuxUsageUrl: "https://127.0.0.1:8824/api/usage", providers: [provider({ quotaProbe: "claude", amuxProvider: "claude" })] }), /amuxProvider/);
+  assert.throws(() => validateConfig({ ...base, ...https, providers: [provider({ quotaProbe: "claude", amuxProvider: "claude" })] }), /amuxProvider/);
+  // https is verified against AMUX's certificate, so it needs the copy's absolute path.
+  assert.throws(() => validateConfig({ ...base, amuxUsageUrl: https.amuxUsageUrl, providers: [provider()] }), /amuxCaFile: an https amuxUsageUrl/);
+  for (const bad of ["amux-cert.pem", "/etc/../home/amux/.amux/tls/cert.pem", "", 7]) {
+    assert.throws(() => validateConfig({ ...base, ...https, amuxCaFile: bad, providers: [provider()] }), /amuxCaFile: the absolute path/, String(bad));
+  }
 
   const live = await serve((req, res) => res.end(JSON.stringify(usage())));
   const config = validateConfig({
