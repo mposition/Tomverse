@@ -53,4 +53,6 @@ test("the monthly setting reuses the existing budget switches and never adds a c
   assert.match(panel, /analysisBudgetSavedMatches/);
   assert.match(panel, /setPending\(attempt\)/);
   assert.match(panel, /aria-describedby/);
+  assert.equal((panel.match(/setRequiresReauthentication\(response\.status === 428\)/g) ?? []).length, 3);
+  assert.match(panel, /requiresReauthentication \? <AmuxAnalysisBudgetReauthenticationNotice/);
 });
