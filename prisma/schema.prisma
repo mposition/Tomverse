@@ -2423,6 +2423,7 @@ model AdminAuditLog {
   amuxV4FrontierRevocations AmuxIdeaFrontierModelApproval[] @relation("AmuxV4FrontierRevocationAudit")
   amuxV4SourcePlanCreations AmuxIdeaSourcePlanRevision[] @relation("AmuxIdeaPlanCreationAudit")
   amuxV4AnalysisPriceApprovals AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceApprovalAudit")
+  amuxV4AnalysisBudgetSettings AmuxIdeaAnalysisBudgetSetting[] @relation("AmuxV4AnalysisBudgetSettingAudit")
   amuxV4AnalysisPriceRevocations AmuxIdeaAnalysisPriceVersion[] @relation("AmuxV4AnalysisPriceRevocationAudit")
   amuxV4ContentPurgeAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4ContentPurgeAudit")
   amuxV4KeyDeleteAudits AmuxIdeaContentKeyRetirement[] @relation("AmuxV4KeyDeleteAudit")
@@ -9468,9 +9469,20 @@ model AmuxIdeaTransferPreview {
   @@index([payloadPurgeAfter, payloadPurgedAt])
 }
 
-/// Agent-only monthly ceiling for AMUX v4 idea analysis. A missing row is a
-/// refusal, never an implicit allowance. This dark table touches no user
-/// credit, plan, Chat provider-budget or worker-execution cost account.
+/// Append-only owner decisions for the analysis-only monthly ceiling.
+/// Existing usage is preserved; no user credit or worker budget is touched.
+model AmuxIdeaAnalysisBudgetSetting {
+  id                 String   @id
+  version            Int      @unique
+  limitMicroUsd      BigInt
+  effectiveMonth     DateTime
+  approvedByUserId   String
+  approvalAuditLogId String   @unique
+  createdAt          DateTime @default(now())
+
+  approvalAudit AdminAuditLog @relation("AmuxV4AnalysisBudgetSettingAudit", fields: [approvalAuditLogId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "AmuxIdeaAnalysisBudgetSetting_audit_fkey")
+}
+
 model AmuxIdeaAnalysisBudgetWindow {
   namespace        String
   monthStart       DateTime

@@ -1,5 +1,44 @@
 # AMUX intake
 
+## v16 — Owner-managed analysis monthly budget [decision, mposition 2026-10-11]
+
+approvedBy: mposition · approvedAt: 2026-10-11 · policy version: 16
+
+The operator approved raising the `agent/amux-intake` monthly ceiling to
+**US$1,000** and managing it as an Admin Console value, not a deployment-time
+constant. Earlier US$50 decisions below are historical; this section supersedes
+only that monthly amount and its configuration mechanism.
+
+- The owner, with recent reauthentication and same-origin protections, saves a
+  positive USD amount (at most two decimal places). Each save appends a version
+  and a canonical human audit in the same transaction. The initial approved
+  value is US$1,000; the previous US$50 remains effective until explicitly saved.
+  Subsequent owner-approved numeric changes require no code release.
+- A save binds an exact request ID, expected previous version and amount. A
+  lost response is read back by that ID, never blindly repeated. Stale versions
+  and a ceiling below the current month's spent-plus-reserved amount are refused.
+- The current DB UTC calendar-month window and future windows use the saved
+  value. Closed months, spent amounts, reservations, price snapshots and
+  settlement records are not reset or retroactively repriced. Reservation and
+  setting writers serialize on the existing audit-chain lock; the DB continues
+  enforcing spent plus reserved no greater than the monthly ceiling.
+- The setting is an append-only app DB record with a single writer and
+  same-transaction audit evidence. IDs, numeric versions/amounts and decisions
+  follow the existing seven-year audit retention; no input or model text is added.
+  The screen shows the actual limit, spent, reserved and available amount.
+- The existing analysis-budget read/write switches gate this control. Saving a
+  ceiling does not clear a halt, dispatch a model, raise per-call/token/day
+  limits, register cards, promote tasks, start workers or touch user credits,
+  Chat provider budgets or other Agent cost namespaces. API charges and CLI
+  conversion estimates remain distinct. Missing/unreadable configuration or
+  accounting fails closed. No migration application, merge or deployment is
+  authorized by the numeric approval itself.
+
+All other checklist boundaries in v4 and approvals in v5–v15 remain unchanged.
+The new decision covers cost (checklist 8), owner control/audit (2/9/12/16),
+append-only schema (7) and exact-ID unknown-outcome recovery (10); it adds no
+external-text, credential, execution-location, publisher or LLM capability.
+
 상태: **v1~v4 설계 승인, v5 구현 착수·보존 계약, v6~v10 보존·산출 계약, v11 단위별 결정·파생 이력, v12 실행 위치·식별자·권한 경계, v13 분석 호출 상한, v14 코드 전용 활성화 PR 및 v15 순차 live 활성화 승인.** 운영자 `mposition`이 2026-09-24에 v1, 2026-09-28에 v2, 2026-09-29에 v3를 승인하고, 2026-09-30에 v3 등록 래치 활성화와 v4 새 경로의 설계를 승인했다. 2026-10-01 v5는 18개 전체 작업의 정책·계약·코드·migration 파일 작성·로컬 합성 검증 착수를, 같은 날 v6~v12는 아래 계약을 승인했다. 2026-10-04 v13은 호출 시간·횟수만 확정했다. 2026-10-08 v14는 v4 코드 래치 전용 PR 작성을 승인했다. 2026-10-09 v15는 남은 v4 live 활성화를 아래 순서와 독립 gate로 승인했다. v22 자동 승격과 worker 실행은 이 승인에 포함하지 않는다.
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 1
 approvedBy: mposition · approvedAt: 2026-09-28 · 정책 버전: 2
