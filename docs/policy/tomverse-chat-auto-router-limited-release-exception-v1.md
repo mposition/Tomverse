@@ -33,10 +33,19 @@ moderation, capability, context, or audit boundaries.
 The limited release is admitted only when all of these are true at once:
 
 1. A checked-in human approval record names the exact policy commit and digest,
-   evaluated implementation commit, approver and time, expiry, evidence
-   reference, known limitations, target Railway environment and service,
-   eligible plans, and maximum rollout percentage. A pending, malformed,
-   expired, or incomplete record grants no authority.
+   evaluated implementation commit and functional-source artifact SHA-256,
+   approver and time, expiry, evidence reference, known limitations, target
+   Railway environment and service, eligible plans, and maximum rollout
+   percentage. Runtime recomputes that artifact digest from the exact deployed
+   source paths named by `AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS`; an
+   unreadable path or mismatch grants no authority. Runtime also hashes the
+   deployed policy's UTF-8 text with canonical LF line endings and requires it
+   to match the approval's `policySha256`. The checked-in approval
+   metadata module and the separately commit-and-digest-bound policy/approval
+   documents are outside that functional digest so a metadata-only approval
+   descendant does not create a self-referential commit SHA. Any covered code
+   change requires a new evaluated digest. A pending, malformed, expired, or
+   incomplete record grants no authority.
 2. `AUTO_ROUTER_LIMITED_RELEASE_EXCEPTION=v1` is explicitly set. Unset and all
    other values are off. `AUTO_ROUTER_LIMITED_RELEASE_COMMIT` must be a full
    commit SHA equal to the serving `RAILWAY_GIT_COMMIT_SHA`; the approved

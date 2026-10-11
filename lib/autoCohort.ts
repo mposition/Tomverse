@@ -190,13 +190,19 @@ export const decideAutoCohort = (input: AutoCohortInput): AutoCohortDecision => 
 
   const readiness = input.readiness ?? autoRolloutReadiness();
   const limitedRelease = config.limitedRelease;
+  const limitedReleaseGateSetMatches =
+    limitedRelease?.admitted === true &&
+    readiness.outstanding.length === limitedRelease.unmetReadinessGates.length &&
+    new Set(readiness.outstanding).size === readiness.outstanding.length &&
+    readiness.outstanding.every((gate) =>
+      limitedRelease.unmetReadinessGates.includes(gate));
   // A product exception may bypass only honest pending gates. A malformed
   // register or an expired ordinary attestation is a defect, not a risk the
   // limited-release approval accepted.
   const limitedReleaseOverride =
     !readiness.ready &&
     readiness.problems.length === 0 &&
-    limitedRelease?.admitted === true;
+    limitedReleaseGateSetMatches;
   // The separate staging fallback drill may also pass an outstanding gate,
   // and only because the alternative was worse: the register is static
   // code with no environment dimension, so attesting a gate to make staging

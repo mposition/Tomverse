@@ -19,6 +19,7 @@ export type AutoRouterLimitedReleaseApprovalRecord = Readonly<{
   policyCommit: string | null;
   policySha256: string | null;
   evaluatedImplementationCommit: string | null;
+  evaluatedArtifactSha256: string | null;
   targetEnvironmentName: string | null;
   targetEnvironmentId: string | null;
   targetServiceId: string | null;
@@ -52,6 +53,7 @@ export const AUTO_ROUTER_LIMITED_RELEASE_APPROVAL:
     policyCommit: null,
     policySha256: null,
     evaluatedImplementationCommit: null,
+    evaluatedArtifactSha256: null,
     targetEnvironmentName: null,
     targetEnvironmentId: null,
     targetServiceId: null,

@@ -7,12 +7,19 @@ import {
   AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_VALUE,
   resolveAutoRouterLimitedRelease,
 } from "../lib/autoRouterLimitedRelease.ts";
+import {
+  AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS,
+  autoRouterLimitedReleaseArtifactSha256,
+  autoRouterLimitedReleasePolicySha256,
+} from "../lib/autoRouterLimitedReleaseArtifact.ts";
 import { AUTO_ROUTER_LIMITED_RELEASE_APPROVAL } from
   "../lib/autoRouterLimitedReleaseApproval.ts";
 
 const COMMIT = "a".repeat(40);
 const POLICY_COMMIT = "b".repeat(40);
+const POLICY_SHA256 = "d".repeat(64);
 const IMPLEMENTATION_COMMIT = "c".repeat(40);
+const ARTIFACT_SHA256 = "e".repeat(64);
 const ENVIRONMENT_ID = "11111111-1111-4111-8111-111111111111";
 const SERVICE_ID = "22222222-2222-4222-8222-222222222222";
 const NOW = Date.parse("2026-10-11T00:00:00.000Z");
@@ -23,8 +30,9 @@ const approval = (overrides = {}) => ({
   approvedBy: "mposition",
   approvedAt: "2026-10-10T23:00:00.000Z",
   policyCommit: POLICY_COMMIT,
-  policySha256: "d".repeat(64),
+  policySha256: POLICY_SHA256,
   evaluatedImplementationCommit: IMPLEMENTATION_COMMIT,
+  evaluatedArtifactSha256: ARTIFACT_SHA256,
   targetEnvironmentName: "production",
   targetEnvironmentId: ENVIRONMENT_ID,
   targetServiceId: SERVICE_ID,
@@ -61,6 +69,8 @@ const resolve = (overrides = {}) => resolveAutoRouterLimitedRelease({
   environment: environment(),
   approval: approval(),
   now: () => NOW,
+  artifactSha256: () => ARTIFACT_SHA256,
+  policySha256: () => POLICY_SHA256,
   ...overrides,
 });
 
@@ -84,6 +94,48 @@ test("the selector is independently default-off", () => {
     [AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV]: undefined,
   }) });
   assert.deepEqual(decision, { admitted: false, reason: "selector_off" });
+});
+
+test("the functional artifact digest is deterministic, closed and byte-sensitive", () => {
+  assert.equal(new Set(AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS).size,
+    AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS.length);
+  assert.ok(AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS.includes(
+    "app/api/chat/route.ts"));
+  assert.ok(AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS.includes(
+    "lib/autoRouterLimitedReleaseArtifact.ts"));
+  assert.equal(AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS.includes(
+    "lib/autoRouterLimitedReleaseApproval.ts"), false);
+  assert.equal(AUTO_ROUTER_LIMITED_RELEASE_ARTIFACT_PATHS.some(
+    (path) => path.startsWith("docs/")), false);
+  const readFile = (path) => Buffer.from(`fixture:${path}`, "utf8");
+  const digest = autoRouterLimitedReleaseArtifactSha256({ readFile });
+  assert.match(digest, /^[0-9a-f]{64}$/);
+  assert.equal(autoRouterLimitedReleaseArtifactSha256({ readFile }), digest);
+  assert.notEqual(autoRouterLimitedReleaseArtifactSha256({
+    readFile: (path) => Buffer.from(
+      path === "lib/autoCohort.ts" ? `changed:${path}` : `fixture:${path}`,
+      "utf8",
+    ),
+  }), digest);
+  assert.throws(() => autoRouterLimitedReleaseArtifactSha256({
+    readFile: (path) => {
+      if (path === "lib/autoCohort.ts") throw new Error("missing fixture");
+      return Buffer.from(`fixture:${path}`, "utf8");
+    },
+  }), /missing fixture/);
+});
+
+test("the policy digest canonicalizes source line endings and remains byte-sensitive", () => {
+  const lf = Buffer.from("policy\nline\n", "utf8");
+  const crlf = Buffer.from("policy\r\nline\r\n", "utf8");
+  const first = autoRouterLimitedReleasePolicySha256({ readFile: () => lf });
+  assert.equal(autoRouterLimitedReleasePolicySha256({ readFile: () => crlf }), first);
+  assert.notEqual(autoRouterLimitedReleasePolicySha256({
+    readFile: () => Buffer.from("policy\nchanged\n", "utf8"),
+  }), first);
+  assert.throws(() => autoRouterLimitedReleasePolicySha256({
+    readFile: () => Buffer.from([0xff]),
+  }));
 });
 
 test("an exact bounded approval admits without exposing the manifest key", () => {
@@ -112,6 +164,26 @@ test("the runtime target and serving commit must match exactly", () => {
   assert.equal(resolve({ environment: environment({
     [AUTO_ROUTER_LIMITED_RELEASE_COMMIT_ENV]: "e".repeat(40),
   }) }).reason, "serving_commit_mismatch");
+});
+
+test("the deployed functional artifact must match the human record", () => {
+  assert.equal(resolve({ artifactSha256: () => "f".repeat(64) }).reason,
+    "evaluated_artifact_mismatch");
+  assert.equal(resolve({ artifactSha256: () => null }).reason,
+    "evaluated_artifact_unavailable");
+  assert.equal(resolve({ artifactSha256: () => { throw new Error("unreadable"); } }).reason,
+    "evaluated_artifact_unavailable");
+  assert.equal(resolve({ approval: approval({ evaluatedArtifactSha256: null }) }).reason,
+    "approval_invalid");
+});
+
+test("the deployed canonical policy bytes must match the human record", () => {
+  assert.equal(resolve({ policySha256: () => "f".repeat(64) }).reason,
+    "policy_source_mismatch");
+  assert.equal(resolve({ policySha256: () => null }).reason,
+    "policy_source_unavailable");
+  assert.equal(resolve({ policySha256: () => { throw new Error("unreadable"); } }).reason,
+    "policy_source_unavailable");
 });
 
 test("manifest enforcement and a valid keyring are non-waivable", () => {
@@ -145,6 +217,14 @@ test("an expired or malformed human record fails closed", () => {
   assert.equal(resolve({ approval: approval({
     expiresAt: "2026-10-10T00:00:00.000Z",
   }) }).reason, "approval_expired");
+  assert.equal(resolve({ approval: approval({ expiresAt: null }) }).reason,
+    "approval_invalid");
+  assert.equal(resolve({ approval: approval({ expiresAt: "not-a-date" }) }).reason,
+    "approval_invalid");
+  assert.equal(resolve({ approval: approval({
+    expiresAt: "2026-10-10T00:00:00.000Z",
+    knownLimitations: null,
+  }) }).reason, "approval_invalid");
   assert.equal(resolve({ approval: approval({
     knownLimitations: null,
   }) }).reason, "approval_invalid");

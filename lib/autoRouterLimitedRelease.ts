@@ -5,6 +5,10 @@ import {
   type AutoRouterLimitedReleaseApprovalRecord,
   type AutoRouterLimitedReleasePlan,
 } from "@/lib/autoRouterLimitedReleaseApproval";
+import {
+  runtimeAutoRouterLimitedReleaseArtifactSha256,
+  runtimeAutoRouterLimitedReleasePolicySha256,
+} from "@/lib/autoRouterLimitedReleaseArtifact";
 
 export const AUTO_ROUTER_LIMITED_RELEASE_SELECTOR_ENV =
   "AUTO_ROUTER_LIMITED_RELEASE_EXCEPTION";
@@ -34,6 +38,10 @@ export type AutoRouterLimitedReleaseRefusal =
   | "target_environment_mismatch"
   | "target_service_mismatch"
   | "serving_commit_mismatch"
+  | "policy_source_unavailable"
+  | "policy_source_mismatch"
+  | "evaluated_artifact_unavailable"
+  | "evaluated_artifact_mismatch"
   | "instrumentation_not_enforce"
   | "manifest_keyring_unavailable"
   | "fallback_enabled"
@@ -51,6 +59,10 @@ export type AutoRouterLimitedReleaseAdmission =
       approvedAt: string;
       expiresAt: string;
       evaluatedImplementationCommit: string;
+      evaluatedArtifactSha256: string;
+      unmetReadinessGates: readonly AutoRouterLimitedReleaseApprovalRecord[
+        "unmetReadinessGates"
+      ][number][];
       servingCommitSha: string;
       targetEnvironmentId: string;
       targetServiceId: string;
@@ -94,6 +106,9 @@ export function autoRouterLimitedReleaseApprovalProblems(
   if (!SHA.test(record.evaluatedImplementationCommit ?? "")) {
     problems.push("evaluatedImplementationCommit is invalid");
   }
+  if (!SHA256.test(record.evaluatedArtifactSha256 ?? "")) {
+    problems.push("evaluatedArtifactSha256 is invalid");
+  }
   if (!nonempty(record.targetEnvironmentName)) {
     problems.push("targetEnvironmentName is missing");
   }
@@ -114,9 +129,8 @@ export function autoRouterLimitedReleaseApprovalProblems(
     problems.push("eligiblePlans must be a non-empty unique list of account plans");
   }
   const expiresAt = Date.parse(record.expiresAt ?? "");
-  if (!Number.isFinite(expiresAt) || expiresAt <= now()) {
-    problems.push("expiresAt is missing, invalid, or expired");
-  }
+  if (!Number.isFinite(expiresAt)) problems.push("expiresAt is missing or invalid");
+  else if (expiresAt <= now()) problems.push("expiresAt is expired");
   if (!nonempty(record.evidenceRef)) problems.push("evidenceRef is missing");
   if (!nonempty(record.knownLimitations)) problems.push("knownLimitations is missing");
   if (!sameStringSet(record.unmetReadinessGates, EXPECTED_PENDING_GATES)) {
@@ -158,6 +172,8 @@ export function resolveAutoRouterLimitedRelease(input: {
   environment?: Record<string, string | undefined>;
   approval?: AutoRouterLimitedReleaseApprovalRecord;
   now?: () => number;
+  artifactSha256?: () => string | null;
+  policySha256?: () => string | null;
 } = {}): AutoRouterLimitedReleaseAdmission {
   const environment = input.environment ?? process.env;
   const approval = input.approval ?? AUTO_ROUTER_LIMITED_RELEASE_APPROVAL;
@@ -171,7 +187,8 @@ export function resolveAutoRouterLimitedRelease(input: {
     return Object.freeze({ admitted: false, reason: "approval_pending" });
   }
   const approvalProblems = autoRouterLimitedReleaseApprovalProblems(approval, now);
-  if (approvalProblems.some((problem) => problem.startsWith("expiresAt"))) {
+  if (approvalProblems.length === 1 &&
+      approvalProblems[0] === "expiresAt is expired") {
     return Object.freeze({ admitted: false, reason: "approval_expired" });
   }
   if (approvalProblems.length !== 0) {
@@ -193,6 +210,41 @@ export function resolveAutoRouterLimitedRelease(input: {
   if (!SHA.test(servingCommit ?? "") || !SHA.test(approvedServingCommit ?? "") ||
       servingCommit !== approvedServingCommit) {
     return Object.freeze({ admitted: false, reason: "serving_commit_mismatch" });
+  }
+  let actualPolicySha256: string | null = null;
+  try {
+    actualPolicySha256 = (input.policySha256 ??
+      runtimeAutoRouterLimitedReleasePolicySha256)();
+  } catch {
+    // The checked-in policy is authority input, so unreadable means off.
+  }
+  if (!SHA256.test(actualPolicySha256 ?? "")) {
+    return Object.freeze({
+      admitted: false,
+      reason: "policy_source_unavailable",
+    });
+  }
+  if (actualPolicySha256 !== approval.policySha256) {
+    return Object.freeze({ admitted: false, reason: "policy_source_mismatch" });
+  }
+  let actualArtifactSha256: string | null = null;
+  try {
+    actualArtifactSha256 = (input.artifactSha256 ??
+      runtimeAutoRouterLimitedReleaseArtifactSha256)();
+  } catch {
+    // A source read is part of admission, never a best-effort diagnostic.
+  }
+  if (!SHA256.test(actualArtifactSha256 ?? "")) {
+    return Object.freeze({
+      admitted: false,
+      reason: "evaluated_artifact_unavailable",
+    });
+  }
+  if (actualArtifactSha256 !== approval.evaluatedArtifactSha256) {
+    return Object.freeze({
+      admitted: false,
+      reason: "evaluated_artifact_mismatch",
+    });
   }
   if (dispatchInstrumentationMode(environment) !== "enforce") {
     return Object.freeze({ admitted: false, reason: "instrumentation_not_enforce" });
@@ -232,6 +284,8 @@ export function resolveAutoRouterLimitedRelease(input: {
     approvedAt: approval.approvedAt!,
     expiresAt: approval.expiresAt!,
     evaluatedImplementationCommit: approval.evaluatedImplementationCommit!,
+    evaluatedArtifactSha256: approval.evaluatedArtifactSha256!,
+    unmetReadinessGates: Object.freeze([...approval.unmetReadinessGates]),
     servingCommitSha: servingCommit!,
     targetEnvironmentId: approval.targetEnvironmentId!,
     targetServiceId: approval.targetServiceId!,

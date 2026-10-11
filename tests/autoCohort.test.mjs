@@ -21,7 +21,11 @@ import {
 const ready = { ready: true, outstanding: [], problems: [] };
 const notReady = {
   ready: false,
-  outstanding: ["offline_quality_evaluation"],
+  outstanding: [
+    "shadow_report",
+    "offline_quality_evaluation",
+    "attempt_manifest_boundary",
+  ],
   problems: [],
 };
 
@@ -34,6 +38,12 @@ const limitedRelease = {
   approvedAt: "2026-10-11T00:00:00.000Z",
   expiresAt: "2026-11-11T00:00:00.000Z",
   evaluatedImplementationCommit: "c".repeat(40),
+  evaluatedArtifactSha256: "e".repeat(64),
+  unmetReadinessGates: [
+    "shadow_report",
+    "offline_quality_evaluation",
+    "attempt_manifest_boundary",
+  ],
   servingCommitSha: "a".repeat(40),
   targetEnvironmentId: "11111111-1111-4111-8111-111111111111",
   targetServiceId: "22222222-2222-4222-8222-222222222222",
@@ -83,7 +93,7 @@ test("an outstanding readiness gate refuses everyone, at any percentage", () => 
     );
     assert.equal(decision.eligible, false, `${rolloutPercent}% slipped through`);
     assert.equal(decision.reason, "readiness_incomplete");
-    assert.deepEqual(decision.outstandingGates, ["offline_quality_evaluation"]);
+    assert.deepEqual(decision.outstandingGates, notReady.outstanding);
   }
 });
 
@@ -96,7 +106,7 @@ test("a separately approved limited release may admit honest pending gates", () 
   assert.deepEqual(decision.limitedReleaseException, {
     exceptionId: "CHAT-01-AUTO-ROUTER-LIMITED-RELEASE-V1",
     evidenceRef: "docs/ops/tomverse-chat-auto-router-limited-release-v1-approval.md",
-    outstandingGates: ["offline_quality_evaluation"],
+    outstandingGates: notReady.outstanding,
   });
   assert.equal(decision.drillOverride, undefined);
 });
@@ -123,6 +133,25 @@ test("a limited release never overrides a malformed readiness register", () => {
   }));
   assert.equal(expired.eligible, false);
   assert.equal(expired.reason, "readiness_incomplete");
+});
+
+test("a limited release overrides only the exact disclosed outstanding gates", () => {
+  for (const outstanding of [
+    ["offline_quality_evaluation"],
+    [
+      "shadow_report",
+      "offline_quality_evaluation",
+      "attempt_manifest_boundary",
+      "future_gate",
+    ],
+  ]) {
+    const decision = decideAutoCohort(subject({
+      readiness: { ready: false, outstanding, problems: [] },
+      config: config({ limitedRelease }),
+    }));
+    assert.equal(decision.eligible, false);
+    assert.equal(decision.reason, "readiness_incomplete");
+  }
 });
 
 test("the kill switch and guest exclusion still outrank an approved exception", () => {
