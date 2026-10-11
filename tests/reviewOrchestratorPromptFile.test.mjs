@@ -11,6 +11,8 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator } from "../tools/review-orchestrator/lib/service.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
 
+const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
+
 const TOOL = resolve("tools/review-orchestrator");
 const CLIENT = join(TOOL, "client/review.mjs");
 const SERVER = join(TOOL, "bin/review-orchestrator.mjs");
@@ -66,7 +68,7 @@ test("{promptFile} hands the prompt (note first) as an owner-only file and remov
   try {
     const { jobId } = JSON.parse(f.client("submit", "--author", "claude", "--repo", "demo").stdout);
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     const slot = new Store(f.config.stateDir).readSlot(jobId, 0);
     assert.equal(slot.verdict, "accept", JSON.stringify(slot));
@@ -90,7 +92,7 @@ test("{promptDir} names a directory of the job's own holding prompt.md, for a CL
   try {
     const { jobId } = JSON.parse(f.client("submit", "--author", "claude", "--repo", "demo").stdout);
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).verdict, "accept");
     assert.match(readFileSync(promptOut, "utf8"), /independent code reviewer/);
@@ -108,7 +110,7 @@ test("without {promptFile} the prompt still goes on stdin, with the note first",
   try {
     const { jobId } = JSON.parse(f.client("submit", "--author", "claude", "--repo", "demo").stdout);
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     assert.equal(new Store(f.config.stateDir).readSlot(jobId, 0).verdict, "accept");
     assert.ok(readFileSync(promptOut, "utf8").startsWith("STDIN NOTE\n\n"));

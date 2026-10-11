@@ -1443,12 +1443,18 @@ fn self_reports_check(state: &AppState) -> Vec<InvariantResult> {
     let Ok(conn) = state.store.read() else {
         return vec![InvariantResult::unknown(ID, "store unreadable")];
     };
-    let signals = crate::api::sessions_legacy::FleetSignals::load(&conn);
+    let mut signals = crate::api::sessions_legacy::FleetSignals::load(&conn);
     if signals.running.is_empty() {
         // Same reasoning as status_pane_check: no fleet is a real state but also
         // what a failed `tmux list-sessions` looks like. Not a pass.
         return vec![InvariantResult::unknown(ID, "no running tmux sessions visible")];
     }
+    // Who is mid-turn right now, by the SAME pane detector status_pane_check
+    // uses (its capture is reused through the pane cache). A stale minimum
+    // only means an outage while someone is working; see the check's doc.
+    signals.capture_panes();
+    let working: std::collections::BTreeMap<String, bool> =
+        signals.probed_lanes().into_iter().collect();
     // NAMESPACE: `signals.running` holds the tmux session names, which are the
     // `amux-<n>` form; `signals.reports` is keyed by the BARE `AMUX_SESSION`
     // name (`<n>`) the report POST carries. `probed_lanes()` bridges the two
@@ -1467,7 +1473,12 @@ fn self_reports_check(state: &AppState) -> Vec<InvariantResult> {
                 .get(n)
                 .and_then(|r| r["ts"].as_f64())
                 .map(|ts| signals.now - ts);
-            checks::LaneReport { name: n.to_string(), report_age_s: age }
+            checks::LaneReport {
+                name: n.to_string(),
+                report_age_s: age,
+                working: working.get(n).copied().unwrap_or(false),
+                hooked: !signals.hookless_workers.contains(n),
+            }
         })
         .collect();
     // Policy in config, not baked in (ethos D4). Defaults: a fleet of >=10 lanes

@@ -874,7 +874,12 @@ pub async fn debug_scan() -> axum::Json<serde_json::Value> {
                      workers. A lane in demoted_structured spoke for itself (live protocol \
                      session); one in demoted_native was reported by its backend (herdr \
                      agent_status); one in scanned had its pane captured because neither \
-                     voice was available. A skip here leaves a trace on purpose (ethos rule 4).",
+                     voice was available. A skip here leaves a trace on purpose (ethos rule 4). \
+                     Only worker-registry lanes (_amux_workers with a live _amux_sessions row) \
+                     are considered: a lane started through the legacy session model \
+                     (~/.amux/sessions/<name>.env) is not a worker row, is never scanned here, \
+                     and takes its status from the sessions derivation instead, so n_considered \
+                     0 on an all-legacy fleet is that, not a stalled loop.",
             "now": now,
             "last_pass_at": s.last_pass_at,
             "last_pass_age_s": s.last_pass_at.map(|t| now - t),
@@ -886,6 +891,7 @@ pub async fn debug_scan() -> axum::Json<serde_json::Value> {
             "process_exits": s.report.process_exits,
             "process_exit_failures": s.report.process_exit_failures,
             "stale_process_exits": s.report.stale_process_exits,
+            "stale_observations": s.report.stale_observations,
             "capture_failures": s.report.capture_failures,
             "events_applied": s.report.events_applied,
             "deduped": s.deduped,
@@ -910,6 +916,7 @@ pub async fn debug_scan() -> axum::Json<serde_json::Value> {
             "process_exits": serde_json::Map::new(),
             "process_exit_failures": Vec::<String>::new(),
             "stale_process_exits": serde_json::Map::new(),
+            "stale_observations": Vec::<String>::new(),
             "capture_failures": Vec::<String>::new(),
             "events_applied": 0,
             "deduped": serde_json::Map::new(),

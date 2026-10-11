@@ -11,6 +11,8 @@ import { validateConfig } from "../tools/review-orchestrator/lib/config.mjs";
 import { Orchestrator } from "../tools/review-orchestrator/lib/service.mjs";
 import { Store } from "../tools/review-orchestrator/lib/store.mjs";
 
+const allAvailable = (config) => Object.fromEntries(config.providers.map((provider) => [provider.id, { state: "available" }]));
+
 const TOOL = resolve("tools/review-orchestrator");
 const CLIENT = join(TOOL, "client/review.mjs");
 const SERVER = join(TOOL, "bin/review-orchestrator.mjs");
@@ -99,7 +101,7 @@ test("a focus this server finished reviewing narrows the contract count; an unre
     const first = JSON.parse(f.client("submit", "--author", "codex", "--repo", "demo").stdout);
     assert.equal(first.reviewers, 2);
     const orchestrator = new Orchestrator(f.config);
-    orchestrator.tick();
+    orchestrator.tick(allAvailable(f.config));
     await orchestrator.idle();
     // Round 2 touches no contract path since round 1's head.
     f.commit("doc.md", "round two\n");

@@ -29,6 +29,27 @@ Subsequent Tomverse commits harden the imported dashboard and local iOS test
 transport; the vendored tree is therefore no longer byte-identical to that
 port commit.
 
+`GET /api/usage` and task routing share the same cached account readings,
+including Cursor and GitHub Copilot. Cursor reads the server user's saved CLI
+OAuth token and `GetCurrentPeriodUsage`; included plan pools, not on-demand
+spending, supply the quota windows. A different `CURSOR_API_KEY` account or an
+expired token is reported as unavailable. Copilot starts a fresh headless
+runtime, performs only `connect` (or legacy `ping`) and `account.getQuota`, then
+terminates it. It respects `AMUX_COPILOT_CMD` and the CLI token environment,
+falling back to the server user's saved CLI login. No session or model request
+is created, and no token or account identity is returned by the usage API.
+
+Copilot defaults to the `premium_interactions` entitlement snapshot;
+`AMUX_COPILOT_QUOTA_KEY` selects another reported quota key. Its percentage and
+request counts are not a conversion to AI Credits or currency. Any exhausted
+included window feeds the existing provider-exhaustion routing exclusion;
+unknown or stale readings retain the existing routing behavior. Both probes
+use the shared `AMUX_USAGE_TTL_S` cache (60 seconds by default), with bounded
+responses and a 12-second request deadline. Cursor's CLI RPC can change, and
+unsupported responses are unavailable rather than guessed. These readings
+describe the server account, not separate credentials overridden in a group
+or worker scope. Live account compatibility must be checked before rollout.
+
 Build and focused test from this directory:
 
 ```bash

@@ -2,11 +2,13 @@
 /**
  * Client the Windows apps call. It packs the commits under review into a git
  * bundle and sends the request to the review server over SSH. It never names
- * a reviewer: the server picks one whose model vendor differs from the author's.
+ * a reviewer by default: the server picks an independent one. An operator can
+ * pin provider ids with --reviewer; server-side eligibility checks still apply.
  *
  *   node tools/review-orchestrator/client/review.mjs submit --author codex [--base <rev>] [--head <rev>]
  *                                          [--reviewers 2] [--scope "..."] [--author-vendor xai]
  *                                          [--focus <rev>]   review only <rev>..HEAD
+ *                                          [--reviewer claude] [--reviewer copilot]
  *   node tools/review-orchestrator/client/review.mjs wait <jobId> [--timeout 540]
  *   node tools/review-orchestrator/client/review.mjs status [jobId]
  *   node tools/review-orchestrator/client/review.mjs report <jobId> [--slot 0]
@@ -39,7 +41,8 @@ export function parseArgs(argv) {
       const key = arg.slice(2);
       const value = rest[i + 1];
       if (value === undefined || value.startsWith("--")) throw new Error(`--${key} needs a value`);
-      options[key] = value;
+      if (key === "reviewer") (options.reviewer ??= []).push(...value.split(","));
+      else options[key] = value;
       i += 1;
     } else {
       options._.push(arg);
@@ -110,7 +113,7 @@ export function nearestBase(head, explicit) {
   return forkPoints.find((candidate) => forkPoints.every((other) => isAncestor(other, candidate))) ?? forkPoints[0];
 }
 
-function transport(token, stdinPath) {
+function transport(token, stdinPath, { capture = false } = {}) {
   const local = process.env.REVIEW_ORCH_LOCAL_BIN;
   let command;
   let args;
@@ -124,9 +127,17 @@ function transport(token, stdinPath) {
     args = ["-o", "BatchMode=yes", host, process.env.REVIEW_ORCH_REMOTE || "review-orchestrator", "rpc", token];
   }
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: [stdinPath ? "pipe" : "ignore", "inherit", "inherit"] });
+    const child = spawn(command, args, {
+      stdio: [stdinPath ? "pipe" : "ignore", capture ? "pipe" : "inherit", "inherit"],
+      timeout: capture ? 30_000 : undefined,
+    });
+    let stdout = "";
+    if (capture) child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+      if (stdout.length > 1_000_000) { child.kill(); reject(new Error("server status response too large")); }
+    });
     child.on("error", reject);
-    child.on("close", (code) => resolve(code ?? 65));
+    child.on("close", (code) => resolve(capture ? { code: code ?? 65, stdout } : code ?? 65));
     if (stdinPath) {
       // If the server closes early, its exit code is the answer; a broken pipe is not.
       child.stdin.on("error", () => {});
@@ -137,9 +148,23 @@ function transport(token, stdinPath) {
   });
 }
 
+export function supportsReviewerSelection(status) {
+  return Array.isArray(status?.capabilities) && status.capabilities.includes("reviewer-selection-v1");
+}
+
 async function submit(options) {
   const author = options.author;
   if (!author) throw new Error("--author is required (claude, codex, cursor, ...)");
+  if (options.reviewer) {
+    // An older server ignores unknown request fields; never silently send a
+    // pinned request to it and receive an automatically assigned reviewer.
+    const reply = await transport(encodeRpc({ command: "status" }), null, { capture: true });
+    let status;
+    try { status = JSON.parse(reply.stdout); } catch { /* unavailable capability */ }
+    if (reply.code !== 0 || !supportsReviewerSelection(status)) {
+      throw new Error("reviewer_selection_unsupported: update the server before using --reviewer");
+    }
+  }
   const head = git(["rev-parse", "--verify", `${options.head ?? "HEAD"}^{commit}`]);
   const base = nearestBase(head, options.base ?? process.env.REVIEW_ORCH_BASE);
   if (base === head) throw new Error("nothing to review: head equals base");
@@ -160,6 +185,7 @@ async function submit(options) {
       author,
       authorVendor: options["author-vendor"],
       reviewers: options.reviewers ? Number(options.reviewers) : 1,
+      reviewerProviders: options.reviewer,
       scope: options.scope,
       focus,
       bundleRef: bundle.ref,
