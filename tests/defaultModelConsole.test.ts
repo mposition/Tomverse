@@ -72,6 +72,111 @@ test("a guest-trio member that is not the lead is a warning, not a block", () =>
   assert.equal(typeof substitute, "string");
 });
 
+test("an adoption that retires a trio member names its guest-eligible successor as the substitute", () => {
+  const member = GUEST_BRAND_TRIO_MODEL_IDS.find((id) => id !== APP_DEFAULTS.defaultModelId)!;
+  const isEligible = (id: string) =>
+    id === "successor-guest" ||
+    eligible(id) ||
+    (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id);
+  // The save sets the member's replacement to the adopted model.
+  const toSuccessor = (successor: string) => (id: string) =>
+    id === member ? successor : undefined;
+
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, toSuccessor("successor-guest")),
+    "successor-guest"
+  );
+  // A successor guests cannot use (a Pro model, or one saved disabled) leaves
+  // the slot to the fallback list, exactly as the guest screen does.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, toSuccessor("successor-pro")),
+    GUEST_FALLBACK_MODEL_IDS.find((id) => isEligible(id))
+  );
+});
+
+test("replacing a member that is already limited still names the adoption's successor", () => {
+  const member = GUEST_BRAND_TRIO_MODEL_IDS.find((id) => id !== APP_DEFAULTS.defaultModelId)!;
+  // The member fails the default rule today (limited or unlisted); its slot is
+  // filled now by its current replacement, "current-successor".
+  const isEligible = (id: string) =>
+    id !== member &&
+    (id === "current-successor" ||
+      id === "adopted-successor" ||
+      eligible(id) ||
+      (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id));
+  const current = (id: string) => (id === member ? "current-successor" : undefined);
+  const adoption = (id: string) => (id === member ? "adopted-successor" : undefined);
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption, undefined, current),
+    "adopted-successor"
+  );
+  // Judged with the adoption's resolver for both, the change disappears --
+  // the defect this parameter fixes.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption),
+    null
+  );
+  // An adoption that keeps today's successor changes nothing.
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, current, undefined, current),
+    null
+  );
+  // The savable case: no replacement today, so the slot is a fallback model
+  // now, and the adoption's successor takes it.
+  const fallbackNow = GUEST_FALLBACK_MODEL_IDS.find((id) => isEligible(id) && !eligible(id));
+  assert.ok(fallbackNow);
+  const none = () => undefined;
+  assert.equal(
+    substituteIfTrioMemberRemoved(member, APP_DEFAULTS.defaultModelId, isEligible, adoption, undefined, none),
+    "adopted-successor"
+  );
+});
+
+test("the effective lead follows a retired lead's successor", () => {
+  const lead = APP_DEFAULTS.guestDefaultModelId;
+  const isEligible = (id: string) => id !== lead && (id === "lead-successor" || eligible(id));
+  assert.equal(
+    effectiveGuestLeadModelId(lead, isEligible, (id) => (id === lead ? "lead-successor" : undefined)),
+    "lead-successor"
+  );
+  // Without the resolver the next trio member leads instead.
+  assert.notEqual(effectiveGuestLeadModelId(lead, isEligible), "lead-successor");
+});
+
+test("a stored lead succeeded in its slot is applied, and a lost provider is named", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const isEligible = (id: string) => id !== anthropic && (id === "claude-successor" || eligible(id));
+  const resolveReplacement = (id: string, accept: (candidate: string) => boolean = () => true) =>
+    id === anthropic && accept("claude-successor") ? "claude-successor" : undefined;
+  const providers: Record<string, string> = {
+    [openai]: "openai",
+    [anthropic]: "anthropic",
+    "claude-successor": "anthropic",
+    [google]: "google",
+  };
+  const succeeded = describeGuestDefault({
+    storedLead: anthropic,
+    isEligible,
+    resolveReplacement,
+    providerOf: (id) => providers[id] ?? null,
+  });
+  assert.equal(succeeded.effectiveLeadId, "claude-successor");
+  assert.equal(succeeded.storedNotApplied, false);
+  assert.deepEqual(succeeded.missingProviders, []);
+
+  // No successor: the slot is backfilled from the fallback list, the stored
+  // lead is not what leads, and the Anthropic slot is gone.
+  const stranded = describeGuestDefault({
+    storedLead: anthropic,
+    isEligible: (id) => id !== anthropic && (eligible(id) || (GUEST_FALLBACK_MODEL_IDS as readonly string[]).includes(id)),
+    providerOf: (id) => providers[id] ?? "other",
+  });
+  assert.equal(stranded.storedNotApplied, true);
+  assert.deepEqual(stranded.missingProviders, ["anthropic"]);
+  // Without a provider lookup the console does not guess.
+  assert.deepEqual(describeGuestDefault({ storedLead: null, isEligible }).missingProviders, []);
+});
+
 test("a fallback transition check fails a registry-only model and the copy does not apply it", () => {
   const checks = assessFallbackTransition({
     candidate: {

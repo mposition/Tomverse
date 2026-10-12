@@ -510,12 +510,21 @@ const compilerOptions = parsedConfig.options;
 // histories above remain, while their combined comments and audit helpers
 // reposition only already-reviewed accesses. The count and position-free
 // inventory remain unchanged, so this repins source positions only.
+// 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
+// save-time checks and its writer in `lib/appSettings.ts` sit above that file's
+// one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
+// lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
+// position-free inventory are unchanged; positions only. Repinned after the AMUX
+// record above merged in from develop.
+// 2026-10-12, merge frozen develop c9c557f3 into the integrated AMUX source:
+// both reviewed histories remain and the combined app-setting offsets only
+// reposition existing accesses. Count and position-free inventory are unchanged.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "fa310e78620dbb73014327028843c467",
-  "1646cb5d14cab332c1874fd8e2bf6bda",
+  "6fb2a6a019e9077ccf028a37eda70b9",
+  "33fc2d44ec6777d4dbf6d3a0af5bca81d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

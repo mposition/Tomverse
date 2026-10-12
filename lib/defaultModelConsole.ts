@@ -1,7 +1,10 @@
 import {
   APP_DEFAULTS,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  expectedLeadForStored,
+  missingLineupProviders,
   resolveGuestDefaultSelectedModels,
+  type ReplacementResolver,
 } from "@/lib/appDefaults";
 
 /**
@@ -23,11 +26,12 @@ export const GUEST_LEAD_PROTECTED = "GUEST_LEAD_PROTECTED";
 
 export const replacementRole = (
   modelId: string,
-  effectiveGuestLeadId: string | null
+  effectiveGuestLeadId: string | null,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): ReplacementRole | null => {
   if (modelId === APP_DEFAULTS.defaultModelId) return "application_fallback";
   if (effectiveGuestLeadId && modelId === effectiveGuestLeadId) return "guest_lead";
-  if ((GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(modelId)) {
+  if (trio.includes(modelId)) {
     return "guest_trio";
   }
   return null;
@@ -42,14 +46,23 @@ export const replacementOptionDisabled = (role: ReplacementRole | null) =>
  * `storedLead` is the raw `AppSetting` value, including a missing row
  * (`null`). A missing or ineligible value is not "no lead": resolution falls
  * through to the compiled trio, which is what the guest screen does.
+ *
+ * `resolveReplacement` is the one the guest screen binds to the same
+ * catalogue (lib/appDefaults `createReplacementResolver`): a retired member's
+ * successor takes its slot there, so it must here as well, or the console
+ * names a lead guests never see.
  */
 export const effectiveGuestLeadModelId = (
   storedLead: string | null | undefined,
-  isEligible: (modelId: string) => boolean
+  isEligible: (modelId: string) => boolean,
+  resolveReplacement?: ReplacementResolver,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS
 ): string | null =>
   resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
+    trio,
   })[0] ?? null;
 
 export type GuestDefaultDescription = {
@@ -59,28 +72,53 @@ export type GuestDefaultDescription = {
   storedNotApplied: boolean;
   ineligibleTrioIds: string[];
   substituteIds: string[];
+  /**
+   * Providers the visible selection does not hold exactly once. Empty when no
+   * `providerOf` was given. The resolver backfills a retired member with no
+   * eligible successor from the fallback list, which can break the
+   * one-per-provider rule; this is how the console says so.
+   */
+  missingProviders: string[];
 };
 
 export const describeGuestDefault = ({
   storedLead,
   isEligible,
+  resolveReplacement,
+  trio = GUEST_BRAND_TRIO_MODEL_IDS,
+  providerOf,
 }: {
   storedLead: string | null;
   isEligible: (modelId: string) => boolean;
+  resolveReplacement?: ReplacementResolver;
+  /** The runtime catalogue's provider for an id; omitting it skips the provider check. */
+  providerOf?: (modelId: string) => string | null;
+  /** The effective lineup (lib/guestLeadFacts `trio`); the compiled trio when omitted. */
+  trio?: readonly string[];
 }): GuestDefaultDescription => {
   const visibleIds = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: storedLead || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
+    trio,
   });
   const effectiveLeadId = visibleIds[0] ?? null;
   return {
     visibleIds,
     effectiveLeadId,
-    storedNotApplied: Boolean(storedLead) && storedLead !== effectiveLeadId,
-    ineligibleTrioIds: GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => !isEligible(id)),
-    substituteIds: visibleIds.filter(
-      (id) => !(GUEST_BRAND_TRIO_MODEL_IDS as readonly string[]).includes(id)
-    ),
+    // Applied means the selection leads with what the stored id should put
+    // first -- itself, or its successor when it is a retired member.
+    storedNotApplied:
+      Boolean(storedLead) &&
+      expectedLeadForStored({
+        stored: storedLead as string,
+        lineup: trio,
+        isEligible,
+        resolveReplacement,
+      }) !== effectiveLeadId,
+    ineligibleTrioIds: trio.filter((id) => !isEligible(id)),
+    substituteIds: visibleIds.filter((id) => !trio.includes(id)),
+    missingProviders: providerOf ? missingLineupProviders(visibleIds.map(providerOf)) : [],
   };
 };
 
@@ -88,20 +126,39 @@ export const describeGuestDefault = ({
  * Who appears in the guest trio if `modelId` is no longer eligible.
  * Null when the id is not a trio member the operator can still turn off
  * (the fallback and the current lead are refused, not warned).
+ *
+ * An adoption that replaces `modelId` passes a `resolveReplacement` that
+ * answers with the model being adopted, and an `isEligible` that knows it:
+ * when the successor is guest-eligible it is the substitute, otherwise the
+ * fallback list is -- the same order the guest screen resolves.
+ *
+ * `currentResolveReplacement` is the catalogue as it stands, for the
+ * selection guests see now. It matters when `modelId` already fails the
+ * default rule (limited or unlisted, say): its slot is then filled today by
+ * its current replacement chain or the fallback list, and judging "now" with
+ * the adoption's resolver would make both selections the same and hide the
+ * change. Omitted, "now" uses `resolveReplacement`.
  */
 export const substituteIfTrioMemberRemoved = (
   modelId: string,
   effectiveGuestLeadId: string | null,
-  isEligible: (modelId: string) => boolean
+  isEligible: (modelId: string) => boolean,
+  resolveReplacement?: ReplacementResolver,
+  trio: readonly string[] = GUEST_BRAND_TRIO_MODEL_IDS,
+  currentResolveReplacement: ReplacementResolver | undefined = resolveReplacement
 ): string | null => {
-  if (replacementRole(modelId, effectiveGuestLeadId) !== "guest_trio") return null;
+  if (replacementRole(modelId, effectiveGuestLeadId, trio) !== "guest_trio") return null;
   const after = resolveGuestDefaultSelectedModels({
     isEligible: (id) => (id === modelId ? false : isEligible(id)),
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement,
+    trio,
   });
   const before = resolveGuestDefaultSelectedModels({
     isEligible,
     leadModelId: effectiveGuestLeadId || APP_DEFAULTS.guestDefaultModelId,
+    resolveReplacement: currentResolveReplacement,
+    trio,
   });
   return after.find((id) => !before.includes(id)) ?? null;
 };

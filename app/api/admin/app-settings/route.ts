@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
+import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
@@ -18,6 +19,7 @@ import {
   isImageGenerationEnabled,
   isMemoryExtractionEnabled,
   isMemoryInjectionEnabled,
+  guestDefaultLineupRejection,
   guestDefaultModelRejection,
   setAssistantKnowledgeEnabled,
   setAssistantProfilesEnabled,
@@ -26,6 +28,7 @@ import {
   isChatStarterEnabled,
   setChatStarterEnabled,
   setImageGenerationEnabled,
+  updateGuestDefaultLineup,
   updateGuestDefaultModel,
   updateOperationalFeatureFlags,
   updatePublicAppSettings,
@@ -44,6 +47,14 @@ const updateAppSettingsSchema = z
     // requests. One request that carries an invalid lead used to refuse the
     // emergency switches in the same body.
     guestDefaultModelId: z.string().trim().min(1).max(120).optional(),
+    // The default lineup (lib/appSettings updateGuestDefaultLineup): the three
+    // models a guest's and a new account's first comparison opens on. Saved on
+    // its own or with the lead that goes with it, never with the flags --
+    // the same separation as the lead above, for the same reason.
+    guestBrandTrioModelIds: z
+      .array(z.string().trim().min(1).max(120))
+      .length(APP_DEFAULTS.maxGuestSelectedModels)
+      .optional(),
     aiChatEnabled: z.boolean().optional(),
     attachmentsEnabled: z.boolean().optional(),
     publicSharingEnabled: z.boolean().optional(),
@@ -110,7 +121,13 @@ const appSettingsWriteSchema = updateAppSettingsSchema.superRefine((value, ctx) 
       message: "Feature flags are saved together.",
     });
   }
-  if (present.length === 0 && !value.guestDefaultModelId) {
+  if (present.length !== 0 && value.guestBrandTrioModelIds) {
+    ctx.addIssue({
+      code: "custom",
+      message: "The default lineup is saved on its own, not with feature flags.",
+    });
+  }
+  if (present.length === 0 && !value.guestDefaultModelId && !value.guestBrandTrioModelIds) {
     ctx.addIssue({
       code: "custom",
       message: "Nothing to save.",
@@ -200,20 +217,41 @@ export async function PATCH(req: Request) {
 
     const body = await readLimitedJson(req, 4 * 1024, appSettingsWriteSchema);
     const leadId = body.guestDefaultModelId;
+    const lineup = body.guestBrandTrioModelIds;
     const writesFlags = typeof body.aiChatEnabled === "boolean";
-    if (leadId) {
+    if (lineup) {
+      const rejection = await guestDefaultLineupRejection({
+        modelIds: lineup,
+        leadModelId: leadId,
+      });
+      if (rejection) {
+        return NextResponse.json({ error: rejection }, { status: 400 });
+      }
+    } else if (leadId) {
       const rejection = await guestDefaultModelRejection(leadId);
       if (rejection) {
         return NextResponse.json({ error: rejection }, { status: 400 });
       }
     }
-    const auditScope = leadId && writesFlags ? "both" : leadId ? "lead" : "flags";
+    const auditScope = lineup
+      ? "lineup"
+      : leadId && writesFlags
+        ? "both"
+        : leadId
+          ? "lead"
+          : "flags";
     // A combined write keeps the broad action. That name was widened on
     // purpose: the old guest-only action hid a feature-flag change and
     // invented a guest-default change that had not happened (2026-08-23,
     // assistantKnowledgeEnabled). A lead-only or flags-only write uses its
     // own action, because the broad summary would now be the lie.
     const auditCopy = {
+      lineup: {
+        startedAction: "app_settings.guest_default_lineup.update_started",
+        completedAction: "app_settings.guest_default_lineup.update_completed",
+        started: "Started default model lineup update.",
+        completed: "Updated the default model lineup.",
+      },
       lead: {
         startedAction: "app_settings.guest_default_model.update_started",
         completedAction: "app_settings.guest_default_model.update_completed",
@@ -242,7 +280,9 @@ export async function PATCH(req: Request) {
       summary: auditCopy.started,
       metadata: body,
     });
-    if (leadId && !writesFlags) {
+    if (lineup) {
+      await updateGuestDefaultLineup({ modelIds: lineup, leadModelId: leadId });
+    } else if (leadId && !writesFlags) {
       await updateGuestDefaultModel(leadId);
     }
     if (writesFlags && body.aiChatEnabled !== undefined && body.attachmentsEnabled !== undefined && body.publicSharingEnabled !== undefined) {
