@@ -89,4 +89,6 @@ test("quota lookup is exact and distinct observations keep separate identities",
   assert.deepEqual(results.map(result => result.status), [200, 200]);
   assert.equal(writeCalls, 3); assert.equal(auditCalls, 3);
   assert.equal(rows.size, 3);
+  for (const observation_id of [missingId, secondId]) assert.deepEqual(await (await lookup(observation_id)).json(),
+    { found: true, observation: { ...body, observation_id } });
 });

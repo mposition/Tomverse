@@ -94,6 +94,40 @@ test("quota reads only the assigned CLI profile, bounds and erases credentials, 
   assert.equal(network, 1, "API-key/alternate backend settings cannot borrow subscription quota");
 });
 
+test("quota transport forces certificate verification and bounded large global config remains usable", async () => {
+  const data = Buffer.from(JSON.stringify({ claudeAiOauth: {
+    accessToken: "synthetic-token-not-real", expiresAt: Date.now() + 60000,
+  } }));
+  const settings = Buffer.from(JSON.stringify({ metadata: "x".repeat(100_000) }));
+  let settingsBuffer, requests = 0;
+  const reset = new Date(Date.now() + 3600000).toISOString();
+  const file = bytes => ({ stat: async () => ({ isFile: () => true, mode: 0o600, uid: 123, size: bytes.length }),
+    read: async buffer => { bytes.copy(buffer); return { bytesRead: bytes.length }; }, close: async () => {} });
+  const result = await probeAmuxV22ClaudeQuota(config, { uid: 123,
+    open: async () => file(data),
+    openSettings: async path => {
+      if (path !== join(config.claudeConfigDir, ".claude.json")) throw Object.assign(new Error(), { code: "ENOENT" });
+      return { ...file(settings), read: async buffer => { settingsBuffer = buffer;
+        settings.copy(buffer); return { bytesRead: settings.length }; } };
+    },
+    httpsGet: (options, callback) => {
+      requests += 1;
+      assert.equal(options.rejectUnauthorized, true);
+      assert.equal(options.hostname, "api.anthropic.com"); assert.equal(options.port, 443);
+      assert.equal(options.path, "/api/oauth/usage"); assert.equal(options.signal.aborted, false);
+      const req = new EventEmitter(); const response = new EventEmitter(); response.statusCode = 200;
+      req.destroy = error => req.emit("error", error);
+      queueMicrotask(() => { callback(response);
+        response.emit("data", Buffer.from(JSON.stringify({ five_hour: { utilization: 10, resets_at: reset },
+          seven_day: { utilization: 20, resets_at: reset } })));
+        response.emit("end"); });
+      return req;
+    },
+  });
+  assert.equal(result.remaining_basis_points, 8000); assert.equal(requests, 1);
+  assert.equal(settingsBuffer.every(byte => byte === 0), true);
+});
+
 test("quota RPC is bound to the fixed worker and creates no execution journal", async () => {
   let runs = 0, reads = 0;
   const handler = createAmuxV22SidecarHandler({ worker: request.worker, stateDir: config.worktreePath,
