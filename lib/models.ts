@@ -182,7 +182,14 @@ const FULL_BINARY_INPUT = {
 // gpt-5-4-mini is deliberately still enabled and publicly listed. It is the
 // baseline this default is being measured against; retiring it is a separate,
 // evidence-gated decision (see docs/policy/default-model-luna-migration.md).
-export const DEFAULT_MODEL_ID = "gpt-5-6-luna";
+//
+// Moved from gpt-5-6-luna to gpt-6-luna on 2026-10-12. Same Guest tier, same
+// Standard class, same 1 credit, so again no user gains or loses access and
+// nothing is charged differently. GPT 6 Luna was already adopted in the
+// production registry; it is compiled below so the default and the guest trio
+// can name it. gpt-5-6-luna stays enabled and listed: this is not its
+// retirement, and the reconciliation script is not run with this switch.
+export const DEFAULT_MODEL_ID = "gpt-6-luna";
 
 // Every model carries three separate identifiers. They are not
 // interchangeable, and support/incident work needs all three to line up:
@@ -212,6 +219,10 @@ export const AVAILABLE_MODELS = [
     { id: "gpt-5-6-sol", name: "GPT-5.6 Sol", apiModel: "gpt-5.6-sol", provider: "openai", icon: "🤖", bestFor: "Frontier reasoning, coding, and complex professional work", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-6-terra", name: "GPT-5.6 Terra", apiModel: "gpt-5.6-terra", provider: "openai", icon: "🤖", bestFor: "Strong analysis and coding with balanced cost", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-6-luna", name: "GPT-5.6 Luna", apiModel: "gpt-5.6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "medium", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
+    // Adopted in the production registry before it was compiled here, and the
+    // row mirrors that registry row: no `reasoning`, so OpenAI's own default
+    // effort (medium) applies. Seeding never overwrites an existing row.
+    { id: "gpt-6-luna", name: "GPT 6 Luna", apiModel: "gpt-6-luna", provider: "openai", icon: "🤖", bestFor: "Efficient high-volume questions and document work", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", contextWindowTokens: 1_050_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5", name: "GPT-5.5", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Complex analysis and important decisions", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
     { id: "gpt-5-5-thinking", name: "GPT-5.5 Thinking", apiModel: "gpt-5.5", provider: "openai", icon: "🤖", bestFor: "Difficult problems that benefit from step-by-step reasoning", minimumPlan: "Pro", usageClass: "premium-reasoning", enabled: true, status: "enabled", reasoning: "high", inputCapabilities: FULL_BINARY_INPUT },
     // Still enabled and publicly listed on purpose: this is the baseline the
@@ -228,6 +239,11 @@ export const AVAILABLE_MODELS = [
     // ledgers keep `claude-opus-4-8`; new requests use Anthropic's Opus 5 API.
     { id: "claude-opus-4-8", name: "Claude Opus 5", apiModel: "claude-opus-5", provider: "anthropic", icon: "🧠", bestFor: "Frontier reasoning across demanding, high-stakes tasks", minimumPlan: "Pro", usageClass: "premium", creditWeight: 16, enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-sonnet-5", name: "Claude Sonnet 5", apiModel: "claude-sonnet-5", provider: "anthropic", icon: "🧠", bestFor: "Writing, structured analysis, and detailed documents", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
+    // Adopted in the production registry before it was compiled here; the row
+    // mirrors that registry row. The guest trio's Anthropic slot from
+    // 2026-10-12, when production had already disabled claude-haiku-4-5 with
+    // this model as its replacement.
+    { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", apiModel: "claude-haiku-5-5", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", reasoning: "high", contextWindowTokens: 1_000_000, inputCapabilities: FULL_BINARY_INPUT },
     { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", apiModel: "claude-haiku-4-5-20251001", provider: "anthropic", icon: "🧠", bestFor: "Quick summaries, drafting, and lightweight analysis", minimumPlan: "Guest", usageClass: "standard", enabled: true, status: "enabled", inputCapabilities: FULL_BINARY_INPUT },
 
     { id: "gemini-3-7-flash", name: "Gemini 3.7 Flash", apiModel: "gemini-3.7-flash", provider: "google", icon: "✨", bestFor: "Complex coding, agentic workflows and multi-step execution", minimumPlan: "Free", usageClass: "advanced", enabled: true, status: "enabled", contextWindowTokens: 1_048_576, inputCapabilities: FULL_BINARY_INPUT },

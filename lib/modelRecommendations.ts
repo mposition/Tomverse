@@ -73,15 +73,21 @@ const USE_CASE_CANDIDATES: Record<
     // gpt-5-4-mini keeps the slot behind it: it is still enabled and still a
     // reasonable everyday pick, so it stays discoverable for the observation
     // period, and this list skips it automatically if it is ever retired.
+    // gpt-6-luna took the lead on 2026-10-12, when it became DEFAULT_MODEL_ID,
+    // and claude-haiku-5-5 sits ahead of the Haiku it replaced in the guest
+    // trio; a disabled id here is skipped, not shown.
+    "gpt-6-luna",
     "gpt-5-6-luna",
     "gpt-5-4-mini",
     "gemini-2-5-flash",
     "qwen3.6-flash",
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "mistral-small-4",
     "glm-5.2",
   ],
   writing: [
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "claude-sonnet-5",
     "mistral-medium-3-1",
@@ -123,7 +129,10 @@ const USE_CASE_CANDIDATES: Record<
     "perplexity/sonar-reasoning-pro",
   ],
   value: [
-    "gpt-5-6-luna",
+    // gpt-6-luna replaced gpt-5-6-luna here on 2026-10-12 rather than joining
+    // it: a model is recommended once per response, so a second Luna would
+    // take the slot the Gemini trio member below needs.
+    "gpt-6-luna",
     // The guest trio's Gemini slot moved to gemini-flash-lite-latest on
     // 2026-09-28 (lib/appDefaults.ts). A new guest comparison selects it, so
     // it must be a candidate here or the picker cannot show a selected model.

@@ -748,7 +748,7 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
   초기화하지도, 추가 지급하지도, 이미 쓴 크레딧을 회수하지도 않습니다.
   업그레이드와 다운그레이드가 같은 함수를 씁니다.
 
-# Default model (GPT-5.6 Luna)
+# Default model (GPT 6 Luna)
 
 `DEFAULT_MODEL_ID`, 게스트 기본값, `gpt-5-4-mini`의 lifecycle을 건드리기 전에
 읽습니다.
@@ -764,9 +764,11 @@ default를 DB에 씁니다), 저장값 JSON 파싱 실패, schema 검증 실패.
 - **trio 밖의 모델은 `guestDefaultModelId`로 저장할 수 없습니다.** resolver가
   무시하므로 저장은 되고 효과는 없는 설정이 됩니다. `guestDefaultLeadRejection()`
   이 거부합니다.
-- **기본 모델은 `gpt-5-6-luna`입니다.** `lib/models.ts`의 `DEFAULT_MODEL_ID`,
-  `lib/appDefaults.ts`의 `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`,
-  Prisma 컬럼 기본값이 함께 움직입니다. 한쪽만 바꾸지 않습니다.
+- **기본 모델은 `gpt-6-luna`입니다**(2026-10-12, 이전 `gpt-5-6-luna`).
+  `lib/models.ts`의 `DEFAULT_MODEL_ID`, `lib/appDefaults.ts`의
+  `GUEST_DEFAULT_MODEL_ID`와 `GUEST_BRAND_TRIO_MODEL_IDS`, Prisma 컬럼 기본값이
+  함께 움직입니다. 한쪽만 바꾸지 않습니다. 같은 날 trio의 Anthropic 자리는
+  `claude-haiku-5-5`로 옮겼습니다. `gpt-5-6-luna`는 은퇴하지 않았습니다.
 - **`gpt-5-4-mini`는 은퇴하지 않았습니다.** enabled·publiclyListed 상태를
   유지하는 것은 의도된 관찰 기간입니다.
 - **수치 eval 통과는 은퇴의 필요조건이지 충분조건이 아닙니다.** 정책 문서

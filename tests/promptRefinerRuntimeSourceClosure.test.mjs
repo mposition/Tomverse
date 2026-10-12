@@ -495,12 +495,18 @@ const compilerOptions = parsedConfig.options;
 // this repins only their final source positions on the main release base.
 // 2026-10-12, back-merge of main 9cd033fa5 into develop: both histories above
 // are kept. Every closure file equals develop's, so develop's pins hold.
+// 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
+// pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
+// below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
+// in `lib/models.ts` move its two `MODEL_ACCESS_RANK[...]` accesses by 16
+// lines. No access is added; count 228 and the position-free inventory are
+// unchanged, so this repins positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "8e5a039576f4fc975a32056ebb70c4ea",
-  "bf85c1b5848955e74b2a4b99e279b0b2",
+  "7de28c2af4b0884b02b29539976e49d5",
+  "623171917914c0fb253d7ee6d7d66547",
 ].join("");
 
 const unwrapStaticExpression = (node) => {
