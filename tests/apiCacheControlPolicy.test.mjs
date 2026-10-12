@@ -144,6 +144,7 @@ test("the proxy matches an exempt pathname exactly, trailing slash aside", () =>
 
 test("only /api paths take the default", () => {
   assert.equal(isApiPathname("/api/user/settings"), true);
+  assert.equal(isApiPathname("/api/chat"), true);
   assert.equal(isApiPathname("/apidocs"), false);
   assert.equal(isApiPathname("/chat"), false);
 });

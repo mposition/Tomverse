@@ -21,6 +21,8 @@ const OWNER_RELEASE_ROUTES = Object.freeze([
 ]);
 // These helpers decide whether a Chat request may pass the shared proxy.
 const REQUEST_BOUNDARY_FILES = Object.freeze([
+  "lib/originProtection.ts",
+  "lib/requestOrigin.ts",
   "lib/nativeBearerGate.ts",
   "lib/mobileAuthContract.ts",
   "lib/mobileAccessToken.ts",
