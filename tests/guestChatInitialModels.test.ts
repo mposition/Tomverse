@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createGuestEligibilityCheck,
+  createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
 } from "@/lib/appDefaults";
@@ -304,4 +305,24 @@ test("a models link does not change the restored conversation's search switch", 
     search: "?models=gpt-5-6-luna",
   };
   assert.equal(resolveGuestInitialWebSearchMode(environment), "off");
+});
+
+test("the first paint succeeds a retired trio member through the catalogue's resolver", () => {
+  const [openai, anthropic, google] = GUEST_BRAND_TRIO_MODEL_IDS;
+  const successor = { ...getModel(anthropic)!, id: "claude-haiku-next", replacementModelId: undefined };
+  const rows = new Map([
+    [anthropic, { ...getModel(anthropic)!, enabled: false, status: "disabled" as const, publiclyListed: false, replacementModelId: successor.id }],
+    [successor.id, successor],
+  ]);
+  const lookup = (id: string) => rows.get(id) ?? getModel(id);
+  const retiredCatalogue = {
+    isEnabledModelId: (id: string) => Boolean(lookup(id)?.enabled),
+    isGuestEligible: createGuestEligibilityCheck(lookup),
+    resolveReplacement: createReplacementResolver(lookup),
+  };
+  const selection = resolveGuestInitialSelectedModels({
+    catalogue: retiredCatalogue,
+    leadModelId: openai,
+  });
+  assert.deepEqual(selection.models, [openai, successor.id, google]);
 });

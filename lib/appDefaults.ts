@@ -4,6 +4,7 @@ import {
   getModel,
   getModelUsageProfile,
   isEnabledModelId,
+  resolveSelectableModelId,
   type AiModel,
 } from "@/lib/models";
 
@@ -65,7 +66,23 @@ export const createGuestEligibilityCheck =
     );
   };
 
+/**
+ * Where a default slot goes when its model is retired: the model's bounded
+ * `replacementModelId` chain (lib/models.ts `resolveSelectableModelId`),
+ * against the same catalogue the caller holds. Undefined when the chain ends
+ * nowhere the catalogue still serves.
+ *
+ * An administrator retires a model by disabling it with a replacement. Before
+ * this, the guest trio ignored that and backfilled the slot from
+ * GUEST_FALLBACK_MODEL_IDS until a code change named the successor -- which is
+ * how claude-haiku-4-5's slot showed a DeepSeek model in production.
+ */
+export const createReplacementResolver =
+  (lookup: ModelLookup) => (modelId: string) =>
+    resolveSelectableModelId(modelId, lookup);
+
 const isGuestEligibleModel = createGuestEligibilityCheck(getModel);
+const resolveStaticReplacement = createReplacementResolver(getModel);
 
 if (!isEnabledModelId(GUEST_DEFAULT_MODEL_ID) || !isGuestEligibleModel(GUEST_DEFAULT_MODEL_ID)) {
   throw new Error("Guest default model must be an enabled guest-accessible Standard model.");
@@ -168,6 +185,13 @@ export const clampGuestSelectedModels = (models: string[]) =>
 // admin-configured guestDefaultModelId) only reorders which of the three
 // appears first, and is ignored if it names a model outside the trio.
 //
+// An ineligible trio member first tries its replacement (`resolveReplacement`,
+// see createReplacementResolver): a retired model's successor keeps the
+// retired model's slot -- and its place in the order, so a retired lead is
+// succeeded as the lead -- provided the successor passes the same `isEligible`
+// rule. Only when it does not, or is already selected, does the slot fall to
+// the fallback list. Omitting `resolveReplacement` keeps the old behaviour.
+//
 // Deliberately pure and catalogue-injected: the server
 // (app/(site)/(application)/chat/page.tsx via lib/appSettings) and the client's
 // very first render (app/(site)/(application)/chat/ChatPageClient.tsx) both
@@ -177,17 +201,22 @@ export const resolveGuestDefaultSelectedModels = ({
   isEligible,
   leadModelId = APP_DEFAULTS.guestDefaultModelId,
   maxModels = APP_DEFAULTS.maxGuestSelectedModels,
+  resolveReplacement,
 }: {
   isEligible: (modelId: string) => boolean;
   leadModelId?: string;
   maxModels?: number;
+  resolveReplacement?: (modelId: string) => string | undefined;
 }) => {
   const orderedTrio = GUEST_BRAND_TRIO_MODEL_IDS.includes(leadModelId)
     ? [leadModelId, ...GUEST_BRAND_TRIO_MODEL_IDS.filter((id) => id !== leadModelId)]
     : GUEST_BRAND_TRIO_MODEL_IDS;
+  const slots = orderedTrio.map((modelId) =>
+    isEligible(modelId) ? modelId : (resolveReplacement?.(modelId) ?? modelId)
+  );
 
   const trio: string[] = [];
-  for (const modelId of [...orderedTrio, ...GUEST_FALLBACK_MODEL_IDS]) {
+  for (const modelId of [...slots, ...GUEST_FALLBACK_MODEL_IDS]) {
     if (trio.includes(modelId) || !isEligible(modelId)) continue;
     trio.push(modelId);
     if (trio.length >= maxModels) break;
@@ -242,5 +271,6 @@ export const getGuestDefaultSelectedModels = (
     resolveGuestDefaultSelectedModels({
       isEligible: isGuestEligibleModel,
       leadModelId,
+      resolveReplacement: resolveStaticReplacement,
     })
   );

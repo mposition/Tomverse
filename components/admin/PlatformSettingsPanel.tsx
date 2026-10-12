@@ -7,7 +7,7 @@ import {
   canUseModelWithPlan,
   getModelUsageProfile,
 } from "@/lib/models";
-import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck } from "@/lib/appDefaults";
+import { APP_DEFAULTS, GUEST_BRAND_TRIO_MODEL_IDS, createGuestEligibilityCheck, createReplacementResolver } from "@/lib/appDefaults";
 import {
   assessFallbackTransition,
   describeGuestDefault,
@@ -539,6 +539,9 @@ export function PlatformSettingsPanel({
   const guestDescription = describeGuestDefault({
     storedLead: storedGuestLead,
     isEligible: guestEligibility,
+    resolveReplacement: createReplacementResolver((id) =>
+      models.find((model) => model.id === id)
+    ),
   });
   const leadInList = guestModels.some((model) => model.id === guestDefaultModelId);
   const labelFor = (id: string) =>

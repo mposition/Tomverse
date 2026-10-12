@@ -154,8 +154,8 @@ import type {
 import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
-  GUEST_FALLBACK_MODEL_IDS,
   isWebSearchEnabled,
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
@@ -1708,6 +1708,7 @@ export function ChatPageClient({
     () => ({
       isEnabledModelId,
       isGuestEligible: createGuestEligibilityCheck(getModel),
+      resolveReplacement: createReplacementResolver(getModel),
     }),
     [getModel, isEnabledModelId]
   );
@@ -2633,6 +2634,7 @@ export function ChatPageClient({
         resolveGuestDefaultSelectedModels({
           isEligible: guestCatalogue.isGuestEligible,
           leadModelId: guestDefaultModelId,
+          resolveReplacement: guestCatalogue.resolveReplacement,
         })
       ),
     [clampGuestSelectedModels, guestCatalogue, guestDefaultModelId]
@@ -2652,19 +2654,22 @@ export function ChatPageClient({
 
   // Shown the first time a freshly created account loads chat, so a new
   // signed-in user starts with the same 3-model side-by-side comparison a
-  // guest already sees instead of a single panel. Same brand-trio-plus-
-  // fallback selection as guestDefaultSelectedModels above, just checked
-  // against "Free" (every guest-eligible model is Free-eligible too).
-  const newAccountDefaultSelectedModels = useMemo(() => {
-    const candidates = [...GUEST_BRAND_TRIO_MODEL_IDS, ...GUEST_FALLBACK_MODEL_IDS];
-    const trio: string[] = [];
-    for (const modelId of candidates) {
-      if (trio.includes(modelId) || !isNewAccountEligibleModel(modelId)) continue;
-      trio.push(modelId);
-      if (trio.length >= APP_DEFAULTS.maxSelectedModels) break;
-    }
-    return clampSelectedModels(trio);
-  }, [clampSelectedModels, isNewAccountEligibleModel]);
+  // guest already sees instead of a single panel. The same resolver as
+  // guestDefaultSelectedModels above -- including a retired member's
+  // successor -- just checked against "Free" (every guest-eligible model is
+  // Free-eligible too), in the trio's own order rather than the guest lead's.
+  const newAccountDefaultSelectedModels = useMemo(
+    () =>
+      clampSelectedModels(
+        resolveGuestDefaultSelectedModels({
+          isEligible: isNewAccountEligibleModel,
+          leadModelId: GUEST_BRAND_TRIO_MODEL_IDS[0],
+          maxModels: APP_DEFAULTS.maxSelectedModels,
+          resolveReplacement: guestCatalogue.resolveReplacement,
+        })
+      ),
+    [clampSelectedModels, guestCatalogue, isNewAccountEligibleModel]
+  );
 
   // The guest default lead model used to be fetched here after mount, which
   // is why the guest bootstrap effect below had to wait on a network response

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   APP_DEFAULTS,
   createGuestEligibilityCheck,
+  createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
   guestDefaultLeadRejection,
@@ -197,4 +198,101 @@ test("disabled, non-guest and non-Standard leads are each rejected on their own 
 test("the compiled trio is one OpenAI, one Anthropic and one Gemini model", () => {
   const providers = GUEST_BRAND_TRIO_MODEL_IDS.map((id) => getModel(id)?.provider);
   assert.deepEqual([...providers].sort(), ["anthropic", "google", "openai"]);
+});
+
+// A catalogue in which the trio's members can be retired. Every row starts as
+// the compiled row, so only the fields a test names differ from production.
+const catalogueWith = (overrides: Record<string, Partial<AiModel>>) => {
+  const rows = new Map<string, AiModel>();
+  for (const [id, change] of Object.entries(overrides)) {
+    const base = getModel(id) ?? getModel(GUEST_BRAND_TRIO_MODEL_IDS[0])!;
+    rows.set(id, { ...base, id, ...change } as AiModel);
+  }
+  const lookup = (id: string) => rows.get(id) ?? getModel(id);
+  return {
+    isEligible: createGuestEligibilityCheck(lookup),
+    resolveReplacement: createReplacementResolver(lookup),
+  };
+};
+const retired = (replacementModelId: string): Partial<AiModel> => ({
+  enabled: false,
+  status: "disabled",
+  publiclyListed: false,
+  replacementModelId,
+});
+const [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT] = GUEST_BRAND_TRIO_MODEL_IDS;
+
+test("a retired trio member is succeeded in its own slot", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-next", GOOGLE_SLOT]
+  );
+});
+
+test("a retired lead is succeeded as the lead", () => {
+  const catalogue = catalogueWith({
+    [OPENAI_SLOT]: retired("gpt-luna-next"),
+    "gpt-luna-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    ["gpt-luna-next", ANTHROPIC_SLOT, GOOGLE_SLOT]
+  );
+});
+
+test("the chain is followed through a retired successor", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": retired("claude-haiku-after"),
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a successor guests cannot use leaves the slot to the fallback list", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, minimumPlan: "Pro", replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("a successor already selected is not counted twice", () => {
+  const catalogue = catalogueWith({ [ANTHROPIC_SLOT]: retired(GOOGLE_SLOT) });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("a replacement cycle ends in the fallback list, not in a loop", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": retired(ANTHROPIC_SLOT),
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
+});
+
+test("without a resolver a retired member still falls to the fallback list", () => {
+  const { isEligible } = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ isEligible, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, GOOGLE_SLOT, GUEST_FALLBACK_MODEL_IDS[0]]
+  );
 });
