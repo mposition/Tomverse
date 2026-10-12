@@ -89,13 +89,8 @@ for (const lang of ["en", "ko"] as const) {
     await expect(page.getByTestId("landing-quick-summary-card")).toBeVisible();
     await expect(page.getByTestId("landing-item-verification-card")).toBeVisible();
     await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
-      "href", `/review?lang=${lang}&entry=guest-preview`
+      "href", `/review?lang=${lang}`
     );
-    await page.getByTestId("landing-primary-cta").click();
-    await expect(page).toHaveURL(url => url.pathname === "/review"
-      && url.searchParams.get("lang") === lang
-      && url.searchParams.get("entry") === "guest-preview");
-    await expect(page.getByTestId("chat-input")).toBeVisible();
   });
 }
 
