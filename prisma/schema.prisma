@@ -10309,8 +10309,9 @@ model AmuxWorkerObservation {
   @@index([workerName, sequence])
 }
 
-/// One trial card's result (orchestration policy version 31, section 5(1)).
-/// Append-only. Closed to every write until R5 replaces its guard.
+/// A trial card's result (orchestration policy version 31, section 5(1)).
+/// Append-only. Closed to every write until R5 replaces its guard; R5 also
+/// adds the uniqueness its re-trial rule needs.
 /// `costMicroUsd` is NULL when unknown, never zero.
 model AmuxWorkerTrialEvidence {
   id           String   @id

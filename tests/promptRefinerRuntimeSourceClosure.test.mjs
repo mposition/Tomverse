@@ -439,12 +439,17 @@ const compilerOptions = parsedConfig.options;
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31), main
+// selective release: the marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "54518b09e096d37dfe4fd70a69fddec2",
-  "8633c118fd3e3cda5c900aeea2838205",
+  "544a9e33f60a03a051f80f59857c15f1",
+  "4f23cdc0fe0078268dcf57626bf7b665",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

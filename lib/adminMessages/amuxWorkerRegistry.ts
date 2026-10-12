@@ -20,7 +20,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     reading: "Reading…",
     comparisonTitle: "Registry and assignment catalog",
     comparisonHelp:
-      "Stage R1 ends when these agree for the agreed period. A worker agrees when the registry says active and the catalog lists it assignable, or when neither does. Roles are not compared.",
+      "Stage R1 ends when these agree for the agreed period. A worker agrees when the registry says active and the catalog lists it assignable, or when neither does. A catalog entry with no registry entry never agrees, even when the catalog holds it, and neither does one whose provider is not its name's class. Roles are not compared.",
     comparisonStatus: {
       match: "They agree",
       mismatch: "They disagree",
@@ -94,7 +94,7 @@ export const adminAmuxWorkerRegistryMessages = defineAdminMessages({
     reading: "읽는 중…",
     comparisonTitle: "등록부와 배정 카탈로그",
     comparisonHelp:
-      "R1 단계는 정해진 기간 동안 둘이 일치하면 끝납니다. 등록부가 active이고 카탈로그가 배정 가능으로 두거나, 둘 다 아닐 때 일치입니다. 역할은 비교하지 않습니다.",
+      "R1 단계는 정해진 기간 동안 둘이 일치하면 끝납니다. 등록부가 active이고 카탈로그가 배정 가능으로 두거나, 둘 다 아닐 때 일치입니다. 등록부에 없는 카탈로그 항목은 카탈로그가 보류 중이어도 불일치이고, 공급사가 이름의 종류와 다른 항목도 불일치입니다. 역할은 비교하지 않습니다.",
     comparisonStatus: {
       match: "일치",
       mismatch: "불일치",
