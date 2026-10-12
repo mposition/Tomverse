@@ -1,27 +1,26 @@
 import { expect, test, type Locator } from "@playwright/test";
 import { prepareGuestPage } from "./support/app-fixtures";
 
-const expectSafeNewTabLink = async (locator: Locator) => {
-  await expect(locator).toHaveAttribute("href", "/status");
+const expectSafeNewTabLink = async (locator: Locator, lang: "en" | "ko") => {
+  await expect(locator).toHaveAttribute("href", `/status?lang=${lang}`);
   await expect(locator).toHaveAttribute("target", "_blank");
   await expect(locator).toHaveAttribute("rel", /noopener/);
   await expect(locator).toHaveAttribute("rel", /noreferrer/);
 };
 
-test("public status remains discoverable from the marketing footer", async ({ page }) => {
-  await prepareGuestPage(page, "en");
-  await page.goto("/");
+for (const lang of ["en", "ko"] as const) {
+  test(`${lang} public status remains discoverable from the marketing footer`, async ({ page }) => {
+    await prepareGuestPage(page, lang);
+    await page.goto(lang === "en" ? "/" : "/ko");
+    await expectSafeNewTabLink(page.getByTestId("footer-status-link"), lang);
+  });
 
-  await expectSafeNewTabLink(page.getByTestId("footer-status-link"));
-
-});
-
-test("the model catalogue links to live service status", async ({ page }) => {
-  await prepareGuestPage(page, "en");
-  await page.goto("/models");
-
-  await expectSafeNewTabLink(page.getByTestId("models-status-link"));
-});
+  test(`${lang} model catalogue links to live service status`, async ({ page }) => {
+    await prepareGuestPage(page, lang);
+    await page.goto(lang === "en" ? "/models" : "/ko/models");
+    await expectSafeNewTabLink(page.getByTestId("models-status-link"), lang);
+  });
+}
 
 test("mobile marketing menu stays focused on the four primary destinations", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -31,14 +30,18 @@ test("mobile marketing menu stays focused on the four primary destinations", asy
   const menuButton = page.getByRole("button", { name: "Menu" });
   await expect(menuButton).toBeVisible();
   await menuButton.click();
-  // The four top destinations since e093addfa; FAQ moved to the footer menu.
-  const menu = page.locator("header nav").filter({ hasText: "How it works" });
-  await expect(menu.getByRole("link", { name: "How it works" })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Models" })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Pricing" })).toBeVisible();
-  await expect(menu.getByRole("link", { name: "Trust" })).toBeVisible();
+  // Product entry choices stay separate; FAQ and status remain in the footer.
+  const menu = page.locator("header nav").filter({ has: page.getByTestId("mobile-chat-link") });
+  for (const id of ["chat", "review", "models", "pricing"]) {
+    await expect(menu.getByTestId(`mobile-${id}-link`)).toBeVisible();
+  }
+  await expect(menu.locator('[data-testid^="mobile-"][data-testid$="-link"]')).toHaveCount(4);
+  await expect(menu.getByRole("link", { name: "Chat", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Review", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Explore models", exact: true })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Pricing", exact: true })).toBeVisible();
   await expect(menu.getByRole("link", { name: "FAQ" })).toHaveCount(0);
-  await expect(menu.getByRole("link", { name: "Status" })).toHaveCount(0);
+  await expect(menu.getByRole("link", { name: "Service status" })).toHaveCount(0);
 });
 
 test("ChatGPT vs Claude guide serves every comparison image", async ({ page }) => {

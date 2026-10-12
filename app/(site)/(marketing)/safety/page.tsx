@@ -1,13 +1,8 @@
 import { MarketingInfoPage } from "@/components/marketing/MarketingInfoPage";
 import { infoPages } from "@/components/marketing/marketingInfoContent";
-import { createPageMetadata } from "@/lib/seo";
+import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
 
-export const metadata = createPageMetadata({
-  title: "Safety and Trust",
-  description:
-    "Explore Tomverse Review safety principles, model transparency, security boundaries, privacy controls, and incident practices.",
-  path: "/safety",
-});
+export const metadata = publicMarketingPageMetadata("/safety");
 
 export default function SafetyPage() {
   return <MarketingInfoPage content={infoPages.safety} />;

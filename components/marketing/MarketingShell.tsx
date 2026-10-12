@@ -1,6 +1,8 @@
 import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
+import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
 
@@ -65,6 +67,7 @@ export function MarketingShell({
         }}
       />
       <MarketingProviders measurementId={measurementId}>
+        <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
         {children}
         {/*
           UX-006. Inside the providers, because the viewport reads its dismiss
@@ -73,6 +76,7 @@ export function MarketingShell({
           once.
         */}
         <AppToastViewport />
+        </MarketingChatAvailabilityProvider>
       </MarketingProviders>
     </>
   );

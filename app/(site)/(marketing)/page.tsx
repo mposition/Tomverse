@@ -1,6 +1,5 @@
 import LaunchHomepage from "@/components/marketing/LaunchHomepage";
 import { homepageProductLinks } from "@/lib/homepageProductLinks";
-import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { createPageMetadata, getHomeOgCopy, getHomeSeoCopy } from "@/lib/seo";
 
@@ -12,14 +11,11 @@ export const metadata = createPageMetadata({
   description: seoCopy.description,
   path: "/",
   localizedBasePath: "/",
+  absoluteTitle: true,
   ogTitle: ogCopy.title,
   ogDescription: ogCopy.description,
 });
 
 export default function LandingPage() {
-  return (
-    <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
-      <LaunchHomepage {...homepageProductLinks("en")} />
-    </MarketingChatAvailabilityProvider>
-  );
+  return <LaunchHomepage {...homepageProductLinks("en")} />;
 }

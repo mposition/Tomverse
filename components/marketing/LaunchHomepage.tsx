@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { localizedPath } from "@/lib/seo";
 import { MarketingFooter, MarketingHeader } from "./MarketingChrome";
 import { useMarketingChatEntry } from "./MarketingChatAvailability";
 import { launchAccountEntryCopy, launchHomepageContent, launchReviewEntryCopy, type EverydayExample, type LaunchHomepageCopy } from "./launchHomepageContent";
@@ -12,6 +13,7 @@ import styles from "./LaunchHomepage.module.css";
 
 type LaunchHomepageProps = { chatHref: string; reviewHref: string; reviewInfoHref: string };
 const modelNames = ["GPT", "Claude", "Gemini"] as const;
+const answerIds = ["A", "B", "C"] as const;
 const exampleIds = ["travel", "learn", "write"] as const;
 
 function ActionLink({ href, children, inverse = false, subtle = false, id, testId, location }: {
@@ -194,9 +196,9 @@ export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) 
             <p className={styles.reviewIntro}>{copy.review.body}</p>
             <div className={styles.reviewSurface}>
               <h3 className={styles.reviewQuestion}>{copy.review.question}</h3>
-              <div className={styles.answerGrid}>{copy.review.answers.map((answer, i) => <article key={modelNames[i]}>
-                <div className={styles.answer}><p className={styles.answerModel}>{modelNames[i]}</p><h4>{answer.title}</h4><p>{answer.body}</p></div>
-                <p className={styles.answerQuote}>{answer.quote} · {modelNames[i]}</p>
+              <div className={styles.answerGrid}>{copy.review.answers.map((answer, i) => <article key={answerIds[i]}>
+                <div className={styles.answer}><p className={styles.answerModel}>{answerIds[i]}</p><h4>{answer.title}</h4><p>{answer.body}</p></div>
+                <p className={styles.answerQuote}>“{answer.quote}” · {answerIds[i]}</p>
               </article>)}</div>
               <div className={styles.aiReview}>
                 <div><p className={styles.aiReviewLabel}>AI Review</p><h3>{copy.review.synthesisTitle}</h3></div>
@@ -215,7 +217,7 @@ export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) 
         <section className={`${styles.section} ${styles.toolsSection}`} aria-labelledby="launch-tools-title">
           <div className={styles.container}>
             <h2 id="launch-tools-title" className={styles.toolsHeading}><Lines lines={copy.tools.title} /></h2>
-            <div className={styles.toolsColumns}>{copy.tools.columns.map((tool) => <div key={tool.title}><h3>{tool.title}</h3><p>{tool.body}</p></div>)}</div>
+            <div className={styles.toolsColumns}>{copy.tools.columns.map((tool) => <div key={tool.title}><h3>{tool.title}</h3><p>{tool.body}</p><p className={styles.toolExample}>{tool.label}</p></div>)}</div>
             <p className={styles.smallNote}>{copy.tools.note}</p>
           </div>
         </section>
@@ -223,8 +225,8 @@ export default function LaunchHomepage({ reviewInfoHref }: LaunchHomepageProps) 
         <section id="trust" className={`${styles.section} ${styles.plansSection}`} aria-labelledby="launch-plans-title">
           <div className={styles.container}>
             <div className={styles.plansGrid}>
-              <div><p className={styles.eyebrow}>Free · Pro · Max</p><h2 id="launch-plans-title">{copy.plans.title}</h2><p>{accountCopy?.plansBody ?? (guestTrialAvailable ? copy.plans.body : reviewEntryCopy.plansBody)}</p><ActionLink href="/pricing" subtle>{copy.actions.pricing}</ActionLink></div>
-              <div className={styles.trustCopy}><h3>{copy.plans.trustTitle}</h3><p>{copy.plans.trustBody}</p><Link href="/safety" className={styles.textLink}>{copy.actions.safety} <span aria-hidden="true">↗</span></Link></div>
+              <div><p className={styles.eyebrow}>Free · Pro · Max</p><h2 id="launch-plans-title">{copy.plans.title}</h2><p>{accountCopy?.plansBody ?? (guestTrialAvailable ? copy.plans.body : reviewEntryCopy.plansBody)}</p><ActionLink href={localizedPath(lang, "/pricing")} subtle>{copy.actions.pricing}</ActionLink></div>
+              <div className={styles.trustCopy}><h3>{copy.plans.trustTitle}</h3><p>{copy.plans.trustBody}</p><Link href={localizedPath(lang, "/safety")} className={styles.textLink}>{copy.actions.safety} <span aria-hidden="true">↗</span></Link></div>
             </div>
           </div>
         </section>

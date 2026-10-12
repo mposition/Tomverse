@@ -1,12 +1,7 @@
 import { SupportPageContent } from "@/components/marketing/SupportPageContent";
-import { createPageMetadata } from "@/lib/seo";
+import { publicMarketingPageMetadata } from "@/lib/publicMarketingMetadata";
 
-export const metadata = createPageMetadata({
-  title: "Support",
-  description:
-    "Get help with Tomverse accounts, AI models, attachments, billing, sharing, errors, and service incidents.",
-  path: "/support",
-});
+export const metadata = publicMarketingPageMetadata("/support");
 
 export default function SupportPage() {
   return <SupportPageContent />;
