@@ -45,6 +45,12 @@ export type GuestCatalogueAccess = {
   /** Additionally guest-plan and Standard-tier, per lib/appDefaults. */
   isGuestEligible: (modelId: string) => boolean;
   /**
+   * isGuestEligible narrowed to what a default may name
+   * (lib/appDefaults `createDefaultLineupEligibilityCheck`). Only the default
+   * selection uses it; a guest's own selection is clamped by isGuestEligible.
+   */
+  isDefaultEligible: (modelId: string) => boolean;
+  /**
    * A retired model's successor, per the same catalogue
    * (lib/appDefaults `createReplacementResolver`). Optional only so a caller
    * without a catalogue lookup still resolves; the chat client always binds it.
@@ -195,7 +201,7 @@ export const resolveGuestInitialSelectedModels = ({
   const clamp = createGuestSelectionClamp(catalogue);
   const guestDefault = clamp(
     resolveGuestDefaultSelectedModels({
-      isEligible: catalogue.isGuestEligible,
+      isEligible: catalogue.isDefaultEligible,
       leadModelId,
       resolveReplacement: catalogue.resolveReplacement,
       trio,

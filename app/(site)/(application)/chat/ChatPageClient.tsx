@@ -153,6 +153,7 @@ import type {
 } from "@/lib/conversationProfileBinding";
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
   createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
@@ -1710,14 +1711,15 @@ export function ChatPageClient({
   // lifecycle. The catalogue itself arrives as an initial prop from the
   // server (components/ModelCatalogProvider), so this is already populated on
   // the first render rather than after a client fetch.
-  const guestCatalogue = useMemo(
-    () => ({
+  const guestCatalogue = useMemo(() => {
+    const isGuestEligible = createGuestEligibilityCheck(getModel);
+    return {
       isEnabledModelId,
-      isGuestEligible: createGuestEligibilityCheck(getModel),
+      isGuestEligible,
+      isDefaultEligible: createDefaultLineupEligibilityCheck(getModel, isGuestEligible),
       resolveReplacement: createReplacementResolver(getModel),
-    }),
-    [getModel, isEnabledModelId]
-  );
+    };
+  }, [getModel, isEnabledModelId]);
 
   // Lazy initializer, not a post-mount effect: the model count is what the
   // estimated credits, panel count, Send label and conversation summary are
@@ -2639,7 +2641,7 @@ export function ChatPageClient({
     () =>
       clampGuestSelectedModels(
         resolveGuestDefaultSelectedModels({
-          isEligible: guestCatalogue.isGuestEligible,
+          isEligible: guestCatalogue.isDefaultEligible,
           leadModelId: guestDefaultModelId,
           resolveReplacement: guestCatalogue.resolveReplacement,
           trio: guestBrandTrioModelIds,
@@ -2670,14 +2672,14 @@ export function ChatPageClient({
     () =>
       clampSelectedModels(
         resolveGuestDefaultSelectedModels({
-          isEligible: isNewAccountEligibleModel,
+          isEligible: createDefaultLineupEligibilityCheck(getModel, isNewAccountEligibleModel),
           leadModelId: guestDefaultModelId,
           maxModels: APP_DEFAULTS.maxSelectedModels,
           resolveReplacement: guestCatalogue.resolveReplacement,
           trio: guestBrandTrioModelIds,
         })
       ),
-    [clampSelectedModels, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId, isNewAccountEligibleModel]
+    [clampSelectedModels, getModel, guestBrandTrioModelIds, guestCatalogue, guestDefaultModelId, isNewAccountEligibleModel]
   );
 
   // The guest default lead model used to be fetched here after mount, which

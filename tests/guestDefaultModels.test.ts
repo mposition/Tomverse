@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   APP_DEFAULTS,
+  createDefaultLineupEligibilityCheck,
   createGuestEligibilityCheck,
   createReplacementResolver,
   expectedLeadForStored,
@@ -500,4 +501,34 @@ test("a selection's missing providers name both an absent and a doubled provider
   assert.deepEqual(missingLineupProviders(["openai", "openai", "google"]), ["openai", "anthropic"]);
   assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google"]), true);
   assert.equal(isOnePerLineupProvider(["openai", "anthropic", "google", "xai"]), false);
+});
+
+test("a lineup member that is limited or unlisted but still guest-eligible is succeeded, and audited so", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  for (const change of [{ status: "limited" as const }, { publiclyListed: false }]) {
+    const rows = new Map<string, AiModel>([
+      [ANTHROPIC_SLOT, { ...getModel(ANTHROPIC_SLOT)!, ...change, replacementModelId: "claude-haiku-next" }],
+      ["claude-haiku-next", { ...getModel(ANTHROPIC_SLOT)!, id: "claude-haiku-next", replacementModelId: undefined }],
+    ]);
+    const lookup = (id: string) => rows.get(id) ?? getModel(id);
+    const isGuest = createGuestEligibilityCheck(lookup);
+    const isEligible = createDefaultLineupEligibilityCheck(lookup, isGuest);
+    const resolveReplacement = createReplacementResolver(lookup);
+    // The plain guest check would keep it -- the defect a default must not have.
+    assert.equal(isGuest(ANTHROPIC_SLOT), true, JSON.stringify(change));
+    assert.equal(isEligible(ANTHROPIC_SLOT), false, JSON.stringify(change));
+    assert.deepEqual(
+      resolveGuestDefaultSelectedModels({ isEligible, resolveReplacement, trio: lineup, leadModelId: OPENAI_SLOT }),
+      [OPENAI_SLOT, "claude-haiku-next", GOOGLE_SLOT]
+    );
+    // Stored as the lead, it expects its successor -- and leads with it.
+    assert.equal(
+      expectedLeadForStored({ stored: ANTHROPIC_SLOT, lineup, isEligible, resolveReplacement }),
+      "claude-haiku-next"
+    );
+    assert.equal(
+      resolveGuestDefaultSelectedModels({ isEligible, resolveReplacement, trio: lineup, leadModelId: ANTHROPIC_SLOT })[0],
+      "claude-haiku-next"
+    );
+  }
 });

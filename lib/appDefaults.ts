@@ -85,6 +85,23 @@ export const isDefaultLineupServable = (
   !model.catalogDeleted;
 
 /**
+ * `isEligible` narrowed to what a default may name (isDefaultLineupServable).
+ * Every place that computes a default selection -- the guest default, a new
+ * account's first comparison, the lead facts, the console and
+ * check:default-models -- passes this as the resolver's `isEligible`, so a
+ * lineup member that is later limited or unlisted is succeeded in its slot
+ * rather than kept for guests and dropped by a new account's clamp. A guest's
+ * own selection keeps the plain guest check: a limited model is still
+ * runnable when someone picks it.
+ */
+export const createDefaultLineupEligibilityCheck =
+  (lookup: ModelLookup, isEligible: (modelId: string) => boolean) =>
+  (modelId: string) => {
+    const model = lookup(modelId);
+    return Boolean(model && isDefaultLineupServable(model) && isEligible(modelId));
+  };
+
+/**
  * Who takes a retired model's default slot. `accept` is the caller's own rule
  * for the slot -- the guest resolver passes its `isEligible`.
  */
@@ -481,7 +498,7 @@ export const getGuestDefaultSelectedModels = (
 ) =>
   clampGuestSelectedModels(
     resolveGuestDefaultSelectedModels({
-      isEligible: isGuestEligibleModel,
+      isEligible: createDefaultLineupEligibilityCheck(getModel, isGuestEligibleModel),
       leadModelId,
       resolveReplacement: resolveStaticReplacement,
     })
