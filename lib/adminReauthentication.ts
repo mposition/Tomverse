@@ -3,6 +3,7 @@ import "server-only";
 import type { Session } from "next-auth";
 import {
   isRecentAdminAuthentication,
+  resolveAccountRecentAuthMinutes,
   resolveRecentAuthMinutes,
 } from "@/lib/adminReauthenticationCore";
 
@@ -23,24 +24,40 @@ export class AdminReauthenticationRequiredError extends Error {
 // unit-tested without a session or an environment, and so the clock-skew rule
 // (a claim dated far in the future buys no step-up window) has one home.
 //
-// Two callers, one policy. A page cannot use the assertion below -- it has to
+// The admin page cannot use the assertion below -- it has to
 // *render* something when the window is spent, and catching a control-flow
 // exception to choose a view is easy to get backwards -- so it reads this
 // predicate instead. Both go through the same environment lookup, so the
 // reauthentication page and `/api/admin/**` cannot reach different conclusions
 // about the same session, which is what a surface re-implementing the window
-// would eventually produce.
-export const hasRecentAdminAuthentication = (
-  session: Session | null | undefined
+// would eventually produce. Account-sensitive operations share the same
+// override and timestamp rules but keep their original 30-minute default.
+const hasRecentAuthentication = (
+  session: Session | null | undefined,
+  recentAuthMinutes: number
 ) =>
   Boolean(session?.user?.id) &&
   isRecentAdminAuthentication({
     authenticatedAt: session?.user?.authenticatedAt,
-    recentAuthMinutes: resolveRecentAuthMinutes(
-      process.env.ADMIN_RECENT_AUTH_MINUTES
-    ),
+    recentAuthMinutes,
     now: new Date(),
   });
+
+export const hasRecentAdminAuthentication = (
+  session: Session | null | undefined
+) =>
+  hasRecentAuthentication(
+    session,
+    resolveRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES)
+  );
+
+export const hasRecentAccountAuthentication = (
+  session: Session | null | undefined
+) =>
+  hasRecentAuthentication(
+    session,
+    resolveAccountRecentAuthMinutes(process.env.ADMIN_RECENT_AUTH_MINUTES)
+  );
 
 export async function assertRecentAdminAuthentication(session: Session) {
   if (!hasRecentAdminAuthentication(session)) {
@@ -48,5 +65,13 @@ export async function assertRecentAdminAuthentication(session: Session) {
   }
 }
 
+export async function assertRecentAccountAuthentication(session: Session) {
+  if (!hasRecentAccountAuthentication(session)) {
+    throw new AdminReauthenticationRequiredError();
+  }
+}
+
 export const isAdminReauthenticationError = (error: unknown) =>
   error instanceof AdminReauthenticationRequiredError;
+
+export const isAccountReauthenticationError = isAdminReauthenticationError;

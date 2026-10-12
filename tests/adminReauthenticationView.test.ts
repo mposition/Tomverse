@@ -13,19 +13,24 @@ import {
   adminReauthenticationSignInHref,
   adminRecentAuthenticationHref,
   isAdminReauthenticationSignInReason,
+  isRecentAdminAuthentication,
   normalizeAdminReauthenticationMode,
+  resolveAccountRecentAuthMinutes,
   resolveAdminReauthenticationView,
   resolveRecentAuthMinutes,
 } from "../lib/adminReauthenticationCore.ts";
-import { hasRecentAdminAuthentication } from "../lib/adminReauthentication.ts";
+import {
+  hasRecentAccountAuthentication,
+  hasRecentAdminAuthentication,
+} from "../lib/adminReauthentication.ts";
 
 /**
  * `/auth/admin-reauthenticate`, which two different expiries land on.
  *
  * The bug these cases exist for: the page redirected any `authorized` session
  * straight to its callback, and `authorized` only ever meant the 8-hour
- * console window (`ADMIN_SESSION_MAX_HOURS`). An operator whose 30-minute
- * step-up window (`ADMIN_RECENT_AUTH_MINUTES`) had run out therefore got a
+ * console window (`ADMIN_SESSION_MAX_HOURS`). An operator whose step-up window
+ * (`ADMIN_RECENT_AUTH_MINUTES`) had run out therefore got a
  * 428 from `/api/admin/app-settings`, followed the reauthentication link, and
  * was bounced back to the same screen -- with the console still working, so
  * nothing on the way explained what to do.
@@ -83,18 +88,36 @@ const recentAuth = (minutesAgo: number, override?: string) => {
   }
 };
 
+const recentAccountAuth = (minutesAgo: number, override?: string) => {
+  const previous = process.env.ADMIN_RECENT_AUTH_MINUTES;
+  if (override === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+  else process.env.ADMIN_RECENT_AUTH_MINUTES = override;
+  try {
+    return hasRecentAccountAuthentication({
+      user: {
+        id: "user-1",
+        email: "owner@example.com",
+        authenticatedAt: authenticatedMinutesAgo(minutesAgo),
+      },
+    } as Parameters<typeof hasRecentAccountAuthentication>[0]);
+  } finally {
+    if (previous === undefined) delete process.env.ADMIN_RECENT_AUTH_MINUTES;
+    else process.env.ADMIN_RECENT_AUTH_MINUTES = previous;
+  }
+};
+
 test("an expired step-up window inside a valid console session shows the card", () => {
-  // 45 minutes: past the 30-minute step-up window, nowhere near the 8-hour
+  // 150 minutes: past the 120-minute step-up window, inside the 8-hour
   // console window. This is the exact state that used to redirect in a circle.
-  assert.equal(adminAccessState(45), "authorized");
-  assert.equal(recentAuth(45), false);
+  assert.equal(adminAccessState(150), "authorized");
+  assert.equal(recentAuth(150), false);
 
   assert.deepEqual(
     resolveAdminReauthenticationView({
       signedIn: true,
-      accessState: adminAccessState(45),
+      accessState: adminAccessState(150),
       mode: "recent-auth",
-      hasRecentAuthentication: recentAuth(45),
+      hasRecentAuthentication: recentAuth(150),
       callbackUrl: "/admin/platform",
     }),
     { kind: "reauthenticate", reason: "recent-auth", callbackUrl: "/admin/platform" }
@@ -205,14 +228,14 @@ test("callbacks outside the console are normalized before they are handed back",
 });
 
 test("the step-up window follows a production override, not a constant", () => {
-  // 45 minutes is expired under the 30-minute default and open under a
-  // 60-minute override. Both readings come from the same env variable the API
+  // 150 minutes is expired under the 120-minute default and open under a
+  // 180-minute override. Both readings come from the same env variable the API
   // endpoint reads, so the page and `/api/admin/**` cannot disagree.
-  assert.equal(resolveRecentAuthMinutes(undefined), 30);
-  assert.equal(resolveRecentAuthMinutes("60"), 60);
-  assert.equal(recentAuth(45), false);
-  assert.equal(recentAuth(45, "60"), true);
-  assert.equal(recentAuth(90, "60"), false);
+  assert.equal(resolveRecentAuthMinutes(undefined), 120);
+  assert.equal(resolveRecentAuthMinutes("180"), 180);
+  assert.equal(recentAuth(150), false);
+  assert.equal(recentAuth(150, "180"), true);
+  assert.equal(recentAuth(181, "180"), false);
 
   // And no copy of either window is written into the decision or the page.
   for (const file of [
@@ -237,6 +260,49 @@ test("the step-up window follows a production override, not a constant", () => {
     /isRecentAdminAuthentication\(/,
     "the shared helper must apply the same policy as the API assertion"
   );
+});
+
+test("the admin default includes 120 minutes and excludes the next instant", () => {
+  const now = new Date("2026-10-12T00:00:00.000Z");
+  const recentAuthMinutes = resolveRecentAuthMinutes(undefined);
+
+  assert.equal(
+    isRecentAdminAuthentication({
+      authenticatedAt: new Date(now.getTime() - 120 * 60_000).toISOString(),
+      recentAuthMinutes,
+      now,
+    }),
+    true
+  );
+  assert.equal(
+    isRecentAdminAuthentication({
+      authenticatedAt: new Date(now.getTime() - 120 * 60_000 - 1).toISOString(),
+      recentAuthMinutes,
+      now,
+    }),
+    false
+  );
+});
+
+test("account-sensitive operations keep the 30-minute default and shared override", () => {
+  assert.equal(resolveAccountRecentAuthMinutes(undefined), 30);
+  assert.equal(recentAccountAuth(29), true);
+  assert.equal(recentAccountAuth(31), false);
+  assert.equal(recentAccountAuth(45, "60"), true);
+  assert.equal(recentAccountAuth(61, "60"), false);
+
+  for (const route of [
+    "app/api/user/account/route.ts",
+    "app/api/user/account/export/route.ts",
+    "app/api/user/login-methods/route.ts",
+    "app/api/user/login-methods/oauth/start/route.ts",
+    "app/api/memories/export/route.ts",
+    "app/api/memories/delete-all/route.ts",
+  ]) {
+    const source = readRepoCode(route);
+    assert.match(source, /assertRecentAccountAuthentication\(session\)/, route);
+    assert.doesNotMatch(source, /assertRecentAdminAuthentication\(session\)/, route);
+  }
 });
 
 test("the two reauthentication entry points stay distinguishable", () => {

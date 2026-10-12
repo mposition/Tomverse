@@ -13,6 +13,7 @@ import { adminAmuxRoutingMessages } from "@/lib/adminMessages/amuxRouting";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminFetch } from "@/lib/adminFetch";
+import { amuxReviewReadError } from "@/lib/amux/reviewReadErrorCore";
 
 // The server-side review proxy waits up to 40s. The browser must not abort
 // first; an unknown outcome freezes writes until decision ID/digest lookup.
@@ -367,12 +368,17 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
       if (requestId !== reviewRequestId.current) return;
       if (!response.ok) {
         const code = await responseCode(response);
-        if (code === "ADMIN_REAUTHENTICATION_REQUIRED" || response.status === 428) {
+        const failure = amuxReviewReadError(response.status, code);
+        if (failure === "reauthentication") {
           setReauthenticationRequired(true);
-        } else if (code === "AMUX_AGENT_APPROVAL_UNAVAILABLE") {
+        } else if (failure === "disabled") {
           setReviewUnavailable(true);
         } else {
-          setReviewError(m.reviewLoadFailed);
+          setReviewError(failure === "proxy_configuration" ? m.reviewProxyConfigurationFailed
+            : failure === "access_refused" ? m.reviewAccessRefused
+            : failure === "not_found" ? m.reviewNotFound
+            : failure === "temporarily_unavailable" ? m.reviewTemporarilyUnavailable
+            : m.reviewLoadFailed);
         }
         return;
       }
@@ -388,7 +394,8 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
     } finally {
       if (requestId === reviewRequestId.current) setReviewLoading(false);
     }
-  }, [pendingDecision, m.reviewLoadFailed]);
+  }, [pendingDecision, m.reviewLoadFailed, m.reviewProxyConfigurationFailed,
+    m.reviewAccessRefused, m.reviewNotFound, m.reviewTemporarilyUnavailable]);
 
   useEffect(() => {
     if (!report || !focusEscalationId || pendingDecision ||
@@ -840,6 +847,18 @@ export function AdminAmuxRoutingPanel({ focusEscalationId = null, canInspectCard
                       <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-red-200">
                         {reviewError}
                       </p>
+                    )}
+                    {!review && !reviewLoading && (reviewError || reauthenticationRequired) && (
+                      <div className="mt-3">
+                        <button type="button"
+                          data-testid="admin-amux-retry-review-read"
+                          disabled={reviewBusy || decisionStatusUnknown || pendingDecision !== null}
+                          onClick={() => void openReview(selectedEscalationId)}
+                          className="rounded-md border border-zinc-700 px-3 py-2 text-zinc-200 hover:bg-zinc-800 disabled:opacity-60">
+                          {m.retryReviewRead}
+                        </button>
+                        <p className="mt-2 text-zinc-400">{m.retryReviewReadDescription}</p>
+                      </div>
                     )}
                     {review && !reviewUnavailable && (
                       <>

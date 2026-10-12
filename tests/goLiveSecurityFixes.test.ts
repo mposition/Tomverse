@@ -9,6 +9,7 @@ import {
 } from "../lib/sessionRevocationCore.ts";
 import {
   isRecentAdminAuthentication,
+  resolveAccountRecentAuthMinutes,
   resolveRecentAuthMinutes,
 } from "../lib/adminReauthenticationCore.ts";
 import {
@@ -230,11 +231,21 @@ test("a future-dated authentication claim cannot buy an unlimited step-up window
 });
 
 test("the step-up window is clamped to a sane range", () => {
-  assert.equal(resolveRecentAuthMinutes(undefined), 30);
-  assert.equal(resolveRecentAuthMinutes("not-a-number"), 30);
+  assert.equal(resolveRecentAuthMinutes(undefined), 120);
+  assert.equal(resolveRecentAuthMinutes(""), 120);
+  assert.equal(resolveRecentAuthMinutes("not-a-number"), 120);
+  assert.equal(resolveRecentAuthMinutes(" "), 5);
   assert.equal(resolveRecentAuthMinutes("1"), 5);
   assert.equal(resolveRecentAuthMinutes("100000"), 240);
   assert.equal(resolveRecentAuthMinutes("45"), 45);
+
+  assert.equal(resolveAccountRecentAuthMinutes(undefined), 30);
+  assert.equal(resolveAccountRecentAuthMinutes(""), 30);
+  assert.equal(resolveAccountRecentAuthMinutes("not-a-number"), 30);
+  assert.equal(resolveAccountRecentAuthMinutes(" "), 5);
+  assert.equal(resolveAccountRecentAuthMinutes("1"), 5);
+  assert.equal(resolveAccountRecentAuthMinutes("100000"), 240);
+  assert.equal(resolveAccountRecentAuthMinutes("45"), 45);
 });
 
 test("step-up authentication no longer depends on the unused Session table", () => {

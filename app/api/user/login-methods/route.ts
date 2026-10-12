@@ -11,8 +11,8 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import {
-  assertRecentAdminAuthentication,
-  isAdminReauthenticationError,
+  assertRecentAccountAuthentication,
+  isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 import { removeLoginMethod } from "@/lib/loginMethodsCore";
@@ -78,7 +78,7 @@ export async function DELETE(req: Request) {
       minute: 3,
       day: 10,
     });
-    await assertRecentAdminAuthentication(session);
+    await assertRecentAccountAuthentication(session);
     const body = await readLimitedJson(req, 1_024, removeSchema);
     const userId = session.user.id;
 
@@ -108,7 +108,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true, changed: true });
   } catch (error) {
-    if (isAdminReauthenticationError(error)) {
+    if (isAccountReauthenticationError(error)) {
       return NextResponse.json(
         { error: "Sign in again before removing a login method.", code: "ACCOUNT_REAUTHENTICATION_REQUIRED" },
         { status: 428 }

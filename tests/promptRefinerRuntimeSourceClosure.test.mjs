@@ -439,6 +439,11 @@ const compilerOptions = parsedConfig.options;
 // readiness and audit scopes move existing accesses in the already-reviewed
 // closure. The 228-entry count and position-free inventory remain unchanged;
 // this repins only their final source positions on the main release base.
+// 2026-10-12, AMUX worker registry R1 (orchestration policy version 31), main
+// selective release: the marketing webhook fingerprint's history comment in
+// lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
+// below it. Count 228 and the position-free inventory remain unchanged; only
+// their source positions are repinned.
 // 2026-10-12, default model GPT 6 Luna and the guest trio's Haiku 5.5: two
 // pricing profiles inserted in `lib/modelPricing.ts` move the twelve accesses
 // below them by 73 lines, and two catalogue rows plus the DEFAULT_MODEL_ID note
@@ -454,13 +459,14 @@ const compilerOptions = parsedConfig.options;
 // base. The four files they move (`lib/modelPricing.ts`, `lib/models.ts`,
 // `lib/appSettings.ts`, `lib/appDefaults.ts`) are identical on main and on the
 // develop they were reviewed on, so the moves above hold; this repins only the
-// final positions main's other closure files give.
+// final positions main's other closure files give, after main's own
+// AMUX worker registry record above.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "52858d2ed70c017ebb0b18e13f1415c2",
-  "042fe67829975d56101ac24beb8d6a29",
+  "19acae9eb62389880916fbb19072995e",
+  "79dfb3ad588211328d66d24d68b3a653",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

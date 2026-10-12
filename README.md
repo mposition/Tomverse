@@ -958,7 +958,9 @@ variable is present but malformed, administrator access fails closed:
 ```text
 ADMIN_ACCESS_EXPIRY_JSON={"operator@example.com":"2026-12-31T23:59:59.000Z"}
 ADMIN_SESSION_MAX_HOURS=8
-ADMIN_RECENT_AUTH_MINUTES=30
+# Leave unset for the admin (120-minute) and account (30-minute) defaults.
+# Optional shared override for both step-up windows:
+# ADMIN_RECENT_AUTH_MINUTES=120
 ADMIN_APPROVAL_TTL_MINUTES=30
 ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS=10000
 ```
@@ -979,9 +981,12 @@ the code that tried to read one failed closed for every caller.
   ordinary application session can remain valid for seven days, an expired
   administrator window sends an allow-listed administrator to the dedicated
   reauthentication screen instead of the console.
-- `ADMIN_RECENT_AUTH_MINUTES` (30 by default) is the step-up window that only
-  high-risk writes require (`assertRecentAdminAuthentication`). While it is
-  spent, the console keeps working and those endpoints answer HTTP 428.
+- `ADMIN_RECENT_AUTH_MINUTES` defaults to 120 minutes for administrator
+  step-up (`assertRecentAdminAuthentication`). While it is spent, the console
+  keeps working and those endpoints answer HTTP 428.
+- Sensitive account operations use `assertRecentAccountAuthentication` and
+  retain their 30-minute default. An explicit `ADMIN_RECENT_AUTH_MINUTES`
+  overrides both defaults, with the existing 5–240-minute bounds.
 
 Because the two windows differ, a step-up refusal is its own recovery path:
 `/auth/admin-reauthenticate?mode=recent` shows the reauthentication card for a

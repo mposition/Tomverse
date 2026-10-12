@@ -655,6 +655,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "Operator evidence for one AMUX Decision Maker switch change or latch, not customer data. The actor id is the administrator who set the switch and is intentionally not a User foreign key, so account deletion cannot rewrite it; a latch carries no person. The row stores a closed scope, value and reason code and identifiers, not free text. A customer export receives nothing from this table.",
   },
   {
+    domain: "amuxWorkerRegistryEvent",
+    publicName: "amux_worker_registry_events",
+    prismaModel: "AmuxWorkerRegistryEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX worker registry change, not customer data. The actor id is the owner who changed the registry and is intentionally not a User foreign key, so account deletion cannot rewrite it. The row stores a worker name, a closed class, role ceiling and desired state, and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
+    domain: "amuxWorkerLatchEvent",
+    publicName: "amux_worker_latch_events",
+    prismaModel: "AmuxWorkerLatchEvent",
+    state: "excluded",
+    exclusionReason:
+      "Operator evidence for one AMUX worker automatic stop latch event, not customer data. A release names the administrator who released it, intentionally not a User foreign key; an opening names no person. The row stores a worker name, a closed event and actor kind, and identifiers, not free text. A customer export receives nothing from this table.",
+  },
+  {
     domain: "amuxDecisionMakerBody",
     publicName: "amux_decision_maker_bodies",
     prismaModel: "AmuxDecisionMakerBody",

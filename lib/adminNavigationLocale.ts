@@ -309,11 +309,12 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
   "amux-execution": {
     label: "실행",
     description: "AMUX 카드와 실행 상태, AMUX가 작업을 배정한 이유",
-    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고", "정지", "결과 불명"],
+    aliases: ["실행", "카드", "워커", "시도", "배정", "에스컬레이션", "사람 검토", "검토", "사고", "정지", "결과 불명", "등록부", "워커 등록부"],
     tabs: {
       cards: { label: "카드", description: "Tomverse에 저장된 모든 AMUX 카드와 실행 상태" },
       assignment: { label: "배정", description: "AMUX가 작업을 배정한 이유와 사람을 기다리는 에스컬레이션" },
       halts: { label: "정지", description: "orchestrator 정지, 사람 확인이 필요한 쓰기, 정지 해제" },
+      workers: { label: "Worker", description: "worker 등록부, worker별 원하는 상태와 실제 상태, 배정 카탈로그와의 일치" },
     },
   },
   "email-policy": {
