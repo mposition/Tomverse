@@ -8,8 +8,8 @@ import { scheduleTomverseAccountDeletion } from "@/lib/accountDeletion";
 import { ACCOUNT_DELETION_SCHEDULED_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import { enqueueStandardEmail } from "@/lib/standardEmailLane";
 import {
-  assertRecentAdminAuthentication,
-  isAdminReauthenticationError,
+  assertRecentAccountAuthentication,
+  isAccountReauthenticationError,
 } from "@/lib/adminReauthentication";
 import {
   apiSecurityResponse,
@@ -41,7 +41,7 @@ export async function DELETE(req: Request) {
       day: 3,
     });
 
-    await assertRecentAdminAuthentication(session);
+    await assertRecentAccountAuthentication(session);
     await readLimitedJson(req, 1024, deleteAccountSchema);
     const deletion = await scheduleTomverseAccountDeletion(session.user.id);
     if (!deletion.scheduled) {
@@ -79,7 +79,7 @@ export async function DELETE(req: Request) {
       scheduledFor: deletion.scheduledFor.toISOString(),
     });
   } catch (error) {
-    if (isAdminReauthenticationError(error)) {
+    if (isAccountReauthenticationError(error)) {
       return NextResponse.json(
         {
           error: "Sign in again before permanently deleting your account.",

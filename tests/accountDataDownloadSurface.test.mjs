@@ -138,7 +138,7 @@ test("reading the history needs a session and a rate limit, but not a step-up", 
   // The step-up is asserted by call site rather than by slice: the prose above
   // POST names the helper, and matching on the name alone would fail on a
   // comment. Issuing a link is gated; reading the history is not.
-  const stepUps = [...route.matchAll(/await assertRecentAdminAuthentication\(session\)/g)];
+  const stepUps = [...route.matchAll(/await assertRecentAccountAuthentication\(session\)/g)];
   assert.equal(stepUps.length, 1, "expected exactly one step-up call in this route");
   assert.ok(stepUps[0].index > postAt, "the history read is behind a step-up");
 });
