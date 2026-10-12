@@ -14,12 +14,15 @@ const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   dependencies:[],dependents:[],attempts:[],escalations:[],score:null,usage:[],reviews:[],publications:[] });
 
 async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUnknown?:boolean;
-  moveRefused?:boolean; moveHalted?:boolean; moveUnavailable?:boolean; readOnly?:boolean }={}) {
-  let promoted=false; let posts=0; let reads=0;
+  moveRefused?:boolean; moveHalted?:boolean; moveUnavailable?:boolean; readOnly?:boolean;
+  moveDelay?:boolean; moveNoReceipt?:boolean }={}) {
+  let promoted=false; let posts=0; let reads=0; let details=0;
   await page.route("**/api/admin/amux/execution-view?**", async route => {
     const p=new URL(route.request().url()).searchParams;
     if(p.get("view")==="activation") return route.fulfill({json:{asOf:"2026-10-12T05:00:00Z",activationAuthorized:false,stages:[]}});
     if(p.get("view")==="detail") {
+      details++;
+      if(opts.moveDelay) await new Promise(resolve=>setTimeout(resolve,2000));
       if(opts.delayed) await new Promise(resolve=>setTimeout(resolve,350));
       if(opts.reauth) return route.fulfill({status:428,json:{error:"ADMIN_REAUTHENTICATION_REQUIRED"}});
       return route.fulfill({json:detail(p.get("taskId")===b.id?b:a)});
@@ -42,14 +45,15 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
       if(opts.moveUnavailable) return route.fulfill({status:503,json:{error:"candidate_unavailable"}});
       if(opts.moveHalted) return route.fulfill({json:{promoted:false,reason:"auto_halted"}});
       if(opts.moveUnknown) return route.fulfill({status:409,json:{error:"outcome_unknown",retry:false}});
+      if(opts.moveNoReceipt) return route.fulfill({status:500,json:{error:"unexpected_write_failure"}});
       promoted=true;
       return route.fulfill({json:{state:"promoted",taskId:a.id,requestId:body.requestId,receiptId:body.requestId}});
     }
-    reads++;return route.fulfill({json:{state:"outcome_unknown",taskId:a.id}});
+    reads++;return route.fulfill({json:{state:opts.moveNoReceipt?"not_found":"outcome_unknown",taskId:a.id}});
   });
   await page.goto("/e2e/admin-console-fixture?view=amux" + (opts.readOnly ? "&readOnly=true" : ""));
   await expect(page.getByTestId("amux-board-card-"+a.id)).toBeVisible();
-  return {posts:()=>posts,reads:()=>reads};
+  return {posts:()=>posts,reads:()=>reads,details:()=>details};
 }
 
 test("number opens modal; tabs, Escape, focus and loaded filter survive",async({page})=>{
@@ -145,6 +149,47 @@ test("cancelling a handle drag does not request admission",async({page})=>{
   await page.keyboard.press("Escape"); await page.mouse.up();
   await expect(page.getByTestId("amux-pointer-drag")).toHaveCount(0);
   await expect(page.getByRole("dialog")).toHaveCount(0); expect(state.posts()).toBe(0);
+});
+
+test("closing before dispatch releases preparation and never sends a late write",async({page})=>{
+  const state=await setup(page,{moveDelay:true});
+  await page.getByRole("button",{name:"Move to AMUX queue",exact:true}).first().click();
+  await expect.poll(state.details).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).not.toHaveURL(/moveRequest=/);
+  await page.waitForTimeout(2200); expect(state.posts()).toBe(0);
+  await page.getByRole("button",{name:"Move to AMUX queue",exact:true}).first().click();
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText("unassigned Todo");
+  expect(state.posts()).toBe(1);
+});
+
+test("closing during detail body decoding cannot dispatch after unmount",async({page})=>{
+  await page.addInitScript(()=>{
+    const original=Response.prototype.json;
+    Response.prototype.json=async function(){
+      const value=await original.call(this);
+      if(this.url.includes("execution-view?view=detail")) await new Promise(resolve=>setTimeout(resolve,1500));
+      return value;
+    };
+  });
+  const state=await setup(page);
+  await page.getByRole("button",{name:"Move to AMUX queue",exact:true}).first().click();
+  await expect.poll(state.details).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(page).not.toHaveURL(/moveRequest=/);
+  await page.waitForTimeout(1700); expect(state.posts()).toBe(0);
+});
+
+test("not-found readback after a dispatched 5xx does not authorize another write",async({page})=>{
+  const state=await setup(page,{moveNoReceipt:true});
+  await page.getByRole("button",{name:"Move to AMUX queue",exact:true}).first().click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("outcome is unconfirmed");
+  expect(state.posts()).toBe(1); expect(state.reads()).toBe(1);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button",{name:"Move to AMUX queue",exact:true}).first().click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("outcome is unconfirmed");
+  expect(state.posts()).toBe(1); expect(state.reads()).toBe(2);
 });
 
 test("known refusal releases the receipt so corrected conditions can be tried",async({page})=>{
