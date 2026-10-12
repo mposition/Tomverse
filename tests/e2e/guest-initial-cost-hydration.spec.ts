@@ -778,7 +778,7 @@ test.describe("guest initial cost hydration", () => {
     await page.goto("/chat?lang=en");
     await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
     await sendChatMessage(page, testInfo, "one Guest Auto failure without a manual retry");
-    await expect(page.getByText("QA Guest Auto provider failure", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("The response could not be generated. Please try again shortly.", { exact: true }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
     await expect(page.getByTestId("composer-auto-routing-toggle")).toHaveAttribute("aria-checked", "true");
     expect(requests).toHaveLength(1);
