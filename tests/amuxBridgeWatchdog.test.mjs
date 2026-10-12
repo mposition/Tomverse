@@ -305,7 +305,10 @@ test("an unreadable unit names systemctl's error, and sends nothing", { skip: no
 });
 
 test("the install fails unless its own run sent a signal", () => {
-  assert.match(install, /_SYSTEMD_INVOCATION_ID=\$invocation/);
+  // Found by time with the timer off, never by InvocationID: a oneshot unit
+  // clears that ID when the run ends, so the third install found no lines.
+  assert.match(install, /journalctl -u tomverse-bridge-watchdog\.service --since "@\$since"/);
+  assert.doesNotMatch(install, /-p InvocationID|_SYSTEMD_INVOCATION_ID=/);
   assert.match(install, /grep -qE '; sent \(up\|down\)\$'/);
   // The timer is enabled only after the check, and switched off on failure.
   const check = install.indexOf("grep -qE");
@@ -387,8 +390,12 @@ test("an install whose run sent a signal turns the timer on", { skip: noBash }, 
   const result = runInstall({ runLog: "tomverse-bridge-watchdog: 9 unit(s), 0 down, 0 in transition or unreadable; sent up" });
   assert.equal(result.status, 0, result.output);
   assert.match(result.output, /TOMVERSE_BRIDGE_WATCHDOG_INSTALLED/);
-  assert.ok(result.actions.includes(TIMER_ON), result.actions.join("\n"));
-  assert.ok(!result.actions.includes(TIMER_OFF), result.actions.join("\n"));
+  // The timer is off for the verification run, so no other run can land in
+  // the journal window it reads, and on again only once the run is proven.
+  const start = result.actions.indexOf("systemctl start tomverse-bridge-watchdog.service");
+  assert.ok(start > 0, result.actions.join("\n"));
+  assert.ok(result.actions.slice(0, start).includes(TIMER_OFF), result.actions.join("\n"));
+  assert.equal(result.actions.at(-1), TIMER_ON, result.actions.join("\n"));
 });
 
 for (const [name, options] of [
