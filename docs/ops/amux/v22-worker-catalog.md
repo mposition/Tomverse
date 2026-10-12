@@ -45,3 +45,45 @@ this document and its example do not set it or open any switch. To withdraw
 new v22 candidates, remove this variable; legacy routing remains intact. Do
 not replay an in-flight or unknown-outcome request during a configuration
 change. Reconcile its app receipt first through the existing owner path.
+
+## Task-profile quota reporting
+
+Implementation repair approved by mposition on 2026-10-12 for end-to-end
+verification. This completes the existing quota comparison, not a new
+worker permission, role, graduation exception or cost allowance.
+
+The fixed sidecar reads subscription quota from the same `CLAUDE_CONFIG_DIR`
+used for its Task process. The native roster's account reading is not a
+substitute. API-key helpers, alternate-backend/auth settings, unsafe or
+expired credentials, unsupported/malformed windows and failed provider
+reads produce no observation. No model call, login or token refresh occurs.
+The OAuth token is used only for one bounded HTTPS GET to Anthropic's usage
+endpoint; it never enters the bridge, app, audit, error output or journal.
+
+The bridge asks its fixed worker socket at most every five minutes, after
+renewing active execution leases. It forwards only the worker, provider,
+remaining/confidence basis points, exhaustion, source, observed/reset times
+and a new observation UUID. The app validates the v22 catalog, time window
+and strict schema, serializes that UUID, and commits the observation and
+existing canonical system audit together. A duplicate with identical facts
+returns the original row; a different payload cannot replace it. Late
+transaction commits remain subject to the existing DB deadline fence.
+
+A lost POST reply permits exact authenticated GET lookup only, never another
+POST. A matching row resolves the outcome; absent/conflicting/unreadable
+evidence stops new bridge assignments. An unavailable read is unknown, not
+zero quota or invented availability. The existing fifteen-minute freshness
+rule remains unchanged. Restarting a bridge makes a new provider observation,
+not a replay of an old write or execution.
+
+Boundary checklist: no Chat, Memory, finance or user-credit access; existing
+AMUX sync identity/system actor only; no human approval is minted; fixed
+numeric external data only, never model instructions; no product credential
+in the sidecar/CLI; existing observation schema/single writer/90-day retention;
+no LLM spend; existing stop/claim switches and worker exclusions remain;
+UUID-bound exact lookup for uncertain writes; same vendor account usage
+channel, no idea or repository transmission; canonical audit has identifiers
+only; no geographic or data-processing expansion; synthetic checks then
+review/CI before installation; existing Ubuntu sidecar/bridge split; app DB
+and Admin remain authoritative. Publishing and deployment of Task results
+are outside this repair.
