@@ -100,7 +100,7 @@ test("move button calls one guarded write then refreshes the actual lane",async(
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("dragging to the queue runs the same guarded card command",async({page,isMobile})=>{
+test("dragging to the queue runs the same guarded card command",async({page,isMobile,browserName})=>{
   const state=await setup(page);
   if (isMobile) {
     const handle=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Drag card to AMUX queue"});
@@ -108,17 +108,25 @@ test("dragging to the queue runs the same guarded card command",async({page,isMo
     const start=await handle.boundingBox(); expect(start).not.toBeNull();
     const board=page.getByTestId("amux-board-lanes");
     const bounds=await board.boundingBox(); expect(bounds).not.toBeNull();
-    const touch=await page.context().newCDPSession(page);
     const y=start!.y+start!.height/2;
-    await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:start!.x+start!.width/2,y,id:1}]});
-    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:bounds!.x+bounds!.width-8,y,id:1}]});
+    // Chromium exposes trusted touch movement through CDP. Other engines
+    // exercise the same pointer handle without calling a Chromium-only API.
+    const touch=browserName==="chromium" ? await page.context().newCDPSession(page) : null;
+    if (touch) {
+      await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:start!.x+start!.width/2,y,id:1}]});
+      await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:bounds!.x+bounds!.width-8,y,id:1}]});
+    } else {
+      await page.mouse.move(start!.x+start!.width/2,y); await page.mouse.down();
+      await page.mouse.move(bounds!.x+bounds!.width-8,y,{steps:8});
+    }
     await expect.poll(()=>board.evaluate(element=>element.scrollLeft)).toBeGreaterThan(110);
     const target=await page.getByRole("region",{name:"AMUX Backlog"}).boundingBox(); expect(target).not.toBeNull();
     const left=Math.max(target!.x,bounds!.x+45);
     const right=Math.min(target!.x+target!.width,bounds!.x+bounds!.width-45);
-    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:(left+right)/2,y,id:1}]});
-    await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
-    await touch.detach();
+    if (touch) {
+      await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:(left+right)/2,y,id:1}]});
+      await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]}); await touch.detach();
+    } else { await page.mouse.move((left+right)/2,y,{steps:8}); await page.mouse.up(); }
   } else {
     await page.getByTestId("amux-board-card-"+a.id).dragTo(page.getByRole("region",{name:"AMUX Backlog"}));
   }
