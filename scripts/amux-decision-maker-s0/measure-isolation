@@ -1,0 +1,451 @@
+#!/bin/bash
+# AMUX Decision Maker, stage S0: the two-way account isolation measurement.
+#
+# docs/policy/amux-decision-maker.md §5 and §12 (S0), and orchestration policy
+# version 27 §6, require the worker, the DM broker, one account per DM vendor
+# and the bridge to be separate UIDs that cannot reach each other, measured on
+# the dedicated Ubuntu runner before stage S2 starts. This script is that
+# measurement. docs/ops/amux/decision-maker-s0.md is the runbook.
+#
+#   sudo bash measure-isolation <config>
+#
+# It runs as root only to act as each account in turn (runuser, setpriv). Every
+# attempt is made by the account under test, with an empty environment, under
+# a five-second timeout. It sends no paid turn: a vendor CLI is only asked for
+# `--version`. What it changes on the host, and undoes on every exit path: one
+# probe request directory per vendor under REQUEST_ROOT (made and removed by
+# the broker, then by root if the broker could not), and one `sleep` process
+# per DM account and for the broker, killed at the end.
+#
+# It prints one JSON document on stdout -- every check with what it expected
+# and what it observed, and a verdict -- and nothing secret: no file content,
+# no environment, no credential. A credential file is reported by its name
+# relative to the account's home, as present or absent, and a git credential
+# helper only as configured or not.
+#
+# The verdict is `isolated` only when every control succeeded and every
+# isolation check was refused. A control that fails (an account cannot read
+# its own request, reach its own vendor, run its own CLI) means the refusals
+# around it prove nothing -- a host with no network refuses every connection
+# -- so the verdict is then `incomplete`, never `isolated`.
+#
+# Exit: 0 isolated, 1 not_isolated, 2 incomplete, 64 a refused config, 77 not
+# root.
+set -u -o pipefail
+
+readonly SCHEMA="amux-dm-s0-isolation/1"
+readonly PROBE_TIMEOUT_SECONDS=5
+readonly PROBE_PATH="/usr/local/bin:/usr/bin:/bin"
+readonly CONFIG_KEYS="WORKER_USER BRIDGE_USER BROKER_USER OPENAI_USER ANTHROPIC_USER REQUEST_ROOT WORKER_PATHS BRIDGE_ENV_FILE OPENAI_CLI ANTHROPIC_CLI OPENAI_HOSTS ANTHROPIC_HOSTS GITHUB_HOSTS OUTSIDE_HOSTS"
+readonly ROLES="worker bridge broker decision-maker-openai decision-maker-anthropic"
+readonly VENDORS="openai anthropic"
+readonly REQUIRED_TOOLS="runuser setpriv timeout python3 getent id stat sha256sum"
+
+# PTRACE_ATTACH (16) and, if it was granted, PTRACE_DETACH (17). Exit 0 means
+# the attach succeeded.
+readonly PTRACE_PY='import ctypes, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+libc.ptrace.argtypes = [ctypes.c_long, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+libc.ptrace.restype = ctypes.c_long
+pid = int(sys.argv[1])
+if libc.ptrace(16, pid, None, None) != 0:
+    sys.exit(1)
+os.waitpid(pid, 0)
+libc.ptrace(17, pid, None, None)'
+
+refuse_config() {
+  printf 'amux-dm-s0: config refused: %s\n' "$1" >&2
+  exit 64
+}
+
+[ "$#" -eq 1 ] || { printf 'usage: %s <config>\n' "${0##*/}" >&2; exit 64; }
+config=$1
+[ -f "$config" ] && [ -r "$config" ] || refuse_config "not a readable file"
+
+# ---------------------------------------------------------------------------
+# The config: KEY=VALUE lines, parsed and never sourced.
+# ---------------------------------------------------------------------------
+
+declare -A CFG=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line=${line%$'\r'}
+  case $line in '' | '#'*) continue ;; esac
+  [[ $line =~ ^([A-Z_]+)=(.*)$ ]] || refuse_config "a line is not KEY=VALUE"
+  key=${BASH_REMATCH[1]}
+  value=${BASH_REMATCH[2]}
+  case " $CONFIG_KEYS " in *" $key "*) ;; *) refuse_config "unknown key $key" ;; esac
+  [ -z "${CFG[$key]+set}" ] || refuse_config "duplicate key $key"
+  CFG[$key]=$value
+done <"$config"
+for key in $CONFIG_KEYS; do
+  [ -n "${CFG[$key]:-}" ] || refuse_config "missing $key"
+done
+
+valid_user() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
+valid_path() {
+  [[ $1 =~ ^/[A-Za-z0-9._/+-]+$ ]] && [[ ! $1 =~ (^|/)\.\.?(/|$) ]] && [[ ! $1 =~ // ]]
+}
+valid_endpoint() { [[ $1 =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?:[0-9]{1,5}$ ]]; }
+
+for key in WORKER_USER BRIDGE_USER BROKER_USER OPENAI_USER ANTHROPIC_USER; do
+  valid_user "${CFG[$key]}" || refuse_config "$key is not a user name"
+done
+for key in REQUEST_ROOT BRIDGE_ENV_FILE OPENAI_CLI ANTHROPIC_CLI; do
+  valid_path "${CFG[$key]}" || refuse_config "$key is not an absolute path"
+done
+for item in ${CFG[WORKER_PATHS]}; do
+  valid_path "$item" || refuse_config "WORKER_PATHS holds a path that is not absolute"
+done
+for key in OPENAI_HOSTS ANTHROPIC_HOSTS GITHUB_HOSTS OUTSIDE_HOSTS; do
+  for item in ${CFG[$key]}; do
+    valid_endpoint "$item" || refuse_config "$key holds an entry that is not host:port"
+  done
+done
+
+[ "$(id -u)" = 0 ] || { printf 'amux-dm-s0: run as root (sudo); nothing was attempted\n' >&2; exit 77; }
+
+# ---------------------------------------------------------------------------
+# Prerequisites. Anything missing ends the run as incomplete before any probe.
+# ---------------------------------------------------------------------------
+
+declare -A USER_OF=(
+  [worker]=${CFG[WORKER_USER]}
+  [bridge]=${CFG[BRIDGE_USER]}
+  [broker]=${CFG[BROKER_USER]}
+  [decision-maker-openai]=${CFG[OPENAI_USER]}
+  [decision-maker-anthropic]=${CFG[ANTHROPIC_USER]}
+)
+declare -A UID_OF=() GID_OF=() HOME_OF=() GROUP_OF=() SLEEPER_OF=()
+REASONS=()
+CHECKS=()
+PROBE_DIRS=()
+SLEEPER_PIDS=()
+CONTROL_FAILURES=0
+ISOLATION_FAILURES=0
+
+for tool in $REQUIRED_TOOLS; do
+  command -v "$tool" >/dev/null 2>&1 || REASONS+=("missing_tool:$tool")
+done
+for role in $ROLES; do
+  entry=$(getent passwd "${USER_OF[$role]}" 2>/dev/null) || entry=""
+  if [ -z "$entry" ]; then
+    REASONS+=("missing_user:$role")
+    continue
+  fi
+  IFS=: read -r _ _ uid gid _ home _ <<<"$entry"
+  UID_OF[$role]=$uid
+  GID_OF[$role]=$gid
+  HOME_OF[$role]=$home
+  GROUP_OF[$role]=$(id -gn "${USER_OF[$role]}" 2>/dev/null) || GROUP_OF[$role]=""
+  [ -n "${GROUP_OF[$role]}" ] || REASONS+=("missing_group:$role")
+done
+
+json_list() {
+  local first=1 item
+  printf '['
+  for item in "$@"; do
+    [ "$first" = 1 ] || printf ', '
+    printf '"%s"' "$item"
+    first=0
+  done
+  printf ']'
+}
+
+sha_of() { sha256sum -- "$1" 2>/dev/null | { read -r sum _ && printf '%s' "$sum"; }; }
+
+emit() {
+  local verdict=$1 role first=1 check
+  printf '{\n'
+  printf '  "schema": "%s",\n' "$SCHEMA"
+  printf '  "policy": "docs/policy/amux-decision-maker.md",\n'
+  printf '  "policyVersion": 1,\n'
+  printf '  "measuredAt": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '  "scriptSha256": "%s",\n' "$(sha_of "${BASH_SOURCE[0]}")"
+  printf '  "configSha256": "%s",\n' "$(sha_of "$config")"
+  printf '  "subjects": {'
+  for role in $ROLES; do
+    [ "$first" = 1 ] || printf ','
+    printf '\n    "%s": {"user": "%s", "uid": %s}' "$role" "${USER_OF[$role]}" "${UID_OF[$role]:-null}"
+    first=0
+  done
+  printf '\n  },\n'
+  printf '  "checks": ['
+  first=1
+  for check in "${CHECKS[@]}"; do
+    [ "$first" = 1 ] || printf ','
+    printf '\n    %s' "$check"
+    first=0
+  done
+  printf '\n  ],\n'
+  printf '  "observations": {"workerSeesDmCmdline": "%s", "ptraceScope": "%s", "procHidepid": "%s"},\n' \
+    "${OBSERVED_CMDLINE:-not_measured}" "${OBSERVED_PTRACE_SCOPE:-unknown}" "${OBSERVED_HIDEPID:-unknown}"
+  printf '  "summary": {"checks": %s, "controlFailures": %s, "isolationFailures": %s, "reasons": %s},\n' \
+    "${#CHECKS[@]}" "$CONTROL_FAILURES" "$ISOLATION_FAILURES" "$(json_list ${REASONS[@]+"${REASONS[@]}"})"
+  printf '  "verdict": "%s"\n' "$verdict"
+  printf '}\n'
+}
+
+if [ "${#REASONS[@]}" -gt 0 ]; then
+  emit incomplete
+  exit 2
+fi
+
+# ---------------------------------------------------------------------------
+# Probes
+# ---------------------------------------------------------------------------
+
+# One attempt by `role`, in a fresh empty environment. Exit 0 means the
+# action succeeded -- which, for an isolation check, is the failure.
+attempt() {
+  local role=$1 kind=$2 target=$3 extra=${4:-} snippet
+  case $kind in
+    read) snippet='if [ -d "$1" ]; then ls -A -- "$1"; else head -c 1 -- "$1"; fi' ;;
+    write) snippet='p="$1/.amux-dm-s0-write"; (set -C; : >"$p") && rm -f -- "$p"' ;;
+    exec) snippet='"$1" --version' ;;
+    connect) snippet='exec 3<>"/dev/tcp/${1%:*}/${1##*:}"' ;;
+    mkreq) snippet='mkdir -m 0750 -- "$1" && chgrp -- "$2" "$1" && printf "amux-dm-s0 probe\n" >"$1/card" && chmod 0640 -- "$1/card" && chgrp -- "$2" "$1/card"' ;;
+    rmreq) snippet='rm -rf -- "$1" && [ ! -e "$1" ]' ;;
+    environ) snippet='head -c 1 -- "/proc/$1/environ"' ;;
+    fd) snippet='ls -- "/proc/$1/fd"' ;;
+    cwd) snippet='ls -A -- "/proc/$1/cwd/"' ;;
+    cmdline) snippet='head -c 1 -- "/proc/$1/cmdline"' ;;
+    ptrace) snippet='python3 -c "$AMUX_DM_S0_PTRACE" "$1"' ;;
+    *) return 2 ;;
+  esac
+  timeout --kill-after=1 "$PROBE_TIMEOUT_SECONDS" \
+    runuser -u "${USER_OF[$role]}" -- \
+    env -i "PATH=$PROBE_PATH" "HOME=${HOME_OF[$role]}" LANG=C.UTF-8 "AMUX_DM_S0_PTRACE=$PTRACE_PY" \
+    bash -c "$snippet" "amux-dm-s0-$kind" "$target" ${extra:+"$extra"} \
+    </dev/null >/dev/null 2>&1
+}
+
+# record <class> <id> <subject> <kind> <target> <expect> <observed>
+#   class `control`: expected to succeed; a failure makes the run incomplete.
+#   class `isolation`: expected to be refused (or absent); a failure is a leak.
+record() {
+  local class=$1 id=$2 subject=$3 kind=$4 target=$5 expect=$6 observed=$7 pass=false
+  [ "$expect" = "$observed" ] && pass=true
+  if [ "$pass" = false ]; then
+    if [ "$class" = control ]; then
+      CONTROL_FAILURES=$((CONTROL_FAILURES + 1))
+    else
+      ISOLATION_FAILURES=$((ISOLATION_FAILURES + 1))
+    fi
+  fi
+  CHECKS+=("{\"class\": \"$class\", \"id\": \"$id\", \"subject\": \"$subject\", \"kind\": \"$kind\", \"target\": \"$target\", \"expect\": \"$expect\", \"observed\": \"$observed\", \"pass\": $pass}")
+}
+
+# probe <class> <id> <role> <kind> <target> [<label>] [<extra>]
+probe() {
+  local class=$1 id=$2 role=$3 kind=$4 target=$5 label=${6:-$5} extra=${7:-} expect observed=denied
+  [ "$class" = control ] && expect=allowed || expect=denied
+  attempt "$role" "$kind" "$target" "$extra" && observed=allowed
+  record "$class" "$id" "$role" "$kind" "$label" "$expect" "$observed"
+}
+
+cleanup() {
+  local pid dir
+  for pid in ${SLEEPER_PIDS[@]+"${SLEEPER_PIDS[@]}"}; do kill "$pid" 2>/dev/null; done
+  for dir in ${PROBE_DIRS[@]+"${PROBE_DIRS[@]}"}; do
+    case $dir in "${CFG[REQUEST_ROOT]}"/amux-dm-s0-[0-9]*) rm -rf -- "$dir" ;; esac
+  done
+}
+trap cleanup EXIT
+trap 'exit 2' INT TERM HUP
+
+# A `sleep` running as the role, standing in for its process. Ready once the
+# kernel reports it under the role's UID.
+start_sleeper() {
+  local role=$1 pid tries=0
+  setpriv --reuid="${UID_OF[$role]}" --regid="${GID_OF[$role]}" --init-groups -- sleep 600 \
+    </dev/null >/dev/null 2>&1 &
+  pid=$!
+  SLEEPER_PIDS+=("$pid")
+  while [ "$(stat -c %u "/proc/$pid" 2>/dev/null)" != "${UID_OF[$role]}" ]; do
+    tries=$((tries + 1))
+    if [ "$tries" -gt 30 ]; then
+      REASONS+=("sleeper_not_ready:$role")
+      return 1
+    fi
+    sleep 0.1
+  done
+  SLEEPER_OF[$role]=$pid
+}
+
+run_id="$(date +%s)-$$"
+declare -A REQUEST_DIR=() CLI_OF=() HOSTS_OF=()
+CLI_OF[openai]=${CFG[OPENAI_CLI]}
+CLI_OF[anthropic]=${CFG[ANTHROPIC_CLI]}
+HOSTS_OF[openai]=${CFG[OPENAI_HOSTS]}
+HOSTS_OF[anthropic]=${CFG[ANTHROPIC_HOSTS]}
+other_vendor() { [ "$1" = openai ] && printf anthropic || printf openai; }
+
+for role in broker decision-maker-openai decision-maker-anthropic; do
+  start_sleeper "$role"
+done
+if [ "${#REASONS[@]}" -gt 0 ]; then
+  emit incomplete
+  exit 2
+fi
+
+# Separate UIDs, and no account sharing a vendor's group but its own (§5).
+declare -A SEEN_UID=()
+shared=absent
+for role in $ROLES; do
+  [ -z "${SEEN_UID[${UID_OF[$role]}]+set}" ] || shared=present
+  SEEN_UID[${UID_OF[$role]}]=$role
+done
+record isolation no_shared_uid all uid "five roles" absent "$shared"
+for vendor in $VENDORS; do
+  group=${GROUP_OF[decision-maker-$vendor]}
+  for role in worker bridge decision-maker-$(other_vendor "$vendor"); do
+    member=absent
+    for name in $(id -nG "${USER_OF[$role]}" 2>/dev/null); do
+      [ "$name" = "$group" ] && member=present
+    done
+    record isolation "${role}_not_in_${vendor}_group" "$role" group "$group" absent "$member"
+  done
+done
+
+# The broker makes each vendor's request directory, broker-owned and readable
+# by that vendor's group only (§5: 0750, files 0640).
+for vendor in $VENDORS; do
+  dir="${CFG[REQUEST_ROOT]}/amux-dm-s0-$run_id-$vendor"
+  PROBE_DIRS+=("$dir")
+  REQUEST_DIR[$vendor]=$dir
+  probe control "broker_creates_${vendor}_request" broker mkreq "$dir" "$dir" "${GROUP_OF[decision-maker-$vendor]}"
+done
+
+for vendor in $VENDORS; do
+  role=decision-maker-$vendor
+  other=$(other_vendor "$vendor")
+  probe control "${vendor}_reads_own_request" "$role" read "${REQUEST_DIR[$vendor]}/card"
+  probe control "${vendor}_runs_own_cli" "$role" exec "${CLI_OF[$vendor]}"
+  for endpoint in ${HOSTS_OF[$vendor]}; do
+    probe control "${vendor}_reaches_own_vendor" "$role" connect "$endpoint"
+  done
+
+  probe isolation "${vendor}_cannot_write_request" "$role" write "${REQUEST_DIR[$vendor]}"
+  probe isolation "${vendor}_cannot_read_${other}_request" "$role" read "${REQUEST_DIR[$other]}/card"
+  probe isolation "${vendor}_cannot_read_${other}_home" "$role" read "${HOME_OF[decision-maker-$other]}" "home:decision-maker-$other"
+  probe isolation "${vendor}_cannot_run_${other}_cli" "$role" exec "${CLI_OF[$other]}"
+  probe isolation "${vendor}_cannot_read_worker_home" "$role" read "${HOME_OF[worker]}" "home:worker"
+  for path in ${CFG[WORKER_PATHS]}; do
+    probe isolation "${vendor}_cannot_read_worker_path" "$role" read "$path"
+  done
+  probe isolation "${vendor}_cannot_read_bridge_env" "$role" read "${CFG[BRIDGE_ENV_FILE]}"
+  for endpoint in ${HOSTS_OF[$other]} ${CFG[GITHUB_HOSTS]} ${CFG[OUTSIDE_HOSTS]}; do
+    probe isolation "${vendor}_cannot_reach_outside_own_vendor" "$role" connect "$endpoint"
+  done
+done
+
+for endpoint in ${CFG[GITHUB_HOSTS]}; do
+  probe control broker_reaches_github broker connect "$endpoint"
+done
+probe isolation broker_cannot_read_worker_home broker read "${HOME_OF[worker]}" "home:worker"
+for path in ${CFG[WORKER_PATHS]}; do
+  probe isolation broker_cannot_read_worker_path broker read "$path"
+done
+probe isolation broker_cannot_read_bridge_env broker read "${CFG[BRIDGE_ENV_FILE]}"
+for vendor in $VENDORS; do
+  probe isolation "broker_cannot_read_${vendor}_home" broker read "${HOME_OF[decision-maker-$vendor]}" "home:decision-maker-$vendor"
+  for endpoint in ${HOSTS_OF[$vendor]}; do
+    probe isolation broker_cannot_reach_vendors broker connect "$endpoint"
+  done
+done
+for endpoint in ${CFG[OUTSIDE_HOSTS]}; do
+  probe isolation broker_cannot_reach_outside broker connect "$endpoint"
+done
+
+probe control worker_reads_own_home worker read "${HOME_OF[worker]}" "home:worker"
+probe isolation worker_cannot_list_requests worker read "${CFG[REQUEST_ROOT]}"
+probe isolation bridge_cannot_list_requests bridge read "${CFG[REQUEST_ROOT]}"
+for vendor in $VENDORS; do
+  probe isolation "worker_cannot_read_${vendor}_request" worker read "${REQUEST_DIR[$vendor]}/card"
+  probe isolation "bridge_cannot_read_${vendor}_request" bridge read "${REQUEST_DIR[$vendor]}/card"
+done
+for role in decision-maker-openai decision-maker-anthropic broker; do
+  pid=${SLEEPER_OF[$role]}
+  for kind in environ fd cwd ptrace; do
+    probe isolation "worker_cannot_${kind}_${role}" worker "$kind" "$pid" "process:$role"
+  done
+done
+
+for vendor in $VENDORS; do
+  probe control "broker_removes_${vendor}_request" broker rmreq "${REQUEST_DIR[$vendor]}"
+done
+
+# No sudo for the worker, the broker or a DM account (§5), asked of sudo by
+# root about each account -- the account itself never runs sudo, so nothing
+# lands in the auth log as an attempt. An answer sudo does not give in one of
+# its two plain forms is reported as `unreadable` and counts as a leak.
+for role in worker broker decision-maker-openai decision-maker-anthropic; do
+  rights=absent
+  if command -v sudo >/dev/null 2>&1; then
+    answer=$(LC_ALL=C sudo -n -l -U "${USER_OF[$role]}" 2>/dev/null) || answer=""
+    case $answer in
+      *"is not allowed to run sudo"*) rights=absent ;;
+      *"may run the following commands"*) rights=present ;;
+      *) rights=unreadable ;;
+    esac
+  fi
+  record isolation "${role}_has_no_sudo" "$role" sudo_rights sudo absent "$rights"
+done
+
+# Credentials the DM accounts and the broker must not hold (§5, v27 §6),
+# looked at by root: a name and whether it exists, never what it holds.
+credential_absent() { # role relative-path
+  local observed=absent
+  [ -e "${HOME_OF[$1]}/$2" ] && observed=present
+  record isolation "${1}_holds_no_credential" "$1" credential_file "~/$2" absent "$observed"
+}
+for role in broker decision-maker-openai decision-maker-anthropic; do
+  home=${HOME_OF[$role]}
+  ssh_keys=absent
+  if [ -d "$home/.ssh" ]; then
+    for file in "$home/.ssh"/*; do
+      [ -f "$file" ] || continue
+      case ${file##*/} in authorized_keys | known_hosts | known_hosts.old | config) ;; *) ssh_keys=present ;; esac
+    done
+  fi
+  record isolation "${role}_holds_no_credential" "$role" credential_file "~/.ssh/*" absent "$ssh_keys"
+  for rel in .git-credentials .netrc .pgpass .config/gh/hosts.yml .cursor .copilot .config/github-copilot; do
+    credential_absent "$role" "$rel"
+  done
+  helper=absent
+  grep -qsE '^[[:space:]]*helper[[:space:]]*=' "$home/.gitconfig" "$home/.config/git/config" && helper=present
+  record isolation "${role}_holds_no_credential" "$role" credential_file "git credential.helper" absent "$helper"
+done
+for rel in .claude .claude.json; do
+  credential_absent decision-maker-openai "$rel"
+done
+credential_absent decision-maker-anthropic .codex
+for rel in .codex .claude .claude.json; do
+  credential_absent broker "$rel"
+done
+
+# Observations, reported and not judged: whether the worker can read a DM
+# process's command line (only `hidepid` hides it), and the settings that
+# decide it and ptrace.
+if attempt worker cmdline "${SLEEPER_OF[decision-maker-openai]}"; then
+  OBSERVED_CMDLINE=allowed
+else
+  OBSERVED_CMDLINE=denied
+fi
+scope=$(head -c 2 /proc/sys/kernel/yama/ptrace_scope 2>/dev/null | tr -cd '0-9')
+OBSERVED_PTRACE_SCOPE=${scope:-unknown}
+hidepid=$(grep -E '^[^ ]+ /proc proc ' /proc/mounts 2>/dev/null | grep -oE 'hidepid=[a-z0-9]+' | head -n 1)
+OBSERVED_HIDEPID=${hidepid#hidepid=}
+OBSERVED_HIDEPID=${OBSERVED_HIDEPID:-none}
+
+if [ "$CONTROL_FAILURES" -gt 0 ]; then
+  REASONS+=("control_failed")
+  emit incomplete
+  exit 2
+fi
+if [ "$ISOLATION_FAILURES" -gt 0 ]; then
+  emit not_isolated
+  exit 1
+fi
+emit isolated
+exit 0
