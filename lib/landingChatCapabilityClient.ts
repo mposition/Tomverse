@@ -1,3 +1,5 @@
+import { discardResponseBody } from "@/lib/discardResponseBody";
+
 /**
  * Read only the existing server-owned Chat offer for a resolved account.
  * Cancellation binds the result to one mounted account identity; it is never
@@ -22,23 +24,25 @@ export function startLandingChatCapabilityRead({
 
   void (async () => {
     try {
-      const response = await fetcher("/api/products/chat/capabilities", {
+      // Marketing only reads an account offer. The workspace capability API
+      // can mint Guest authority if a browser session is stale.
+      const response = await fetcher("/api/marketing/chat-entry", {
         method: "GET",
         cache: "no-store",
         signal: controller.signal,
       });
-      if (!active || controller.signal.aborted) return;
+      if (!active || controller.signal.aborted) {
+        await discardResponseBody(response);
+        return;
+      }
       if (!response.ok) {
         resolve(false);
+        await discardResponseBody(response);
         return;
       }
       const body: unknown = await response.json();
-      const autoSelection = body && typeof body === "object" &&
-        !Array.isArray(body) && "autoSelection" in body
-          ? body.autoSelection : null;
-      resolve(Boolean(autoSelection && typeof autoSelection === "object" &&
-        !Array.isArray(autoSelection) && "offered" in autoSelection &&
-        autoSelection.offered === true));
+      resolve(Boolean(body && typeof body === "object" &&
+        !Array.isArray(body) && "offered" in body && body.offered === true));
     } catch {
       resolve(false);
     }

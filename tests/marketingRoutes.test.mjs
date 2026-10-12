@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isStaticMarketingPathname,
+  LOCALIZED_MARKETING_BASE_PATHS,
   localizedMarketingRedirect,
 } from "../lib/marketingRoutes.ts";
+import { marketingProductEntryHref } from "../lib/marketingProductEntry.ts";
 
 /**
  * R-05-LANG. The redirect that stops `/` being served in English to a visitor
@@ -61,25 +63,17 @@ test("an already-localized path never redirects, which is what makes a loop impo
 });
 
 test("only the routes that have a localized counterpart are redirected", () => {
-  // Generated per locale.
-  for (const intent of [
-    "ai-answer-review",
-    "ai-for-file-analysis",
-    "chatgpt-vs-claude",
-    "compare-ai-models",
-  ]) {
+  for (const path of LOCALIZED_MARKETING_BASE_PATHS) {
     assert.equal(
-      localizedMarketingRedirect({ pathname: `/${intent}`, language: "ko", source: "accept" }),
-      `/ko/${intent}`
+      localizedMarketingRedirect({ pathname: path, language: "ko", source: "accept" }),
+      path === "/" ? "/ko" : `/ko${path}`
     );
   }
-  // English-only marketing pages: there is no /ko/pricing to send anyone to,
-  // so redirecting would be a 404 dressed up as a fix.
-  for (const path of ["/pricing", "/faq", "/privacy", "/terms", "/safety/approach"]) {
+  for (const path of ["/privacy", "/terms", "/refund"]) {
     assert.equal(
       localizedMarketingRedirect({ pathname: path, language: "ko", source: "accept" }),
       null,
-      `${path} has no localized counterpart`
+      `${path} keeps its existing legal destination`
     );
   }
 });
@@ -128,4 +122,23 @@ test("the dynamic Assistant and Knowledge guide uses the nonce CSP path", () => 
     false,
     "the poster is an image response, not an HTML file with inline hashes"
   );
+});
+
+test("Review information is localized static marketing while the workspace remains dynamic", () => {
+  assert.equal(isStaticMarketingPathname("/products/review"), true);
+  for (const locale of ["en", "ko", "zh", "fr", "de", "es", "pt", "kr", "cn"]) {
+    assert.equal(isStaticMarketingPathname(`/${locale}/products/review`), true);
+  }
+  for (const path of ["/review", "/ko/review", "/ko/products/review/settings", "/ko/products/chat"]) {
+    assert.equal(isStaticMarketingPathname(path), false, `${path} must not inherit static marketing policy`);
+  }
+  assert.equal(localizedMarketingRedirect({ pathname: "/products/review", language: "ko", source: "accept" }), "/ko/products/review");
+  assert.equal(localizedMarketingRedirect({ pathname: "/ko/products/review", language: "fr", source: "search" }), null);
+});
+
+test("explicit product entry keeps Review separate without changing a visitor's workspace preferences", () => {
+  assert.equal(marketingProductEntryHref("review", "ko"), "/review?lang=ko");
+  assert.equal(marketingProductEntryHref("chat", "ko"), "/chat?lang=ko");
+  assert.equal(marketingProductEntryHref("review", "a&b"), "/review?lang=a%26b");
+  assert.equal(new URL(marketingProductEntryHref("review", "ko"), "https://tomverse.test").searchParams.has("entry"), false);
 });

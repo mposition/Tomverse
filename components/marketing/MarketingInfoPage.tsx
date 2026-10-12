@@ -8,8 +8,10 @@ import { ChatGptVsClaudeGuide } from "./ChatGptVsClaudeGuide";
 import { AiReviewDemo } from "./AiReviewDemo";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
+import { LOCALIZED_SEO_PATHS, localizedPath } from "@/lib/seo";
 
 export type MarketingInfoSection = {
+  lang?: Language;
   title: string;
   body: string;
   bullets?: string[];
@@ -42,6 +44,19 @@ export function MarketingInfoPage({
   const { lang } = useLanguage();
   const localizedPage = content[lang];
   const page = localizedPage ?? content.en;
+  const pageHref = (href: string) => {
+    if (href === "/support/help-centre/chat-workspace") return chatWorkspaceGuideHref(lang);
+    if (href.startsWith("/review") || /^\/chat(?=\?|$)/.test(href)) {
+      const url = new URL(href.replace(/^\/chat(?=\?|$)/, "/review"), "https://tomverse.app");
+      url.searchParams.set("lang", lang);
+      return `${url.pathname}${url.search}${url.hash}`;
+    }
+    const url = href.startsWith("/") ? new URL(href, "https://tomverse.app") : null;
+    if (url && LOCALIZED_SEO_PATHS.includes(url.pathname as (typeof LOCALIZED_SEO_PATHS)[number])) {
+      return `${localizedPath(lang, url.pathname)}${url.search}${url.hash}`;
+    }
+    return href;
+  };
 
   return (
     <main className="min-h-screen bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
@@ -72,7 +87,7 @@ export function MarketingInfoPage({
             ) : null}
             <div className="mt-12 grid gap-5">
               {page.sections.map((section) => (
-                <article key={section.title} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+                <article key={section.title} lang={section.lang} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900/40">
                   <h2 className="text-xl font-black">{section.title}</h2>
                   <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{section.body}</p>
                   {section.bullets && (
@@ -87,11 +102,7 @@ export function MarketingInfoPage({
                   )}
                   {section.link ? (
                     <Link
-                      href={
-                        section.link.href === "/support/help-centre/chat-workspace"
-                          ? chatWorkspaceGuideHref(lang)
-                          : section.link.href
-                      }
+                      href={pageHref(section.link.href)}
                       target={section.link.external ? "_blank" : undefined}
                       rel={section.link.external ? "noopener noreferrer" : undefined}
                       className="mt-5 inline-flex items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
@@ -106,7 +117,7 @@ export function MarketingInfoPage({
 
             {page.cta && (
               <Link
-                href={page.cta.href}
+                href={pageHref(page.cta.href)}
                 onClick={() =>
                   trackProductEvent("cta_start_click", 0, {
                     cta_location:

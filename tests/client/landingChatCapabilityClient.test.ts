@@ -17,7 +17,7 @@ test("guests and unresolved account IDs perform no capability request", async ()
   const stop = startLandingChatCapabilityRead({
     accountUserId: null,
     onResolved: (offered) => results.push(offered),
-    fetcher: async () => { reads += 1; return response({ autoSelection: { offered: true } }); },
+    fetcher: async () => { reads += 1; return response({ offered: true }); },
   });
   stop();
   await settle();
@@ -31,12 +31,12 @@ test("a resolved account reads the existing private endpoint with GET and no-sto
     accountUserId: "account-a",
     onResolved: (offered) => results.push(offered),
     fetcher: async (url, options) => {
-      assert.equal(url, "/api/products/chat/capabilities");
+      assert.equal(url, "/api/marketing/chat-entry");
       assert.equal(options?.method, "GET");
       assert.equal(options?.cache, "no-store");
       assert.ok(options?.signal instanceof AbortSignal);
       assert.equal(options.signal.aborted, false);
-      return response({ autoSelection: { offered: true }, ignoredClientFlag: false });
+      return response({ offered: true, ignoredClientFlag: false });
     },
   });
   await settle();
@@ -45,9 +45,9 @@ test("a resolved account reads the existing private endpoint with GET and no-sto
 });
 
 test("only a strict server offered boolean admits the account link", async () => {
-  for (const body of [null, {}, { offered: true }, { flagEnabled: true },
-    { autoSelection: { offered: false } }, { autoSelection: { offered: "true" } },
-    { autoSelection: { offered: 1 } }, { autoSelection: [] }]) {
+  for (const body of [null, {}, { autoSelection: { offered: true } }, { flagEnabled: true },
+    { offered: false }, { offered: "true" },
+    { offered: 1 }, [{ offered: true }]]) {
     const results: boolean[] = [];
     const stop = startLandingChatCapabilityRead({
       accountUserId: "account-a",
@@ -62,8 +62,8 @@ test("only a strict server offered boolean admits the account link", async () =>
 
 test("HTTP, transport and malformed body failures retain an unavailable account link", async () => {
   const fetchers: Array<typeof fetch> = [
-    async () => response({ autoSelection: { offered: true } }, 401),
-    async () => response({ autoSelection: { offered: true } }, 500),
+    async () => response({ offered: true }, 401),
+    async () => response({ offered: true }, 500),
     async () => { throw new Error("NETWORK_UNAVAILABLE"); },
     async () => new Response("{invalid"),
   ];
@@ -97,13 +97,13 @@ test("an A-to-B-to-A transition discards both earlier identity responses", async
   const stopB = start(1, "account-b");
   stopB();
   const stopReturningA = start(2, "account-a");
-  pending[0]!.resolve(response({ autoSelection: { offered: true } }));
-  pending[1]!.resolve(response({ autoSelection: { offered: true } }));
+  pending[0]!.resolve(response({ offered: true }));
+  pending[1]!.resolve(response({ offered: true }));
   await settle();
   assert.deepEqual(results, []);
   assert.equal(signals[0]!.aborted, true);
   assert.equal(signals[1]!.aborted, true);
-  pending[2]!.resolve(response({ autoSelection: { offered: false } }));
+  pending[2]!.resolve(response({ offered: false }));
   await settle();
   assert.deepEqual(results, [{ identity: "account-a-2", offered: false }]);
   stopReturningA();
@@ -119,7 +119,7 @@ test("cancellation while the response body is pending cannot restore the old off
   });
   await settle();
   stop();
-  body.resolve({ autoSelection: { offered: true } });
+  body.resolve({ offered: true });
   await settle();
   assert.deepEqual(results, []);
 });

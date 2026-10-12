@@ -1,22 +1,21 @@
-import { LandingPageContent } from "@/components/marketing/LandingPageContent";
+import LaunchHomepage from "@/components/marketing/LaunchHomepage";
+import { homepageProductLinks } from "@/lib/homepageProductLinks";
 import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
-import { createPageMetadata, homeOgCopy, homeSeoCopy } from "@/lib/seo";
+import { createPageMetadata, getHomeOgCopy, getHomeSeoCopy } from "@/lib/seo";
+
+const seoCopy = getHomeSeoCopy("en", PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
+const ogCopy = getHomeOgCopy("en", PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE);
 
 export const metadata = createPageMetadata({
-  title: homeSeoCopy.en.title,
-  description: homeSeoCopy.en.description,
+  title: seoCopy.title,
+  description: seoCopy.description,
   path: "/",
   localizedBasePath: "/",
-  ogTitle: homeOgCopy.en.title,
-  ogDescription: homeOgCopy.en.description,
+  absoluteTitle: true,
+  ogTitle: ogCopy.title,
+  ogDescription: ogCopy.description,
 });
 
 export default function LandingPage() {
-  // Public Guest entry belongs to this static document. Account availability
-  // is read privately only after the client session resolves.
-  return (
-    <LandingPageContent
-      guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}
-    />
-  );
+  return <LaunchHomepage {...homepageProductLinks("en")} />;
 }

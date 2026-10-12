@@ -62,19 +62,25 @@ function MarketingLanguageQuerySync({ enabled }: { enabled: boolean }) {
 function SessionAwareMarketingProviders({
   children,
   measurementId,
+  initialLang: suppliedInitialLang,
+  forceInitialLang = false,
+  nonce,
 }: {
   children: React.ReactNode;
   measurementId: string | null;
+  initialLang?: Language;
+  forceInitialLang?: boolean;
+  nonce?: string | null;
 }) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const pathLanguage = pathnameLanguage(pathname);
-  const initialLang = pathLanguage || "en";
+  const initialLang = pathLanguage || suppliedInitialLang || "en";
 
   return (
     <LanguageProvider
       initialLang={initialLang}
-      forceInitialLang={pathLanguage !== null}
+      forceInitialLang={pathLanguage !== null || forceInitialLang}
     >
       <Suspense fallback={null}>
         <MarketingLanguageQuerySync enabled={pathLanguage === null} />
@@ -86,7 +92,7 @@ function SessionAwareMarketingProviders({
           Boolean(session?.user?.id)
         )}
         measurementId={measurementId}
-        nonce={null}
+        nonce={nonce || null}
         userCreatedAt={session?.user?.createdAt || null}
       >
         <ModelCatalogProvider>{children}</ModelCatalogProvider>
@@ -98,13 +104,19 @@ function SessionAwareMarketingProviders({
 export function MarketingProviders({
   children,
   measurementId,
+  initialLang,
+  forceInitialLang,
+  nonce,
 }: {
   children: React.ReactNode;
   measurementId: string | null;
+  initialLang?: Language;
+  forceInitialLang?: boolean;
+  nonce?: string | null;
 }) {
   return (
     <SessionProviderWrapper>
-      <SessionAwareMarketingProviders measurementId={measurementId}>
+      <SessionAwareMarketingProviders measurementId={measurementId} initialLang={initialLang} forceInitialLang={forceInitialLang} nonce={nonce}>
         {children}
       </SessionAwareMarketingProviders>
     </SessionProviderWrapper>

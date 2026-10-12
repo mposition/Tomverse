@@ -1,8 +1,11 @@
 import { MarketingConsentReservation } from "@/components/analytics/MarketingConsentReservation";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { MarketingProviders } from "@/components/marketing/MarketingProviders";
+import { MarketingChatAvailabilityProvider } from "@/components/marketing/MarketingChatAvailability";
+import { PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE } from "@/lib/landingWorkspaceEntry";
 import { StructuredData } from "@/components/seo/StructuredData";
 import { SITE_NAME, SITE_ORIGIN } from "@/lib/seo";
+import type { Language } from "@/lib/language";
 
 const configuredMeasurementId = process.env.GA4_MEASUREMENT_ID?.trim();
 const measurementId =
@@ -24,15 +27,22 @@ const measurementId =
  */
 export function MarketingShell({
   children,
+  initialLang,
+  forceInitialLang,
+  nonce,
 }: Readonly<{
   children: React.ReactNode;
+  initialLang?: Language;
+  forceInitialLang?: boolean;
+  nonce?: string | null;
 }>) {
   return (
     <>
       {/* First thing in the marketing subtree, so it runs before the header --
           and therefore the consent slot -- is parsed. */}
-      <MarketingConsentReservation />
+      <MarketingConsentReservation nonce={nonce} />
       <StructuredData
+        nonce={nonce}
         data={{
           "@context": "https://schema.org",
           "@graph": [
@@ -49,7 +59,7 @@ export function MarketingShell({
               name: SITE_NAME,
               url: SITE_ORIGIN,
               description:
-                "A multi-model AI workspace for comparing answers, analyzing files, and organizing conversations.",
+                "Use multiple AI models in one workspace. Tomverse Chat helps with model selection and everyday questions, while Tomverse Review compares different answers and perspectives.",
               applicationCategory: "BusinessApplication",
               applicationSubCategory: "Artificial intelligence workspace",
               operatingSystem: "Any modern web browser",
@@ -64,7 +74,8 @@ export function MarketingShell({
           ],
         }}
       />
-      <MarketingProviders measurementId={measurementId}>
+      <MarketingProviders measurementId={measurementId} initialLang={initialLang} forceInitialLang={forceInitialLang} nonce={nonce}>
+        <MarketingChatAvailabilityProvider guestTrialAvailable={PUBLIC_GUEST_CHAT_TRIAL_AVAILABLE}>
         {children}
         {/*
           UX-006. Inside the providers, because the viewport reads its dismiss
@@ -73,6 +84,7 @@ export function MarketingShell({
           once.
         */}
         <AppToastViewport />
+        </MarketingChatAvailabilityProvider>
       </MarketingProviders>
     </>
   );

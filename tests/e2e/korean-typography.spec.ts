@@ -211,19 +211,19 @@ test.describe("Korean typography: landing hero", () => {
     await mockPublicProofMetrics(page);
   });
 
-  test("keeps 비교하세요 intact and wraps within 4 lines at 320x568", async ({ page }) => {
+  test("keeps 고민은 intact and wraps within 4 lines at 320x568", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/");
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
     await expect(title).toBeVisible();
-    await expect(title).toContainText("비교하세요");
+    await expect(title).toContainText("고민은");
 
     const lineCount = await countRenderedLines(page, "[data-testid='landing-hero-title']");
     expect(lineCount).toBeLessThanOrEqual(4);
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "비교하세요");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
 
     const box = await title.boundingBox();
@@ -240,8 +240,8 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "ko");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("비교하세요");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "비교하세요");
+    await expect(title).toContainText("고민은");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
 
     await expect(page.getByTestId("landing-primary-cta")).toBeVisible();
@@ -269,8 +269,8 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("Compare multiple AI answers.");
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "Compare");
+    await expect(title).toContainText("Let Tomverse help you choose.");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "Tomverse");
     expect(wordLines).toBe(1);
 
     await expectNoHorizontalOverflow(page);
@@ -282,7 +282,7 @@ test.describe("Korean typography: landing hero", () => {
     await selectLanguage(page, "zh");
 
     const title = page.getByTestId("landing-hero-title");
-    await expect(title).toContainText("比较多个 AI 的回答");
+    await expect(title).toContainText("让 Tomverse 帮你选。");
     await expectNoHorizontalOverflow(page);
 
     const box = await title.boundingBox();
@@ -300,7 +300,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.waitForTimeout(100);
 
     await expectNoHorizontalOverflow(page);
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "비교하세요");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
   });
 
@@ -310,7 +310,7 @@ test.describe("Korean typography: landing hero", () => {
     await page.goto("/");
     await selectLanguage(page, "ko");
 
-    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "비교하세요");
+    const wordLines = await countLinesForWord(page, "[data-testid='landing-hero-title']", "고민은");
     expect(wordLines).toBe(1);
     await expectNoHorizontalOverflow(page);
   });
@@ -318,7 +318,7 @@ test.describe("Korean typography: landing hero", () => {
 
 // ---------------------------------------------------------------------------
 // UI-006. Word preservation was only enforced on the landing H1. Everything
-// else in the Korean display hierarchy -- the landing section headings, the
+// else in the Korean display hierarchy -- the Review section headings, the
 // pricing H1 and its section headings -- wrapped with the browser default,
 // which treats every Hangul syllable as a break opportunity and produces
 // "선택하\n세요". The rule now lives in one place (lib/displayHeading.ts) and
@@ -329,9 +329,9 @@ test.describe("Korean typography: landing hero", () => {
 // measures the test runner's font stack rather than the layout.
 // ---------------------------------------------------------------------------
 const KO_DISPLAY_HEADINGS = [
-  { route: "/", selector: "[data-testid='landing-hero-title']", word: "비교하세요", label: "landing H1" },
-  { route: "/", selector: "h2:has-text('업그레이드하세요')", word: "업그레이드하세요", label: "landing pricing H2" },
-  { route: "/", selector: "h2:has-text('시작됩니다')", word: "시작됩니다", label: "landing CTA H2" },
+  { route: "/products/review", selector: "[data-testid='landing-hero-title']", word: "비교하세요", label: "Review H1" },
+  { route: "/products/review", selector: "h2:has-text('업그레이드하세요')", word: "업그레이드하세요", label: "Review pricing H2" },
+  { route: "/products/review", selector: "h2:has-text('시작됩니다')", word: "시작됩니다", label: "Review CTA H2" },
   { route: "/pricing", selector: "h1:has-text('선택하세요')", word: "선택하세요", label: "pricing H1" },
   { route: "/pricing", selector: "h2:has-text('플랜별 제공 기능 비교')", word: "제공", label: "pricing compare H2" },
 ] as const;

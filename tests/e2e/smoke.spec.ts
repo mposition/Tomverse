@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { CHAT_WORKSPACE_PATH } from "@/lib/productSurfaceRoutes";
 import {
   mockChatStream,
   mockPublicBillingConfig,
@@ -13,45 +14,41 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
+  await prepareGuestPage(page, "en");
   await page.goto("/");
   await expect(page.locator("main")).toBeVisible();
   await expect(page.locator("main")).toHaveCount(1);
-  await expect(
-    page.getByRole("heading", {
-      name: "Ask once. Compare multiple AI answers.",
-    })
-  ).toBeVisible();
-  if ((page.viewportSize()?.width ?? 1024) >= 768) {
+  await expect(page.getByTestId("landing-hero-title")).toContainText("AI");
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "unauthenticated");
+  const guestChatAvailable = await page.getByTestId("launch-homepage").getAttribute("data-guest-chat-trial-available") === "true";
+  const startHref = guestChatAvailable ? `${CHAT_WORKSPACE_PATH}?lang=en` : "/review?lang=en";
+  if ((page.viewportSize()?.width ?? 1024) >= 1024) {
     await expect(
-      page.getByRole("link", { name: /^Open Review$/i }).first()
+      page.getByTestId("marketing-header-app-cta")
     ).toHaveAttribute(
       "href",
-      "/review?lang=en"
+      startHref
     );
   }
-  // The primary guest CTA starts Review; Chat has its own sign-in entry.
+  // A start action opens only an available product.
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    "Start comparing free"
+    guestChatAvailable ? /Chat/ : /Review/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/review?lang=en&entry=guest-preview"
+    startHref
   );
   // The hero states the no-sign-up promise once. It used to carry it twice,
   // in the signup note and again in a guest note, in near-identical words;
   // the second element is gone.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
-    "No sign-up required. Start with three models."
+    /Review/
   );
   await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
-  await expect(
-    page.getByRole("heading", {
-      name: "한 번 질문하고, 여러 AI 답변을 비교하세요.",
-    })
-  ).toBeVisible();
+  await expect(page.getByTestId("landing-hero-title")).toContainText("고민은 Tomverse에.");
 });
 
 test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
@@ -67,17 +64,23 @@ test("signed-in homepage keeps the page visible and offers one continue action",
       }),
     })
   );
+  await page.route("**/api/marketing/chat-entry", route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ offered: false }),
+  }));
 
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("marketing-header-app-cta")).toHaveAttribute("data-session-state", "authenticated");
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Open Review/
+    /Review/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
     "/review?lang=en"
   );
-  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
+  await expect(page.getByTestId("landing-hero-signup-note")).toContainText(/Review/);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 
@@ -119,9 +122,9 @@ test("guest preview opens a 3-model comparison chat by default", { tag: "@smoke"
 test("pricing page supports Chinese copy", async ({ page }) => {
   await page.goto("/pricing");
   await page.getByTestId("marketing-language-switcher").selectOption("zh");
-  await expect(
-    page.getByRole("heading", { name: "选择适合你的 AI 能力等级。" })
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/zh\/pricing$/);
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("先体验，再选择适合的套餐。");
   await expect(page.getByTestId("pricing-credit-packs")).toBeVisible();
   await expect(page.locator('[data-pack-id="starter_500"]')).toContainText("500");
   await expect(page.locator('[data-pack-id="project_1500"]')).toContainText("1,500");

@@ -28,13 +28,9 @@ import { startLandingChatCapabilityRead } from "@/lib/landingChatCapabilityClien
  *
  * ## What V2 changed, and why
  *
- * Tomverse is the brand; Tomverse Review was V1's guest entry. The V1 hero
- * said so twice and then contradicted
- * itself: a badge and a brand note each introduced the product, a signup note
- * and a guest note each promised the same "no sign-up required", and the CTA
- * read "Start chatting free" -- which named the then-unreleased Tomverse Chat.
- * A visitor could not tell from the first screen which of the
- * four brand-tree products the button was going to open.
+ * This page introduces Tomverse Review. Tomverse is the brand, Tomverse Chat
+ * is the conversational product, and AI Review is a comparison feature inside
+ * Tomverse Review. Product choices keep their names and entry points distinct.
  *
  * The hero now names both product jobs once. Its primary guest action still
  * starts Review, while Chat has a distinct single-model guest trial entry and
@@ -97,28 +93,14 @@ function LandingPageContentForIdentity({
   }), [accountUserId]);
   const content = getLandingCopy(lang);
   const productCopy = chatProductUiCopy[lang];
-  const chatHref = workspaceDestination({
-    chatSurfaceAvailable,
-    lang,
-    isAuthenticated: true,
-  });
-  const guestChatHref = workspaceDestination({
-    chatSurfaceAvailable,
-    lang,
-    isAuthenticated: false,
-  });
-  const primaryChatHref = isAuthenticated ? chatHref : guestChatHref;
-  const primaryCtaLabel =
-    isAuthenticated && chatSurfaceAvailable
-      ? productCopy.chat.open
-      : isAuthenticated
-        ? content.signedInCta
-        : content.primaryCta;
   const reviewHref = workspaceDestination({
     chatSurfaceAvailable: false,
     lang,
     isAuthenticated,
   });
+  // This page introduces Review; Chat has its separate capability-gated card.
+  const primaryChatHref = reviewHref;
+  const primaryCtaLabel = isAuthenticated ? content.signedInCta : content.primaryCta;
   const chatProductHref = chatProductDestination({
     chatSurfaceAvailable,
     guestTrialAvailable,
@@ -129,7 +111,7 @@ function LandingPageContentForIdentity({
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-white text-zinc-950 dark:bg-zinc-950 dark:text-white">
-      <MarketingHeader />
+      <MarketingHeader variant="launch" />
 
       <section
         aria-labelledby="landing-hero-title"
@@ -358,7 +340,7 @@ function LandingPageContentForIdentity({
         }
       />
 
-      <MarketingFooter />
+      <MarketingFooter variant="launch" />
     </main>
   );
 }

@@ -8,6 +8,7 @@ const exactMarketingPaths = new Set([
   "/faq",
   "/models",
   "/pricing",
+  "/products/review",
   "/privacy",
   "/refund",
   "/safety",
@@ -32,12 +33,29 @@ const localizedMarketingLocales = new Set([
   "cn",
 ]);
 
-const localizedSearchIntentPaths = new Set([
-  "ai-answer-review",
-  "ai-for-file-analysis",
-  "chatgpt-vs-claude",
-  "compare-ai-models",
-]);
+/** Only paths backed by prerendered locale routes belong in this list. */
+export const LOCALIZED_MARKETING_BASE_PATHS = [
+  "/",
+  "/compare-ai-models",
+  "/ai-answer-review",
+  "/chatgpt-vs-claude",
+  "/ai-for-file-analysis",
+  "/products/review",
+  "/about",
+  "/faq",
+  "/pricing",
+  "/models",
+  "/safety",
+  "/safety/approach",
+  "/safety/security-privacy",
+  "/safety/trust-transparency",
+  "/support",
+  "/support/help-centre",
+  "/support/help-centre/chat-workspace",
+] as const;
+const localizedMarketingBasePaths = new Set<string>(LOCALIZED_MARKETING_BASE_PATHS);
+
+export const REVIEW_PRODUCT_PATH = "/products/review";
 
 const normalizePathname = (pathname: string) => {
   if (!pathname || pathname === "/") return "/";
@@ -51,9 +69,7 @@ export const isStaticMarketingPathname = (pathname: string) => {
   const segments = normalized.split("/").filter(Boolean);
   if (!localizedMarketingLocales.has(segments[0] || "")) return false;
   if (segments.length === 1) return true;
-  return (
-    segments.length === 2 && localizedSearchIntentPaths.has(segments[1] || "")
-  );
+  return localizedMarketingBasePaths.has(`/${segments.slice(1).join("/")}`);
 };
 
 /**
@@ -69,14 +85,13 @@ export const isStaticMarketingPathname = (pathname: string) => {
  * webfont blocked -- the copy swap on its own. `/zh` measures 0.0076, and 0
  * with fonts blocked, because it ships the right language in the first byte.
  *
- * Only routes that *have* a localized counterpart can be redirected: `/` and
- * the four search-intent pages are generated per locale, `/pricing` and the
- * rest are not. Those keep the client-side swap, which is why this closes the
- * measured landing-page failure rather than the whole class.
+ * Only routes with a generated locale counterpart can redirect. Legal pages,
+ * the application, status and the dynamic Knowledge guide retain their own
+ * language and caching behavior.
  *
  * Returning `null` means "serve what was asked for".
  */
-const REDIRECTABLE_BASE_PATHS = new Set(["/", ...[...localizedSearchIntentPaths].map((slug) => `/${slug}`)]);
+const REDIRECTABLE_BASE_PATHS = localizedMarketingBasePaths;
 
 export const localizedMarketingRedirect = ({
   pathname,

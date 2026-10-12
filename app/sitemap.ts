@@ -41,19 +41,21 @@ const publicPages: Array<{
 export default function sitemap(): MetadataRoute.Sitemap {
   const localizedEntries = LOCALIZED_SEO_PATHS.flatMap((basePath) => {
     const alternates = { languages: localizedLanguageAlternates(basePath) };
-    const priority = basePath === "/" ? 1 : 0.85;
+    const publicPage = publicPages.find((page) => page.path === basePath);
+    const priority = publicPage?.priority ?? (basePath === "/" ? 1 : basePath === "/products/review" ? 0.9 : 0.85);
+    const changeFrequency = publicPage?.changeFrequency ?? "weekly";
     return [
       {
         url: `${SITE_ORIGIN}${basePath}`,
         ...lastModifiedFor(basePath),
-        changeFrequency: "weekly" as const,
+        changeFrequency,
         priority,
         alternates,
       },
       ...SEO_LOCALES.map((locale) => ({
         url: `${SITE_ORIGIN}${localizedPath(locale, basePath)}`,
         ...lastModifiedFor(basePath),
-        changeFrequency: "weekly" as const,
+        changeFrequency,
         priority,
         alternates,
       })),
@@ -62,7 +64,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   return [
     ...localizedEntries,
-    ...publicPages.map((page) => ({
+    ...publicPages.filter((page) => !(LOCALIZED_SEO_PATHS as readonly string[]).includes(page.path)).map((page) => ({
       url: `${SITE_ORIGIN}${page.path}`,
       ...lastModifiedFor(page.path),
       changeFrequency: page.changeFrequency,

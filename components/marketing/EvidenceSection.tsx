@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { PUBLIC_MODEL_PROVIDERS } from "@/lib/models";
 import { getLandingCopy } from "./landingContent";
 import { ConditionLine, SectionHeading } from "./landingPrimitives";
+import { localizedPath } from "@/lib/seo";
 
 /**
  * Where a claim came from, and whether it still holds.
@@ -168,7 +169,7 @@ export function EvidenceSection() {
             {copy.footnote}
           </p>
           <Link
-            href="/pricing"
+            href={localizedPath(lang, "/pricing")}
             className="group inline-flex min-h-11 shrink-0 items-center gap-2 text-sm font-bold text-zinc-950 underline underline-offset-4 transition hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-400"
           >
             {copy.cta}

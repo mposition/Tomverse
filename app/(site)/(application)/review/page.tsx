@@ -4,15 +4,15 @@ import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
 import { CONVERSATION_HANDOFF_PARAM } from "@/lib/continuationRoutes";
 
 /**
- * `/review` — the canonical Tomverse Review URL.
+ * `/review` — the canonical Tomverse Review URL used by public product links.
  *
  * Decision record v1.2 §7 (합류) and §8. The same shell as `/chat`, not a copy:
  * a second implementation would drift, and the parity job would end up
  * comparing two implementations rather than two URLs.
  *
- * The product selector and stored-product handoff both navigate here. The
- * layout remains `noindex` exactly as `/chat` is; route visibility and search
- * indexing are separate decisions.
+ * The workspace remains `noindex` like `/chat`; public product information
+ * lives at `/products/review`. Prepared links preserve model and prompt
+ * parameters and leave the user in control of sending the question.
  */
 export default async function ReviewPage({
   searchParams,
