@@ -98,6 +98,21 @@ test("a runtime successor of a native model is reported with what it replaced", 
   ]);
 });
 
+test("a predecessor an administrator moved off native search is not called native", () => {
+  for (const webSearchOverride of ["app-managed", "off"]) {
+    const [finding] = webSearch([
+      model("claude-sonnet-5", "anthropic", {
+        enabled: false,
+        replacementModelId: "claude-sonnet-5-5",
+        webSearchOverride,
+      }),
+      model("claude-sonnet-5-5", "anthropic"),
+    ]);
+    assert.equal(finding.modelId, "claude-sonnet-5-5");
+    assert.deepEqual(finding.nativePredecessors, [], webSearchOverride);
+  }
+});
+
 test("models that are on their route by decision are not reported", () => {
   assert.deepEqual(
     webSearch([

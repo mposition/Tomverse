@@ -124,8 +124,11 @@ export const webSearchRouteFindings = ({ models, register, capabilityOf }) => {
     if (model.webSearchOverride) continue;
     const capability = capabilityOf(model);
     if (capability.support !== "app-managed") continue;
+    // Through capabilityOf, not the register alone: a predecessor an
+    // administrator moved to the app backend or switched off did not search
+    // natively, whatever the register says about its id.
     const nativePredecessors = models
-      .filter((other) => other.replacementModelId === model.id && register[other.id]?.support === "native")
+      .filter((other) => other.replacementModelId === model.id && capabilityOf(other).support === "native")
       .map((other) => other.id)
       .sort();
     findings.push({
