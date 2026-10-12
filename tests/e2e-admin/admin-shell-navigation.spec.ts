@@ -707,13 +707,14 @@ test.describe("the AMUX group by role", () => {
     await expect(page.getByTestId("amux-card-list-panel")).toHaveCount(0);
   });
 
-  test("Workers shows the registry to every role, and offers the owner nothing while the code latch is off", async ({
+  test("Workers shows the registry to every role, and offers registration to the owner only", async ({
     page,
     signInAs,
   }) => {
     // Orchestration policy version 31, sections 3 and 8: any administrator
     // reads the registry and its comparison with the assignment catalog; only
-    // the owner may register, and R1 ships with registry writes latched off.
+    // the owner may register (version 32 turned R1's code latch on). Nothing
+    // is clicked here: a registration is a write.
     await signInAs("readonly");
     await page.goto("/admin/amux-execution?tab=workers");
     const panel = page.getByTestId("amux-worker-registry-panel");
@@ -728,7 +729,7 @@ test.describe("the AMUX group by role", () => {
     await expect(page.getByTestId("amux-worker-registry-read-only")).toHaveCount(0);
     await expect(page.getByTestId("amux-worker-registry-latch")).toBeVisible();
     await expect(page.getByTestId("amux-worker-registry-seed")).toBeVisible();
-    await expect(page.getByTestId("amux-worker-registry-seed-register")).toBeDisabled();
+    await expect(page.getByTestId("amux-worker-registry-seed-register")).toBeEnabled();
     expect(await adminFixtureDatabase().amuxWorkerRegistryEvent.count()).toBe(0);
   });
 
@@ -739,7 +740,7 @@ test.describe("the AMUX group by role", () => {
     // docs/policy/amux-decision-maker.md §8: any administrator reads the
     // switches; a change takes ops:write and a recent step-up.
     await signInAs("readonly");
-    await page.goto("/admin/amux-execution?tab=decision-maker");
+    await page.goto("/admin/amux-settings?tab=decision-maker");
     const panel = page.getByTestId("amux-decision-maker-switch-panel").filter({ visible: true });
     await expect(panel).toHaveCount(1);
     await expect(panel).toBeVisible();
@@ -752,7 +753,7 @@ test.describe("the AMUX group by role", () => {
     // with the way back on screen (docs/ui-contracts/admin-console-ia.md rule 7),
     // and nothing is written.
     await signInAs("ops", { authenticatedMinutesAgo: 45 });
-    await page.goto("/admin/amux-execution?tab=decision-maker");
+    await page.goto("/admin/amux-settings?tab=decision-maker");
     await expect(panel.getByTestId("amux-dm-switch-read-only")).toHaveCount(0);
     await panel.getByTestId("amux-dm-switch-set-kill_switch-on").click();
     await expect(panel.getByTestId("admin-api-reauthenticate-link")).toHaveAttribute(

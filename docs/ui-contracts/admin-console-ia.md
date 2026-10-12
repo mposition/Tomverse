@@ -235,7 +235,7 @@ Its Assignment tab carries the count of AMUX escalations still `open` or
 `acknowledged`, from the same status list the section reads
 (`AMUX_ESCALATION_AWAITING_STATUSES`). The Execution entry carries that count
 (`amuxEscalations`). The **Safety & recovery** section in **Operations
-settings** opens to every admin role (orchestration policy v20 section 7, amended by v32).
+settings** opens to every admin role (orchestration policy v20 section 7, amended by v33 section 4).
 It explains stop reasons and evidence, shows receipt confirmation and the
 owner's clear, and carries the count of open halts (`amuxOrchestratorHalts`).
 The server automatically clears only a request-bound outcome-unknown halt

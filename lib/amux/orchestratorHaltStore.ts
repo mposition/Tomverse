@@ -268,7 +268,7 @@ async function findNoCommitResolutionAuditId(
 }
 
 /**
- * Version 32: with the admission row already locked and resolved no_commit,
+ * Version 33: with the admission row already locked and resolved no_commit,
  * closes its one eligible open halt. The receipt count is checked again under
  * the same admission lock. The evidence audit, automatic-clear audit and halt
  * columns are bound in this transaction; the append migration's trigger
@@ -458,7 +458,7 @@ const haltRow = (row: RawHaltRow): AmuxOrchestratorHaltRow => ({
 
 /**
  * A halt counts as cleared only when its path-specific proof is complete:
- * the existing human audit and actor, or version 32's no-commit resolution
+ * the existing human audit and actor, or version 33's no-commit resolution
  * audit plus automatic-clear system audit and zero receipts.
  */
 const selectHaltsByKeys = (tx: Prisma.TransactionClient, haltKeys: readonly string[]) =>
@@ -768,7 +768,7 @@ export async function clearAmuxOrchestratorHalt(input: {
   return prisma.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('statement_timeout', ${String(CLEAR_STATEMENT_TIMEOUT_MS)}, true)`;
-      // Version 32's automatic clear locks admission then halt. Read the
+      // Version 33's automatic clear locks admission then halt. Read the
       // immutable request id first and take the same lock order here so a
       // simultaneous owner decision cannot deadlock with the resolver.
       const identified = (

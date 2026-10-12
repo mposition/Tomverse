@@ -506,12 +506,16 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-12, merge pinned main after the integrated AMUX source: both
+// histories above remain, while their combined comments and audit helpers
+// reposition only already-reviewed accesses. The count and position-free
+// inventory remain unchanged, so this repins source positions only.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ef477daaa1e18310a4d5cd458aa2b9f2",
-  "dd0a87ce5b6cf018c4c99f7f41f84578",
+  "fa310e78620dbb73014327028843c467",
+  "1646cb5d14cab332c1874fd8e2bf6bda",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

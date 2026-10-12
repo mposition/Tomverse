@@ -7,7 +7,7 @@
  * not know. The server admits each write call before processing it
  * (`AmuxOrchestratorWrite`), writes a receipt beside every state change it
  * commits (`AmuxOrchestratorWriteReceipt`), and keeps the orchestrator's halt
- * (`AmuxOrchestratorHalt`) until a person clears it or version 32 verifies the
+ * (`AmuxOrchestratorHalt`) until a person clears it or version 33 verifies the
  * same request as `no_commit` with zero receipts.
  *
  * Pure: no database, no `server-only`, so the store, the routes, the Admin
@@ -66,7 +66,7 @@ export const AMUX_ORCHESTRATOR_HALT_REASON_CODES = [
 export type AmuxOrchestratorHaltReasonCode =
   (typeof AMUX_ORCHESTRATOR_HALT_REASON_CODES)[number];
 
-/** Version 32: only result-unknown writes can close from verified no-commit evidence. */
+/** Version 33: only result-unknown writes can close from verified no-commit evidence. */
 export const AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES = [
   "claim_outcome_unknown",
   "recovery_outcome_unknown",
@@ -78,7 +78,7 @@ export const amuxOrchestratorHaltReasonAllowsAutoClear = (
 ): boolean =>
   (AMUX_ORCHESTRATOR_AUTO_CLEAR_REASON_CODES as readonly string[]).includes(reason);
 
-/** Version 32: a clear is either the existing human decision or verified no-commit. */
+/** Version 33: a clear is either the existing human decision or verified no-commit. */
 export const AMUX_ORCHESTRATOR_HALT_CLEAR_KINDS = [
   "human",
   "system_no_commit",

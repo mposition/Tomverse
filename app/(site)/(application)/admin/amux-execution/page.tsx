@@ -59,10 +59,9 @@ export default async function AdminAmuxExecutionPage({
   ]);
   const isOwner = Boolean(session?.user?.id) && role === "owner";
   const statuses: Record<string, AmuxTabStatus | undefined> = {
-    // The card list issues no request and writes nothing
-    // (tests/amuxAdminCardList.test.mjs pins both), so there is no switch for
-    // this to read: it is read-only by construction, for the owner too.
-    cards: "read_only",
+    // The owner may move cards in the Kanban workspace. Every command checks
+    // owner authorization again; other administrators only inspect it.
+    cards: isOwner ? undefined : "read_only",
     // The same permission every escalation, proposal and review route checks.
     assignment: hasAdminPermission(session, "ops:write") ? undefined : "read_only",
     // A registry change takes the owner role, the stage's code latch and a
@@ -94,7 +93,7 @@ export default async function AdminAmuxExecutionPage({
     return (
       <div className="flex min-w-0 flex-col gap-5">
         {tabs}
-        <AmuxExecutionWorkspace initialTaskId={typeof query.taskId === "string" &&
+        <AmuxExecutionWorkspace canMoveCards={isOwner} initialTaskId={typeof query.taskId === "string" &&
           /^[A-Za-z0-9-]{1,128}$/.test(query.taskId) ? query.taskId : null} />
         <AmuxCardListPanel rows={rows} total={total} limit={limit} />
         <AmuxCliUsagePanel view={usage} />

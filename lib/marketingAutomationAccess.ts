@@ -576,6 +576,10 @@ export const computeMarketingWebhookPipelineFingerprint = (
  * system-audit action and its `AdminAuditLog` back relation. The webhook
  * receiver's calls, descriptor and admission decisions are unchanged; the
  * watched closure bytes moved, so existing signed staging evidence is stale.
+ * 2026-10-10, CHAT-01 production selective integration adds the vNext
+ * one-shot dark tables to the watched Prisma schema. The receiver's calls,
+ * descriptor and admission decisions remain unchanged; the closure bytes
+ * move and the fingerprint is repinned after the full reviewed closure lands.
  * 2026-10-12: the AMUX worker registry (orchestration policy version 31, stage
  * R1) adds the registry event, trial evidence and latch event back relations
  * to `AdminAuditLog` in the watched schema. No actor, descriptor, webhook

@@ -57,7 +57,7 @@ export type AdminNavigationCounts = {
    */
   openAmuxEscalations: number | null;
   /**
-   * AMUX orchestrator halts not yet cleared (orchestration policy version 32).
+   * AMUX orchestrator halts not yet cleared (orchestration policy version 33).
    * The operations-settings entry carries this count; verified no-commit
    * halts can be cleared automatically and other halts need investigation.
    */

@@ -5,7 +5,7 @@
 //! Every write call (claim, recover, automatic promotion tick) carries a new
 //! request id; a known answer is acknowledged to the server before the next
 //! write; anything else is a halt, recorded in the app database and cleared
-//! by a person or by version 32's verified no-commit proof. This module holds
+//! by a person or by version 33's verified no-commit proof. This module holds
 //! the closed lists and every decision
 //! that does not need the network, so each one is tested on its own:
 //!

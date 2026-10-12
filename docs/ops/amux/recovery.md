@@ -284,7 +284,11 @@ queue와 routing-snapshot 두 selection read를 모두 지난다.
 
 #### 운영자의 해제 절차
 
-정책 v32에서 같은 요청의 `no_commit`, 영수증 0건과 종결 감사 증거를 서버가 검증한 결과 불명 정지는 자동 해제한다. 접수 기록 없음·미확정 결과·반영된 변경·인증/계약 오류는 자동 해제하지 않는다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 사람 확인 대상은 운영자가 영수증의 실제 대상을 대조한다.
+정책 v33에서 같은 요청의 `no_commit`, 영수증 0건과 종결 감사 증거를 서버가 검증한 결과 불명 정지는 자동 해제한다. 접수 기록 없음·미확정 결과·반영된 변경·인증/계약 오류는 자동 해제하지 않는다. 해제는 원래의 claim·회수·승격을 다시 실행하지 않는다. 사람 확인 대상은 운영자가 영수증의 실제 대상을 대조한다.
+
+앱과 orchestrator는 같은 revision의 정지 read contract로 함께 전환한다. `reason_code`는 필수이고 알 수 없는 필드는 거부한다. proof 필드는 열린 정지에서 없을 수 있지만, 종결된 정지는 `clear_kind`와 서로 맞는 감사·resolution proof가 있어야 한다. 혼합 버전은 예전 사람 해제에 `clear_kind`가 없는 경우처럼 사람 확인이 필요한 `contract_violation` 정지를 만들 수 있지만, 모든 열린 정지가 실패하는 것은 아니다. rollout에서 첫 write admission 전에 양쪽 revision과 정지 read-back을 맞춰 확인한다.
+
+append migration `20261012170000_amux_verified_no_commit_halt_auto_clear`의 v32 초안 주석은 이미 검증 DB에 적용된 checksum을 보존하기 위해 바꾸지 않는다. 현재 승인과 런타임 계약은 정책 v33이다.
 
 1. Admin Console에 owner로 로그인하고 `/admin/amux-settings?tab=safety`를 연다.
 2. **열린 정지**에서 사유 코드와 요청 id를 읽는다. 요청이 있으면 그 접수의 호출 종류, 접수

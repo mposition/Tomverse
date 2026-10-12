@@ -10,7 +10,8 @@
 상태(v29 이력): **v29 v22 자동 편입·worker claim·Task 실행 활성화 범위 승인.** 운영자 `mposition`의 2026-10-10 요청을 아래 v29 절에 기록한다. 코드 래치 변경은 실제 운영 활성화나 완료 증거가 아니다.
 상태(v30 이력): **v30 초기 v22 활성화의 졸업 근거 예외 승인.** 운영자 `mposition`이 2026-10-11에 아래 v30 절의 닫힌 bootstrap 예외를 승인했다. 이전 v29 상태 줄은 이력이다.
 상태(v31 이력): **v31 worker 등록부와 공급사 종류 승인.** 운영자 `mposition`이 2026-10-12에 아래 v31 절과 그 활성화 게이트 값을 승인했다. 이전 v30 상태 줄은 이력이다.
-상태(최신): **v32 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v32 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
+상태(v32 이력): **v32 worker 등록부 R1 코드 래치 승인.** 2026-10-12 운영자 `mposition`이 아래 v32 절을 승인했다. `AMUX_WORKER_REGISTRY_WRITES_LATCH`는 true가 되어 owner가 Admin에서 등록부에 쓸 수 있다. 배정은 R2 전까지 카탈로그 환경 변수를 따른다. 이전 v31 상태 줄은 이력이다.
+상태(최신): **v33 DB로 미반영이 확정된 Orchestrator halt의 자동 종결 승인.** 운영자 `mposition`이 2026-10-12에 아래 v33 절의 동일 요청 `no_commit` 범위와 운영 안내 화면을 승인했다. 자동 종결은 원래 쓰기의 재시도가 아니며, 증거 없는 정지와 사람 확인 대상은 계속 사람이 해제한다.
 approvedBy: mposition · approvedAt: 2026-09-22 · 정책 버전: 2
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 3
 approvedBy: mposition · approvedAt: 2026-09-24 · 정책 버전: 4
@@ -40,6 +41,7 @@ approvedBy: mposition · approvedAt: 2026-10-10 · 정책 버전: 29
 approvedBy: mposition · approvedAt: 2026-10-11 · 정책 버전: 30
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 31
 approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
+approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 33
 
 버전 22는 아래의 포트폴리오→Task DAG→worker→운영자 완료 판정 계약을 승인한다. **설계 승인이지 현재 코드·migration·운영 스위치·자동 병합/배포 활성화의 증거가 아니다.** 버전 16의 한 카드 단계 순환은 v22 신규 Task에 더 이상 적용하지 않으며, 기존 카드의 기록과 안전한 이행 전 상태는 보존한다.
 
@@ -75,7 +77,8 @@ approvedBy: mposition · approvedAt: 2026-10-12 · 정책 버전: 32
 | 29 | 2026-10-10 mposition | v22 자동 편입·worker claim·Task 실행의 코드 래치를 켠다. 환경 값과 기존 졸업·비용·승인·감사·정지 게이트를 면제하지 않고, 게시·병합·배포와 운영자 완료 판정 자동화는 열지 않는다. |
 | 30 | 2026-10-11 mposition | 초기 v22 활성화에 `owner-bootstrap-2026-10-11` 졸업 근거 예외 하나를 둔다. owner 재인증·동일 transaction 감사·매 회차 재확인을 요구하고 다른 졸업·비용·권한·결과 불명 게이트는 유지한다. |
 | 31 | 2026-10-12 mposition | worker 등록부와 공급사 종류, 조정기의 관측·관리 단계, 사용량 원장 일반화와 자동 정지 래치를 승인한다. worker 추가를 운영 행위로 바꾸되 새 종류·권한 확대는 새 정책 버전으로 남긴다. |
-| 32 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
+| 32 | 2026-10-12 mposition | 버전 31 R1의 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`를 켠다. owner의 등록부 쓰기만 열리고, R1의 관측 기간은 열셋 등록 뒤 3일(72시간)이다. 배정, 환경 변수, worker catalog, bridge, 관측·시험·래치 표는 바꾸지 않는다. |
+| 33 | 2026-10-12 mposition | 같은 요청의 admission row lock, deadline+grace, 영수증 0, `no_commit` resolution과 결속된 시스템 감사를 DB가 검증한 결과 불명 halt만 자동 종결한다. 그 밖의 정지는 사람 해제 그대로이며 원래 쓰기를 재시도하지 않는다. 운영 화면은 자동 복구와 사람 판단을 구분해 증거와 확인 순서를 설명한다. |
 
 v1 행은 역사적 승인 기록으로 남는다. v2는 이 표의 행과 상태 줄이 공개 저장소 파일에 함께 기록되어야 저장소상 효력을 가진다. 개별 Agent의 승인 정책을 이 문서의 승인으로 간주하지 않는다.
 
@@ -1540,7 +1543,34 @@ v27의 여섯은 R5의 활성화 전까지 v27 절 5의 제약을 그대로 받�
    - 7항의 자동 정지 연속 실패 3회
 3. 각 단계(R1~R6)는 독립 검토와 그 단계의 운영자 활성화 기록 뒤에만 켠다.
 
-## 버전 32 — 검증된 `no_commit` Orchestrator halt 자동 종결
+## 버전 32 — worker 등록부 R1 코드 래치
+
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 2026-10-12 작성, 작성자 Claude. 운영자는 2026-10-12에 R1의 관측 기간을 3일로 정하고, R1 코드 래치를 켜라고 지시했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다. 작성자와 다른 공급사의 독립 검토(codex·copilot)는 r-20261012-085331-1f4295에서 둘 다 지적 없이 accept였다.
+
+이 버전은 버전 31 8항의 R1을 켠다. 버전 31 8항에서 R1은 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`(`lib/amux/workerRegistryCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이 버전 31 8항이 말하는 그 단계의 운영자 활성화 기록이다.
+
+- **열리는 것.**
+  - 래치가 여는 것은 하나다. owner가 Admin(AMUX › 실행 › Worker)에서 최근 step-up을 거쳐 등록부에 쓰는 것이다.
+  - 등록부에 무엇이 들어갈 수 있는지는 버전 31대로 DB가 강제한다.
+    - 첫 사건은 `requested`다. 처음부터 `active`가 될 수 있는 것은 카탈로그의 일곱뿐이다.
+    - `retired` 뒤에는 어떤 사건도 붙지 않는다.
+    - 첫 사건 뒤에 `active`로 바꿀 수 없다. 그 전환은 R5의 시험 증거가 있어야 한다.
+    - 역할 확대는 `requested`일 때만 된다.
+    - 같은 트랜잭션에 사람 감사 `amux.worker.register` 또는 `amux.worker.change`가 있어야 한다.
+- **R1 등록.** owner는 버전 27 절 1의 열셋을 등록한다. 카탈로그의 일곱은 `active`로, Cursor·Copilot의 여섯은 `requested`로 등록한다.
+- **관측 기간.**
+  - 버전 31 8항 R1의 "정해진 기간"은 3일, 곧 72시간이다.
+  - production에서 열셋의 등록을 마친 시각부터 센다.
+  - 그 사이 Admin의 일치 보고(등록부와 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`)가 일치가 아닌 것을 관측하면, 원인을 고친 뒤 처음부터 다시 센다.
+  - 기간을 채우면 운영자가 R1 종료를 기록하고, 그 뒤에 R2로 간다.
+- **바뀌지 않는 것.**
+  - 배정은 R2 전까지 그대로 `TOMVERSE_AMUX_WORKER_CATALOG_JSON`을 따른다. 등록부의 `active`는 아무것도 배정하지 않는다.
+  - 관측·시험·래치 표는 계속 모든 쓰기를 거부한다. 그 writer는 R4와 R5에서 만든다.
+  - v27의 여섯은 `requested`로 등록되어도 v27 절 5의 제약을 그대로 받는다.
+  - 환경 변수, worker catalog, bridge, 용량 행, 비용 상한, 동시 실행 상한은 바꾸지 않는다.
+- **되돌리기.** 래치를 false로 되돌리는 변경은 쓰기만 다시 닫는다. 이미 쓴 사건은 append-only라 남는다. 등록부를 비우는 경로는 없다.
+
+## 버전 33 — 검증된 `no_commit` Orchestrator halt 자동 종결
 
 승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 운영자는 서버가 동일 요청의 결과 미반영을 확정한 경우 정지를 자동으로 풀고, 운영 화면에서 자동 복구와 사람 판단 대상을 구분해 무엇을 확인할지 설명하도록 요청했다. 이 버전은 v20의 Orchestrator halt만 개정한다. v20 11항의 bridge 종료 코드 3, v31의 worker 자동 정지 래치, worker 등록·heartbeat 결과 불명은 바꾸지 않는다.
 
@@ -1579,6 +1609,8 @@ v20 7항의 전용 Halts 탭은 정보 구조를 고정한 요구가 아니다. 
 ### 4. 경계와 활성화
 
 이 버전은 새 환경 변수, 외부 알림, provider 호출, 비용, 카드 lifecycle·owner·attempt·promotion 상태, worker 등록부·bridge·sidecar, Publisher·병합·배포 권한을 바꾸지 않는다. 자동 종결과 사람 해제 어느 쪽도 claim·recover·promotion 원래 작업을 다시 실행하지 않는다.
+
+append migration `20261012170000_amux_verified_no_commit_halt_auto_clear`에 남은 v32 표기는 승인 전 초안 주석이며, 이미 적용해 검증한 migration checksum을 보존하기 위해 바꾸지 않는다. 현재 승인과 런타임 계약은 이 v33 절이다.
 
 작성자와 다른 provider의 독립 검토, append migration을 적용한 PostgreSQL 통합 테스트, Rust 계약 테스트가 배포 전 차단 조건이다. 구현·검토·병합·배포와 운영 read-back은 따로 보고한다.
 
