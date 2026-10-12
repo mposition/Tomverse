@@ -791,7 +791,9 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     // route checks it); the card list writes nothing. Clearing an orchestrator
     // halt takes the owner role and a recent step-up in its own route, and so
     // does a Decision Maker switch change, with ops:write
-    // (docs/policy/amux-decision-maker.md §8).
+    // (docs/policy/amux-decision-maker.md §8). A worker registry change takes
+    // the owner role and a recent step-up in its route (orchestration policy
+    // version 31, section 3).
     writeRoles: ["owner", "ops"],
     // Escalations plus open orchestrator halts (orchestration policy
     // version 20, section 7).
@@ -812,6 +814,8 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "outcome unknown",
       "decision maker",
       "kill switch",
+      "registry",
+      "worker registry",
     ],
     tabs: [
       {
@@ -836,6 +840,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         id: "decision-maker",
         label: "Decision Maker",
         description: "The Decision Maker kill switch and the mode of each instance",
+      },
+      {
+        id: "workers",
+        label: "Workers",
+        description: "The worker registry, each worker's desired and effective state, and whether the assignment catalog agrees",
       },
     ],
   },
