@@ -43,7 +43,17 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "This task has exhausted its five attempts. Blocking is terminal; continue only by issuing a new task.",
     remaining: "remaining",
     reviewLoading: "Loading protected review…",
-    reviewLoadFailed: "Could not load this task review. Refresh and try again.",
+    reviewLoadFailed: "Could not load this task review. No task decision was submitted by this read.",
+    reviewProxyConfigurationFailed:
+      "The server's protected review connection is misconfigured. Check the internal review origin and its bound port; refreshing alone will not fix it.",
+    reviewAccessRefused:
+      "The protected review request was refused. Check administrator access and the server's internal review connection. No task decision was submitted by this read.",
+    reviewNotFound: "This review could not be found or is not accessible to this administrator.",
+    reviewTemporarilyUnavailable:
+      "The protected review service is temporarily unavailable or rate-limited. Wait before reading it again. No task decision was submitted by this read.",
+    retryReviewRead: "Read this review again",
+    retryReviewReadDescription:
+      "Reads the same escalation only; it does not approve, retry, unblock or execute the Task.",
     reviewUnavailable: "Agent task review is not enabled here. No decision was made.",
     reauthenticationRequired: "A recent administrator sign-in is required.",
     reauthenticate: "Sign in again and return here",
@@ -183,7 +193,16 @@ export const adminAmuxRoutingMessages = defineAdminMessages({
       "이 작업은 시도 5회를 소진했습니다. 차단하면 종결되며, 계속하려면 새 task를 발행해야 합니다.",
     remaining: "잔여",
     reviewLoading: "보호된 검토를 불러오는 중…",
-    reviewLoadFailed: "작업 검토를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.",
+    reviewLoadFailed: "작업 검토를 불러오지 못했습니다. 이 조회에서 작업 결정을 제출하지는 않았습니다.",
+    reviewProxyConfigurationFailed:
+      "서버의 보호된 검토 연결 설정이 올바르지 않습니다. 내부 검토 주소와 서비스 포트를 확인해야 하며, 새로고침만으로 해결되지 않습니다.",
+    reviewAccessRefused:
+      "보호된 검토 조회가 거절됐습니다. 관리자 접근 권한과 서버의 내부 검토 연결을 확인하세요. 이 조회에서 작업 결정을 제출하지는 않았습니다.",
+    reviewNotFound: "이 검토를 찾을 수 없거나 현재 관리자에게 조회 권한이 없습니다.",
+    reviewTemporarilyUnavailable:
+      "검토 조회 서비스가 일시적으로 사용 불가능하거나 요청 한도에 도달했습니다. 잠시 뒤 다시 조회하세요. 이 조회에서 작업 결정을 제출하지는 않았습니다.",
+    retryReviewRead: "이 검토 다시 조회",
+    retryReviewReadDescription: "같은 에스컬레이션만 읽으며 Task 승인·재실행·차단 해제·실행은 하지 않습니다.",
     reviewUnavailable: "여기서는 Agent 작업 검토가 활성화되지 않았습니다. 결정은 기록되지 않았습니다.",
     reauthenticationRequired: "관리자가 최근에 다시 로그인해야 합니다.",
     reauthenticate: "다시 로그인하고 이 화면으로 돌아오기",
