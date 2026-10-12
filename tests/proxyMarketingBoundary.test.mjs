@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { proxyMarketingBoundary } from "../lib/proxyMarketingBoundary.ts";
+import { proxyMarketingBoundary } from "../lib/marketingRoutes.ts";
 
 test("API responses never use marketing redirects or public cache classification", () => {
   for (const pathname of ["/api/chat", "/api/products/chat/capabilities"]) {

@@ -22,7 +22,7 @@ import {
   DEFAULT_API_CACHE_CONTROL,
   isApiPathname,
 } from "@/lib/apiCacheControlPolicy";
-import { proxyMarketingBoundary } from "@/lib/proxyMarketingBoundary";
+import { proxyMarketingBoundary } from "@/lib/marketingRoutes";
 import {
   hasValidMutationOrigin,
   requiresMutationOriginCheck,
