@@ -349,6 +349,11 @@ async function expectComposerControlsContained(page: Page) {
         if (width > 1 && height > 1) failures.push(`${name} overlaps ${other.node.dataset.testid}`);
       }
     }
+    for (const label of composer.querySelectorAll<HTMLElement>("nav a span")) {
+      if (label.scrollWidth > label.clientWidth + 1 || label.scrollHeight > label.clientHeight + 1) {
+        failures.push(`product label ${label.textContent} clipped`);
+      }
+    }
     const credit = composer.querySelector<HTMLElement>('[data-testid="request-credit-estimate"]');
     if (!credit) return [...failures, "credit estimate missing"];
     const creditBox = credit.getBoundingClientRect();

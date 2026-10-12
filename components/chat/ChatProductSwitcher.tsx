@@ -88,7 +88,7 @@ export function ChatProductSwitcherView({
                   event.preventDefault();
                 }
               }}
-              className={`flex min-h-11 min-w-0 touch-manipulation items-center justify-center gap-2 rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+              className={`flex min-h-11 min-w-0 flex-wrap touch-manipulation content-center items-center justify-center gap-x-2 gap-y-0.5 rounded-lg border px-2 text-center text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
                 current
                   ? product === "review"
                     ? "border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-200"
@@ -99,7 +99,9 @@ export function ChatProductSwitcherView({
               }`}
             >
               <ProductIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">{item.shortLabel}</span>
+              <span className="min-w-0 max-w-full whitespace-normal break-words leading-tight">
+                {item.shortLabel}
+              </span>
             </Link>
           );
         })}
