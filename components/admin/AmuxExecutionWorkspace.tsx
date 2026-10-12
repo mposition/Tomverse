@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Copy, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
-import { MoveRight } from "lucide-react";
+import { GripVertical, MoveRight } from "lucide-react";
 import { AmuxExecutionMovePanel, type AmuxBoardMove } from "./AmuxExecutionMovePanel";
 import { AmuxExecutionDialog } from "./AmuxExecutionDialog";
 import styles from "./AmuxExecutionWorkspace.module.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
 import { adminFetch } from "@/lib/adminFetch";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
@@ -142,6 +142,11 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const [detailBusy, setDetailBusy] = useState(false);
   const [moveTarget, setMoveTarget] = useState<AmuxBoardMove | null>(null);
   const dragCard = useRef<string | null>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
+  const pointerDrag = useRef<{ taskId: string; pointerId: number; x: number; y: number;
+    startX: number; startY: number; moved: boolean } | null>(null);
+  const [pointerTask, setPointerTask] = useState<string | null>(null);
+  const dragGhostRef = useRef<HTMLDivElement>(null);
   const moveRequests = useRef(new Map<string, string>());
   const settledMoveRequests = useRef(new Set<string>());
   const [detailOpen, setDetailOpen] = useState(false);
@@ -321,6 +326,51 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     moveRequests.current.set(taskId, requestId);
     setMoveTarget({ taskId, requestId, readOnly: Boolean(prior) });
   };
+  useEffect(() => {
+    if (!pointerTask) return;
+    let frame = 0;
+    const tick = () => {
+      const drag = pointerDrag.current;
+      const boardElement = boardRef.current;
+      if (!drag || !boardElement) return;
+      if (dragGhostRef.current) {
+        dragGhostRef.current.style.left = `${Math.max(120, Math.min(window.innerWidth - 120, drag.x))}px`;
+        dragGhostRef.current.style.top = `${Math.max(32, Math.min(window.innerHeight - 32, drag.y))}px`;
+      }
+      const bounds = boardElement.getBoundingClientRect();
+      if (drag.moved && drag.y >= bounds.top && drag.y <= bounds.bottom) {
+        if (drag.x > bounds.right - 40) boardElement.scrollLeft += 10;
+        else if (drag.x < bounds.left + 40) boardElement.scrollLeft -= 10;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [pointerTask]);
+  const startPointerDrag = (event: PointerEvent<HTMLButtonElement>, taskId: string) => {
+    if (!canMoveCards || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    returnFocusRef.current = event.currentTarget;
+    pointerDrag.current = { taskId, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      startX: event.clientX, startY: event.clientY, moved: false };
+    setPointerTask(taskId);
+  };
+  const updatePointerDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = pointerDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    drag.x = event.clientX; drag.y = event.clientY;
+    drag.moved ||= Math.hypot(drag.x - drag.startX, drag.y - drag.startY) > 6;
+  };
+  const finishPointerDrag = (event: PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const drag = pointerDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    pointerDrag.current = null; setPointerTask(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const destination = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-amux-lane]');
+    if (!cancelled && drag.moved && destination?.getAttribute('data-amux-lane') === 'amux_backlog') openMove(drag.taskId);
+  };
   const closeMove = () => {
     if (moveTarget && settledMoveRequests.current.has(moveTarget.requestId)) {
       const url = new URL(window.location.href);
@@ -406,6 +456,9 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
   const selectedBody = cardBody(selected?.body ?? null);
   return <section className={styles.workspace}
     data-testid="amux-execution-workspace">
+    {pointerTask && <div ref={dragGhostRef} className={styles.dragGhost} aria-hidden="true" data-testid="amux-pointer-drag">
+      {amuxVisibleInspectionText(uniqueCards.find(card => card.id === pointerTask)?.sourceKey ?? pointerTask)} · {m.moveToQueue}
+    </div>}
     <div className={styles.header}>
       <div><h2>{m.boardTitle}</h2><p>{m.boardSubtitle}</p></div>
       <div className="flex gap-2" role="group" aria-label={m.viewLabel}>
@@ -466,12 +519,12 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     </p>}
     {view === "board" && <>
       {!board ? <p role="status" className={styles.empty}>{boardLoading ? m.loading : m.unavailable}</p> :
-        <div className={styles.board} aria-label={m.board}>
+        <div ref={boardRef} className={styles.board} aria-label={m.board} data-testid="amux-board-lanes">
           {AMUX_EXECUTION_VISIBLE_LANES.map((lane) => {
             const column = board.lanes.find((item) => item.lane === lane);
             const cards = column?.cards ?? [];
             const matches = filtered(cards);
-            return <section key={lane} aria-label={m.lane[lane]} className={styles.column}
+            return <section key={lane} aria-label={m.lane[lane]} className={styles.column} data-amux-lane={lane}
               onDragOver={(event) => { if (lane === "amux_backlog" && dragCard.current) event.preventDefault(); }}
               onDrop={(event) => {
                 event.preventDefault(); const id = dragCard.current; dragCard.current = null;
@@ -485,7 +538,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                 <li key={card.id} className={styles.card + (lane === "attention" ? " " + styles.attention : "")}
                   data-testid={"amux-board-card-" + card.id}
                   draggable={canMoveCards && lane === "tomverse_backlog" && card.cardType === "task"}
-                  onDragStart={(event) => { dragCard.current = card.id;
+                  onDragStart={(event) => { if (pointerDrag.current) { event.preventDefault(); return; }
+                    dragCard.current = card.id;
                     event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", card.id); }}
                   onDragEnd={() => { dragCard.current = null; }}>
                   <div className={styles.identity}>
@@ -493,6 +547,22 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
                       onClick={(event) => { returnFocusRef.current = event.currentTarget; void openCard(card.id); }}>
                       {amuxVisibleInspectionText(card.sourceKey ?? card.id)}</button>
                     {card.sev1 && <span className={styles.cardWarning}>SEV1</span>}
+                    {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
+                      <button type="button" className={styles.iconButton + " " + styles.dragHandle} aria-label={m.dragToQueue}
+                        onPointerDown={(event) => startPointerDrag(event, card.id)}
+                        onPointerMove={updatePointerDrag} onPointerUp={finishPointerDrag}
+                        onPointerCancel={(event) => finishPointerDrag(event, true)}
+                        onLostPointerCapture={(event) => {
+                          if (pointerDrag.current?.pointerId === event.pointerId) {
+                            pointerDrag.current = null; setPointerTask(null);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") { pointerDrag.current = null; setPointerTask(null); }
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault(); returnFocusRef.current = event.currentTarget; openMove(card.id);
+                          }
+                        }}><GripVertical size={14} aria-hidden="true" /></button>}
                     {canMoveCards && lane === "tomverse_backlog" && card.cardType === "task" &&
                       <button type="button" className={styles.iconButton} aria-label={m.moveToQueue}
                         onClick={(event) => { returnFocusRef.current = event.currentTarget; openMove(card.id); }}>

@@ -100,11 +100,43 @@ test("move button calls one guarded write then refreshes the actual lane",async(
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
 
-test("dragging to the queue runs the same guarded card command",async({page})=>{
+test("dragging to the queue runs the same guarded card command",async({page,isMobile})=>{
   const state=await setup(page);
-  await page.getByTestId("amux-board-card-"+a.id).dragTo(page.getByRole("region",{name:"AMUX Backlog"}));
+  if (isMobile) {
+    const handle=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Drag card to AMUX queue"});
+    await handle.scrollIntoViewIfNeeded();
+    const start=await handle.boundingBox(); expect(start).not.toBeNull();
+    const board=page.getByTestId("amux-board-lanes");
+    const bounds=await board.boundingBox(); expect(bounds).not.toBeNull();
+    const touch=await page.context().newCDPSession(page);
+    const y=start!.y+start!.height/2;
+    await touch.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[{x:start!.x+start!.width/2,y,id:1}]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:bounds!.x+bounds!.width-8,y,id:1}]});
+    await expect.poll(()=>board.evaluate(element=>element.scrollLeft)).toBeGreaterThan(110);
+    const target=await page.getByRole("region",{name:"AMUX Backlog"}).boundingBox(); expect(target).not.toBeNull();
+    const left=Math.max(target!.x,bounds!.x+45);
+    const right=Math.min(target!.x+target!.width,bounds!.x+bounds!.width-45);
+    await touch.send("Input.dispatchTouchEvent",{type:"touchMove",touchPoints:[{x:(left+right)/2,y,id:1}]});
+    await touch.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});
+    await touch.detach();
+  } else {
+    await page.getByTestId("amux-board-card-"+a.id).dragTo(page.getByRole("region",{name:"AMUX Backlog"}));
+  }
   await expect(page.getByRole("dialog").getByRole("status")).toContainText("unassigned Todo");
   expect(state.posts()).toBe(1);
+});
+
+test("cancelling a handle drag does not request admission",async({page})=>{
+  const state=await setup(page);
+  const handle=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Drag card to AMUX queue"});
+  await handle.scrollIntoViewIfNeeded();
+  const box=await handle.boundingBox(); expect(box).not.toBeNull();
+  await page.mouse.move(box!.x+box!.width/2,box!.y+box!.height/2);
+  await page.mouse.down(); await page.mouse.move(box!.x+20,box!.y+30);
+  await expect(page.getByTestId("amux-pointer-drag")).toBeVisible();
+  await page.keyboard.press("Escape"); await page.mouse.up();
+  await expect(page.getByTestId("amux-pointer-drag")).toHaveCount(0);
+  await expect(page.getByRole("dialog")).toHaveCount(0); expect(state.posts()).toBe(0);
 });
 
 test("known refusal releases the receipt so corrected conditions can be tried",async({page})=>{
@@ -128,6 +160,7 @@ test("a halted admission response shows the actual reason without claiming succe
 test("a read-only viewer has no move button or drag affordance",async({page})=>{
   const state=await setup(page,{readOnly:true});
   await expect(page.getByRole("button",{name:"Move to AMUX queue"})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"Drag card to AMUX queue"})).toHaveCount(0);
   await expect(page.getByTestId("amux-board-card-"+a.id)).toHaveAttribute("draggable","false");
   expect(state.posts()).toBe(0);
 });

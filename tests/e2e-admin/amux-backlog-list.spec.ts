@@ -30,7 +30,8 @@ test("backlog lists four columns, searches all pages and keeps the filter in the
   await page.setViewportSize({ width: 1440, height: 900 });
   await list.getByRole("link", { name: "CARD-0", exact: true }).click();
   await expect(page).toHaveURL(/tab=cards&taskId=backlog-list-0$/);
-  await expect(page.getByRole("region", { name: "Task execution detail" })).toContainText("CARD-0");
+  await expect(page.getByRole("dialog")).toContainText("CARD-0");
+  await expect(page.getByTestId("amux-execution-detail")).toContainText("Backlog summary 0");
 });
 
 test("old authentication shows a return link without revealing summaries", async ({ page, signInAs }) => {

@@ -22,6 +22,9 @@
 .button:disabled, .iconButton:disabled { opacity:.5; cursor:default; }
 .viewButton[aria-pressed=true], .tab[aria-selected=true] { background:var(--amux-selected); color:var(--amux-blue); border-color:var(--amux-blue); }
 .iconButton { width:36px; padding:7px; flex-shrink:0; }
+.dragHandle { touch-action:none; cursor:grab; }
+.dragHandle:active { cursor:grabbing; }
+.dragGhost { position:fixed; left:-999px; top:-999px; z-index:110; pointer-events:none; transform:translate(-50%,-50%); max-width:230px; padding:10px 14px; border:1px solid var(--amux-blue); border-radius:9px; background:var(--amux-surface); color:var(--amux-text); box-shadow:0 12px 32px rgb(0 0 0 / .3); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .toolbar { flex-wrap:wrap; margin-bottom:14px; }
 .search { display:flex; align-items:center; gap:8px; width:min(340px,100%); padding:0 10px; height:38px; border:1px solid var(--amux-border); border-radius:7px; background:var(--amux-surface); }
 .search input { flex:1; min-width:0; outline:none; background:transparent; font-size:12px; }
