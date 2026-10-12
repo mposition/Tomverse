@@ -122,6 +122,14 @@ type Props = {
   storedGuestDefaultModelId?: string | null;
 };
 
+// How a lineup slot names its provider. One model per provider is the rule
+// (GUEST_LINEUP_PROVIDERS in lib/appDefaults.ts); Google's models are Gemini.
+const PROVIDER_LABELS: ReadonlyMap<string, string> = new Map([
+  ["openai", "OpenAI"],
+  ["anthropic", "Anthropic"],
+  ["google", "Gemini"],
+]);
+
 export function PlatformSettingsPanel({
   settings,
   assistantPackageImportEnabled: initialAssistantPackageImportEnabled = false,
@@ -172,6 +180,9 @@ export function PlatformSettingsPanel({
   const [guestDefaultModelId, setGuestDefaultModelId] = useState(
     settings.guestDefaultModelId
   );
+  // The lead as last saved, kept apart from the dropdown above: a lineup save
+  // carries the saved lead, never an unsaved pick in that dropdown.
+  const [appliedLead, setAppliedLead] = useState(settings.guestDefaultModelId);
   const [storedGuestLead, setStoredGuestLead] = useState<string | null>(
     storedGuestDefaultModelId
   );
@@ -314,6 +325,7 @@ export function PlatformSettingsPanel({
 
   const applyLeadSettings = (nextSettings: PublicAppSettings) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
+    setAppliedLead(nextSettings.guestDefaultModelId);
     const nextTrio = nextSettings.guestBrandTrioModelIds ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
     setGuestTrio(nextTrio);
     setLineupDraft(nextTrio);
@@ -540,13 +552,15 @@ export function PlatformSettingsPanel({
     }
   };
 
-  // The lead travels with the lineup: the current one if the new lineup keeps
-  // it, otherwise the lineup's first model. The server refuses a lineup that
-  // would strand the stored lead, so sending it explicitly is what keeps the
-  // two settings one decision.
-  const lineupLead = lineupDraft.includes(guestDefaultModelId)
-    ? guestDefaultModelId
-    : lineupDraft[0];
+  // The lead travels with the lineup: the saved one if the new lineup keeps
+  // it, otherwise the lineup's first model, stated before the click. The
+  // server refuses a lineup that would strand the stored lead, so sending it
+  // explicitly is what keeps the two settings one decision.
+  const lineupLead = lineupDraft.includes(appliedLead) ? appliedLead : lineupDraft[0];
+  // Each slot keeps the provider of the saved lineup's model in that slot, so
+  // the editor cannot build a lineup the one-per-provider rule refuses.
+  const slotProvider = (index: number) =>
+    models.find((model) => model.id === guestTrio[index])?.provider ?? null;
   const lineupChanged = lineupDraft.some((id, index) => id !== guestTrio[index]);
   const lineupComplete =
     lineupDraft.length === guestTrio.length &&
@@ -1047,7 +1061,7 @@ export function PlatformSettingsPanel({
                     {lineupDraft.map((slotId, index) => (
                       <label key={index} className="block">
                         <span className="mb-2 block text-xs font-semibold text-zinc-500">
-                          {m.guestDefault.lineupSlot(index + 1)}
+                          {m.guestDefault.lineupSlot(index + 1, PROVIDER_LABELS.get(slotProvider(index) ?? "") ?? slotProvider(index) ?? "")}
                         </span>
                         <select
                           value={slotId}
@@ -1065,7 +1079,9 @@ export function PlatformSettingsPanel({
                           {lineupCandidates.some((model) => model.id === slotId) ? null : (
                             <option value={slotId}>{labelFor(slotId)}</option>
                           )}
-                          {lineupCandidates.map((model) => (
+                          {lineupCandidates
+                            .filter((model) => !slotProvider(index) || model.provider === slotProvider(index))
+                            .map((model) => (
                             <option
                               key={model.id}
                               value={model.id}
@@ -1078,7 +1094,7 @@ export function PlatformSettingsPanel({
                       </label>
                     ))}
                   </div>
-                  {lineupChanged && lineupLead && lineupLead !== guestDefaultModelId ? (
+                  {lineupChanged && lineupLead && lineupLead !== appliedLead ? (
                     <p className="mt-2 text-sm text-amber-200" data-testid="admin-guest-lineup-lead-moves">
                       {m.guestDefault.lineupLeadMoves(labelFor(lineupLead))}
                     </p>

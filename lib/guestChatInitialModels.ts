@@ -3,6 +3,7 @@ import {
   normalizeWebSearchMode,
   resolveGuestDefaultSelectedModels,
   type WebSearchMode,
+  type ReplacementResolver,
 } from "@/lib/appDefaults";
 
 // Same keys app/(site)/(application)/chat/ChatPageClient.tsx persists guest state
@@ -48,7 +49,7 @@ export type GuestCatalogueAccess = {
    * (lib/appDefaults `createReplacementResolver`). Optional only so a caller
    * without a catalogue lookup still resolves; the chat client always binds it.
    */
-  resolveReplacement?: (modelId: string) => string | undefined;
+  resolveReplacement?: ReplacementResolver;
 };
 
 export const readGuestInitialModelEnvironment =

@@ -317,15 +317,17 @@ test.describe("platform operations", () => {
 
   test("the default lineup is saved with its lead and read back", async ({ page }) => {
     // No lineup row is seeded, so the compiled trio is what the card starts
-    // from. The second slot is replaced; the seeded lead stays in the lineup,
-    // so it travels unchanged with the save.
+    // from. The second slot is the Anthropic one, and a slot only offers its
+    // own provider's models (one OpenAI, one Anthropic, one Gemini), so it is
+    // replaced with another Anthropic model. The seeded lead stays in the
+    // lineup, so it travels unchanged with the save.
     await page.goto("/admin/platform");
     const secondSlot = page.getByTestId("admin-guest-lineup-slot-1");
     await expect(secondSlot).toHaveValue(GUEST_BRAND_TRIO_MODEL_IDS[1]);
     const save = page.getByTestId("admin-guest-lineup-save");
     await expect(save).toBeDisabled();
 
-    await secondSlot.selectOption("mistral-small-4");
+    await secondSlot.selectOption("claude-haiku-4-5");
     await expect(save).toBeEnabled();
     await save.click();
 
@@ -337,7 +339,7 @@ test.describe("platform operations", () => {
     });
     expect(JSON.parse(lineup.value)).toEqual([
       GUEST_BRAND_TRIO_MODEL_IDS[0],
-      "mistral-small-4",
+      "claude-haiku-4-5",
       GUEST_BRAND_TRIO_MODEL_IDS[2],
     ]);
     const lead = await adminFixtureDatabase().appSetting.findUniqueOrThrow({
@@ -347,7 +349,7 @@ test.describe("platform operations", () => {
 
     await page.reload();
     await expect(page.getByTestId("admin-guest-lineup-slot-1")).toHaveValue(
-      "mistral-small-4"
+      "claude-haiku-4-5"
     );
   });
 

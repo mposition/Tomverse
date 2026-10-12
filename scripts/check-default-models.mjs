@@ -21,6 +21,7 @@ import {
   createGuestEligibilityCheck,
   createReplacementResolver,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  guestLeadForLineup,
   parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
 } from "../lib/appDefaults.ts";
@@ -33,7 +34,6 @@ import { resolveNewConversationModels } from "../lib/newConversationModels.ts";
 import { resolveGuestInitialSelectedModels } from "../lib/guestChatInitialModels.ts";
 import {
   AVAILABLE_MODELS,
-  canUseModelWithPlan,
   DEFAULT_MODEL_ID,
   getModelUsageProfile,
   isPubliclySelectableModel,
@@ -98,27 +98,18 @@ const isEnabled = (modelId) => {
   return model ? isPubliclySelectableModel(model) : false;
 };
 
-// getPublicAppSettings()'s own rule, reproduced against whichever catalogue
-// answered: a stored value that fails it is discarded in favour of the
-// compiled guest default.
-const storedIsUsable =
-  storedGuestDefaultModelId !== null &&
-  (() => {
-    const model = lookup(storedGuestDefaultModelId);
-    return Boolean(
-      model &&
-        isPubliclySelectableModel(model) &&
-        canUseModelWithPlan("Guest", model) &&
-        getModelUsageProfile(model).category === "Standard"
-    );
-  })();
-const normalizedGuestDefaultModelId = storedIsUsable
-  ? storedGuestDefaultModelId
-  : APP_DEFAULTS.guestDefaultModelId;
-
 // The lineup the lead orders: the stored AppSetting when it parses, else the
 // compiled trio -- getPublicAppSettings()'s rule.
 const effectiveGuestBrandTrio = storedGuestBrandTrio ?? [...GUEST_BRAND_TRIO_MODEL_IDS];
+
+// getPublicAppSettings()'s own rule, the same function: a stored lead that is
+// a member of the lineup is passed through -- retired or not, the resolver
+// succeeds it in its slot -- and anything else gives way to the compiled
+// guest default.
+const normalizedGuestDefaultModelId = guestLeadForLineup(
+  storedGuestDefaultModelId,
+  effectiveGuestBrandTrio
+);
 
 const effectiveGuestSelectedModelIds = resolveGuestDefaultSelectedModels({
   isEligible: isGuestEligible,

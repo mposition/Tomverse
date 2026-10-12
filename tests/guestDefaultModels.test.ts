@@ -6,8 +6,10 @@ import {
   createReplacementResolver,
   getGuestDefaultSelectedModels,
   GUEST_BRAND_TRIO_MODEL_IDS,
+  GUEST_LINEUP_PROVIDERS,
   guestBrandTrioRejection,
   guestDefaultLeadRejection,
+  guestLeadForLineup,
   GUEST_FALLBACK_MODEL_IDS,
   parseGuestBrandTrio,
   resolveGuestDefaultSelectedModels,
@@ -350,9 +352,11 @@ test("a lead is checked against the lineup it would order", () => {
 });
 
 test("a lineup is refused for a wrong size, a repeat, or any member guests could not be shown or priced", () => {
-  const good = { exists: true, guestEligible: true, usageCategory: "Standard", priced: true };
+  const good = { exists: true, guestEligible: true, usageCategory: "Standard", priced: true, provider: "openai" as string | null };
+  const providerOf: Record<string, string> = { a: "openai", b: "anthropic", c: "google" };
   const factsFor = (overrides: Record<string, Partial<typeof good>>) => (id: string) => ({
     ...good,
+    provider: providerOf[id] ?? null,
     ...(overrides[id] ?? {}),
   });
   const lineup = ["a", "b", "c"];
@@ -363,4 +367,64 @@ test("a lineup is refused for a wrong size, a repeat, or any member guests could
   assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ b: { guestEligible: false } }) }) ?? "", /not available to guests/);
   assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ c: { usageCategory: "Premium" } }) }) ?? "", /not Standard/);
   assert.match(guestBrandTrioRejection({ modelIds: lineup, facts: factsFor({ a: { priced: false } }) }) ?? "", /no verified price/);
+});
+
+test("a lineup must hold one OpenAI, one Anthropic and one Gemini model", () => {
+  const facts = (provider: string) => () => ({
+    exists: true,
+    guestEligible: true,
+    usageCategory: "Standard",
+    priced: true,
+    provider,
+  });
+  const providers: Record<string, string> = { a: "openai", b: "anthropic", c: "google", d: "openai", e: "deepseek" };
+  const factsById = (id: string) => facts(providers[id])();
+  assert.equal(guestBrandTrioRejection({ modelIds: ["a", "b", "c"], facts: factsById }), null);
+  assert.match(
+    guestBrandTrioRejection({ modelIds: ["a", "d", "c"], facts: factsById }) ?? "",
+    /one OpenAI, one Anthropic and one Gemini model; this one is openai, openai, google/
+  );
+  assert.match(
+    guestBrandTrioRejection({ modelIds: ["a", "b", "e"], facts: factsById }) ?? "",
+    /one OpenAI, one Anthropic and one Gemini/
+  );
+  assert.deepEqual([...GUEST_LINEUP_PROVIDERS].sort(), ["anthropic", "google", "openai"]);
+});
+
+test("the chain walks past a successor guests cannot use to a later one they can", () => {
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-pro-only"),
+    "claude-haiku-pro-only": {
+      enabled: true,
+      status: "enabled",
+      publiclyListed: true,
+      minimumPlan: "Pro",
+      replacementModelId: "claude-haiku-after",
+    },
+    "claude-haiku-after": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({ ...catalogue, leadModelId: OPENAI_SLOT }),
+    [OPENAI_SLOT, "claude-haiku-after", GOOGLE_SLOT]
+  );
+});
+
+test("a stored lead inside the lineup is handed over even when retired, so its successor leads", () => {
+  const lineup = [OPENAI_SLOT, ANTHROPIC_SLOT, GOOGLE_SLOT];
+  assert.equal(guestLeadForLineup(ANTHROPIC_SLOT, lineup), ANTHROPIC_SLOT);
+  assert.equal(guestLeadForLineup("not-in-the-lineup", lineup), APP_DEFAULTS.guestDefaultModelId);
+  assert.equal(guestLeadForLineup(null, lineup), APP_DEFAULTS.guestDefaultModelId);
+  // End to end with the resolver: the retired lead's successor leads.
+  const catalogue = catalogueWith({
+    [ANTHROPIC_SLOT]: retired("claude-haiku-next"),
+    "claude-haiku-next": { enabled: true, status: "enabled", publiclyListed: true, replacementModelId: undefined },
+  });
+  assert.deepEqual(
+    resolveGuestDefaultSelectedModels({
+      ...catalogue,
+      trio: lineup,
+      leadModelId: guestLeadForLineup(ANTHROPIC_SLOT, lineup),
+    }),
+    ["claude-haiku-next", OPENAI_SLOT, GOOGLE_SLOT]
+  );
 });

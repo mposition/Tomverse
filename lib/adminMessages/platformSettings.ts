@@ -99,8 +99,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       saveLead: "Save leading model",
       lineupTitle: "Default lineup",
       lineupDescription:
-        "Each model must be enabled, available to guests and Standard-priced, with a verified price. Existing conversations keep their models; a retired model's replacement takes its place automatically.",
-      lineupSlot: (slot: number) => `Model ${slot}`,
+        "One OpenAI, one Anthropic and one Gemini model, each enabled, publicly listed, available to guests and Standard-priced, with a verified price. Existing conversations keep their models; a retired model's replacement takes its place automatically.",
+      lineupSlot: (slot: number, provider: string) => (provider ? `Model ${slot} (${provider})` : `Model ${slot}`),
       lineupLeadMoves: (lead: string) =>
         `Saving also makes ${lead} the leading model, because the current lead is not in this lineup.`,
       saveLineup: "Save lineup",
@@ -267,8 +267,8 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       saveLead: "선두 모델 저장",
       lineupTitle: "기본 3모델 구성",
       lineupDescription:
-        "각 모델은 활성화돼 있고 게스트가 쓸 수 있는 Standard 등급이며 가격이 확인돼 있어야 합니다. 기존 대화의 모델은 그대로이며, 은퇴한 모델의 자리는 대체 모델이 자동으로 이어받습니다.",
-      lineupSlot: (slot: number) => `모델 ${slot}`,
+        "OpenAI · Anthropic · Gemini 모델을 각 1개씩 고르며, 각 모델은 활성 · 공개 상태이고 게스트가 쓸 수 있는 Standard 등급이며 가격이 확인돼 있어야 합니다. 기존 대화의 모델은 그대로이며, 은퇴한 모델의 자리는 대체 모델이 자동으로 이어받습니다.",
+      lineupSlot: (slot: number, provider: string) => (provider ? `모델 ${slot} (${provider})` : `모델 ${slot}`),
       lineupLeadMoves: (lead: string) =>
         `현재 선두가 이 구성에 없으므로, 저장하면 ${lead}가 선두 모델이 됩니다.`,
       saveLineup: "구성 저장",
