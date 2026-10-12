@@ -1,0 +1,63 @@
+#!/bin/bash
+# One dead-man signal for the AMUX execution bridge on the Ubuntu host.
+#
+# docs/ops/amux/bridge-monitoring.md is the runbook. A systemd timer runs this
+# every five minutes. It reads one thing -- the bridge unit's state -- and
+# sends one request without a body:
+#
+#   active            -> <ping URL>        the monitor stays up
+#   failed / inactive -> <ping URL>/fail   the monitor alerts now
+#   anything else     -> nothing           activating, deactivating, or a state
+#                                          systemctl could not read
+#
+# Sending nothing is a signal too: the monitor turns a silence longer than its
+# grace period into an alert, which is also what the host going down, losing
+# its network, or this timer stopping looks like.
+#
+# Nothing about the bridge leaves the host -- no journal line, worker name,
+# card or exit code. The alert carries the check's name; the cause is read on
+# the host (journalctl -u tomverse-bridge.service).
+#
+# The URL arrives as a systemd credential (LoadCredential=ping-url), readable
+# only by this service's dynamic user. The worker account can neither read it
+# nor forge the success signal with it. This script never prints it.
+set -euo pipefail
+
+unit=tomverse-bridge.service
+# A plain https URL: host, optional port, path segments. No query string, no
+# fragment, no credentials -- the check's own ping URL never needs them.
+url_pattern='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)+$'
+
+if [[ -z "${CREDENTIALS_DIRECTORY:-}" || ! -r "${CREDENTIALS_DIRECTORY}/ping-url" ]]; then
+  echo "tomverse-bridge-watchdog: no ping-url credential; nothing sent" >&2
+  exit 2
+fi
+url=$(head -n 1 "${CREDENTIALS_DIRECTORY}/ping-url" | tr -d '[:space:]')
+if [[ ! "$url" =~ $url_pattern ]]; then
+  echo "tomverse-bridge-watchdog: ping-url is not a plain https URL; nothing sent" >&2
+  exit 2
+fi
+
+# `is-active` exits non-zero for every state but active; the state it prints
+# is the answer either way.
+state=$(systemctl is-active "$unit" 2>/dev/null || true)
+case "$state" in
+  active) target="$url" signal=up ;;
+  failed | inactive) target="$url/fail" signal=down ;;
+  *)
+    echo "tomverse-bridge-watchdog: $unit is ${state:-unreadable}; no signal this run"
+    exit 0
+    ;;
+esac
+
+# The URL goes to curl as a config line on stdin, never as an argument: any
+# local user, the worker account included, can read a process's arguments
+# from /proc/<pid>/cmdline. printf is a builtin and starts no process. The
+# URL pattern above admits no quote or backslash, so the line is literal.
+if printf 'url = "%s"\n' "$target" | curl --config - --fail --silent --show-error \
+  --max-time 10 --retry 3 --retry-delay 2 --proto '=https' --output /dev/null; then
+  echo "tomverse-bridge-watchdog: $unit is $state; sent $signal"
+else
+  echo "tomverse-bridge-watchdog: $unit is $state; the $signal signal was not delivered" >&2
+  exit 1
+fi

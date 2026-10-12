@@ -244,6 +244,8 @@ pub fn is_database_busy(error: &anyhow::Error) -> bool {
 /// for this marker, so attaching it here changes no other caller's control
 /// flow (claim, recovery, auto-promotion, lifecycle routes, and the WSL
 /// bridge's owned-queue read all still see a plain `Err` and stop as before).
+/// `parse_owned_queue_body` attaches it too, for the same 5xx and 429, so the
+/// WSL bridge's halt line can name the status; the bridge still halts on it.
 #[derive(Debug, Clone, Copy)]
 pub struct SelectionReadTransientStatus {
     pub status: StatusCode,
@@ -508,7 +510,13 @@ pub(crate) fn parse_owned_queue_body(
         return Ok(SelectionRead::DatabaseBusy);
     }
     if status != StatusCode::OK {
-        bail!("unsupported Tomverse internal response status");
+        // Still an error, and still the same text. The status marker is read
+        // by one thing: the bridge's halt line names `http_<status>` from it
+        // (`wsl_bridge::bridge_error_class`) instead of an unexplained halt.
+        return Err(transient_status_or(
+            status,
+            "unsupported Tomverse internal response status",
+        ));
     }
     let tasks: Vec<OwnedTodoTask> =
         serde_json::from_slice(body).context("invalid Tomverse internal JSON response")?;
