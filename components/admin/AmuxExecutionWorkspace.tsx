@@ -321,9 +321,10 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     const prior = moveRequests.current.get(taskId) ??
       (url.searchParams.get("taskId") === taskId ? url.searchParams.get("moveRequest") : null);
     const requestId = prior && /^[0-9a-f-]{36}$/i.test(prior) ? prior : crypto.randomUUID();
-    url.searchParams.set("taskId", taskId); url.searchParams.set("moveRequest", requestId);
+    url.searchParams.set("taskId", taskId);
+    if (prior) url.searchParams.set("moveRequest", requestId);
+    else url.searchParams.delete("moveRequest");
     window.history.replaceState(window.history.state, "", url);
-    moveRequests.current.set(taskId, requestId);
     setMoveTarget({ taskId, requestId, readOnly: Boolean(prior) });
   };
   useEffect(() => {
@@ -372,7 +373,8 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     if (!cancelled && drag.moved && destination?.getAttribute('data-amux-lane') === 'amux_backlog') openMove(drag.taskId);
   };
   const closeMove = () => {
-    if (moveTarget && settledMoveRequests.current.has(moveTarget.requestId)) {
+    if (moveTarget && (moveRequests.current.get(moveTarget.taskId) !==
+        moveTarget.requestId || settledMoveRequests.current.has(moveTarget.requestId))) {
       const url = new URL(window.location.href);
       if (url.searchParams.get("taskId") === moveTarget.taskId) {
         url.searchParams.delete("taskId"); url.searchParams.delete("moveRequest");
@@ -623,6 +625,16 @@ export function AmuxExecutionWorkspace({ initialTaskId = null, canMoveCards = fa
     {moveTarget && <AmuxExecutionDialog title={m.moveTitle} closeLabel={m.close}
       onClose={closeMove} returnFocusRef={returnFocusRef}>
       <AmuxExecutionMovePanel key={moveTarget.requestId} move={moveTarget}
+        onWriteStarting={() => {
+          if (moveTarget.readOnly ||
+              settledMoveRequests.current.has(moveTarget.requestId)) return false;
+          moveRequests.current.set(moveTarget.taskId, moveTarget.requestId);
+          const url = new URL(window.location.href);
+          url.searchParams.set("taskId", moveTarget.taskId);
+          url.searchParams.set("moveRequest", moveTarget.requestId);
+          window.history.replaceState(window.history.state, "", url);
+          return true;
+        }}
         onKnownRefusal={() => {
           settledMoveRequests.current.add(moveTarget.requestId);
           moveRequests.current.delete(moveTarget.taskId);
