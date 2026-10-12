@@ -167,7 +167,7 @@ test("the public guide degrades to the unavailable import state when the flag re
   const source = readFileSync(
     fileURLToPath(
       new URL(
-        "../app/(site)/(marketing)/guides/assistant-knowledge/page.tsx",
+        "../app/(site)/(public-guides)/guides/assistant-knowledge/page.tsx",
         import.meta.url
       )
     ),

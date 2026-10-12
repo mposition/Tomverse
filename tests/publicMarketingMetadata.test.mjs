@@ -63,11 +63,19 @@ test("legal and dynamic guide destinations do not inherit static localized polic
     for (const locale of SEO_LOCALES) assert.equal(isStaticMarketingPathname(`/${locale}${path}`), false);
   }
   assert.equal(isStaticMarketingPathname("/guides/assistant-knowledge"), false);
-  const guideSource = readFileSync(new URL("../app/(site)/(marketing)/guides/assistant-knowledge/page.tsx", import.meta.url), "utf8");
+  const guideSource = readFileSync(new URL("../app/(site)/(public-guides)/guides/assistant-knowledge/page.tsx", import.meta.url), "utf8");
   assert.ok(guideSource.includes('dynamic = "force-dynamic"'));
   assert.ok(guideSource.includes('await isAssistantPackageImportEnabled()'));
   assert.ok(guideSource.includes('configuredAssistantKnowledgeSupademoEmbeds()'));
   assert.ok(guideSource.includes('assistantKnowledgeMetadata(lang)'));
+  assert.equal(existsSync(new URL("../app/(site)/(marketing)/guides/assistant-knowledge/page.tsx", import.meta.url)), false);
+  const guideLayout = readFileSync(new URL("../app/(site)/(public-guides)/layout.tsx", import.meta.url), "utf8");
+  assert.match(guideLayout, /export const dynamic = "force-dynamic"/);
+  assert.match(guideLayout, /DOCUMENT_LANGUAGE_HEADER/);
+  assert.match(guideLayout, /DOCUMENT_LANGUAGE_SOURCE_HEADER\) === "search"/);
+  assert.match(guideLayout, /nonce=\{nonce\}/);
+  const staticLayout = readFileSync(new URL("../app/(site)/(marketing)/layout.tsx", import.meta.url), "utf8");
+  assert.match(staticLayout, /export const dynamic = "force-static"/);
 });
 
 test("Knowledge query metadata points only to supported query-language pages", () => {
