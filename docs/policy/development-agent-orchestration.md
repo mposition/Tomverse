@@ -1537,7 +1537,7 @@ v27의 여섯은 R5의 활성화 전까지 v27 절 5의 제약을 그대로 받�
 
 ## 버전 32 — worker 등록부 R1 코드 래치
 
-승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 2026-10-12 작성, 작성자 Claude. 운영자는 2026-10-12에 R1의 관측 기간을 3일로 정하고, R1 코드 래치를 켜라고 지시했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다.
+승인 기록: `approvedBy: mposition`, `approvedAt: 2026-10-12`. 2026-10-12 작성, 작성자 Claude. 운영자는 2026-10-12에 R1의 관측 기간을 3일로 정하고, R1 코드 래치를 켜라고 지시했다. 이 승인과 같은 변경에서 래치 상수를 true로 바꾼다. 작성자와 다른 공급사의 독립 검토(codex·copilot)는 r-20261012-085331-1f4295에서 둘 다 지적 없이 accept였다.
 
 이 버전은 버전 31 8항의 R1을 켠다. 버전 31 8항에서 R1은 코드 래치 `AMUX_WORKER_REGISTRY_WRITES_LATCH`(`lib/amux/workerRegistryCore.ts`)를 false로 둔 채 출고됐고, 이 버전이 그 래치를 true로 바꾼다. 이 기록이 버전 31 8항이 말하는 그 단계의 운영자 활성화 기록이다.
 
