@@ -111,7 +111,7 @@ type EnterOptions = {
 async function enterMobileComposer(page: Page, options: EnterOptions) {
   const {
     lang = "ko",
-    productKey = "review",
+    productKey,
     models = THREE_MODELS,
     viewport,
     webSearchMode = "always",
@@ -151,7 +151,7 @@ async function enterMobileComposer(page: Page, options: EnterOptions) {
   }
 
   await page.setViewportSize(viewport);
-  await page.goto(`/${productKey}?lang=${lang}`);
+  await page.goto(`/${productKey ?? "review"}?lang=${lang}`);
   await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
   await expect(page.getByTestId("mobile-header-model-summary-skeleton")).toHaveCount(0);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
