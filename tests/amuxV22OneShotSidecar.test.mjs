@@ -76,6 +76,12 @@ test("quota reads only the assigned CLI profile, bounds and erases credentials, 
     readSettings: async () => ({ apiKeyHelper: "must-not-execute" }) }), null);
   assert.equal(await probeAmuxV22ClaudeQuota(config, { ...options,
     readSettings: async () => ({ env: { ANTHROPIC_API_KEY: "not-real" } }) }), null);
+  const visited = [];
+  assert.equal(await probeAmuxV22ClaudeQuota(config, { ...options,
+    readSettings: async path => { visited.push(path);
+      return path === join(config.claudeConfigDir, ".claude.json")
+        ? { primaryApiKey: "synthetic-not-real" } : null; } }), null);
+  assert.ok(visited.includes(join(config.claudeConfigDir, ".claude.json")));
   assert.equal(network, 1, "API-key/alternate backend settings cannot borrow subscription quota");
 });
 

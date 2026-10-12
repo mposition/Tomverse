@@ -73,3 +73,17 @@ test("quota report cannot invent a worker/provider or launder old/future evidenc
   }
   assert.equal(writeCalls, 1); assert.equal(auditCalls, 1);
 });
+
+test("quota lookup is exact and distinct observations keep separate identities", async () => {
+  const route = await routeModule;
+  const missingId = "00000000-0000-4000-8000-000000000003";
+  const lookup = (key: string) => route.GET(new Request(`https://test.invalid/api/internal/amux/quota?observation_id=${key}`));
+  assert.deepEqual(await (await lookup(missingId)).json(), { found: false });
+  assert.equal((await lookup("not-an-id")).status, 400);
+  const secondId = "00000000-0000-4000-8000-000000000004";
+  const results = await Promise.all([post({ ...body, observation_id: missingId }),
+    post({ ...body, observation_id: secondId })]);
+  assert.deepEqual(results.map(result => result.status), [200, 200]);
+  assert.equal(writeCalls, 3); assert.equal(auditCalls, 3);
+  assert.equal(rows.size, 3);
+});
