@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
 import { ko } from "../../locales/ko";
+import { APP_DEFAULTS } from "../../lib/appDefaults";
 
 /**
  * /settings/assistants (Release C, slice C3b).
@@ -641,7 +642,12 @@ test.describe("assistant profile settings", () => {
         await page.getByTestId("assistant-advanced-toggle").click();
         await page.getByTestId("assistant-model-mode-explicit").check();
 
-        const seeded = page.getByTestId("assistant-model-gpt-5-6-luna");
+        // The editor seeds the application default (APP_DEFAULTS.defaultModelId),
+        // so this follows it rather than naming a model: it was gpt-5-6-luna
+        // until the default moved to gpt-6-luna on 2026-10-12.
+        const seeded = page.getByTestId(
+            `assistant-model-${APP_DEFAULTS.defaultModelId}`
+        );
         await expect(seeded).toBeChecked();
         await expect(seeded).toBeDisabled();
         await expect(page.getByTestId("assistant-models-keep-one")).toBeVisible();

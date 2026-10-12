@@ -506,12 +506,18 @@ const compilerOptions = parsedConfig.options;
 // lib/marketingAutomationAccess.ts grows by four lines, moving the accesses
 // below it. Count 228 and the position-free inventory remain unchanged; only
 // their source positions are repinned.
+// 2026-10-12, the default lineup as an Admin setting: the lineup reader, its
+// save-time checks and its writer in `lib/appSettings.ts` sit above that file's
+// one access, `flags[feature]`, and move it by 184 lines. The replacement walk,
+// lineup rules and lead helper in `lib/appDefaults.ts` add no access. Count 228 and the
+// position-free inventory are unchanged; positions only. Repinned after the AMUX
+// record above merged in from develop.
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_COUNT = 228;
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_POSITION_FREE_SHA256 =
   "9aa7ec49f0bdd40002c306305261d6165c8f14250c47e1ce6a6f63bb3a786a65";
 const REVIEWED_DYNAMIC_ELEMENT_ACCESS_SHA256 = [
-  "ef477daaa1e18310a4d5cd458aa2b9f2",
-  "dd0a87ce5b6cf018c4c99f7f41f84578",
+  "8172515bb4b6206b6ce423a17e3b427d",
+  "dcb5928470f83b05dd213de581a93d0d",
 ].join("");
 
 const unwrapStaticExpression = (node) => {

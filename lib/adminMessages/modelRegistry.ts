@@ -138,7 +138,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       guestLeadWarning: (name: string) =>
         `${name} is the guest leading model. Change that lead in Platform settings before replacing it.`,
       trioWarning: (name: string, substitute: string) =>
-        `Turning off ${name} shows ${substitute} to guests in its place. Changing the guest trio is a code change.`,
+        `Turning off ${name} shows ${substitute} to guests in its place. The default lineup itself is under Platform settings.`,
       successorStatus: (status: string, listing: string) =>
         `New model: ${status} · ${listing}`,
       unlisted: "unlisted",
@@ -405,7 +405,7 @@ export const adminModelRegistryMessages = defineAdminMessages({
       guestLeadWarning: (name: string) =>
         `${name}은 게스트 선두 모델입니다. 대체하기 전에 플랫폼 설정에서 선두를 바꾸세요.`,
       trioWarning: (name: string, substitute: string) =>
-        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 게스트 3종 변경은 코드 변경입니다.`,
+        `${name}을 끄면 게스트에게는 그 자리에 ${substitute}가 보입니다. 기본 3모델 구성은 플랫폼 설정에서 바꿉니다.`,
       successorStatus: (status: string, listing: string) =>
         `새 모델: ${status} · ${listing}`,
       unlisted: "비공개",
