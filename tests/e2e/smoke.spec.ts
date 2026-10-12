@@ -16,43 +16,34 @@ test("home renders the marketing site", { tag: "@smoke" }, async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("main")).toBeVisible();
   await expect(page.locator("main")).toHaveCount(1);
-  await expect(
-    page.getByRole("heading", {
-      name: "Ask once. Compare multiple AI answers.",
-    })
-  ).toBeVisible();
+  await expect(page.getByTestId("landing-hero-title")).toContainText("AI");
   if ((page.viewportSize()?.width ?? 1024) >= 768) {
     await expect(
-      page.getByRole("link", { name: /^Open Review$/i }).first()
+      page.getByTestId("marketing-header-app-cta")
     ).toHaveAttribute(
       "href",
-      "/chat?lang=en"
+      "/chat/workspace?lang=en"
     );
   }
-  // "Start chatting free" named Tomverse Chat, which is not released. The
-  // CTA says what pressing it starts instead.
+  // The launch homepage offers the two products explicitly.
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    "Start comparing free"
+    /Chat/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat?lang=en&entry=guest-preview"
+    "/chat/workspace?lang=en"
   );
   // The hero states the no-sign-up promise once. It used to carry it twice,
   // in the signup note and again in a guest note, in near-identical words;
   // the second element is gone.
   await expect(page.getByTestId("landing-hero-signup-note")).toHaveText(
-    "No sign-up required. Start with three models."
+    /Chat.*Review/
   );
   await expect(page.getByTestId("landing-guest-note")).toHaveCount(0);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 
   await page.getByTestId("marketing-language-switcher").selectOption("ko");
-  await expect(
-    page.getByRole("heading", {
-      name: "한 번 질문하고, 여러 AI 답변을 비교하세요.",
-    })
-  ).toBeVisible();
+  await expect(page.getByTestId("landing-hero-title")).toContainText("구독은");
 });
 
 test("signed-in homepage keeps the page visible and offers one continue action", { tag: "@smoke" }, async ({
@@ -72,13 +63,13 @@ test("signed-in homepage keeps the page visible and offers one continue action",
   await page.goto("/");
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByTestId("landing-primary-cta")).toHaveText(
-    /Open Review/
+    /Chat/
   );
   await expect(page.getByTestId("landing-primary-cta")).toHaveAttribute(
     "href",
-    "/chat?lang=en"
+    "/chat/workspace?lang=en"
   );
-  await expect(page.getByTestId("landing-hero-signup-note")).toHaveCount(0);
+  await expect(page.getByTestId("landing-hero-signup-note")).toContainText(/Chat.*Review/);
   await expect(page.getByTestId("landing-guest-cta")).toHaveCount(0);
 });
 

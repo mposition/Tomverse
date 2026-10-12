@@ -49,7 +49,7 @@ export function MarketingShell({
               name: SITE_NAME,
               url: SITE_ORIGIN,
               description:
-                "A multi-model AI workspace for comparing answers, analyzing files, and organizing conversations.",
+                "Use multiple AI models in one workspace. Tomverse Chat helps with model selection and everyday questions, while Tomverse Review compares different answers and perspectives.",
               applicationCategory: "BusinessApplication",
               applicationSubCategory: "Artificial intelligence workspace",
               operatingSystem: "Any modern web browser",

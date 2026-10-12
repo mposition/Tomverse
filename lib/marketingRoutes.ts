@@ -8,6 +8,7 @@ const exactMarketingPaths = new Set([
   "/faq",
   "/models",
   "/pricing",
+  "/products/review",
   "/privacy",
   "/refund",
   "/safety",
@@ -39,6 +40,19 @@ const localizedSearchIntentPaths = new Set([
   "compare-ai-models",
 ]);
 
+export const REVIEW_PRODUCT_PATH = "/products/review";
+
+/** Product choices are explicit; a Review CTA never switches to Chat. */
+export const marketingProductEntryHref = (
+  product: "chat" | "review",
+  lang: string,
+  isAuthenticated = false,
+) => {
+  const path = product === "chat" ? "/chat/workspace" : "/review";
+  const guestEntry = product === "review" && !isAuthenticated ? "&entry=guest-preview" : "";
+  return `${path}?lang=${encodeURIComponent(lang)}${guestEntry}`;
+};
+
 const normalizePathname = (pathname: string) => {
   if (!pathname || pathname === "/") return "/";
   return pathname.replace(/\/+$/, "") || "/";
@@ -51,6 +65,7 @@ export const isStaticMarketingPathname = (pathname: string) => {
   const segments = normalized.split("/").filter(Boolean);
   if (!localizedMarketingLocales.has(segments[0] || "")) return false;
   if (segments.length === 1) return true;
+  if (segments.length === 3 && segments[1] === "products" && segments[2] === "review") return true;
   return (
     segments.length === 2 && localizedSearchIntentPaths.has(segments[1] || "")
   );
@@ -76,7 +91,7 @@ export const isStaticMarketingPathname = (pathname: string) => {
  *
  * Returning `null` means "serve what was asked for".
  */
-const REDIRECTABLE_BASE_PATHS = new Set(["/", ...[...localizedSearchIntentPaths].map((slug) => `/${slug}`)]);
+const REDIRECTABLE_BASE_PATHS = new Set(["/", REVIEW_PRODUCT_PATH, ...[...localizedSearchIntentPaths].map((slug) => `/${slug}`)]);
 
 export const localizedMarketingRedirect = ({
   pathname,
