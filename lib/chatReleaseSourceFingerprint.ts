@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 
 /**
@@ -18,6 +19,13 @@ const OWNER_RELEASE_ROUTES = Object.freeze([
   "app/api/admin/prompt-refiner/product-auto-resume/route.ts",
   "app/api/admin/prompt-refiner/guest-chat-auto-activation/route.ts",
 ]);
+// Whole-file boundaries shared with unrelated jobs. Their Chat helpers are
+// already reached from the Chat/Owner closure; traversing the maintenance
+// route would also bind AMUX, Memory and marketing workers to Chat approval.
+const SHARED_BOUNDARY_FILES = Object.freeze([
+  "proxy.ts",
+  "app/api/internal/maintenance/credit-reservations/route.ts",
+]);
 const SCHEMA_MODEL = /^(?:AdminAuditLog|AppSetting|BillingPlan|ModelRegistryEntry|User|Account|Conversation[A-Za-z0-9_]*|Message[A-Za-z0-9_]*|Chat[A-Za-z0-9_]*|Credit[A-Za-z0-9_]*|Provider[A-Za-z0-9_]*|Routing[A-Za-z0-9_]*|PromptRefiner[A-Za-z0-9_]*|Guest[A-Za-z0-9_]*|AutoRouter[A-Za-z0-9_]*|ContextManifest|TokenEstimate[A-Za-z0-9_]*)$/;
 const SOURCE_EXTENSIONS = Object.freeze(["", ".ts", ".tsx", ".mjs", ".js",
   ".json", "/index.ts", "/index.tsx", "/index.mjs", "/index.js"]);
@@ -28,6 +36,7 @@ const REQUIRED_SOURCE = Object.freeze([
   "lib/chatRefinerInitialAutoRelease.ts",
   "lib/guestChatSmartAdaptiveRelease.ts",
   "packages/chat-core/src/index.ts",
+  ...SHARED_BOUNDARY_FILES,
 ]);
 
 const digest = (value: string | Buffer) => createHash("sha256")
@@ -70,7 +79,7 @@ function localImport(root: string, importer: string, specifier: string):
 function importSpecifiers(root: string, path: string): string[] {
   const source = readFileSync(join(root, ...path.split("/")), "utf8");
   return [
-    ...source.matchAll(/^\s*(?:import|export)\s+(?:type\s+)?(?:[^"';]*?\s+from\s*)?["']([^"']+)["']/gm),
+    ...source.matchAll(/^\s*(?:import|export)\b\s*(?:type\s+)?(?:[^"';]*?\s*from\s*)?["']([^"']+)["']/gm),
     ...source.matchAll(/\b(?:import|require)\s*\(\s*["']([^"']+)["']\s*\)/g),
   ].map((match) => match[1]);
 }
@@ -85,7 +94,10 @@ function externalPackage(specifier: string): string | null {
   if (specifier.startsWith(".") || specifier.startsWith("@/") ||
       specifier === "@tomverse/chat-core" ||
       specifier.startsWith("@tomverse/chat-core/") ||
-      specifier.startsWith("node:")) return null;
+      isBuiltin(specifier)) return null;
+  if (specifier.startsWith("@tomverse/")) {
+    throw new Error("chat_release_workspace_import_unreviewed");
+  }
   if (!/^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9._-]+)(?:\/|$)/i.test(
     specifier)) return null;
   const segments = specifier.split("/");
@@ -114,8 +126,11 @@ function executionDependencyLock(root: string, paths: readonly string[]): string
     selected.add(key);
     const required = entry.dependencies as Record<string, string> | undefined;
     const optional = entry.optionalDependencies as Record<string, string> | undefined;
+    const peers = entry.peerDependencies as Record<string, string> | undefined;
+    const peerMeta = entry.peerDependenciesMeta as
+      Record<string, { optional?: boolean }> | undefined;
     for (const name of [...Object.keys(required ?? {}),
-      ...Object.keys(optional ?? {})]) {
+      ...Object.keys(optional ?? {}), ...Object.keys(peers ?? {})]) {
       let scope = key;
       let resolvedKey = "";
       while (scope) {
@@ -126,7 +141,9 @@ function executionDependencyLock(root: string, paths: readonly string[]): string
       }
       resolvedKey ||= `node_modules/${name}`;
       if (!packages[resolvedKey]) {
-        if (Object.hasOwn(optional ?? {}, name)) continue;
+        if (Object.hasOwn(optional ?? {}, name) || peerMeta?.[name]?.optional) {
+          continue;
+        }
         throw new Error(`chat_release_dependency_lock_incomplete:${key}:${name}`);
       }
       queue.push(resolvedKey);
@@ -153,6 +170,7 @@ export function chatReleaseSourcePaths(root: string): string[] {
       }
     }
   }
+  for (const path of SHARED_BOUNDARY_FILES) entries.add(path);
   const paths = [...entries].sort();
   if (paths.length < MINIMUM_SOURCE_FILES ||
       REQUIRED_SOURCE.some((path) => !entries.has(path))) {

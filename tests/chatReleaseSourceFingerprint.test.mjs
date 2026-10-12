@@ -21,6 +21,8 @@ test("unrelated deployment source is stable; execution drift and missing source 
   try {
     const paths = chatReleaseSourcePaths(repository);
     for (const path of [
+      "proxy.ts",
+      "app/api/internal/maintenance/credit-reservations/route.ts",
       "lib/anthropicPromptCaching.ts",
       "lib/servedProcessingTier.ts",
       "lib/webSearchNativeCostReservation.ts",
@@ -29,6 +31,7 @@ test("unrelated deployment source is stable; execution drift and missing source 
       "lib/pinnedDeploymentExecution.ts",
       "lib/conversationKindGuard.ts",
     ]) assert.ok(paths.includes(path), `execution closure omits ${path}`);
+    assert.ok(!paths.includes("lib/amux/bridgeLivenessCore.ts"));
     for (const path of paths) copy(path);
     copy("lib/amux/workerRegistryCore.ts");
     copy("prisma/schema.prisma");
@@ -51,6 +54,13 @@ test("unrelated deployment source is stable; execution drift and missing source 
     appendFileSync(join(root, "lib", "amux", "workerRegistryCore.ts"),
       "\n// Unrelated AMUX change.\n");
     assert.equal(chatReleaseSourceFingerprint(root), original);
+    appendFileSync(join(root, "proxy.ts"), "\n// Request boundary drift.\n");
+    const changedProxy = chatReleaseSourceFingerprint(root);
+    assert.notEqual(changedProxy, original);
+    appendFileSync(join(root, "app", "api", "internal", "maintenance",
+      "credit-reservations", "route.ts"), "\n// Settlement drift.\n");
+    const changedSettlement = chatReleaseSourceFingerprint(root);
+    assert.notEqual(changedSettlement, changedProxy);
     appendFileSync(join(root, "lib", "chatRefinerInitialAutoRelease.ts"),
       "\n// Execution boundary changed.\n");
     const changedExecution = chatReleaseSourceFingerprint(root);
@@ -62,6 +72,9 @@ test("unrelated deployment source is stable; execution drift and missing source 
     appendFileSync(join(root, "packages", "chat-core", "src",
       "completionStatus.ts"), "\n// Shared execution drift.\n");
     assert.notEqual(chatReleaseSourceFingerprint(root), changedProvider);
+    appendFileSync(join(root, "app", "api", "chat", "route.ts"),
+      "\nimport \"crypto\";\nimport\"@/lib/chatRefinerInitialAutoRelease\";\n");
+    assert.match(chatReleaseSourceFingerprint(root), /^[0-9a-f]{64}$/);
     rmSync(join(root, "app", "api", "chat", "route.ts"));
     assert.throws(() => chatReleaseSourceFingerprint(root),
       /chat_release_source_unavailable/);
