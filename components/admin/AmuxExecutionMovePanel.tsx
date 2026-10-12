@@ -79,7 +79,8 @@ export function AmuxExecutionMovePanel({ move, onMoved, onKnownRefusal }: {
             setPhase("done"); onMovedRef.current(); return;
           }
           if (result.state === "outcome_unknown" || result.code === "outcome_unknown" ||
-              result.error === "outcome_unknown" || response.status >= 500) {
+              result.error === "outcome_unknown" ||
+              (response.status >= 500 && result.error !== "candidate_unavailable")) {
             await readback(current); return;
           }
           onRefusedRef.current(); setCode(result.code ?? result.error ?? result.reason ?? "move_refused"); setPhase("refused");

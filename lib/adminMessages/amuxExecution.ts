@@ -18,7 +18,9 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       score_unbound: "The score is not bound to the current approved card.", v22_not_activated: "Owner authorization for admission is not active.",
       graduation_unmet: "Admission readiness evidence is not sufficient.", incident_blocked: "Incident control is blocking new work.",
       capacity_unconfigured: "Verified worker capacity is not configured.", legacy_auto_promotion_enabled: "An incompatible admission path is active.",
-      detail_unavailable: "The card could not be checked. Refresh before moving it.", forbidden: "Only the owner can admit this card." },
+      detail_unavailable: "The card could not be checked. Refresh before moving it.", forbidden: "Only the owner can admit this card.",
+      candidate_unavailable: "The card evidence could not be loaded. Refresh before moving it again.",
+      origin_refused: "The request origin could not be verified. Reload this page before moving the card." },
 
     boardTitle: "Execution board", boardSubtitle: "Track work, inspect evidence and find the next action.",
     refresh: "Refresh", searchLoaded: "Search loaded cards", clearSearch: "Clear search",
@@ -143,7 +145,9 @@ export const adminAmuxExecutionMessages = defineAdminMessages({
       score_unbound: "점수가 현재 승인된 카드에 연결되지 않았습니다.", v22_not_activated: "운영자의 편입 승인이 활성화되지 않았습니다.",
       graduation_unmet: "편입 준비 근거가 충분하지 않습니다.", incident_blocked: "사고 대응 제어가 새 작업을 차단하고 있습니다.",
       capacity_unconfigured: "검증된 Worker 용량이 설정되지 않았습니다.", legacy_auto_promotion_enabled: "호환되지 않는 편입 경로가 활성화돼 있습니다.",
-      detail_unavailable: "카드를 확인하지 못했습니다. 새로고침 후 이동하세요.", forbidden: "이 카드는 운영자만 편입할 수 있습니다." },
+      detail_unavailable: "카드를 확인하지 못했습니다. 새로고침 후 이동하세요.", forbidden: "이 카드는 운영자만 편입할 수 있습니다.",
+      candidate_unavailable: "카드 근거를 불러오지 못했습니다. 새로고침 후 다시 이동할 수 있습니다.",
+      origin_refused: "요청 출처를 확인하지 못했습니다. 페이지를 새로고침한 뒤 이동하세요." },
 
     boardTitle: "실행 보드", boardSubtitle: "작업 흐름과 근거, 다음 조치를 한곳에서 확인합니다.",
     refresh: "새로고침", searchLoaded: "불러온 카드 검색", clearSearch: "검색 지우기",
