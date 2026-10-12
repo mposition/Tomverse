@@ -14,7 +14,7 @@ const detail = (card=a) => ({ ...card, revision:3, body:JSON.stringify({
   dependencies:[],dependents:[],attempts:[],escalations:[],score:null,usage:[],reviews:[],publications:[] });
 
 async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUnknown?:boolean;
-  moveRefused?:boolean; moveHalted?:boolean; readOnly?:boolean }={}) {
+  moveRefused?:boolean; moveHalted?:boolean; moveUnavailable?:boolean; readOnly?:boolean }={}) {
   let promoted=false; let posts=0; let reads=0;
   await page.route("**/api/admin/amux/execution-view?**", async route => {
     const p=new URL(route.request().url()).searchParams;
@@ -36,6 +36,7 @@ async function setup(page:Page, opts:{ delayed?:boolean; reauth?:boolean; moveUn
       posts++;const body=route.request().postDataJSON();
       expect(body.taskId).toBe(a.id);expect(body.expectedRevision).toBe(3);
       if(opts.moveRefused) return route.fulfill({status:409,json:{error:"stale_revision"}});
+      if(opts.moveUnavailable) return route.fulfill({status:503,json:{error:"candidate_unavailable"}});
       if(opts.moveHalted) return route.fulfill({json:{promoted:false,reason:"auto_halted"}});
       if(opts.moveUnknown) return route.fulfill({status:409,json:{error:"outcome_unknown",retry:false}});
       promoted=true;
@@ -126,6 +127,16 @@ test("a read-only viewer has no move button or drag affordance",async({page})=>{
   await expect(page.getByRole("button",{name:"Move to AMUX queue"})).toHaveCount(0);
   await expect(page.getByTestId("amux-board-card-"+a.id)).toHaveAttribute("draggable","false");
   expect(state.posts()).toBe(0);
+});
+
+test("known pre-write unavailability permits a new intentional attempt",async({page})=>{
+  const state=await setup(page,{moveUnavailable:true});
+  const move=page.getByTestId("amux-board-card-"+a.id).getByRole("button",{name:"Move to AMUX queue"});
+  await move.click();await expect(page.getByRole("dialog").getByRole("alert")).toContainText("evidence could not be loaded");
+  await expect(page).not.toHaveURL(/moveRequest=/);
+  await page.keyboard.press("Escape");await move.click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("evidence could not be loaded");
+  expect(state.posts()).toBe(2);expect(state.reads()).toBe(0);
 });
 
 test("unknown move uses readback and reopening never replays the write",async({page})=>{
