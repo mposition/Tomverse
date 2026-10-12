@@ -105,6 +105,10 @@ action sends a message, creates a paid turn, or silently creates a conversation.
   product context is desktop text, and is absent on mobile before it can
   narrow the input. The composer's Smart Adaptive switch stays directly
   accessible without opening the drawer.
+  In an active multi-model conversation with less than 800px of visible
+  height, the shell may omit this duplicate composer instance while the drawer
+  route remains available. Empty/new conversations and taller layouts retain
+  the approved Composer row.
 - On both desktop and mobile, a fully supported web-search chip sits in the
   footer tools group beside model selection. Partial or blocked search remains
   in the independent status row with its detail or recovery action.

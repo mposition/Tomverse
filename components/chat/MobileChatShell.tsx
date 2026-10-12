@@ -1117,6 +1117,18 @@ export function MobileChatShell({
   // PROV-BANNER-001. What the user can really see, which is what the outage
   // banner's cap has to be a fraction of.
   const visibleViewportHeight = useVisibleViewportHeight();
+  // COMPOSER-SHORT-DUPLICATES-01. An active multi-model conversation already
+  // exposes product navigation in the drawer and every selected model in the
+  // strip above the answer canvas. Below 800px of genuinely visible height,
+  // repeating both summaries inside the composer leaves too little of the
+  // viewport for the conversation. Empty/new conversations and the approved
+  // 844px presentation keep the expanded rows.
+  const omitDuplicateComposerRows = Boolean(
+    visibleViewportHeight &&
+      visibleViewportHeight < 800 &&
+      !isActiveConversationEmpty &&
+      showModelTabs
+  );
   const headerRef = useRef<HTMLElement | null>(null);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
   // The shell rows the banner may never eat into: the header above it and the
@@ -1831,7 +1843,8 @@ export function MobileChatShell({
         createPortal(
           <ChatInput
             currentProduct={currentProduct}
-            showProductSwitcher={!isCompactBottomDock}
+            showProductSwitcher={!isCompactBottomDock && !omitDuplicateComposerRows}
+            showReviewModelRow={!omitDuplicateComposerRows}
             productSwitchDisabled={productSwitchDisabled}
             onProductSwitch={onProductSwitch}
             singleModelSelection={singleTranscript}

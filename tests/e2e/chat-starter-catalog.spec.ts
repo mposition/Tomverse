@@ -102,7 +102,7 @@ const hasHorizontalOverflow = (page: Page) =>
  * pin were found in.
  */
 const turnWebSearchOff = async (page: Page) => {
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   const toggle = page.getByTestId("tools-web-search-row");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await toggle.click();

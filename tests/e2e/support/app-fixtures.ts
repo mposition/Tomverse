@@ -1604,9 +1604,9 @@ export async function sendChatMessage(
   }
 }
 
-/** The model-selector trigger, second of the two chat-input popover buttons. */
+/** The model-selector trigger, addressed independently of composer DOM order. */
 export function modelMenuTrigger(page: Page) {
-  return page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+  return page.getByTestId("composer-model-select");
 }
 
 /**

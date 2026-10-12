@@ -60,7 +60,7 @@ async function startRunningDeepResearch(
   await mockDeepResearchStatus(page, "hold");
 
   await page.getByTestId("chat-textarea").fill("Compare renewable energy adoption across three regions.");
-  await page.locator('button[aria-controls="chat-input-popover"]').nth(0).click();
+  await page.getByTestId("composer-tools-button").click();
   await page.getByTestId("tools-deep-research-row").click();
   await page.getByTestId("deep-research-depth-standard").click();
   await page.getByTestId("deep-research-confirm-start").click();

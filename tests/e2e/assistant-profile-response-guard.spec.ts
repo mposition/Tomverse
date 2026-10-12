@@ -46,7 +46,7 @@ const PROFILES = [
 ];
 
 const toolsMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(0);
+  page.getByTestId("composer-tools-button");
 
 type Traffic = {
   /** Every PATCH that carried a model selection, by conversation id. */

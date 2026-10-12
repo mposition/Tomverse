@@ -109,7 +109,7 @@ test.describe("isolated admin staging fixture harness", () => {
   });
   test("synthetic attachment binds to a Chat card and remains in QA cache after reload", async ({ page, baseURL }) => {
     await openQa(page, baseURL!);
-    await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+    await page.getByTestId("composer-tools-button").click();
     await page.getByTestId("tools-attach-row").click();
     const chooser = page.waitForEvent("filechooser");
     await page.getByTestId("attach-local-file-row").click();
@@ -136,7 +136,7 @@ test.describe("isolated admin staging fixture harness", () => {
   test("search switch and generated file use synthetic trailers and exact local download bytes", async ({ page, baseURL }) => {
     await openQa(page, baseURL!);
     await page.getByTestId("e04-include-artifact").click();
-    await page.locator('button[aria-controls="chat-input-popover"]').first().click();
+    await page.getByTestId("composer-tools-button").click();
     await page.getByTestId("tools-web-search-row").click();
     await expect(page.getByTestId("tools-web-search-row")).toHaveAttribute("aria-checked", "true");
     await page.keyboard.press("Escape");

@@ -449,17 +449,13 @@ test("UK visitors do not load GA4 before explicit consent", async ({
 // banner also anchored). The notice now portals into a flex-flow slot next
 // to whichever composer layout is active, so it can only ever push the
 // composer aside, never cover it.
-// The chat sidebar also has its own "More actions"-labeled hamburger
-// button, so the composer's "+" and model-select triggers are targeted the
-// same way chat-tools.spec.ts does: by position among the two
-// chat-input-popover triggers, scoped to the chat-input container.
+// The chat sidebar also has its own "More actions"-labeled hamburger button,
+// so the composer's "+" and model-select triggers use their stable component
+// identities rather than DOM order.
 const chatComposerLocators = (page: Page) => {
-  const popoverTriggers = page
-    .getByTestId("chat-input")
-    .locator('button[aria-controls="chat-input-popover"]');
   return {
-    moreActions: popoverTriggers.nth(0),
-    modelSelect: popoverTriggers.nth(1),
+    moreActions: page.getByTestId("composer-tools-button"),
+    modelSelect: page.getByTestId("composer-model-select"),
     estimatedCredits: page.getByRole("button", {
       name: /Estimated .* credits, view breakdown/,
     }),

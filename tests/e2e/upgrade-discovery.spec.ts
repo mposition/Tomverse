@@ -40,7 +40,7 @@ async function fulfillMessageSave(
 }
 
 const modelMenuTrigger = (page: Page) =>
-  page.locator('button[aria-controls="chat-input-popover"]').nth(1);
+  page.getByTestId("composer-model-select");
 
 async function prepareAuthenticatedChat(
   page: Page,
