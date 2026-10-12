@@ -387,7 +387,8 @@ route로 제출하며, `/api/internal`은 Access 우회 경로라 Access 자격�
      열려 있고 마감 전일 때만 발급합니다.
   2. token은 앱의 Ed25519 개인키로 서명한 `{runId, pageId, exp}`이고 `exp = min(발급 + 90초, run 마감)`입니다. nonce는 없습니다.
      같은 network의 다른 서비스는 제출 secret이 없어 token을 얻을 수 없고, 가로챈 token을 다시 써도 아래 live 확인이 같은
-     조건을 요구하므로 할 수 있는 일은 그 run이 열린 동안 같은 공개 page를 한 번 더 읽는 것뿐이기 때문입니다.
+     조건을 요구하므로 할 수 있는 일은 `exp`가 지나기 전, 그 run이 열린 동안 같은 공개 page를 다시 읽는 것뿐이며 그 횟수도 browser
+     서비스의 동시 1개·시간당 60개 상한에 묶이기 때문입니다.
   3. browser 서비스는 공개키로 서명을, 그리고 `pageId` 일치와 `exp`(자기 시계 기준, 허용 오차 5초)를 검증합니다.
   4. **Chromium을 띄우기 직전에** 그 token을 앱의 page permit route(`POST`, token이 곧 인증)로 보내 그 순간의 kill switch·스위치·
      latch·run 상태·마감을 다시 확인받고, `go`가 아니거나 응답이 없으면 띄우지 않습니다. 그래서 kill switch를 켠 뒤에는 새 page가
@@ -408,8 +409,11 @@ route로 제출하며, `/api/internal`은 Access 우회 경로라 Access 자격�
   client 5초) + 외부 호출 하나(카탈로그 GET 20초, DB 규칙 호출 20초, browser 호출 75초) 또는 렌더러 probe(120초). 단위 상한은
   `rule` 25초, `page` 80초, `probe` 125초이고, run의 남은 시간이 단위 상한 + 5초보다 작으면 그 단위를 시작하지 않습니다.
 - **slot:** 매일 18:00:00 UTC instant(DB CHECK), 시작 창 `[slot, slot + 1시간)`. slot은 run 시작 때 DB가 계산하며 호출자는 보낼 수
-  없습니다. run 마감 `deadlineAt` = DB 시계로 시작 + 40분이며 process 강제 종료(45분)보다 앞섭니다. 마감 뒤의 쓰기는 삽입 때와
-  COMMIT 때(commit 예비시간 200 ms) DB가 거절합니다.
+  없고, **slot당 run 행은 하나**입니다(slot unique 제약, `runRequestId`도 unique). 같은 `runRequestId`의 재요청은 기존 run을
+  돌려주고, 같은 slot에 다른 `runRequestId`로 온 시작은 행을 만들지 않고 거절합니다(§14). run 마감 `deadlineAt` = DB 시계로
+  시작 + 40분이며 process 강제 종료(45분)보다 앞섭니다. run에 속한 쓰기(발견·관측 묶음, run 종료)는 마감 뒤면 삽입 때와 COMMIT
+  때(commit 예비시간 200 ms) DB가 거절합니다. **예외는 다음 run 시작이 쓰는 만료 전이 하나**이며, 그 전이는 같은 트랜잭션의 만료
+  사건과 감사가 있어야 받아들여집니다(§14 판정 2).
 - **앱 route의 시간:** 트랜잭션 첫 문장에서 `statement_timeout` 2초, `idle_in_transaction_session_timeout` 1초를 local로 두고,
   PostgreSQL 17 이상에서만 `transaction_timeout`을 연산별 값으로 둡니다. 연산마다 문장 수 A를 고정하고 앱이 유도한 최대는 3A+5초이며
   (DB 강제가 아님), A는 statement budget 테스트로 고정합니다. 가장 작은 연산도 A = 2(11초)이므로 statement·idle 상한은 언제나
@@ -432,7 +436,9 @@ trigger가 같은 트랜잭션의 시작·종료·만료 사건을 확인합니�
 관측 수가 그 단위 결과가 말한 수와 같고, 관측 수 상한 초과가 0이어야 합니다. 아니면 `failed`만 기록됩니다. 관측 수 상한(run당
 묶음 20개 × 50건)에 닿으면 잘라내지 않고 그 run을 `failed`로 끝냅니다. 카탈로그 버전이 앱과 다르면 그 run은 `failed`입니다.
 
-**run 시작 판정.** run 시작 route는 감사 체인 lock을 잡은 뒤 같은 트랜잭션에서 차례로 봅니다.
+**run 시작 판정.** 같은 `runRequestId`의 재요청은 판정 전에 기존 run을 돌려줍니다(결과 불명 뒤의 read-back과 같은 답). 그 밖의
+시작은 run 시작 route가 감사 체인 lock을 잡은 뒤 같은 트랜잭션에서 차례로 봅니다. 지금 slot에 run 행이 이미 있으면 어느 단계든
+새 행을 만들지 않고 거절하며, slot unique 제약이 DB에서 같은 것을 강제합니다. 그래서 하루에 시작되는 run은 많아야 하나입니다.
 
 0. owner의 Scout 활성화 기록이 없으면 거절합니다. 첫 run은 활성화 시각보다 엄격히 뒤에 시작하는 첫 slot(`effectiveFirstSlot`)부터
    받습니다.
@@ -444,7 +450,13 @@ trigger가 같은 트랜잭션의 시작·종료·만료 사건을 확인합니�
 4. 기준점(가장 최근 latch 해제, 없으면 `effectiveFirstSlot`) 뒤의 run 중 마지막 세 개가 모두 `failed`이면 latch를 걸고 거절합니다.
 5. 그 밖이면 시작합니다.
 
-**발견과 사람의 결정.** 같은 fingerprint는 한 발견으로 묶습니다. 사람의 결정은 발견마다 순번이 붙는 append-only 사건이며 허용
+**발견과 fingerprint.** 발견의 fingerprint는 (규칙 id, 규칙 버전, 환경, 대상 id, 정규화 관측 digest)의 digest이고 unique입니다.
+정규화 관측 digest는 그 규칙의 schema가 **식별 field**로 지정한 값만으로 계산하며, run id·관측 시각·관측 횟수·응답 시간처럼
+회차마다 달라지는 값은 넣지 않습니다. 식별 field 목록은 규칙 정의(코드)의 일부이고, 그 목록이나 판정을 바꾸면 규칙 버전이
+오릅니다. 그래서 같은 문제는 매일 같은 발견에 관측만 더하고(한 run에서 한 발견의 관측은 하나, (발견, run) unique), 식별 field의
+값이 달라진 근거는 새 발견이 됩니다.
+
+**사람의 결정.** 사람의 결정은 발견마다 순번이 붙는 append-only 사건이며 허용
 전이는 직전 사건 종류만으로 정합니다: 없음 → 거절·보류·채택, 보류 → 거절·보류·채택, 채택 → 연결, 거절·연결 → 없음. 표시와
 거절·보류·채택은 **성공 run의 관측이 있는 발견**에만 허용됩니다. 연결은 직전 사건이 채택인지로만 판정하므로 관측이 만료된 뒤에도
 할 수 있고, 앱은 그 AMUX idea id의 `AmuxIdeaSubmission` 행이 있고 그 제출자가 연결하는 owner와 같은지 확인합니다. 거절한 발견은
